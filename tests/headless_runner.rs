@@ -2391,3 +2391,150 @@ fn the_composed_player_battleship_holds_a_leading_gun_line_only_at_red_alert() {
         "the battleship's bow sat outside its own {deadband:.3} rad tracking          deadband on only {lead_ticks} of {hold_ticks} holding ticks (worst          {worst_lead:.3} rad). Pointing at the INTERCEPT rather than at the ship          is the whole of what `hold_artillery_position` does; a hull tracking the          live bearing drives that error into the deadband and stays there."
     );
 }
+
+/// **The composed player cruiser flies a broadside ring and breaks it for a
+/// torpedo run, and neither leg before the alert is up (issue #876 AC1).**
+///
+/// `alliance_cruiser.toml` takes Engines and Steering from
+/// `fragments/ai/movement_broadside_orbit.toml` and tunes them with three
+/// `param` keys and nothing else.
+///
+/// Every claim below is read off `HelmPassSurface`, which the ship's own Steering
+/// POLICY publishes by resolving its `yaw` channel — so `combat_orbit` and
+/// `torpedo_bearing` say which leg the DOCTRINE reached, not where the hull
+/// happened to end up. That distinction is the whole point of measuring here: a
+/// range or speed assertion cannot tell a doctrine apart from ordinary travel
+/// that arrived at a similar place, and this hull's previous, WITHDRAWN attempt
+/// held a plausible-looking range while Channel 3 flew it.
+///
+/// Two probes, because the two legs dominate in opposite worlds and a test that
+/// only saw one of them would pass on half a doctrine:
+///
+/// * `probe_duel` — an ACTIVE hostile that closes and shoots. The ring is what
+///   the hull flies almost throughout, which is where "works its arcs in a
+///   tightened orbit at red alert" is actually demonstrated.
+/// * `probe_aggressor` — a PASSIVE hostile. Nothing ever strips its shields, so
+///   the torpedo run is entered on the hull's own loaded battery and held; this
+///   is where the run leg, and the tube bearing it exists to buy, are visible.
+#[test]
+fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes() {
+    use project_phoenix::ship::helm_ai::HelmPassSurface;
+    use project_phoenix::ship::state::ShipRedAlert;
+
+    struct Legs {
+        clear: usize,
+        orbit: usize,
+        run: usize,
+        orbit_while_clear: usize,
+        run_while_clear: usize,
+        surface_ticks: usize,
+    }
+
+    let sample = |world: &str, secs: f64| -> Legs {
+        let dt = 1.0 / 30.0;
+        let args = HeadlessArgs {
+            world_path: world.into(),
+            dt,
+            max_ticks: ticks_for_sim_seconds(secs, dt),
+            deterministic: true,
+            ..test_args()
+        };
+        let mut app = build_headless_app(&args).expect("the composed cruiser must build an app");
+        let mut l = Legs {
+            clear: 0,
+            orbit: 0,
+            run: 0,
+            orbit_while_clear: 0,
+            run_while_clear: 0,
+            surface_ticks: 0,
+        };
+        for _ in 0..args.max_ticks {
+            run(&mut app, 1);
+            let mut q = app.world_mut().query_filtered::<(
+                Option<&ShipRedAlert>,
+                Option<&HelmPassSurface>,
+            ), With<LocalShip>>();
+            let Ok((alert, pass)) = q.single(app.world()) else {
+                continue;
+            };
+            let red = alert.is_some_and(|a| a.0);
+            if !red {
+                l.clear += 1;
+            }
+            let Some(pass) = pass else { continue };
+            l.surface_ticks += 1;
+            if pass.combat_orbit {
+                l.orbit += 1;
+                if !red {
+                    l.orbit_while_clear += 1;
+                }
+            }
+            if pass.torpedo_bearing {
+                l.run += 1;
+                if !red {
+                    l.run_while_clear += 1;
+                }
+            }
+        }
+        l
+    };
+
+    let duel = sample("assets/worlds/probe_duel.toml", 45.0);
+    let aggressor = sample("assets/worlds/probe_aggressor.toml", 30.0);
+
+    // The surface exists at all. A hull whose travel axes failed to compose still
+    // loads, still backfills and still reports every station crewed — it just
+    // publishes no leg and flies ordinary doctrine travel, which is precisely the
+    // state this hull was left in before AC1.
+    assert!(
+        duel.surface_ticks > 100 && aggressor.surface_ticks > 100,
+        "the cruiser published a pass surface on only {} / {} ticks: its Steering \
+         policy is not resolving a yaw verb, so no leg of the doctrine is being \
+         flown at all",
+        duel.surface_ticks,
+        aggressor.surface_ticks
+    );
+
+    // THE RING. Asserted in the duel, where an active hostile keeps the alert up
+    // and the ring is the leg the engagement is actually fought on.
+    assert!(
+        duel.orbit > 300,
+        "only {} ticks on the fighting ring across 45 s of a live duel — the hull \
+         is not flying a broadside orbit",
+        duel.orbit
+    );
+
+    // THE TORPEDO RUN. Asserted in the aggressor probe, where the hull carries a
+    // loaded battery it never gets to spend, so the leg is entered on its own
+    // readiness and held. This is the leg whose ABSENCE let Channel 3 overwrite
+    // the ring solution every tick, which is what withdrew this doctrine the first
+    // time round.
+    assert!(
+        aggressor.run > 100,
+        "the cruiser never broke its ring to bring its tubes to bear ({} run \
+         ticks). With no torpedo leg of its own the hull is dragged bow-on by \
+         `ArcBearingRequest` instead, which is a facing the doctrine did not \
+         choose and cannot see",
+        aggressor.run
+    );
+
+    // THE POSTURE GATE, on both legs and in both worlds. Neither half of the
+    // aggressive doctrine may be flown with the captain stood down.
+    for (name, l) in [("duel", &duel), ("aggressor", &aggressor)] {
+        assert!(
+            l.clear > 0,
+            "{name}: the alert was up from the first tick, so this run never \
+             observed the doctrine's defensive half at all"
+        );
+        assert_eq!(
+            (l.orbit_while_clear, l.run_while_clear),
+            (0, 0),
+            "{name}: the cruiser flew its fighting ring on {} ticks and its \
+             torpedo run on {} ticks with the alert DOWN. Both belong to the \
+             pressed half of the doctrine; when clear this hull holds a standoff \
+             ring and nothing else",
+            l.orbit_while_clear,
+            l.run_while_clear
+        );
+    }
+}

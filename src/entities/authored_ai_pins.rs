@@ -322,10 +322,6 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // two hulls after this issue rather than three. A movement fragment owes
     // `idle = false` only when it supplies a boost machine.
     //
-    // The player CRUISER is deliberately absent from this list. #876 composed it
-    // onto the library too, but onto the fleet baseline's stateless travel axes —
-    // see the note on `includes` in `alliance_cruiser.toml` — so it is one of the
-    // hulls the baseline is derived FROM rather than a departure from it.
     ("alliance_battleship", "engines"),
     ("alliance_battleship", "steering"),
     // …and IMPULSE, which the artillery fragment authors idle for the same
@@ -336,6 +332,39 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // now, and they depart identically — which the unanimity requirement on the
     // hulls that are NOT listed is what makes meaningful.
     ("alliance_battleship", "impulse"),
+    // ── The composed broadside orbit (issue #876 AC1) ────────────────────────
+    //
+    // The player CRUISER takes `fragments/ai/movement_broadside_orbit.toml` by
+    // `includes` plus FOUR `param` keys across TWO tables and nothing else —
+    // `combat_orbit_range` and `combat_orbit_speed` on Steering, which is the axis
+    // the host reads the fighting ring off, and `torpedo_run_range` on Steering
+    // AND Engines, because the guard that reads it exists on both copies of the
+    // machine. That buys a wide defensive standoff ring while the alert is down,
+    // and at red alert a fighting ring at its own `combat_orbit_range` with a
+    // torpedo run cut into it.
+    //
+    // It was absent from this list until AC1 landed, with a note calling it "one
+    // of the hulls the baseline is derived FROM rather than a departure from it".
+    // That framing was only ever true of a hull that composed the ship-level
+    // spine and NO class movement fragment — it described the withheld state, not
+    // a property of the cruiser — and it does not survive the doctrine shipping.
+    // Both travel axes are now machines, so the hull is a departure and has to be
+    // named as one, in both directions: a broadside orbit that quietly collapsed
+    // back onto the fleet's stateless `actuate_desired_travel` would still
+    // validate, still spawn and still report every station crewed, and only this
+    // entry notices.
+    //
+    // Note what is NOT listed, and it is the same pair the artillery doctrine
+    // leaves alone for different reasons. BOOST: no leg of a ring engages the
+    // drive, so the hull keeps the baseline's `idle = true` and
+    // `boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it` still names
+    // two hulls. IMPULSE: a fighting ring is tens of units across, comfortably
+    // inside the drive's own 40-unit cancel radius, so the autopilot releases
+    // before the ring begins — unlike the artillery band, which sits inside the
+    // cruise window and is why THAT fragment has to idle the drive. Two hulls
+    // depart from the impulse baseline, not three.
+    ("alliance_cruiser", "engines"),
+    ("alliance_cruiser", "steering"),
     // The broadside orbit: a stateful engines/steering pair, plus two tubes
     // that hold fire until the target's striking arc is actually down.
     ("ship_harrow_cruiser", "engines"),
@@ -1253,6 +1282,337 @@ fn every_aggressive_leg_of_the_class_doctrine_can_return_to_the_defensive_one() 
             "{axis}/shadow: the standoff leg must have exactly one exit, and it must \
              be the posture gate. A second exit is a way to start a fight without \
              the captain."
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The composed BROADSIDE-ORBIT doctrine (issue #876 AC1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The two copies of the composed broadside-orbit machine, keyed by the axis they
+/// fly. Read off the SHIPPED hull, so a retune in TOML retunes these pins with it.
+///
+/// Two, not three: no leg of a ring engages the boost drive, so
+/// `fragments/ai/movement_broadside_orbit.toml` leaves `[helm_console.boost_ai]`
+/// alone and this hull keeps the fleet baseline's `idle = true` — which is why
+/// `boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it` still names two
+/// hulls after AC1 rather than three.
+fn broadside_orbit_policies() -> Vec<(&'static str, AiPolicy)> {
+    let hull = entity("alliance_cruiser");
+    let helm = hull
+        .helm_console
+        .as_ref()
+        .expect("the player cruiser authors `[helm_console]`");
+    vec![
+        (
+            "engines",
+            policy(
+                helm.engines_ai
+                    .as_ref()
+                    .expect("composed from movement_broadside_orbit.toml"),
+            ),
+        ),
+        (
+            "steering",
+            policy(
+                helm.steering_ai
+                    .as_ref()
+                    .expect("composed from movement_broadside_orbit.toml"),
+            ),
+        ),
+    ]
+}
+
+/// **The posture truth table for the broadside-orbit doctrine (issue #876 AC1).**
+///
+/// The same claim `the_artillery_doctrine_rests_defensive_until_red_alert` makes
+/// about the gun line, and it is here for the same reason: `posture` is a fact
+/// NAME, so a misspelling in the fragment or in
+/// `helm_ai::seed_helm_actuator_facts` parses, validates and reads false for ever
+/// — presenting as a cruiser that holds a polite standoff ring and never once
+/// fights, with every other test still green.
+///
+/// It is also the half of AC1 the live probes structurally cannot check. In both
+/// `probe_duel` and `probe_aggressor` a hostile sits inside the captain's
+/// `alert_on_hostile_within` from the opening seconds, so a hull with the gate
+/// mutated out reaches its ring on very nearly the same tick as one without —
+/// which is exactly why the gate needs a truth table and not only a live run.
+///
+/// Nothing in a ring is a commitment the hull is owed (unlike the attack pass's
+/// escape leg, which flies a frozen heading), so the posture drop is asserted as
+/// the HIGHEST-priority exit from every aggressive leg.
+///
+/// The threshold comes out of the authored `param` rather than a literal, so a
+/// designer who adds an intermediate rung to the posture ladder and retunes
+/// `press_posture` retunes this test with it (AGENTS.md rule #11).
+#[test]
+fn the_broadside_orbit_doctrine_rests_defensive_until_red_alert() {
+    for (axis, p) in broadside_orbit_policies() {
+        let press = param(&p, "press_posture");
+        assert!(
+            press > 0.0,
+            "{axis}: `press_posture` must be a live threshold, not zero — at zero \
+             the defensive rung (0.0) would satisfy `>=` and the gate would be open \
+             for ever."
+        );
+        let machine = p.machine().expect("a state machine");
+        assert_eq!(
+            machine.initial, "shadow",
+            "{axis}: the doctrine RESTS defensive. A machine that booted into an \
+             aggressive leg would press once before the first posture reading \
+             arrived."
+        );
+
+        let pressed = facts(&[("posture", press)]);
+        let clear = facts(&[("posture", press - 1.0)]);
+        let unseeded = facts(&[]);
+        let memory = machine_memory(&p, 0.0);
+
+        assert_eq!(
+            p.resolve_transition("shadow", &pressed, &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("acquire"),
+            "{axis}/shadow: red alert ⇒ the class doctrine is licensed and the hull \
+             leaves the standoff ring."
+        );
+        assert_eq!(
+            p.resolve_transition("shadow", &clear, &memory, &[]),
+            None,
+            "{axis}/shadow: alert DOWN ⇒ maintain range. This is the half that makes \
+             the assertion above mean something — without it `shadow` could be a \
+             state the hull leaves unconditionally."
+        );
+        assert_eq!(
+            p.resolve_transition("shadow", &unseeded, &memory, &[]),
+            None,
+            "{axis}/shadow: with NO posture reading at all the comparison reads \
+             false and the hull stays defensive. The gate fails CLOSED, so a typo \
+             in the fact name cannot make a hull aggressive."
+        );
+
+        for state in &machine.states {
+            if state.id == "shadow" {
+                continue;
+            }
+            assert_eq!(
+                p.resolve_transition(&state.id, &clear, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("shadow"),
+                "{axis}/{}: the alert going down must outrank everything else in \
+                 this leg. Nothing in a ring is a commitment the hull is owed — \
+                 there is no frozen heading to protect — so a captain standing the \
+                 alert down breaks it off at the next tick.",
+                state.id
+            );
+            assert_ne!(
+                p.resolve_transition(&state.id, &pressed, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("shadow"),
+                "{axis}/{}: at red alert the break-off guard must NOT fire, or the \
+                 doctrine could never join its ring at all.",
+                state.id
+            );
+        }
+
+        let shadow = machine.state("shadow").expect("the defensive leg");
+        assert_eq!(
+            shadow.transitions.len(),
+            1,
+            "{axis}/shadow: the standoff leg must have exactly one exit, and it \
+             must be the posture gate. A second exit is a way to start a fight \
+             without the captain."
+        );
+    }
+}
+
+/// **The broadside-orbit doctrine's legs are the ones the HOST reads (issue #876
+/// AC1).**
+///
+/// The host never learns a state's NAME: it reads which leg is being flown off the
+/// Steering axis's yaw verb, and gates each leg on its own complete authored
+/// scalar set. So a fragment whose states are all present but whose verbs drifted
+/// would validate, spawn, and fly ordinary doctrine travel for ever — which is
+/// precisely the state this hull was left in when AC1 was withdrawn, and it looked
+/// identical from outside.
+///
+/// `hold_torpedo_bearing` in particular is not interchangeable with
+/// `pivot_to_reengage`, whose geometry is the same: that verb is a leg of the
+/// shield-RECOVERY doctrine and the host pairs it with `reengage_speed`, so a
+/// drift onto it would fly the bow hold at the wrong throttle and publish the
+/// wrong leg on the pass surface.
+#[test]
+fn the_broadside_orbit_doctrine_rings_when_pressed_and_points_for_a_salvo() {
+    let (_, steering) = broadside_orbit_policies()
+        .into_iter()
+        .find(|(axis, _)| *axis == "steering")
+        .expect("the doctrine authors a Steering machine");
+    let memory = machine_memory(&steering, 0.0);
+    let yaw = |state: &str, f: &AiFacts| {
+        steering
+            .resolve_channel_in_state(state, "yaw", f, &memory, &[])
+            .cloned()
+    };
+    let with_target = facts(&[("target_valid", 1.0)]);
+    let no_target = facts(&[("target_valid", 0.0)]);
+
+    assert_eq!(
+        yaw("shadow", &with_target),
+        Some(AiPolicyVerb::HoldRecoveryOrbit),
+        "clear, with something to stand off FROM ⇒ hold the wide ring the hull's \
+         `safe_range_margin` puts beyond the target's own reach."
+    );
+    assert_eq!(
+        yaw("shadow", &no_target),
+        Some(AiPolicyVerb::ActuateDesiredFacing),
+        "clear, with NOTHING to stand off from ⇒ ordinary doctrine travel. A ring \
+         needs a centre, and without this second rule the channel resolves to a \
+         hold and a targetless hull coasts on its last steering input for ever."
+    );
+    assert_eq!(
+        yaw("acquire", &with_target),
+        Some(AiPolicyVerb::ActuateDesiredFacing),
+        "acquire: the bow goes on the target on the way in, and ordinary doctrine \
+         travel carries the hull to `engage_range`."
+    );
+    assert_eq!(
+        yaw("orbit", &with_target),
+        Some(AiPolicyVerb::HoldCombatOrbit),
+        "THE manoeuvre: a ring at the hull's OWN fighting radius with the \
+         broadsides bearing. This is the verb the host gates the whole \
+         combat-orbit arm on."
+    );
+    assert_eq!(
+        yaw("torpedo_run", &with_target),
+        Some(AiPolicyVerb::HoldTorpedoBearing),
+        "THE torpedo run: a live bow-on tracking solution, re-solved every tick. \
+         Not `pivot_to_reengage`, whose geometry is identical but which the host \
+         pairs with the shield-recovery doctrine's `reengage_speed`."
+    );
+}
+
+/// **The torpedo run opens on the hull's own readiness and is bounded on it too
+/// (issue #876 AC1).**
+///
+/// The leg exists to own the channel-3 `ArcBearingRequest`: while a loaded tube
+/// cannot bear, `apply_arc_bearing_request` overwrites the doctrine's steering
+/// with a bow-on solution after the planner has already solved the ring tangent.
+/// A hull that points its own bow when it has a salvo satisfies that request by
+/// flying its own doctrine instead.
+///
+/// Every guard below fails silently if it drifts:
+///
+/// * a run that cannot be ENTERED hands the ring back to Channel 3, which is the
+///   withdrawn state this issue was reopened from;
+/// * a run entered while the hull is still CLOSING cuts thrust at whatever range
+///   the tubes happened to finish loading at — measured parking this hull just
+///   outside its own beam reach for the rest of the engagement;
+/// * a run that cannot be LEFT is a hull that stops orbiting for ever, and it is
+///   reachable rather than theoretical: `auto_fire_torpedo` refuses every launch
+///   while the striking arc is up, so `tubes_full` can stay true indefinitely
+///   against a target this hull cannot strip.
+///
+/// Both armament exits carry `torpedoes_in_flight` for the same reason: firing
+/// empties the tubes immediately, so without it the salvo-spent guard would
+/// release the hull on the very tick it launched.
+#[test]
+fn the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament() {
+    // The two copies must AGREE about the threshold before anything else is
+    // asserted about it. `torpedo_run_range` is referenced by a guard on BOTH
+    // axes, so a hull that retunes it on one and leaves the other on the class
+    // default breaks its ring at two different ranges — the axes reach different
+    // legs on the same tick, which is the silent failure two independent copies of
+    // one machine exist to make impossible.
+    let ranges: Vec<f64> = broadside_orbit_policies()
+        .iter()
+        .map(|(_, p)| param(p, "torpedo_run_range"))
+        .collect();
+    assert_eq!(
+        ranges[0], ranges[1],
+        "the Engines and Steering copies disagree about the range a loaded salvo is \
+         worth breaking the ring for ({} vs {}). Both guards read this name, so a \
+         hull retuning it owes it to both axes.",
+        ranges[0], ranges[1]
+    );
+
+    for (axis, p) in broadside_orbit_policies() {
+        let press = param(&p, "press_posture");
+        let run_range = param(&p, "torpedo_run_range");
+        assert!(
+            run_range > 0.0,
+            "{axis}: `torpedo_run_range` must be a live threshold. At zero the leg \
+             can never open and the ring is handed straight back to Channel 3."
+        );
+        let memory = machine_memory(&p, 0.0);
+        let at = |range: f64, full: f64, fillable: f64, in_flight: f64| {
+            facts(&[
+                ("posture", press),
+                ("target_valid", 1.0),
+                ("range_to_target", range),
+                ("tubes_full", full),
+                ("tubes_fillable", fillable),
+                ("torpedoes_in_flight", in_flight),
+            ])
+        };
+
+        assert_eq!(
+            p.resolve_transition("orbit", &at(run_range, 1.0, 1.0, 0.0), &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("torpedo_run"),
+            "{axis}/orbit: a loaded, reachable salvo inside `torpedo_run_range` is \
+             what the ring breaks for."
+        );
+        for (why, f) in [
+            ("no salvo loaded", at(run_range, 0.0, 1.0, 0.0)),
+            ("the battery shot out", at(run_range, 1.0, 0.0, 0.0)),
+            ("the hull still closing", at(run_range + 1.0, 1.0, 1.0, 0.0)),
+        ] {
+            assert_ne!(
+                p.resolve_transition("orbit", &f, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("torpedo_run"),
+                "{axis}/orbit: the ring must NOT break with {why}. It spends the \
+                 broadside geometry for a shot that is not there — and outside the \
+                 run range it also cuts thrust at whatever range the hull reached."
+            );
+        }
+
+        assert_eq!(
+            p.resolve_transition("torpedo_run", &at(run_range, 0.0, 1.0, 0.0), &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("orbit"),
+            "{axis}/torpedo_run: the salvo is spent ⇒ back to the ring while the \
+             tubes reload. THE bound, and it is drawn on this hull's own armament \
+             rather than on the target doing anything."
+        );
+        assert_eq!(
+            p.resolve_transition("torpedo_run", &at(run_range, 1.0, 0.0, 0.0), &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("orbit"),
+            "{axis}/torpedo_run: the battery is gone ⇒ back to the ring. This is \
+             what a rounds-in-the-tube reading structurally cannot see — a tube \
+             destroyed mid-run keeps its rounds, so `tubes_full` stays true."
+        );
+        for full in [0.0, 1.0] {
+            assert_ne!(
+                p.resolve_transition("torpedo_run", &at(run_range, full, 0.0, 1.0), &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("orbit"),
+                "{axis}/torpedo_run: a hull does not turn away from rounds it has \
+                 committed, airborne or still owed to a burst."
+            );
+        }
+        assert_eq!(
+            p.resolve_transition(
+                "torpedo_run",
+                &facts(&[("posture", press), ("target_valid", 0.0)]),
+                &memory,
+                &[]
+            )
+            .map(|t| t.to.as_str()),
+            Some("acquire"),
+            "{axis}/torpedo_run: the target is gone ⇒ `acquire`, not `orbit`. There \
+             is no bow to hold on nothing, and no ring to hold either."
         );
     }
 }

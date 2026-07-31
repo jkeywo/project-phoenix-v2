@@ -1,0 +1,691 @@
+# The BROADSIDE-ORBIT class movement doctrine, as a reusable library fragment
+# (issue #876 AC1).
+#
+# A FRAGMENT, not a hull — see the header of
+# `fragments/ai/captain_red_alert_aggressive.toml`. It is never parsed alone;
+# `include_resolve` merges it into a declaring template and only the resolved
+# document is validated and spawned.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# What a hull writes to use this
+# ═════════════════════════════════════════════════════════════════════════════
+#
+#     includes = [
+#       "fragments/ai/fleet_baseline.toml",
+#       "fragments/ai/captain_alliance.toml",
+#       "fragments/ai/movement_broadside_orbit.toml",
+#     ]
+#
+#     [helm_console.engines_ai.param]
+#     torpedo_run_range = 35.0
+#
+#     [helm_console.steering_ai.param]
+#     combat_orbit_range = 32.0
+#     combat_orbit_speed = 0.6
+#     torpedo_run_range = 35.0
+#
+# Order matters: this fragment REPLACES the fleet baseline's two travel axes, so
+# it must be listed after it (a template's includes merge in declared order, and
+# the declaring template itself merges last).
+#
+# `combat_orbit_range` alone is NOT enough, and the two extra names are not
+# decoration:
+#
+# * `torpedo_run_range` must be restated on BOTH axes, sized to the including
+#   hull's own envelope — see "The range gate, and why the leg needs one" below.
+#   Left at the class default of 50 a tighter hull enters the bow hold, which is
+#   flown at `torpedo_bearing_speed = 0`, from outside its own guns and parks
+#   there dealing nothing. Engines and Steering are two independent copies of one
+#   machine, so tuning one and not the other has them break their ring at
+#   different ranges and disagree about which leg they are flying.
+# * `combat_orbit_speed` is left to this file's default only by a hull that has
+#   MEASURED that the default suits it. It is a throttle held on a ring of the
+#   hull's own radius, and the sustained yaw it demands is `v / r` against that
+#   hull's `max_yaw_rate` — a number the class default cannot know.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# What this owns, and what it deliberately leaves alone
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The WHOLE of `[helm_console.engines_ai]` and `[helm_console.steering_ai]` —
+# two independent copies of ONE machine, which agree by reading the same
+# host-seeded facts rather than by sharing state. They ship together because a
+# copy that disagreed with the other about a threshold would reach a different
+# leg on the same tick, which is a silent failure with no test that could name
+# it.
+#
+# NOT `[helm_console.boost_ai]`. No leg of a broadside orbit engages the drive —
+# a ring is flown at a steady authored throttle and a boost would only widen it —
+# so the fleet baseline's `idle = true` is exactly the right declaration and this
+# fragment leaves it standing. `movement_attack_pass.toml` owes `idle = false`
+# because it SUPPLIES a boost machine; a movement fragment that supplies none
+# owes nothing. This is the same reading `movement_artillery.toml` takes.
+#
+# NOT `[helm_console.impulse_ai]` either, and that is a REAL difference from
+# `movement_artillery.toml` rather than an oversight. The artillery fragment has
+# to idle the drive because its hold band (180 units at the class default) sits
+# INSIDE the impulse autopilot's default cruise window — engage at 200, cancel at
+# 40 — so the drive would still be engaged, hard-overriding commanded throttle,
+# at the very range the gun line is supposed to be held at. A fighting ring is
+# the opposite geometry: it is tens of units across, comfortably INSIDE the
+# drive's own 40-unit cancel radius, so the autopilot releases before the ring
+# begins and the doctrine's throttle is the one that flies. `movement_attack_pass.toml`
+# leaves impulse alone for the same reason, and both fragments' hulls keep the
+# baseline's permit — which is what keeps the impulse baseline unanimous across
+# the fleet.
+#
+# One fragment owns entire policy blocks because since #911 an array with no
+# stable identity — and `*.ai.rule` and `*_ai.state[].transition` are both — still
+# REPLACES wholesale on compose. Two fragments cannot each contribute a rule to
+# the same policy; the second would wipe the first. Specialisation therefore runs
+# entirely through `param`, an ordinary table that deep-merges.
+#
+# `rule = []` appears twice, on Engines and on Steering, and it is load-bearing
+# on both: it clears the rules `fleet_baseline.toml` authors, because a policy
+# carrying BOTH top-level rules and states is rejected at load
+# (`validate_fine_system_ai_policy`).
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# The doctrine
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# A fighting ring with a torpedo run cut into it, under a posture gate.
+#
+#   shadow      → the DEFENSIVE resting leg. Holds a wide standoff ring around
+#                 the target at `target_direct_fire_range + safe_range_margin`,
+#                 outside the other ship's guns by an authored margin, and it
+#                 never closes. This is where a hull sits whenever its captain
+#                 has not called red alert.
+#   acquire     → a target has appeared but is not yet inside `engage_range`.
+#                 Tracks it continuously and lets ordinary doctrine travel carry
+#                 the hull in.
+#   orbit       → THE MANOEUVRE, and what the posture gate buys. Circles the
+#                 target at the hull's own `combat_orbit_range` so the broadsides
+#                 bear for the whole ring rather than only where it grazes
+#                 weapons range.
+#   torpedo_run → the ring BREAKS and the bow comes onto the target, for as long
+#                 as there is a salvo to put into it. Then the ring resumes.
+#
+# ── Why a ring needs a torpedo run at all, and why the doctrine owns it ───────
+#
+# This is the load-bearing paragraph of the file. A settled ring holds the target
+# at EXACTLY 90 degrees — a circular path makes the hull's heading the tangent,
+# so the bearing is the beam by construction rather than merely near it. Every
+# fixed forward tube in the fleet is therefore permanently out of arc for as long
+# as the ring is flown, and a hull that only ever orbits never launches anything.
+#
+# That is not just a damage cost; left alone it stops the ring being flown at
+# all. Weapons raises a channel-3 `ArcBearingRequest` for the first family that
+# has the target in reach and cannot bear (`tick_weapons_arc_request` in
+# `src/console/weapons/mod.rs`), and a torpedo's reach is `speed * lifespan` —
+# hundreds of units, so it is effectively never out of reach. On the receiving
+# side `apply_arc_bearing_request` (`src/ship/helm_ai.rs`) does not bias the
+# doctrine's facing, it OVERWRITES the steering command with a full bow-on
+# tracking solution AFTER the planner has already solved the ring tangent, for
+# every yaw verb including `hold_combat_orbit`. A ring with loaded tubes and no
+# torpedo leg therefore gets dragged bow-on by Channel 3, snaps back to the
+# tangent when a tube bears, and is dragged bow-on again — a sawtooth that walks
+# the hull tens of units in and out of its authored radius, through whatever
+# envelope the other ship is shooting from.
+#
+# So the bow-on phase is authored HERE, as a leg of the doctrine, rather than
+# left to arrive from Channel 3. `evaluate_family_arc_request` emits nothing for
+# a family in which some emitter is READY — in range and in arc — so a hull that
+# points its own bow when it has a salvo ready satisfies the request by flying
+# its own doctrine, and the ring it returns to is the ring the planner solved.
+# The two halves are the same manoeuvre described once.
+
+# ── What this leg does NOT fix, stated plainly ───────────────────────────────
+#
+# It absorbs the request; it does not remove it. The two conditions are not the
+# same shape: the request fires while a loaded tube cannot bear, and this leg
+# opens while a loaded salvo is worth pointing at. Between them sits every tick
+# where the hull is on its ring with tubes it has no run-range for — a reloading
+# hull just outside `torpedo_run_range`, most obviously — and on those ticks
+# Channel 3 still overwrites the steering. Nothing a doctrine can author closes
+# that gap, because closing it means pretending an opportunity exists in order to
+# satisfy a request; the honest fix is a precedence rule saying a class movement
+# doctrine's facing outranks an arc-bearing request, which is ISSUE #918 and is
+# deliberately not attempted here. #918's other half is the destroyer's `escape`
+# leg, whose frozen heading has exactly the same problem and no torpedo run to
+# hide behind.
+#
+# What that residual costs is a THROTTLE decision, not a facing one — see
+# `combat_orbit_speed` below, which is the knob an including hull sizes against
+# it.
+#
+# ── The entry condition: what "a torpedo shot is available" reads as ─────────
+#
+# It is genuinely readable at the helm, which is not obvious and is worth stating
+# plainly: `seed_torpedo_opportunity_facts` runs on every ship every shared tick,
+# unconditionally, and seeds `tubes_full`, `tubes_fillable`, `torpedoes_in_flight`
+# and `target_facing_shield_down` whatever the hull's doctrine asks for. They are
+# TRANSITION-scope facts — the per-axis actuator hosts resolve rule guards from
+# their own snapshot — which is why every guard below that reads one is a
+# transition and every RULE in this file is unconditional.
+#
+# The entry takes three readings:
+#
+# * `tubes_full` — is a WHOLE salvo loaded RIGHT NOW? The launcher's own
+#   question, computed helm-side by exactly the expression `ai_torpedo_auto_fire`
+#   uses to seed the launch channel's fact of the same name, so the manoeuvre
+#   that spends a firing geometry and the launcher that uses it ask one question
+#   and not two.
+# * `tubes_fillable` — is a whole salvo still REACHABLE at all? Slower and
+#   quieter: no tube and not the magazine has been shot out, and enough rounds
+#   remain to top every tube up. It catches what `tubes_full` structurally
+#   cannot, a tube that is loaded but destroyed, so the pair reads "a salvo is
+#   loaded, and the battery that will fire it is intact".
+# * `range_to_target <= torpedo_run_range` — see below. Without it the leg is not
+#   a manoeuvre, it is a handbrake.
+#
+# ── Why the target's SHIELD FACING is deliberately not one of them ───────────
+#
+# `ship_harrow_cruiser.toml`, the hand-authored ancestor of this fragment, adds
+# `target_facing_shield_down` to its own entry, and the launcher really does
+# refuse every shot while the striking arc is up: `auto_fire_torpedo`
+# (`src/console_ai/core.rs`) returns NO tubes at all while
+# `target_facing_shields > 0`, for every hull, player and NPC alike. So the
+# tighter guard is not wrong about the shot. It is wrong about the JOB.
+#
+# What this leg exists to own is the channel-3 `ArcBearingRequest`, and that
+# request fires on a strictly WEAKER condition than "the launcher would fire now":
+# `evaluate_family_arc_request` emits whenever some loaded tube has the target in
+# reach and NO tube of the family bears. Loaded and unable to point is enough. A
+# doctrine that only breaks its ring when the shot is already takeable therefore
+# leaves the request firing across the whole rest of the engagement, and Channel 3
+# flies the ship instead of the planner — which is the exact failure the leg was
+# added to end.
+#
+# It is measured rather than argued. On `alliance_cruiser.toml` in
+# `assets/worlds/probe_aggressor.toml`, with `target_facing_shield_down` on the
+# entry, the run opened on 0 of 901 ticks: the hull's beams average about 1 damage
+# per second into an 80-point arc regenerating 6.5, so the window it was waiting
+# for never came. The ring meanwhile sawtoothed from its authored 22 units down to
+# 7.8, and the engagement went 101 dealt against 370 taken. With the conjunct
+# dropped, the same run holds 24.5-25.6 units with no sawtooth at all and goes 62
+# dealt against 0 taken.
+#
+# The Harrow's reading is right for the Harrow because a shield gap is the only
+# thing its bow hold can be FOR: its rounds author `damage_shields = 0`, and its
+# beams are a 270-degree pair it works from the beam, so bow-on it can neither
+# strip the arc nor use the rounds. Waiting bow-on for a window it is not creating
+# would be a deadlock. A hull whose forward bank bears on its own bow can strip
+# the arc it is about to shoot through, so the same bow hold is self-completing.
+# The shared intent is "only point the bow when pointing it accomplishes
+# something"; the literals differ because the hulls differ, and a hull that wants
+# the stricter reading authors it on its TUBES, where the loadout lives.
+#
+# ── The range gate, and why the leg needs one ────────────────────────────────
+#
+# `torpedo_run_range` is what stops the leg opening during the RUN-IN. The bow
+# hold is flown at `torpedo_bearing_speed`, which is authored ZERO, so entering it
+# does not merely change the facing — it cuts thrust and stops the hull wherever
+# it happens to be. A hull whose tubes finish loading while it is still closing
+# would freeze at that range and stay there, and if that range is outside its own
+# weapons envelope it will sit and do nothing for the rest of the engagement.
+# Measured on the player cruiser with no gate: parked at 26.7 units, three
+# hundredths of a unit outside its own effective beam reach, for 810 of 901 ticks,
+# dealing nothing.
+#
+# So an including hull authors this as the range inside which pointing the bow
+# still leaves its own guns on the target — a property of that hull's envelope,
+# like `combat_orbit_range` and unlike `safe_range_margin`. It belongs just
+# outside the radius the ring settles at, so the leg opens from the ring and not
+# before it.
+#
+# ── The three ways back to the ring ──────────────────────────────────────────
+#
+# `torpedoes_in_flight` is a conjunct on both armament exits and means the same
+# thing on both: a hull does not turn away from rounds it has committed, airborne
+# or still owed to a burst. Firing makes `tubes_full` false immediately, so
+# without that conjunct the first guard would release the ship on the very tick
+# it launched.
+#
+#   * THE SALVO IS SPENT (`tubes_full`) — the ordinary case, and the BOUND. Entry
+#     required a full salvo; firing empties the tubes; the reload is what puts
+#     the hull back on its ring. This bound is drawn on the hull's OWN armament
+#     and so does not depend on the target doing anything — which matters,
+#     because `target_facing_shield_down` reads `1.0` permanently against a
+#     target that carries no `[shields]` block at all.
+#   * THE BATTERY IS GONE (`tubes_fillable`) — what a rounds-in-the-tube reading
+#     structurally cannot see. A tube destroyed AFTER the run opened leaves
+#     `tubes_full` true (the rounds are still sitting in the dead tube) and would
+#     shut every other exit; this is the guard that catches it.
+#   * THE TARGET IS GONE (`target_valid`) — there is no bow to hold on nothing,
+#     and this one lands in `acquire` rather than `orbit` because there is no
+#     ring to hold either.
+#
+# Priorities are authored explicitly on every exit because content validation
+# refuses equal-priority transitions out of one state: an authored tie would
+# resolve by file order, which is a decision the file should be making out loud.
+#
+# ── The posture gate (issue #876) ────────────────────────────────────────────
+#
+# `posture` is host-seeded on every helm policy host from this ship's own red
+# alert: 0 DEFENSIVE, 1 PRESSED. Every leg of the aggressive half carries a
+# transition back to `shadow` on `fact(posture) < param(press_posture)` at the
+# HIGHEST priority in the state — nothing in a ring is a commitment that outranks
+# the captain standing the alert down, and unlike an attack pass's escape leg
+# there is no frozen heading to protect.
+#
+# It is compared against an authored `press_posture` rather than a literal so a
+# future intermediate rung on the posture ladder does not have to touch a guard.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# The parameter surface
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# RING        `combat_orbit_range` — THE knob. The fighting radius, and a
+#             property of the including hull's OWN guns rather than of the enemy:
+#             it belongs inside the banks' `beam_range` by a real margin so the
+#             target stays under the broadsides for the whole ring instead of
+#             only where it grazes weapons range. `combat_orbit_speed` is the
+#             throttle held there and `combat_orbit_spiral_gain` how hard the
+#             radial error is corrected.
+# AGGRESSION  `engage_range` — how close before the ring is joined at all.
+# TORPEDO RUN `torpedo_run_range` — how close before a loaded salvo is worth
+#             breaking the ring for, and the guard that stops the leg freezing the
+#             run-in; `torpedo_bearing_speed` — the throttle flown with the bow on
+#             the target.
+# SAFE RANGE  `safe_range_margin` — world units of daylight wanted BEYOND the
+#             target's own longest direct-fire reach, plus `orbit_speed`,
+#             `orbit_spiral_gain`, `safe_ring_tolerance`,
+#             `safe_distance_window_ticks` and `reengage_speed` shaping how the
+#             defensive ring is held.
+# POSTURE     `press_posture` — the rung at which the aggressive half unlocks.
+# FIRE GATE   NOT here: it is `min_alert_to_fire` on each `*.ai` block inside the
+#             hull's own `[[weapons_console.*_banks]]` / `[[torpedoes.tubes]]`
+#             entries. Those arrays merge by `id`, so a shared fragment could
+#             only name bank ids it cannot know, and an unmatched id APPENDS a
+#             bank with no geometry. The fire gate is one authored predicate
+#             repeated per weapon, by design (issue #872).
+#
+# Every value below is a DEFAULT for the class, and every one is authored: there
+# is no Rust fallback for any of them. The host gates each leg on its OWN
+# complete scalar set and declines the whole arm on a missing name rather than
+# flying at an invented number:
+#
+#   * `combat_orbit_range` / `combat_orbit_speed` / `combat_orbit_spiral_gain`
+#     gate the fighting ring (`COMBAT_ORBIT_PARAMS`), and they gate as one unit —
+#     "one authoring the throttle but not the range would fly a tangent of a ring
+#     of radius zero, which is a spiral straight into the target";
+#   * `torpedo_bearing_speed` gates the bow hold (`TORPEDO_BEARING_PARAMS`) on
+#     its own, because the value a hull most often wants is `0.0`, which is
+#     indistinguishable from unauthored unless the gate asks for the NAME.
+#     `torpedo_run_range` is NOT one of the host's gates — no Rust reads it — it
+#     is read only by this file's own entry guard, on both axes;
+#   * the SIX recovery scalars gate the defensive ring (`RECOVERY_PARAMS`), and
+#     they gate as one unit. `reengage_speed` names the throttle of a pivot leg
+#     this doctrine never flies; it is authored anyway because omitting it
+#     declines the standoff ring `shadow` is entirely made of.
+#
+# The shared thresholds are restated on each axis because content validation
+# rejects an undeclared `param(...)`, and because these are two independent
+# machines rather than one machine with two readers.
+
+# ── Engines (longitudinal) ───────────────────────────────────────────────────
+#
+# The throttle axis. Every state authors the same unconditional "actuate the
+# planner's desired travel": which THROTTLE that resolves to is the Steering
+# axis's verb's business (`combat_orbit_speed` on the fighting ring,
+# `torpedo_bearing_speed` on the bow hold, `orbit_speed` on the defensive ring,
+# ordinary doctrine travel while closing), so this axis needs no knowledge of
+# which leg it is flying.
+[helm_console.engines_ai]
+initial_state = "shadow"
+rule = []
+
+[helm_console.engines_ai.param]
+# Restated on this axis because its OWN guards reference them; content validation
+# rejects an undeclared `param(...)`. Engines runs an independent copy of the
+# machine from the SAME shared fact snapshot, so it reaches each leg on its own
+# reading rather than by consulting Steering's state — the two axes are separate
+# fine systems and neither may read the other's memory.
+engage_range = 220.0
+torpedo_run_range = 50.0
+# The posture rung at which the aggressive half of the doctrine unlocks.
+press_posture = 1.0
+
+# Host-written private memory (issue #882: the host writes, the policy reads —
+# there is no authored write verb). `min_range_seen` starts effectively infinite
+# so the first folded range always wins the minimum.
+[helm_console.engines_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.engines_ai.state]]
+id = "shadow"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(posture) >= param(press_posture)"
+
+[[helm_console.engines_ai.state]]
+id = "acquire"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(engage_range)"
+
+[[helm_console.engines_ai.state]]
+id = "orbit"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 30
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  # THE TORPEDO OPPORTUNITY. Engines runs its OWN copy of the machine from the
+  # SAME shared fact snapshot, so it reaches the run on its own reading rather
+  # than by consulting Steering's state — the two axes are independent fine
+  # systems and neither may read the other's memory.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "torpedo_run"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0"
+
+  # A transition guarded on hazard urgency here would drop the hull out of the
+  # ring for the duration of a detour it is already handling additively, and
+  # re-entering would re-draw the circulation direction — so a debris field would
+  # randomise which way the ship circles. Losing the target is the one thing that
+  # genuinely ends an engagement.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+# The torpedo run, on the travel axis. The rule is the same unconditional
+# "actuate the planner's desired travel" every other state authors, and it has to
+# be: the run's throttle is `torpedo_bearing_speed`, which the HOST reads off the
+# Steering axis and folds into the planner solution. This axis never learns which
+# leg it is flying, exactly as it never learns it is orbiting.
+[[helm_console.engines_ai.state]]
+id = "torpedo_run"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 30
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "orbit"
+  when = "fact(tubes_full) < 1 and fact(torpedoes_in_flight) < 1"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(tubes_fillable) < 1 and fact(torpedoes_in_flight) < 1"
+
+# ── Steering (yaw) ───────────────────────────────────────────────────────────
+#
+# The axis that carries the manoeuvre, because the host reads WHICH leg is being
+# flown off this axis's verb — never off a state's name, so these states could be
+# called anything.
+#
+#   hold_recovery_orbit    → hold a wide ring derived from the target's own reach
+#                            plus this hull's authored margin: the defensive leg
+#   actuate_desired_facing → re-solve against the moving target every tick
+#   hold_combat_orbit      → neither of those: hold a ring around the target at
+#                            MY OWN fighting range, with the broadsides bearing
+#   hold_torpedo_bearing   → "point my bow at where the target is RIGHT NOW" — a
+#                            live tracking solution, re-solved every tick, because
+#                            a target that jinks while a fixed tube is lining up
+#                            is the case the leg exists to handle. It is not
+#                            `pivot_to_reengage`, whose geometry is identical:
+#                            that verb is one leg of the shield-RECOVERY doctrine
+#                            and is paired host-side with `reengage_speed`, one of
+#                            six scalars all about a ring derived from the
+#                            TARGET's reach.
+[helm_console.steering_ai]
+initial_state = "shadow"
+rule = []
+
+[helm_console.steering_ai.param]
+press_posture = 1.0
+# The hull commits to the ring once the target is this close. Comfortably outside
+# `combat_orbit_range` so the approach and the ring are distinct phases and the
+# spiral-in is visible rather than instantaneous.
+engage_range = 220.0
+# Steering response. A wide deadband because an orbit is a sustained turn against
+# a continuously moving solution and a tight one would have the hull hunting
+# either side of the tangent every tick. The saturation angle is TIGHT because it
+# is half of what sets the ring's steady-state radius — see
+# `combat_orbit_spiral_gain`.
+tracking_deadband_rad = 0.05
+tracking_full_steer_rad = 0.3
+# ── The three scalars the HOST reads off this axis to fly the FIGHTING ring ───
+# Steering owns them because Steering's yaw verb is what tells the host which leg
+# is being flown. Omit ANY ONE and the host declines the combat-orbit arm
+# outright — the hull falls back to ordinary doctrine travel rather than circling
+# at an invented radius or at zero throttle.
+#
+# The fighting radius, world units, and THE knob every including hull retunes: it
+# is an authored property of that hull's own guns and is not derived from the
+# target. It belongs inside the banks' `beam_range` by a real margin.
+combat_orbit_range = 42.0
+# Throttle fraction flown on the ring. Not zero and not flat out: the ring has to
+# hold its angular rate against `max_yaw_rate`, and a hull at full throttle on a
+# tight ring would need more turn authority than it has.
+#
+# It is also the doctrine's exposure to the residual described in the header, and
+# an including hull should size it with that in mind. While the tubes are loaded
+# and out of arc, `apply_arc_bearing_request` overwrites the STEERING and leaves
+# this THROTTLE alone, so whatever fraction of the ring Channel 3 is flying is
+# flown bow-on at this speed — straight at the thing being circled. A ring that is
+# too fast for its radius does not wobble, it closes.
+combat_orbit_speed = 0.6
+# Radians of heading offset per unit of FRACTIONAL radial error. Fractional so
+# the same gain behaves identically on a 42-unit ring and a 400-unit one.
+#
+# Much higher than the defensive ring's gain below, and the reason is the control
+# law rather than taste. The correction is PROPORTIONAL — heading offset against
+# radial error, with no integral term — so the ring settles at the radius where
+# the offset it commands is exactly the offset needed to sustain the turn, which
+# is always a little OUTSIDE the authored radius. That equilibrium solves to
+# `r(r - R) = v * R * tracking_full_steer_rad / (max_yaw_rate * gain)`. A gentle
+# gain is fine for a standoff ring hundreds of units out, where a few per cent is
+# noise; on a fighting ring it would settle most of the way to the edge of the
+# weapons envelope. Raising the gain and tightening `tracking_full_steer_rad`
+# together is what pulls it back in.
+combat_orbit_spiral_gain = 4.0
+# ── The scalar the HOST reads off this axis to fly the TORPEDO RUN ────────────
+# Throttle fraction flown while the bow is held on the target. Authored ZERO: the
+# leg exists to stop the hull swinging and let a fixed forward tube settle on the
+# target, and thrust on a tight ring is what makes the bearing move.
+#
+# Zero is exactly why this needs a name of its own. An unauthored param and an
+# authored 0.0 are the same number and opposite intents, so the host gates on the
+# NAME being present: omit it and the whole bow-hold arm is declined and the hull
+# keeps orbiting, rather than coasting to a halt in front of an enemy on a value
+# nobody chose.
+torpedo_bearing_speed = 0.0
+torpedo_run_range = 50.0
+# ── The six scalars the HOST reads off this axis to fly the DEFENSIVE ring ────
+# Gated as one unit (`RECOVERY_PARAMS`): omit any one and the host declines the
+# standoff arm outright, which would leave `shadow` — the leg this doctrine rests
+# in whenever the alert is down — flying nothing at all.
+#
+# World units added to the TARGET's own longest usable direct-fire range to get
+# the ring. The ring is therefore a property of the fight, not of this file: all a
+# hull authors is how much daylight it wants beyond the other ship's guns. THE
+# safe-range knob, and the counterpart of `combat_orbit_range`, which is a
+# property of the hull's own guns instead.
+safe_range_margin = 60.0
+# Throttle fraction flown on the defensive ring. Deliberately LOW — this is a hull
+# standing off, not patrolling — but not zero: a ship parked inside a hostile's
+# reach is not standing off from it, it is a target.
+orbit_speed = 0.5
+# Radians of heading offset per unit of FRACTIONAL radial error, and gentle
+# because a slow hull hunting a wide ring is the failure mode here.
+orbit_spiral_gain = 1.2
+# World units inside the ring that still count as "at safe distance" when the
+# distance history is folded. Absorbs the spiral's own overshoot, so a converging
+# orbit is not read as a breach.
+safe_ring_tolerance = 20.0
+# Length of the bounded distance history, in shared AI ticks. At the default 30 Hz
+# helm cadence this is two seconds of held standoff — the "maintained" in
+# "maintained safe distance".
+safe_distance_window_ticks = 60.0
+# Throttle flown on the re-entry pivot. This doctrine authors no leg that flies
+# it — there is no shield-recovery arm here — but the six gate as ONE unit, so
+# omitting it would decline the defensive ring along with it. Authored ZERO, which
+# is the same statement `torpedo_bearing_speed` makes: if a future leg ever
+# reaches for it, a cold turn is what it should get.
+reengage_speed = 0.0
+
+[helm_console.steering_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+# Host-written on the tick a ring is entered, from the seeded composite key.
+# Declared here so its pre-engagement value is authored rather than implicit; no
+# guard reads it — the host does, when it publishes the pass surface. Both rings
+# share the slot, because a ship circles one way at a time.
+orbit_direction = 1.0
+
+[[helm_console.steering_ai.state]]
+id = "shadow"
+
+  # The defensive ring — but only against something to hold a ring AROUND. With
+  # no target the standoff has no centre and the host has no reach to derive one
+  # from, so the fallback hands the axis back to ordinary doctrine travel and the
+  # hull flies its `[behaviour]` doctrine (patrol, hold station, a Navigation
+  # waypoint) exactly as an unbackfilled one would. Without this second rule the
+  # channel would resolve to "hold" and a targetless hull would coast on its last
+  # steering input for ever.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 10
+  channel = "yaw"
+  when = "fact(target_valid) > 0"
+  verb = "hold_recovery_orbit"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(posture) >= param(press_posture)"
+
+[[helm_console.steering_ai.state]]
+id = "acquire"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(engage_range)"
+
+# THE MANOEUVRE.
+[[helm_console.steering_ai.state]]
+id = "orbit"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_combat_orbit"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 30
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  # THE TORPEDO OPPORTUNITY — see the header for why this leg exists and why its
+  # entry is the hull's OWN readiness rather than the target's shield facing.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "torpedo_run"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+# THE TORPEDO RUN, on the axis that carries it: the ring stops and the bow comes
+# onto the target for as long as there is a salvo to put into it.
+[[helm_console.steering_ai.state]]
+id = "torpedo_run"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_torpedo_bearing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 30
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  # THE SALVO IS SPENT, and re-entering `orbit` here is what re-draws the
+  # circulation direction — so the ring resumed after a torpedo run is not
+  # necessarily the one that preceded it.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "orbit"
+  when = "fact(tubes_full) < 1 and fact(torpedoes_in_flight) < 1"
+
+  # THE BATTERY IS GONE — see the header. `tubes_full` is a statement about the
+  # rounds, not about the tubes, so shooting a tube out mid-run leaves the guard
+  # above shut with the rounds still sitting in the dead tube.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(tubes_fillable) < 1 and fact(torpedoes_in_flight) < 1"

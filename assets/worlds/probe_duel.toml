@@ -15,7 +15,43 @@
 # `src/console/weapons/mod.rs::ai_target_selection`.
 
 [global]
-seed = 838
+# RE-MEASURED again after issue #923 (the fleet sensors-power -> beam-reach
+# change) shifted this chaotic duel's dynamics a second time. The #895
+# re-bless directly above/before this one measured 838 as the sole resolving
+# seed on a base that predated #923; #923 then raised backfilled Alliance
+# hulls' combat-stations beam reach (the cruiser's fore bank: 26.7 -> 40.0
+# units), which changes the range fire opens at and, with it, which seed
+# actually closes for a kill instead of settling into a standoff.
+#
+# Swept on the current (post-#923) base over a 60 sim-second window — built
+# `phoenix-headless --world assets/worlds/probe_duel.toml --seed N --hz 30
+# --sim-seconds 60 --deterministic --report-format json` (--hz 30 to match
+# the test harness's dt; irrelevant to the outcome since #895 — the
+# simulation fixed-steps on `sim_tick_hz`, not the frame rate):
+#
+#   10   this seed. Hostile deals ~329 against ~38 of return fire, and it
+#        resolves inside the window — at 14.1 s (outcome Defeat). The
+#        faster of the two seeds below that close for a kill, so it leaves
+#        the most margin under the 60 s budget.
+#   5    also resolves, at 20.1 s (outcome Defeat) — hostile deals ~321
+#        against ~38 of return fire. A real second candidate, not a draw:
+#        an earlier, incomplete re-sweep of this file claimed 5 stalls at
+#        30/216 hull, which this measurement does not reproduce.
+#   1, 2, 13, 21, 34   ~232 against 30, still InProgress at 60 s: a Draw.
+#   3, 8               ~182 against 10-14, likewise a Draw.
+#   838  the previous pick. ~264 against 36 post-#923 (was ~332 against ~40
+#        pre-#923) — the extra beam reach lets the hostile open, and stay,
+#        effective from further out, so it now settles into the same standoff
+#        as the other non-resolving seeds instead of closing. No longer a
+#        candidate.
+#
+# 10 and 5 are the only two of the ten that resolve; 10 is the pick, both for
+# the larger margin under the budget and because it is also the seed
+# `ai_crewed_ships_actually_launch_torpedoes_in_a_real_run`
+# (tests/headless_runner.rs) already pins explicitly, under its own
+# independent ~30-seed sweep, for the same reason: this re-bless just makes
+# the world's own default agree with it.
+seed = 10
 ai_helm_tick_hz = 30.0
 
 [player_spawn]

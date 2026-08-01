@@ -27,7 +27,14 @@
 //! a real chance of disagreeing with what Bevy actually uploads. Bytes and LOD
 //! coverage are honest today; the mesh interior is a separate piece of work
 //! that should be built against Bevy's own loader rather than a second
-//! opinion about the same file.
+//! opinion about the same file (issue #905 owns that).
+//!
+//! The LOD generator (issue #919, `scripts/generate-lods.mjs`) records the byte
+//! size of every file it produces in `scripts/lod-manifest.toml`. It does not
+//! measure them a second way: `the_lod_manifest_records_the_bytes_this_inventory_measures`
+//! below asserts that what the manifest recorded is what this inventory reads
+//! off disk, so there is one byte measurement in the repository with two
+//! readers rather than two measurements that can disagree.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -286,5 +293,61 @@ max_distance = 100.0
     #[test]
     fn a_missing_tree_is_an_error_not_an_empty_inventory() {
         assert!(inventory(Path::new("no/such/root")).is_err());
+    }
+
+    /// The generated LOD files and this budget agree about their size
+    /// (issue #919).
+    ///
+    /// `scripts/generate-lods.mjs` writes a manifest recording, per generated
+    /// `.glb`, the source it came from, the parameters that made it, and how
+    /// big it turned out. That last number is *this* module's measurement —
+    /// asserted here rather than re-derived, so the pipeline cannot grow a
+    /// second opinion about file size. It also means a generated LOD that was
+    /// hand-edited, truncated or reverted without regenerating fails `cargo
+    /// test`, not only the Node drift check in CI.
+    ///
+    /// Triangle and texture budgets stay with issue #905; nothing here counts
+    /// them.
+    #[test]
+    fn the_lod_manifest_records_the_bytes_this_inventory_measures() {
+        let text = std::fs::read_to_string("scripts/lod-manifest.toml")
+            .expect("the LOD manifest is committed alongside the generated files");
+        let doc: toml::Value = toml::from_str(&text).expect("the manifest parses as TOML");
+        let outputs = doc
+            .get("output")
+            .and_then(|o| o.as_array())
+            .expect("the manifest lists [[output]] records");
+        assert!(
+            !outputs.is_empty(),
+            "the shipped tree generates at least one LOD level"
+        );
+
+        let found = inventory(Path::new(".")).expect("assets directories exist");
+        let mut problems: Vec<String> = Vec::new();
+        for output in outputs {
+            let path = output
+                .get("path")
+                .and_then(|p| p.as_str())
+                .expect("every record names its file");
+            let recorded = output
+                .get("output_bytes")
+                .and_then(|b| b.as_integer())
+                .expect("every record carries the size it was written at")
+                as u64;
+            let key = path.rsplit('/').next().unwrap_or(path);
+            match found.glb_bytes.get(key) {
+                None => problems.push(format!("{path}: recorded in the manifest, missing on disk")),
+                Some(&bytes) if bytes != recorded => problems.push(format!(
+                    "{path}: manifest recorded {recorded} bytes, disk has {bytes}"
+                )),
+                Some(_) => {}
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "generated LODs have drifted from scripts/lod-manifest.toml — regenerate with \
+             `npm run lods` (or re-baseline with `--adopt`) and commit both:\n{}",
+            problems.join("\n")
+        );
     }
 }

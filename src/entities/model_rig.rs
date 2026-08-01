@@ -28,6 +28,15 @@
 //! model = "assets/models/rock.glb"
 //! variant = "large"         # omitted → this sidecar's own variant
 //!
+//! [[lod]]
+//! max_distance = 150.0
+//! model = "assets/models/rock_lod2.glb"
+//! [lod.generate]          # how that .glb is regenerated (build-time only)
+//! source = "assets/models/rock.glb"
+//! ratio = 0.05
+//! error = 0.1
+//! texture_size = 256
+//!
 //! [[lod]]                 # procedural fallback level (no `model`)
 //! shape = "sphere"
 //! ```
@@ -38,6 +47,16 @@
 //! `.glb` it decimates, and the entity's `[mesh]` only names the model. Entity
 //! TOML that still authors `[[mesh.lod]]` is rejected at parse with a message
 //! pointing at this file — see [`crate::entity_config::EntityConfig::from_toml`].
+//!
+//! # Regenerating a ladder (issue #919)
+//! A level whose `.glb` was decimated out of another one carries the parameters
+//! that produced it in a `[lod.generate]` sub-table
+//! ([`crate::entity_config::LodGeneration`]), so the sidecar declares not just
+//! *which* files the ladder uses but *how they come back*:
+//! `node scripts/generate-lods.mjs <model>` reads exactly these blocks. The
+//! engine ignores every one of those keys — they are build-time provenance —
+//! but the strict schema still applies, so a misspelling fails the build rather
+//! than quietly detaching a level from its generator.
 //!
 //! # Composition
 //! The base rig is applied *inner* to the per-entity transform. The renderer
@@ -582,6 +601,42 @@ shape = "sphere"
         );
     }
 
+    /// A generated level carries the parameters that produced it (issue #919).
+    /// The renderer ignores them; the point is that they parse, so the sidecar
+    /// can own its whole ladder without the engine rejecting the sidecar.
+    #[test]
+    fn a_level_carries_its_generation_parameters() {
+        let toml = r##"
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/rock_lod2.glb"
+[lod.generate]
+source = "assets/models/rock.glb"
+ratio = 0.05
+error = 0.1
+texture_size = 256
+
+[[lod]]
+shape = "sphere"
+"##;
+        let rig = ModelRig::from_toml(toml).expect("generation params must parse");
+        // The near level is authored, not generated.
+        assert!(rig.lod[0].generate.is_none());
+        let gen = rig.lod[1].generate.as_ref().expect("level 1 is generated");
+        assert_eq!(gen.source.as_deref(), Some("assets/models/rock.glb"));
+        assert_eq!(gen.ratio, Some(0.05));
+        assert_eq!(gen.error, Some(0.1));
+        assert_eq!(gen.texture_size, Some(256));
+        // Absent means "no Blender pre-pass", not "voxel size zero".
+        assert_eq!(gen.remesh_voxel_size, None);
+        // Selection is untouched by the added block: still four bands.
+        assert_eq!(rig.lod.len(), 3);
+    }
+
     /// The schema is strict, so a mistyped key fails loudly instead of
     /// resolving to a rig that quietly lost a marker or a whole ladder.
     #[test]
@@ -589,6 +644,12 @@ shape = "sphere"
         assert!(ModelRig::from_toml("[base]\noffest = [1.0, 0.0, 0.0]\n").is_err());
         assert!(ModelRig::from_toml("lods = []\n").is_err());
         assert!(ModelRig::from_toml("[[lod]]\nmax_distance = 50.0\nmodell = \"a.glb\"\n").is_err());
+        // …including inside the build-time block, where a typo would otherwise
+        // detach the level from the generator that maintains it (issue #919).
+        assert!(ModelRig::from_toml(
+            "[[lod]]\nmodel = \"a.glb\"\n[lod.generate]\nratio = 0.5\nerorr = 0.01\n"
+        )
+        .is_err());
         assert!(ModelRig::from_toml(
             "[markers.fore]\nposition = [0.0, 0.0, 0.0]\ndirection = [0.0, 0.0, -1.0]\nfacing = 1.0\n"
         )
@@ -725,6 +786,25 @@ shape = "sphere"
                 "LOD level sidecar {level_sidecar} must exist"
             );
         }
+        // Both decimated levels declare how they are regenerated (issue #919),
+        // so deleting a `_lod*.glb` is recoverable from the sidecar alone. The
+        // near level is the source and declares nothing.
+        assert!(rig.lod[0].generate.is_none(), "the source is not generated");
+        for level in &rig.lod[1..3] {
+            let gen = level
+                .generate
+                .as_ref()
+                .expect("every decimated level declares its parameters");
+            assert_eq!(
+                gen.source.as_deref(),
+                Some("assets/models/asteroid_common_1.glb"),
+                "both steps decimate the full model, not each other"
+            );
+            assert!(matches!(gen.ratio, Some(r) if r > 0.0 && r < 1.0));
+            assert!(gen.error.is_some());
+            assert!(gen.texture_size.is_some());
+        }
+
         // The last level is the shared procedural sphere, inheriting the
         // entity's radius/colour rather than restating them.
         let last = rig.lod.last().unwrap();

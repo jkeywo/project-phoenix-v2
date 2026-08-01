@@ -501,6 +501,69 @@ pub struct LodLevel {
     /// Emissive multiplier. Falls back to `MeshConfig::emissive`.
     #[serde(default)]
     pub emissive: Option<f32>,
+    /// How this level's `model` was decimated out of a source GLB (issue #919).
+    /// Authored as a `[lod.generate]` sub-table. Build-time provenance only —
+    /// see [`LodGeneration`]; the renderer never reads it.
+    #[serde(default)]
+    pub generate: Option<LodGeneration>,
+}
+
+/// Decimation parameters that produced a generated LOD level's `.glb`
+/// (issue #919), authored as a `[lod.generate]` sub-table on the level.
+///
+/// **Ignored at runtime.** Every field here is meaningless to the renderer: by
+/// the time the game loads the ladder, the decimation has already happened and
+/// the only thing that matters is the file on disk. It lives in the sidecar
+/// anyway so the sidecar *fully* declares its ladder — the distances, the files,
+/// and how those files come back if someone deletes them. The alternative was a
+/// second list of ratios inside a build script, which is exactly the hardcoded
+/// table this repo does not keep (Key Constraint 11).
+///
+/// `scripts/generate-lods.mjs` is the one reader: it plans a
+/// simplify → resize run per declared level and records the result in
+/// `scripts/lod-manifest.toml`. A level with no `[lod.generate]` is authored by
+/// hand and the generator leaves it alone.
+///
+/// ```toml
+/// [[lod]]
+/// max_distance = 100.0
+/// model = "assets/models/asteroid_common_1_lod1.glb"
+///
+/// [lod.generate]
+/// source = "assets/models/asteroid_common_1.glb"
+/// ratio = 0.25
+/// error = 0.01
+/// texture_size = 512
+/// ```
+///
+/// Optional throughout, and deliberately so: the engine must never reject a
+/// sidecar over a build-time key it does not use. Validation of the *values*
+/// (a missing `source`, a ratio outside 0–1, two sidecars claiming the same
+/// output with different parameters) belongs to the generator, which is where
+/// the parameters mean something. `deny_unknown_fields` still applies, so a
+/// misspelled key fails loudly rather than being silently dropped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct LodGeneration {
+    /// The `.glb` this level is decimated from — normally the ladder's own
+    /// near level. Omitted means "the first GLB level of this chain".
+    #[serde(default)]
+    pub source: Option<String>,
+    /// meshoptimizer target ratio (0–1) of vertices to keep.
+    #[serde(default)]
+    pub ratio: Option<f32>,
+    /// meshoptimizer error limit, as a fraction of mesh radius.
+    #[serde(default)]
+    pub error: Option<f32>,
+    /// Maximum texture dimension (px) after decimation. Omitted means the
+    /// source's textures are carried over untouched.
+    #[serde(default)]
+    pub texture_size: Option<u32>,
+    /// Voxel size for the optional Blender voxel-remesh pre-pass
+    /// (`scripts/blender-voxel-remesh.py`), for meshes that decimate badly.
+    /// Omitted means no pre-pass, which is the case for every shipped ladder.
+    #[serde(default)]
+    pub remesh_voxel_size: Option<f32>,
 }
 
 /// Upper bound (exclusive) of level `i`'s distance band. A missing

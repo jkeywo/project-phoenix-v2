@@ -13,6 +13,12 @@ size = [ 7.7416092709945445, 5.1923960367530455, 7.9854709454965445 ]
 # Distance-based LOD (issue #914): full GLB up close, two decimated steps, then
 # a shared procedural sphere far away. Levels omit `variant`, `radius` and
 # `colour` so each rock inherits them from the entity's own flat `[mesh]`.
+# The two decimated steps declare how they are regenerated (issue #919):
+#   node scripts/generate-lods.mjs asteroid_common_4
+# Known stubborn mesh: plain regeneration comes out larger than the adopted
+# baseline below and the growth gate refuses it. Reach for the Blender voxel
+# pre-pass (remesh_voxel_size + --remesh, scripts/blender-voxel-remesh.py)
+# before --force.
 [[lod]]
 max_distance = 50.0
 model = "assets/models/asteroid_common_4.glb"
@@ -21,9 +27,21 @@ model = "assets/models/asteroid_common_4.glb"
 max_distance = 100.0
 model = "assets/models/asteroid_common_4_lod1.glb"
 
+[lod.generate]
+source = "assets/models/asteroid_common_4.glb"
+ratio = 0.25
+error = 0.01
+texture_size = 512
+
 [[lod]]
 max_distance = 150.0
 model = "assets/models/asteroid_common_4_lod2.glb"
+
+[lod.generate]
+source = "assets/models/asteroid_common_4.glb"
+ratio = 0.05
+error = 0.1
+texture_size = 256
 
 [[lod]]
 shape = "sphere"

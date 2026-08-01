@@ -9,9 +9,16 @@
     "build:client": "node scripts/build-client.mjs",
     "build": "npm run build:server && npm run build:client",
     "dev:viewer": "node scripts/dev-viewer.mjs",
-    "balance:demo": "cargo build --release --features headless --bin phoenix-headless && node scripts/balance-runs.mjs scripts/balance-runs.demo.toml --out .balance-out"
+    "balance:demo": "cargo build --release --features headless --bin phoenix-headless && node scripts/balance-runs.mjs scripts/balance-runs.demo.toml --out .balance-out",
+    "lods": "node scripts/generate-lods.mjs",
+    "lods:check": "node scripts/generate-lods.mjs --check"
+  },
+  "comment:overrides": "@gltf-transform/cli pins sharp ~0.34.5 while its ndarray-pixels dependency wants a newer one, so npm installs BOTH — and two libvips copies in one process disagree about the VipsInterpretation enum, which makes every `gltf-transform resize` die with 'colourspace: parameter space not set'. One sharp for the whole tree (issue #919).",
+  "overrides": {
+    "sharp": "0.34.5"
   },
   "devDependencies": {
+    "@gltf-transform/cli": "4.4.2",
     "binaryen": "^130.0.0",
     "jsdom": "^29.1.1",
     "ktx2tools": "^1.1.0",

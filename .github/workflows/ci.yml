@@ -179,6 +179,18 @@ jobs:
       - name: Check string table
         run: node scripts/check-strings.mjs --strict
 
+      # Guards the generated LOD models against silent drift (issue #919):
+      # re-hashes every generated .glb, the source it was decimated from, and
+      # the parameters its sidecar declares, and compares all three against
+      # scripts/lod-manifest.toml. It deliberately does NOT re-run
+      # gltf-transform — the simplifier is not byte-reproducible across CLI
+      # versions, so a regenerate-and-diff gate would go red for reasons that
+      # are not drift, and the runner would need the whole texture toolchain.
+      # Regenerating stays a local command (`npm run lods`); this step only
+      # asks whether what is committed is what the sidecars describe.
+      - name: Check generated LODs are current
+        run: npm run lods:check
+
   # ── Smoke tests ───────────────────────────────────────────────────────────────
   smoke:
     needs: build

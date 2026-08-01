@@ -44,6 +44,7 @@ cargo clippy --all-targets --all-features -- -D warnings   # CI: test job, step 
 cargo test                                     # CI: test job, step 3
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
 node scripts/check-strings.mjs --strict        # CI: editor-test job
+npm run lods:check                             # CI: editor-test job (LOD drift)
 uv run pytest -q tests/pasm                    # CI: pasm job — asserts on the spec model
 uv run pasm validate                           # CI: pasm job
 
@@ -68,6 +69,19 @@ node scripts/balance-runs.mjs scripts/balance-runs.example.toml [--out <dir>]
 
 # Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
+
+# LOD generation (issue #919) — regenerate a model's decimated levels from the
+# `[lod.generate]` blocks in its own rig sidecar. Needs `npm install` (pinned
+# @gltf-transform/cli); rewrites .glb files under assets/models and the
+# manifest CI checks. `--plan` prints the work without running it.
+npm run lods                                   # every declared LOD output
+node scripts/generate-lods.mjs asteroid_common_1   # one model
+node scripts/generate-lods.mjs --plan
+#   --remesh runs the optional Blender voxel pre-pass (scripts/blender-voxel-remesh.py)
+#   --adopt re-baselines the manifest from the files already on disk
+#   A level with no remesh_voxel_size that regenerates LARGER than its
+#   recorded baseline (a stubborn mesh) fails the run instead of just
+#   warning; fix it with the Blender voxel pre-pass above, not --force.
 
 # Model / shader viewer — one model, real render path, switchable lighting.
 # Use this to iterate on how things LOOK instead of booting a whole scenario.
@@ -95,7 +109,8 @@ npx playwright test                            # from tests/smoke/
 #   pasm         uv run pytest -q tests/pasm ; uv run pasm validate
 #   test         cargo fmt --check ; cargo clippy --all-targets --all-features
 #                -D warnings ; cargo test
-#   editor-test  npx vitest run ; node scripts/check-strings.mjs --strict
+#   editor-test  npx vitest run ; node scripts/check-strings.mjs --strict ;
+#                npm run lods:check
 #   build        TRUNK_BUILD_RELEASE=true trunk build --release ;
 #                node scripts/build-client.mjs
 #   smoke        npx playwright test (against the built dist/)

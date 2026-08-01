@@ -33,6 +33,7 @@ use crate::messages::{
     GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
 };
 use crate::server::asset_preload::AssetPreloadResource;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::server::renderer::GameCamera;
 use crate::server_app::GameOverReason;
 use crate::ship_state::ShipPhysics;

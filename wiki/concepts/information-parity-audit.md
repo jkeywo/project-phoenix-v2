@@ -281,3 +281,5 @@ authored by no hull, so no policy reads them yet. Their console counterpart —
 the red-alert helm-radar wedge overlay — already shipped with #874, so when
 #877 lands the parity row is satisfied on arrival. Re-check that row when the
 courier doctrine is authored; no other row in this checklist depends on #877.
+
+**Courier frozen-battery exception (issue #923, `alliance_courier.toml`).** Once a sustained red alert drains the courier's battery to the point sensors sheds to level 1, its `rates = [3, 2, 1, 0, -1, -3]` put a flat 0 at the resulting resting total, so the battery never recovers and no console on this hull shows the sensors power level to tell a crew reach is stuck at two thirds — accepted rather than filed; revisit with #877/#922.

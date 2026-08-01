@@ -2751,3 +2751,88 @@ fn a_world_flag_drives_a_backfilled_doctrine_in_a_real_run() {
          through the production schedule's flag chain"
     );
 }
+
+/// **A backfilled hull's phasers reach the `beam_range` its own file authors,
+/// in a real engagement (issue #923).**
+///
+/// The unit pin in `modifiers::coordination` resolves the authored policy by
+/// hand; this one lets the SHIPPED schedule do it — captain AI raises the alert
+/// off real combat, `ai_power_allocation` resolves the `sensors` channel and
+/// emits an admitted `SetPowerGroupAllocation`, `handle_power_messages` applies
+/// it, and `translate_power_modifiers` folds it into `ModifierSlot::RadarRange`.
+/// Nothing here sets a power level or an alert by hand: if any link in that
+/// chain stops firing the reach never reaches 1.0 and this fails.
+///
+/// It is deliberately a MAXIMUM over the run rather than a reading at the end.
+/// Combat stations is a burst the battery pays for — the sensor point is shed
+/// again below the authored reserve, and by 45 s the cruiser in `probe_duel`
+/// has long since dropped back to its resting allocation. The claim is "the
+/// hull reaches its authored range while it is fighting", not "for ever", and
+/// the two-thirds floor is asserted alongside it so a regression in either
+/// direction is visible.
+#[test]
+fn a_backfilled_cruiser_reaches_its_authored_beam_range_while_at_combat_stations() {
+    use project_phoenix::messages::ModifierSlot;
+    use project_phoenix::modifiers::ShipModifiers;
+
+    // The authored number this test is about, read off the shipped hull rather
+    // than restated — a retune of the bank retunes the assertion with it.
+    let hull = project_phoenix::entity_includes::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .expect("the shipped cruiser composes");
+    let authored_beam_range = hull
+        .weapons_console
+        .as_ref()
+        .and_then(|wc| wc.phaser_banks.iter().find(|b| b.id == "fore"))
+        .map(|b| b.beam_range)
+        .expect("the cruiser authors a `fore` phaser bank with a beam_range");
+    assert!(authored_beam_range > 0.0);
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(45.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("probe_duel must build an app");
+
+    let mut best: f32 = 0.0;
+    let mut worst: f32 = f32::MAX;
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipModifiers, With<LocalShip>>();
+        let Ok(mods) = q.single(app.world()) else {
+            continue;
+        };
+        let reach = authored_beam_range * mods.get(&ModifierSlot::RadarRange);
+        best = best.max(reach);
+        worst = worst.min(reach);
+    }
+
+    assert!(
+        (best - authored_beam_range).abs() < 1e-3,
+        "the cruiser's best effective phaser reach across 45 s of a live duel was \
+         {best:.2} against an authored beam_range of {authored_beam_range:.2}. The \
+         sensors → RadarRange → reach chain is not delivering nominal reach at \
+         combat stations, so every doctrine range on this hull is sized against a \
+         number its guns never have"
+    );
+    // The control, and it matters: a slot pinned at 1.0 for the whole run would
+    // satisfy the assertion above while proving nothing about the power chain.
+    // Reach must also read BELOW nominal somewhere, which it does for two
+    // independent reasons — the sensor point is shed below its authored reserve,
+    // and `apply_radar_damage_modifiers` drives the same slot when this hull's
+    // tactical radar is hit. No lower BOUND is asserted, for exactly that second
+    // reason: a destroyed radar takes the slot to ~0.001 by design.
+    assert!(
+        worst < authored_beam_range,
+        "effective reach never left {authored_beam_range:.2} across the whole run, so \
+         this probe never exercised the power chain it claims to measure — something \
+         other than the sensors group is holding the RadarRange slot at 1.0"
+    );
+}

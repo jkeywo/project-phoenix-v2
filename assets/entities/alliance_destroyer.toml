@@ -1071,6 +1071,20 @@ verb = "grant_torpedo_round"
 # is time spent unable to shoot back) and it shadows a little tighter (45 rather
 # than 60 units beyond the target's own reach, which is what keeps a 15-unit hull
 # from losing contact altogether while the alert is down).
+#
+# Both were re-checked against issue #923 and both stay, for different reasons.
+# `commit_range` is an APPROACH trigger three times any reach this hull has at any
+# sensor level, so raising sensors at red alert cannot move it — the 35 in the
+# sentence above is the authored `beam_range`, which is what the hull now actually
+# gets at combat stations rather than the 23.3 it was silently getting.
+# `safe_range_margin` needs no retune BECAUSE it is derived: the host adds it to
+# `target_direct_fire_range`, which `entity_direct_fire_range` reads off the
+# TARGET's live banks WITH that ship's own `RadarRange` modifier applied, so a
+# destroyer standing off an Alliance hull at combat stations already opens its
+# ring by the same thirteen units that hull's reach gained. Measured on
+# `npm run balance:demo`, seeds 1-5 × 120 s: the same 10W/5L/5D, every recorded
+# threshold passing, TTK medians 15.1→15.2 s (harrow cruiser), 6.7→6.5 s (patrol),
+# 13.0→13.1 s (warhawk), damage margin against the mirror destroyer 427→444.
 [helm_console.engines_ai.param]
 commit_range = 120.0
 

@@ -2552,10 +2552,34 @@ station = "sensors"
         )
     }
 
+    /// The reactor as the four Alliance hulls author it: `ops` and `sensors`
+    /// resting at 1, `helm` and `weapons` at 2 — a sustainable resting total of 6
+    /// inside the system's cap of 8.
+    ///
+    /// The fixture carries the real layout because the shipped policy is authored
+    /// FOR it. Since issue #923 the group the alert raises is `sensors`, and
+    /// against `PowerSystem::default()` — the canonical trio at 2, no `ops` — that
+    /// elevation would be a no-op these tests could not see.
+    fn alliance_reactor() -> crate::modifiers::power_system::PowerSystem {
+        use crate::messages::PowerGroupId;
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, SENSORS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        crate::modifiers::power_system::PowerSystem::from_authored_groups(
+            100.0,
+            &[
+                (PowerGroupId(HELM_POWER_GROUP.into()), 2),
+                (PowerGroupId(WEAPONS_POWER_GROUP.into()), 2),
+                (PowerGroupId(SENSORS_POWER_GROUP.into()), 1),
+                (PowerGroupId("ops".into()), 1),
+            ],
+        )
+    }
+
     /// Wires the real production pair: the AI decide system
     /// (`ai_power_allocation`, emit) `.before` the single applier
     /// (`ship::power::handle_power_messages`, issue #831). Attaches the canonical
-    /// default `PowerAiPolicy` (baseline: helm←thrust / weapons←red alert with
+    /// default `PowerAiPolicy` (baseline: helm←thrust / sensors←red alert with
     /// reserve guards) unless the caller overrides it.
     fn power_test_app() -> App {
         let mut app = App::new();
@@ -2581,9 +2605,7 @@ station = "sensors"
         app.world_mut().spawn((
             crate::server_app::Ship,
             control_sources,
-            crate::ship::power::ShipPowerSystem(
-                crate::modifiers::power_system::PowerSystem::default(),
-            ),
+            crate::ship::power::ShipPowerSystem(alliance_reactor()),
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_plugin::LastHelmInput::default(),
             default_power_policy(),
@@ -2626,11 +2648,13 @@ station = "sensors"
     }
 
     #[test]
-    fn baseline_default_reallocates_toward_weapons_on_red_alert() {
-        // Baseline preservation: the synthesised default policy reproduces the
-        // retired red-alert→weapons behaviour. Under red alert with a full
-        // battery (well above the 10% weapons reserve) weapons rises to its
-        // elevated level 3.
+    fn baseline_default_reallocates_toward_sensors_on_red_alert() {
+        // The shipped policy's red-alert elevation, through the real emit +
+        // apply pair. Since issue #923 the group the alert raises is `sensors`:
+        // it rests at 1, which folds `ModifierSlot::RadarRange` to ×0.667, and
+        // nominal (2) is the level at which a hull's phaser banks reach the
+        // `beam_range` its own file authors. Under red alert with a full battery
+        // — well above the 10% sensor reserve — it rises.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
         app.world_mut()
@@ -2642,9 +2666,16 @@ station = "sensors"
         power_tick_with_dt(&mut app, 0.1);
 
         assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
+            2,
+            "sustained red alert must raise the sensor suite to nominal — the level \
+             at which authored weapon reach is the reach the hull actually has"
+        );
+        assert_eq!(
             power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
-            3,
-            "sustained red alert must elevate weapons power (default baseline)"
+            2,
+            "and weapons holds nominal: the point that used to elevate it is the one \
+             the sensor suite now spends, which is what keeps the total inside 8"
         );
     }
 
@@ -2745,9 +2776,9 @@ station = "sensors"
             .unwrap()
             .0 = true;
 
-        let before = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        let before = power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP);
         power_tick_with_dt(&mut app, 0.1);
-        let after = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        let after = power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP);
         assert_eq!(
             before, after,
             "ships without AiHighFidelity must not be touched by ai_power_allocation"
@@ -2778,11 +2809,11 @@ station = "sensors"
                 ControlSource::Human,
             );
 
-        let before = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        let before = power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP);
         power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
             before,
-            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
             "human-operated power reactor must not be touched by ai_power_allocation"
         );
 
@@ -2798,8 +2829,8 @@ station = "sensors"
             );
         power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
-            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
-            3,
+            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
+            2,
             "regaining AI control yields a clean elevate decision (stateless reset)"
         );
     }
@@ -2827,9 +2858,7 @@ station = "sensors"
             .spawn((
                 crate::server_app::Ship,
                 cs,
-                crate::ship::power::ShipPowerSystem(
-                    crate::modifiers::power_system::PowerSystem::default(),
-                ),
+                crate::ship::power::ShipPowerSystem(alliance_reactor()),
                 crate::ship_state::ShipRedAlert(true),
                 crate::ship_plugin::LastHelmInput::default(),
                 default_power_policy(),
@@ -2848,22 +2877,22 @@ station = "sensors"
             .entity(ee)
             .get::<crate::messages::AdmittedCommands>()
             .unwrap();
-        let weapons_alloc = admitted.0.iter().find_map(|c| match &c.payload {
+        let sensors_alloc = admitted.0.iter().find_map(|c| match &c.payload {
             crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level }
                 if c.target == crate::system_registry::power_reactor_system_id()
-                    && group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP =>
+                    && group.0 == crate::modifiers::power_system::SENSORS_POWER_GROUP =>
             {
                 Some(*level)
             }
             _ => None,
         });
         assert_eq!(
-            weapons_alloc,
-            Some(3),
-            "red alert must admit an absolute SetPowerGroupAllocation(3) for weapons"
+            sensors_alloc,
+            Some(2),
+            "red alert must admit an absolute SetPowerGroupAllocation(2) for sensors"
         );
 
-        // Saturate weapons at the emitted level and clear admissions: a further
+        // Saturate sensors at the emitted level and clear admissions: a further
         // tick produces the same target and must NOT re-admit a no-op.
         {
             let mut ent = emit_app.world_mut().entity_mut(ee);
@@ -2872,9 +2901,9 @@ station = "sensors"
                 .0
                 .set_group_allocation(
                     &crate::messages::PowerGroupId(
-                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                        crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
                     ),
-                    3,
+                    2,
                 )
                 .unwrap();
             ent.get_mut::<crate::messages::AdmittedCommands>()
@@ -2896,7 +2925,7 @@ station = "sensors"
             !admitted.0.iter().any(|c| matches!(
                 &c.payload,
                 crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, .. }
-                    if group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP
+                    if group.0 == crate::modifiers::power_system::SENSORS_POWER_GROUP
             )),
             "a group already at the target level must not re-admit a no-op"
         );
@@ -2913,9 +2942,7 @@ station = "sensors"
             .entity_mut(e)
             .insert(crate::server_app::LocalShip);
         app.world_mut()
-            .insert_resource(crate::ship::power::ShipPowerSystem(
-                crate::modifiers::power_system::PowerSystem::default(),
-            ));
+            .insert_resource(crate::ship::power::ShipPowerSystem(alliance_reactor()));
         app.world_mut()
             .entity_mut(e)
             .get_mut::<crate::ship_state::ShipRedAlert>()
@@ -2925,16 +2952,21 @@ station = "sensors"
         power_tick_with_dt(&mut app, 0.1);
 
         let component_level =
-            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP);
         let resource_level = app
             .world()
             .resource::<crate::ship::power::ShipPowerSystem>()
             .0
             .level_for(&crate::messages::PowerGroupId(
-                crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
             ));
         assert_eq!(component_level, resource_level);
-        assert_eq!(resource_level, 3);
+        assert_eq!(
+            resource_level, 2,
+            "the red-alert sensor elevation must reach the legacy Resource too — a \
+             dual write that stopped here would leave the LocalShip's own reach \
+             reading two thirds while its component said nominal"
+        );
     }
 
     #[test]
@@ -3289,8 +3321,9 @@ station = "sensors"
 
         power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
-            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
-            2
+            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
+            1,
+            "red alert would move sensors 1 -> 2 if the idle policy did not hold it"
         );
         assert_eq!(
             power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),

@@ -419,6 +419,148 @@ mod tests {
         assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
     }
 
+    /// **Every shipped Alliance hull reaches its own authored `beam_range` at
+    /// combat stations (issue #923).**
+    ///
+    /// The drift this pins is silent by construction and cost the fleet a third
+    /// of its reach for four issues: `ModifierSlot::RadarRange` is driven off the
+    /// SENSORS power group, the hulls rest that group at 1, level 1 folds to
+    /// ×0.667 — and until #923 no authored policy anywhere carried a `sensors`
+    /// channel, so nothing ever raised it. Nothing in Rust was wrong and nothing
+    /// in any hull file looked wrong; the reach was simply two thirds of every
+    /// number a designer had written down.
+    ///
+    /// So this walks the whole authored path rather than asserting on a
+    /// multiplier in isolation, on the SHIPPED files through the include
+    /// resolver:
+    ///
+    ///   1. seed a `PowerSystem` from the hull's `[power_groups.*]`, in the
+    ///      runtime's own order (`authored_power_group_seed`);
+    ///   2. resolve every group's channel against the hull's own
+    ///      `[power.ai_policy]` over a COMBAT-STATIONS fact snapshot, and apply
+    ///      the winning level through `set_group_allocation` — so the silent
+    ///      8-point total cap is exercised for real, in emission order, and a
+    ///      policy that asks for nine points fails here rather than in a duel;
+    ///   3. translate that power state through `apply_power_modifiers_from_read_state`
+    ///      with the hull's own `[sensors_console] power_multipliers`;
+    ///   4. assert each authored phaser bank's effective reach —
+    ///      `beam_range × RadarRange` — is exactly its authored `beam_range`.
+    ///
+    /// Deliberately NOT `assert_eq!(mult, 1.0)`: the claim is about REACH, and
+    /// stating it as reach is what makes a hull that retunes `power_multipliers`
+    /// fail the test for the right reason.
+    #[test]
+    fn every_alliance_hull_reaches_its_authored_beam_range_at_combat_stations() {
+        for path in [
+            "assets/entities/alliance_battleship.toml",
+            "assets/entities/alliance_cruiser.toml",
+            "assets/entities/alliance_destroyer.toml",
+            "assets/entities/alliance_courier.toml",
+        ] {
+            let config = crate::entity_includes::load_entity_config(path)
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let reactor = config
+                .power
+                .as_ref()
+                .unwrap_or_else(|| panic!("{path} authors a [power] reactor"));
+            let policy = reactor
+                .ai_policy
+                .as_ref()
+                .unwrap_or_else(|| panic!("{path} authors a [power.ai_policy]"))
+                .to_policy()
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let topology = config
+                .ship_config
+                .as_ref()
+                .unwrap_or_else(|| panic!("{path} authors a ship_config"));
+
+            // (1) The reactor as the spawner seeds it.
+            let seed = crate::ship::power::authored_power_group_seed(&topology.power_groups);
+            assert!(
+                !seed.is_empty(),
+                "{path} authors no [power_groups.*]; this pin is about the four-group \
+                 Alliance hulls, whose resting `sensors` level is what makes the rule \
+                 load-bearing"
+            );
+            let mut power = PowerSystem::from_authored_groups(reactor.capacity, &seed);
+
+            // (2) Combat stations: red alert, a full battery, under way. The
+            // groups are walked in `power.iter()` order because that is the order
+            // `ai_power_allocation` emits in, and the total cap makes the order
+            // observable.
+            let facts = crate::ship::power::seed_power_facts(
+                &power,
+                100.0, // battery_pct — above every authored reserve
+                1.0,   // thrust — above `thrust_threshold`
+                true,  // red alert
+                Some(0.0),
+                None,
+                true,
+                0,
+            );
+            let group_ids: Vec<PowerGroupId> = power.iter().map(|(id, _)| id.clone()).collect();
+            for id in &group_ids {
+                if let Some(crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level)) =
+                    policy.resolve_channel(&id.0, &facts, &[])
+                {
+                    let wanted = *level;
+                    power
+                        .set_group_allocation(id, wanted)
+                        .unwrap_or_else(|e| panic!("{path}: {e:?}"));
+                    assert_eq!(
+                        power.level_for(id),
+                        wanted,
+                        "{path}: the authored policy asked for `{}` = {wanted} at combat \
+                         stations and the reactor's 8-point total cap refused it (total is \
+                         now {}). `PowerSystem::increase` fails SILENTLY, so a policy that \
+                         over-spends the budget ships as a group stuck at the wrong level \
+                         and a command re-emitted every tick for ever",
+                        id.0,
+                        power.total()
+                    );
+                }
+            }
+            assert!(
+                power.total() <= 8,
+                "{path}: combat stations totals {} against a cap of 8",
+                power.total()
+            );
+
+            // (3) Power → modifiers, through the hull's own multiplier table.
+            let mut multipliers = default_multipliers();
+            if let Some(pm) = config
+                .sensors_console
+                .as_ref()
+                .and_then(|sc| sc.power_multipliers)
+            {
+                multipliers.insert(PowerGroupId(SENSORS_POWER_GROUP.into()), pm);
+            }
+            let mut mods = ShipModifiers::new();
+            apply_power_modifiers_from_read_state(&mut mods, &power.read_state(), &multipliers);
+            let reach_mult = mods.get(&ModifierSlot::RadarRange);
+
+            // (4) The claim, stated as reach.
+            let banks = config
+                .weapons_console
+                .as_ref()
+                .map(|wc| wc.phaser_banks.as_slice())
+                .unwrap_or_default();
+            for bank in banks.iter().filter(|b| b.beam_range > 0.0) {
+                let effective = bank.beam_range * reach_mult;
+                assert!(
+                    (effective - bank.beam_range).abs() < 1e-4,
+                    "{path}: phaser bank `{}` authors beam_range {} but reaches {effective:.1} \
+                     at combat stations (RadarRange ×{reach_mult:.3}, sensors at level {}). \
+                     Every doctrine range on this hull — its ring, its commit range, its \
+                     artillery envelope — is sized against a number the guns do not have",
+                    bank.id,
+                    bank.beam_range,
+                    power.level_for(&sensors())
+                );
+            }
+        }
+    }
+
     #[test]
     fn helm_power_4_gives_positive_bonus() {
         let mut mods = ShipModifiers::new();

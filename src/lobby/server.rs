@@ -109,12 +109,12 @@ pub struct OutboundMessage {
 
 // ── System set ─────────────────────────────────────────────────────────────
 
-/// Ordering anchor for every lobby `Update` system: `handle_disconnect` runs
-/// first, then the per-variant message systems (Identify / SetName /
-/// ReturnToLobby plus the four station-management systems), then
-/// `tick_countdown → update_game_state_cache`. Downstream systems that must
-/// observe the post-lobby world state order themselves with
-/// `.after(LobbySystemSet)`.
+/// Ordering anchor for every lobby system (in `FixedUpdate` since issue #895):
+/// `handle_disconnect` runs first, then the per-variant message systems
+/// (Identify / SetName / ReturnToLobby plus the four station-management
+/// systems), then `tick_countdown → update_game_state_cache`. Downstream
+/// systems that must observe the post-lobby world state order themselves with
+/// `.after(LobbySystemSet)` — which is why they share its schedule.
 #[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LobbySystemSet;
 
@@ -152,8 +152,17 @@ impl Plugin for LobbyPlugin {
             // player marked disconnected with their seat cleared. `tick_countdown`
             // runs after the message systems (but before the outbox drain) so
             // countdown broadcasts reach the outbound bus.
+            //
+            // `FixedUpdate` since issue #895: the `SimSet` chain lives in the
+            // fixed schedule and orders itself `.after(LobbySystemSet)`, an
+            // edge that is only real when both sides share a schedule. Lobby
+            // handling therefore advances on the logical tick too — inbound
+            // messages drained in `PreUpdate` are buffered by Bevy until a
+            // fixed step has observed them, and `tick_countdown`'s `Res<Time>`
+            // reads the fixed clock, which is what drives the
+            // `GamePhase::InProgress` transition on tick time.
             .add_systems(
-                Update,
+                FixedUpdate,
                 (handle_disconnect, tick_countdown, update_game_state_cache)
                     .chain()
                     .in_set(LobbySystemSet),
@@ -168,7 +177,7 @@ impl Plugin for LobbyPlugin {
             // Identify + the four station systems gate on
             // Lobby/Loading/InProgress (claim/release/toggle + mid-game reconnect).
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     handle_identify_system,
                     handle_select_station_system,
@@ -187,7 +196,7 @@ impl Plugin for LobbyPlugin {
             )
             // SetName gates on Lobby/Loading (rename before the game starts).
             .add_systems(
-                Update,
+                FixedUpdate,
                 handle_set_name_system
                     .in_set(LobbySystemSet)
                     .after(handle_disconnect)
@@ -196,7 +205,7 @@ impl Plugin for LobbyPlugin {
             )
             // ReturnToLobby gates on GameOver (the game-over screen's button).
             .add_systems(
-                Update,
+                FixedUpdate,
                 handle_return_to_lobby_system
                     .in_set(LobbySystemSet)
                     .after(handle_disconnect)
@@ -1402,7 +1411,11 @@ pub struct LobbyOutboxPlugin;
 
 impl Plugin for LobbyOutboxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, drain_lobby_outbox.after(tick_countdown));
+        // `FixedUpdate` with the rest of the lobby (issue #895): the
+        // `.after(tick_countdown)` edge — which is what keeps `GameStarted`
+        // from being lost on the transition tick — is only real inside the
+        // schedule `tick_countdown` runs in.
+        app.add_systems(FixedUpdate, drain_lobby_outbox.after(tick_countdown));
     }
 }
 
@@ -1446,11 +1459,15 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(lobby_outbox_broadcaster())
             .add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_secs_f32(1.0),
-            ))
             .init_resource::<Outbox>()
             .add_systems(PostUpdate, collect);
+        // One fixed step per update (issue #895): the lobby runs on the
+        // logical tick, and each 1 s harness tick advances it once — the
+        // countdown tests count whole seconds per tick.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_secs_f32(1.0),
+        );
         app
     }
 

@@ -70,14 +70,14 @@ pub struct ConsoleAiPlugin;
 
 impl Plugin for ConsoleAiPlugin {
     fn build(&self, app: &mut App) {
-        // The ONE shared AI decision cadence (issue #889). Every decider below
-        // used to be UNGATED, and because `SimSet` is configured in Bevy's
+        // The ONE shared AI decision cadence (issues #889, #895). Every decider
+        // below used to be UNGATED, and while `SimSet` was configured in Bevy's
         // `Update` that meant one decision per rendered frame — at display
         // refresh rate, over a `WorldSnapshot` rebuilt on an unrelated clock.
-        // They now share the helm axes' fixed-rate latch.
+        // They now share the helm axes' latch, derived from the logical tick.
         crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 // Decide only (issue #826): emits admitted SetShieldArcFocus
                 // payloads; the single applier is `ship::shields::

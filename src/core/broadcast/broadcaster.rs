@@ -344,6 +344,12 @@ mod tests {
         }
         app.init_resource::<Outbox>();
         app.add_systems(PostUpdate, collect);
+        // One fixed step per update (issue #895): both dispatchers run on
+        // the logical tick.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(1),
+        );
 
         // Distinct Resource identities, one registration each.
         assert_eq!(

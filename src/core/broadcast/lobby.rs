@@ -8,7 +8,8 @@ use crate::messages::{DeliveryClass, GamePhase};
 /// - Delivery: `Reliable` (must arrive; lobby chrome is not resent).
 /// - Phase gate: inline — dispatch runs only while `GamePhase::Lobby` is the
 ///   current state (and skips entirely when no `State<GamePhase>` exists).
-/// - Schedule: `Update`, after `LobbySystemSet`.
+/// - Schedule: `FixedUpdate`, after `LobbySystemSet` (which moved to the fixed
+///   schedule with the sim in issue #895 — the edge must share its schedule).
 pub struct Lobby;
 
 impl BroadcastKind for Lobby {
@@ -25,7 +26,7 @@ impl BroadcastKind for Lobby {
 
     fn add_dispatch(app: &mut App) {
         app.add_systems(
-            Update,
+            FixedUpdate,
             dispatch::<Lobby>.after(crate::lobby::LobbySystemSet),
         );
     }
@@ -67,6 +68,13 @@ mod tests {
             .insert_resource(State::new(GamePhase::Lobby));
         app.init_resource::<Outbox>();
         app.add_systems(PostUpdate, collect);
+        // One fixed step per update (issue #895): dispatch runs on the
+        // logical tick, and a 1 ms step keeps the Hz cadences' clocks as
+        // near-still as the old wall-clock fixture.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(1),
+        );
         app
     }
 

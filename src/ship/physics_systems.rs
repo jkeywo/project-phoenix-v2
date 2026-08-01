@@ -154,6 +154,25 @@ pub(crate) fn integrate_ship_physics(
     #[cfg(debug_assertions)] mut guard_q: Query<&mut crate::ship::helm::HelmPhysicsWriteGuard>,
     #[cfg(debug_assertions)] mut commands: Commands,
 ) {
+    // The `HELM_AI_MAX_DT_SECS` clamp is DEAD in production, and is kept only
+    // for the bare-`App` fixtures (issue #895).
+    //
+    // Since #895 this system runs in `FixedUpdate`, where `Res<Time>` is the
+    // fixed clock, so `dt == 1 / [global] sim_tick_hz`. The divergence trap
+    // that used to live here — a slow host silently getting a shortened step,
+    // so two hosts integrated differently from the same commands — is now
+    // closed at LOAD instead: `world::config::parse_world` rejects any authored
+    // `sim_tick_hz` below `entity_config::MIN_SIM_TICK_HZ`, which is derived
+    // from this very constant. A shipped world therefore cannot reach the
+    // clamp, and no run-time branch decides fidelity.
+    //
+    // What still reaches it is the bare-`App` fixture: it authors no world (so
+    // no floor applies) and paces itself at `test_support::TEST_TICK` (200 ms).
+    // The clamp is what keeps those fixtures' integration step at the 1/30 s
+    // every helm assertion in this crate was written against. Deleting it is a
+    // behaviour re-bless of ~6 combat-AI tests, not a determinism fix — see
+    // `helm_ai::tests::backfill_helm_ai_caps_long_frame_yaw_step`, which pins
+    // exactly that fixture contract.
     let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
 
     for (

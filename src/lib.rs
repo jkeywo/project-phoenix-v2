@@ -91,6 +91,7 @@ pub mod radar_config;
 pub mod ship_plugin;
 pub mod sim_rng;
 pub mod sim_sets;
+pub mod sim_tick;
 /// Shared pure-Rust libm wrappers — the only sanctioned transcendental float
 /// math in simulation code (issue #908; enforced via clippy.toml).
 pub mod simmath;

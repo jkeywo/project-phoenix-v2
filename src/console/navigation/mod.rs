@@ -22,7 +22,7 @@ impl Plugin for NavigationPlugin {
         // emit in the same set for a same-tick AI waypoint to land. Human
         // commands admitted before Input survive to Physics unchanged.
         app.add_systems(
-            Update,
+            FixedUpdate,
             handle_navigation_waypoint
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(operate_navigation_ai),
@@ -32,11 +32,11 @@ impl Plugin for NavigationPlugin {
         // waypoint into the SimSnapshot. Auto-clear when the parent
         // entity is no longer present.
         .add_systems(
-            Update,
+            FixedUpdate,
             refresh_anchored_waypoint.in_set(crate::sim_sets::SimSet::Modifiers),
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             operate_navigation_ai.in_set(crate::sim_sets::SimSet::Physics),
         )
         // The single, origin-agnostic Channel-3 clearance issuer (issue #702
@@ -46,14 +46,14 @@ impl Plugin for NavigationPlugin {
         // this tick gets its clearance this tick, whoever set it (#702 shared-
         // issuer invariant).
         .add_systems(
-            Update,
+            FixedUpdate,
             issue_navigate_to_clearance
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(operate_navigation_ai)
                 .after(handle_navigation_waypoint),
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             publish_navigation_blackboard.in_set(crate::sim_sets::SimSet::Publish),
         );
     }
@@ -895,16 +895,13 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
             // Chain SimSet phases so handle (Input) → refresh (Modifiers) →
             // broadcast (Broadcast) run in the right order. Without this,
             // adding a second resource-touching system to a different set
             // makes the schedule non-deterministic and breaks the existing
             // broadcast assertions.
             .configure_sets(
-                Update,
+                FixedUpdate,
                 (
                     crate::sim_sets::SimSet::Input,
                     crate::sim_sets::SimSet::Physics,
@@ -923,7 +920,7 @@ mod tests {
             .add_plugins(crate::server_app::sim_outbox_broadcaster())
             .init_resource::<crate::simulation::SimOutbox>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 crate::server_app::broadcast_blackboard_updates
                     .in_set(crate::sim_sets::SimSet::PublishAggregate),
             )
@@ -961,6 +958,12 @@ mod tests {
                 power_rating: None,
             },
         ));
+        // One fixed step per update (issue #895): the plugin's systems run on
+        // the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         app
     }
 

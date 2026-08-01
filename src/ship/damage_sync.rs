@@ -472,14 +472,17 @@ mod tests {
         // With one engine offline, effective thrust = 0.5, so terminal = 0.5 * max_speed = 12.5.
         // We run enough ticks to approach terminal velocity at the 50%-thrust case,
         // then verify the one-engine-offline ship is slower than the both-online ship.
-        const TICK_MS: u64 = 34; // slightly above 1/30s so timer fires once per tick
+        const TICK_MS: u64 = 34; // slightly above 1/30s, the physics' own scale
         const TICKS: usize = 120; // 120 ticks × 34ms ≈ 4s, enough to reach ~12.5 m/s terminal
 
         let make_app = || {
             let mut app = test_app_with_engine_hull();
-            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            // Re-pin the harness to a 34 ms logical tick (issue #895): the
+            // helper keeps timestep == frame advance, one step per update.
+            crate::ship::test_support::drive_one_fixed_step_per_update(
+                &mut app,
                 std::time::Duration::from_millis(TICK_MS),
-            ));
+            );
             app
         };
 
@@ -551,10 +554,13 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
             .add_plugins(ShipPlugin);
+        // One fixed step per update (issue #895): ShipPlugin's systems run on
+        // the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         let hull_config = &[
             (crate::messages::SystemId("helm".into()), 25.0_f32),
             (crate::messages::SystemId("tactical".into()), 25.0),
@@ -652,10 +658,13 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
             .add_plugins(ShipPlugin);
+        // One fixed step per update (issue #895): ShipPlugin's systems run on
+        // the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
 
         let tc = crate::damage::ConsoleTierConfig::default();
         let arc_hull = crate::damage::ShipArcHull::from_entries(vec![

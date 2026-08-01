@@ -41,7 +41,7 @@ impl Plugin for RegionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RegionMembership>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     update_region_membership.in_set(crate::sim_sets::SimSet::Physics),
                     apply_damage_zone_damage
@@ -490,11 +490,16 @@ mod tests {
     use crate::ship_physics::ShipPhysicsConfig;
     use crate::simulation::ShipImpulse;
 
-    /// Build a minimal Bevy app with the region plugin.
+    /// Build a minimal Bevy app with the real `RegionPlugin`, one fixed
+    /// simulation step per `update()` (issue #895).
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin);
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            crate::ship::test_support::TEST_TICK,
+        );
         // Spawn the ship entity with ShipPhysics and ShipModifiers so region systems can query it.
         app.world_mut().spawn((
             LocalShip,
@@ -507,7 +512,13 @@ mod tests {
     }
 
     /// Spawn a region entity at the given position with the given shape.
-    /// Does NOT call app.update() internally Ã¢â‚¬â€ caller must flush afterwards.
+    ///
+    /// Does NOT call `app.update()` - the caller drives the membership
+    /// system itself. It DOES flush the world command queue, which matters
+    /// since issue #895: `spawn_entity` queues through `Commands`, and that
+    /// queue is applied later in the frame than `FixedUpdate`, so without
+    /// the flush the region would not exist yet on the fixed step the
+    /// caller's next `update()` runs.
     fn spawn_region(app: &mut App, x: f32, z: f32, shape: RegionShape) -> Entity {
         let config = EntityConfig {
             name: None,
@@ -551,7 +562,9 @@ mod tests {
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+        let entity = spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None);
+        app.world_mut().flush();
+        entity
     }
 
     fn ship_entity(app: &mut App) -> Entity {
@@ -733,10 +746,8 @@ mod tests {
 
     fn damage_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin);
-        // Manually control time — no TimePlugin. Bevy 0.18 Time is generic;
-        // we insert Time<()> ourselves and use advance_by() before each update.
-        app.insert_resource(Time::<()>::default());
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(RegionPlugin);
         // AiEntityDestroyed / WorldResource are needed by apply_damage_zone_damage
         // for the NPC-destruction path (PRD #597 PR 9). They're written only
         // when a non-LocalShip ship dies inside a damage zone, but the
@@ -764,8 +775,8 @@ mod tests {
 
     fn blocks_impulse_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin);
-        app.insert_resource(Time::<()>::default());
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(RegionPlugin);
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
@@ -777,9 +788,25 @@ mod tests {
         app
     }
 
+    /// Advance the fixed clock by exactly `dt_secs` and run one `app.update()`.
+    ///
+    /// Routes through `test_support::drive_one_fixed_step_per_update`
+    /// (issue #895 re-review), which lets every fixture in this module build
+    /// with the REAL `RegionPlugin` instead of a hand-rolled `Time<()>` copy
+    /// of its registration: `apply_damage_zone_damage` and
+    /// `update_region_membership` read the generic `Res<Time>`, which
+    /// resolves to `Time<Fixed>` inside `FixedUpdate` and reports exactly the
+    /// `dt_secs` this function just pinned the timestep to. A caller passing
+    /// 0.1, then 1.0, then 0.016 across successive calls sees exactly those
+    /// deltas — the arbitrary-precision behaviour these tests were written
+    /// against — because the corrected helper discards stale overstep and
+    /// skips its fresh-app preload once `app.update()` has run at least once,
+    /// so re-pacing mid-test can never double a step.
     fn tick_with_dt(app: &mut App, dt_secs: f32) {
-        let mut time = app.world_mut().resource_mut::<Time>();
-        time.advance_by(Duration::from_secs_f32(dt_secs));
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            app,
+            Duration::from_secs_f32(dt_secs),
+        );
         app.update();
     }
 
@@ -829,7 +856,14 @@ mod tests {
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+        let entity = spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None);
+        // Flush now (issue #895): these fixtures drive the REAL `RegionPlugin`,
+        // which runs in `FixedUpdate` — earlier in the frame than the point a
+        // command queued outside any system would otherwise be applied. Without
+        // this the region entity does not exist yet on the fixed step the
+        // caller's next `tick_with_dt` runs, exactly like `spawn_region` above.
+        app.world_mut().flush();
+        entity
     }
 
     fn spawn_damage_zone(app: &mut App, x: f32, z: f32, radius: f32, dps: f32) -> Entity {
@@ -892,7 +926,14 @@ mod tests {
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+        let entity = spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None);
+        // Flush now (issue #895): these fixtures drive the REAL `RegionPlugin`,
+        // which runs in `FixedUpdate` — earlier in the frame than the point a
+        // command queued outside any system would otherwise be applied. Without
+        // this the region entity does not exist yet on the fixed step the
+        // caller's next `tick_with_dt` runs, exactly like `spawn_region` above.
+        app.world_mut().flush();
+        entity
     }
 
     #[test]
@@ -1251,9 +1292,13 @@ mod tests {
 
     fn radar_dampening_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin)
-            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
-            .insert_resource(Time::<()>::default());
+        // Region observers first, then the modifier plugin's — matching the
+        // production registration order (`RegionPlugin` before
+        // `ModifierCoordinationPlugin`), which decides which observer sees a
+        // `RegionEntered` first.
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(RegionPlugin)
+            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin);
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
@@ -1325,7 +1370,14 @@ mod tests {
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+        let entity = spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None);
+        // Flush now (issue #895): these fixtures drive the REAL `RegionPlugin`,
+        // which runs in `FixedUpdate` — earlier in the frame than the point a
+        // command queued outside any system would otherwise be applied. Without
+        // this the region entity does not exist yet on the fixed step the
+        // caller's next `tick_with_dt` runs, exactly like `spawn_region` above.
+        app.world_mut().flush();
+        entity
     }
 
     #[test]
@@ -1411,9 +1463,13 @@ mod tests {
 
     fn slow_zone_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin)
-            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
-            .insert_resource(Time::<()>::default());
+        // Region observers first, then the modifier plugin's — matching the
+        // production registration order (`RegionPlugin` before
+        // `ModifierCoordinationPlugin`), which decides which observer sees a
+        // `RegionEntered` first.
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(RegionPlugin)
+            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin);
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
@@ -1481,7 +1537,14 @@ mod tests {
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+        let entity = spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None);
+        // Flush now (issue #895): these fixtures drive the REAL `RegionPlugin`,
+        // which runs in `FixedUpdate` — earlier in the frame than the point a
+        // command queued outside any system would otherwise be applied. Without
+        // this the region entity does not exist yet on the fixed step the
+        // caller's next `tick_with_dt` runs, exactly like `spawn_region` above.
+        app.world_mut().flush();
+        entity
     }
 
     fn check_modifier(app: &mut App, slot: ModifierSlot, expected: f32) {
@@ -1771,9 +1834,13 @@ mod tests {
 
     fn flag_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin)
-            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
-            .insert_resource(Time::<()>::default());
+        // Region observers first, then the modifier plugin's — matching the
+        // production registration order (`RegionPlugin` before
+        // `ModifierCoordinationPlugin`), which decides which observer sees a
+        // `RegionEntered` first.
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(RegionPlugin)
+            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin);
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
@@ -1831,7 +1898,14 @@ mod tests {
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+        let entity = spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None);
+        // Flush now (issue #895): these fixtures drive the REAL `RegionPlugin`,
+        // which runs in `FixedUpdate` — earlier in the frame than the point a
+        // command queued outside any system would otherwise be applied. Without
+        // this the region entity does not exist yet on the fixed step the
+        // caller's next `tick_with_dt` runs, exactly like `spawn_region` above.
+        app.world_mut().flush();
+        entity
     }
 
     /// Spawn a region with the SensorBlind effect at the given position.
@@ -1881,7 +1955,14 @@ mod tests {
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+        let entity = spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None);
+        // Flush now (issue #895): these fixtures drive the REAL `RegionPlugin`,
+        // which runs in `FixedUpdate` — earlier in the frame than the point a
+        // command queued outside any system would otherwise be applied. Without
+        // this the region entity does not exist yet on the fixed step the
+        // caller's next `tick_with_dt` runs, exactly like `spawn_region` above.
+        app.world_mut().flush();
+        entity
     }
 
     fn assert_flag(app: &mut App, flag: FlagKind, expected: bool) {

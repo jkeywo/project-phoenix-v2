@@ -36,7 +36,6 @@ use crate::entity_spawner::ShipAudioSection;
 use crate::lobby::OutboundMessage;
 use crate::messages::{GamePhase, ServerMessage};
 use crate::ship_state::ShipPhysics;
-use crate::sim_sets::SimSet;
 use crate::simulation::LocalShip;
 use crate::world::config::WorldConfig;
 
@@ -73,13 +72,17 @@ impl Plugin for ServerAudioPlugin {
                     // OnEnter chain — and if it lost that ordering race it
                     // would never get a second chance.
                     push_audio_config.run_if(in_state(GamePhase::InProgress)),
-                    process_forcefield_damage.after(SimSet::Broadcast),
+                    // No `.after(SimSet::Broadcast)` edges since issue #895:
+                    // the sim's Broadcast set runs in `FixedUpdate`, which
+                    // always completes before `Update`, so the OutboundMessage
+                    // stream these read is already settled for the frame.
+                    process_forcefield_damage,
                     // Deliberately not gated on InProgress: if a hit spikes
                     // the level just as the ship dies, gating here would
                     // freeze the decay and leave the bed looping at full
                     // volume forever. With no LocalShip (lobby) it early-returns.
                     drive_forcefield_level.after(process_forcefield_damage),
-                    push_blaster_cues.after(SimSet::Broadcast),
+                    push_blaster_cues,
                 ),
             );
     }

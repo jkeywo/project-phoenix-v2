@@ -164,7 +164,7 @@ fn seed_viewscreen_from_selection(
 fn test_app() -> App {
     let mut app = App::new();
     app.configure_sets(
-        Update,
+        FixedUpdate,
         (
             crate::sim_sets::SimSet::Input,
             crate::sim_sets::SimSet::Physics,
@@ -179,9 +179,6 @@ fn test_app() -> App {
     .add_plugins(LobbyPlugin)
     .add_plugins(bevy::time::TimePlugin)
     .add_plugins(crate::server_app::AdmissionPlugin)
-    .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-        std::time::Duration::from_millis(200),
-    ))
     .init_resource::<WorldResource>()
     .add_message::<AsteroidDestroyedVfx>()
     .add_message::<ShipDestroyedVfx>()
@@ -236,7 +233,7 @@ fn test_app() -> App {
         },
     ))
     .add_systems(
-        Update,
+        FixedUpdate,
         seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
     )
     .add_plugins(weapons_update_broadcaster())
@@ -245,6 +242,12 @@ fn test_app() -> App {
     // with `ShipShields` observe regen on every frame.
     .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
     .add_systems(PostUpdate, (collect, collect_arc_requests));
+    // One fixed step per update (issue #895): the plugins' systems run on the
+    // logical tick, and each harness tick advances it once.
+    crate::ship::test_support::drive_one_fixed_step_per_update(
+        &mut app,
+        std::time::Duration::from_millis(200),
+    );
     // Spawn the Ship entity with config/control-source components so all
     // weapons systems that use `Query<..., With<Ship>>.single()` have a
     // valid entity to operate on, matching what `spawn_game_start_entities`
@@ -5689,8 +5692,24 @@ fn ai_target_selection_runs_on_the_shared_ai_tick_not_per_frame() {
         .insert("target".into(), near_uuid.clone());
     insert_destroy_objective_blackboard(&mut app, "target", 80.0);
 
-    // 10 ms per frame — under the 33.3 ms shared cadence period, i.e. what a
-    // 60 Hz rAF-driven host actually does.
+    // 10 ms per frame — under the 33.3 ms decision period, i.e. what a
+    // 60 Hz rAF-driven host actually does. Since #895 the throttle IS the
+    // fixed loop: pin the logical timestep to the shipped decision period
+    // (no WorldConfig here, so every fixed step is an AI tick) and let the
+    // 10 ms frames under-feed it.
+    //
+    // `test_app()` (above) never ticks before reaching here, so its
+    // `TEST_TICK` (200 ms) preload is still sitting untouched in
+    // `Time<Fixed>`'s accumulator. Discard it before re-pacing to the fine
+    // 10 ms frame, or the loop below bursts ~6 steps (200 ms / 33.3 ms) on
+    // its first iteration instead of the 0-or-1 the throttle assertions
+    // below assume.
+    crate::ship::test_support::discard_stale_overstep(&mut app);
+    app.world_mut()
+        .resource_mut::<Time<Fixed>>()
+        .set_timestep(crate::sim_tick::sim_tick_period(
+            crate::entity_config::GlobalConfig::default().ai_tick_hz,
+        ));
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_millis(10),
     ));
@@ -7020,7 +7039,7 @@ fn publish_drops_locked_target_when_the_selected_target_dies_mid_tick() {
     // destroyed in Damage — exactly the beam/torpedo kill ordering.
     app.insert_resource(KillTargetOnDamage(target_uuid.clone()));
     app.add_systems(
-        Update,
+        FixedUpdate,
         kill_target_after_input.in_set(crate::sim_sets::SimSet::Damage),
     );
     tick(&mut app);
@@ -7171,7 +7190,7 @@ fn npc_and_local_ship_select_targets_independently() {
 fn torpedo_ai_test_app() -> App {
     let mut app = test_app();
     app.add_systems(
-        Update,
+        FixedUpdate,
         crate::console_ai_plugin::ai_torpedo_auto_fire
             .in_set(crate::sim_sets::SimSet::Physics)
             .before(crate::console::weapons::handle_fire_torpedo),
@@ -10197,7 +10216,7 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
     let mut app = test_app();
     // Register the sync system directly (test_app doesn't include ShipPlugin).
     app.add_systems(
-        Update,
+        FixedUpdate,
         crate::ship_plugin::sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
     );
 
@@ -10502,7 +10521,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
     // `SimSet::Input`, so pushing during Input survives to Physics.
     let claim_target_entity = npc_entity;
     app.add_systems(
-        Update,
+        FixedUpdate,
         (move |mut queue: ResMut<InterSystemQueue>| {
             queue.0.push(InterSystemMsg {
                 target: crate::system_registry::torpedo_magazine_system_id(),
@@ -10571,9 +10590,6 @@ fn los_test_app() -> App {
     use bevy_rapier3d::prelude::RapierPhysicsPlugin;
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(200),
-        ))
         .add_plugins(bevy::transform::TransformPlugin)
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<bevy::mesh::Mesh>()
@@ -10582,7 +10598,7 @@ fn los_test_app() -> App {
         .init_state::<GamePhase>()
         .add_plugins(RapierPhysicsPlugin::<()>::default())
         .configure_sets(
-            Update,
+            FixedUpdate,
             (
                 crate::sim_sets::SimSet::Input,
                 crate::sim_sets::SimSet::Physics,
@@ -10638,6 +10654,12 @@ fn los_test_app() -> App {
         // Do NOT register them again here.
         .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
         .add_systems(PostUpdate, collect);
+
+    // One fixed step per update (issue #895).
+    crate::ship::test_support::drive_one_fixed_step_per_update(
+        &mut app,
+        std::time::Duration::from_millis(200),
+    );
 
     // Advance one tick to let Rapier initialise.
     app.world_mut()

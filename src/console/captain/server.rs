@@ -41,10 +41,10 @@ impl Plugin for CaptainPlugin {
             crate::system_registry::VIEWSCREEN_SYSTEM_ID,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
-        // The ONE shared AI decision cadence (issue #889).
+        // The ONE shared AI decision cadence (issues #889, #895).
         crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 // Gated by `run_if`, not by an `Option<Res<_>>` check inside the
                 // body (issue #889). The in-body form fell back to evaluating
@@ -711,6 +711,12 @@ mod tests {
                     .expect("the shipped Captain policy decodes"),
             ),
         ));
+        // One fixed step per update (issue #895): the plugin's systems run on
+        // the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(1),
+        );
         app
     }
 

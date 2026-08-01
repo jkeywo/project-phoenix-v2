@@ -101,12 +101,12 @@ impl Plugin for RendererPlugin {
                     update_view_screen_text,
                     update_view_direction_label,
                     toggle_ship_model_visibility,
-                    hull_camera
-                        .run_if(in_state(GamePhase::InProgress))
-                        .after(crate::sim_sets::SimSet::Physics),
-                    cinematic_camera
-                        .run_if(in_state(GamePhase::InProgress))
-                        .after(crate::sim_sets::SimSet::Physics),
+                    // No `.after(SimSet::Physics)` edges since issue #895: the
+                    // sim runs in `FixedUpdate`, which always completes before
+                    // `Update`, so this frame's camera work reads the latest
+                    // stepped `Transform`s without an explicit edge.
+                    hull_camera.run_if(in_state(GamePhase::InProgress)),
+                    cinematic_camera.run_if(in_state(GamePhase::InProgress)),
                     sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
                 ),
             )

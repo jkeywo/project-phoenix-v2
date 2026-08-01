@@ -1051,8 +1051,11 @@ mod tests {
     /// real one: `process_coordination_lag` lands a value in `Modifiers`, and
     /// the applier reads it in the FOLLOWING tick's `Input`.
     fn add_tactical_hint_applier(app: &mut App) {
+        // `FixedUpdate` (issue #895): the applier joins the SimSet chain in
+        // the schedule the chain lives in, preserving the one-tick handover
+        // window between the router (Modifiers) and next tick's Input.
         app.add_systems(
-            Update,
+            FixedUpdate,
             crate::console::weapons::apply_tactical_frequency_hint
                 .in_set(crate::sim_sets::SimSet::Input),
         );
@@ -1097,8 +1100,10 @@ mod tests {
             crate::entity_spawner::EntityUuid(target_uuid.to_string()),
             crate::ship::shields::ShipShields(crate::shield::ShieldSystem::default(), frequency),
         ));
+        // `FixedUpdate` (issue #895): the emitter joins the SimSet chain in
+        // the schedule the chain lives in, so its `.before` edge stays real.
         app.add_systems(
-            Update,
+            FixedUpdate,
             crate::ship::sensors::tick_sensors_frequency_hint
                 .in_set(crate::sim_sets::SimSet::Input)
                 .before(handle_coordination_enqueue),

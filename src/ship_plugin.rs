@@ -48,10 +48,11 @@ impl Plugin for ShipPlugin {
         app.init_resource::<BankConfigResource>()
             .add_message::<CoordinationEnqueue>()
             .add_message::<AiChatterEvent>();
-        // The ONE shared AI decision cadence (issues #803, #889). Installed by
-        // every plugin that registers a gated system; the helper is idempotent
-        // and registers its tick system in `Last`, so the latch is always
-        // consumed by the `Update` systems it gates before it is re-armed.
+        // The ONE shared AI decision cadence (issues #803, #889, #895).
+        // Installed by every plugin that registers a gated system; the helper
+        // is idempotent and derives the latch from the logical tick in
+        // `FixedLast`, so it is always consumed by the `FixedUpdate` systems
+        // it gates before it is re-armed for the next step.
         crate::ai::cadence::register_ai_cadence(app);
         app
             // The shared helm decision surface (issue #824): rebuilt once per
@@ -66,7 +67,7 @@ impl Plugin for ShipPlugin {
             // Tick-derived clock for stateful policy `state_time` (issue #882).
             .init_resource::<AiPolicyTickClock>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 // ONE state tick for every stateful fine-system policy. Ordered
                 // `.after(helm_motion_planner)` (its transition guards read the
                 // hazard surface the planner publishes this tick) and `.before`
@@ -111,7 +112,7 @@ impl Plugin for ShipPlugin {
                     .run_if(ai_tick_ready),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     // One assembly of the helm decision surface per AI tick
                     // (issue #824). `.after(AiTickLabel)`: it reads the viewscreen
@@ -239,11 +240,11 @@ impl Plugin for ShipPlugin {
         // `SimSet::Publish` so every decision the snapshot reads has settled:
         // helm policy state committed in `Physics`, hull in `Damage`, power and
         // the coordination bus in `Modifiers`. `run_if(ai_tick_ready)` because
-        // `SimSet` lives in `Update` — an ungated narrator would sample
+        // `SimSet` runs once per logical tick — an ungated narrator would sample
         // decision state once per rendered frame (AGENTS.md #7) and could
         // narrate a flicker inside a single AI tick twice.
         app.add_systems(
-            Update,
+            FixedUpdate,
             tick_intent_narration
                 .in_set(crate::sim_sets::SimSet::Publish)
                 .after(crate::lobby::LobbySystemSet)
@@ -281,7 +282,7 @@ impl Plugin for ShipPlugin {
         //   (`ai_power_allocation` reads `.thrust` alone, so it cannot see a
         //   torn pair and needs no edge.)
         app.add_systems(
-            Update,
+            FixedUpdate,
             (ai_helm_thrust, ai_helm_steering)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
@@ -300,7 +301,7 @@ impl Plugin for ShipPlugin {
         // so the phase transition still lands the same tick it was decided.
         // `.after(AiTickLabel)` covers the frame this system reads.
         app.add_systems(
-            Update,
+            FixedUpdate,
             ai_helm_impulse
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
@@ -319,7 +320,7 @@ impl Plugin for ShipPlugin {
         // `.after(helm_motion_planner)`. Registered separately because the main
         // tuple is at Bevy's 20-element limit.
         app.add_systems(
-            Update,
+            FixedUpdate,
             ai_helm_vertical_thrust
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
@@ -342,7 +343,7 @@ impl Plugin for ShipPlugin {
         // `.after(helm_motion_planner)`. Registered separately because the main
         // tuple is at Bevy's 20-element limit.
         app.add_systems(
-            Update,
+            FixedUpdate,
             ai_helm_boost
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
@@ -352,13 +353,15 @@ impl Plugin for ShipPlugin {
                 .run_if(ai_tick_ready),
         );
 
-        // Debug-only helm-path single-writer tripwire (issue #699). The frame
-        // stamp is bumped once in `First` so every writer in a given frame
-        // observes the same value; `integrate_ship_physics` stamps each ship
-        // it integrates and panics if that ship was already stamped this
-        // frame. Compiled out entirely in release builds.
+        // Debug-only helm-path single-writer tripwire (issue #699). The stamp
+        // is bumped once per FIXED STEP in `FixedFirst` (issue #895 — a frame
+        // can legally run several steps, each with its own integration) so
+        // every writer within a step observes the same value;
+        // `integrate_ship_physics` stamps each ship it integrates and panics
+        // if that ship was already stamped this step. Compiled out entirely in
+        // release builds.
         #[cfg(debug_assertions)]
         app.init_resource::<crate::ship::helm::HelmPhysicsFrame>()
-            .add_systems(First, crate::ship::helm::tick_helm_physics_frame);
+            .add_systems(FixedFirst, crate::ship::helm::tick_helm_physics_frame);
     }
 }

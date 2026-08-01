@@ -292,14 +292,12 @@ impl Plugin for PfxPlugin {
                     sync_dust_materials
                         .after(tick_dust_state)
                         .run_if(in_state(GamePhase::InProgress)),
-                )
-                    // These read ship `Transform`/`ShipPhysics`, which
-                    // `sync_ship_position` (SimSet::Physics) writes each tick.
-                    // Without this, the two systems have a genuine read/write
-                    // conflict on `Transform` with no ordering constraint
-                    // between them, so PFX can read a stale pre-physics
-                    // transform depending on scheduler tie-breaking.
-                    .after(crate::sim_sets::SimSet::Physics),
+                ),
+                // These read ship `Transform`/`ShipPhysics`, which
+                // `sync_ship_position` writes each sim tick. Since issue #895
+                // that writer runs in `FixedUpdate`, which always completes
+                // before `Update`, so the old `.after(SimSet::Physics)` edge
+                // is provided by schedule order and no longer declared here.
             )
             // Runs after tick_bursts/sync_phaser_beams so its camera-facing
             // rotation always wins for the frame (those systems write

@@ -1,4 +1,4 @@
-//! The single AI decision cadence (issue #889).
+//! The single AI decision cadence (issues #889, #895).
 //!
 //! Before this module the AI's decision cadence was fragmented three ways:
 //! the six per-axis helm systems ran on an `AiHelmTickTimer` at the
@@ -7,58 +7,58 @@
 //! `Option<Res<_>>` that fell back to evaluating every tick when absent; and
 //! seven further deciders (shield focus, power allocation, torpedo auto-fire,
 //! torpedo load, frequency hint, phaser auto-fire, blaster auto-fire, AI target
-//! selection) had no gate at all. Because `SimSet` is configured in Bevy's
-//! `Update`, "no gate" means **once per rendered frame** — decisions taken at
-//! display refresh rate over a `WorldSnapshot` rebuilt on an unrelated clock.
+//! selection) had no gate at all.
 //!
-//! There is now exactly ONE timer. [`AiTickTimer`] runs at the authored
-//! `[global] ai_tick_hz` (the old `ai_helm_tick_hz` key remains a serde alias,
-//! so every shipped world TOML keeps working) and sets [`AiTickReady`]. The
-//! slower snapshot cadence is **derived** from it as an integer multiple —
-//! `ai_tick_hz / ai_snapshot_hz` base ticks per snapshot tick — rather than
-//! being a second, independently-drifting `Timer`. A non-integer relationship
-//! between the two authored rates is rejected at world load
-//! (`world::config::parse_world`), so the two AI clocks can never be
-//! commensurate only by luck.
+//! #889 unified those onto one wall-clock `Timer`; #895 removed the wall clock.
+//! The cadence is now DERIVED from the logical simulation tick
+//! ([`SimTick`](crate::sim_tick::SimTick)) by counting: every
+//! `sim_tick_hz / ai_tick_hz`-th fixed step is an AI decision tick, and every
+//! `ai_tick_hz / ai_snapshot_hz`-th of those is a snapshot tick. Both ratios
+//! are authored in the world TOML (the old `ai_helm_tick_hz` key remains a
+//! serde alias for `ai_tick_hz`, so every shipped world keeps working) and both
+//! are validated as positive integers at world load
+//! (`world::config::parse_world`), so no clock in the AI stack can drift
+//! against the tick two lockstep hosts must agree on. `tick_ai_cadence` reads
+//! no `Res<Time>` at all — two hosts that agree on the tick count agree on
+//! every AI decision boundary, regardless of their frame rates.
 //!
-//! # Why a latch resource rather than `Timer` in a run condition
-//! `run_if` conditions must take read-only parameters, so the timer is advanced
-//! by a dedicated system ([`tick_ai_cadence`]) that writes the two boolean
-//! latches, which the conditions then read. The tick system is registered in
-//! Bevy's `Last` schedule: every gated system lives in `Update`, so `Last`
-//! guarantees the flag is consumed before it is re-armed **without** needing an
-//! explicit `.after()` edge against each of the fifteen gated systems (which
-//! would silently degrade to an empty constraint in any fixture that does not
-//! register them all).
+//! # Why a latch resource rather than a modulo in a run condition
+//! `run_if` conditions could compute `tick % n == 0` themselves, but `n` comes
+//! from the world config, and fifteen conditions each reading two resources
+//! and re-deriving the ratio is exactly the drift surface #889 removed. One
+//! system ([`tick_ai_cadence`]) writes the two boolean latches; the conditions
+//! read one `bool`.
 //!
-//! # Free-run on the first update
-//! Both latches initialise to `true` so the very first `Update` always decides,
-//! before the timer has had a chance to fire. This mirrors the pre-#889
+//! # Scheduling: consume-before-rearm
+//! Every gated system lives in `FixedUpdate`; [`tick_ai_cadence`] runs in
+//! `FixedLast`, after [`advance_sim_tick`](crate::sim_tick::advance_sim_tick)
+//! has moved the counter to the next step's index. Within each fixed step the
+//! latch is therefore consumed by the gated systems before it is re-armed for
+//! the following step — the same guarantee the pre-#895 `Update`/`Last` split
+//! provided, now inside the fixed loop.
+//!
+//! # Free-run on the first step
+//! Both latches initialise to `true`, and the modulo agrees (`0 % n == 0`), so
+//! the very first fixed step always decides. This mirrors the pre-#889
 //! behaviour of both `AiHelmTickReady` and `AiSnapshotReady`.
+//!
+//! # The no-world fixture arm
+//! Without a `WorldConfig` BOTH latches arm on EVERY fixed step. That is the
+//! faithful successor to the pre-#895 fixture behaviour — a bare-`App` fixture
+//! ticked both the 33 ms base timer and the 100 ms snapshot timer with a 200 ms
+//! `ManualDuration`, so both fired on every update — and it is what lets such a
+//! harness drive one decision per `update()` without authoring a world. Taking
+//! the snapshot divisor from `GlobalConfig::default()` instead would silently
+//! put every fixture's Captain and Sensors on a 3-step cadence they were never
+//! written for. Per the #889 lesson — a fallback arm every fixture takes leaves
+//! the shipped arm untested — the SHIPPED derivation (both authored ratios, via
+//! a real `WorldConfig`) is pinned by this module's own tests below, not left
+//! to chance.
 
 use bevy::prelude::*;
 
-/// The single repeating timer behind every AI decision gate.
-///
-/// Period is the authored `[global] ai_tick_hz` (serde default 30 Hz). The
-/// resource is created at plugin build, before any `WorldConfig` exists, so
-/// [`tick_ai_cadence`] reconciles the period against the loaded world config on
-/// each frame (a cheap duration-equality check that only writes when the
-/// authored rate differs).
-#[derive(Resource)]
-pub struct AiTickTimer(pub Timer);
-
-impl Default for AiTickTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(
-            1.0 / crate::entity_config::GlobalConfig::default().ai_tick_hz,
-            TimerMode::Repeating,
-        ))
-    }
-}
-
-/// Boolean latch set each frame by [`tick_ai_cadence`]: `true` on base-cadence
-/// ticks, `false` on every other rendered frame. Read by [`ai_tick_ready`].
+/// Boolean latch set once per fixed step by [`tick_ai_cadence`]: `true` on AI
+/// base-cadence steps, `false` on every other step. Read by [`ai_tick_ready`].
 #[derive(Resource)]
 pub struct AiTickReady(pub bool);
 
@@ -70,49 +70,37 @@ pub struct AiTickReady(pub bool);
 #[derive(Resource)]
 pub struct AiSnapshotReady(pub bool);
 
-/// How many base ticks have elapsed since the last snapshot tick. Private to
-/// this module: it is the derivation of [`AiSnapshotReady`] from
-/// [`AiTickReady`], not a second clock.
-#[derive(Resource, Default)]
-pub struct AiSnapshotPhase(u32);
-
-/// Advance [`AiTickTimer`] and set both latches.
+/// Derive both latches from the logical tick count.
 ///
-/// Registered in `Last` by [`register_ai_cadence`], so it always runs after
-/// every gated `Update` system: the flag is consumed before it is re-armed.
-/// Also reconciles the timer period against the TOML-authored
-/// `[global] ai_tick_hz` once `WorldConfig` exists — the timer resource is
-/// created at plugin build, before the world TOML has been parsed.
+/// Registered in `FixedLast`, after
+/// [`advance_sim_tick`](crate::sim_tick::advance_sim_tick): the counter then
+/// holds the index of the NEXT fixed step, so the latches written here are
+/// that step's, and the current step's gated systems (all in `FixedUpdate`)
+/// have already consumed theirs. Reads no `Res<Time>` (issue #895 AC): the
+/// cadence is a pure function of the tick count and the authored rates.
 pub fn tick_ai_cadence(
-    time: Res<Time>,
+    tick: Res<crate::sim_tick::SimTick>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    mut timer: ResMut<AiTickTimer>,
     mut ready: ResMut<AiTickReady>,
-    mut phase: ResMut<AiSnapshotPhase>,
     mut snapshot_ready: ResMut<AiSnapshotReady>,
 ) {
-    let mut snapshot_every = crate::entity_config::GlobalConfig::default().snapshot_every_ticks();
-    if let Some(wc) = world_config.as_deref() {
-        let hz = wc.global.ai_tick_hz;
-        if hz > 0.0 {
-            let configured = std::time::Duration::from_secs_f32(1.0 / hz);
-            if timer.0.duration() != configured {
-                timer.0.set_duration(configured);
-            }
-        }
-        snapshot_every = wc.global.snapshot_every_ticks();
-    }
-
-    let fired = timer.0.tick(time.delta()).just_finished();
-    ready.0 = fired;
-    if fired {
-        // The FIRST base tick is also a snapshot tick, then every
-        // `snapshot_every`-th one after it.
-        snapshot_ready.0 = phase.0 == 0;
-        phase.0 = (phase.0 + 1) % snapshot_every.max(1);
-    } else {
-        snapshot_ready.0 = false;
-    }
+    let (per_ai, snapshot_every) = match world_config.as_deref() {
+        Some(wc) => (
+            wc.global.sim_ticks_per_ai_tick() as u64,
+            wc.global.snapshot_every_ticks() as u64,
+        ),
+        // No authored world (bare-`App` fixtures): every fixed step is both a
+        // decision tick and a snapshot tick — see the module docs' "no-world
+        // fixture arm" note. Deliberately (1, 1) rather than the shipped
+        // default divisor: pre-#895 a fixture's wall-clock snapshot timer
+        // fired every update too, and borrowing `GlobalConfig::default()` here
+        // would quietly re-cadence every fixture's Captain and Sensors.
+        None => (1, 1),
+    };
+    let per_ai = per_ai.max(1);
+    let per_snapshot = (per_ai * snapshot_every).max(1);
+    ready.0 = tick.0.is_multiple_of(per_ai);
+    snapshot_ready.0 = tick.0.is_multiple_of(per_snapshot);
 }
 
 /// Read-only run condition: the shared AI base cadence.
@@ -125,29 +113,32 @@ pub fn ai_snapshot_ready(ready: Res<AiSnapshotReady>) -> bool {
     ready.0
 }
 
-/// Install the shared cadence resources and the one system that advances them.
+/// Install the shared cadence resources and the one system that derives them,
+/// plus the [`SimTick`](crate::sim_tick::SimTick) counter they derive from.
 ///
 /// Idempotent, and deliberately a plain function rather than a `Plugin`: every
-/// plugin that registers a gated system calls it, and duplicate registration of
-/// [`tick_ai_cadence`] would advance the timer once per calling plugin.
+/// plugin that registers a gated system calls it, and a duplicate registration
+/// would re-derive the latches once per calling plugin.
 pub fn register_ai_cadence(app: &mut App) {
-    if app.world().contains_resource::<AiTickTimer>() {
+    if app.world().contains_resource::<AiTickReady>() {
         return;
     }
-    app.init_resource::<AiTickTimer>()
-        .insert_resource(AiTickReady(true))
-        .init_resource::<AiSnapshotPhase>()
+    crate::sim_tick::register_sim_tick(app);
+    app.insert_resource(AiTickReady(true))
         .insert_resource(AiSnapshotReady(true))
-        .add_systems(Last, tick_ai_cadence);
+        .add_systems(
+            FixedLast,
+            tick_ai_cadence.after(crate::sim_tick::advance_sim_tick),
+        );
 }
 
 /// Re-arm both latches so the next `app.update()` is an AI decision tick.
 ///
 /// Test-only. Fixtures that assert on decision CONTENT drive several updates
-/// without advancing wall-clock time past the 33.3 ms period; they call this to
-/// tick the latch by hand rather than relying on an evaluate-every-frame
-/// fallback that production never takes. Fixtures that assert on CADENCE drive
-/// `Time` instead and must not call this.
+/// without stepping the fixed clock; they call this to tick the latch by hand
+/// rather than relying on an evaluate-every-frame fallback that production
+/// never takes. Fixtures that assert on CADENCE drive `Time` instead and must
+/// not call this.
 #[cfg(test)]
 pub fn arm_ai_tick(app: &mut App) {
     if let Some(mut ready) = app.world_mut().get_resource_mut::<AiTickReady>() {
@@ -162,35 +153,45 @@ pub fn arm_ai_tick(app: &mut App) {
 mod tests {
     use super::*;
 
-    fn cadence_app() -> App {
+    /// A cadence app whose `ManualDuration` equals its fixed timestep, so
+    /// every `update()` after the zero-delta baseline frame runs exactly one
+    /// fixed step.
+    fn cadence_app(period_ms: u64) -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
         register_ai_cadence(&mut app);
+        let period = std::time::Duration::from_millis(period_ms);
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
+        // Establish the time baseline: the first update carries a zero delta
+        // and runs no fixed step, so it would otherwise read the init-true
+        // latches as a counted decision.
+        app.update();
         app
     }
 
-    /// One base tick per authored period, and the derived snapshot latch fires
-    /// on exactly every third of them at the shipped 30 Hz / 10 Hz pair.
-    #[test]
-    fn snapshot_latch_is_an_integer_multiple_of_the_base_latch() {
-        let mut app = cadence_app();
-        // 40 ms per frame is longer than the 33.3 ms base period, so every
-        // frame is a base tick and the phase counter is the only thing
-        // separating base ticks from snapshot ticks.
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(40),
-        ));
+    /// A `WorldConfig` authoring the given rates — the SHIPPED derivation arm,
+    /// which no fixture without a world config ever exercises (#889's lesson).
+    fn world_config(
+        sim_hz: f32,
+        ai_hz: f32,
+        snapshot_hz: f32,
+    ) -> crate::world::config::WorldConfig {
+        let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.global.sim_tick_hz = sim_hz;
+        cfg.global.ai_tick_hz = ai_hz;
+        cfg.global.ai_snapshot_hz = snapshot_hz;
+        cfg
+    }
 
-        // Count over exactly nine BASE ticks, however many frames that takes —
-        // the first frame carries a zero delta, so a fixed frame count would be
-        // measuring the warm-up rather than the phase.
-        let mut base = 0usize;
-        let mut snapshot = 0usize;
-        let mut frames = 0usize;
-        while base < 9 {
+    /// Drive `steps` fixed steps and record `(base, snapshot)` latch counts.
+    fn count_latches(app: &mut App, steps: usize) -> (usize, usize) {
+        let mut base = 0;
+        let mut snapshot = 0;
+        for _ in 0..steps {
             app.update();
-            frames += 1;
-            assert!(frames < 50, "the base latch never fired at 40 ms per frame");
             if app.world().resource::<AiTickReady>().0 {
                 base += 1;
                 if app.world().resource::<AiSnapshotReady>().0 {
@@ -198,70 +199,103 @@ mod tests {
                 }
             }
         }
+        (base, snapshot)
+    }
 
+    /// The shipped default rates (60/30/10): every second sim tick is an AI
+    /// tick, every sixth is a snapshot tick, and the snapshot latch only ever
+    /// arms alongside the base latch — both derived from the tick count alone.
+    #[test]
+    fn cadence_is_derived_from_the_tick_count_at_the_shipped_rates() {
+        let mut app = cadence_app(10);
+        app.insert_resource(world_config(60.0, 30.0, 10.0));
+
+        // 12 steps: `count_latches` reads each latch AFTER `app.update()`
+        // returns, and `tick_ai_cadence` (`FixedLast`, `.after(advance_sim_tick)`)
+        // computes it from the POST-increment tick — the module's
+        // consume-before-rearm scheduling pre-arms the NEXT step's latch, not
+        // the step that just ran. So the Nth `update()` observes the latch
+        // keyed to tick N, not N-1: base fires on ticks 2,4,6,8,10,12 → 6;
+        // snapshot fires on 6,12 → 2.
+        let (base, snapshot) = count_latches(&mut app, 12);
         assert_eq!(
-            snapshot, 3,
-            "the snapshot cadence is DERIVED as every third base tick \
-             (30 Hz / 10 Hz), not a second independent timer"
+            base, 6,
+            "at 60/30 Hz every second sim tick is an AI decision tick"
+        );
+        assert_eq!(
+            snapshot, 2,
+            "the snapshot cadence is DERIVED as every third AI tick \
+             (30 Hz / 10 Hz), not a second independent clock"
         );
     }
 
     /// The base cadence is TOML-authored, not hardcoded: an authored
-    /// `[global] ai_tick_hz` must reconfigure the shared timer.
+    /// `[global] ai_tick_hz` equal to the sim rate makes every step decide.
     #[test]
     fn base_rate_is_read_from_world_config() {
-        let mut app = cadence_app();
-        let mut cfg = crate::world::config::WorldConfig::default();
-        cfg.global.ai_tick_hz = 100.0;
-        app.insert_resource(cfg);
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(11),
-        ));
+        let mut app = cadence_app(10);
+        app.insert_resource(world_config(100.0, 100.0, 100.0));
 
-        let mut base = 0usize;
-        for _ in 0..8 {
-            app.update();
-            if app.world().resource::<AiTickReady>().0 {
-                base += 1;
-            }
-        }
-
-        // 7 of 8, not 8 of 8: the first frame's delta is zero. At the default
-        // 30 Hz this same drive fires at most twice, so the margin is wide.
-        assert!(
-            base >= 7,
-            "with [global] ai_tick_hz = 100 the 10 ms period fires on every \
-             11 ms frame — {base} of 8 means the authored rate was never applied"
+        let (base, _) = count_latches(&mut app, 8);
+        assert_eq!(
+            base, 8,
+            "with sim_tick_hz == ai_tick_hz every fixed step must be a \
+             decision tick — fewer means the authored rate was never applied"
         );
     }
 
-    /// The frame-rate decoupling that is the whole point of the latch: at a
-    /// frame period well under the authored tick period, most frames must NOT
-    /// be decision ticks.
+    /// The frame-rate decoupling that is the whole point: on frames whose
+    /// accumulated time never reaches the timestep, no fixed step runs, so no
+    /// new decision tick can be minted — however many frames the host renders.
     #[test]
-    fn base_latch_throttles_frames_shorter_than_the_period() {
-        let mut app = cadence_app();
+    fn frames_without_a_fixed_step_mint_no_decision_ticks() {
+        let mut app = cadence_app(30);
+        app.insert_resource(world_config(60.0, 30.0, 10.0));
+        // Reconfigure the drive to a third of the timestep: what a 90 Hz
+        // rAF-driven host does against a ~33 ms tick.
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(10),
         ));
 
-        let mut base = 0usize;
+        let mut steps = 0usize;
         for _ in 0..12 {
+            let tick_before = app.world().resource::<crate::sim_tick::SimTick>().0;
+            let latch_before = app.world().resource::<AiTickReady>().0;
             app.update();
-            if app.world().resource::<AiTickReady>().0 {
-                base += 1;
+            let tick_after = app.world().resource::<crate::sim_tick::SimTick>().0;
+            if tick_after == tick_before {
+                // No fixed step ran this frame: the latch must be exactly what
+                // the last step left it — a rendered frame can never re-arm.
+                assert_eq!(
+                    app.world().resource::<AiTickReady>().0,
+                    latch_before,
+                    "a frame with no fixed step re-armed the AI latch"
+                );
+            } else {
+                steps += (tick_after - tick_before) as usize;
             }
         }
-
         assert!(
-            base > 0,
-            "precondition: 12 frames x 10 ms spans several 33.3 ms periods"
+            (3..=5).contains(&steps),
+            "12 frames x 10 ms against a 30 ms timestep is 4 steps (±1 for \
+             rounding); got {steps} — the fixed loop is not throttling"
         );
-        assert!(
-            base <= 6,
-            "at 10 ms per frame — what a 60 Hz rAF-driven host does — the \
-             33.3 ms base cadence must fire on at most half the frames; \
-             {base} of 12 means the throttle is gone"
+    }
+
+    /// Without a `WorldConfig`, every fixed step decides — on BOTH latches.
+    /// The documented fixture arm, pinned so a change here is a deliberate one:
+    /// a snapshot divisor borrowed from the shipped defaults would put every
+    /// bare-`App` fixture's Captain and Sensors on a 3-step cadence they were
+    /// never written against (pre-#895 their wall-clock timer fired every
+    /// update).
+    #[test]
+    fn without_a_world_config_every_step_is_a_decision_tick() {
+        let mut app = cadence_app(10);
+        let (base, snapshot) = count_latches(&mut app, 6);
+        assert_eq!(base, 6);
+        assert_eq!(
+            snapshot, 6,
+            "the fixture arm must arm the SNAPSHOT latch every step too"
         );
     }
 }

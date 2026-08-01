@@ -39,8 +39,11 @@ pub use router::{
 };
 
 /// System set that `admit_system_commands` belongs to. Handlers that run in
-/// `Update` but outside `SimSet::Input` can use `.after(AdmissionSet)` to
-/// guarantee they see a fully-populated `AdmittedCommands`.
+/// `FixedUpdate` but outside `SimSet::Input` can use `.after(AdmissionSet)` to
+/// guarantee they see a fully-populated `AdmittedCommands`. Admission lives in
+/// the fixed schedule with the sim it gates (issue #895): inbound messages are
+/// drained per FRAME in `PreUpdate`, and admitting there would clear-and-refill
+/// `AdmittedCommands` zero or several times per logical tick.
 #[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AdmissionSet;
 
@@ -54,13 +57,13 @@ impl Plugin for AdmissionPlugin {
         app.init_resource::<crate::messages::InterSystemQueue>()
             .init_resource::<crate::ai::server::AiTokenRegistry>()
             .configure_sets(
-                Update,
+                FixedUpdate,
                 AdmissionSet
                     .after(crate::lobby::LobbySystemSet)
                     .before(crate::sim_sets::SimSet::Input),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 (admit_system_commands, clear_inter_system_queue).in_set(AdmissionSet),
             )
             // Unrouted-command lint (issue #833): warning-only, ordered after
@@ -70,7 +73,7 @@ impl Plugin for AdmissionPlugin {
             // `server_app` adds the twin system directly since it wires the
             // admission seam inline rather than via this plugin.
             .add_systems(
-                Update,
+                FixedUpdate,
                 warn_unrouted_admitted_commands.after(crate::sim_sets::SimSet::Broadcast),
             );
     }

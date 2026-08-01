@@ -301,7 +301,7 @@ impl Plugin for WorldPlugin {
                     .chain(),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 broadcast_objective_summary
                     .in_set(crate::sim_sets::SimSet::Broadcast)
                     .after(crate::comms::server::broadcast_comms_state),
@@ -313,7 +313,7 @@ impl Plugin for WorldPlugin {
             // against these two systems, reproducing the original
             // four-system `.chain()` exactly.
             .add_systems(
-                Update,
+                FixedUpdate,
                 (collect_world_events, tick_trigger_pipeline)
                     .chain()
                     .in_set(crate::sim_sets::SimSet::Physics),
@@ -325,22 +325,22 @@ impl Plugin for WorldPlugin {
             // `WorldEvent::WaypointReached` on the next tick (the same
             // one-tick event bridge `AiEntityAttacked` already uses).
             .add_systems(
-                Update,
+                FixedUpdate,
                 crate::ai_plugin::advance_objective_cursors
                     .in_set(crate::sim_sets::SimSet::Modifiers),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 tick_delayed_actions
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(tick_trigger_pipeline),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics),
             )
             .add_observer(handle_region_entered_event)
@@ -6523,16 +6523,36 @@ condition = "on_world_loaded"
     use crate::entity_config::EntityConfig;
     use crate::entity_spawner::{spawn_entity, EntityUuid};
     use crate::region_shape::RegionShape;
-    use crate::regions::server::RegionPlugin;
 
-    /// Build a minimal app that wires `RegionPlugin` + the issue-#416
+    /// Build a minimal app that wires the region membership system + the issue-#416
     /// observers + `tick_trigger_pipeline` into the same world. Skips the
     /// heavyweight `WorldPlugin`/`AiPlugin`/`LobbyPlugin` bootstrap so the
     /// test focuses on the region-event ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ trigger-fire path.
     fn region_trigger_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
-            .add_plugins(RegionPlugin)
+            // The region membership system registered directly in `Update`
+            // rather than via `RegionPlugin` (which schedules it on the fixed
+            // logical tick since #895): this fixture drives per-update
+            // semantics, the standard bare-`App` shape. Tail of the chain, so
+            // a boundary crossing queues its world event for the NEXT
+            // update's pipeline — the event lag this module's trigger tests
+            // were written against.
+            //
+            // This one genuinely cannot switch to the real `RegionPlugin`
+            // (re-review of issue #895): that plugin schedules
+            // `update_region_membership` in `FixedUpdate`, which runs BEFORE
+            // `Update` within the same `app.update()` call, so a boundary
+            // crossing would be visible to `collect_world_events` on the SAME
+            // frame instead of lagging by one — the exact cross-schedule
+            // ordering these trigger tests assert on would collapse. Keeping
+            // the system here is therefore load-bearing, not laziness, but it
+            // IS a hand-copy of one `RegionPlugin::build` registration: if
+            // that plugin ever changes how `update_region_membership` is
+            // scheduled or gated (a new `.after()`/`.before()`, a run
+            // condition, an added parameter), check whether this copy needs
+            // to follow.
+            .init_resource::<crate::regions::server::RegionMembership>()
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
@@ -6550,6 +6570,7 @@ condition = "on_world_loaded"
                     inject_comms_templates,
                     tick_trigger_pipeline,
                     handle_comms_channel2,
+                    crate::regions::server::update_region_membership,
                 )
                     .chain(),
             )

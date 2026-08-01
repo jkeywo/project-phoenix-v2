@@ -108,7 +108,7 @@ impl Plugin for ShipSensorsPlugin {
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsAiConfigResource>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     // In `SimSet::Physics`, not Input (issue #828, the #826
                     // shields shape): `admit_system_commands` clears every
@@ -1040,7 +1040,7 @@ mod tests {
         // (issue #828), so the harness needs the production set chain for
         // AdmissionSet → Input → Physics ordering to hold.
         app.configure_sets(
-            Update,
+            FixedUpdate,
             (
                 crate::sim_sets::SimSet::Input,
                 crate::sim_sets::SimSet::Physics,
@@ -1055,16 +1055,13 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .init_resource::<EnqueueLog>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(ShipSensorsPlugin)
             .add_systems(
-                Update,
+                FixedUpdate,
                 seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
             )
             .add_systems(PostUpdate, (collect, collect_enqueues));
@@ -1083,6 +1080,12 @@ mod tests {
             SensorsFrequencyState::default(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
         ));
+        // One fixed step per update (issue #895): the plugin's systems run on
+        // the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         app
     }
 

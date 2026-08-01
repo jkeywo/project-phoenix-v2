@@ -37,7 +37,6 @@ use crate::server::asset_preload::AssetPreloadResource;
 use crate::server::renderer::GameCamera;
 use crate::server_app::GameOverReason;
 use crate::ship_state::ShipPhysics;
-use crate::sim_sets::SimSet;
 use crate::stations_config::ShipStations;
 
 // ── Shield flash constants ────────────────────────────────────────────
@@ -142,9 +141,14 @@ impl Plugin for ViewscreenBorderPlugin {
             .add_systems(
                 Update,
                 (
-                    process_shield_flash.after(SimSet::Broadcast),
+                    // No `.after(SimSet::Broadcast)` edges since issue #895:
+                    // the sim (and its Broadcast set) runs in `FixedUpdate`,
+                    // which always completes before `Update` in a frame, so
+                    // the outbox has already been drained into
+                    // `OutboundMessage` when these frame-side readers run.
+                    process_shield_flash,
                     drive_vignette_intensity.after(process_shield_flash),
-                    process_hull_shake.after(SimSet::Broadcast),
+                    process_hull_shake,
                     apply_camera_shake
                         .after(process_shield_flash)
                         .after(process_hull_shake)
@@ -290,8 +294,8 @@ fn setup_vignette_material(
 /// `shield > 0` and sets [`ShieldFlashState::intensity`] scaled linearly
 /// over 0–30 HP absorbed (full white at 30+).
 ///
-/// Runs after `SimSet::Broadcast` so the outbox has been drained into
-/// `OutboundMessage` messages and is safe to read.
+/// Runs in `Update`, after the fixed loop (where `SimSet::Broadcast` lives
+/// since #895) has drained the outbox into `OutboundMessage` messages.
 fn process_shield_flash(
     mut outbound: MessageReader<OutboundMessage>,
     mut flash: ResMut<ShieldFlashState>,
@@ -309,8 +313,8 @@ fn process_shield_flash(
 /// `hull > 0` and pushes `(timestamp, hull)` entries into the rolling
 /// window [`ShakeState`].
 ///
-/// Runs after `SimSet::Broadcast` so the outbox has been drained into
-/// `OutboundMessage` messages and is safe to read.
+/// Runs in `Update`, after the fixed loop (where `SimSet::Broadcast` lives
+/// since #895) has drained the outbox into `OutboundMessage` messages.
 fn process_hull_shake(
     mut outbound: MessageReader<OutboundMessage>,
     mut shake: ResMut<ShakeState>,

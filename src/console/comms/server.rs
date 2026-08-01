@@ -25,7 +25,7 @@ pub struct CommsConsolePlugin;
 impl Plugin for CommsConsolePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 publish_comms_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 // `Input`, not `Physics`, and explicitly before `handle_hail`:
@@ -3228,8 +3228,10 @@ mod tests {
         let mut app = comms_parity_test_app();
         // The two AI deciders, ordered exactly as the real plugin orders them:
         // inside `SimSet::Input`, each before the handler that drains it.
+        // `FixedUpdate` (issue #895): the handlers these edges name live in
+        // the fixed schedule, and an ordering edge is only real within it.
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 operate_comms_ai.before(handle_hail),
                 operate_comms_response_ai.before(handle_respond_to_message),
@@ -3418,8 +3420,10 @@ mod tests {
                 comms.active_dialogues.clear();
             }
         }
+        // `FixedUpdate` (issue #895): same schedule as the router, so the
+        // decide → sabotage → route order is real.
         app.init_resource::<RetireDialoguesNow>().add_systems(
-            Update,
+            FixedUpdate,
             (operate_comms_response_ai, retire_dialogues)
                 .chain()
                 .after(crate::server_app::AdmissionSet)

@@ -501,10 +501,17 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     app.insert_resource(sim_rng);
     app.add_plugins(WorldPlugin);
 
-    // Fixed timestep. `ManualDuration` makes every `Time` clock advance by
-    // exactly `dt` per `update()` regardless of wall clock, which is what makes
-    // the run rate-independent; rapier needs telling separately, since its
-    // default `TimestepMode::Variable` would otherwise reintroduce the coupling.
+    // Frame clock. `ManualDuration` makes every `Time` clock advance by
+    // exactly `dt` per `update()` regardless of wall clock. Since issue #895
+    // the SIMULATION rate is no longer this frame rate: the sim runs in
+    // `FixedUpdate` at the world's `[global] sim_tick_hz` (the `WorldConfig`
+    // inserted above, applied by `reconcile_fixed_timestep`), and each
+    // `update()` here steps it zero or more whole logical ticks so that sim
+    // time tracks the `dt`-per-frame virtual clock. At the default
+    // `--hz 60` against the default `sim_tick_hz = 60` that is exactly one
+    // tick per frame. Rapier still needs telling separately — its default
+    // `TimestepMode::Variable` would re-couple it to the frame — and stays
+    // frame-driven at `dt` until its own slice (#896) moves it onto the tick.
     app.insert_resource(TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_secs_f64(args.dt),
     ));
@@ -515,13 +522,16 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
 
     app.add_systems(PreUpdate, headless_auto_start);
 
-    // Telemetry. `count_tick` in `First` and `collect_outbound` in `Last` so
-    // every message is attributed to the tick that produced it.
+    // Telemetry. `collect_outbound` and `collect_balance_events` run in
+    // `Last` and stamp each record with `Res<SimTick>` (issue #895
+    // re-review — a per-`update()` frame counter used to do this and folded
+    // multiple logical ticks into one stamp whenever `--hz` ran slower than
+    // `sim_tick_hz`); `register_sim_tick` above (`add_simulation_plugins_with`)
+    // guarantees that resource exists.
     app.insert_resource(super::report::RunTelemetry {
         capture_stream: args.report_format == super::args::ReportFormat::Ndjson,
         ..Default::default()
     })
-    .add_systems(First, super::report::count_tick)
     // Chained so an ndjson tick reads message-traffic-then-balance rather
     // than in whatever order the executor happened to pick.
     .add_systems(
@@ -567,11 +577,15 @@ fn headless_auto_start(
     *started = true;
 }
 
-/// Pump the app for `args.max_ticks` fixed steps.
+/// Pump the app for `args.max_ticks` FRAMES (`update()` calls), each of which
+/// advances `args.dt` of virtual time and therefore runs however many fixed
+/// simulation steps that covers — one apiece at the default `--hz 60` against
+/// the default `sim_tick_hz = 60` (issue #895). `--ticks` keeps its pre-#895
+/// name; what it counts is frames.
 ///
 /// Deliberately not `App::run()`: with no `WinitPlugin` and no
 /// `ScheduleRunnerPlugin` the default runner calls `update()` exactly once.
-/// Driving the loop by hand also gives the tick budget and the exit condition
+/// Driving the loop by hand also gives the frame budget and the exit condition
 /// for free.
 pub fn run(app: &mut App, max_ticks: u64) -> u64 {
     run_sampled(app, max_ticks, None)

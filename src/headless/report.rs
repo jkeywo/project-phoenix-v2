@@ -24,9 +24,16 @@ use crate::sim_rng::SeedSource;
 use super::args::{HeadlessArgs, ReportFormat};
 
 /// Accumulates everything the exit summary needs, tick by tick.
+///
+/// No longer keeps its own tick counter (issue #895 re-review): a headless
+/// run's `--hz` frame rate and the world's `[global] sim_tick_hz` are
+/// independent, so a per-`update()` counter folds however many logical sim
+/// ticks a frame ran (2 at `--hz 30` against the shipped `sim_tick_hz = 60`)
+/// into one stamp. `Res<SimTick>` (`crate::sim_tick`) is the real counter
+/// every other tick-keyed artifact already keys on — read it directly at the
+/// call sites below instead.
 #[derive(Resource, Default)]
 pub struct RunTelemetry {
-    pub ticks: u64,
     /// Count of each `ServerMessage` variant seen, keyed by variant name.
     /// `BTreeMap` so the report is byte-identical across runs.
     pub message_counts: BTreeMap<String, u64>,
@@ -62,13 +69,24 @@ fn variant_name(msg: &ServerMessage) -> String {
 
 /// Records every outbound message. Runs in `Last` so it sees the whole tick's
 /// traffic regardless of which `SimSet` produced it.
+///
+/// Stamped with `Res<SimTick>` (issue #895 re-review), not a per-`update()`
+/// counter: this system runs once per FRAME, and a frame can run zero or more
+/// logical sim ticks (2 at `--hz 30` against the shipped `sim_tick_hz = 60`),
+/// so a frame counter silently folded that frame's worth of ticks into one
+/// stamp. `SimTick` is the real counter, and this system running once per
+/// frame rather than once per tick means every message this frame's `Last`
+/// pass sees still shares the one `SimTick` value current at that point (the
+/// most recently completed tick) — imprecise across a multi-tick frame, but
+/// no longer a meaningless frame index.
 pub fn collect_outbound(
     mut telemetry: ResMut<RunTelemetry>,
     mut reader: MessageReader<OutboundMessage>,
     time: Res<Time>,
+    sim_tick: Res<crate::sim_tick::SimTick>,
 ) {
     let codec = JsonCodec;
-    let tick = telemetry.ticks;
+    let tick = sim_tick.0;
     let sim_t = time.elapsed_secs_f64();
     for out in reader.read() {
         *telemetry
@@ -116,15 +134,17 @@ fn referenced_ship_uuids(event: &BalanceEvent) -> Vec<&String> {
 
 /// Records every balance event, alongside the `EntityName` of any ship it
 /// names. Runs in `Last` for the same reason as [`collect_outbound`]: the
-/// chokepoints are spread across several `SimSet`s.
+/// chokepoints are spread across several `SimSet`s. Stamped with
+/// `Res<SimTick>` for the same reason too — see that function's doc.
 pub fn collect_balance_events(
     mut telemetry: ResMut<RunTelemetry>,
     mut reader: MessageReader<BalanceEvent>,
     time: Res<Time>,
+    sim_tick: Res<crate::sim_tick::SimTick>,
     named_q: Query<(&EntityUuid, &EntityName)>,
     faction_q: Query<(&EntityUuid, &crate::entity_spawner::FactionComponent)>,
 ) {
-    let tick = telemetry.ticks;
+    let tick = sim_tick.0;
     let sim_t = time.elapsed_secs_f64();
     for event in reader.read() {
         // Snapshot the `EntityName` and faction of every ship any variant
@@ -162,12 +182,6 @@ pub fn collect_balance_events(
             event: event.clone(),
         });
     }
-}
-
-/// Advances the tick counter. Separate from [`collect_outbound`] so messages
-/// are attributed to the tick that produced them.
-pub fn count_tick(mut telemetry: ResMut<RunTelemetry>) {
-    telemetry.ticks += 1;
 }
 
 /// Final state of the player ship.
@@ -328,7 +342,6 @@ fn reported_wall_seconds(seed_source: &str, wall_seconds: f64) -> f64 {
 /// Read the finished world and produce the summary.
 pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> RunReport {
     let telemetry = app.world().resource::<RunTelemetry>();
-    let ticks = telemetry.ticks;
     let message_counts = telemetry.message_counts.clone();
     let final_sim_t = app.world().resource::<Time>().elapsed_secs_f64();
     // Pure fold: the ledgers come from the stamped event log and the names
@@ -340,6 +353,16 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         &telemetry.entity_names,
         final_sim_t,
     );
+
+    // The logical sim-tick count (issue #895 re-review): this used to be
+    // `RunTelemetry`'s own per-`update()` frame counter, but a headless run's
+    // `--hz` frame rate and the world's `[global] sim_tick_hz` are
+    // independent — at `--hz 30` against the shipped `sim_tick_hz = 60` every
+    // frame runs TWO fixed steps, so a frame counter silently reported half
+    // the number of ticks the simulation actually ran. `SimTick` is the real
+    // counter every other tick-keyed artifact (command stamps, the AI
+    // cadence) already keys on.
+    let ticks = app.world().resource::<crate::sim_tick::SimTick>().0;
 
     // Read off the resource rather than off `args`: `args.seed` is only the
     // CLI tier of the precedence chain, and the report has to name the seed

@@ -131,7 +131,7 @@ impl Plugin for RepairPlugin {
         // `.after(operate_repair_ai)` ordering (issue #830). See `super::dispatch`.
         super::dispatch::register_repair_dispatch(app);
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 // AC4 DETERMINISM (issue #785) — pin the remaining intra-Physics
                 // edge. `operate_repair_ai` (decide/emit) →
@@ -949,8 +949,11 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        // `FixedUpdate`, where `RepairPlugin` and `AdmissionPlugin` register
+        // since issue #895 — configured on `Update` this chain would order
+        // nothing, leaving admission unordered against the repair handlers.
         app.configure_sets(
-            Update,
+            FixedUpdate,
             (
                 crate::sim_sets::SimSet::Input,
                 crate::sim_sets::SimSet::Physics,
@@ -965,15 +968,19 @@ mod tests {
         .add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
         .add_plugins(crate::server_app::AdmissionPlugin)
-        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(200),
-        ))
         .init_resource::<crate::lobby::WorldResource>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
         .add_plugins(RepairPlugin)
         .add_plugins(repair_state_broadcaster())
         .add_systems(PostUpdate, collect);
+        // One fixed step per update, 200 ms of sim time each (issue #895), so
+        // the Hz-based repair broadcast timer fires within a single harness
+        // tick.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         // Spawn the player ship entity so handle_dispatch_repair_team can query it.
         let hull_config = &[
             (SystemId("helm".into()), 25.0_f32),

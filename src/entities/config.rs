@@ -13140,6 +13140,33 @@ pub struct GlobalConfig {
     /// Short description shown below the title in the lobby.
     #[serde(default)]
     pub description: Option<String>,
+    /// Fixed rate (Hz) of the LOGICAL SIMULATION tick (issue #895, PRD #849).
+    ///
+    /// The rate `Time<Fixed>` steps at — every `SimSet` system, in every host
+    /// (browser and headless alike), advances on this clock rather than on the
+    /// rendered frame. The serde default of 60 Hz matches what the browser
+    /// host effectively ran at while the sim was frame-driven, and headless'
+    /// `DEFAULT_HZ`, so an unauthored world does not change pace.
+    ///
+    /// Must be a whole multiple of [`Self::ai_tick_hz`]: the AI decision
+    /// cadence is derived from this tick by counting (see
+    /// [`Self::sim_ticks_per_ai_tick`]), and `world::config::parse_world`
+    /// rejects a non-commensurate pair the same way it rejects a bad
+    /// `ai_tick_hz / ai_snapshot_hz` ratio.
+    ///
+    /// Must also be at least [`MIN_SIM_TICK_HZ`] (30 Hz), which `parse_world`
+    /// enforces the same way. Below that floor the helm integrator's
+    /// `HELM_AI_MAX_DT_SECS` cap would silently shorten every step: the ship
+    /// under-integrates, and two hosts on different authored rates diverge.
+    /// A slower rate is a content error at load, not a quiet loss of fidelity.
+    ///
+    /// Must be at most [`MAX_SIM_TICK_HZ`] (240 Hz), which `parse_world` also
+    /// enforces. Above that ceiling the number of `FixedUpdate` steps a
+    /// single lagged frame can unpack into (`Time<Virtual>::max_delta` /
+    /// timestep) grows large enough to wedge the host — a faster rate is a
+    /// content error at load, not a quiet performance cliff.
+    #[serde(default = "default_sim_tick_hz")]
+    pub sim_tick_hz: f32,
     /// Fixed rate (Hz) of the ONE shared AI decision tick (issue #889).
     ///
     /// Gates every AI policy host — the six per-axis helm systems, the seven
@@ -13190,6 +13217,7 @@ impl Default for GlobalConfig {
             seed: None,
             title: None,
             description: None,
+            sim_tick_hz: default_sim_tick_hz(),
             ai_tick_hz: default_ai_tick_hz(),
             ai_snapshot_hz: default_ai_snapshot_hz(),
             intent_break_off_hull_fraction: default_intent_break_off_hull_fraction(),
@@ -13226,12 +13254,71 @@ impl GlobalConfig {
         self.checked_snapshot_every_ticks()
             .unwrap_or_else(|| (default_ai_tick_hz() / default_ai_snapshot_hz()).round() as u32)
     }
+
+    /// The number of logical sim ticks per shared AI decision tick (issue
+    /// #895): the AI cadence is derived from [`SimTick`](crate::sim_tick::SimTick)
+    /// by counting, so `sim_tick_hz / ai_tick_hz` must be a positive integer.
+    ///
+    /// `None` when it is not — a content error `parse_world` rejects, exactly
+    /// like [`Self::checked_snapshot_every_ticks`].
+    pub fn checked_sim_ticks_per_ai_tick(&self) -> Option<u32> {
+        if !(self.sim_tick_hz.is_finite() && self.sim_tick_hz > 0.0) {
+            return None;
+        }
+        if !(self.ai_tick_hz.is_finite() && self.ai_tick_hz > 0.0) {
+            return None;
+        }
+        let ratio = self.sim_tick_hz / self.ai_tick_hz;
+        let rounded = ratio.round();
+        if rounded < 1.0 || (ratio - rounded).abs() > SNAPSHOT_RATIO_EPSILON {
+            return None;
+        }
+        Some(rounded as u32)
+    }
+
+    /// [`Self::checked_sim_ticks_per_ai_tick`] with the parse-time default
+    /// applied, for the cadence system that cannot return an error.
+    pub fn sim_ticks_per_ai_tick(&self) -> u32 {
+        self.checked_sim_ticks_per_ai_tick()
+            .unwrap_or_else(|| (default_sim_tick_hz() / default_ai_tick_hz()).round() as u32)
+    }
 }
 
 /// Tolerance on the `ai_tick_hz / ai_snapshot_hz` ratio. Both are authored as
 /// `f32`, so an exactly-integer relationship such as 30/10 can land a few ULPs
 /// off; 2.5 is nowhere near this band.
 const SNAPSHOT_RATIO_EPSILON: f32 = 1e-4;
+
+/// Floor on the authored [`GlobalConfig::sim_tick_hz`], enforced by
+/// `world::config::parse_world` (issue #895).
+///
+/// Derived from — not merely matching — the helm integrator's
+/// `HELM_AI_MAX_DT_SECS` cap: a sim tick longer than that cap would be
+/// silently shortened by it, so the sim would under-integrate and two hosts
+/// on different rates would produce different trajectories from the same
+/// commands. Keeping the floor tied to the constant means the two can never
+/// drift apart.
+pub const MIN_SIM_TICK_HZ: f32 = 1.0 / crate::ship::components::HELM_AI_MAX_DT_SECS;
+
+/// Ceiling on the authored [`GlobalConfig::sim_tick_hz`], enforced by
+/// `world::config::parse_world` (re-review of issue #895 — the floor above
+/// had no matching upper bound).
+///
+/// `Time<Virtual>`'s `max_delta` (250 ms) bounds how much wall-clock lag a
+/// single rendered frame can absorb, but the NUMBER of `FixedUpdate` steps
+/// that lag unpacks into is `max_delta / timestep`: an unbounded rate lets a
+/// fat-fingered or hostile TOML (`sim_tick_hz = 100000`) demand ~25 000
+/// fixed steps back-to-back inside one frame, starving everything else on
+/// the host thread and making the browser or headless runner appear to
+/// hang. 240 Hz keeps that worst case to 60 steps — generous headroom above
+/// the shipped 60 Hz default and well past the fastest cadence any current
+/// design work asks for — while still catching authored rates nobody could
+/// mean.
+pub const MAX_SIM_TICK_HZ: f32 = 240.0;
+
+fn default_sim_tick_hz() -> f32 {
+    60.0
+}
 
 fn default_ai_tick_hz() -> f32 {
     30.0

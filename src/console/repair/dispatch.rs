@@ -36,7 +36,7 @@ pub fn register_repair_dispatch(app: &mut App) {
     // reads the `repair` system's admitted commands.
     app.register_admitted_consumer(ConsumerMatcher::exact(REPAIR_SYSTEM_ID));
     app.add_systems(
-        Update,
+        FixedUpdate,
         (handle_dispatch_repair_team, handle_set_repair_priority)
             .in_set(crate::sim_sets::SimSet::Physics)
             .after(super::server::operate_repair_ai)

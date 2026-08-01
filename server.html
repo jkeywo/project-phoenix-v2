@@ -2659,6 +2659,10 @@ function finishInit() {
   window.wasm_get_instagib = wasmBindings.wasm_get_instagib;
   window.wasm_teleport_to_waypoint = wasmBindings.wasm_teleport_to_waypoint;
   window.wasm_has_navigation_waypoint = wasmBindings.wasm_has_navigation_waypoint;
+  // The logical simulation tick count (issue #895). Read-only: the smoke
+  // tests sample it to prove the sim advances on the authored fixed tick
+  // rather than the rendered frame.
+  window.wasm_sim_tick = wasmBindings.wasm_sim_tick;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
   document.getElementById('qr-toggle-btn').addEventListener('click', function() {

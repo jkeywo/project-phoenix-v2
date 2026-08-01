@@ -214,7 +214,7 @@ impl Plugin for ShipShieldsPlugin {
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     // In `SimSet::Physics`, not Input (issue #826):
                     // `admit_system_commands` clears every ship's
@@ -744,9 +744,6 @@ mod tests {
         app.insert_resource(ShipEntity(ship));
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(100),
-            ))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -757,11 +754,17 @@ mod tests {
             .init_resource::<CoordEnqueueBox>()
             .add_plugins(ShipShieldsPlugin)
             .add_systems(
-                Update,
+                FixedUpdate,
                 seed_viewscreen_from_selection.before(publish_shields_blackboard),
             )
             .add_systems(PostUpdate, collect)
             .add_systems(PostUpdate, collect_coord);
+        // One fixed step per update (issue #895): the plugin's systems run
+        // on the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(100),
+        );
         app
     }
 
@@ -899,9 +902,6 @@ mod tests {
             .id();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(100),
-            ))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -909,6 +909,11 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .add_plugins(ShipShieldsPlugin);
+        // One fixed step per update (issue #895).
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(100),
+        );
         app.update();
         assert_eq!(shields_bb(&mut app).facings.len(), 4);
     }
@@ -1009,9 +1014,6 @@ mod tests {
         app.insert_resource(ShipEntity(ship));
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(100),
-            ))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -1023,6 +1025,12 @@ mod tests {
             .add_plugins(ShipShieldsPlugin)
             .add_systems(PostUpdate, collect)
             .add_systems(PostUpdate, collect_coord);
+        // One fixed step per update (issue #895): the plugin's systems run
+        // on the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(100),
+        );
         app
     }
 

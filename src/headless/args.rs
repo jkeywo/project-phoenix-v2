@@ -10,8 +10,10 @@
 use crate::headless::duel::MAX_SIDE;
 use crate::logging::{parse_log_entities, parse_log_spec, LogFilterConfig};
 
-/// Default simulation rate. Matches the 60 Hz the browser host effectively runs
-/// at, so headless traces line up with what a player would have seen.
+/// Default frame rate the harness drives the app at. Matches the 60 Hz rAF
+/// rate of the browser host AND the default `[global] sim_tick_hz`, so by
+/// default each `update()` advances exactly one logical sim tick and headless
+/// traces line up with what a player would have seen.
 pub const DEFAULT_HZ: f64 = 60.0;
 
 const DEFAULT_WORLD: &str = "assets/worlds/default.toml";
@@ -59,12 +61,20 @@ DUEL (assets/worlds/duel.toml)
                           rejected rather than silently run as-is.
 
 TIME
-    --hz <N>              Simulation rate in ticks per sim-second [default: 60]
-                          Do not go below 30: the AI helm clamps its integration
-                          step to 1/30s, so slower rates under-integrate and the
-                          run stops matching real play. 30/60/144 agree closely.
-    --dt <SECONDS>        Fixed timestep; mutually exclusive with --hz
-    --ticks <N>           Stop after N ticks
+    --hz <N>              Frame rate the harness drives the app at, in frames
+                          per sim-second [default: 60]. Since issue #895 the
+                          SIMULATION advances on the world's [global]
+                          sim_tick_hz (default 60) inside Bevy's fixed loop,
+                          so this flag chooses how much virtual time each
+                          update() advances, not how often the sim thinks —
+                          any --hz covers the same logical ticks per
+                          sim-second. (Rapier still steps once per frame at
+                          this rate until #896 moves it onto the tick.)
+    --dt <SECONDS>        Frame period; mutually exclusive with --hz
+    --ticks <N>           Stop after N frames. Named before issue #895, when a
+                          frame and a sim tick were the same thing; it counts
+                          update() calls, so the LOGICAL ticks a run covers are
+                          N x sim_tick_hz / --hz.
     --sim-seconds <N>     Stop after N seconds of simulated time
                           (If neither is given, the run stops at 60 sim-seconds.)
 
@@ -145,10 +155,13 @@ pub enum ReportFormat {
 pub struct HeadlessArgs {
     pub world_path: String,
     pub ship_path: String,
-    /// Fixed timestep in seconds.
+    /// Frame period in seconds — the virtual time one `update()` advances.
+    /// Since issue #895 this is NOT the simulation's step: the sim steps at the
+    /// world's `[global] sim_tick_hz` inside Bevy's fixed loop.
     pub dt: f64,
-    /// Tick count at which the run stops. Always resolved — `--sim-seconds` is
-    /// converted here so the run loop only ever counts ticks.
+    /// FRAME count at which the run stops (`--ticks`, named before #895 split
+    /// frames from logical ticks). Always resolved — `--sim-seconds` is
+    /// converted here so the run loop only ever counts frames.
     pub max_ticks: u64,
     pub log: LogFilterConfig,
     /// The raw `--log` spec, forwarded to `LogPlugin`'s own `EnvFilter` so

@@ -6054,6 +6054,25 @@ mod tests {
     ) -> (usize, usize) {
         const FRAME_MS: u64 = 10;
         const TICKS: usize = 12;
+        // Since #895 the sim advances in `FixedUpdate`, so "the AI must not
+        // decide every rendered frame" is enforced by the fixed loop itself:
+        // pin the logical timestep to the shipped 33.3 ms decision period
+        // (`GlobalConfig::default().ai_tick_hz`; without a `WorldConfig` every
+        // fixed step is a decision tick) and drive frames at 10 ms, so only
+        // the frames that accumulate a whole step can decide.
+        //
+        // The callers below build `app` via `test_app()` and never tick it
+        // before reaching here, so `test_app()`'s `TEST_TICK` (200 ms)
+        // preload is still sitting untouched in `Time<Fixed>`'s accumulator.
+        // Discard it before re-pacing to the fine 10 ms frame, or this
+        // function's first `tick()` bursts ~6 steps (200 ms / 33.3 ms) instead
+        // of the 0-or-1 the throttle assertions below assume.
+        crate::ship::test_support::discard_stale_overstep(app);
+        app.world_mut().resource_mut::<Time<Fixed>>().set_timestep(
+            crate::sim_tick::sim_tick_period(
+                crate::entity_config::GlobalConfig::default().ai_tick_hz,
+            ),
+        );
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(FRAME_MS),
         ));
@@ -6191,33 +6210,52 @@ mod tests {
         assert_shared_sim_tick_cadence("ai_helm_impulse", counts);
     }
 
-    /// The shared sim-tick rate is TOML-authored (`[global] ai_tick_hz`),
-    /// not hardcoded: `tick_ai_cadence` must reconcile the timer period
-    /// against a loaded `WorldConfig` that authors a different rate. At an
-    /// authored 100 Hz the 10 ms frames land exactly on the period, so the
-    /// lateral dodge recomputes every frame — where the default 30 Hz gate
-    /// (asserted by the cadence tests above) allows at most half.
+    /// The shared decision cadence is TOML-authored, not hardcoded: with a
+    /// loaded `WorldConfig`, `tick_ai_cadence` derives it as
+    /// `sim_tick_hz / ai_tick_hz` logical ticks per decision (issue #895).
+    /// Authoring the two rates EQUAL makes every fixed step a decision tick,
+    /// so with the timestep pinned to the 10 ms frame period the dodge
+    /// recomputes every frame — where the shipped 2:1 ratio (the default
+    /// `WorldConfig`) would allow at most half.
     #[test]
     fn ai_helm_tick_rate_is_reconfigured_from_world_config() {
         let mut app = lateral_dodge_app();
         set_helm_control_source(&mut app, ControlSource::Ai);
         let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.global.sim_tick_hz = 100.0;
         cfg.global.ai_tick_hz = 100.0;
+        cfg.global.ai_snapshot_hz = 100.0;
         // `lateral_dodge_app` leaves no WorldConfig installed; the dodge only
         // needs the snapshot obstacle, so the empty-anchor config is inert
-        // apart from the authored tick rate.
+        // apart from the authored cadence.
         app.insert_resource(cfg);
+        // Pin the logical timestep to the frame period: one step per frame,
+        // so decisions-per-frame is exactly the authored per-tick cadence.
+        // (`reconcile_fixed_timestep` is a production registration; fixtures
+        // own their timestep, so it is set directly here.)
+        crate::ship::test_support::discard_stale_overstep(&mut app);
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(std::time::Duration::from_millis(10));
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(10),
+        ));
 
-        let (ran, ticks) = count_sim_tick_runs(
-            &mut app,
-            |app| set_lateral_intent(app, CADENCE_SENTINEL),
-            |app| lateral_intent(app) != CADENCE_SENTINEL,
-        );
+        let mut ran = 0usize;
+        const TICKS: usize = 12;
+        for _ in 0..TICKS {
+            set_lateral_intent(&mut app, CADENCE_SENTINEL);
+            tick(&mut app);
+            if lateral_intent(&mut app) != CADENCE_SENTINEL {
+                ran += 1;
+            }
+        }
         assert!(
-            ran > ticks / 2,
-            "with [global] ai_tick_hz = 100 the 10 ms period fires every frame, \
-             so the dodge must recompute on (nearly) all of them — {ran} of {ticks} \
-             means tick_ai_cadence never applied the TOML-authored rate"
+            ran > TICKS / 2,
+            "with sim_tick_hz == ai_tick_hz every logical tick is a decision \
+             tick, so the dodge must recompute on (nearly) every frame — {ran} \
+             of {TICKS} means tick_ai_cadence never applied the TOML-authored \
+             cadence"
         );
     }
 
@@ -8004,10 +8042,14 @@ mod tests {
             app
         }
 
+        // ONE tick per app: since #895 the first fixed step is always a
+        // decision tick (the latch derives from the tick count and arms at
+        // tick 0), and a second tick would integrate 200 ms of drag first —
+        // the projection would then be measured at a decayed speed rather
+        // than the seeded 10 u/s the geometry above is computed from.
         let mut default_app = moving_app(None);
         snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
-        // See the buffer test: two ticks, because the timer skips the first.
-        tick_twice(&mut default_app);
+        tick(&mut default_app);
         assert_eq!(
             lateral_intent(&mut default_app),
             0.0,
@@ -8020,7 +8062,7 @@ mod tests {
             ..Default::default()
         }));
         snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
-        tick_twice(&mut authored_app);
+        tick(&mut authored_app);
         assert!(
             lateral_intent(&mut authored_app).abs() > 0.0,
             "a TOML-authored 10 s look-ahead projects 100 units ahead, onto the \
@@ -10740,6 +10782,16 @@ verb = "engage_boost"
         );
     }
 
+    /// The `HELM_AI_MAX_DT_SECS` cap on the integration step, exercised
+    /// through the only path that can still reach it since issue #895: a
+    /// bare-`App` fixture, which authors no world and paces itself at the
+    /// 200 ms `TEST_TICK`.
+    ///
+    /// In production the cap is dead. The sim runs in `FixedUpdate`, so the
+    /// step is `1 / [global] sim_tick_hz`, and `world::config::parse_world`
+    /// rejects any authored rate below `entity_config::MIN_SIM_TICK_HZ` —
+    /// derived from this very constant. So what this test pins is the fixture
+    /// contract, not a production frame-rate guard.
     #[test]
     fn backfill_helm_ai_caps_long_frame_yaw_step() {
         let mut app = test_app();
@@ -10802,8 +10854,10 @@ verb = "engage_boost"
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         app.init_resource::<FrameProbe>();
+        // `FixedUpdate` (issue #895): the probes bracket systems that live in
+        // the fixed schedule, and ordering edges are only real within it.
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 probe_frame_before
                     .in_set(crate::sim_sets::SimSet::Physics)
@@ -10819,9 +10873,10 @@ verb = "engage_boost"
                     .after(ai_helm_steering)
                     .after(ai_helm_lateral_thrust)
                     .after(ai_helm_impulse)
-                    // The cadence tick system that re-arms the latch lives in
-                    // `Last` since #889, so it is unconditionally after every
-                    // `Update` system — no explicit `.before` edge needed.
+                    // The cadence derivation that re-arms the latch lives in
+                    // `FixedLast` since #895, so it is unconditionally after
+                    // every `FixedUpdate` system — no explicit `.before` edge
+                    // needed.
                     .run_if(ai_tick_ready),
             ),
         );

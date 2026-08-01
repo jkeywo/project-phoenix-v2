@@ -162,7 +162,7 @@ impl Plugin for CommsWorldPlugin {
                 mark_comms_dirty_on_game_start,
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     handle_hail.in_set(crate::sim_sets::SimSet::Input),
                     handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
@@ -202,7 +202,7 @@ impl Plugin for CommsWorldPlugin {
             // `runtime.name_to_uuid` (`SpawnEntity`); the pipeline consumes
             // the buffer last.
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     tick_pending_follow_ups.before(crate::world::server::collect_world_events),
                     inject_comms_templates
@@ -881,7 +881,7 @@ pub(crate) mod tests {
             .init_resource::<Outbox>()
             .add_message::<CommsChannel2Event>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     handle_hail,
                     handle_respond_to_message,
@@ -896,6 +896,12 @@ pub(crate) mod tests {
                     .after(crate::server_app::AdmissionSet),
             )
             .add_systems(PostUpdate, collect);
+        // One fixed step per update (issue #895): the chain above joins the
+        // admission seam in `FixedUpdate`, and each harness tick steps it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(1),
+        );
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,

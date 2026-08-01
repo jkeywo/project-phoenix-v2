@@ -387,8 +387,21 @@ pub fn add_simulation_plugins(app: &mut App) {
 
 /// [`add_simulation_plugins`] with explicit control over the optional slices.
 pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
+    // The logical simulation tick (issue #895). The whole `SimSet` chain lives
+    // in `FixedUpdate`, so the simulation advances zero or more whole steps per
+    // rendered frame on the `[global] sim_tick_hz` clock rather than once per
+    // frame. The default timestep is applied here so an app that never loads a
+    // world still steps at the shipped rate; `reconcile_fixed_timestep` (in
+    // `First`, before the fixed loop runs) applies the authored rate once a
+    // `WorldConfig` exists.
+    app.insert_resource(Time::<Fixed>::from_duration(
+        crate::sim_tick::sim_tick_period(crate::entity_config::GlobalConfig::default().sim_tick_hz),
+    ));
+    crate::sim_tick::register_sim_tick(app);
+    app.add_systems(First, crate::sim_tick::reconcile_fixed_timestep);
+
     app.configure_sets(
-        Update,
+        FixedUpdate,
         (
             crate::sim_sets::SimSet::Input,
             crate::sim_sets::SimSet::Physics,
@@ -465,17 +478,24 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
     // Balance tracer for game-phase transitions. One global reader, one emit
     // per transition — inherently unconditional, no per-`next_state.set` taps.
-    .add_systems(Update, emit_phase_change_balance_events)
+    // In the fixed schedule so its events land in tick order with the rest of
+    // the balance stream.
+    .add_systems(FixedUpdate, emit_phase_change_balance_events)
     .insert_resource(GameOverReason(None, None))
     .add_systems(
-        Update,
+        FixedUpdate,
         (reconcile_runtime_entities, broadcast_world_setup_on_start)
             .chain()
             .after(crate::lobby::LobbySystemSet)
             .before(crate::sim_sets::SimSet::Input),
     )
+    // Command admission moves with the sim into `FixedUpdate` (issue #895):
+    // inbound messages are drained once per FRAME in `PreUpdate`, so admitting
+    // per frame would clear-and-refill `AdmittedCommands` zero or several
+    // times per tick. Here it runs exactly once per tick, before
+    // `SimSet::Input`, whatever the frame rate.
     .add_systems(
-        Update,
+        FixedUpdate,
         (
             admit_system_commands,
             crate::command_admission::clear_inter_system_queue,
@@ -492,24 +512,24 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // it reads is populated by each consumer plugin's `register_admitted_consumer`
     // call at build time.
     .add_systems(
-        Update,
+        FixedUpdate,
         crate::command_admission::warn_unrouted_admitted_commands
             .after(crate::sim_sets::SimSet::Broadcast)
             .run_if(in_state(GamePhase::InProgress)),
     )
     .add_systems(
-        Update,
+        FixedUpdate,
         broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_systems(
-        Update,
+        FixedUpdate,
         refresh_caches_on_midgame_reconnect
             .after(crate::lobby::LobbySystemSet)
             .before(crate::lobby::server::drain_lobby_outbox)
             .before(crate::sim_sets::SimSet::Broadcast),
     )
     .add_systems(
-        Update,
+        FixedUpdate,
         (
             broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
             handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
@@ -518,22 +538,22 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .after(crate::lobby::LobbySystemSet),
     )
     .add_systems(
-        Update,
+        FixedUpdate,
         crate::modifier_coordination::translate_power_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
-        Update,
+        FixedUpdate,
         crate::modifier_coordination::translate_impulse_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
-        Update,
+        FixedUpdate,
         crate::modifier_coordination::apply_radar_damage_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
-        Update,
+        FixedUpdate,
         (
             clear_last_attacker_on_death,
             clear_last_attacker_on_red_alert_off,
@@ -4026,7 +4046,7 @@ station = "pilot"
     fn test_app() -> App {
         let mut app = App::new();
         app.configure_sets(
-            Update,
+            FixedUpdate,
             (
                 crate::sim_sets::SimSet::Input,
                 crate::sim_sets::SimSet::Physics,
@@ -4039,18 +4059,13 @@ station = "pilot"
                 .chain(),
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             seed_viewscreen_from_selection
                 .after(crate::lobby::LobbySystemSet)
                 .before(crate::sim_sets::SimSet::Input),
         )
         .add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
-        // Advance time by 200 ms per tick so Hz-based SimBroadcaster timers
-        // (period = 100 ms) always fire within a single update call.
-        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(200),
-        ))
         .init_resource::<WorldResource>()
         .init_resource::<TrackedEntities>()
         .insert_resource(SimBroadcastTimer(Timer::new(
@@ -4080,7 +4095,7 @@ station = "pilot"
             reset_broadcast_caches_on_start,
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             (
                 admit_system_commands,
                 crate::command_admission::clear_inter_system_queue,
@@ -4089,7 +4104,7 @@ station = "pilot"
                 .before(crate::sim_sets::SimSet::Input),
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             (
                 handle_impulse_messages,
                 broadcast_shield_status,
@@ -4101,18 +4116,18 @@ station = "pilot"
             ),
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             crate::modifier_coordination::translate_power_modifiers
                 .after(crate::power_plugin::handle_power_messages)
                 .after(crate::power_plugin::tick_power_system),
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             crate::modifier_coordination::translate_impulse_modifiers
                 .after(handle_impulse_messages),
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             (
                 sim_processing_anchor,
                 broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
@@ -4122,6 +4137,13 @@ station = "pilot"
         .add_plugins(sim_state_broadcaster())
         .add_plugins(modifier_events_broadcaster())
         .add_systems(PostUpdate, collect);
+        // One fixed step per update (issue #895): the sim chain above lives in
+        // `FixedUpdate`, and each 200 ms harness tick advances it once (so the
+        // Hz-based SimBroadcaster timers always fire within a single update).
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         // Spawn the Ship entity immediately so systems that query it (including
         // auth checks in handle_fire_torpedo, handle_power_messages, etc.) work
         // during Lobby as well as InProgress.

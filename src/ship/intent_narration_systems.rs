@@ -30,7 +30,7 @@
 //!
 //! # Why it is gated on the shared AI cadence
 //!
-//! `SimSet` is configured in Bevy's `Update`, so an ungated system here would
+//! `SimSet` is configured in Bevy's `FixedUpdate` (issue #895), so an ungated system here would
 //! sample decision state once per *rendered frame* (AGENTS.md #7). The snapshot
 //! pair would then be two readings 16 ms apart on a fast host and 33 ms apart on
 //! a slow one, and a decision that flickered inside one AI tick could narrate

@@ -227,6 +227,12 @@ thread_local! {
     /// teleport control when there is nowhere to teleport to (issue #770, AC2).
     static HAS_NAVIGATION_WAYPOINT: RefCell<bool> = const { RefCell::new(false) };
 
+    /// The logical simulation tick count (issue #895), mirrored each frame by
+    /// `publish_sim_tick` and read back by `wasm_sim_tick()` so the smoke
+    /// tests can observe the fixed tick advancing independently of the frame
+    /// rate — the Rust suite cannot see the browser's frame loop.
+    static SIM_TICK_COUNT: RefCell<u64> = const { RefCell::new(0) };
+
     /// The single Host Channel callback registered by the host page (issue
     /// #818). Signature: `callback(name: string, payload: any)` where `name`
     /// is one of [`host_channels::ALL`] and `payload` is a JSON string for the
@@ -647,7 +653,16 @@ pub fn wasm_init() {
             publish_waypoint_existence,
         ),
     )
-    .add_systems(PostUpdate, (flush_outbound, flush_host_channels));
+    // The JS ingress/egress seams stay frame-driven (issue #895): `PreUpdate`
+    // runs before the fixed loop and `PostUpdate` after it, so a frame drains
+    // inbound messages before any of its sim ticks and flushes everything
+    // those ticks broadcast. Bevy defers message cleanup until the fixed
+    // schedules have observed a frame's messages, so a frame that runs zero
+    // fixed steps loses nothing.
+    .add_systems(
+        PostUpdate,
+        (flush_outbound, flush_host_channels, publish_sim_tick),
+    );
 
     // Insert the validated ShipStations resource if it was pre-validated.
     SHIP_STATIONS.with(|slot| {
@@ -976,6 +991,20 @@ pub fn wasm_teleport_to_waypoint() {
 #[wasm_bindgen]
 pub fn wasm_has_navigation_waypoint() -> bool {
     HAS_NAVIGATION_WAYPOINT.with(|v| *v.borrow())
+}
+
+/// The logical simulation tick count (issue #895) — the number of completed
+/// `FixedUpdate` steps. Read back from the mirror maintained by
+/// `publish_sim_tick` each frame.
+///
+/// Returned as `f64` so JS receives a plain number rather than a `BigInt`;
+/// at 60 Hz the count stays exactly representable for ~4.7 million years.
+/// The smoke tests sample this twice to assert the sim advances on the
+/// authored `[global] sim_tick_hz` clock rather than the rendered frame rate.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_sim_tick() -> f64 {
+    SIM_TICK_COUNT.with(|v| *v.borrow()) as f64
 }
 
 // ── Config Preload Exports ──────────────────────────────────────────────────
@@ -1405,6 +1434,15 @@ fn drain_debug_toggles(
 
     if pause_changed {
         if paused.0 {
+            // Pausing `Time<Virtual>` starves the fixed accumulator, so
+            // `FixedUpdate` (and with it `SimTick`) stops advancing entirely —
+            // deliberately, this is what `sim-tick.spec.ts` DECOUPLING asserts
+            // on. Since issue #895 this freezes more than the `SimSet` chain:
+            // lobby (countdown, ready-check, `drain_lobby_outbox`) and command
+            // admission both moved into `FixedUpdate` too, so F9 now also
+            // pauses the lobby and stops admitting commands, which it did not
+            // pre-#895 when those ran frame-driven in `Update`. See
+            // `wiki/concepts/game-loop.md` for the fuller writeup.
             virtual_time.pause();
         } else {
             virtual_time.unpause();
@@ -1484,6 +1522,14 @@ fn drain_teleport_to_waypoint(
     for (mut physics, waypoint) in ship_q.iter_mut() {
         apply_teleport_to_waypoint(&mut physics, waypoint);
     }
+}
+
+/// Mirrors [`crate::sim_tick::SimTick`] into a thread-local each frame so
+/// `wasm_sim_tick()` can read it back (issue #895). Pure read; no gameplay
+/// effect.
+#[cfg(target_arch = "wasm32")]
+fn publish_sim_tick(tick: Res<crate::sim_tick::SimTick>) {
+    SIM_TICK_COUNT.with(|v| *v.borrow_mut() = tick.0);
 }
 
 /// Mirrors the LocalShip's Navigation-waypoint existence into a thread-local

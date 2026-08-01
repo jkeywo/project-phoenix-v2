@@ -8,7 +8,8 @@ use crate::messages::DeliveryClass;
 /// - Delivery: `Snapshot` (lossy, latest-wins).
 /// - Phase gate: none inline — the SimSet chain's
 ///   `.run_if(in_state(GamePhase::InProgress))` gates the whole set.
-/// - Schedule: `Update`, inside `SimSet::Broadcast`.
+/// - Schedule: `FixedUpdate` (where `SimSet` lives since issue #895), inside
+///   `SimSet::Broadcast`.
 pub struct Sim;
 
 impl BroadcastKind for Sim {
@@ -18,7 +19,7 @@ impl BroadcastKind for Sim {
 
     fn add_dispatch(app: &mut App) {
         app.add_systems(
-            Update,
+            FixedUpdate,
             dispatch::<Sim>.in_set(crate::sim_sets::SimSet::Broadcast),
         );
     }
@@ -78,6 +79,12 @@ mod tests {
         // Outbox + collector.
         app.init_resource::<Outbox>();
         app.add_systems(PostUpdate, collect);
+
+        // One fixed step per update (issue #895) — see the Lobby twin.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(1),
+        );
 
         app
     }

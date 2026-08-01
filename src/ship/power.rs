@@ -217,7 +217,7 @@ impl Plugin for ShipPowerPlugin {
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     // In `SimSet::Physics`, not Input (issue #831, mirroring
                     // shields #826): `admit_system_commands` clears every
@@ -824,17 +824,17 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
             // Chain the SimSet phases so admission (before Input) → the applier
             // `handle_power_messages` (moved to Physics in issue #831) → battery
             // tick → publish run in order. Without this, `handle_power_messages`
             // in Physics has no ordering vs. the `.before(Input)` AdmissionSet,
             // so it can run before the command is admitted and the allocation
             // never applies (mirrors the navigation test harness's #830 chain).
+            // In `FixedUpdate`, where `ShipPowerPlugin` and `AdmissionPlugin`
+            // register since issue #895 — configured on `Update` this chain
+            // would order nothing at all.
             .configure_sets(
-                Update,
+                FixedUpdate,
                 (
                     crate::sim_sets::SimSet::Input,
                     crate::sim_sets::SimSet::Physics,
@@ -855,11 +855,20 @@ mod tests {
             .init_resource::<Outbox>()
             .add_plugins(ShipPowerPlugin)
             .add_systems(
-                Update,
+                FixedUpdate,
                 crate::modifier_coordination::translate_power_modifiers.after(tick_power_system),
             )
             .add_plugins(crate::simulation::sim_state_broadcaster())
             .add_systems(PostUpdate, collect);
+        // Exactly one fixed step per `update()` (issue #895), advancing 200 ms
+        // of sim time so the Hz-based broadcast timers always fire inside a
+        // single harness tick — the pace this fixture has always run at, which
+        // a bare `ManualDuration` no longer delivers now the sim is in
+        // `FixedUpdate` against the default 60 Hz timestep.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         // Spawn the player ship entity so handle_power_messages can query it.
         app.world_mut().spawn((
             crate::simulation::Ship,
@@ -1526,17 +1535,15 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
             // Chain the SimSet phases so admission (before Input) → the applier
             // `handle_power_messages` (moved to Physics in issue #831) → battery
             // tick → publish run in order. Without this, `handle_power_messages`
             // in Physics has no ordering vs. the `.before(Input)` AdmissionSet,
             // so it can run before the command is admitted and the allocation
             // never applies (mirrors the navigation test harness's #830 chain).
+            // In `FixedUpdate` since issue #895 — see `test_app` above.
             .configure_sets(
-                Update,
+                FixedUpdate,
                 (
                     crate::sim_sets::SimSet::Input,
                     crate::sim_sets::SimSet::Physics,
@@ -1557,6 +1564,11 @@ mod tests {
             .init_resource::<Outbox>()
             .add_plugins(ShipPowerPlugin)
             .add_plugins(crate::simulation::sim_state_broadcaster());
+        // One fixed step per update, 200 ms of sim time each (issue #895).
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         // Spawn the player ship with control sources so we can seed offline_systems.
         app.world_mut().spawn((
             crate::simulation::Ship,

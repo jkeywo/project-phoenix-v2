@@ -18,7 +18,7 @@ pub struct HelmPlugin;
 impl Plugin for HelmPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
-            Update,
+            FixedUpdate,
             publish_helm_blackboard.in_set(crate::sim_sets::SimSet::Publish),
         );
     }

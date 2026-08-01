@@ -723,26 +723,27 @@ impl Plugin for AiPlugin {
         app.add_message::<AiEntityDestroyed>();
         app.add_message::<AiWaypointReached>();
         app.init_resource::<WorldSnapshot>();
-        // The ONE shared AI decision cadence (issue #889), which also derives
-        // the slower snapshot latch these two systems gate on. Its tick system
-        // lives in `Last`, so the flag is consumed by every `Update` system it
-        // gates before it is re-armed — no per-system `.after()` edge needed.
+        // The ONE shared AI decision cadence (issues #889, #895), which also
+        // derives the slower snapshot latch these two systems gate on. Its
+        // derivation system lives in `FixedLast`, so the flag is consumed by
+        // every `FixedUpdate` system it gates before it is re-armed for the
+        // next step — no per-system `.after()` edge needed.
         crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
-            Update,
+            FixedUpdate,
             build_world_snapshot
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .before(crate::sim_sets::AiTickLabel)
                 .run_if(ai_snapshot_ready),
         );
         app.add_systems(
-            Update,
+            FixedUpdate,
             aggregate_doctrine_blackboards
                 .in_set(crate::sim_sets::SimSet::PublishAggregate)
                 .run_if(ai_snapshot_ready),
         );
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 simulate_low_lod_ships
                     .in_set(crate::sim_sets::SimSet::Physics)
@@ -754,7 +755,7 @@ impl Plugin for AiPlugin {
             ),
         );
         app.add_systems(
-            Update,
+            FixedUpdate,
             (
                 register_ai_tokens_on_spawn,
                 emit_attacked_on_new_attacker
@@ -1803,6 +1804,12 @@ verb = "fire_blaster"
             .init_resource::<AttackedBox>()
             .init_resource::<DestroyedBox>()
             .add_systems(PostUpdate, (collect_attacked, collect_destroyed));
+        // One fixed step per update (issue #895): AiPlugin's systems run on
+        // the logical tick, and each harness tick advances it once.
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_millis(200),
+        );
         app
     }
 

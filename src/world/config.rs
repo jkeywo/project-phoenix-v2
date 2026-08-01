@@ -1679,6 +1679,57 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         ));
     }
 
+    // The logical tick also has a FLOOR (issue #895). The helm integrator caps
+    // its step at `HELM_AI_MAX_DT_SECS`, so a sim tick longer than that cap is
+    // silently shortened: the ship under-integrates and two hosts on different
+    // authored rates diverge from identical commands. Rejecting the rate at
+    // load turns that silent fidelity loss into a content error the author can
+    // see, and is what lets `integrate_ship_physics` assert the cap is dead.
+    if !raw.global.sim_tick_hz.is_finite()
+        || raw.global.sim_tick_hz < crate::entity_config::MIN_SIM_TICK_HZ
+    {
+        return Err(format!(
+            "[global] sim_tick_hz = {} is below the {} Hz floor: the helm integrator caps \
+             its step at 1/{} s, so a slower logical tick would be silently shortened and \
+             the simulation would under-integrate",
+            raw.global.sim_tick_hz,
+            crate::entity_config::MIN_SIM_TICK_HZ.round(),
+            crate::entity_config::MIN_SIM_TICK_HZ.round(),
+        ));
+    }
+
+    // The logical tick also has a CEILING (re-review of issue #895 — the
+    // floor above had no matching upper bound). `Time<Virtual>::max_delta`
+    // (250 ms) bounds how much wall-clock lag a single frame can absorb, but
+    // the NUMBER of `FixedUpdate` steps that lag unpacks into is
+    // `max_delta / timestep`: an unbounded rate (e.g. `sim_tick_hz =
+    // 100000`) demands tens of thousands of fixed steps back-to-back inside
+    // one frame and wedges the host. Rejecting the rate at load turns that
+    // silent performance cliff into a content error the author can see.
+    if raw.global.sim_tick_hz > crate::entity_config::MAX_SIM_TICK_HZ {
+        return Err(format!(
+            "[global] sim_tick_hz = {} is above the {} Hz ceiling: a lagged frame can \
+             unpack into max_delta / timestep FixedUpdate steps, and a rate this fast \
+             would run tens of thousands of them back-to-back and wedge the host",
+            raw.global.sim_tick_hz,
+            crate::entity_config::MAX_SIM_TICK_HZ.round(),
+        ));
+    }
+
+    // The AI decision tick is in turn derived from the logical simulation tick
+    // by counting (issue #895), so the same commensurability contract applies
+    // one level up: `sim_tick_hz / ai_tick_hz` must be a positive integer.
+    if raw.global.checked_sim_ticks_per_ai_tick().is_none() {
+        return Err(format!(
+            "[global] sim_tick_hz = {} and ai_tick_hz = {} are not a positive integer \
+             relationship: the AI decision cadence is derived as a whole number of logical \
+             sim ticks, so sim_tick_hz / ai_tick_hz must divide exactly (got {})",
+            raw.global.sim_tick_hz,
+            raw.global.ai_tick_hz,
+            raw.global.sim_tick_hz / raw.global.ai_tick_hz
+        ));
+    }
+
     let mut anchors: HashMap<String, [f32; 3]> = HashMap::with_capacity(raw.anchors.len());
     for (name, pos) in raw.anchors {
         let normalised = match pos.len() {
@@ -2217,8 +2268,97 @@ mod tests {
              the pair; got: {err}"
         );
 
-        parse_world("[global]\nai_tick_hz = 25.0\nai_snapshot_hz = 5.0\n")
+        // `sim_tick_hz = 50` keeps the OTHER commensurability contract (the
+        // #895 sim/ai one below) satisfied: 50 / 25 = 2 sim ticks per AI tick.
+        parse_world("[global]\nsim_tick_hz = 50.0\nai_tick_hz = 25.0\nai_snapshot_hz = 5.0\n")
             .expect("25 Hz base against 5 Hz snapshot divides exactly (5 base ticks)");
+    }
+
+    /// Issue #895: the AI decision tick is derived from the LOGICAL SIM tick
+    /// by counting, so `sim_tick_hz / ai_tick_hz` must be a positive integer —
+    /// the same contract, one level up. The default 60 Hz sim tick against the
+    /// default 30 Hz AI tick is 2:1; an authored pair that does not divide is
+    /// a content error at world load, not something to round at runtime.
+    #[test]
+    fn parse_world_rejects_a_sim_tick_the_ai_tick_does_not_divide() {
+        let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
+        assert_eq!(
+            defaulted.global.sim_tick_hz, 60.0,
+            "omitted sim_tick_hz must default to the 60 Hz the frame-driven \
+             browser host effectively ran at"
+        );
+        assert_eq!(
+            defaulted.global.sim_ticks_per_ai_tick(),
+            2,
+            "60 Hz sim against 30 Hz AI is two sim ticks per decision"
+        );
+
+        let err = parse_world("[global]\nsim_tick_hz = 50.0\n")
+            .expect_err("50 Hz sim against the 30 Hz default AI tick is 1.67 ticks");
+        assert!(
+            err.contains("sim_tick_hz") && err.contains("ai_tick_hz"),
+            "the load error must name both authored rates so the author can fix \
+             the pair; got: {err}"
+        );
+
+        let authored = parse_world("[global]\nsim_tick_hz = 120.0\nai_tick_hz = 30.0\n")
+            .expect("120 Hz sim against 30 Hz AI divides exactly (4 sim ticks)");
+        assert_eq!(authored.global.sim_tick_hz, 120.0);
+        assert_eq!(authored.global.sim_ticks_per_ai_tick(), 4);
+    }
+
+    /// Issue #895: a logical tick slower than the helm integrator's
+    /// `HELM_AI_MAX_DT_SECS` cap would be silently shortened by it — the sim
+    /// under-integrates and two hosts on different rates diverge. So the floor
+    /// is a load-time rejection, not a runtime clamp, and 30 Hz itself (the
+    /// cap's own rate) is still legal.
+    #[test]
+    fn parse_world_rejects_a_sim_tick_below_the_integrator_floor() {
+        // Rates chosen so BOTH commensurability contracts hold (20/10 = 2
+        // snapshot ticks, 20/20 = 1 sim tick per AI tick): the only thing
+        // wrong with this world is that it is too slow.
+        let err = parse_world("[global]\nsim_tick_hz = 20.0\nai_tick_hz = 20.0\n")
+            .expect_err("20 Hz is below the 30 Hz integrator floor");
+        assert!(
+            err.contains("sim_tick_hz") && err.contains("20"),
+            "the load error must name the authored rate so the author can fix \
+             it; got: {err}"
+        );
+
+        // Commensurate with the default 30 Hz AI tick AND exactly on the
+        // floor: the boundary is inclusive, or the shipped `HELM_AI_MAX_DT_SECS`
+        // rate would itself be unauthorable.
+        let at_the_floor = parse_world("[global]\nsim_tick_hz = 30.0\n")
+            .expect("30 Hz sits exactly on the floor and must be accepted");
+        assert_eq!(at_the_floor.global.sim_tick_hz, 30.0);
+        assert_eq!(at_the_floor.global.sim_ticks_per_ai_tick(), 1);
+    }
+
+    /// Re-review of issue #895: the floor above had no matching ceiling, so
+    /// `sim_tick_hz = 100000` loaded and wedged the host — `max_delta /
+    /// timestep` `FixedUpdate` steps trying to run inside a single frame
+    /// (~25 000 of them at that rate under the 250 ms default `max_delta`).
+    /// So the ceiling is a load-time rejection too, and 240 Hz itself is
+    /// still legal.
+    #[test]
+    fn parse_world_rejects_a_sim_tick_above_the_ceiling() {
+        // ai_tick_hz left at its 30 Hz default: 480 / 30 = 16, a whole
+        // number, so the only thing wrong with this world is that the sim
+        // tick itself is too fast.
+        let err = parse_world("[global]\nsim_tick_hz = 480.0\n")
+            .expect_err("480 Hz is above the 240 Hz ceiling");
+        assert!(
+            err.contains("sim_tick_hz") && err.contains("480"),
+            "the load error must name the authored rate so the author can fix \
+             it; got: {err}"
+        );
+
+        // Commensurate with the default 30 Hz AI tick AND exactly on the
+        // ceiling: the boundary is inclusive.
+        let at_the_ceiling = parse_world("[global]\nsim_tick_hz = 240.0\n")
+            .expect("240 Hz sits exactly on the ceiling and must be accepted");
+        assert_eq!(at_the_ceiling.global.sim_tick_hz, 240.0);
+        assert_eq!(at_the_ceiling.global.sim_ticks_per_ai_tick(), 8);
     }
 
     #[test]

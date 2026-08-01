@@ -121,7 +121,7 @@ impl Plugin for WeaponsPlugin {
             .add_observer(on_beam_started)
             .add_observer(on_beam_ended)
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     // `handle_set_target` is the SOLE writer of
                     // `TacticalRadarSelection` (issue #887). Both origins reach it
@@ -195,7 +195,7 @@ impl Plugin for WeaponsPlugin {
                 ),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     // Beam tick split into three phases (issue #723), connected
                     // by the one-tick `BeamContext` resource: prepare writes it,
@@ -260,7 +260,7 @@ impl Plugin for WeaponsPlugin {
                 ),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 // One system per blackboard type (issue #725). Each writes
                 // disjoint ShipSystemBlackboards keys, so there is no
                 // ordering dependency between them — bare tuple, no chain().

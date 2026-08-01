@@ -851,8 +851,11 @@ impl Plugin for AsteroidLifecyclePlugin {
             .init_resource::<AsteroidEntityMap>()
             .init_resource::<crate::core::broadcast::LastBroadcastEntityPositions>()
             .init_resource::<crate::core::broadcast::LastBroadcastEntityHealth>()
+            // `FixedUpdate` (issue #895): the window tracks the ship the sim
+            // moves, spawns/despawns are sim state, and destroyed-asteroid
+            // respawn bookkeeping must count in ticks, not frames.
             .add_systems(
-                Update,
+                FixedUpdate,
                 (check_destroyed_asteroids, update_asteroid_window).chain(),
             );
     }

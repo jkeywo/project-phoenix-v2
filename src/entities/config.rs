@@ -2385,7 +2385,7 @@ pub struct FineSystemAiRuleToml {
 /// list. Note [`FineSystemAiRuleToml`] deliberately gained NO `state` field:
 /// it is `deny_unknown_fields`, and nesting rules under the state that owns
 /// them keeps a rule's owning state unambiguous.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FineSystemAiStateToml {
     /// Unique state id within this policy; referenced by `initial_state` and
@@ -2397,6 +2397,44 @@ pub struct FineSystemAiStateToml {
     /// Outgoing transitions, at most one of which fires per eligible tick.
     #[serde(default)]
     pub transition: Vec<FineSystemAiTransitionToml>,
+    /// Whether this leg yields its solved facing to a channel-3
+    /// `ArcBearingRequest` (issue #918).
+    ///
+    /// Defaults to `true`, which is exactly what every leg did before #918: a
+    /// weapon family that cannot bear takes the facing and the ship turns to
+    /// make it bear (#673-#684). A leg authors `false` when the heading it flies
+    /// IS the manoeuvre — a broadside ring's tangent, a fly-through escape's
+    /// frozen heading — and a request that arrives while it is flown is
+    /// declined instead of overwriting it.
+    ///
+    /// Only a system with a `yaw` channel can consume this;
+    /// [`validate_fine_system_ai_policy`] rejects a `false` authored on any
+    /// other system, so a declaration that could never be read is a load error
+    /// rather than a silent no-op.
+    #[serde(default = "default_yields_to_arc_requests")]
+    pub yields_to_arc_requests: bool,
+}
+
+/// The parse default for [`FineSystemAiStateToml::yields_to_arc_requests`]:
+/// a leg that says nothing yields, as every leg did before issue #918.
+pub(crate) fn default_yields_to_arc_requests() -> bool {
+    true
+}
+
+impl Default for FineSystemAiStateToml {
+    /// Hand-written rather than derived for the reason
+    /// [`FineSystemAiConfigToml::default`] is: a derived `bool` default is
+    /// `false`, and `yields_to_arc_requests: false` is not "unauthored", it is
+    /// a leg that declines channel-3 requests. `..Default::default()` has to
+    /// mean the same thing as an omitted field in TOML.
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            rule: Vec::new(),
+            transition: Vec::new(),
+            yields_to_arc_requests: default_yields_to_arc_requests(),
+        }
+    }
 }
 
 /// One authored transition out of the enclosing state
@@ -2524,6 +2562,7 @@ impl FineSystemAiConfigToml {
                     id: s.id.clone(),
                     rules: decode_rules(&s.rule)?,
                     transitions,
+                    yields_to_arc_requests: s.yields_to_arc_requests,
                 });
             }
             Some(crate::ai::policy::AiPolicyMachine {
@@ -2823,6 +2862,20 @@ fn validate_policy_inner(
             check_rule(&format!("state '{}' rule {idx}", s.id), r)?;
         }
         check_rule_priorities(&format!("state '{}' ", s.id), &s.rule)?;
+        // A leg that declines channel-3 arc-bearing requests (issue #918) can
+        // only be read by a system that steers, and the `yaw` channel is what
+        // makes a system one. Authored anywhere else it is a declaration
+        // nothing will ever consult — the silent-no-op class this validator
+        // exists to turn into a load error.
+        if !s.yields_to_arc_requests && !valid_channels.contains(&HELM_YAW_CHANNEL) {
+            return Err(format!(
+                "ai policy state '{}' declares yields_to_arc_requests = false, but this \
+                 system drives {valid_channels:?} and an arc-bearing request is answered \
+                 on the '{HELM_YAW_CHANNEL}' channel: nothing would ever read the \
+                 declaration",
+                s.id
+            ));
+        }
     }
     // Reachability is a FIXPOINT walk from `initial`, following transitions only
     // out of states already known reachable. A single pass over every state's
@@ -8833,6 +8886,137 @@ when = "state_time >= param(surge_dwell_secs)"
         assert_eq!(machine.initial_memory.get("engagements"), Some(0.0));
     }
 
+    /// **Issue #918: whether a doctrine leg yields its solved facing to a
+    /// channel-3 arc-bearing request is AUTHORED on the leg.**
+    ///
+    /// Three properties, and the first is the one that keeps #673-#684 working:
+    /// a leg that says nothing yields, so every hull authored before this field
+    /// existed — and every helm with no doctrine at all — behaves exactly as it
+    /// did. The second is that `false` reaches the typed policy. The third is
+    /// that the host's question is answered off the CURRENT leg and off nothing
+    /// else: not off the verb, not off the state's name, and with no parameter
+    /// through which the requester could be consulted.
+    #[test]
+    fn a_doctrine_leg_authors_whether_it_yields_to_arc_requests() {
+        let hull = r#"
+name = "Committed"
+[helm_console.steering_ai]
+initial_state = "travel"
+
+[[helm_console.steering_ai.state]]
+id = "travel"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "committed"
+  when = "true"
+
+[[helm_console.steering_ai.state]]
+id = "committed"
+yields_to_arc_requests = false
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_committed_heading"
+"#;
+        let cfg = EntityConfig::from_toml(hull).expect("the authored hull must parse and validate");
+        let steering = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.steering_ai.as_ref())
+            .expect("hull declares [helm_console.steering_ai]");
+        assert!(
+            steering.state[0].yields_to_arc_requests,
+            "an omitted declaration must parse as YIELDING — the pre-#918 behaviour \
+             every authored hull and every doctrine-less helm depends on"
+        );
+        assert!(!steering.state[1].yields_to_arc_requests);
+
+        let policy = steering.to_policy().expect("the authored policy decodes");
+        let machine = policy.machine().expect("machine decoded");
+        assert!(
+            machine
+                .state("travel")
+                .expect("travel declared")
+                .yields_to_arc_requests
+        );
+        assert!(
+            !machine
+                .state("committed")
+                .expect("committed declared")
+                .yields_to_arc_requests,
+            "the declaration must survive into the typed policy the host reads"
+        );
+
+        // The host's question, asked of one leg at a time.
+        assert!(policy.leg_yields_to_arc_requests(Some("travel")));
+        assert!(!policy.leg_yields_to_arc_requests(Some("committed")));
+        assert!(
+            policy.leg_yields_to_arc_requests(None),
+            "a machine that has entered nothing has committed to no heading"
+        );
+        assert!(
+            policy.leg_yields_to_arc_requests(Some("no-such-leg")),
+            "an unknown leg is not a licence to ignore Channel 3"
+        );
+
+        // ...and a STATELESS policy — the shape a helm with no authored
+        // doctrine flies — has no legs to decline with, whatever it is asked.
+        let stateless = crate::ai::policy::AiPolicy::default();
+        assert!(stateless.leg_yields_to_arc_requests(None));
+        assert!(stateless.leg_yields_to_arc_requests(Some("committed")));
+    }
+
+    /// Issue #918: the declaration is rejected on a system that could never read
+    /// it. An arc-bearing request is answered on the `yaw` channel; authored on
+    /// the boost machine, `yields_to_arc_requests = false` is a line a designer
+    /// would reasonably expect to do something and that nothing would ever
+    /// consult — so it fails the load rather than reading as a silent no-op.
+    #[test]
+    fn declining_arc_requests_is_rejected_on_a_system_that_does_not_steer() {
+        let leg = |yields: bool| FineSystemAiStateToml {
+            id: "cruise".to_string(),
+            yields_to_arc_requests: yields,
+            ..Default::default()
+        };
+
+        let err = validate_fine_system_ai_policy(
+            &stateful_cfg(Some("cruise"), vec![leg(false)]),
+            BOOST_CHANNELS,
+            BOOST_VERBS,
+        )
+        .unwrap_err();
+        assert!(err.contains("cruise"), "must name the state: {err}");
+        assert!(
+            err.contains("yields_to_arc_requests"),
+            "must name the offending declaration: {err}"
+        );
+
+        // The same machine is fine on the axis that steers...
+        assert!(validate_fine_system_ai_policy(
+            &stateful_cfg(Some("cruise"), vec![leg(false)]),
+            STEERING_CHANNELS,
+            STEERING_VERBS,
+        )
+        .is_ok());
+        // ...and leaving the default standing is fine anywhere, which is why
+        // every already-authored hull keeps loading.
+        assert!(validate_fine_system_ai_policy(
+            &stateful_cfg(Some("cruise"), vec![leg(true)]),
+            BOOST_CHANNELS,
+            BOOST_VERBS,
+        )
+        .is_ok());
+    }
+
     /// Build a stateful policy config for the AC6 rejection cases directly, so
     /// each rejection is isolated from TOML surface noise.
     fn stateful_cfg(
@@ -8862,6 +9046,7 @@ when = "state_time >= param(surge_dwell_secs)"
                     when: "true".to_string(),
                 })
                 .collect(),
+            ..Default::default()
         }
     }
 
@@ -9011,6 +9196,7 @@ when = "state_time >= param(surge_dwell_secs)"
                     id: "cruise".to_string(),
                     rule: Vec::new(),
                     transition: vec![transition(3, "surge"), transition(3, "coast")],
+                    ..Default::default()
                 },
                 boost_state("surge", &[]),
                 boost_state("coast", &[]),
@@ -9037,6 +9223,7 @@ when = "state_time >= param(surge_dwell_secs)"
                     id: "cruise".to_string(),
                     rule: Vec::new(),
                     transition: vec![transition(3, "surge"), transition(2, "coast")],
+                    ..Default::default()
                 },
                 boost_state("surge", &[]),
                 boost_state("coast", &[]),
@@ -9058,11 +9245,13 @@ when = "state_time >= param(surge_dwell_secs)"
                     id: "cruise".to_string(),
                     rule: Vec::new(),
                     transition: vec![transition(0, "surge")],
+                    ..Default::default()
                 },
                 FineSystemAiStateToml {
                     id: "surge".to_string(),
                     rule: Vec::new(),
                     transition: vec![transition(0, "cruise")],
+                    ..Default::default()
                 },
             ],
         );
@@ -9148,6 +9337,7 @@ when = "state_time >= param(surge_dwell_secs)"
                 id: "surge".to_string(),
                 rule: vec![boost_rule(4), boost_rule(4)],
                 transition: Vec::new(),
+                ..Default::default()
             }],
         );
         let err = validate_fine_system_ai_policy(&tie, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
@@ -9166,11 +9356,13 @@ when = "state_time >= param(surge_dwell_secs)"
                     id: "cruise".to_string(),
                     rule: vec![boost_rule(0)],
                     transition: vec![transition(0, "surge")],
+                    ..Default::default()
                 },
                 FineSystemAiStateToml {
                     id: "surge".to_string(),
                     rule: vec![boost_rule(0)],
                     transition: Vec::new(),
+                    ..Default::default()
                 },
             ],
         );

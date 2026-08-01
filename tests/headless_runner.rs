@@ -2540,6 +2540,131 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
     }
 }
 
+/// **The composed cruiser's ring flies the facing its OWN doctrine solved, in a
+/// real run, with Channel 3 asking for a different one (issue #918).**
+///
+/// This is #918's no-sawtooth pin at the level the defect was measured on. The
+/// two probes are the pair the doctrine test above uses and for the same reason:
+/// `probe_duel` is where the ring dominates, `probe_aggressor` is the world the
+/// original measurement came from.
+///
+/// Measured as the admitted yaw against the yaw the ship's own planner solved
+/// this tick, decoded exactly as `ai_helm_steering` decodes it. Deliberately NOT
+/// as a range: a hull carries momentum either way, so a radius that looks steady
+/// says nothing about whether the steering command was the doctrine's, and this
+/// doctrine's withdrawn first attempt held a plausible radius while Channel 3
+/// flew it.
+///
+/// The `requested` count is the control condition, and it is asserted on the
+/// DUEL alone. Nothing here raises a request by hand — the cruiser's own Weapons
+/// AI does, because its three tubes are 90-degree fore/aft and a settled ring
+/// puts the target on the beam — and without it this test would go green while
+/// measuring an engagement in which nothing was ever declined. It is not
+/// asserted on the aggressor probe because there it is legitimately near zero:
+/// that hull spends the run in the torpedo leg, whose whole purpose is to
+/// SATISFY the request rather than decline it (#876). Measured across the duel's
+/// 45 s: 1336 ring ticks with the leg yielding, 41 of them flown at a yaw the
+/// doctrine did not solve (worst 2.0 — a full-scale reversal); with the leg
+/// declining, 1307 ring ticks and none.
+#[test]
+fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
+    use project_phoenix::ai::decode_steering_from_facing;
+    use project_phoenix::ship::helm_ai::HelmPassSurface;
+    use project_phoenix::ship::helm_planner::HelmMotionPlan;
+    use project_phoenix::ship_plugin::{LastHelmInput, PendingArcBearingRequest};
+
+    struct Ring {
+        ticks: usize,
+        overwritten: usize,
+        requested: usize,
+        worst: f32,
+    }
+
+    let sample = |world: &str, secs: f64| -> Ring {
+        let dt = 1.0 / 30.0;
+        let args = HeadlessArgs {
+            world_path: world.into(),
+            dt,
+            max_ticks: ticks_for_sim_seconds(secs, dt),
+            deterministic: true,
+            ..test_args()
+        };
+        let mut app = build_headless_app(&args).expect("the composed cruiser must build an app");
+        let mut r = Ring {
+            ticks: 0,
+            overwritten: 0,
+            requested: 0,
+            worst: 0.0,
+        };
+        for _ in 0..args.max_ticks {
+            run(&mut app, 1);
+            let mut q = app.world_mut().query_filtered::<(
+                Entity,
+                &HelmPassSurface,
+                &LastHelmInput,
+                Option<&PendingArcBearingRequest>,
+            ), With<LocalShip>>();
+            let Ok((ship, pass, last, pending)) = q.single(app.world()) else {
+                continue;
+            };
+            let standing = pending.and_then(|p| p.target).is_some();
+            if !pass.combat_orbit {
+                continue;
+            }
+            let steering = last.steering;
+            let Some(plan) = app
+                .world()
+                .resource::<HelmMotionPlan>()
+                .ships
+                .get(&ship)
+                .copied()
+            else {
+                continue;
+            };
+            r.ticks += 1;
+            if standing {
+                r.requested += 1;
+            }
+            let solved = decode_steering_from_facing(plan.motion.desired_facing_local.to_array());
+            let error = (steering - solved).abs();
+            r.worst = r.worst.max(error);
+            if error > 1e-3 {
+                r.overwritten += 1;
+            }
+        }
+        r
+    };
+
+    let duel = sample("assets/worlds/probe_duel.toml", 45.0);
+    let aggressor = sample("assets/worlds/probe_aggressor.toml", 30.0);
+
+    // The control: in the world where the ring IS the engagement, the hull
+    // genuinely spent ring ticks with a request standing against it.
+    assert!(
+        duel.requested > 0,
+        "the cruiser's Weapons never had a standing arc-bearing request across {} \
+         ring ticks of a live duel. Nothing was declined, so this probe proves \
+         nothing — the control condition has rotted",
+        duel.ticks
+    );
+
+    for (name, ring, min_ticks) in [("duel", &duel, 300), ("aggressor", &aggressor, 50)] {
+        assert!(
+            ring.ticks >= min_ticks,
+            "{name}: only {} ticks were flown on the fighting ring — this run did not \
+             measure the leg the issue is about",
+            ring.ticks
+        );
+        assert_eq!(
+            ring.overwritten, 0,
+            "{name}: {} of {} ring ticks were flown at a yaw the ship's own doctrine \
+             did not solve (worst {}). That is the sawtooth: an arc-bearing request \
+             overwriting the ring tangent after the planner had already solved it",
+            ring.overwritten, ring.ticks, ring.worst
+        );
+    }
+}
+
 /// Issue #891 stage 2, end to end in the REAL app: the production schedule
 /// hands every AI host a live world-flag chain. A flag-gated Captain doctrine
 /// on the fully-backfilled player ship holds Red Alert down while the

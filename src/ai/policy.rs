@@ -353,6 +353,25 @@ pub struct AiPolicyState {
     pub rules: Vec<AiPolicyRule>,
     /// Outgoing transitions, evaluated once per eligible tick.
     pub transitions: Vec<AiPolicyTransition>,
+    /// Whether the leg this state flies yields its solved facing to a
+    /// channel-3 `ArcBearingRequest` (issue #918).
+    ///
+    /// `true` — the authored default, and the value every leg carried before
+    /// #918 — means a weapon family that cannot bear may take the facing: the
+    /// request replaces the leg's solved steering with a bow-on tracking
+    /// solution, which is the #673-#684 behaviour and the right answer for a
+    /// leg that is merely travelling.
+    ///
+    /// `false` says this leg has CHOSEN a heading and the choice is the whole
+    /// point of it — a ring tangent, a frozen escape heading — so a request
+    /// that arrives while it is flown is declined rather than obeyed.
+    ///
+    /// It lives on the STATE rather than on the rule because the unit a
+    /// designer commits to a heading in is the leg, and a state is what a leg
+    /// is. It follows that a STATELESS policy has no legs and therefore always
+    /// yields, which is what [`AiPolicy::leg_yields_to_arc_requests`] answers
+    /// for a helm with no authored doctrine at all.
+    pub yields_to_arc_requests: bool,
 }
 
 /// The opt-in state machine half of a policy (issue #882).
@@ -471,6 +490,32 @@ impl AiPolicy {
     /// The opt-in state machine, when this policy declares one (issue #882).
     pub fn machine(&self) -> Option<&AiPolicyMachine> {
         self.machine.as_ref()
+    }
+
+    /// Does the leg this policy is flying RIGHT NOW yield its solved facing to
+    /// a channel-3 `ArcBearingRequest` (issue #918)?
+    ///
+    /// `current_state` is the runtime state id the host is holding — `None`, or
+    /// a name no state answers to, for a policy that has no machine to be in a
+    /// leg of.
+    ///
+    /// Answers `true` for everything except an authored doctrine leg that says
+    /// otherwise, and that default is the whole of the #673-#684 guarantee: a
+    /// helm with no doctrine, a stateless policy, a hull whose machine has not
+    /// entered anything yet — none of them have chosen a heading, so all of
+    /// them still turn to bring a family that cannot bear onto its target.
+    ///
+    /// The question is asked of the HELM's own current leg and of nothing else.
+    /// It cannot see who raised the request, and there is deliberately no
+    /// parameter through which it could (AGENTS.md #6).
+    pub fn leg_yields_to_arc_requests(&self, current_state: Option<&str>) -> bool {
+        let Some(machine) = self.machine() else {
+            return true;
+        };
+        current_state
+            .and_then(|id| machine.state(id))
+            .map(|leg| leg.yields_to_arc_requests)
+            .unwrap_or(true)
     }
 
     /// Every `history(...)` atom this policy's guards contain, wherever they
@@ -797,6 +842,7 @@ mod tests {
     fn the_yaw_channel_resolves_all_four_distinct_mode_verbs() {
         let state = |id: &str, verb: AiPolicyVerb| AiPolicyState {
             id: id.into(),
+            yields_to_arc_requests: true,
             rules: vec![AiPolicyRule {
                 priority: 0,
                 channel: "yaw".into(),
@@ -870,6 +916,7 @@ mod tests {
                 states: vec![
                     AiPolicyState {
                         id: "orbit".into(),
+                        yields_to_arc_requests: true,
                         rules: vec![AiPolicyRule {
                             priority: 0,
                             channel: "yaw".into(),
@@ -880,6 +927,7 @@ mod tests {
                     },
                     AiPolicyState {
                         id: "torpedo_run".into(),
+                        yields_to_arc_requests: true,
                         rules: vec![AiPolicyRule {
                             priority: 0,
                             channel: "yaw".into(),
@@ -929,6 +977,7 @@ mod tests {
                 states: vec![
                     AiPolicyState {
                         id: "recover".into(),
+                        yields_to_arc_requests: true,
                         rules: Vec::new(),
                         transitions: vec![AiPolicyTransition {
                             priority: 0,
@@ -942,6 +991,7 @@ mod tests {
                     },
                     AiPolicyState {
                         id: "reenter".into(),
+                        yields_to_arc_requests: true,
                         rules: Vec::new(),
                         transitions: Vec::new(),
                     },
@@ -1534,6 +1584,7 @@ mod tests {
                 states: vec![
                     AiPolicyState {
                         id: "cruise".into(),
+                        yields_to_arc_requests: true,
                         // No rule fires here: cruising holds boost.
                         rules: Vec::new(),
                         transitions: vec![AiPolicyTransition {
@@ -1548,6 +1599,7 @@ mod tests {
                     },
                     AiPolicyState {
                         id: "surge".into(),
+                        yields_to_arc_requests: true,
                         rules: vec![AiPolicyRule {
                             priority: 0,
                             channel: "boost".into(),
@@ -1710,6 +1762,7 @@ mod tests {
                 states: vec![
                     AiPolicyState {
                         id: "start".into(),
+                        yields_to_arc_requests: true,
                         rules: Vec::new(),
                         transitions: vec![
                             AiPolicyTransition {
@@ -1726,11 +1779,13 @@ mod tests {
                     },
                     AiPolicyState {
                         id: "first".into(),
+                        yields_to_arc_requests: true,
                         rules: Vec::new(),
                         transitions: Vec::new(),
                     },
                     AiPolicyState {
                         id: "second".into(),
+                        yields_to_arc_requests: true,
                         rules: Vec::new(),
                         transitions: Vec::new(),
                     },
@@ -1812,6 +1867,7 @@ mod tests {
                 initial_memory: AiPolicyMemory::new(),
                 states: vec![AiPolicyState {
                     id: "idle".into(),
+                    yields_to_arc_requests: true,
                     rules: vec![AiPolicyRule {
                         priority: 0,
                         channel: "boost".into(),
@@ -1898,6 +1954,7 @@ mod tests {
                 states: vec![
                     AiPolicyState {
                         id: "acquire".into(),
+                        yields_to_arc_requests: true,
                         rules: vec![AiPolicyRule {
                             priority: 0,
                             channel: "yaw".into(),
@@ -1916,6 +1973,7 @@ mod tests {
                     },
                     AiPolicyState {
                         id: "inbound".into(),
+                        yields_to_arc_requests: true,
                         rules: vec![AiPolicyRule {
                             priority: 0,
                             channel: "yaw".into(),
@@ -1943,6 +2001,7 @@ mod tests {
                     },
                     AiPolicyState {
                         id: "escape".into(),
+                        yields_to_arc_requests: true,
                         rules: vec![AiPolicyRule {
                             priority: 0,
                             channel: "yaw".into(),
@@ -2110,6 +2169,7 @@ mod tests {
                 states: vec![
                     AiPolicyState {
                         id: "closing".into(),
+                        yields_to_arc_requests: true,
                         rules: Vec::new(),
                         transitions: vec![AiPolicyTransition {
                             priority: 0,
@@ -2123,6 +2183,7 @@ mod tests {
                     },
                     AiPolicyState {
                         id: "standing_off".into(),
+                        yields_to_arc_requests: true,
                         rules: vec![AiPolicyRule {
                             priority: 0,
                             channel: "longitudinal".into(),

@@ -56,7 +56,7 @@
 //! Everything here reads `assets/entities/*.toml` — the shipped content — so a
 //! failure names a hull and a block an author can open.
 
-use crate::ai::policy::{AiPolicy, AiPolicyVerb};
+use crate::ai::policy::{AiPolicy, AiPolicyState, AiPolicyVerb};
 use crate::ai::selector::{SelectorCandidate, SelfContext, TargetSelector};
 use crate::entities::config::{EntityConfig, FineSystemAiConfigToml, FineSystemAiSelectorToml};
 use crate::world::flags::AiFacts;
@@ -1491,14 +1491,198 @@ fn the_broadside_orbit_doctrine_rings_when_pressed_and_points_for_a_salvo() {
     );
 }
 
+/// One authored leg's declared answer to a channel-3 arc-bearing request
+/// (issue #918).
+fn leg_yields_to_arc_requests(p: &AiPolicy, leg: &str) -> bool {
+    p.machine()
+        .expect("the doctrine authors a state machine")
+        .state(leg)
+        .unwrap_or_else(|| panic!("the doctrine declares the `{leg}` leg"))
+        .yields_to_arc_requests
+}
+
+/// The `steering` copy of a class movement doctrine.
+fn steering_of(policies: Vec<(&'static str, AiPolicy)>) -> AiPolicy {
+    policies
+        .into_iter()
+        .find(|(axis, _)| *axis == "steering")
+        .expect("the doctrine authors a Steering machine")
+        .1
+}
+
+/// **The two COMMITTED legs in the fragment library decline channel-3
+/// arc-bearing requests; every travelling leg beside them still yields (issue
+/// #918).**
+///
+/// The precedence rule is authored data, not a Rust branch on the verb, and this
+/// is where that claim is checked against the files the fleet actually flies. A
+/// host that hardcoded "a combat orbit outranks Channel 3" would pass every
+/// behavioural test in the repo and would silently decide for the next doctrine
+/// somebody writes; the declaration is what keeps the decision the designer's.
+///
+/// The YIELDING half is the load-bearing one and is asserted leg by leg rather
+/// than in the aggregate. A fragment that declined on every leg would look
+/// correct in a duel and would quietly retire #673-#684: a cruiser that has not
+/// reached its ring yet, or a destroyer still lining up, must still turn to bring
+/// a family that cannot bear onto its target, exactly as a hull with no doctrine
+/// at all does.
+#[test]
+fn only_the_committed_legs_decline_a_channel_three_arc_bearing_request() {
+    let ring = steering_of(broadside_orbit_policies());
+    assert!(
+        !leg_yields_to_arc_requests(&ring, "orbit"),
+        "the broadside ring holds the target on the beam by construction, which no \
+         fixed fore tube can ever satisfy: a ring that yielded would be overwritten \
+         bow-on on every tick it was flown"
+    );
+    // `shadow` flies the identical `plan_recovery_orbit` tangent solver as
+    // `orbit`, so it is just as vulnerable to the bow-on overwrite and declines
+    // for the same reason (issue #918 followed up).
+    assert!(
+        !leg_yields_to_arc_requests(&ring, "shadow"),
+        "the standoff ring shares `orbit`'s tangent solver and would sawtooth the \
+         same way if left to yield"
+    );
+    for travelling in ["acquire", "torpedo_run"] {
+        assert!(
+            leg_yields_to_arc_requests(&ring, travelling),
+            "`{travelling}` is not a committed heading — it must leave the default \
+             standing and turn to bring a family to bear (#673-#684)"
+        );
+    }
+
+    let pass = steering_of(attack_pass_policies());
+    assert!(
+        !leg_yields_to_arc_requests(&pass, "escape"),
+        "the escape leg's whole point is the frozen heading, and #875 wrote that \
+         nothing about the target may cut its dwell short. A request that turns the \
+         hull back onto the ship it just passed is exactly that, by another route"
+    );
+    // `shadow` and `recover` both fly rings on the same `plan_recovery_orbit`
+    // tangent solver `escape`'s sibling doctrines fight on, so both decline too
+    // (issue #918 followed up).
+    for ring_leg in ["shadow", "recover"] {
+        assert!(
+            !leg_yields_to_arc_requests(&pass, ring_leg),
+            "`{ring_leg}` holds a ring via `hold_recovery_orbit`, which shares the \
+             fighting doctrines' tangent solver and would sawtooth the same way if \
+             left to yield"
+        );
+    }
+    for travelling in ["acquire", "inbound", "reenter"] {
+        assert!(
+            leg_yields_to_arc_requests(&pass, travelling),
+            "`{travelling}` tracks or holds against the target anyway — it has no \
+             separate heading to defend and must keep yielding"
+        );
+    }
+
+    // The declaration belongs to the axis that STEERS. The other copies of the
+    // same machine run the same legs and answer no facing request, and content
+    // validation rejects the declaration on them outright — so a fragment that
+    // mirrored it across the axes would fail to LOAD rather than diverge quietly.
+    for (axis, policy) in attack_pass_policies()
+        .into_iter()
+        .chain(broadside_orbit_policies())
+        .filter(|(axis, _)| *axis != "steering")
+    {
+        for leg in &policy.machine().expect("a doctrine machine").states {
+            assert!(
+                leg.yields_to_arc_requests,
+                "{axis}: leg `{}` declares an arc-request disposition on an axis that \
+                 does not steer",
+                leg.id
+            );
+        }
+    }
+}
+
+/// **Every shipped hull whose RESOLVED steering machine flies a ring or a
+/// frozen heading declines a channel-3 arc-bearing request on that leg,
+/// full stop (issue #918 followed up).**
+///
+/// [`only_the_committed_legs_decline_a_channel_three_arc_bearing_request`]
+/// checks two specific fragments by NAME — `orbit` on the broadside doctrine,
+/// `escape`/`shadow`/`recover` on the attack-pass one. This pin checks the
+/// same property the other way round and structurally, so it does not need to
+/// know a fragment's state names or even that the fragment exists: for every
+/// AI-bearing hull (`ai_hulls`, i.e. every hull that authors `[behaviour]`),
+/// walk every axis of its COMPOSED `[helm_console]` — the same six `*_ai`
+/// blocks `harrow_warhawk_authors_the_artillery_machine_on_both_travel_axes`
+/// (`src/entities/config.rs`) iterates by hand for one hull — and for every
+/// state any of whose rules emits `HoldCombatOrbit`, `HoldRecoveryOrbit` or
+/// `HoldCommittedHeading`, assert the state itself declares
+/// `yields_to_arc_requests = false`.
+///
+/// Walking the composed config rather than hand-listing "`orbit` on
+/// broadside, `escape`/`shadow`/`recover` on attack-pass, `shadow` on
+/// artillery, `recover` on the Harrow destroyer's own hand-authored
+/// doctrine, ..." is the whole point (review finding 6): a THIRD movement
+/// fragment, or a bespoke hull that authors one of these three verbs on a
+/// state and forgets the decline, fails HERE — on the hull it was authored
+/// on — rather than only in a fragment-specific pin that has never heard of
+/// it. `leg.rules` rather than the state's `id` is what is inspected,
+/// because the host reads which leg is being flown off the VERB and never
+/// off the name (every doctrine file in the fleet says so), so a pin keyed
+/// on ids would silently stop checking the day a state was renamed.
+#[test]
+fn every_ring_or_frozen_heading_leg_declines_arc_bearing_requests() {
+    let committed_verbs = |leg: &AiPolicyState| {
+        leg.rules.iter().any(|r| {
+            matches!(
+                &r.verb,
+                AiPolicyVerb::HoldCombatOrbit
+                    | AiPolicyVerb::HoldRecoveryOrbit
+                    | AiPolicyVerb::HoldCommittedHeading
+            )
+        })
+    };
+    for (stem, cfg) in ai_hulls() {
+        let Some(hc) = cfg.helm_console.as_ref() else {
+            continue;
+        };
+        for (axis, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref()),
+            ("steering_ai", hc.steering_ai.as_ref()),
+            ("lateral_ai", hc.lateral_ai.as_ref()),
+            ("vertical_ai", hc.vertical_ai.as_ref()),
+            ("impulse_ai", hc.impulse_ai.as_ref()),
+            ("boost_ai", hc.boost_ai.as_ref()),
+        ] {
+            let Some(ai) = ai else { continue };
+            let Some(machine) = policy(ai).machine().cloned() else {
+                continue;
+            };
+            for leg in &machine.states {
+                if committed_verbs(leg) {
+                    assert!(
+                        !leg.yields_to_arc_requests,
+                        "{stem}: {axis} leg `{}` flies a ring or a frozen heading \
+                         (`hold_combat_orbit` / `hold_recovery_orbit` / \
+                         `hold_committed_heading`) and must decline channel-3 \
+                         arc-bearing requests (issue #918) — left to yield it would \
+                         sawtooth in and out of its ring, or be dragged off its \
+                         committed heading, by a bow-on solution written over the \
+                         planner's own",
+                        leg.id
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// **The torpedo run opens on the hull's own readiness and is bounded on it too
 /// (issue #876 AC1).**
 ///
-/// The leg exists to own the channel-3 `ArcBearingRequest`: while a loaded tube
-/// cannot bear, `apply_arc_bearing_request` overwrites the doctrine's steering
-/// with a bow-on solution after the planner has already solved the ring tangent.
-/// A hull that points its own bow when it has a salvo satisfies that request by
-/// flying its own doctrine instead.
+/// The leg exists to own the channel-3 `ArcBearingRequest` where a doctrine can:
+/// while a loaded tube cannot bear, a request is raised, and before issue #918
+/// `apply_arc_bearing_request` overwrote the doctrine's steering with a bow-on
+/// solution after the planner had already solved the ring tangent. A hull that
+/// points its own bow when it has a salvo satisfies that request by flying its
+/// own doctrine instead — still the better answer on the ticks it covers, and it
+/// covers ticks the ring's #918 declaration does not: a hull with a salvo worth
+/// spending should point it, not merely refuse to be turned.
 ///
 /// Every guard below fails silently if it drifts:
 ///

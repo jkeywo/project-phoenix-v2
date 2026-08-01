@@ -725,6 +725,7 @@ entities:
         - This is an internal coordination state, not a player-authored objective.
         - "Weapon-family-aware (issue #767): the component carries the emitting family's usable ONLINE emitter arcs (`Vec<WeaponEmitterArc { facing_deg, arc_deg, range }>`), copied from the `ArcBearingRequest` payload by `process_coordination_lag`. `apply_arc_bearing_request` biases facing-only steering against those carried arcs — no longer a hard-coded phaser scan."
         - "Helm AI clears it when the target leaves visibility, leaves the range of every carried arc, or enters some carried arc (the emitting family can already bear) — the same geometry the emitter uses to decide whether to ask."
+        - "Issue #918: a doctrine leg may DECLINE the request instead of obeying it, by authoring `yields_to_arc_requests = false` on its current state — a ring tangent or a frozen escape heading the leg has already committed to. `apply_arc_bearing_request` then writes no steering at all for that tick, leaving the leg's own solved facing standing. Declining does not clear the request: nothing about the decline touches `PendingArcBearingRequest`, so it persists on the component exactly as any other un-acted-on request does, until the clearing geometry above resolves it or the ship transitions onto a leg that yields, which then honours it on the first tick it is current."
     architecture:
       classification: authoritative
       owner: helm-ai-operator

@@ -51,14 +51,16 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # ship it was fighting; in `probe_aggressor` that inverted the engagement, 64 dealt
 # / 0 taken uncomposed against 50 dealt / 136 taken composed.
 #
-# The fragment's `torpedo_run` leg is the fix, and it is a doctrine decision
-# rather than a precedence rule: `evaluate_family_arc_request` emits nothing for a
-# family in which some emitter is READY, so a hull that points its own bow when it
-# has a salvo ready satisfies the request by flying its own doctrine, and the ring
-# it returns to is the ring the planner solved. Whether a movement doctrine's
-# facing should ALSO outrank an arc-bearing request is a separate live question
-# for the destroyer's `escape` leg — issue #918 — and is deliberately not answered
-# here.
+# The fragment answers this in two places, and they are different answers to
+# different halves of it. The `torpedo_run` leg is a DOCTRINE decision:
+# `evaluate_family_arc_request` emits nothing for a family in which some emitter
+# is READY, so a hull that points its own bow when it has a salvo ready satisfies
+# the request by flying its own doctrine, and the ring it returns to is the ring
+# the planner solved. The `orbit` leg's `yields_to_arc_requests = false` (issue
+# #918) is a PRECEDENCE decision, and it covers the ticks the first cannot reach
+# — a hull on its ring with tubes it has no run-range for. The host asks the leg
+# the helm is flying, so the ring declines while `acquire`, which is only
+# travelling, still yields; nothing anywhere asks who sent the request.
 #
 # ── The ring converges; there is no controller bug ───────────────────────────
 #

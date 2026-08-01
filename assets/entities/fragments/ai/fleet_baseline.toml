@@ -78,6 +78,13 @@ verb = "actuate_desired_travel"
 
 # Helm yaw — the mirror of `engines_ai` on the facing axis: always actuate the
 # planner's desired facing.
+#
+# STATELESS, and therefore always yielding to a channel-3 `ArcBearingRequest`
+# (issue #918): a hull flying this baseline has no doctrine leg and so no chosen
+# heading to defend, and it turns to bring a weapon family that cannot bear onto
+# its target exactly as it has since #673-#684. Declining is a property of an
+# authored LEG — `yields_to_arc_requests = false` on a `[[...state]]` — so it is
+# a class movement fragment's decision to make, never the baseline's.
 
 [helm_console.steering_ai]
 

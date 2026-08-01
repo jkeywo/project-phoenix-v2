@@ -536,10 +536,20 @@ id = "inbound"
 
 [[helm_console.steering_ai.state]]
 id = "escape"
+# THE COMMITMENT IS THE LEG, so the leg keeps the facing (issue #918). A
+# channel-3 `ArcBearingRequest` overwrote the frozen heading outright — a bow-on
+# tracking solution written over the escape after the planner had solved it —
+# which on a hull flying away from the ship it just passed is a request to turn
+# straight back into it. "The target may not" bend this heading was the doctrine
+# from the start; this is what enforces it against Channel 3 as well.
+#
+# THIS leg only: `acquire` and `inbound` track the target anyway, leave the
+# default standing, and still turn to bring a family that cannot bear onto it.
+yields_to_arc_requests = false
 
   # THE commitment (AC2). The heading was frozen by the host at the instant this
   # transition committed; hazard avoidance may still bend it (AC3), the target
-  # may not.
+  # may not, and since #918 neither may a weapon that cannot bear.
   [[helm_console.steering_ai.state.rule]]
   priority = 0
   channel = "yaw"
@@ -568,6 +578,14 @@ id = "escape"
 # called anything.
 [[helm_console.steering_ai.state]]
 id = "recover"
+# THE RING NEEDS PROTECTING HERE TOO (issue #918 followed up) — this leg flies
+# the same `plan_recovery_orbit` tangent solver as `escape`'s frozen heading
+# above and is exactly as vulnerable to Channel 3's bow-on overwrite. See
+# `fragments/ai/movement_attack_pass.toml`'s `recover` state (this hull's own
+# doctrine is its hand-authored ancestor) for the identical case; this state
+# has only the one yaw rule (unconditional `hold_recovery_orbit`), so the
+# decline is unconditional too.
+yields_to_arc_requests = false
 
   [[helm_console.steering_ai.state.rule]]
   priority = 0

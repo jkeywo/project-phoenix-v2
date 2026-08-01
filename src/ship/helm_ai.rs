@@ -733,11 +733,49 @@ pub(crate) fn helm_ai_decision(
 ///
 /// Only while the target is in reach of some arc but no arc bears does it
 /// steer.
+///
+/// ## The leg's consent (issue #918)
+///
+/// `leg_yields` is the authored answer of the doctrine leg the helm is flying
+/// this tick — [`crate::ai::policy::AiPolicy::leg_yields_to_arc_requests`],
+/// resolved off the ship's OWN steering machine and nothing else. `false`
+/// DECLINES the request: the facing the planner solved stands, and the bow-on
+/// tracking solution below is never written.
+///
+/// Everything else about the request's life is unchanged by a decline —
+/// satisfaction and expiry are still evaluated, so a declined request clears
+/// when its GEOMETRY stops meaning anything (the target leaves visibility,
+/// leaves the range of every carried arc, or a carried arc already bears)
+/// rather than sitting stale until the hull happens to change leg. Only the
+/// steering write is gated, because only the steering write is the thing a
+/// committed heading cannot survive.
+///
+/// That geometry check reads `pending.arcs` — the emitting family's usable
+/// arc set AS OF THE TICK THE REQUEST WAS RAISED — and nothing here re-derives
+/// it. If the family that raised the request goes unusable afterwards (a
+/// torpedo tube drains its load, a bank is knocked offline) the request is
+/// never WITHDRAWN for that reason; it only ever clears on the geometry above.
+/// That hole predates #918 and this change does not close it — a declining
+/// leg only widens the window it is visible in, because the request now
+/// stands for as long as the leg keeps declining instead of being satisfied
+/// by an early turn onto it. Left as future work; withdrawal is deliberately
+/// not implemented here.
+///
+/// A decline is not a refusal to the *requester*, and nothing about a decline
+/// makes the emitter re-raise the request either — `tick_weapons_arc_request`
+/// is DEBOUNCED (`src/console/weapons/mod.rs:651-657`): it re-fires only on a
+/// change to the family, target, or usable-arc set, never on every tick the
+/// same miss persists. What carries the request across ticks is that nothing
+/// on a decline clears `PendingArcBearingRequest`: the request the last
+/// debounced emission set simply stands, unconsumed, until the hull enters a
+/// leg that yields — which then honours it on the very first tick it is
+/// current.
 fn apply_arc_bearing_request(
     steering: &mut f32,
     pending: Option<&mut PendingArcBearingRequest>,
     world_view: &crate::ai::WorldView,
     physics: &ShipPhysics,
+    leg_yields: bool,
 ) {
     let Some(pending) = pending else { return };
     let Some(bearing_uuid) = pending.target else {
@@ -771,7 +809,7 @@ fn apply_arc_bearing_request(
 
             if satisfied {
                 pending.target = None;
-            } else {
+            } else if leg_yields {
                 let dx = target_entity.position[0] - world_view.entity_pos[0];
                 let dz = target_entity.position[2] - world_view.entity_pos[2];
                 let dist = (dx * dx + dz * dz).sqrt();
@@ -3940,12 +3978,28 @@ pub(crate) fn ai_helm_steering(
         // ── Weapons->Helm arc-bearing request (issue #677) ───────────────
         // Gated on a live objective, matching the pre-#741 shape: with nothing
         // to pursue the ship holds its facing rather than turning to bear.
+        //
+        // ...and on the consent of the leg this helm is flying (issue #918).
+        // The request replaces `steering` outright with a bow-on tracking
+        // solution, which is right for a helm that is merely travelling and
+        // wrong for one whose doctrine has committed to a heading: on the
+        // cruiser's broadside ring the tubes can never bear from the tangent, so
+        // an obeyed request hauled the hull bow-on every tick and sawtoothed it
+        // through the enemy's envelope. The question asked is what THIS helm is
+        // doing — the authored leg, resolved from the ship's own steering
+        // machine — never who raised the request; admission has already stripped
+        // that and there is nothing here to branch on (AGENTS.md #6). A helm
+        // with no doctrine leg to defend answers `true` and behaves exactly as
+        // it did before.
+        let leg_yields =
+            policy.leg_yields_to_arc_requests(steering_state.map(|s| s.0.current.as_str()));
         if sf.has_objective {
             apply_arc_bearing_request(
                 &mut steering,
                 pending_bearing.as_deref_mut(),
                 &sf.merged_view,
                 physics,
+                leg_yields,
             );
         }
 
@@ -6647,6 +6701,14 @@ mod tests {
     }
 
     // ── #677: Weapons->Helm arc-bearing request ──────────────────────────────
+    //
+    // Every test in this block flies the FLEET BASELINE steering policy — the
+    // stateless `actuate_desired_facing` block `attach_shipped_ai_declarations`
+    // takes from shipped content — which is to say a helm with no authored
+    // doctrine leg at all. That is what makes them issue #918's preservation
+    // tests as well as #677's: a hull with nothing committed has no heading to
+    // defend and still turns to bring a family that cannot bear onto its target.
+    // Nothing below was relaxed to accommodate #918, and nothing below may be.
 
     #[test]
     fn helm_ai_folds_pending_arc_bearing_request_into_steering() {
@@ -11247,6 +11309,197 @@ verb = "engage_boost"
         );
     }
 
+    // ── #918: a committed leg keeps its facing; a travelling one still yields ──
+
+    /// A standing channel-3 arc-bearing request for `target`, from a family of
+    /// FIXED FORE emitters that reach a long way — the shape every hull in the
+    /// fleet raises, because a fore tube's reach is `speed * lifespan` and its
+    /// arc is 90 degrees, so it is effectively always in reach and easily out of
+    /// arc.
+    ///
+    /// Re-inserted rather than inserted once wherever a test runs several
+    /// ticks — not because Weapons re-raises it that way. `tick_weapons_arc_
+    /// request` is DEBOUNCED (`src/console/weapons/mod.rs:651-657`) and only
+    /// re-fires on a change to the family, target, or usable-arc set, never on
+    /// every tick the same miss persists. This bare fixture runs no real
+    /// Weapons system to raise the request at all, so the harness stands it up
+    /// directly; re-inserting on every tick is what keeps that self-contained
+    /// rather than leaning on a single insert to persist through however the
+    /// fixture is wired. It changes nothing a persisting request would not
+    /// already show — nothing about a decline clears `pending.target` on its
+    /// own — so a decline can never be mistaken for the request having quietly
+    /// expired.
+    fn stand_up_fore_arc_request(app: &mut App, target: uuid::Uuid) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(PendingArcBearingRequest {
+                target: Some(target),
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 90.0,
+                    range: 500.0,
+                }],
+            });
+    }
+
+    /// The yaw the ship's own DOCTRINE solved this tick, decoded from the shared
+    /// motion plan exactly as `ai_helm_steering` decodes it.
+    ///
+    /// This is the reference issue #918 asks the sawtooth to be measured
+    /// against: the doctrine's own solved heading, not a range. A hull carries
+    /// momentum either way, so a range assertion cannot tell a ring that was
+    /// overwritten from one that was merely shoved.
+    fn doctrine_steering(app: &mut App) -> f32 {
+        let ship = find_ship_entity(app);
+        let plan = app
+            .world()
+            .resource::<crate::ship::helm_planner::HelmMotionPlan>();
+        let sp = plan
+            .ships
+            .get(&ship)
+            .copied()
+            .expect("the planner published this ship's motion plan");
+        crate::ai::decode_steering_from_facing(sp.motion.desired_facing_local.to_array())
+    }
+
+    /// Whether the ship is still carrying an unanswered arc-bearing request.
+    fn arc_request_stands(app: &mut App) -> bool {
+        let ship = find_ship_entity(app);
+        app.world()
+            .get::<PendingArcBearingRequest>(ship)
+            .and_then(|p| p.target)
+            .is_some()
+    }
+
+    /// **Issue #918: the destroyer's `escape` leg holds its frozen heading under
+    /// a STANDING out-of-arc request — the case #875 documented as inviolable
+    /// and that nothing enforced.**
+    ///
+    /// The sibling of
+    /// `the_escape_leg_ignores_the_target_and_flies_the_frozen_heading`, and the
+    /// same fixture and pose, with one thing added: a channel-3 request for the
+    /// bogey that has just been swung hard onto the beam. Before #918 that
+    /// request replaced the escape's steering with a full bow-on tracking
+    /// solution — the target could not end the dwell but a gun that could not
+    /// bear could turn the hull straight back into it, which is the same thing
+    /// by a different route.
+    ///
+    /// Both halves are asserted, because either alone would pass on a bug:
+    /// the admitted yaw must be the yaw the planner solved for the FROZEN
+    /// heading, and the request must still be STANDING afterwards. A request
+    /// that had merely been satisfied would leave the first assertion true while
+    /// proving nothing about precedence.
+    #[test]
+    fn the_escape_leg_declines_a_standing_arc_bearing_request() {
+        let (mut app, uuid) = run_to_escape();
+        let frozen = pass_surface(&mut app).escape_heading_rad;
+
+        // Hard to starboard, exactly as the sibling test does: a bearing that
+        // saturates a tracking solution, and one no fore arc can cover.
+        set_bogey(&mut app, uuid, [400.0, 0.0, -260.0], 0.0, 0.0);
+        place_ship(&mut app, 0.0, -260.0, frozen, 20.0);
+        stand_up_fore_arc_request(&mut app, uuid);
+        tick(&mut app);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "the request must not change which leg is flown either"
+        );
+        assert!(
+            arc_request_stands(&mut app),
+            "the request must be DECLINED, not consumed: it is still out of arc and \
+             well within reach, so the only reason the hull did not turn must be the \
+             leg's own declaration"
+        );
+        let (admitted, solved) = (get_steering_input(&mut app), doctrine_steering(&mut app));
+        assert!(
+            (admitted - solved).abs() < 1e-3,
+            "the escape must fly the heading its own doctrine solved ({solved}), but the \
+             admitted yaw was {admitted}: the arc-bearing request overwrote a committed \
+             leg"
+        );
+        assert!(
+            admitted <= 0.0,
+            "and the sign says which way it was pulled — the bogey is hard to \
+             STARBOARD, so a hull obeying the request commands a saturated POSITIVE \
+             yaw; got {admitted}"
+        );
+    }
+
+    /// **Issue #918's other half, on the SAME hull and the SAME request: a leg
+    /// that is only travelling still turns to bring the family to bear
+    /// (#673-#684 preserved).**
+    ///
+    /// This is the control that makes the test above mean anything. `inbound`
+    /// leaves `yields_to_arc_requests` at its default, so the identical standing
+    /// request — same emitter arc, same bogey, same hull, same tick — takes the
+    /// facing. The two tests differ in exactly one thing: which leg the helm is
+    /// flying. Nothing about the requester differs, and there is nowhere in the
+    /// path it could (AGENTS.md #6).
+    #[test]
+    fn a_travelling_leg_still_turns_to_bear_under_the_same_request() {
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "inbound",
+            "the fixture must be on a TRAVELLING leg for this control to mean anything"
+        );
+
+        // The bogey dead ahead, so the doctrine's own solution needs no turn at
+        // all: any yaw at all is then attributable to the request.
+        set_bogey(&mut app, uuid, [0.0, 0.0, -200.0], 0.0, 0.0);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick(&mut app);
+        assert!(
+            get_steering_input(&mut app).abs() < 0.05,
+            "control condition: dead ahead the inbound leg commands no turn, got {}",
+            get_steering_input(&mut app)
+        );
+
+        // Now a contact off the starboard beam that no fore arc covers, with the
+        // hull still pointed at it... and the travelling leg turns to bear.
+        let bearing = uuid::Uuid::new_v4();
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid,
+                    name: Some(BOGEY.into()),
+                    position: [0.0, 0.0, -200.0],
+                    yaw: Some(0.0),
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: bearing,
+                    name: Some("beam contact".into()),
+                    position: [200.0, 0.0, -1.0],
+                    yaw: Some(0.0),
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+            ],
+        });
+        stand_up_fore_arc_request(&mut app, bearing);
+        tick(&mut app);
+
+        assert!(
+            get_steering_input(&mut app) > 0.05,
+            "a helm on a travelling leg must still turn to bring a family that cannot \
+             bear onto its target — the whole point of #673-#684 — got {}",
+            get_steering_input(&mut app)
+        );
+    }
+
     /// The escape leg outlives its target — which in combat is the ORDINARY
     /// case, because the pass is what kills the target.
     ///
@@ -13253,6 +13506,75 @@ verb = "engage_boost"
                 "the settled orbit must stay near the authored ring ({ring}); {label}                  the sweep it was at {range}"
             );
         }
+    }
+
+    /// **Issue #918: the settled ring flies the facing its own doctrine solved,
+    /// tick after tick, under a request that stands for every one of them.**
+    ///
+    /// The measurement is the admitted yaw against `doctrine_steering` — the
+    /// planner's own solution for this tick, decoded exactly as
+    /// `ai_helm_steering` decodes it — and deliberately NOT against the range to
+    /// the bogey. A hull carries momentum either way, so a radius that looks
+    /// steady proves nothing about whether the steering command was the
+    /// doctrine's; and #876 measured a ring that held a plausible radius for a
+    /// while precisely as Channel 3 was flying it.
+    ///
+    /// A settled ring is the WORST case for this and that is why it is the one
+    /// tested: the tangent puts the bogey on the beam by construction, so a
+    /// fixed fore arc can never bear and the request never self-satisfies. The
+    /// request is RE-INSERTED every tick by `stand_up_fore_arc_request` — not
+    /// because Weapons re-raises it that way (`tick_weapons_arc_request` is
+    /// debounced, `src/console/weapons/mod.rs:651-657`, and only re-fires on a
+    /// family/target/arc-set change) but because this bare fixture runs no real
+    /// Weapons system to raise it at all — and asserted still standing at the
+    /// end — a run that quietly satisfied it would show a clean heading and
+    /// mean nothing.
+    #[test]
+    fn the_settled_ring_keeps_its_solved_facing_under_a_standing_arc_request() {
+        let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
+        let (mut app, uuid) = run_to_orbit(ring);
+        assert_eq!(steering_state(&mut app), "orbit");
+        fly_for(&mut app, ORBIT_SETTLE_SECS);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "the fixture must still be on the ring before the request goes up"
+        );
+
+        let mut ring_ticks = 0_usize;
+        let mut overwritten = 0_usize;
+        let mut worst = 0.0_f32;
+        for _ in 0..((10.0 / HELM_AI_MAX_DT_SECS) as usize) {
+            stand_up_fore_arc_request(&mut app, uuid);
+            tick(&mut app);
+            if steering_state(&mut app) != "orbit" {
+                continue;
+            }
+            ring_ticks += 1;
+            let error = (get_steering_input(&mut app) - doctrine_steering(&mut app)).abs();
+            worst = worst.max(error);
+            if error > 1e-3 {
+                overwritten += 1;
+            }
+        }
+
+        assert!(
+            ring_ticks > 250,
+            "only {ring_ticks} of ~300 ticks were flown on the ring: this run did not \
+             measure the leg it is about"
+        );
+        assert_eq!(
+            overwritten, 0,
+            "{overwritten} of {ring_ticks} ring ticks were flown at a yaw the doctrine \
+             did not solve (worst {worst}). That is the sawtooth: a bow-on tracking \
+             solution written over the tangent after the planner had already solved it"
+        );
+        assert!(
+            arc_request_stands(&mut app),
+            "the request must still be STANDING — declined every tick rather than \
+             satisfied. A ring that had satisfied it would hold a clean heading for a \
+             reason that has nothing to do with this issue"
+        );
     }
 
     /// AC2, the spiral half: the cruiser MAINTAINS the authored range from

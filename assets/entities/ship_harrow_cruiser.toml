@@ -413,6 +413,19 @@ id = "acquire"
 
 [[helm_console.steering_ai.state]]
 id = "orbit"
+# THE RING IS THE MANOEUVRE, so the ring keeps the facing (issue #918). A settled
+# ring holds the target on the beam by construction — a bearing no fixed fore
+# tube can satisfy — so Channel 3 raises an `ArcBearingRequest` for the tube
+# family on every tick of it, and an obeyed request overwrote the tangent the
+# planner had already solved with a bow-on solution. The hull sawtoothed between
+# the two facings, in and out of its own authored radius, for as long as it
+# fought. Declining is what makes the ring flyable.
+#
+# THIS leg only: `acquire`, and `shadow` with nothing to stand off from, are
+# travelling legs. They leave the default standing and still turn to bring a
+# family that cannot bear onto its target, exactly as a hull with no doctrine
+# does.
+yields_to_arc_requests = false
 
   # THE manoeuvre. The host reads the leg off this verb — never off the state's
   # name — so these states could be called anything.

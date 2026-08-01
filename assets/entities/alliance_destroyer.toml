@@ -527,6 +527,57 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["red-alert"]
 
+# Contextual tutorial overlays (issue #921, on the #916 framework). The
+# Captain station is system-composed (captain + sensors families — issue
+# #825), so `state` triggers below read the generic
+# `systems.<system-id>.<field>` shape (see SystemStationConsolePayload in
+# gui/console-state.js), not a flat CaptainConsolePayload.
+[[station.tutorial]]
+id = "captain-welcome"
+title = "entity.alliance_destroyer.station.captain.tutorial.welcome.title"
+text = "entity.alliance_destroyer.station.captain.tutorial.welcome.text"
+anchor = "sensor-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "captain-camera"
+title = "entity.alliance_destroyer.station.captain.tutorial.camera.title"
+text = "entity.alliance_destroyer.station.captain.tutorial.camera.text"
+anchor = "camera-select"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "captain-sensors-target"
+title = "entity.alliance_destroyer.station.captain.tutorial.sensors_target.title"
+text = "entity.alliance_destroyer.station.captain.tutorial.sensors_target.text"
+anchor = "sensor-radar"
+trigger = { kind = "control_unused", control = "set_sensors_target" }
+
+[[station.tutorial]]
+id = "captain-objectives"
+title = "entity.alliance_destroyer.station.captain.tutorial.objectives.title"
+text = "entity.alliance_destroyer.station.captain.tutorial.objectives.text"
+anchor = "objective-list"
+trigger = { kind = "control_unused", control = "set_objective_priority" }
+
+[[station.tutorial]]
+id = "captain-red-alert"
+title = "entity.alliance_destroyer.station.captain.tutorial.red_alert.title"
+text = "entity.alliance_destroyer.station.captain.tutorial.red_alert.text"
+anchor = "red-alert"
+trigger = { kind = "control_unused", control = "set_red_alert" }
+
+# Contextual: fires once red alert is actually live, read straight off this
+# station's own composed payload (`systems.captain.red_alert` — captain,
+# red-alert and viewscreen all alias the same captain-family view).
+[[station.tutorial]]
+id = "captain-red-alert-active"
+priority = 10
+title = "entity.alliance_destroyer.station.captain.tutorial.red_alert_active.title"
+text = "entity.alliance_destroyer.station.captain.tutorial.red_alert_active.text"
+anchor = "sensor-radar"
+trigger = { kind = "state", path = "systems.captain.red_alert", op = "truthy" }
+
 [[station]]
 id = "helm"
 name = "Helm"
@@ -543,6 +594,64 @@ automated_systems = []
 [[station.rating]]
 name = "Simplified"
 automated_systems = ["helm-lateral-thrust"]
+
+# Contextual tutorial overlays (issue #916). Trigger vocabulary is DATA,
+# evaluated by gui/tutorial-state.js: `first_visit` shows until dismissed,
+# `control_unused` completes when the named console action is first used,
+# `state` gates on a field of this console's own payload (HelmConsolePayload —
+# see gui/console-state.js). `title`/`text` are strings.csv ids; `anchor`
+# names a DOM element id in gui/destroyer/helm.html; higher `priority`
+# preempts the intro queue (contextual event tips jump ahead). `id` only
+# needs to be unique within THIS station's [[station.tutorial]] list — the
+# client scopes all dismissal/used bookkeeping per station (`<station>/<id>`
+# keys), so two stations may author the same id without sharing state.
+[[station.tutorial]]
+id = "helm-welcome"
+title = "entity.alliance_destroyer.station.helm.tutorial.welcome.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.welcome.text"
+anchor = "helm-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "helm-joystick"
+title = "entity.alliance_destroyer.station.helm.tutorial.joystick.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.joystick.text"
+anchor = "helm-joystick"
+trigger = { kind = "control_unused", control = "set_helm" }
+
+[[station.tutorial]]
+id = "helm-lateral"
+title = "entity.alliance_destroyer.station.helm.tutorial.lateral.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.lateral.text"
+anchor = "lateral-thrust-joystick"
+trigger = { kind = "control_unused", control = "set_lateral_thrust" }
+
+[[station.tutorial]]
+id = "helm-impulse"
+title = "entity.alliance_destroyer.station.helm.tutorial.impulse.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.impulse.text"
+anchor = "impulse-btn"
+trigger = { kind = "control_unused", control = "start_impulse_charge" }
+
+# Contextual: shows only while boost is actually available, retires the first
+# time the player boosts (the shared `control` completion gate).
+[[station.tutorial]]
+id = "helm-boost"
+priority = 5
+title = "entity.alliance_destroyer.station.helm.tutorial.boost.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.boost.text"
+anchor = "boost-btn"
+trigger = { kind = "state", path = "boost_enabled", op = "truthy", control = "set_boost" }
+
+# Contextual: fires with the red-alert hostile-arc overlay (#874) so a
+# first-time helm learns what the shaded wedges mean the moment they appear.
+[[station.tutorial]]
+id = "helm-red-alert"
+priority = 10
+title = "entity.alliance_destroyer.station.helm.tutorial.red_alert.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.red_alert.text"
+anchor = "helm-radar"
+trigger = { kind = "state", path = "red_alert", op = "truthy" }
 
 [[station]]
 id = "tactical"
@@ -561,6 +670,54 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["phaser-omni"]
 
+# Contextual tutorial overlays (issue #921, on the #916 framework). Tactical
+# is system-composed (weapons + navigation + comms families — issue #825),
+# so `state` triggers read `systems.<system-id>.<field>`; anchors are DOM
+# ids in gui/destroyer/tactical.html (the `comms-toggle` button, not the
+# hidden comms overlay panel it opens, so the tip is visible before the
+# player has ever opened Comms).
+[[station.tutorial]]
+id = "tactical-welcome"
+title = "entity.alliance_destroyer.station.tactical.tutorial.welcome.title"
+text = "entity.alliance_destroyer.station.tactical.tutorial.welcome.text"
+anchor = "tactical-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "tactical-lock-target"
+title = "entity.alliance_destroyer.station.tactical.tutorial.lock_target.title"
+text = "entity.alliance_destroyer.station.tactical.tutorial.lock_target.text"
+anchor = "tactical-radar"
+trigger = { kind = "control_unused", control = "set_target" }
+
+[[station.tutorial]]
+id = "tactical-phaser"
+title = "entity.alliance_destroyer.station.tactical.tutorial.phaser.title"
+text = "entity.alliance_destroyer.station.tactical.tutorial.phaser.text"
+anchor = "phasers-controls"
+trigger = { kind = "control_unused", control = "fire_phaser" }
+
+[[station.tutorial]]
+id = "tactical-blaster"
+title = "entity.alliance_destroyer.station.tactical.tutorial.blaster.title"
+text = "entity.alliance_destroyer.station.tactical.tutorial.blaster.text"
+anchor = "blasters-controls"
+trigger = { kind = "control_unused", control = "fire_blaster" }
+
+[[station.tutorial]]
+id = "tactical-torpedo"
+title = "entity.alliance_destroyer.station.tactical.tutorial.torpedo.title"
+text = "entity.alliance_destroyer.station.tactical.tutorial.torpedo.text"
+anchor = "torpedo-controls"
+trigger = { kind = "control_unused", control = "fire_torpedo" }
+
+[[station.tutorial]]
+id = "tactical-comms"
+title = "entity.alliance_destroyer.station.tactical.tutorial.comms.title"
+text = "entity.alliance_destroyer.station.tactical.tutorial.comms.text"
+anchor = "comms-toggle"
+trigger = { kind = "control_unused", control = "hail" }
+
 [[station]]
 id = "engineering"
 name = "Engineering"
@@ -577,6 +734,51 @@ automated_systems = []
 [[station.rating]]
 name = "Simplified"
 automated_systems = ["repair"]
+
+# Contextual tutorial overlays (issue #921, on the #916 framework).
+# Engineering is system-composed (shields + power + repair families — issue
+# #825), so `state` triggers read `systems.<system-id>.<field>`. The damage
+# tip reads the repair view's ship-wide `overall_hull.pct` (not just this
+# station's own systems) so it fires on ANY hull damage, matching the
+# `ph-hull-integrity` bar it anchors to.
+[[station.tutorial]]
+id = "engineering-welcome"
+title = "entity.alliance_destroyer.station.engineering.tutorial.welcome.title"
+text = "entity.alliance_destroyer.station.engineering.tutorial.welcome.text"
+anchor = "hull-integrity"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "engineering-power"
+title = "entity.alliance_destroyer.station.engineering.tutorial.power.title"
+text = "entity.alliance_destroyer.station.engineering.tutorial.power.text"
+anchor = "power-controls"
+trigger = { kind = "control_unused", control = "set_power" }
+
+[[station.tutorial]]
+id = "engineering-shields"
+title = "entity.alliance_destroyer.station.engineering.tutorial.shields.title"
+text = "entity.alliance_destroyer.station.engineering.tutorial.shields.text"
+anchor = "shield-facings"
+trigger = { kind = "control_unused", control = "set_shield_focus" }
+
+[[station.tutorial]]
+id = "engineering-repair"
+title = "entity.alliance_destroyer.station.engineering.tutorial.repair.title"
+text = "entity.alliance_destroyer.station.engineering.tutorial.repair.text"
+anchor = "repair-teams"
+trigger = { kind = "control_unused", control = "dispatch_repair_team" }
+
+# Contextual: fires the moment ANY system on the ship takes damage (below
+# 90% of the ship-wide hull aggregate), not gated to a Std/Simplified rating
+# split — repair is Engineering's job regardless of what else is automated.
+[[station.tutorial]]
+id = "engineering-damage"
+priority = 10
+title = "entity.alliance_destroyer.station.engineering.tutorial.damage.title"
+text = "entity.alliance_destroyer.station.engineering.tutorial.damage.text"
+anchor = "hull-integrity"
+trigger = { kind = "state", path = "systems.repair.overall_hull.pct", op = "lt", value = 0.9 }
 
 [[system]]
 id = "captain"

@@ -121,12 +121,13 @@
 # hundreds of units, so it is effectively never out of reach. On the receiving
 # side `apply_arc_bearing_request` (`src/ship/helm_ai.rs`) does not bias the
 # doctrine's facing, it OVERWRITES the steering command with a full bow-on
-# tracking solution AFTER the planner has already solved the ring tangent, for
-# every yaw verb including `hold_combat_orbit`. A ring with loaded tubes and no
-# torpedo leg therefore gets dragged bow-on by Channel 3, snaps back to the
-# tangent when a tube bears, and is dragged bow-on again — a sawtooth that walks
-# the hull tens of units in and out of its authored radius, through whatever
-# envelope the other ship is shooting from.
+# tracking solution AFTER the planner has already solved the ring tangent —
+# which it did for every yaw verb, `hold_combat_orbit` included, until issue #918
+# gave a leg the right to decline. A ring with loaded tubes and no torpedo leg
+# got dragged bow-on by Channel 3, snapped back to the tangent when a tube bore,
+# and was dragged bow-on again — a sawtooth that walked the hull tens of units in
+# and out of its authored radius, through whatever envelope the other ship was
+# shooting from.
 #
 # So the bow-on phase is authored HERE, as a leg of the doctrine, rather than
 # left to arrive from Channel 3. `evaluate_family_arc_request` emits nothing for
@@ -135,24 +136,36 @@
 # its own doctrine, and the ring it returns to is the ring the planner solved.
 # The two halves are the same manoeuvre described once.
 
-# ── What this leg does NOT fix, stated plainly ───────────────────────────────
+# ── What this leg absorbs, and what closes the rest (issue #918) ─────────────
 #
-# It absorbs the request; it does not remove it. The two conditions are not the
-# same shape: the request fires while a loaded tube cannot bear, and this leg
-# opens while a loaded salvo is worth pointing at. Between them sits every tick
-# where the hull is on its ring with tubes it has no run-range for — a reloading
-# hull just outside `torpedo_run_range`, most obviously — and on those ticks
-# Channel 3 still overwrites the steering. Nothing a doctrine can author closes
-# that gap, because closing it means pretending an opportunity exists in order to
-# satisfy a request; the honest fix is a precedence rule saying a class movement
-# doctrine's facing outranks an arc-bearing request, which is ISSUE #918 and is
-# deliberately not attempted here. #918's other half is the destroyer's `escape`
-# leg, whose frozen heading has exactly the same problem and no torpedo run to
-# hide behind.
+# The torpedo leg absorbs the request; it does not remove it. The two conditions
+# are not the same shape: the request fires while a loaded tube cannot bear, and
+# this leg opens while a loaded salvo is worth pointing at. Between them sits
+# every tick where the hull is on its ring with tubes it has no run-range for — a
+# reloading hull just outside `torpedo_run_range`, most obviously — and on those
+# ticks Channel 3 used to overwrite the steering anyway.
 #
-# What that residual costs is a THROTTLE decision, not a facing one — see
-# `combat_orbit_speed` below, which is the knob an including hull sizes against
-# it.
+# Nothing a doctrine could author closed that gap, because closing it meant
+# pretending an opportunity existed in order to satisfy a request. #918 closed it
+# from the other end instead: the `orbit` state below declares
+# `yields_to_arc_requests = false`, and the host asks the leg the helm is
+# CURRENTLY flying whether a request may take its facing. The ring says no; the
+# hull's travelling legs say nothing and therefore yes, so a cruiser that is not
+# yet on its ring still turns to bring a family to bear exactly as it always did.
+# It is a property of the leg, never of who asked — a human Tactical officer's
+# request and an AI seat's are the same request by the time the helm sees it
+# (AGENTS.md #6). #918's other half is the destroyer's `escape` leg in
+# `movement_attack_pass.toml`, whose frozen heading had the identical problem and
+# no torpedo run to hide behind; it carries the identical declaration.
+#
+# The torpedo leg is not made redundant by any of this and is not folded away: a
+# ring that declines a request still cannot fire a fore tube, and pointing the
+# bow when a salvo is worth pointing it is a manoeuvre the doctrine wants for its
+# own sake.
+#
+# What the ring's remaining cost is, is a THROTTLE decision rather than a facing
+# one — see `combat_orbit_speed` below, which is the knob an including hull sizes
+# against it.
 #
 # ── The entry condition: what "a torpedo shot is available" reads as ─────────
 #
@@ -582,6 +595,29 @@ orbit_direction = 1.0
 
 [[helm_console.steering_ai.state]]
 id = "shadow"
+# THE STANDOFF RING NEEDS THE SAME PROTECTION AS THE FIGHTING RING (issue #918
+# followed up). This leg's `hold_recovery_orbit` rule flies the identical
+# `plan_recovery_orbit` tangent solver `orbit`'s `hold_combat_orbit` does
+# (`src/ai/core.rs`), so it is exactly as vulnerable to Channel 3's bow-on
+# overwrite: a standoff ring that yielded would sawtooth in and out of its
+# own radius precisely as an undeclined fighting ring did.
+#
+# Declined on the WHOLE state rather than only the `hold_recovery_orbit`
+# rule — `yields_to_arc_requests` is a state-level field, so a per-rule
+# decline cannot be authored. The coarser grain costs nothing here: the
+# state's other rule, `actuate_desired_facing` (priority 0), fires only on
+# the tick `fact(target_valid) < 1` — exactly when the ring rule's own guard
+# fails and THIS ship has no resolvable target of its own. Verified against
+# `tick_weapons_arc_request` (`src/console/weapons/mod.rs`) rather than
+# assumed: a request can exist only once this ship's own frozen combat lock
+# resolves to a live position (`live_entity_xz`), and `helm_shared_target_view`
+# folds that same lock's target into the Helm's merged view unconditionally —
+# regardless of this ship's own radar range — precisely so Helm and Weapons
+# never disagree about it (issue #702). So on every tick a request against
+# this ship's own lock could stand, `target_valid` is already true and the
+# ring rule is the one flying, not the fallback — the decline never has a
+# live request to refuse while `actuate_desired_facing` is the one running.
+yields_to_arc_requests = false
 
   # The defensive ring — but only against something to hold a ring AROUND. With
   # no target the standoff has no centre and the host has no reach to derive one
@@ -629,6 +665,19 @@ id = "acquire"
 # THE MANOEUVRE.
 [[helm_console.steering_ai.state]]
 id = "orbit"
+# THE RING IS THE MANOEUVRE, so the ring keeps the facing (issue #918). A settled
+# ring holds the target on the beam by construction, which is a bearing no fixed
+# fore tube can ever satisfy, so Channel 3 raises a request for the tube family
+# on every tick this leg is flown. Declining it is what makes the ring flyable:
+# a leg that yielded here would be overwritten by a bow-on tracking solution
+# after the planner had already solved the tangent, and the hull would sawtooth
+# between the two facings for as long as it fought.
+#
+# Only THIS leg declines, and it declines only while it is the current one. The
+# hull's travelling legs (`acquire`, and `shadow` with nothing to stand off from)
+# leave the default standing and turn to bring a family onto its target exactly
+# as a hull with no doctrine does.
+yields_to_arc_requests = false
 
   [[helm_console.steering_ai.state.rule]]
   priority = 0

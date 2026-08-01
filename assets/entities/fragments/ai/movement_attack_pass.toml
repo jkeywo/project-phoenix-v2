@@ -397,6 +397,18 @@ orbit_direction = 1.0
 
 [[helm_console.steering_ai.state]]
 id = "shadow"
+# THE STANDOFF RING NEEDS THE SAME PROTECTION AS THE FIGHTING LEG BELOW (issue
+# #918 followed up) — see `movement_broadside_orbit.toml`'s `shadow` state for
+# the full reasoning behind declining the WHOLE state rather than only the
+# `hold_recovery_orbit` rule. The short version: this leg's other rule,
+# `actuate_desired_facing` (priority 0), only runs on the tick
+# `fact(target_valid) < 1`, and that is verified — against
+# `tick_weapons_arc_request` in `src/console/weapons/mod.rs`, not assumed — to
+# be exactly the tick no request against THIS ship's own combat lock can
+# stand: `helm_shared_target_view` folds a resolvable lock's target into the
+# merged view unconditionally, which is what makes `target_valid` true in the
+# first place (issue #702).
+yields_to_arc_requests = false
 
   # The defensive ring — but only against something to hold a ring AROUND. With
   # no target the standoff has no centre and the host has no reach to derive one
@@ -469,9 +481,22 @@ id = "inbound"
 
 [[helm_console.steering_ai.state]]
 id = "escape"
+# THE COMMITMENT IS THE LEG, so the leg keeps the facing (issue #918). "Nothing
+# about the target may cut this dwell short" was written into this doctrine from
+# the start and nothing enforced it: a channel-3 `ArcBearingRequest` overwrote
+# the frozen heading with a bow-on tracking solution for any family that could
+# not bear — which, on a hull flying away from the ship it has just passed, is
+# most of them — and hauled the destroyer straight back into the guns it had
+# just flown through. Declining the request is the enforcement.
+#
+# The declaration sits on THIS leg alone. `acquire` and `inbound` track the
+# target anyway and leave the default standing, so a destroyer still turns to
+# bring a family to bear on its way in, exactly as a hull with no doctrine does.
+yields_to_arc_requests = false
 
   # THE commitment. The heading was frozen by the host at the instant this
-  # transition committed; hazard avoidance may still bend it, the target may not.
+  # transition committed; hazard avoidance may still bend it, the target may not,
+  # and since #918 neither may a weapon that cannot bear.
   [[helm_console.steering_ai.state.rule]]
   priority = 0
   channel = "yaw"
@@ -495,6 +520,12 @@ id = "escape"
 
 [[helm_console.steering_ai.state]]
 id = "recover"
+# THE RING NEEDS PROTECTING HERE TOO (issue #918 followed up): this leg flies
+# the same `plan_recovery_orbit` tangent solver as the fighting ring and the
+# `shadow` standoff above, so it is exactly as vulnerable to Channel 3's
+# bow-on overwrite. Unlike `shadow` this state has only the one yaw rule
+# (unconditional `hold_recovery_orbit`), so the decline is unconditional too.
+yields_to_arc_requests = false
 
   [[helm_console.steering_ai.state.rule]]
   priority = 0

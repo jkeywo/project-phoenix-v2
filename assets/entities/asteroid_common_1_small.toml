@@ -14,29 +14,9 @@ length = 0.0
 hull_integrity = 30
 
 [mesh]
+# The LOD ladder for this model lives in its rig sidecar (issue #914).
 model = "assets/models/asteroid_common_1.glb"
 variant = "small"
-shape = "sphere"
-radius = 2
-colour = [0.55, 0.5, 0.42]
-
-# Distance-based LOD: full GLB up close, decimated steps, shared sphere far away.
-[[mesh.lod]]
-max_distance = 50.0
-model = "assets/models/asteroid_common_1.glb"
-variant = "small"
-
-[[mesh.lod]]
-max_distance = 100.0
-model = "assets/models/asteroid_common_1_lod1.glb"
-variant = "small"
-
-[[mesh.lod]]
-max_distance = 150.0
-model = "assets/models/asteroid_common_1_lod2.glb"
-variant = "small"
-
-[[mesh.lod]]
 shape = "sphere"
 radius = 2
 colour = [0.55, 0.5, 0.42]

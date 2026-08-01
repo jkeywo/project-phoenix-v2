@@ -86,6 +86,25 @@ export function worldPathFor(catalog, selection) {
   return entry ? entry.world : null;
 }
 
+/**
+ * Template paths the locked scenario's catalog entry offers (issue #917).
+ *
+ * The catalog entry's `ships` list is already curation-filtered by the Rust
+ * side (`world::manifest::build_catalog`) — non-empty only when the manifest
+ * curated the world down to a subset, otherwise it's every ship the world
+ * offers. Either way this is exactly the allowlist `wasm_load_world` needs to
+ * restrict which hulls get preloaded: empty (unresolved selection, or a world
+ * with no `[[available_ships]]`) means unrestricted, matching
+ * `ScenarioEntry.ships`'s own semantics. Count-based, not keyed on any hull
+ * name.
+ */
+export function curatedShipsFor(catalog, selection) {
+  const sel = normalizeSelection(selection);
+  const entry = findScenario(catalog, sel.scenario_id);
+  const ships = (entry && entry.ships) || [];
+  return ships.map((s) => s.template_path);
+}
+
 // Expose for classic-script consumers (server.html is not a module).
 if (typeof window !== 'undefined') {
   window.scenarioArbiter = {
@@ -95,5 +114,6 @@ if (typeof window !== 'undefined') {
     selectPlayerShip,
     isComplete,
     worldPathFor,
+    curatedShipsFor,
   };
 }

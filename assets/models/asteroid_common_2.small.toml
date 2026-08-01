@@ -9,3 +9,35 @@ max = [ 2, 1.3260189421783068, 1.8244785181089165 ]
 size = [ 3.982563763793883, 2.6520378843566137, 3.6424968299743563 ]
 
 [markers]
+
+# Distance-based LOD (issue #914): full GLB up close, two decimated steps, then
+# a shared procedural sphere far away. Levels omit `variant`, `radius` and
+# `colour` so each rock inherits them from the entity's own flat `[mesh]`.
+# The two decimated steps declare how they are regenerated (issue #919):
+#   node scripts/generate-lods.mjs asteroid_common_2
+[[lod]]
+max_distance = 50.0
+model = "assets/models/asteroid_common_2.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/asteroid_common_2_lod1.glb"
+
+[lod.generate]
+source = "assets/models/asteroid_common_2.glb"
+ratio = 0.25
+error = 0.01
+texture_size = 512
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/asteroid_common_2_lod2.glb"
+
+[lod.generate]
+source = "assets/models/asteroid_common_2.glb"
+ratio = 0.05
+error = 0.1
+texture_size = 256
+
+[[lod]]
+shape = "sphere"

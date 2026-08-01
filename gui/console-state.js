@@ -69,6 +69,7 @@
  * @param {{ x?: number, position?: number[] }} e
  */
 import { t } from './strings.js';
+import { buildTutorialState } from './tutorial-state.js';
 
 /**
  * Display name for a station id.
@@ -1522,12 +1523,43 @@ function withStationDamage(consoleName, state, json) {
   }
 }
 
+/**
+ * Merge the contextual tutorial block (issue #916) into the built console
+ * JSON as `tutorial`, evaluating this station's TOML-authored overlay
+ * definitions (`state.stationTutorials`, from Welcome) against the
+ * client-local progress (`state.tutorialProgress`) and the payload itself —
+ * so `state`-kind triggers reference exactly the fields the console renders.
+ * Cross-cutting like `withStationDamage` above: every console gets it, and
+ * a station that authored no overlays gets `tutorial: null`. `consoleName`
+ * also scopes every progress lookup (`<station>/<id>` keys — see
+ * gui/tutorial-state.js), so stations never share dismissal state.
+ */
+export function withTutorialOverlay(consoleName, state, json) {
+  try {
+    const obj = JSON.parse(json);
+    obj.tutorial = buildTutorialState(
+      (state.stationTutorials || {})[consoleName] || [],
+      state.tutorialProgress,
+      obj,
+      consoleName,
+    );
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
 if (typeof window !== 'undefined') {
   // Station labels for the inline client.html script (lobby chips, console
   // title) — the tab-bar CONSOLE_LABEL map was deleted with the tab bar (#827).
   window.stationDisplayName = stationDisplayName;
   window.buildConsoleState = function buildConsoleState(consoleName, state) {
-    return withStationDamage(consoleName, state, buildConsoleStateInner(consoleName, state));
+    const inner = buildConsoleStateInner(consoleName, state);
+    return withTutorialOverlay(
+      consoleName,
+      state,
+      withStationDamage(consoleName, state, inner),
+    );
   };
   window.buildConsoleStateInner = function buildConsoleStateInner(consoleName, state) {
     // Post issue #618: `consoleName` is a lowercase station id (from each

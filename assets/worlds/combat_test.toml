@@ -202,13 +202,20 @@ id = "ice-moon"
 name = "world.entity.ice_moon.name"
 transform = { relative_to = "gas-giant", offset = [125.0, 0.0, 40.0] }
 
+# The two belts are authored as separate field entities but spawn through
+# ONE composed density evaluator (#913): every field contributes its density
+# weighted by `weight`, a single streaming window evaluates each world cell
+# exactly once, and wherever fields overlap the blend spawns each rock once
+# instead of once per field. `shape = "torus"` selects the explicit annulus
+# eligibility (cells whose bounding box overlaps the ring).
+
 # Inner asteroid belt around the star, r=200..300. Forms cover near the
 # centre of the playspace; the player can hide in or peek out of it.
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
 id = "inner-belt"
 transform = { position = [0.0, 0.0, 0.0] }
-overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0 } }
+overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0, weight = 1.0, shape = "torus" } }
 
 # Outer asteroid belt, r=800..1000. Sits between the starbase and the
 # enemy spawn anchors (all at r >= 1000), so attackers must fly through
@@ -217,12 +224,19 @@ overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0 } }
 template_path = "assets/entities/asteroid_field_main.toml"
 id = "outer-belt"
 transform = { position = [0.0, 0.0, 0.0] }
-overrides = { asteroid_field = { inner_radius = 800.0, outer_radius = 1000.0 } }
+overrides = { asteroid_field = { inner_radius = 800.0, outer_radius = 1000.0, weight = 1.0, shape = "torus" } }
 
 # Player ship — selected from the lobby ship picker. The [[available_ships]]
 # entries drive the lobby UI; [player_spawn] sets the spawn position once
-# the player enters the game. The legacy [[entity]] + spawn_on = "game_start"
-# block is replaced by this pair so all three Alliance hulls are accessible.
+# the player enters the game. The [[entity]] + spawn_on = "game_start" block
+# below is NOT replaced by this pair — spawn_game_start_entities still needs
+# a game-start "ship" entity to anchor position/uuid/tags on, it just discards
+# that entity's own EntityConfig in favour of the lobby-selected template
+# (server_app.rs spawn_game_start_entities). Its template_path must therefore
+# stay a hull this world's own [[available_ships]] always preloads: keep it in
+# sync with available_ships[0] (the destroyer) so a curated single-hull
+# manifest (issue #917, assets/scenarios.demo.toml) never has to fetch a hull
+# outside its curated allowlist just to spawn this placeholder.
 
 [[available_ships]]
 template_path = "assets/entities/alliance_destroyer.toml"
@@ -248,9 +262,12 @@ position = [400.0, 0.0, 200.0]
 # Player ship entity — spawned by spawn_game_start_entities when the game starts.
 # The [player_spawn] section above overrides the position below. The actual ship
 # template is determined by the player's lobby selection (PendingShipConfig), which
-# is applied to this entity at spawn time.
+# is applied to this entity at spawn time. template_path here matters only as a
+# fallback (no lobby selection, e.g. the ?scenario=<path> dev bypass) and to give
+# spawn_game_start_entities a "ship"-tagged EntityConfig to key off of — kept as
+# available_ships[0] (see the comment above [[available_ships]]).
 [[entity]]
-template_path = "assets/entities/alliance_cruiser.toml"
+template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"
 transform = { position = [400.0, 0.0, 200.0] }
 spawn_on = "game_start"

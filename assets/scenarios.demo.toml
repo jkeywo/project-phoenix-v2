@@ -1,0 +1,24 @@
+# Demo scenario manifest (issue #917).
+#
+# A curated alternate to `assets/scenarios.toml`: same `[[scenario]]` schema
+# (shared with the mod-pack manifests from #759/#760 — see that file's header
+# comment), listing only the scenarios and per-scenario playable hulls the
+# public demo build should offer. Loaded INSTEAD OF the base manifest when the
+# host is started with `?manifest=assets/scenarios.demo.toml`; dev/default
+# launches (no query param) keep fetching the base manifest untouched, so the
+# full catalogue is unaffected.
+#
+# Curation never edits the referenced world TOML: `combat_test.toml` still
+# authors all four Alliance hulls in its own `[[available_ships]]` list. The
+# optional `ships` field below is an allowlist of `template_path` values —
+# the pre-load catalog (`world::manifest::build_catalog`) filters the world's
+# ship list down to just these, in the world's own authored order, and
+# `wasm_get_scenario_catalog` is what both the host UI and connected phones
+# read. A single curated ship also makes the lobby ship picker resolve
+# straight to it (gui/ship-picker.js / the pre-load arbiter auto-select),
+# without a hull-specific code branch anywhere.
+
+[[scenario]]
+id = "combat_test"
+world = "assets/worlds/combat_test.toml"
+ships = ["assets/entities/alliance_destroyer.toml"]

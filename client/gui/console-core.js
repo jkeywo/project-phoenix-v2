@@ -50,6 +50,10 @@
 import './strings-boot.js';
 import { applyToDom } from './strings.js';
 import { mountHelp } from './help-panel.js';
+// Registers <ph-tutorial-overlay> (issue #916) so every console gets the
+// contextual tutorial overlay without per-file HTML; Node-safe (guarded
+// definition), so plain-Node test imports of this module stay fine.
+import './components/ph-tutorial-overlay.js';
 
 export function initConsole({ name, render }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
@@ -85,6 +89,27 @@ export function initConsole({ name, render }) {
     ? new BroadcastChannel('phoenix-console-state')
     : null;
 
+  // ── Contextual tutorial overlay (issue #916) ───────────────────────────
+  // Every console renders the tutorial block for free: the parent merges a
+  // `tutorial` field into each payload (withTutorialOverlay in
+  // gui/console-state.js), and this lazily mounts <ph-tutorial-overlay> the
+  // first time a payload actually carries one. No per-console HTML needed —
+  // authoring `[[station.tutorial]]` in the ship TOML is the whole job.
+  var _tutorialEl = null;
+  function _updateTutorialOverlay(s) {
+    if (typeof document === 'undefined' || typeof customElements === 'undefined') return;
+    if (!_tutorialEl) {
+      if (!s || !s.tutorial) return; // nothing to show yet — don't mount
+      _tutorialEl = document.createElement('ph-tutorial-overlay');
+      // Mounted after _wireComponents ran at init, so repair the sendAction
+      // reference by hand like _wireComponents would have.
+      _tutorialEl.sendAction = sendAction;
+      var host = document.querySelector('.frame') || document.body || document.documentElement;
+      host.appendChild(_tutorialEl);
+    }
+    _tutorialEl.state = (s && s.tutorial) || null;
+  }
+
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────
   _root.__updateConsole = function(consoleName, stateJson) {
     var s;
@@ -93,6 +118,7 @@ export function initConsole({ name, render }) {
       return;
     }
     render(s);
+    _updateTutorialOverlay(s);
   };
 
   // ── BroadcastChannel receive path (ADR-0001 §3 target 4) ───────────────

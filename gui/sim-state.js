@@ -173,6 +173,21 @@ export class ClientSimState {
      * state ONLY — the client never mutates it or authors commands from it.
      */
     this.shipManual = null;
+    /**
+     * Contextual tutorial overlay definitions per station (issue #916), from
+     * Welcome `ship_config.station_tutorials` — TOML-authored `[[station.
+     * tutorial]]` blocks carried verbatim. Evaluated per push by
+     * `withTutorialOverlay` in gui/console-state.js.
+     */
+    this.stationTutorials = {};
+    /**
+     * Client-LOCAL tutorial progress (issue #916): which overlays the player
+     * has dismissed and which console actions they have used. Not server
+     * state — hydrated from localStorage by gui/tutorial-state.js and
+     * PRESERVED across Welcome resets (a reconnect must not replay dismissed
+     * tips), which is why this is the one field reset() keeps.
+     */
+    this.tutorialProgress = this.tutorialProgress || { dismissed: {}, used: {} };
   }
 
   /**
@@ -232,6 +247,7 @@ export class ClientSimState {
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
         this.hostileArcColor   = sc.hostile_arc_color   ?? this.hostileArcColor;
+        this.stationTutorials  = sc.station_tutorials   || {};
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
         if (world) {

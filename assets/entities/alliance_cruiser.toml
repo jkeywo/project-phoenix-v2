@@ -1005,28 +1005,48 @@ verb = "grant_torpedo_round"
 # ── The ring, and the range it is actually sized against ─────────────────────
 #
 # 22 units, which is a long way inside the 40-unit `beam_range` both phaser banks
-# author — and the margin is not caution, it is the reach this hull actually has
-# when nobody is sitting at Sensors.
+# author — and the margin is not caution, it is the reach this hull STILL has once
+# its battery reserve is spent.
 #
 # A phaser's effective reach is `beam_range * ModifierSlot::RadarRange`, and that
 # slot is driven by the SENSORS power group (`apply_power_modifiers_from_read_state`).
-# The fleet-baseline Power policy authors rules for the `helm` and `weapons`
-# channels and NONE for `sensors`, so on a fully backfilled hull the sensors group
-# sits at level 1, contributing `-0.5`; `ShipModifiers::rebuild_cache` folds a
+# Sensors at level 1 contributes `-0.5`; `ShipModifiers::rebuild_cache` folds a
 # negative sum as `1 / (1 + |sum|)`, so the slot resolves to 0.667 and the banks
 # reach 26.7 units, not 40. Measured, not inferred: the fore bank reports
-# `OutOfRange` at 26.98 and fires at 22.11 in `probe_aggressor`.
+# `OutOfRange` at 26.98 and fires at 22.11 in `probe_aggressor`, and the bow hold
+# brackets it from both sides — flown at `torpedo_bearing_speed = 0`, opening
+# `torpedo_run_range` out parks the hull at a chosen range, and swept over 40 s it
+# deals 80 parked at 26.3-28.3 and ZERO parked at 27.4-29.2. That is `40 * 0.667`,
+# and nowhere near 40.
 #
-# So 40 is the reach a Sensors officer can unlock and 26.7 is the reach an
-# AI-crewed hull has, and a fighting ring authored against the first number puts
-# the target outside the guns for the whole engagement.
+# Before issue #923 that was the ONLY reach a backfilled hull ever had: no
+# authored policy in the tree carried a `sensors` channel, so the group never left
+# its resting level 1. The fleet baseline now raises it to 2 at red alert — read
+# `fragments/ai/fleet_baseline.toml`'s power header before touching any range in
+# this file — so the hull has TWO reaches and the ring is sized against the
+# shorter:
 #
-# That 26.7 is BRACKETED by measurement rather than only derived. The bow hold is
-# flown at `torpedo_bearing_speed = 0`, so opening `torpedo_run_range` out parks
-# the hull at a chosen range; swept on `probe_aggressor` over 40 s, parked at
-# 26.3-28.3 the hull still deals 80, and parked at 27.4-29.2 it deals ZERO. The
-# reach is therefore somewhere in 26.3-27.4, which is where `40 * 0.667` sits and
-# is nowhere near 40.
+#     40.0   at combat stations, while the battery holds above the sensor
+#            reserve — about fourteen seconds of continuous red alert
+#     26.7   below that reserve, and whenever the alert is down
+#
+# Re-checked for #923 on the shipped policy rather than assumed. Ring and torpedo
+# gate swept together, `probe_aggressor` 30 s plus `probe_duel` 45 s, seeds 1-10:
+#
+#     ring 22 gate 25 → aggressor 76   duel 10/10, 38.2 dealt / 176.0 taken
+#     ring 26 gate 29 → aggressor 29   duel 10/10, 38.3 / 175.9
+#     ring 30 gate 33 → aggressor 29   duel  9/10, 37.1 / 186.2
+#     ring 34 gate 37 → aggressor 46   duel  9/10, 41.1 / 186.7
+#     ring 38 gate 41 → aggressor 50   duel 10/10, 41.6 / 193.3
+#
+# Every ring authored against the 40 collapses the aggressor probe, because that
+# probe OUTLASTS the reserve: a hull holding 26-38 units is inside its guns for
+# the first fourteen seconds and outside them for the remaining sixteen. So the
+# ring stays at 22 and the reason it stays has changed — it is no longer "the only
+# reach this hull has", it is "the reach it still has when the reserve is gone".
+# What #923 buys this hull is not a wider ring but a faster opening: same ring,
+# `probe_aggressor` 67 damage before and 71 after, because the run-in now opens
+# fire at 40 instead of closing to 26.7 first.
 #
 # ── The throttle, and why the class default is not kept ──────────────────────
 #
@@ -1095,8 +1115,11 @@ verb = "grant_torpedo_round"
 #
 # ── The torpedo run's range gate ─────────────────────────────────────────────
 #
-# 25 units: inside the 26.3-27.4 the beams actually reach, and just outside the
-# 21.8-22.0 the hull holds against a passive target.
+# 25 units: inside the 26.3-27.4 the beams reach on the LOW rung of the sensor
+# ladder above — the reach this hull keeps for the whole engagement rather than
+# only while its reserve lasts — and just outside the 21.8-22.0 the hull holds
+# against a passive target. Sized against the low rung for the same reason the
+# ring is, and swept with it in the #923 table above.
 #
 # Authoring it TIGHTER than the range the hull settles at is the failure that
 # matters — the leg never opens, and the hull flies a ring nothing ever

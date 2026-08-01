@@ -1167,6 +1167,20 @@ verb = "grant_torpedo_round"
 # outside the 40-unit close-defence phasers, which join in only if it closes;
 # nothing in the doctrine gives ground when it does.
 #
+# Both numbers are UNCHANGED by issue #923 and both were re-checked against it,
+# for opposite reasons. A blaster's range is not scaled by
+# `ModifierSlot::RadarRange` at all — only beams and the Tactical radar horizon
+# are — so the envelope this band is sized against never moved. The phaser clause
+# above did: before #923 those banks reached 26.7 rather than 40, so a target held
+# at 45 was not "just outside" the close-defence guns, it was nineteen units
+# outside them, and the sentence was aspirational. With the fleet baseline raising
+# sensors at red alert it is now a true description of the hull at combat stations.
+# Measured, `--side-a battleship`, 120 s, seeds 1-3: against `ship_harrow_cruiser`
+# one victory and two timeouts taking 880-888 becomes three victories taking
+# 82-120; against `ship_harrow_warhawk` three victories either way, 345 taken down
+# to 324; against `ship_harrow_destroyer` the kill takes longer than 120 s where it
+# used to fit (955 dealt against 1032) but lands on every seed by 180 s.
+#
 # The band still lies inside the impulse drive's default cruise window (engage
 # 200, cancel 40), which is what makes the fragment's `impulse_ai` idle
 # load-bearing on this hull rather than superstition.

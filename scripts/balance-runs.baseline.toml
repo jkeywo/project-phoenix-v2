@@ -11,9 +11,32 @@
 # batches are comparable; changing them invalidates the recorded baseline.
 # For exploratory sweeps, copy scripts/balance-runs.example.toml instead.
 #
-# Recorded baseline — commit b208d9aa, 192 runs (12 seeds x 16 ordered pairs):
-#   87 wins / 89 losses / 4 draws / 12 timeouts
+# Recorded baseline — at #895 + #897, 192 runs (12 seeds x 16 ordered pairs):
+#   78 wins / 56 losses / 46 draws / 12 timeouts, 0 failed
 # Re-record this line whenever an accepted balance change moves it.
+#
+# This figure is the ONE re-record for two changes, on purpose. #895 put the
+# whole simulation on a fixed logical tick and #897 swapped the generator
+# (`rand`'s SmallRng -> `vellum_rng::Pcg32`); each invalidates every recorded
+# run on its own, and re-recording them separately would have produced two
+# baselines neither of which any single change could be attributed to. The
+# previous figure (87/89/4/12 at commit b208d9aa) is the last one measured
+# before either landed. The visible shift is draws: 4 -> 46, almost all of it
+# out of the losses column. The shape of the shift is consistent with the
+# fixed tick; the two changes were re-recorded together per #897's
+# coordination requirement and the split between them was not measured. Where
+# it shows up: `destroyer_vs_destroyer` and `cruiser_vs_destroyer` — the
+# evenly matched pairs — are now 12/12 draws instead of resolving inside the
+# 90 s window, the same pairing where `probe_duel.toml` needed a resolving
+# seed re-picked under #895. That location is descriptive, not causal: a
+# generator swap alone also re-rolls which system each hit lands on, and
+# nothing here isolates which of the two changes — or what combination —
+# produced the standoffs.
+#
+# Both of those are behaviour-neutral infrastructure changes, so this is a
+# re-record, NOT an accepted balance change: nothing here says the classes are
+# tuned differently. The next batch that alters NPC flight or firing compares
+# against these numbers.
 
 seeds       = 12                         # seeds 1..12
 sim_seconds = 90                         # long enough for a decision in most pairs

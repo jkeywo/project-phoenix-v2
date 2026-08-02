@@ -118,7 +118,8 @@ entities:
       title: Seeded Simulation RNG
       summary: Sim-wide seeded RNG resource exposing per-subsystem streams derived from the master seed and a stream name, replacing the OS-seeded damage-distribution sites and entity/asteroid uuid generation, so a seeded headless run is byte-identically reproducible on the same binary and machine.
       rationale:
-        - "Streams derive from splitmix64(master + fnv1a64(stream_name)), keyed by name not discriminant, so adding or reordering consumers never shifts an existing site's sequence. Seed precedence is --seed > world [global] seed > a randomly drawn seed; the resolved seed and its provenance are always echoed in the report, and --seed implies the single-threaded deterministic scheduler."
+        - "Each stream is a vellum_rng::Pcg32 built as seeded(master, fnv1a64(stream_name)) — the master seeds the generator, the name-derived hash selects the PCG stream — so streams are disjoint by construction rather than offsets into one sequence, and are keyed by name not discriminant, so adding or reordering consumers never shifts an existing site's sequence. Seed precedence is --seed > world [global] seed > a randomly drawn seed; the resolved seed and its provenance are always echoed in the report, and --seed implies the single-threaded deterministic scheduler."
+        - "The generator is the fleet crate rather than rand's SmallRng (#897) because Pcg32 is Serialize: the six stream positions can leave the process, which is what lets a world snapshot resume a run from where it got to instead of replaying it from tick zero. rand remains a dependency for the cosmetic, deliberately unseeded generators outside this boundary."
     architecture:
       kind: determinism-source
       authority: authoritative
@@ -136,7 +137,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Simulation RNG State
-      summary: The resolved master seed, its provenance (cli / world / random), and the per-stream generators.
+      summary: The resolved master seed, its provenance (cli / world / random), and the per-stream generators. Capturable and restorable as SimRngState, which is what a world snapshot stores so a restored run resumes each stream at its exact position.
     architecture:
       classification: authoritative
       owner: sim-rng
@@ -144,7 +145,7 @@ entities:
     implementation:
       status: declared
       paths: [src/sim_rng.rs]
-      symbols: [SimRng]
+      symbols: [SimRng, SimRngState]
       tests: [cargo test, tests/rng_determinism.rs]
 
   - component: run-outcome-classifier

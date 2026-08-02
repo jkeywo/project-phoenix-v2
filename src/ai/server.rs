@@ -2067,7 +2067,7 @@ verb = "fire_blaster"
 
         // 50 HP out of 100 HP = 0.5 fraction
         let mut hull = SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
-        let mut rng = rand::rng();
+        let mut rng = crate::sim_rng::unseeded_test_rng();
         hull.apply_damage(50.0, &mut rng);
 
         let entity = app

@@ -1723,7 +1723,7 @@ mod tests {
 
         let mut hull =
             crate::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
-        let mut rng = rand::rng();
+        let mut rng = crate::sim_rng::unseeded_test_rng();
         hull.apply_damage(damage, &mut rng);
 
         let mut queue = RepairRequestQueue::default();

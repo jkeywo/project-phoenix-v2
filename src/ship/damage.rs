@@ -1,8 +1,30 @@
 use crate::messages::SystemId;
 use crate::shield::ShieldSystem;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use vellum_rng::Pcg32;
+
+/// A uniform `f32` in `[0, 1)` from one 32-bit draw.
+///
+/// `Pcg32` deliberately implements no `rand` traits, so there is no
+/// `random::<f32>()` to call and the conversion is written here, once, where
+/// the weighted damage roll below can be read against it (issue #897).
+///
+/// An `f32` has a 24-bit significand, so 24 bits is exactly what can be kept
+/// without rounding: `>> 8` leaves an integer in `0..2^24`, and multiplying by
+/// `2^-24` maps it onto the 2^24 evenly spaced representable multiples of
+/// `2^-24` across `[0, 1)`. Both operands are powers of two and the numerator
+/// is exactly representable, so every product is exact — no rounding, no
+/// platform variation, and `1.0` is unreachable. That last part is load-bearing
+/// for the callers: they scale by a total and walk the systems subtracting, and
+/// a draw of exactly `1.0` would fall off the end of the list every time.
+///
+/// The *high* 24 bits are the ones kept. PCG's XSH-RR output permutation makes
+/// the whole word equally good, so this is a convention rather than a
+/// correction — but it is the convention the sequence is now recorded against.
+fn unit_f32(rng: &mut Pcg32) -> f32 {
+    (rng.next_u32() >> 8) as f32 * (1.0 / 16_777_216.0)
+}
 
 // ── DamageTier ────────────────────────────────────────────────────────────────
 
@@ -75,11 +97,7 @@ pub fn apply_damage_with_shields(
 ///
 /// - `hull_damage_applied`: what was actually absorbed by systems
 /// - `ship_destroyed`: true when all systems have reached 0 HP after this hit
-pub fn apply_hull_damage(
-    hull: &mut SystemHull,
-    amount: f32,
-    rng: &mut impl rand::Rng,
-) -> (f32, bool) {
+pub fn apply_hull_damage(hull: &mut SystemHull, amount: f32, rng: &mut Pcg32) -> (f32, bool) {
     let before = hull.total_current();
     hull.apply_damage(amount, rng);
     let hull_damage = before - hull.total_current();
@@ -272,7 +290,7 @@ impl SystemHull {
     /// more likely to absorb the next hit). Damage spills to further weighted
     /// selections when a system is exhausted. Systems already at 0 HP are
     /// never targeted.
-    pub fn apply_damage(&mut self, mut amount: f32, rng: &mut impl Rng) {
+    pub fn apply_damage(&mut self, mut amount: f32, rng: &mut Pcg32) {
         while amount > 0.0 {
             let total: f32 = self
                 .order
@@ -287,7 +305,7 @@ impl SystemHull {
             // Weighted selection: generate r in [0, total), subtract each
             // system's HP in order; choose the first one that drives r
             // negative.
-            let mut r = rng.random::<f32>() * total;
+            let mut r = unit_f32(rng) * total;
             let mut chosen_id: Option<SystemId> = None;
             for id in &self.order {
                 let entry = self
@@ -544,7 +562,7 @@ impl ShipArcHull {
     /// Apply `amount` of damage distributed across arcs above 0 HP, weighted
     /// by remaining HP — same policy as [`SystemHull::apply_damage`]. Damage
     /// spills to further weighted selections when an arc is exhausted.
-    pub fn apply_damage(&mut self, mut amount: f32, rng: &mut impl Rng) {
+    pub fn apply_damage(&mut self, mut amount: f32, rng: &mut Pcg32) {
         while amount > 0.0 {
             let total: f32 = self
                 .order
@@ -556,7 +574,7 @@ impl ShipArcHull {
             if total == 0.0 {
                 break;
             }
-            let mut r = rng.random::<f32>() * total;
+            let mut r = unit_f32(rng) * total;
             let mut chosen_id: Option<String> = None;
             for id in &self.order {
                 let entry = self
@@ -614,6 +632,18 @@ impl ShipArcHull {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // These tests want *a* generator, not a particular sequence — the
+    // distribution they assert on holds for any of them. `damage.rs` is one
+    // of the crate's pure, Bevy-free modules (AGENTS.md #10); `sim_rng` is
+    // not (it imports `bevy::prelude::Resource` for the `SimRng` resource),
+    // so borrowing its `unseeded_test_rng` here coupled this module's tests
+    // to a Bevy-adjacent one. Building the `Pcg32` locally instead keeps that
+    // layering clean, and a literal (rather than OS-drawn) seed makes these
+    // fixtures themselves deterministic run to run.
+    fn test_rng() -> Pcg32 {
+        Pcg32::seeded(1337, 0)
+    }
 
     // ── split_damage_for_pierce helper ────────────────────────────────────
 
@@ -713,7 +743,7 @@ mod tests {
     #[test]
     fn apply_hull_damage_zero_damage_no_change() {
         let mut hull = single_console_hull(100.0);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let (applied, _destroyed) = crate::damage::apply_hull_damage(&mut hull, 0.0, &mut rng);
         assert_eq!(applied, 0.0);
         assert!((hull.total_current() - 100.0).abs() < 1e-6);
@@ -722,7 +752,7 @@ mod tests {
     #[test]
     fn apply_hull_damage_fractional_accumulates() {
         let mut hull = single_console_hull(100.0);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let (applied, _destroyed) = crate::damage::apply_hull_damage(&mut hull, 3.5, &mut rng);
         assert!((applied - 3.5).abs() < 1e-6, "applied={}", applied);
         assert!((hull.total_current() - 96.5).abs() < 1e-6);
@@ -731,7 +761,7 @@ mod tests {
     #[test]
     fn apply_hull_damage_also_applies_to_hull() {
         let mut hull = single_console_hull(100.0);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         apply_hull_damage(&mut hull, 10.0, &mut rng);
         assert!((hull.total_current() - 90.0).abs() < 1e-6);
     }
@@ -739,7 +769,7 @@ mod tests {
     #[test]
     fn station_hull_can_be_initialised_with_custom_hp_and_absorbs_damage() {
         let mut station_hull = single_console_hull(80.0);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let (applied, _destroyed) = apply_hull_damage(&mut station_hull, 30.0, &mut rng);
         assert!((applied - 30.0).abs() < 1e-6, "applied={}", applied);
         assert!((station_hull.total_current() - 50.0).abs() < 1e-6);
@@ -748,7 +778,7 @@ mod tests {
     #[test]
     fn station_hull_reaches_zero_on_destruction() {
         let mut station_hull = single_console_hull(50.0);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         apply_hull_damage(&mut station_hull, 100.0, &mut rng);
         assert_eq!(
             station_hull.total_current(),
@@ -760,7 +790,7 @@ mod tests {
     #[test]
     fn apply_hull_damage_returns_ship_destroyed_false_when_hp_remains() {
         let mut hull = single_console_hull(100.0);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let (_applied, destroyed) = apply_hull_damage(&mut hull, 10.0, &mut rng);
         assert!(!destroyed, "ship should not be destroyed when HP remains");
     }
@@ -768,7 +798,7 @@ mod tests {
     #[test]
     fn apply_hull_damage_returns_ship_destroyed_true_when_all_consoles_at_zero() {
         let mut hull = single_console_hull(20.0);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let (_applied, destroyed) = apply_hull_damage(&mut hull, 100.0, &mut rng);
         assert!(
             destroyed,
@@ -779,7 +809,7 @@ mod tests {
     #[test]
     fn apply_hull_damage_spillover_fires_destroyed_after_second_console_wiped() {
         let mut hull = SystemHull::from_config(&[(sid("helm"), 5.0), (sid("tactical"), 10.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let (_applied, destroyed) = apply_hull_damage(&mut hull, 20.0, &mut rng);
         assert!(
             destroyed,
@@ -867,7 +897,7 @@ mod tests {
     #[test]
     fn system_hull_is_destroyed_only_when_all_at_zero() {
         let mut hull = four_console_hull();
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(1000.0, &mut rng); // wipe everything
         assert!(hull.is_destroyed());
     }
@@ -876,7 +906,7 @@ mod tests {
     #[test]
     fn apply_damage_reduces_total_hp() {
         let mut hull = four_console_hull();
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(10.0, &mut rng);
         assert!(near(hull.total_current(), 90.0));
     }
@@ -887,7 +917,7 @@ mod tests {
         // Build hull with one console at very low HP so it depletes first.
         // Use a seeded RNG to control which console is chosen.
         let mut hull = SystemHull::from_config(&[(sid("helm"), 5.0), (sid("tactical"), 100.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         // Apply 110 damage — should wipe both consoles (5 + 105 spill to Tactical)
         hull.apply_damage(110.0, &mut rng);
         assert!(hull.is_destroyed(), "all consoles should be at 0");
@@ -898,7 +928,7 @@ mod tests {
     #[test]
     fn restore_heals_only_targeted_console() {
         let mut hull = four_console_hull();
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(100.0, &mut rng); // wipe all
         hull.restore(&sid("helm"), 10.0);
         // Only Helm should have HP restored
@@ -932,7 +962,7 @@ mod tests {
     fn weighted_selection_favours_higher_hp_console() {
         // Tactical has 99× more HP than Helm, so it should absorb ~99% of hits.
         let mut hull = SystemHull::from_config(&[(sid("helm"), 1.0), (sid("tactical"), 99.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let mut tactical_hits = 0u32;
         let trials = 10_000;
         for _ in 0..trials {
@@ -972,7 +1002,7 @@ mod tests {
     fn tier_is_damaged_below_damaged_threshold() {
         // Default damaged_threshold = 0.75. 74% of 100 → Damaged.
         let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         // Directly set HP to 74 by restoring after wiping.
         hull.apply_damage(100.0, &mut rng); // wipe to 0
         hull.restore(&sid("helm"), 74.0); // 74/100 = 0.74 < 0.75 → Damaged
@@ -983,7 +1013,7 @@ mod tests {
     fn tier_is_disabled_below_disabled_threshold() {
         // Default disabled_threshold = 0.25. 24% of 100 → Disabled.
         let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(100.0, &mut rng); // wipe to 0
         hull.restore(&sid("helm"), 24.0); // 24/100 = 0.24 < 0.25 → Disabled
         assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Disabled);
@@ -992,7 +1022,7 @@ mod tests {
     #[test]
     fn tier_is_destroyed_at_zero_hp() {
         let mut hull = SystemHull::from_config(&[(sid("helm"), 25.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(100.0, &mut rng);
         assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Destroyed);
     }
@@ -1006,7 +1036,7 @@ mod tests {
             debuff_magnitude: 0.15,
         };
         let mut hull = SystemHull::from_config_with_tiers(&[(sid("helm"), 100.0, cfg)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
 
         // 60% → still Operational (above 50% threshold).
         hull.apply_damage(100.0, &mut rng);
@@ -1028,7 +1058,7 @@ mod tests {
     fn tier_transitions_correctly_with_damage() {
         // Track the tier as the console takes progressive damage.
         let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
 
         // Full HP → Operational.
         assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Operational);
@@ -1077,7 +1107,7 @@ mod tests {
     fn debuff_magnitude_for_damaged_console_returns_config_value() {
         // 50% HP → Damaged tier → returns tier_config.debuff_magnitude (default 0.15).
         let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(100.0, &mut rng);
         hull.restore(&sid("helm"), 50.0); // 50% < 75% threshold → Damaged
         assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Damaged);
@@ -1097,7 +1127,7 @@ mod tests {
             debuff_magnitude: 0.30,
         };
         let mut hull = SystemHull::from_config_with_tiers(&[(sid("helm"), 100.0, cfg)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(100.0, &mut rng);
         hull.restore(&sid("helm"), 50.0); // 50% → Damaged
         let debuff = hull.debuff_magnitude_for(&sid("helm"));
@@ -1111,7 +1141,7 @@ mod tests {
     fn debuff_magnitude_for_destroyed_console_returns_zero() {
         // 0 HP → Destroyed → no partial debuff (fully offline).
         let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         hull.apply_damage(100.0, &mut rng);
         assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Destroyed);
         let debuff = hull.debuff_magnitude_for(&sid("helm"));
@@ -1173,7 +1203,7 @@ mod tests {
     #[test]
     fn arc_hull_apply_damage_reduces_total_hp() {
         let mut hull = four_arc_hull();
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let before: f32 = hull.iter().map(|(_, e)| e.current).sum();
         hull.apply_damage(10.0, &mut rng);
         let after: f32 = hull.iter().map(|(_, e)| e.current).sum();
@@ -1248,7 +1278,7 @@ mod tests {
                 },
             ),
         ]);
-        let mut rng = rand::rng();
+        let mut rng = test_rng();
         let mut aft_hits = 0u32;
         let trials = 10_000;
         for _ in 0..trials {

@@ -290,7 +290,9 @@ mod tests {
             .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap();
         // Wipe then restore to exact HP.
-        hull_component.0.apply_damage(1_000_000.0, &mut rand::rng());
+        hull_component
+            .0
+            .apply_damage(1_000_000.0, &mut crate::sim_rng::unseeded_test_rng());
         hull_component.0.restore(&system_id, hp);
     }
 

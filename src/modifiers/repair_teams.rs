@@ -361,7 +361,7 @@ mod tests {
         // Damage it down to `current` by applying the difference.
         let dmg = 25.0 - current;
         if dmg > 0.0 {
-            let mut rng = rand::rng();
+            let mut rng = crate::sim_rng::unseeded_test_rng();
             h.apply_damage(dmg, &mut rng);
         }
         h
@@ -546,7 +546,7 @@ mod tests {
     fn two_teams_operate_independently() {
         let mut hull = SystemHull::from_config(&[(sid("helm"), 25.0), (sid("tactical"), 25.0)]);
         // Damage both systems
-        let mut rng = rand::rng();
+        let mut rng = crate::sim_rng::unseeded_test_rng();
         hull.apply_damage(10.0, &mut rng);
         hull.apply_damage(10.0, &mut rng);
 
@@ -757,7 +757,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         // Build a hull with helm at 0 HP (Destroyed).
         let mut hull = SystemHull::from_config(&[(sid("helm"), 25.0)]);
-        let mut rng = rand::rng();
+        let mut rng = crate::sim_rng::unseeded_test_rng();
         hull.apply_damage(1000.0, &mut rng); // wipe to 0
         assert_eq!(
             hull.tier_for(&sid("helm")),

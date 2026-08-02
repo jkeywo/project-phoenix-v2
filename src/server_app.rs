@@ -4441,7 +4441,7 @@ station = "pilot"
     }
 
     fn apply_hull_damage(app: &mut App, amount: f32) {
-        let mut rng = rand::rng();
+        let mut rng = crate::sim_rng::unseeded_test_rng();
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -6762,7 +6762,7 @@ station = "pilot"
         let leak = apply_damage_with_shields(absorbed.round() as i32, 0.0, &mut shields);
         let total_hull = pierced + leak as f32;
         if total_hull > 0.0 {
-            let rng = &mut rand::rng();
+            let rng = &mut crate::sim_rng::unseeded_test_rng();
             apply_hull_damage(&mut hull, total_hull, rng);
         }
         assert!(
@@ -6798,7 +6798,7 @@ station = "pilot"
             0
         };
         let total_hull = pierced + leak as f32;
-        let rng = &mut rand::rng();
+        let rng = &mut crate::sim_rng::unseeded_test_rng();
         apply_hull_damage(&mut hull, total_hull, rng);
         assert!(
             (hull.total_current() - 90.0).abs() < 1e-6,
@@ -6826,7 +6826,7 @@ station = "pilot"
         let (pierced, absorbed) = split_damage_for_pierce(damage, 0.3);
         let leak = apply_damage_with_shields(absorbed.round() as i32, 0.0, &mut shields);
         let total_hull = pierced + leak as f32;
-        let rng = &mut rand::rng();
+        let rng = &mut crate::sim_rng::unseeded_test_rng();
         apply_hull_damage(&mut hull, total_hull, rng);
         assert!(
             (hull.total_current() - 97.0).abs() < 1e-6,

@@ -1915,7 +1915,7 @@ mod tests {
     }
 
     fn apply_hull_damage(app: &mut App, amount: f32) {
-        let mut rng = rand::rng();
+        let mut rng = crate::sim_rng::unseeded_test_rng();
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()

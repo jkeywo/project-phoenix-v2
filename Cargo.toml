@@ -167,6 +167,15 @@ libm = "0.2"
 # repo carries one vellum rev rather than two. The `json` feature is on because
 # CI stores the capture artifact; `Baseline` round-trips RON without it.
 vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9", features = ["json"] }
+# The seeded simulation generator behind `crate::sim_rng` (issue #897). Same
+# vellum rev as `vellum-perf` above, for the same reason — one vellum rev in
+# the repo, not two. Taken for a property `rand`'s `SmallRng` does not have:
+# `Pcg32` is `Serialize`, so the six `SimStream` positions can enter a world
+# snapshot (#862). Its only dependency is serde, so it is a non-event for the
+# wasm build. `rand` stays regardless: it still backs the *cosmetic* unseeded
+# generators in the renderer, pfx and asteroid modules, which are deliberately
+# not part of the seeded simulation.
+vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9" }
 
 # Native: parallel physics enabled
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

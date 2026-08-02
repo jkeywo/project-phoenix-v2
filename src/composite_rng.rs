@@ -15,9 +15,11 @@
 //! is stateful, nothing here is a resource, and nothing here knows what a ship
 //! is — the keys are plain `u64`s and the caller decides what they mean.
 //!
-//! The *mixing idiom* is borrowed deliberately from
-//! `sim_rng::derive_stream_seed`: FNV-1a folding into SplitMix64's finaliser, so
-//! neighbouring keys land far apart in seed space.
+//! The *mixing idiom* is borrowed deliberately from `sim_rng`'s per-stream
+//! derivation: FNV-1a folding into SplitMix64's finaliser, so neighbouring keys
+//! land far apart in seed space. (Since #897 that module folds its FNV-1a hash
+//! into `vellum_rng::Pcg32`'s stream selector rather than into a seed, but the
+//! reason for the idiom is unchanged, and this module stays standalone.)
 //!
 //! # Why the fold is order-sensitive
 //!

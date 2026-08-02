@@ -515,9 +515,12 @@ fn deterministic_cell_uuid(
         .to_string()
 }
 
-/// SplitMix64's finaliser. Local twin of the one in [`crate::sim_rng`]: this
-/// path deliberately does not depend on the master seed (a rock's identity is
-/// a pure function of its cell), so it does not reach for that module's state.
+/// SplitMix64's finaliser. Local twin of the one [`crate::sim_rng`] reaches
+/// through `vellum_rng::split_mix_64`: this path deliberately does not depend
+/// on the master seed (a rock's identity is a pure function of its cell), so it
+/// does not reach for that module's state — and keeping the constants here
+/// rather than calling the crate's copy keeps the asteroid field's recorded
+/// values independent of a fleet-wide RNG decision.
 fn splitmix64(x: u64) -> u64 {
     let mut z = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);

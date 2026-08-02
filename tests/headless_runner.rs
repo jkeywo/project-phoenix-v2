@@ -950,22 +950,29 @@ fn requiem_courier_reaches_its_destination_anchor() {
 /// run was only as stable as that authored value — retuning it silently
 /// re-rolled the guard.
 ///
-/// Seed 9 is measured, not assumed. Across seeds 1–12 every run reaches
-/// GameOver as a defeat, and 9 is the earliest resolution of the set: player
-/// `damage_dealt` ~265 and `damage_taken` ~1200 against the `> 0` thresholds
-/// below, 5 kills against `> 0`.
+/// Seed 9 is measured, not assumed — RE-MEASURED for #897's generator swap
+/// (`rand`'s SmallRng -> `vellum_rng::Pcg32`), which re-rolls which system
+/// every hit lands on and so can move which seeds resolve and when. On the
+/// current generator (`phoenix-headless --world assets/worlds/combat_test.toml
+/// --seed 9 --hz 30 --sim-seconds 400 --deterministic --report-format json`),
+/// seed 9 still reaches `GameOver` as a defeat: player `damage_dealt` 79.0 and
+/// `damage_taken` 493.808 against the `> 0` thresholds below, 1 kill (`wave_4`)
+/// against the `> 0` floor. The old figures here (~265 / ~1200 / 5 kills) and
+/// the claim that 9 is "the earliest resolution" of a 1–12 sweep both predate
+/// #897 and were not re-verified — this re-measurement covers only seed 9,
+/// which is all the test pins.
 ///
-/// Note the seed does *not* make `combat_test` bit-reproducible: measured over
-/// 11 runs at this seed and rate, resolution lands anywhere in 246–275
-/// sim-seconds (the belt-dense scenario has a second variance source beyond the
-/// RNG — `--deterministic` is already in force, so per-process `HashMap` seeding
-/// is the likely culprit; `rng_coverage.toml` under `tests/rng_determinism.rs`
-/// is byte-identical run to run, so this is scenario-specific, not a hole in the
-/// seeded-RNG guarantee). The budget is 400 s rather than 300 s so the slowest
-/// observed resolution clears by ~45 %: the timing assertion is the only one
-/// that could flake, and every other assertion is a `> 0` that holds across the
-/// whole spread. The seed removes one source of drift, it does not carry the
-/// test.
+/// The old note also claimed `combat_test` is *not* bit-reproducible at this
+/// seed (11 runs landing anywhere in 246–275 sim-seconds, blamed on
+/// per-process `HashMap` seeding). That does not reproduce here either: 12
+/// consecutive runs on the current generator and build produced byte-identical
+/// exit reports, all resolving at tick 10899 / sim_t 181.6667 s. Whatever
+/// drove the old spread, it is not observed under this generator — treat this
+/// scenario as bit-reproducible at this seed until shown otherwise, not as
+/// inherently noisy. The 400 s budget (vs. 300 s) predates this finding and is
+/// left as-is: it still clears the observed 181.7 s resolution with room to
+/// spare, and the timing assertion remains the only one that could flake if a
+/// future change reopens that variance.
 #[test]
 fn combat_test_develops_two_sided_combat_and_resolves() {
     let dt = 1.0 / 30.0;
@@ -1076,8 +1083,8 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
         // now bears only when the doctrine's torpedo-run leg brings it round.
         // That makes launches markedly rarer in this duel than under either
         // change alone (main: 3 launches in 16 s; #895 alone: 4 in 21 s), and
-        // most seeds now yield 0 or 1 across the full 90 s window. Measured
-        // over that window on this base:
+        // most seeds yielded 0 or 1 across the full 90 s window under that
+        // (pre-#897) generator. Swept over that window on that base:
         //   838  the world seed. Resolves in 18.7 s on beams and blasters
         //        alone — 0 launches, too fast for a tube to come round.
         //   2    #895's pick. 90 s draw, 0 launches.
@@ -1085,10 +1092,24 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
         //        apiece, all of them 90 s draws.
         //   1, 4, 7, 13, 14, 19, 21, 23, 29, 34, 37, 53, 89, 144    0.
         //   10   this seed, and the only one of the ~30 sampled that both
-        //        RESOLVES (a kill at 14.8 s) and launches — 2 tubes away, both
-        //        hulls dealing damage. A launch inside a duel that actually
-        //        ends is the strongest evidence the pipeline is whole, so it
-        //        is the pick over the 1-launch stalemates.
+        //        resolved (a kill at 14.8 s) and launched — the pick over the
+        //        1-launch stalemates.
+        //
+        // RE-MEASURED for #897's generator swap (`rand`'s SmallRng ->
+        // `vellum_rng::Pcg32`), which re-rolls which system every hit lands on
+        // and, with it, which duels resolve at all:
+        // `phoenix-headless --world assets/worlds/probe_duel.toml --seed 10
+        // --hz 30 --sim-seconds 90 --deterministic --report-format json`, 3
+        // runs, byte-identical. Seed 10 no longer resolves on this generator —
+        // the 90 s window now ends in a draw (player hull 116/216, enemy
+        // 205/205), not the 14.8 s kill the table above was measured under.
+        // It still launches twice (`TorpedoLaunched: 2`), which is all this
+        // test asserts — `launched > 0`, not that the duel resolves. A launch
+        // inside a real duel between two torpedo-armed AI hulls is still the
+        // evidence the pipeline is whole; this seed just no longer doubles as
+        // a resolution guard too. Re-sweeping the other ~29 seeds above for a
+        // seed that both resolves and launches under the new generator is out
+        // of scope here — nothing requires this pin to do both.
         seed: Some(10),
         deterministic: true,
         ..test_args()
@@ -2478,15 +2499,16 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
             world_path: world.into(),
             dt,
             max_ticks: ticks_for_sim_seconds(secs, dt),
-            // The world's own `[global] seed` (838), pinned explicitly so a
-            // future re-bless of `probe_duel.toml` cannot silently move the
-            // window these leg counts were measured on. #895 briefly pinned 1
-            // here, against a base that predated the composed cruiser doctrine
-            // (#918) and the curated player hull (#916/#917); on this base seed
-            // 1 rings for only 87 of 1351 sampled frames, well under the floor
-            // below, while 838 rings for the bulk of the window with both hulls
-            // trading fire. See `probe_duel.toml` for the per-seed table.
-            seed: Some(838),
+            // Pinned explicitly so a future re-bless of `probe_duel.toml`
+            // cannot silently move the window these leg counts were measured
+            // on — it happens to be that world's own `[global] seed` again
+            // today, as it was before #923, but the two are free to diverge.
+            // Re-measured for #897's generator swap: the previous pin (838)
+            // rings for only 277 of 1351 sampled frames on this generator,
+            // well under the floor below, while 3 rings for 1332 of them with
+            // both hulls trading fire. See `probe_duel.toml` for the per-seed
+            // table.
+            seed: Some(3),
             deterministic: true,
             ..test_args()
         };
@@ -3070,8 +3092,9 @@ struct RunFingerprint {
     /// One probe draw per `SimStream`, taken after the run: two runs that made
     /// a different NUMBER of draws on any stream land at different positions,
     /// so this catches divergence in the damage/uuid paths without needing the
-    /// generators' private state.
-    rng_positions: Vec<u64>,
+    /// generators' private state. The width is the generator's (`Pcg32` draws
+    /// 32 bits); the comparison is generator-agnostic either way.
+    rng_positions: Vec<u32>,
     /// `(entity index, x, z, yaw, forward_speed, hull current, hull max)` for
     /// every `Ship`, sorted by entity index — which is itself part of the
     /// comparison, so a run that spawned a different number of entities, or
@@ -3109,7 +3132,6 @@ fn the_simulation_reaches_the_same_state_at_wildly_different_frame_rates() {
     use project_phoenix::sim_rng::{SimRng, SimStream};
     use project_phoenix::sim_tick::SimTick;
     use project_phoenix::simulation::Ship;
-    use rand::RngCore;
 
     /// Drive `frames` frames of `ticks_per_frame` logical ticks each and
     /// fingerprint the world it leaves behind.
@@ -3152,7 +3174,7 @@ fn the_simulation_reaches_the_same_state_at_wildly_different_frame_rates() {
         let rng = app.world().resource::<SimRng>();
         let rng_positions = SimStream::ALL
             .iter()
-            .map(|s| rng.stream(*s).next_u64())
+            .map(|s| rng.stream(*s).next_u32())
             .collect();
 
         RunFingerprint {

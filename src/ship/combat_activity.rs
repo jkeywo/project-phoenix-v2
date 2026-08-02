@@ -94,7 +94,7 @@ mod tests {
     fn test_hull(current_damage: f32) -> SystemHull {
         let mut hull = SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
         if current_damage > 0.0 {
-            let mut rng = rand::rng();
+            let mut rng = crate::sim_rng::unseeded_test_rng();
             hull.apply_damage(current_damage, &mut rng);
         }
         hull

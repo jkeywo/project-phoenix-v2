@@ -984,11 +984,11 @@ describe('buildShieldsConsoleState', () => {
     expect(s.grid_status).toBe('GRID NOMINAL');
   });
 
-  it('target_bearing null when no weaponsTarget', () => {
-    expect(parse(buildShieldsConsoleState(EMPTY)).target_bearing).toBeNull();
+  it('combat_lock_bearing null when no weaponsTarget', () => {
+    expect(parse(buildShieldsConsoleState(EMPTY)).combat_lock_bearing).toBeNull();
   });
 
-  it('computes target_bearing from entity position', () => {
+  it('computes combat_lock_bearing from entity position', () => {
     // Target is directly to starboard (+X) from ship at origin
     // atan2(dx=10, -dz=0) = atan2(10,0) = 90°
     const s = parse(buildShieldsConsoleState({
@@ -996,7 +996,7 @@ describe('buildShieldsConsoleState', () => {
       weaponsTarget: 'tgt',
       asteroids: [{ uuid: 'tgt', x: 10, z: 0 }],
     }));
-    expect(s.target_bearing).toBeCloseTo(90);
+    expect(s.combat_lock_bearing).toBeCloseTo(90);
   });
 
   it('passes priority field through from blackboard facings', () => {
@@ -1009,7 +1009,7 @@ describe('buildShieldsConsoleState', () => {
           ],
           hull_integrity_pct: 100,
           focused_facing: null,
-          target_bearing: null,
+          combat_lock_bearing: null,
           grid_status: 'GRID NOMINAL',
         },
       },
@@ -1027,6 +1027,42 @@ describe('buildShieldsConsoleState', () => {
     };
     const s = parse(buildShieldsConsoleState(state));
     expect(s.facings[0].priority).toBe(2);
+  });
+
+  // ── Threat bearing parity (issue #926, the #874 shape) ───────────────────
+  //
+  // `threat_bearing` is the SAME authoritative fact the backfilled Shields
+  // focus AI reads (via PendingShieldsThreatBearing) — one producer
+  // (ShieldsBlackboard, published server-side from SensorsThreatState),
+  // read verbatim here and by every shields-owning console. No client-side
+  // re-derivation, unlike the legacy `combat_lock_bearing` fallback above.
+
+  const THREAT_BB = {
+    facings: [],
+    hull_integrity_pct: 100,
+    focused_facing: null,
+    combat_lock_bearing: null,
+    threat_bearing: 247.5,
+    grid_status: 'GRID NOMINAL',
+  };
+
+  it('passes threat_bearing through verbatim from the blackboard', () => {
+    const s = parse(buildShieldsConsoleState({ blackboards: { shields: THREAT_BB } }));
+    // Verbatim: the client must not re-derive this from entity positions.
+    expect(s.threat_bearing).toBe(THREAT_BB.threat_bearing);
+  });
+
+  it('threat_bearing is null when the blackboard reports no threat', () => {
+    const s = parse(buildShieldsConsoleState({
+      blackboards: { shields: { ...THREAT_BB, threat_bearing: null } },
+    }));
+    expect(s.threat_bearing).toBeNull();
+  });
+
+  it('threat_bearing is null in the legacy fallback (no blackboard)', () => {
+    // Pre-#562 legacy path has no server-side threat-bearing source at all —
+    // it must not be synthesised client-side.
+    expect(parse(buildShieldsConsoleState(EMPTY)).threat_bearing).toBeNull();
   });
 });
 
@@ -1203,6 +1239,37 @@ describe('buildSensorsConsoleState', () => {
     expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
   });
 
+  // ── target_shield_freq ──────────────────────────────────────────────────
+
+  it('target_shield_freq is null when target has no shield_freq field', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'] }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_freq).toBeNull();
+  });
+
+  it('target_shield_freq passes through a non-zero frequency', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_freq: 0.42 }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_freq).toBe(0.42);
+  });
+
+  it('target_shield_freq passes through 0.0 rather than falling back to null (falsy-zero bug)', () => {
+    // `0.0 || null` would incorrectly collapse a legitimate zero frequency
+    // to null — the frequency dial's minimum, not "no data".
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_freq: 0.0 }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_freq).toBe(0.0);
+  });
+
   // ── target_alert (#749) — read only from the sensor-radar blackboard ──────
 
   it('target_alert threads true from the sensor-radar blackboard', () => {
@@ -1303,6 +1370,27 @@ describe('science station via buildSystemStationConsoleState', () => {
     }));
     expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
     expect(s.systems['shields-system'].facings).toEqual(['fore', 'port', 'aft', 'starboard']);
+  });
+
+  it('passes threat_bearing through the cruiser science shields view (issue #926)', () => {
+    // The cruiser puts shields on the composed Science console — confirms
+    // the compact threat-bearing readout reaches it via the same
+    // buildShieldsConsoleState() every other shields-owning console uses.
+    const state = {
+      stationSystems: SCIENCE_SYSTEMS,
+      blackboards: {
+        shields: {
+          facings: [],
+          hull_integrity_pct: 100,
+          focused_facing: null,
+          combat_lock_bearing: null,
+          threat_bearing: 132.0,
+          grid_status: 'GRID NOMINAL',
+        },
+      },
+    };
+    const s = parse(buildSystemStationConsoleState('science', state));
+    expect(s.systems['shields-system'].threat_bearing).toBe(132.0);
   });
 });
 
@@ -2043,6 +2131,62 @@ describe('destroyer captain station via buildSystemStationConsoleState', () => {
     expect(s.systems['sensors'].target_uuid).toBe('tgt-1');
     expect(s.systems['sensors'].target_name).toBe('Raider');
   });
+
+  it('passes target shield fields through the sensors view (issue #927)', () => {
+    // The destroyer's captain station embeds ph-sensor-panel via this same
+    // `sensors` system view — confirms the shared panel's fix reaches it.
+    const state = {
+      stationSystems: CAPTAIN_SYSTEMS,
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'tgt-1',
+      asteroids: [{
+        uuid: 'tgt-1', x: 0, z: -100, tags: ['ship'], name: 'Raider',
+        stance: 'hostile', faction: 'pirate', radar_icon: 'ship',
+        shields: [{ label: 'Fore', hp: 40, max_hp: 80, online: true }],
+        shield_fraction: 0.5, shield_freq: 0.25,
+      }],
+    };
+    const s = parse(buildSystemStationConsoleState('captain', state));
+    expect(s.systems['sensors'].target_shields).toEqual([{ label: 'Fore', hp: 40, max_hp: 80, online: true }]);
+    expect(s.systems['sensors'].target_shield_fraction).toBe(0.5);
+    expect(s.systems['sensors'].target_shield_freq).toBe(0.25);
+  });
+});
+
+// ── courier captain station (generic payload, issue #825) ─────────────────────
+
+describe('courier captain station via buildSystemStationConsoleState', () => {
+  // Courier captain station (command + shields + power + repair — the
+  // small hull's captain runs shields directly, no dedicated
+  // shields/engineering station) as declared in
+  // assets/entities/alliance_courier.toml.
+  const COURIER_CAPTAIN_SYSTEMS = {
+    captain: [
+      'captain', 'viewscreen', 'red-alert', 'navigation', 'comms',
+      'shields-system', 'repair', 'power-reactor', 'power-battery',
+    ],
+  };
+
+  it('passes threat_bearing through the courier captain shields view (issue #926)', () => {
+    // The courier puts shields directly on the composed Captain console —
+    // confirms the compact threat-bearing readout reaches it via the same
+    // buildShieldsConsoleState() every other shields-owning console uses.
+    const state = {
+      stationSystems: COURIER_CAPTAIN_SYSTEMS,
+      blackboards: {
+        shields: {
+          facings: [],
+          hull_integrity_pct: 100,
+          focused_facing: null,
+          combat_lock_bearing: null,
+          threat_bearing: 205.5,
+          grid_status: 'GRID NOMINAL',
+        },
+      },
+    };
+    const s = parse(buildSystemStationConsoleState('captain', state));
+    expect(s.systems['shields-system'].threat_bearing).toBe(205.5);
+  });
 });
 
 // ── courier pilot station (generic payload, issue #825) ───────────────────────
@@ -2281,7 +2425,8 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
           ],
           hull_integrity_pct: 75,
           focused_facing: null,
-          target_bearing: null,
+          combat_lock_bearing: null,
+          threat_bearing: null,
           grid_status: 'GRID NOMINAL',
         },
       },
@@ -2290,6 +2435,27 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
     expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
     expect(s.systems['shields-system'].facings).toHaveLength(2);
     expect(s.systems['shields-system'].hull_integrity_pct).toBe(75);
+  });
+
+  it('passes threat_bearing through the destroyer engineering shields view (issue #926)', () => {
+    // The demo hull (Alliance Destroyer) puts shields on the composed
+    // Engineering console — confirms the parity fix reaches it via the same
+    // buildShieldsConsoleState() every other shields-owning console uses.
+    const state = {
+      stationSystems: ENG_SYSTEMS,
+      blackboards: {
+        shields: {
+          facings: [],
+          hull_integrity_pct: 100,
+          focused_facing: null,
+          combat_lock_bearing: null,
+          threat_bearing: 88.0,
+          grid_status: 'GRID NOMINAL',
+        },
+      },
+    };
+    const s = parse(buildSystemStationConsoleState('engineering', state));
+    expect(s.systems['shields-system'].threat_bearing).toBe(88.0);
   });
 
   it('passes power blackboard state through the power view', () => {

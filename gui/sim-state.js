@@ -222,6 +222,17 @@ export class ClientSimState {
           if (st.yaw != null) entity.yaw = st.yaw;
           if (st.hull_fraction != null) entity.hull_fraction = st.hull_fraction;
           if (st.shield_fraction != null) entity.shield_fraction = st.shield_fraction;
+          // Per-facing shield detail + generator frequency (issue #927).
+          // Server-side `EntityStateSnapshot.shields`/`.shield_freq` were
+          // always absent before #927 (sim_state_broadcaster hardcoded
+          // `shields: None` and had no shield_freq field at all), so these
+          // were dead reads on this side too — buildSensorsConsoleState has
+          // read `tgt.shields`/`tgt.shield_freq` since #473/#870 but nothing
+          // ever set them. Same delta-compressed pattern as hull/shield
+          // fraction above: only present on a tick where the server decided
+          // something changed.
+          if (st.shields != null) entity.shields = st.shields;
+          if (st.shield_freq != null) entity.shield_freq = st.shield_freq;
         }
         break;
       }

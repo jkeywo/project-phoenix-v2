@@ -95,6 +95,129 @@ describe('PhSensorPanel', () => {
     expect(sd.textContent).not.toContain(t('component.sensor_panel.alert'));
   });
 
+  // ── Target shields (issue #927) ───────────────────────────────────────
+  //
+  // `target_shields` / `target_shield_fraction` / `target_shield_freq` are on
+  // every Sensors payload already; this shared panel — the one the
+  // destroyer, cruiser and courier all embed — used to drop all three.
+
+  it('shows a per-facing shield row when target_shields is non-empty', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shields: [
+        { label: 'Fore', hp: 80, max_hp: 80, online: true },
+        { label: 'Aft', hp: 0, max_hp: 80, online: false },
+      ],
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.shield'));
+    expect(sd.textContent).toContain('FORE 100%');
+    expect(sd.textContent).toContain('AFT ' + t('console.shield.down'));
+  });
+
+  it('shows the single-fraction shield row when target_shields is empty but target_shield_fraction is present', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shields: [], target_shield_fraction: 0.5,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.shield'));
+    expect(sd.textContent).toContain('50%');
+  });
+
+  it('shows shield DOWN when target_shield_fraction is zero', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shields: [], target_shield_fraction: 0,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('console.shield.down'));
+  });
+
+  it('hides the shield row entirely when target_shields is empty and target_shield_fraction is null', () => {
+    // Matches the no-shield-data case at gui/battleship/sensors.html:78 — a
+    // shieldless target (e.g. an asteroid) gets no shield row at all.
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'asteroid',
+      target_shields: [], target_shield_fraction: null,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.shield'));
+  });
+
+  it('shows a shield-frequency row when target_shield_freq is present', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shield_freq: 0.75,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.shield_freq'));
+    expect(sd.textContent).toContain('75%');
+  });
+
+  it('hides the shield-frequency row when target_shield_freq is null', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shield_freq: null,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.shield_freq'));
+  });
+
+  // ── hide-shield-rows (issue #927 battleship duplication fix) ────────────
+  //
+  // The battleship's dedicated Target Analysis section already shows target
+  // shields (its own renderShieldFacings() + Shield Freq metric); without
+  // this attribute the shared panel duplicated both rows on that console.
+
+  it('suppresses the per-facing shield row when hide-shield-rows is set', () => {
+    const { el } = setup('<ph-sensor-panel id="test-panel" hide-shield-rows></ph-sensor-panel>');
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shields: [{ label: 'Fore', hp: 80, max_hp: 80, online: true }],
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.shield'));
+  });
+
+  it('suppresses the single-fraction shield row when hide-shield-rows is set', () => {
+    const { el } = setup('<ph-sensor-panel id="test-panel" hide-shield-rows></ph-sensor-panel>');
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shields: [], target_shield_fraction: 0.5,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.shield'));
+  });
+
+  it('suppresses the shield-frequency row when hide-shield-rows is set', () => {
+    const { el } = setup('<ph-sensor-panel id="test-panel" hide-shield-rows></ph-sensor-panel>');
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shield_freq: 0.75,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.shield_freq'));
+  });
+
+  it('still shows shield rows when hide-shield-rows is absent (every other hull)', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_shields: [{ label: 'Fore', hp: 80, max_hp: 80, online: true }],
+      target_shield_freq: 0.5,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.shield'));
+    expect(sd.textContent).toContain(t('component.sensor_panel.shield_freq'));
+  });
+
   it('updates when state changes', () => {
     const { el } = setup();
     el.state = { scan_range: 100 };

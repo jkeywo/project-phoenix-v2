@@ -370,6 +370,7 @@ mod tests {
                             shield_fraction: None,
                             flags: vec![],
                             shields: None,
+                            shield_freq: None,
                             warp_out_remaining_secs: None,
                         }],
                     },

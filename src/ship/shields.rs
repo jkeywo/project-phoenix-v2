@@ -468,6 +468,76 @@ pub fn emit_shields_coordination(
     }
 }
 
+// ── Wire conversion ──────────────────────────────────────────────────────────
+
+/// Convert a `ShieldSystem::snapshot()` result into the wire
+/// `Vec<ShieldFacingStatus>` shape.
+///
+/// The one conversion every broadcaster of a ship's shield facings uses:
+/// this ship's own `ShieldsBlackboard.facings` (below, via
+/// `publish_shields_blackboard`), a reconnecting client's resync
+/// `ShieldStatus` (`core::broadcast::cache_registry::resync_for_token`), the
+/// `SimState` world snapshot other ships see this ship's facings through
+/// when it is their Sensors target (issue #927,
+/// `server_app::build_sim_state_entity_states`), and the periodic 10 Hz
+/// `ShieldStatus` broadcast to all players (`server_app::broadcast_shield_status`).
+/// One producer, four callers, so a facing field added here reaches all
+/// four without a second hand-written mapping to drift out of sync.
+pub fn shield_facing_statuses(
+    snapshots: &[crate::shield::ShieldFacingSnapshot],
+) -> Vec<ShieldFacingStatus> {
+    snapshots
+        .iter()
+        .map(|s| ShieldFacingStatus {
+            label: s.label.clone(),
+            hp: s.hp,
+            max_hp: s.max_hp,
+            online: s.online,
+            offline_remaining: s.offline_remaining,
+            is_focused: s.is_focused,
+            center_deg: s.center_deg,
+            width_deg: s.width_deg,
+            arc_id: s.id.clone(),
+            priority: s.priority,
+        })
+        .collect()
+}
+
+/// Project a `shield_facing_statuses()` result for the `SimState`
+/// broadcaster's delta gate: identical to the input except `offline_remaining`
+/// is bucketed to whole seconds (ceiling), so the projection is stable
+/// between second-boundary crossings.
+///
+/// `ShieldFacingStatus` derives `PartialEq` over every field, including
+/// `offline_remaining` — which `tick_shields` decrements continuously
+/// through a ~30s recovery. Comparing raw `shield_facing_statuses()` output
+/// tick-over-tick therefore reports "changed" on effectively every 10 Hz
+/// tick while any facing is offline, even though nothing a player can
+/// perceive moved. The client has no sub-second countdown display (only an
+/// ONLINE/OFFLINE state and, on the battleship's dedicated Sensors readout,
+/// no numeric remaining-time render at all), so whole seconds is the
+/// coarsest bucket that still reports every honestly-observable change —
+/// finer buckets would just be resending noise, and no bucket at all (i.e.
+/// dropping `offline_remaining` from comparison entirely) would hide a
+/// facing coming back online a tick early inside a `[1.0, 2.0)` window.
+/// Callers gate a delta-cache comparison on this projection's equality; the
+/// wire payload itself is never built from this — it stays the raw,
+/// unbucketed `shield_facing_statuses()` value so the receiver still gets
+/// full precision whenever a send actually happens.
+pub fn shields_delta_projection(
+    facings: &Option<Vec<ShieldFacingStatus>>,
+) -> Option<Vec<ShieldFacingStatus>> {
+    facings.as_ref().map(|fs| {
+        fs.iter()
+            .cloned()
+            .map(|mut f| {
+                f.offline_remaining = f.offline_remaining.max(0.0).ceil();
+                f
+            })
+            .collect()
+    })
+}
+
 // ── Blackboard publish ─────────────────────────────────────────────────────────
 
 /// Publish every ship's own `Shields` aggregate + per-arc `ShieldArc`
@@ -477,8 +547,20 @@ pub fn emit_shields_coordination(
 /// No field here is player-only: hull integrity, control sources, and physics
 /// are all read from the same entity being published, so there is no
 /// `Has<LocalShip>` split — every ship gets the identical derivation.
-/// `target_bearing` reads this ship's OWN frozen viewscreen `combat_lock`
-/// (issue #829, spec §3), not a live targeting component.
+/// `combat_lock_bearing` reads this ship's OWN frozen viewscreen
+/// `combat_lock` (issue #829, spec §3), not a live targeting component.
+/// `threat_bearing` reads this ship's OWN `ship::sensors::SensorsThreatState`
+/// (issue #926) — the same authoritative fact
+/// `console_ai::server::ai_shield_focus` reads (delayed, via the channel-3
+/// `PendingShieldsThreatBearing` inbox) to override the damage-based focus
+/// decision. Reading the live component here, rather than the AI's one-shot
+/// coordination inbox, is deliberate: `PendingShieldsThreatBearing` is
+/// consumed (`Option::take`) the instant the AI reads it and is only ever
+/// populated for an AI-controlled Shields, so it cannot serve as a standing
+/// value for a human console and never clears back to `None` on its own.
+/// `SensorsThreatState` is the one producer both paths ultimately derive
+/// from, and it clears to `None` itself (`ship::sensors::tick_sensors_threat_warning`)
+/// the moment Sensors reports no hostile in range.
 fn publish_shields_blackboard(
     mut ships_q: Query<
         (
@@ -486,6 +568,7 @@ fn publish_shields_blackboard(
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&crate::ship_plugin::ShipSystemControlSources>,
             Option<&crate::ship_state::ShipPhysics>,
+            Option<&crate::ship::sensors::SensorsThreatState>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
@@ -499,7 +582,7 @@ fn publish_shields_blackboard(
         Without<crate::simulation::AsteroidUuid>,
     >,
 ) {
-    for (shields, hull, control_sources, physics, mut bbs) in ships_q.iter_mut() {
+    for (shields, hull, control_sources, physics, sensors_threat, mut bbs) in ships_q.iter_mut() {
         let physics = physics.copied().unwrap_or_default();
         // Frozen Combat Lock from this ship's viewscreen blackboard (written in
         // the previous tick's PublishAggregate — this system runs in Publish).
@@ -512,21 +595,7 @@ fn publish_shields_blackboard(
         // Snapshot facings once so we can reuse them for both the aggregate
         // and per-arc blackboards.
         let snapshots = shields.0.snapshot();
-        let facings: Vec<ShieldFacingStatus> = snapshots
-            .iter()
-            .map(|s| ShieldFacingStatus {
-                label: s.label.clone(),
-                hp: s.hp,
-                max_hp: s.max_hp,
-                online: s.online,
-                offline_remaining: s.offline_remaining,
-                is_focused: s.is_focused,
-                center_deg: s.center_deg,
-                width_deg: s.width_deg,
-                arc_id: s.id.clone(),
-                priority: s.priority,
-            })
-            .collect();
+        let facings: Vec<ShieldFacingStatus> = shield_facing_statuses(&snapshots);
 
         let (total_hp, total_current) = hull
             .map(|h| (h.0.total_max(), h.0.total_current()))
@@ -550,7 +619,7 @@ fn publish_shields_blackboard(
         }
         .to_string();
 
-        let target_bearing = combat_lock.as_ref().and_then(|uuid| {
+        let combat_lock_bearing = combat_lock.as_ref().and_then(|uuid| {
             let live = asteroid_q
                 .iter()
                 .find(|(u, _)| u.0 == *uuid)
@@ -568,11 +637,19 @@ fn publish_shields_blackboard(
             Some(bearing_rad.to_degrees())
         });
 
+        // Same conversion `console_ai::server::ai_shield_focus` applies to
+        // the delayed copy of this same fact, so the console marker and the
+        // AI's decision agree numerically, not just in source.
+        let threat_bearing = sensors_threat
+            .and_then(|s| s.last_bearing_rad)
+            .map(|rad| (rad.to_degrees() + 360.0) % 360.0);
+
         let bb = ShieldsBlackboard {
             facings: facings.clone(),
             hull_integrity_pct,
             focused_facing,
-            target_bearing,
+            combat_lock_bearing,
+            threat_bearing,
             grid_status,
             frequency: shields.frequency(),
         };
@@ -1592,13 +1669,13 @@ mod tests {
     }
 
     #[test]
-    fn publish_npc_target_bearing_uses_its_own_weapons_target() {
-        // target_bearing derives from each ship's OWN Combat Lock (read from
-        // its frozen ViewscreenBlackboard, #829) +
-        // ShipPhysics: an NPC at the origin (yaw 0) targeting an entity at
-        // +X reads a bearing of 180° (atan2 convention preserved from the
-        // LocalShip-only publish); the LocalShip, with no TacticalRadarSelection,
-        // stays None.
+    fn publish_npc_combat_lock_bearing_uses_its_own_weapons_target() {
+        // combat_lock_bearing (renamed from target_bearing, issue #926)
+        // derives from each ship's OWN Combat Lock (read from its frozen
+        // ViewscreenBlackboard, #829) + ShipPhysics: an NPC at the origin
+        // (yaw 0) targeting an entity at +X reads a bearing of 180° (atan2
+        // convention preserved from the LocalShip-only publish); the
+        // LocalShip, with no TacticalRadarSelection, stays None.
         let mut app = test_app();
         app.world_mut().spawn((
             crate::entity_spawner::EntityUuid("npc-target".into()),
@@ -1621,16 +1698,86 @@ mod tests {
             panic!("expected Shields blackboard variant on the NPC");
         };
         let bearing = bb
-            .target_bearing
-            .expect("NPC target_bearing must derive from its own TacticalRadarSelection");
+            .combat_lock_bearing
+            .expect("NPC combat_lock_bearing must derive from its own TacticalRadarSelection");
         assert!(
             (bearing - 180.0).abs() < 0.01,
             "expected bearing ~180° for a target dead ahead on +X (got {bearing})"
         );
         assert_eq!(
-            shields_bb(&mut app).target_bearing,
+            shields_bb(&mut app).combat_lock_bearing,
             None,
             "the LocalShip holds no TacticalRadarSelection, so its bearing stays None"
+        );
+    }
+
+    // ── threat_bearing (issue #926) ─────────────────────────────────────────
+    //
+    // Parity fix: the same authoritative bearing the backfilled Shields
+    // focus AI reads (via the delayed `PendingShieldsThreatBearing` inbox)
+    // published as a standing field so a human Shields officer sees it too.
+
+    #[test]
+    fn threat_bearing_none_when_sensors_holds_no_threat() {
+        let mut app = test_app();
+        app.update();
+        assert_eq!(shields_bb(&mut app).threat_bearing, None);
+    }
+
+    #[test]
+    fn threat_bearing_reads_sensors_threat_state_verbatim() {
+        let mut app = test_app();
+        let se = ship_e(&mut app);
+        // Same conversion `console_ai::server::ai_shield_focus` applies to
+        // the bearing radians it reads off the delayed coordination copy of
+        // this same fact.
+        let bearing_rad = std::f32::consts::FRAC_PI_2; // 90°
+        app.world_mut()
+            .entity_mut(se)
+            .insert(crate::ship::sensors::SensorsThreatState {
+                last_threat_uuid: Some("hostile-1".into()),
+                last_bearing_rad: Some(bearing_rad),
+                last_label: Some("Hostile closing".into()),
+                last_distance: Some(500.0),
+            });
+        app.update();
+        let bearing = shields_bb(&mut app)
+            .threat_bearing
+            .expect("threat_bearing must be Some while Sensors holds a threat");
+        assert!(
+            (bearing - 90.0).abs() < 0.01,
+            "expected bearing ~90° (got {bearing})"
+        );
+    }
+
+    #[test]
+    fn threat_bearing_clears_when_sensors_threat_state_clears() {
+        // Matches the state clear at src/ship/sensors.rs:449 — no hostile in
+        // range clears `last_bearing_rad` back to None, and the published
+        // marker must follow.
+        let mut app = test_app();
+        let se = ship_e(&mut app);
+        app.world_mut()
+            .entity_mut(se)
+            .insert(crate::ship::sensors::SensorsThreatState {
+                last_threat_uuid: Some("hostile-1".into()),
+                last_bearing_rad: Some(0.5),
+                last_label: Some("Hostile closing".into()),
+                last_distance: Some(500.0),
+            });
+        app.update();
+        assert!(shields_bb(&mut app).threat_bearing.is_some());
+
+        app.world_mut()
+            .entity_mut(se)
+            .get_mut::<crate::ship::sensors::SensorsThreatState>()
+            .unwrap()
+            .last_bearing_rad = None;
+        app.update();
+        assert_eq!(
+            shields_bb(&mut app).threat_bearing,
+            None,
+            "threat_bearing must clear when SensorsThreatState clears"
         );
     }
 }

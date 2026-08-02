@@ -614,57 +614,128 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
 /// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 pub fn sim_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
-        // ── Asteroids: position/yaw never changes — omit from per-tick payload.
-        // The client already has asteroid positions from WorldSetup/AsteroidSpawned.
-        // Health fields are delta-compressed: only emitted when changed since last tick.
-        type AsteroidRaw = (String, Option<f32>, Option<f32>);
-        let asteroid_raw: Vec<AsteroidRaw> = {
-            let mut q = world.query::<(
-                &AsteroidUuid,
-                Option<&crate::entity_spawner::EntitySystemHull>,
-                Option<&crate::ship::shields::ShipShields>,
-            )>();
-            q.iter(world)
-                .filter_map(|(uuid, hull_comp, shield_comp)| {
-                    let hull_fraction = hull_comp.map(|h| {
-                        let max = h.0.total_max();
-                        if max > 0.0 {
-                            h.0.total_current() / max
-                        } else {
-                            1.0
-                        }
-                    });
-                    let shield_fraction = shield_comp.map(|s| {
-                        let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
-                        let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                        if total_max > 0 {
-                            total_hp as f32 / total_max as f32
-                        } else {
-                            0.0
-                        }
-                    });
-                    // Skip entirely when there are no health components (unbreakable asteroids).
-                    if hull_fraction.is_none() && shield_fraction.is_none() {
-                        return None;
+        let entity_states = build_sim_state_entity_states(world);
+
+        // ── Emit SystemHullUpdate per recipient, only when that recipient's
+        // *visible* detail changed (issue #737).
+        //
+        // Post issue #618 `SystemHullStatus` carries the authoritative
+        // `SystemId`, display_name and tier. Post #737 the entry list is a
+        // role-scoped projection instead of the whole ship, so the send is a
+        // per-token fan-out rather than one `Target::All` push — see
+        // `crate::console::repair::visibility`.
+        crate::console::repair::visibility::push_hull_updates(world);
+
+        let snapshot = crate::messages::SimSnapshot { entity_states };
+        vec![ServerMessage::SimState { snapshot }]
+    })
+}
+
+/// Compute this tick's `EntityStateSnapshot` list for the `SimState` broadcast.
+///
+/// Extracted from [`sim_state_broadcaster`]'s producer closure (issue #927)
+/// so it can be called directly in tests without going through the
+/// Broadcaster/cadence machinery — see the `sim_state_entity_states` test
+/// module below, which pins the shield-detail payload population directly
+/// (target with shields -> `shields`/`shield_freq` present; entity with none
+/// -> absent) without needing a full multi-tick cadence fixture.
+fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::EntityStateSnapshot> {
+    // ── Asteroids: position/yaw never changes — omit from per-tick payload.
+    // The client already has asteroid positions from WorldSetup/AsteroidSpawned.
+    // Health fields are delta-compressed: only emitted when changed since last tick.
+    type AsteroidRaw = (
+        String,
+        Option<f32>,
+        Option<f32>,
+        Option<Vec<crate::messages::ShieldFacingStatus>>,
+        Option<f32>,
+    );
+    let asteroid_raw: Vec<AsteroidRaw> = {
+        let mut q = world.query::<(
+            &AsteroidUuid,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::ship::shields::ShipShields>,
+        )>();
+        q.iter(world)
+            .filter_map(|(uuid, hull_comp, shield_comp)| {
+                let hull_fraction = hull_comp.map(|h| {
+                    let max = h.0.total_max();
+                    if max > 0.0 {
+                        h.0.total_current() / max
+                    } else {
+                        1.0
                     }
-                    Some((uuid.0.clone(), hull_fraction, shield_fraction))
-                })
-                .collect()
-        };
-        let asteroid_states: Vec<crate::messages::EntityStateSnapshot> = {
-            let mut health_cache = world.resource_mut::<LastBroadcastEntityHealth>();
-            asteroid_raw
-                .into_iter()
-                .filter_map(|(uuid, hull_fraction, shield_fraction)| {
-                    let prev = health_cache.0.get(&uuid).copied().unwrap_or((None, None));
+                });
+                let shield_fraction = shield_comp.map(|s| {
+                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
+                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
+                    if total_max > 0 {
+                        total_hp as f32 / total_max as f32
+                    } else {
+                        0.0
+                    }
+                });
+                // Per-facing detail + generator frequency (issue #927): the
+                // SAME producer this ship's own `ShieldsBlackboard.facings`
+                // uses (`ship::shields::shield_facing_statuses`) and the
+                // same `ShipShields::frequency()`
+                // `tick_frequency_hint_high_fidelity` reads for
+                // `FrequencyHint` — one producer, no parallel derivation.
+                // These were always sent as `None` before #927, which is
+                // why `target_shields`/`target_shield_freq` were always
+                // empty on the wire regardless of which console rendered them.
+                let shields_wire = shield_comp
+                    .map(|s| crate::ship::shields::shield_facing_statuses(&s.0.snapshot()));
+                let shield_freq = shield_comp.map(|s| s.frequency());
+                // Skip entirely when there are no health components (unbreakable asteroids).
+                if hull_fraction.is_none() && shield_fraction.is_none() {
+                    return None;
+                }
+                Some((
+                    uuid.0.clone(),
+                    hull_fraction,
+                    shield_fraction,
+                    shields_wire,
+                    shield_freq,
+                ))
+            })
+            .collect()
+    };
+    let asteroid_states: Vec<crate::messages::EntityStateSnapshot> = {
+        let mut health_cache = world.resource_mut::<LastBroadcastEntityHealth>();
+        asteroid_raw
+            .into_iter()
+            .filter_map(
+                |(uuid, hull_fraction, shield_fraction, shields_wire, shield_freq)| {
+                    let prev = health_cache
+                        .0
+                        .get(&uuid)
+                        .cloned()
+                        .unwrap_or((None, None, None, None));
                     let hull_changed = hull_fraction != prev.0;
                     let shield_changed = shield_fraction != prev.1;
-                    if !hull_changed && !shield_changed {
+                    // Bucketed projection (issue #927 gap-fill review): a
+                    // raw `shields_wire != prev.2` compares `offline_remaining`
+                    // at full precision, which `tick_shields` decrements every
+                    // tick through a ~30s recovery — that re-triggered this
+                    // gate on effectively every 10 Hz tick while any facing
+                    // was offline. See `ship::shields::shields_delta_projection`.
+                    let shields_changed =
+                        crate::ship::shields::shields_delta_projection(&shields_wire)
+                            != crate::ship::shields::shields_delta_projection(&prev.2);
+                    let freq_changed = shield_freq != prev.3;
+                    if !hull_changed && !shield_changed && !shields_changed && !freq_changed {
                         return None;
                     }
-                    health_cache
-                        .0
-                        .insert(uuid.clone(), (hull_fraction, shield_fraction));
+                    health_cache.0.insert(
+                        uuid.clone(),
+                        (
+                            hull_fraction,
+                            shield_fraction,
+                            shields_wire.clone(),
+                            shield_freq,
+                        ),
+                    );
                     Some(crate::messages::EntityStateSnapshot {
                         uuid,
                         position: None,
@@ -672,74 +743,103 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                         hull_fraction,
                         shield_fraction,
                         flags: vec![],
-                        shields: None,
+                        shields: shields_wire,
+                        shield_freq,
                         warp_out_remaining_secs: None,
                     })
-                })
-                .collect()
-        };
+                },
+            )
+            .collect()
+    };
 
-        // ── Non-asteroid entities (NPCs, stations): collect raw data first so
-        // we can drop the ECS borrow before mutating the LastBroadcast* resources.
-        type NpcRaw = (String, bevy::math::Vec3, f32, Option<f32>, Option<f32>);
-        let npc_raw: Vec<NpcRaw> = {
-            let mut q = world.query_filtered::<(
-                &Transform,
-                &EntityUuid,
-                Option<&crate::entity_spawner::EntitySystemHull>,
-                Option<&crate::ship::shields::ShipShields>,
-            ), Without<Asteroid>>();
-            q.iter(world)
-                .map(|(transform, uuid, hull_comp, shield_comp)| {
-                    let hull_fraction = hull_comp.map(|h| {
-                        let max = h.0.total_max();
-                        if max > 0.0 {
-                            h.0.total_current() / max
-                        } else {
-                            1.0
-                        }
-                    });
-                    let shield_fraction = shield_comp.map(|s| {
-                        let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
-                        let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                        if total_max > 0 {
-                            total_hp as f32 / total_max as f32
-                        } else {
-                            0.0
-                        }
-                    });
-                    let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
-                    (
-                        uuid.0.clone(),
-                        transform.translation,
+    // ── Non-asteroid entities (NPCs, stations): collect raw data first so
+    // we can drop the ECS borrow before mutating the LastBroadcast* resources.
+    type NpcRaw = (
+        String,
+        bevy::math::Vec3,
+        f32,
+        Option<f32>,
+        Option<f32>,
+        Option<Vec<crate::messages::ShieldFacingStatus>>,
+        Option<f32>,
+    );
+    let npc_raw: Vec<NpcRaw> = {
+        let mut q = world.query_filtered::<(
+            &Transform,
+            &EntityUuid,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::ship::shields::ShipShields>,
+        ), Without<Asteroid>>();
+        q.iter(world)
+            .map(|(transform, uuid, hull_comp, shield_comp)| {
+                let hull_fraction = hull_comp.map(|h| {
+                    let max = h.0.total_max();
+                    if max > 0.0 {
+                        h.0.total_current() / max
+                    } else {
+                        1.0
+                    }
+                });
+                let shield_fraction = shield_comp.map(|s| {
+                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
+                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
+                    if total_max > 0 {
+                        total_hp as f32 / total_max as f32
+                    } else {
+                        0.0
+                    }
+                });
+                // Per-facing detail + generator frequency (issue #927) —
+                // same producer as the asteroid branch above; see the
+                // comment there for why this closes the Sensors-panel gap.
+                let shields_wire = shield_comp
+                    .map(|s| crate::ship::shields::shield_facing_statuses(&s.0.snapshot()));
+                let shield_freq = shield_comp.map(|s| s.frequency());
+                let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
+                (
+                    uuid.0.clone(),
+                    transform.translation,
+                    yaw,
+                    hull_fraction,
+                    shield_fraction,
+                    shields_wire,
+                    shield_freq,
+                )
+            })
+            .collect()
+    };
+
+    // Compare against last-broadcast positions and health; skip entities
+    // where nothing changed.  Position/yaw suppressed below ~1 cm movement;
+    // hull/shield suppressed when the f32 value is identical to last tick.
+    const POS_THRESHOLD_SQ: f32 = 0.0001; // 0.01 world-unit radius
+    const YAW_THRESHOLD: f32 = 0.001; // ~0.057 degrees
+    let npc_states: Vec<crate::messages::EntityStateSnapshot> = {
+        // Borrow position cache, then health cache separately (both mut).
+        // Collect diffs first to avoid holding multiple mut borrows.
+        type NpcDiff = (
+            String,
+            Option<[f32; 3]>,
+            Option<f32>,
+            Option<f32>,
+            Option<f32>,
+            Option<Vec<crate::messages::ShieldFacingStatus>>,
+            Option<f32>,
+        );
+        let diffs: Vec<NpcDiff> = {
+            let mut pos_cache = world.resource_mut::<LastBroadcastEntityPositions>();
+            npc_raw
+                .iter()
+                .map(
+                    |(
+                        uuid,
+                        pos,
                         yaw,
                         hull_fraction,
                         shield_fraction,
-                    )
-                })
-                .collect()
-        };
-
-        // Compare against last-broadcast positions and health; skip entities
-        // where nothing changed.  Position/yaw suppressed below ~1 cm movement;
-        // hull/shield suppressed when the f32 value is identical to last tick.
-        const POS_THRESHOLD_SQ: f32 = 0.0001; // 0.01 world-unit radius
-        const YAW_THRESHOLD: f32 = 0.001; // ~0.057 degrees
-        let npc_states: Vec<crate::messages::EntityStateSnapshot> = {
-            // Borrow position cache, then health cache separately (both mut).
-            // Collect diffs first to avoid holding multiple mut borrows.
-            type NpcDiff = (
-                String,
-                Option<[f32; 3]>,
-                Option<f32>,
-                Option<f32>,
-                Option<f32>,
-            );
-            let diffs: Vec<NpcDiff> = {
-                let mut pos_cache = world.resource_mut::<LastBroadcastEntityPositions>();
-                npc_raw
-                    .iter()
-                    .map(|(uuid, pos, yaw, hull_fraction, shield_fraction)| {
+                        shields_wire,
+                        shield_freq,
+                    )| {
                         let moved = match pos_cache.0.get(uuid) {
                             Some(&(prev_pos, prev_yaw)) => {
                                 (*pos - prev_pos).length_squared() > POS_THRESHOLD_SQ
@@ -762,25 +862,59 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                             out_yaw,
                             *hull_fraction,
                             *shield_fraction,
+                            shields_wire.clone(),
+                            *shield_freq,
                         )
-                    })
-                    .collect()
-            };
-            let mut health_cache = world.resource_mut::<LastBroadcastEntityHealth>();
-            diffs
-                .into_iter()
-                .filter_map(|(uuid, out_pos, out_yaw, hull_fraction, shield_fraction)| {
-                    let prev = health_cache.0.get(&uuid).copied().unwrap_or((None, None));
+                    },
+                )
+                .collect()
+        };
+        let mut health_cache = world.resource_mut::<LastBroadcastEntityHealth>();
+        diffs
+            .into_iter()
+            .filter_map(
+                |(
+                    uuid,
+                    out_pos,
+                    out_yaw,
+                    hull_fraction,
+                    shield_fraction,
+                    shields_wire,
+                    shield_freq,
+                )| {
+                    let prev = health_cache
+                        .0
+                        .get(&uuid)
+                        .cloned()
+                        .unwrap_or((None, None, None, None));
                     let hull_changed = hull_fraction != prev.0;
                     let shield_changed = shield_fraction != prev.1;
+                    // Bucketed projection — see the asteroid branch above and
+                    // `ship::shields::shields_delta_projection`'s doc comment.
+                    let shields_changed =
+                        crate::ship::shields::shields_delta_projection(&shields_wire)
+                            != crate::ship::shields::shields_delta_projection(&prev.2);
+                    let freq_changed = shield_freq != prev.3;
                     // Skip the entity entirely when nothing at all changed.
-                    if out_pos.is_none() && out_yaw.is_none() && !hull_changed && !shield_changed {
+                    if out_pos.is_none()
+                        && out_yaw.is_none()
+                        && !hull_changed
+                        && !shield_changed
+                        && !shields_changed
+                        && !freq_changed
+                    {
                         return None;
                     }
-                    if hull_changed || shield_changed {
-                        health_cache
-                            .0
-                            .insert(uuid.clone(), (hull_fraction, shield_fraction));
+                    if hull_changed || shield_changed || shields_changed || freq_changed {
+                        health_cache.0.insert(
+                            uuid.clone(),
+                            (
+                                hull_fraction,
+                                shield_fraction,
+                                shields_wire.clone(),
+                                shield_freq,
+                            ),
+                        );
                     }
                     Some(crate::messages::EntityStateSnapshot {
                         uuid,
@@ -793,28 +927,16 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                             None
                         },
                         flags: vec![],
-                        shields: None,
+                        shields: if shields_changed { shields_wire } else { None },
+                        shield_freq: if freq_changed { shield_freq } else { None },
                         warp_out_remaining_secs: None,
                     })
-                })
-                .collect()
-        };
+                },
+            )
+            .collect()
+    };
 
-        let entity_states: Vec<_> = asteroid_states.into_iter().chain(npc_states).collect();
-
-        // ── Emit SystemHullUpdate per recipient, only when that recipient's
-        // *visible* detail changed (issue #737).
-        //
-        // Post issue #618 `SystemHullStatus` carries the authoritative
-        // `SystemId`, display_name and tier. Post #737 the entry list is a
-        // role-scoped projection instead of the whole ship, so the send is a
-        // per-token fan-out rather than one `Target::All` push — see
-        // `crate::console::repair::visibility`.
-        crate::console::repair::visibility::push_hull_updates(world);
-
-        let snapshot = crate::messages::SimSnapshot { entity_states };
-        vec![ServerMessage::SimState { snapshot }]
-    })
+    asteroid_states.into_iter().chain(npc_states).collect()
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `ModifierAdded` and
@@ -1534,23 +1656,8 @@ fn broadcast_shield_status(
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
-    let facings: Vec<ShieldFacingStatus> = shields
-        .0
-        .snapshot()
-        .into_iter()
-        .map(|s| ShieldFacingStatus {
-            label: s.label,
-            hp: s.hp,
-            max_hp: s.max_hp,
-            online: s.online,
-            offline_remaining: s.offline_remaining,
-            is_focused: s.is_focused,
-            center_deg: s.center_deg,
-            width_deg: s.width_deg,
-            arc_id: s.id,
-            priority: s.priority,
-        })
-        .collect();
+    let facings: Vec<ShieldFacingStatus> =
+        crate::ship::shields::shield_facing_statuses(&shields.0.snapshot());
 
     let frequency = shields.frequency();
     if facings != last.0 {
@@ -8405,6 +8512,155 @@ station = "pilot"
             app.world().get::<LastShipAttacker>(local).unwrap().0,
             Some("attacker-1".to_string()),
             "the player ship, still at red alert, must keep its attacker record"
+        );
+    }
+
+    // ── build_sim_state_entity_states: shield detail on the wire (#927) ─────
+    //
+    // Root cause pinned here: `sim_state_broadcaster` always sent
+    // `shields: None` and had no `shield_freq` field on `EntityStateSnapshot`
+    // at all, regardless of whether the entity carried a `ShipShields`
+    // component — so `target_shields`/`target_shield_freq` were empty on the
+    // wire for every Sensors target, on every hull, before this fix. These
+    // call `build_sim_state_entity_states` directly (the function extracted
+    // from `sim_state_broadcaster`'s producer closure) rather than going
+    // through the Broadcaster/cadence machinery, since the function needs
+    // only a bare `World` with the two delta-cache resources.
+
+    #[test]
+    fn target_with_shields_populates_shields_and_shield_freq() {
+        let mut world = World::new();
+        world.init_resource::<LastBroadcastEntityPositions>();
+        world.init_resource::<LastBroadcastEntityHealth>();
+        world.spawn((
+            EntityUuid("target-1".to_string()),
+            Transform::from_xyz(10.0, 0.0, 20.0),
+            ShipShields(ShieldSystem::default(), 0.75),
+        ));
+
+        let states = build_sim_state_entity_states(&mut world);
+        let entry = states
+            .iter()
+            .find(|s| s.uuid == "target-1")
+            .expect("target-1 must appear in the first SimState tick");
+
+        let shields = entry
+            .shields
+            .as_ref()
+            .expect("a ShipShields-carrying entity must publish its facings");
+        assert!(
+            !shields.is_empty(),
+            "expected at least one shield facing, same producer as this ship's own ShieldsBlackboard"
+        );
+        assert_eq!(
+            entry.shield_freq,
+            Some(0.75),
+            "shield_freq must be the entity's own ShipShields::frequency() — \
+             the same value FrequencyHint reads"
+        );
+    }
+
+    #[test]
+    fn entity_without_shields_leaves_shields_and_shield_freq_absent() {
+        let mut world = World::new();
+        world.init_resource::<LastBroadcastEntityPositions>();
+        world.init_resource::<LastBroadcastEntityHealth>();
+        world.spawn((
+            EntityUuid("no-shields-1".to_string()),
+            Transform::from_xyz(5.0, 0.0, 5.0),
+        ));
+
+        let states = build_sim_state_entity_states(&mut world);
+        let entry = states
+            .iter()
+            .find(|s| s.uuid == "no-shields-1")
+            .expect("no-shields-1 must still appear (position changed on the first tick)");
+
+        assert!(
+            entry.shields.is_none(),
+            "an entity with no ShipShields must not carry a shields field"
+        );
+        assert!(
+            entry.shield_freq.is_none(),
+            "an entity with no ShipShields must not carry a shield_freq field"
+        );
+    }
+
+    #[test]
+    fn shield_detail_is_delta_compressed_like_hull_and_shield_fraction() {
+        // The widened `LastBroadcastEntityHealth` cache tuple must gate the
+        // NEXT tick's inclusion on shields/shield_freq changing, exactly as
+        // it already did for hull_fraction/shield_fraction — not just those
+        // two fields.
+        let mut world = World::new();
+        world.init_resource::<LastBroadcastEntityPositions>();
+        world.init_resource::<LastBroadcastEntityHealth>();
+        world.spawn((
+            EntityUuid("steady-1".to_string()),
+            Transform::from_xyz(1.0, 0.0, 1.0),
+            ShipShields(ShieldSystem::default(), 0.5),
+        ));
+
+        let first = build_sim_state_entity_states(&mut world);
+        assert!(
+            first.iter().any(|s| s.uuid == "steady-1"),
+            "first tick must publish the newly-seen entity"
+        );
+
+        let second = build_sim_state_entity_states(&mut world);
+        assert!(
+            !second.iter().any(|s| s.uuid == "steady-1"),
+            "an entity whose position/hull/shields/freq are all unchanged \
+             since the last broadcast must be omitted entirely from the next tick"
+        );
+    }
+
+    #[test]
+    fn shield_offline_remaining_delta_gate_ignores_subsecond_countdown_but_reports_bucket_crossings(
+    ) {
+        // `ShieldFacingStatus` derives `PartialEq` over every field including
+        // `offline_remaining`, which `tick_shields` decrements every tick
+        // through a ~30s recovery. A raw equality gate re-sent this payload
+        // on effectively every 10 Hz tick while any facing was offline, even
+        // though nothing perceptible changed. `shields_delta_projection`
+        // buckets `offline_remaining` to whole seconds (ceiling) before
+        // comparing — see its doc comment in `ship::shields`.
+        let mut world = World::new();
+        world.init_resource::<LastBroadcastEntityPositions>();
+        world.init_resource::<LastBroadcastEntityHealth>();
+        let entity = world
+            .spawn((
+                EntityUuid("recovering-1".to_string()),
+                Transform::from_xyz(1.0, 0.0, 1.0),
+                ShipShields(ShieldSystem::default(), 0.5),
+            ))
+            .id();
+        world.get_mut::<ShipShields>(entity).unwrap().0.facings[0].offline_remaining = 5.5;
+
+        let first = build_sim_state_entity_states(&mut world);
+        assert!(
+            first.iter().any(|s| s.uuid == "recovering-1"),
+            "first tick must publish the newly-seen offline facing"
+        );
+
+        // Sub-second countdown: 5.5s -> 5.4s still buckets to ceil = 6.0 —
+        // must NOT re-send.
+        world.get_mut::<ShipShields>(entity).unwrap().0.facings[0].offline_remaining = 5.4;
+        let second = build_sim_state_entity_states(&mut world);
+        assert!(
+            !second.iter().any(|s| s.uuid == "recovering-1"),
+            "a sub-second offline_remaining tick (5.5s -> 5.4s, same whole-second \
+             bucket) must not re-trigger the delta gate"
+        );
+
+        // Crossing a whole-second boundary: 5.4s -> 4.9s, ceil bucket goes
+        // 6.0 -> 5.0 — must re-send.
+        world.get_mut::<ShipShields>(entity).unwrap().0.facings[0].offline_remaining = 4.9;
+        let third = build_sim_state_entity_states(&mut world);
+        assert!(
+            third.iter().any(|s| s.uuid == "recovering-1"),
+            "crossing a whole-second bucket boundary (5.4s -> 4.9s) must \
+             re-trigger the delta gate"
         );
     }
 }

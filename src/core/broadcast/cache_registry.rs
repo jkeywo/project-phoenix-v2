@@ -74,12 +74,30 @@ use crate::messages::{ServerMessage, ShieldFacingStatus, SystemBlackboard, Syste
 #[derive(Resource, Default)]
 pub struct LastBroadcastEntityPositions(pub HashMap<String, (bevy::math::Vec3, f32)>);
 
-/// Last-broadcast health (hull_fraction, shield_fraction) for all entities.
-/// Keyed by UUID string. Used by the sim_state_broadcaster to skip sending
-/// health fields when they haven't changed since the last broadcast, reducing
-/// wire payload for stationary / undamaged NPCs.
+/// Last-broadcast health (hull_fraction, shield_fraction, shield facings,
+/// shield frequency) for all entities. Keyed by UUID string. Used by the
+/// sim_state_broadcaster to skip sending health/shield fields when they
+/// haven't changed since the last broadcast, reducing wire payload for
+/// stationary / undamaged NPCs.
+///
+/// Widened by issue #927 to also delta-compress the per-facing detail and
+/// generator frequency `EntityStateSnapshot.shields` /
+/// `.shield_freq` carry — until #927 `sim_state_broadcaster` always sent
+/// `shields: None` and there was no `shield_freq` field at all, so
+/// `target_shields` / `target_shield_freq` were empty on the wire for every
+/// Sensors target regardless of which console rendered them.
 #[derive(Resource, Default)]
-pub struct LastBroadcastEntityHealth(pub HashMap<String, (Option<f32>, Option<f32>)>);
+pub struct LastBroadcastEntityHealth(
+    pub  HashMap<
+        String,
+        (
+            Option<f32>,
+            Option<f32>,
+            Option<Vec<ShieldFacingStatus>>,
+            Option<f32>,
+        ),
+    >,
+);
 
 /// Last-broadcast per-system hull state, **keyed by session token**.
 ///
@@ -204,23 +222,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
         let mut q = world.query_filtered::<&ShipShields, With<LocalShip>>();
         if let Ok(shields) = q.single(world) {
             let frequency = shields.frequency();
-            let facings: Vec<ShieldFacingStatus> = shields
-                .0
-                .snapshot()
-                .into_iter()
-                .map(|s| ShieldFacingStatus {
-                    label: s.label,
-                    hp: s.hp,
-                    max_hp: s.max_hp,
-                    online: s.online,
-                    offline_remaining: s.offline_remaining,
-                    is_focused: s.is_focused,
-                    center_deg: s.center_deg,
-                    width_deg: s.width_deg,
-                    arc_id: s.id,
-                    priority: s.priority,
-                })
-                .collect();
+            let facings = crate::ship::shields::shield_facing_statuses(&shields.0.snapshot());
             messages.push(ServerMessage::ShieldStatus { facings, frequency });
         }
     }
@@ -343,7 +345,9 @@ mod tests {
             .0
             .insert("uuid-1".into(), (bevy::math::Vec3::ZERO, 0.0));
         let mut health = LastBroadcastEntityHealth::default();
-        health.0.insert("uuid-1".into(), (Some(1.0), Some(1.0)));
+        health
+            .0
+            .insert("uuid-1".into(), (Some(1.0), Some(1.0), None, None));
         let mut weapons = crate::console::weapons::LastWeaponsUpdate {
             target_uuid: Some("uuid-1".into()),
             ..Default::default()
@@ -416,9 +420,15 @@ mod tests {
             .insert("gone-2".into(), (bevy::math::Vec3::ZERO, 0.0));
 
         let mut health = LastBroadcastEntityHealth::default();
-        health.0.insert("keep-1".into(), (Some(1.0), Some(1.0)));
-        health.0.insert("gone-1".into(), (Some(0.5), Some(0.5)));
-        health.0.insert("gone-2".into(), (Some(0.2), None));
+        health
+            .0
+            .insert("keep-1".into(), (Some(1.0), Some(1.0), None, None));
+        health
+            .0
+            .insert("gone-1".into(), (Some(0.5), Some(0.5), None, None));
+        health
+            .0
+            .insert("gone-2".into(), (Some(0.2), None, None, None));
 
         prune(
             &mut positions,
@@ -452,7 +462,9 @@ mod tests {
             .0
             .insert("keep-1".into(), (bevy::math::Vec3::ZERO, 0.0));
         let mut health = LastBroadcastEntityHealth::default();
-        health.0.insert("keep-1".into(), (Some(1.0), Some(1.0)));
+        health
+            .0
+            .insert("keep-1".into(), (Some(1.0), Some(1.0), None, None));
 
         prune(&mut positions, &mut health, &["never-existed".to_string()]);
 
@@ -478,7 +490,7 @@ mod tests {
             positions
                 .0
                 .insert(uuid.clone(), (bevy::math::Vec3::ZERO, 0.0));
-            health.0.insert(uuid.clone(), (Some(1.0), None));
+            health.0.insert(uuid.clone(), (Some(1.0), None, None, None));
 
             // Once more than LIVE_AT_ONCE entries have ever been inserted,
             // despawn (and prune) the oldest one so the live set stays

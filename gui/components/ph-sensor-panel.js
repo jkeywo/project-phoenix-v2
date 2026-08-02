@@ -5,6 +5,17 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 
+/**
+ * `hide-shield-rows` (boolean attribute): suppresses the SHIELD and SHIELD
+ * FREQ scan rows this panel would otherwise render (issue #927 gave every
+ * embedder these rows for free, but the battleship's dedicated Sensors
+ * console already has its own richer Target Analysis shield readout —
+ * `gui/battleship/sensors.html`'s `renderShieldFacings()` plus its own
+ * Shield Freq metric — so without this flag the battleship showed shields
+ * twice). Set on the element in markup, e.g.
+ * `<ph-sensor-panel hide-shield-rows>`; every other hull leaves it unset and
+ * keeps the rows.
+ */
 export class PhSensorPanel extends HTMLElement {
   #state = null;
   #scanRowCache = new Map();
@@ -14,6 +25,12 @@ export class PhSensorPanel extends HTMLElement {
   #badgesEl = null;
   #brgEl = null;
   #rngEl = null;
+
+  static get observedAttributes() { return ['hide-shield-rows']; }
+
+  attributeChangedCallback(name) {
+    if (name === 'hide-shield-rows') this.#render();
+  }
 
   constructor() {
     super();
@@ -138,6 +155,47 @@ export class PhSensorPanel extends HTMLElement {
     // Selected-target red alert (issue #749). Only present for Red-Alert-capable
     // ship targets; `null` (non-ship/incapable/no selection) hides the row.
     if (s.target_alert != null) scanRows.push({ k: t('component.sensor_panel.alert'), v: s.target_alert ? t('component.sensor_panel.alert_active') : t('component.sensor_panel.alert_standby') });
+
+    // Target shields (issue #927). `target_shields`, `target_shield_fraction`
+    // and `target_shield_freq` are on every Sensors payload already
+    // (gui/console-state.js buildSensorsConsoleState) but this shared panel —
+    // the one the destroyer, cruiser and courier all embed — used to drop
+    // all three on the floor, so `fact(target_facing_shields)` and the
+    // FrequencyHint's sender-side origin were invisible on three of four
+    // hulls. Same classification `gui/battleship/sensors.html`'s
+    // renderShieldFacings() applies (per-facing hp/max_hp, `online === false`
+    // means down), so the two surfaces agree on the same payload — no second
+    // derivation, no divergent formatting rule. Degrades to no row at all
+    // when there is no target or the target has no shields, matching the
+    // no-target-shields case at gui/battleship/sensors.html:78.
+    //
+    // `hide-shield-rows` (issue #927 duplication fix): the battleship sets
+    // this attribute because its dedicated Target Analysis section already
+    // shows the same facts (renderShieldFacings() + its own Shield Freq
+    // metric) — without the guard both surfaces rendered on that one console.
+    if (!this.hasAttribute('hide-shield-rows')) {
+      const shields = s.target_shields || [];
+      if (shields.length > 0) {
+        const summary = shields.map((f) => {
+          const pct = f.max_hp > 0 ? Math.round((f.hp / f.max_hp) * 100) : 0;
+          const label = (f.label || '?').toUpperCase();
+          return label + ' ' + (f.online === false ? t('console.shield.down') : pct + '%');
+        }).join(' · ');
+        scanRows.push({ k: t('component.sensor_panel.shield'), v: summary });
+      } else if (s.target_shield_fraction != null) {
+        const pct = Math.max(0, Math.round(s.target_shield_fraction * 100));
+        scanRows.push({
+          k: t('component.sensor_panel.shield'),
+          v: pct > 0 ? pct + '%' : t('console.shield.down'),
+        });
+      }
+      if (s.target_shield_freq != null) {
+        scanRows.push({
+          k: t('component.sensor_panel.shield_freq'),
+          v: Math.round(s.target_shield_freq * 100) + '%',
+        });
+      }
+    }
 
     if (scanRows.length > 0) {
       const live = new Set(scanRows.map(r => r.k));

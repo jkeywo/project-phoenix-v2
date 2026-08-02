@@ -2,8 +2,8 @@
 title: Information-Parity Audit — Fact to Console Checklist
 type: concept
 tags: [ai, backfill, parity, consoles, audit]
-sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ship/helm_ai.rs, src/ai/server.rs, src/ai/core.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/mod.rs, src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/console/helm/server.rs, src/ship/coordination.rs, src/core/messages.rs, gui/console-state.js, gui/mount-plan.js, gui/console-resolver.js, gui/components/ph-helm-radar.js, gui/components/ph-sensor-panel.js]
-updated: 2026-07-31
+sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ship/helm_ai.rs, src/ai/server.rs, src/ai/core.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/mod.rs, src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/console/helm/server.rs, src/ship/coordination.rs, src/core/messages.rs, gui/console-state.js, gui/mount-plan.js, gui/console-resolver.js, gui/components/ph-helm-radar.js, gui/components/ph-sensor-panel.js, gui/battleship/shields.html, gui/destroyer/engineering.html]
+updated: 2026-08-01
 ---
 
 Summary
@@ -78,9 +78,9 @@ one bank list.
 | Motion — closest approach, separation progress | Helm ×6 | none directly | **Derived policy state — no parity owed.** See candidate 3 |
 | Ship capability (actuators, boost, availability) | Helm ×6 | Boost/impulse buttons, joystick, station damage bar | OK |
 | Shields and damage (own) | Shields focus, Helm, Power, Repair | Shield facing bars, hull hero bar, core-damage panel, station damage bar | OK |
-| Shields and damage (target) | Torpedo tube, Helm | `target_shields` / `target_shield_fraction` — **battleship only** | **Finding 3** |
+| Shields and damage (target) | Torpedo tube, Helm | `target_shields` / `target_shield_fraction` / `target_shield_freq` — every hull via `ph-sensor-panel` (#927) | OK — resolved, was **Finding 3** |
 | Weapons — arc, range, readiness, magazine, in-flight | Phaser/Blaster/Tube/Magazine, Helm | Bank + tube readiness widgets, magazine counter, phaser/torpedo arc overlays | OK |
-| Threat bearing (Sensors → Shields, channel 3) | Shields focus | transient popup only; no persistent readout outside the battleship | **Finding 2** |
+| Threat bearing (Sensors → Shields, channel 3) | Shields focus | `ShieldsBlackboard.threat_bearing`, rendered on every hull's shields surface (#926) | OK — resolved, was **Finding 2** |
 | Enemy weapon arcs | Helm ×6 | Helm-radar wedge overlay at red alert (#874) | OK — parity by construction; *pending #877* for the reader |
 | Policy runtime (`state_time`, `memory(...)`, history windows) | Helm engines/steering/boost | n/a | Not world information — the AI's own bookkeeping |
 
@@ -117,7 +117,7 @@ consoles the other three hulls use.
 | `fact(inside_threat_range)` | `helm_ai.rs:1616` | Enemy arc wedges drawn to each bank's own range | OK — **candidate 2**, parity by construction |
 | `fact(tubes_full)` / `fact(tubes_fillable)` | `helm_ai.rs:2133` / `:2091` | Torpedo tube slot widget + magazine counter | OK |
 | `fact(torpedoes_in_flight)` | `helm_ai.rs:2041` | Torpedo blips on the tactical radar | OK |
-| `fact(target_facing_shield_down)` | `helm_ai.rs:1987` | `target_shields` — *battleship only* | **Finding 3** |
+| `fact(target_facing_shield_down)` | `helm_ai.rs:1987` | `target_shields` — every hull via `ph-sensor-panel` (#927) | OK — resolved, was **Finding 3** |
 | `fact(hostile_arc_exposure)` / `_escape_deg` / `_inescapable` | `helm_ai.rs:1495`–`:1517` | Helm-radar wedge overlay at red alert (`gui/components/ph-helm-radar.js:207`) | **Pending #877** — counterpart already delivered by #874; no hull authors a reader yet |
 
 ### Weapons — phaser bank, blaster bank, torpedo tube, torpedo magazine
@@ -126,7 +126,7 @@ consoles the other three hulls use.
 | --- | --- | --- | --- |
 | `fact(in_arc)` | `beam.rs:342`, `blaster.rs:76`, `torpedo.rs:106` | Phaser/torpedo arc overlays on the tactical radar | OK |
 | `fact(loaded)` | `torpedo.rs:103` | Tube slot state (`torpSlotStates`) | OK |
-| `fact(target_facing_shields)` | `torpedo.rs:107` | `target_shields` — *battleship only* | **Finding 3** |
+| `fact(target_facing_shields)` | `torpedo.rs:107` | `target_shields` — every hull via `ph-sensor-panel` (#927) | OK — resolved, was **Finding 3** |
 | `fact(red_alert)` | `beam.rs:345`, `blaster.rs:78`, `torpedo.rs:110` | Red-alert control | OK |
 | `in_range`, `on_cooldown`, `cooldown_remaining`, `frequency`, `tubes_full`, `magazine`, `in_flight`, `loaded_count`, `target_count`, `ai_target_count`, `operates_ai` | seeded | Arc wedge radius + radar range rings; bank readiness + magazine widgets; AUTO badges | OK — *unauthored* by any shipped hull |
 
@@ -136,7 +136,7 @@ consoles the other three hulls use.
 | --- | --- | --- | --- |
 | `fact(recent_damage_pct_max)` | `src/console_ai/core.rs:553` | Shield facing HP bars — the level whose fall *is* the recent damage | OK |
 | `recent_damage_<facing>`, `recent_damage_total`, `recent_damage_fraction_max`, `health_fraction_min_ratio`, `health_ratio_pct` | `console_ai/core.rs:540`–`:573` | same, plus hull hero bar | OK — *unauthored* |
-| threat bearing (channel 3, overrides the damage decision) | `src/console_ai/server.rs:190`–`194` | transient popup only | **Finding 2** |
+| threat bearing (channel 3, overrides the damage decision) | `src/console_ai/server.rs:190`–`194` | `ShieldsBlackboard.threat_bearing` (#926) — every hull's shields surface | OK — resolved, was **Finding 2** |
 
 ### Power — `[power.ai_policy]`
 
@@ -169,8 +169,8 @@ sender-side reading must be visible on the sender's own console.
 | Payload | Emitted from | Sender-side console origin | AI receiver | Verdict |
 | --- | --- | --- | --- | --- |
 | `TargetDesignation` | `src/ship/sensors.rs:206` | Sensors radar selection | Tactical | OK |
-| `ThreatBearing` | `src/ship/sensors.rs:491` — nearest hostile in sensor range, authoritative | Nearest hostile blip on the Sensors radar | Shields focus | OK on emission; **Finding 2** on the receiving console |
-| `FrequencyHint` | `src/console_ai/server.rs:1327` | `target_shield_freq` — *battleship only* | Tactical | **Finding 3** |
+| `ThreatBearing` | `src/ship/sensors.rs:491` — nearest hostile in sensor range, authoritative | Nearest hostile blip on the Sensors radar; `ShieldsBlackboard.threat_bearing` on the receiving ship's shields surface (#926) | Shields focus | OK — resolved, was **Finding 2** |
+| `FrequencyHint` | `src/console_ai/server.rs:1327` | `target_shield_freq` — every hull via `ph-sensor-panel` (#927) | Tactical | OK — resolved, was **Finding 3** |
 | `ArcBearingRequest` | `src/console/weapons/mod.rs:684` | Phaser/torpedo arc overlay + target lock | Helm | OK |
 | `NavigateTo` | `src/console/navigation/mod.rs:337` | Waypoint marker on the nav chart | Helm | OK |
 | `RepairRequest` | `src/ship/damage_sync.rs:161` | Core-damage panel + dispatch targets (#737 projection applies to both actors) | Repair | OK |
@@ -184,24 +184,37 @@ sender's origin tag only, never on which actor produced the underlying state.
 
 ## The three named candidates
 
-### 1. Threat bearing — **gap, filed**
+### 1. Threat bearing — **resolved by #926**
 
 The backfilled Shields focus consumes `PendingShieldsThreatBearing`, the
 relative bearing of the nearest hostile in sensor range, and it **overrides**
 the damage-based focus decision for that tick
-(`src/console_ai/server.rs:190`–`194`). A human Shields officer gets only the
-transient coordination popup.
+(`src/console_ai/server.rs:190`–`194`). A human Shields officer used to get
+only the transient coordination popup.
 
-The `ShieldsConsolePayload.target_bearing` field is not this quantity: it is
-the bearing to this ship's *own* Combat Lock (`src/ship/shields.rs:552`), and
-it renders on one console in the game — `gui/battleship/shields.html:40,80`,
-labelled "Threat Bearing". The demo hull puts shields on
-`gui/destroyer/engineering.html:87`, which renders facings and focus and no
-bearing at all.
+The old `ShieldsConsolePayload.target_bearing` field was not this quantity: it
+is the bearing to this ship's *own* Combat Lock (`src/ship/shields.rs:552`
+pre-#926), and it rendered on one console in the game —
+`gui/battleship/shields.html:40,80`, mislabelled "Threat Bearing". The demo
+hull put shields on `gui/destroyer/engineering.html:87`, which rendered
+facings and focus and no bearing at all.
 
-So the human seat sees a one-shot popup where the AI seat sees a standing
-input, and on three of four player hulls not even the mislabelled proxy.
-Filed.
+Closed the way #874 closed the first gap: one producer, both consumers.
+`ShieldsBlackboard` now carries two distinct fields — `combat_lock_bearing`
+(the renamed old field, unchanged Combat Lock meaning) and `threat_bearing`
+(new), the latter read straight off `ship::sensors::SensorsThreatState` on
+the same ship, the same authoritative state
+`console_ai::server::ai_shield_focus` reads via the delayed
+`PendingShieldsThreatBearing` coordination copy — no second derivation.
+`publish_shields_blackboard` (`src/ship/shields.rs`) is the one producer;
+`gui/battleship/shields.html`'s "Threat Bearing" row now shows the actual
+threat bearing, and every other shields-owning console gained the same
+compact threat-bearing readout: `gui/destroyer/engineering.html`'s Shields
+column, `gui/cruiser/science.html`'s Shields column, and
+`gui/courier/captain.html`'s Shields & Power column — all reached via
+`buildSystemStationConsoleState` → `buildShieldsConsoleState` like every
+other shields-owning console. The marker clears whenever
+`SensorsThreatState.last_bearing_rad` clears (`src/ship/sensors.rs:449`).
 
 ### 2. Safe-range ring — **no gap; already parity by construction**
 
@@ -260,7 +273,7 @@ follow-up filed.
    gap in the game and it is structural, not per-fact. Filed as **#925**.
 2. **Threat bearing has no persistent console counterpart outside the
    battleship, and the battleship's is a different quantity.** See candidate 1.
-   Filed as **#926**.
+   Filed as #926 — **resolved**.
 3. **Target shield state renders on one console family only.**
    `target_shields`, `target_shield_fraction` and `target_shield_freq` are
    built into every Sensors payload (`gui/console-state.js:1264`–`:1266`) but
@@ -270,7 +283,19 @@ follow-up filed.
    tube reads `fact(target_facing_shields)`, the backfilled helm reads
    `fact(target_facing_shield_down)`, and the `FrequencyHint` channel carries
    the target's shield frequency to Tactical. On three of four player hulls the
-   human seat cannot see any of it. Filed as **#927**.
+   human seat cannot see any of it. Filed as #927 — **resolved**:
+   `ph-sensor-panel.js` now adds a per-facing-or-fraction shield row and a
+   shield-frequency row to its scan data, using the same classification
+   `gui/battleship/sensors.html`'s `renderShieldFacings()` applies (no second
+   derivation), and degrading to no row when the target has no shields. Every
+   station that embeds the shared panel — including the destroyer's captain
+   station — picks it up via the same `buildSensorsConsoleState()` payload,
+   no per-hull change needed. The battleship already had its own dedicated
+   readout (`renderShieldFacings()`), so the new shared-panel rows initially
+   duplicated it there; `ph-sensor-panel` now takes a `hide-shield-rows`
+   boolean attribute, the battleship sets it and folds Shield Freq into its
+   own Target Analysis section instead, and every other hull leaves the
+   attribute unset and keeps the shared rows.
 
 ## Deferred
 

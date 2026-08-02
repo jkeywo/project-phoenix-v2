@@ -132,6 +132,46 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.world.entities[0].shield_fraction).toBe(0);
   });
 
+  // ── shields / shield_freq merge (issue #927) ─────────────────────────────
+  //
+  // `EntityStateSnapshot.shields`/`.shield_freq` were always absent on the
+  // wire before #927 (server_app::sim_state_broadcaster hardcoded
+  // `shields: None` and had no shield_freq field at all), so this merge was
+  // dead code — buildSensorsConsoleState has read `tgt.shields`/
+  // `tgt.shield_freq` since #473/#870 but nothing upstream ever set them.
+
+  it('SimState merges per-facing shields into the live entity in place', () => {
+    const s = new ClientSimState();
+    s.world.entities = [asteroid('a', 0, 0)];
+    const facings = [
+      { label: 'Fore', hp: 80, max_hp: 80, online: true, arc_id: 'fore', center_deg: 0, width_deg: 90, priority: 1, offline_remaining: 0, is_focused: false },
+    ];
+    s.apply({ type: 'SimState', data: { snapshot: {
+      entity_states: [{ uuid: 'a', shields: facings }],
+    } } });
+    expect(s.world.entities[0].shields).toEqual(facings);
+  });
+
+  it('SimState merges shield_freq into the live entity in place', () => {
+    const s = new ClientSimState();
+    s.world.entities = [asteroid('a', 0, 0)];
+    s.apply({ type: 'SimState', data: { snapshot: {
+      entity_states: [{ uuid: 'a', shield_freq: 0.75 }],
+    } } });
+    expect(s.world.entities[0].shield_freq).toBe(0.75);
+  });
+
+  it('SimState leaves shields/shield_freq untouched when the snapshot omits them', () => {
+    const s = new ClientSimState();
+    const facings = [{ label: 'Fore', hp: 80, max_hp: 80, online: true }];
+    s.world.entities = [{ ...asteroid('a', 0, 0), shields: facings, shield_freq: 0.5 }];
+    s.apply({ type: 'SimState', data: { snapshot: {
+      entity_states: [{ uuid: 'a', position: [1, 0, 2] }],
+    } } });
+    expect(s.world.entities[0].shields).toEqual(facings);
+    expect(s.world.entities[0].shield_freq).toBe(0.5);
+  });
+
   it('SimState mirrors the shared navigation waypoint', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {

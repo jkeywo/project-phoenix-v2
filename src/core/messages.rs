@@ -1288,8 +1288,20 @@ pub struct EntityStateSnapshot {
     #[serde(default)]
     pub flags: Vec<FlagKind>,
     /// Four-quadrant shield state, present only for ship-like entities.
+    /// Populated from the same `ShipShields::snapshot()` this ship's own
+    /// `ShieldsBlackboard.facings` uses (issue #927 —
+    /// `ship::shields::shield_facing_statuses`, called from
+    /// `server_app::sim_state_broadcaster`); previously always `None` on
+    /// this wire type regardless of the entity's shields, which is why the
+    /// Sensors panel's `target_shields` was always empty for every target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shields: Option<Vec<ShieldFacingStatus>>,
+    /// Shield generator frequency (0.0-1.0) for this entity, present only
+    /// for ship-like entities. The SAME authoritative `ShipShields::frequency()`
+    /// `console_ai::server::tick_frequency_hint_high_fidelity` reads to build
+    /// `FrequencyHint` (issue #927) — one producer, no parallel derivation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_freq: Option<f32>,
     /// Seconds remaining until the entity warps out (present only while in `WarpingOut` AI state).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warp_out_remaining_secs: Option<f32>,
@@ -2798,9 +2810,19 @@ pub struct ShieldsBlackboard {
     pub focused_facing: Option<String>,
     /// Grid status string (e.g. "GRID NOMINAL", "EMITTER OFFLINE").
     pub grid_status: String,
-    /// Bearing of the current Tactical target in degrees, or None if no target.
+    /// Bearing of this ship's own frozen Combat Lock target, in degrees, or
+    /// None if no lock. Renamed from `target_bearing` (issue #926) — it was
+    /// easily confused with `threat_bearing` below, a different quantity.
     #[serde(default)]
-    pub target_bearing: Option<f32>,
+    pub combat_lock_bearing: Option<f32>,
+    /// Relative bearing (degrees) of the nearest hostile in sensor range —
+    /// the SAME authoritative fact the backfilled Shields focus AI reads via
+    /// `PendingShieldsThreatBearing` (issue #926), sourced from
+    /// `ship::sensors::SensorsThreatState` on this ship. `None` when Sensors
+    /// reports no hostile in range. One producer for both the AI fact and
+    /// this console field — no parallel client-side derivation.
+    #[serde(default)]
+    pub threat_bearing: Option<f32>,
     /// Current shield generator frequency (0.0–1.0).
     #[serde(default = "default_shield_frequency")]
     pub frequency: f32,

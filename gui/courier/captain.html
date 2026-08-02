@@ -18,6 +18,12 @@
     .col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--edge); background: rgba(14,17,23,.6); }
     h2 { margin: 0; border-bottom: 1px solid var(--edge); padding-bottom: 5px; color: var(--ink-dim); font: 600 11px "Chakra Petch", sans-serif; letter-spacing: .24em; text-transform: uppercase; }
     ph-objective-list, ph-shield-facings, ph-power-controls, ph-repair-teams { flex: 1; min-height: 0; }
+    /* Compact threat-bearing readout (issue #926) — same standing fact the
+       battleship's dedicated Shields console shows, condensed to one line
+       for this column's tighter layout. Hidden when Sensors holds no threat. */
+    .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 0 0 8px; flex-shrink: 0; visibility: hidden; }
+    .threat-readout.active { visibility: visible; }
+    .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 14px; }
     .footer { color: var(--ink-faint); font: 11px "JetBrains Mono", monospace; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }.spacer { flex: 1; }
     .overlay { display: none; position: absolute; inset: 0; z-index: 2; padding: 18px; box-sizing: border-box; background: rgba(5,8,24,.97); flex-direction: column; gap: 9px; }
@@ -43,6 +49,7 @@
         </div>
         <div class="col">
           <h2 data-i18n="console.captain.shields_power">Shields & Power</h2>
+          <div class="threat-readout" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
           <ph-shield-facings id="shields"></ph-shield-facings>
           <ph-power-controls id="power"></ph-power-controls>
           <ph-battery-bar id="battery"></ph-battery-bar>
@@ -103,6 +110,14 @@
       document.getElementById('red-alert').state = { active: !!command.red_alert, auto: !!command.red_alert_auto };
       document.getElementById('objectives').state = { objectives: command.objectives || [], boosted_objective_id: command.boosted_objective_id ?? null };
       document.getElementById('shields').state = { facings: shields.facings || [], focused_facing: shields.focused_facing || null, auto: !!shields.shields_auto };
+      const threatRow = document.getElementById('threat-row');
+      if (shields.threat_bearing != null) {
+        threatRow.classList.add('active');
+        document.getElementById('threat-bearing').textContent = Math.round(shields.threat_bearing) + '°M';
+      } else {
+        threatRow.classList.remove('active');
+        document.getElementById('threat-bearing').textContent = '—';
+      }
       document.getElementById('power').state = { groups: power.consoles || [], auto: !!power.power_auto };
       document.getElementById('battery').state = { level_pct: power.battery_max ? power.battery_charge / power.battery_max * 100 : 0, charging: !!power.battery_online && !power.locked, emergency_threshold_pct: 20 };
       document.getElementById('hull').state = { total_pct: repair.overall_hull?.pct ?? 1 };

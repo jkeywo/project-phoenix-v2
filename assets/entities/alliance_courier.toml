@@ -217,6 +217,9 @@ max_reverse_speed = 8
 acceleration = 9
 deceleration = 18
 max_yaw_rate = 0.9
+# Lightest hull in the fleet, so it buys the most turn back for throttle:
+# a stationary courier comes about 50% faster than one at flank speed.
+low_speed_turn_boost = 0.5
 max_bank_deg = 18
 impulse_charge_duration = 2.0
 impulse_speed_multiplier = 14

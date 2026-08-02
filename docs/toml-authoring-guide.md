@@ -537,6 +537,7 @@ defining bridge crew layouts; see **§6.3**.
 | `acceleration` | f32 | `0.0` | Acceleration (units/s²). |
 | `deceleration` | f32 | `0.0` | Deceleration when thrust = 0. |
 | `max_yaw_rate` | f32 | `0.0` | Max yaw (rad/s). |
+| `low_speed_turn_boost` | f32 | `0.0` | Extra turn authority for flying slow. Effective yaw rate is `max_yaw_rate * (1 + X * (1 - speed/cap))`: x`1+X` at a dead stop, lerping to x1 at the speed cap. Light hulls author the most, capital hulls `0`. |
 | `radar_range` | f32 | `0.0` | Helm overlay radar range. |
 | `radar_shows` | bool | `false` | Whether helm radar overlay is enabled. |
 | `power_multipliers` | `[f32; 4]` | none | Bonus values per power level 0..3. See power model. |

@@ -232,6 +232,9 @@ max_reverse_speed = 4.5
 acceleration = 3.0
 deceleration = 9.0
 max_yaw_rate = 0.20
+# Capital hull: no low-speed turn trade. Authored explicitly so the zero
+# reads as a decision.
+low_speed_turn_boost = 0.0
 max_bank_deg = 5.0
 
 [helm_console.engine_pfx]

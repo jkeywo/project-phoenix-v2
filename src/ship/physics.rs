@@ -64,6 +64,18 @@ pub struct ShipPhysicsConfig {
     pub acceleration: f32,
     pub deceleration: f32,
     pub max_yaw_rate: f32,
+    /// Extra turn authority granted for flying SLOW, from
+    /// `[helm_console] low_speed_turn_boost`.
+    ///
+    /// The effective yaw rate is `max_yaw_rate * (1 + X * (1 - speed_fraction))`,
+    /// where `speed_fraction` is the ship's current speed as a fraction of its
+    /// own cap. So `X` is the bonus at a DEAD STOP and the multiplier lerps
+    /// linearly down to x1 at the speed cap. `0.0` (the default) restores the
+    /// old speed-independent behaviour exactly.
+    ///
+    /// This is what stops two evenly-matched hulls locking into a circling
+    /// stalemate: whoever backs off the throttle out-turns the one that didn't.
+    pub low_speed_turn_boost: f32,
     pub max_lateral_speed: f32,
     pub lateral_acceleration: f32,
     /// Maximum vertical (up/down) speed in world units per second (issue #744).
@@ -86,6 +98,8 @@ impl ShipPhysicsConfig {
             acceleration: 25.0 / 3.0,
             deceleration: 25.0,
             max_yaw_rate: std::f32::consts::PI / 16.0,
+            // Off by default: a hull opts in from its own TOML.
+            low_speed_turn_boost: 0.0,
             max_lateral_speed: 15.0,
             lateral_acceleration: 15.0,
             // Vertical mirrors lateral tuning: a rate-limited axis with its own
@@ -94,6 +108,30 @@ impl ShipPhysicsConfig {
             vertical_acceleration: 15.0,
         }
     }
+}
+
+/// The yaw rate a ship actually turns at right now, given how fast it is going.
+///
+/// Slow hulls turn harder: the multiplier is `1 + low_speed_turn_boost` at rest
+/// and lerps linearly to `1` at the speed cap, so a helm trades throttle for
+/// turn authority. Speed is measured against the cap for the direction of
+/// travel — full astern is not "slow" — and a hull with no cap (an unauthored
+/// `max_speed = 0`) is treated as stationary.
+fn effective_yaw_rate(speed: f32, config: &ShipPhysicsConfig) -> f32 {
+    if config.low_speed_turn_boost <= 0.0 {
+        return config.max_yaw_rate;
+    }
+    let cap = if speed < 0.0 {
+        config.max_reverse_speed
+    } else {
+        config.max_speed
+    };
+    let speed_fraction = if cap > 0.0 {
+        (speed.abs() / cap).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    config.max_yaw_rate * (1.0 + config.low_speed_turn_boost * (1.0 - speed_fraction))
 }
 
 /// Compute the new ship state given current state, inputs, and delta time.
@@ -147,8 +185,8 @@ pub fn compute_physics(
         }
     };
 
-    // Compute new yaw
-    let yaw_change = steering * config.max_yaw_rate * dt;
+    // Compute new yaw, with the low-speed turn boost folded into the rate.
+    let yaw_change = steering * effective_yaw_rate(new_speed, config) * dt;
     let new_yaw = state.yaw + yaw_change;
 
     // Compute lateral speed
@@ -510,5 +548,137 @@ mod tests {
             "expected ~{target}, got {}",
             s.forward_speed
         );
+    }
+
+    // ── Low-speed turn boost ────────────────────────────────────────────────
+    // The throttle-for-turn trade. Each test pins one property of the lerp,
+    // because each has its own way of going wrong silently.
+
+    fn boosted_config(boost: f32) -> ShipPhysicsConfig {
+        ShipPhysicsConfig {
+            low_speed_turn_boost: boost,
+            ..ShipPhysicsConfig::new()
+        }
+    }
+
+    fn full_right() -> ShipPhysicsInput {
+        ShipPhysicsInput {
+            steering: 1.0,
+            ..default_input()
+        }
+    }
+
+    /// A hull that authored no boost — or omitted the field entirely, which
+    /// deserialises to 0.0 — must turn at exactly the rate it always did.
+    #[test]
+    fn zero_turn_boost_leaves_the_yaw_rate_untouched() {
+        let cfg = boosted_config(0.0);
+        let stationary = compute_physics(default_state(), full_right(), 1.0, &cfg);
+        assert!((stationary.yaw - cfg.max_yaw_rate).abs() < 1e-4);
+    }
+
+    /// At a dead stop the multiplier is the full `1 + X`.
+    #[test]
+    fn turn_boost_is_at_maximum_when_stopped() {
+        let cfg = boosted_config(0.5);
+        let result = compute_physics(default_state(), full_right(), 1.0, &cfg);
+        assert!(
+            (result.yaw - cfg.max_yaw_rate * 1.5).abs() < 1e-4,
+            "expected x1.5 at rest, got {}",
+            result.yaw / cfg.max_yaw_rate
+        );
+    }
+
+    /// At the speed cap the boost is entirely gone — flank speed must not be
+    /// quietly more agile than it was before the feature landed.
+    #[test]
+    fn turn_boost_is_gone_at_the_speed_cap() {
+        let cfg = boosted_config(0.5);
+        let state = ShipPhysicsState {
+            forward_speed: cfg.max_speed,
+            ..default_state()
+        };
+        let input = ShipPhysicsInput {
+            thrust: 1.0,
+            ..full_right()
+        };
+        let result = compute_physics(state, input, 1.0, &cfg);
+        assert!(
+            (result.yaw - cfg.max_yaw_rate).abs() < 1e-4,
+            "expected x1.0 at flank, got {}",
+            result.yaw / cfg.max_yaw_rate
+        );
+    }
+
+    /// Halfway up the throttle is halfway through the lerp — the interpolation
+    /// is linear in speed, not stepped at the endpoints.
+    #[test]
+    fn turn_boost_lerps_linearly_between_the_endpoints() {
+        let cfg = boosted_config(0.5);
+        let state = ShipPhysicsState {
+            forward_speed: cfg.max_speed * 0.5,
+            ..default_state()
+        };
+        let input = ShipPhysicsInput {
+            thrust: 0.5,
+            ..full_right()
+        };
+        let result = compute_physics(state, input, 1.0, &cfg);
+        assert!(
+            (result.yaw - cfg.max_yaw_rate * 1.25).abs() < 1e-3,
+            "expected x1.25 at half throttle, got {}",
+            result.yaw / cfg.max_yaw_rate
+        );
+    }
+
+    /// Full astern is not "slow". Reverse is measured against
+    /// `max_reverse_speed`, so a ship backing off at its reverse cap gets no
+    /// boost — otherwise every hull would fight the whole engagement in
+    /// reverse, which is the deadlock this feature exists to break.
+    #[test]
+    fn full_reverse_earns_no_turn_boost() {
+        let cfg = boosted_config(0.5);
+        let state = ShipPhysicsState {
+            forward_speed: -cfg.max_reverse_speed,
+            ..default_state()
+        };
+        let input = ShipPhysicsInput {
+            thrust: -1.0,
+            ..full_right()
+        };
+        let result = compute_physics(state, input, 1.0, &cfg);
+        assert!(
+            (result.yaw - cfg.max_yaw_rate).abs() < 1e-4,
+            "expected x1.0 at full astern, got {}",
+            result.yaw / cfg.max_yaw_rate
+        );
+    }
+
+    /// A hull with no authored speed cap can never be anything but stopped, so
+    /// the fraction must not divide by zero and hand it a NaN yaw.
+    #[test]
+    fn turn_boost_survives_an_unauthored_speed_cap() {
+        let cfg = ShipPhysicsConfig {
+            max_speed: 0.0,
+            max_reverse_speed: 0.0,
+            low_speed_turn_boost: 0.5,
+            ..ShipPhysicsConfig::new()
+        };
+        let result = compute_physics(default_state(), full_right(), 1.0, &cfg);
+        assert!(result.yaw.is_finite());
+        assert!((result.yaw - cfg.max_yaw_rate * 1.5).abs() < 1e-4);
+    }
+
+    /// The boost is symmetric: turning to port gains exactly what turning to
+    /// starboard does.
+    #[test]
+    fn turn_boost_applies_to_both_directions() {
+        let cfg = boosted_config(0.3);
+        let left = ShipPhysicsInput {
+            steering: -1.0,
+            ..default_input()
+        };
+        let result = compute_physics(default_state(), left, 1.0, &cfg);
+        assert!((result.yaw + cfg.max_yaw_rate * 1.3).abs() < 1e-4);
     }
 }

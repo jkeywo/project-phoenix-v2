@@ -3,7 +3,7 @@ title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost]
 sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/console-state.js, gui/components/ph-helm-radar.js, src/weapons/arc_geometry.rs, src/console/helm/server.rs, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs]
-updated: 2026-07-30
+updated: 2026-08-02
 ---
 
 # Helm Console
@@ -29,6 +29,14 @@ When the impulse drive enters `ImpulsePhase::Charging` (`ShipView.impulse_charge
 - The speed cap during Active is driven by `ImpulseConfigResource.speed_multiplier` flowing through `translate_impulse_modifiers` → `ModifierSlot::MaxSpeed` (under `ModifierSource::ImpulseDrive`).
 
 Cancel buttons live on Helm, Sensors (`ScienceCancelImpulseButton`) and Navigation (`NavCancelImpulseButton`); all three emit `ClientMessage::CancelImpulse`.
+
+## Low-speed turn boost
+
+`[helm_console] low_speed_turn_boost = X` makes a hull turn harder the slower it flies. `effective_yaw_rate` in `src/ship/physics.rs` scales `max_yaw_rate` by `1 + X * (1 - speed_fraction)` — x`1+X` at a dead stop, lerping linearly to x1 at the speed cap — where `speed_fraction` is the post-thrust speed over the cap for the direction of travel (`max_reverse_speed` when astern). Absent or `0.0` restores the flat speed-independent rate.
+
+It sits inside `compute_physics`, so it applies identically to human and AI helms, and it stacks multiplicatively with the `MaxYawRate` power/damage modifiers and boost's `steering_multiplier` that `integrate_ship_physics` folds into `max_yaw_rate` first.
+
+Authored per class, lightest hulls first: Alliance courier/destroyer `0.5`, cruiser `0.2`, battleship `0.0`; Harrow escort/destroyer `0.3`, cruiser/patrol `0.1`, warhawk `0.0`.
 
 ## Boost drive
 

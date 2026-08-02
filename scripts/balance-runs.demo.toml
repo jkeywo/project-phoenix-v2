@@ -39,7 +39,9 @@ max_failures = 0
 # the FIRST observed batch (seeds 1-5, sim_seconds 120) with headroom for seed
 # noise — re-record them alongside any accepted balance change that moves them.
 
-# Mirror-weight duel: five draws, destroyer out-damaging +167 on average.
+# Mirror-weight duel: five draws, destroyer out-damaging +265 on average. The
+# low-speed turn boost retired the two 120 s timeouts this used to produce —
+# both hulls now reach a decision inside the budget, they just survive it.
 [[matchup]]
 name   = "destroyer_vs_harrow_destroyer"
 side_a = ["destroyer"]
@@ -47,7 +49,9 @@ side_b = ["ship_harrow_destroyer"]
   [matchup.thresholds]
   min_damage_margin = 100.0
 
-# The destroyer sweeps the cruiser: 5/5 wins, TTK median 16.9 s.
+# The destroyer sweeps the cruiser: 5/5 wins, TTK median 18.5 s. This matchup is
+# the binding constraint on the destroyer's blaster damage — see the floor note
+# in assets/entities/alliance_destroyer.toml.
 [[matchup]]
 name   = "destroyer_vs_harrow_cruiser"
 side_a = ["destroyer"]
@@ -56,7 +60,9 @@ side_b = ["ship_harrow_cruiser"]
   min_win_rate   = 1.0
   max_ttk_median = 30.0
 
-# The stateless patrol escort folds fast: 5/5 wins, TTK median 6.7 s.
+# The patrol escort still loses 5/5, but it is a fight now rather than a
+# fly-past: TTK median 12.4 s and a +76 damage margin, after the blaster tuning
+# pass took it off a 9.3 s single-approach kill.
 [[matchup]]
 name   = "destroyer_vs_harrow_patrol"
 side_a = ["destroyer"]
@@ -65,7 +71,7 @@ side_b = ["ship_harrow_patrol"]
   min_win_rate   = 1.0
   max_ttk_median = 15.0
 
-# The warhawk battleship wins on weight of fire: 0/5, margin -121. A destroyer
+# The warhawk battleship wins on weight of fire: 0/5, margin -158. A destroyer
 # that starts BEATING it — or getting crushed far harder — is worth a look.
 [[matchup]]
 name   = "destroyer_vs_harrow_warhawk"

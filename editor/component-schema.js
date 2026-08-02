@@ -181,6 +181,7 @@ export const COMPONENT_SCHEMA = {
       { key: 'acceleration', type: 'number', default: 0 },
       { key: 'deceleration', type: 'number', default: 0 },
       { key: 'max_yaw_rate', type: 'number', default: 0 },
+      { key: 'low_speed_turn_boost', type: 'number', default: 0, optional: true },
       { key: 'max_bank_deg', type: 'number', default: 0, optional: true },
       { key: 'bank_lerp_rate', type: 'number', optional: true },
       { key: 'impulse_charge_duration', type: 'number', default: 3.0 },

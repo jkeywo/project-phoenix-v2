@@ -581,6 +581,9 @@ max_reverse_speed = 2.7
 acceleration = 2.7
 deceleration = 6.7
 max_yaw_rate = 0.27
+# Capital hulls do not get the low-speed turn trade. Authored explicitly
+# rather than omitted: 0 here is a balance decision, not an oversight.
+low_speed_turn_boost = 0.0
 max_bank_deg = 8
 impulse_charge_duration = 3
 impulse_speed_multiplier = 8

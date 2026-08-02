@@ -81,6 +81,8 @@ max_reverse_speed = 5.0
 acceleration = 4.0
 deceleration = 10.0
 max_yaw_rate = 0.2
+# Escort hull, so it takes the Harrow light-hull low-speed turn trade.
+low_speed_turn_boost = 0.3
 max_bank_deg = 5.0
 
 [weapons_console]

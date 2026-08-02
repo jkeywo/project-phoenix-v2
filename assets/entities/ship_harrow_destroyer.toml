@@ -183,6 +183,10 @@ max_reverse_speed = 8.0
 acceleration = 9.0
 deceleration = 12.0
 max_yaw_rate = 0.55
+# Low-speed turn trade, the Harrow light-hull figure (x1.3 at rest). Lower
+# than the Alliance destroyer's 0.5: the Harrow already out-turns it flat
+# out, and matching the bonus would hand it both ends of the trade.
+low_speed_turn_boost = 0.3
 max_bank_deg = 22.0
 
 # MANDATORY for this hull, not decoration: the spawner only inserts an ENABLED

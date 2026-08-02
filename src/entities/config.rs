@@ -997,6 +997,16 @@ pub struct HelmConsoleConfig {
     pub deceleration: f32,
     #[serde(default)]
     pub max_yaw_rate: f32,
+    /// Extra turn authority for flying slow, as a fraction added at a dead stop
+    /// and lerped away to nothing at `max_speed`. `0.5` means a stationary hull
+    /// turns 50% faster than it does at full throttle; `0.0` (the default) is
+    /// the old speed-independent turn rate.
+    ///
+    /// This is the throttle-vs-turn trade that keeps evenly-matched hulls from
+    /// deadlocking in a co-rotating circle. Authored per class: light hulls get
+    /// the most, capital hulls none.
+    #[serde(default)]
+    pub low_speed_turn_boost: f32,
     /// Radar configuration for the Helm radar widget, from
     /// `[helm_console.radar]`.
     #[serde(default)]

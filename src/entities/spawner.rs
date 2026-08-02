@@ -904,6 +904,7 @@ pub fn spawn_entity(
                 acceleration: hc.acceleration,
                 deceleration: hc.deceleration,
                 max_yaw_rate: hc.max_yaw_rate,
+                low_speed_turn_boost: hc.low_speed_turn_boost,
                 max_lateral_speed: hc
                     .lateral_thrust
                     .as_ref()

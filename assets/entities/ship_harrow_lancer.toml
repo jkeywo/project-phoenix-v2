@@ -46,8 +46,14 @@ description = "entity.ship_harrow_lancer.target.description"
 # shield override in the world file) — torpedo damage dealt to an NPC is
 # invisible to the report. For that the Lancers have to stay alive and keep
 # firing across the whole run, so their hull outlasts the player's return fire.
+# 2000 -> 100 (#915 tuning pass). 2000 was the fleet's largest pool by a
+# factor of two, on an ESCORT with a 5-point shield — it outlasted the
+# battleship. 100 puts it at the bottom of the ladder where its class sits.
+# `assets/worlds/rng_coverage.toml` fields two of these to exercise all three
+# weapon kinds; they now die far sooner, so check that world still gets its
+# torpedo and blaster coverage.
 [hull]
-hull_integrity = 2000.0
+hull_integrity = 100.0
 
 # Single omni arc, as on every other NPC hull: NPCs have no `[shields]`
 # station, so the auto-generated `[[system]]` entry is ownerless and `ai_only`.

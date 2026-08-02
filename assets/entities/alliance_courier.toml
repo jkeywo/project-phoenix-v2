@@ -66,10 +66,21 @@ target_speed  = 0.0
 # RepairTarget::Core dispatches to. Shield-arc hull comes from
 # [[shield_arc]].hull_max_hp, not from here.
 
+# ── Durability ladder (#915 tuning pass) ─────────────────────────────────────
+# The whole fleet was re-pegged in one pass, because these numbers only mean
+# anything relative to each other. Dynasty hulls carry a monolithic
+# `[hull] hull_integrity`; Alliance hulls have none, and their equivalent pool
+# is the SUM of the per-system `max_hp` below. Shields sit on top of both.
+#
+#   Dynasty   courier 100 | destroyer 200 | patrol/cruiser 300 | warhawk 400
+#   Alliance  courier 200 | destroyer 300 | cruiser 500 | battleship 800
+#
+# The Alliance figures were reached by scaling each hull's authored system HP
+# proportionally, so the relative weighting between systems is unchanged.
 [[hull.system_hull]]
 system_id = "core"
 display_name = "entity.alliance_courier.hull.system_hull.core.display_name"
-max_hp = 12
+max_hp = 24
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.10
@@ -77,7 +88,7 @@ debuff_magnitude = 0.10
 [[hull.system_hull]]
 system_id = "helm-engine-port"
 display_name = "entity.alliance_courier.hull.system_hull.helm_engine_port.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -85,7 +96,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "entity.alliance_courier.hull.system_hull.helm_engine_starboard.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -93,7 +104,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-lateral-thrust"
 display_name = "entity.alliance_courier.hull.system_hull.helm_lateral_thrust.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -101,7 +112,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "tactical-radar"
 display_name = "entity.alliance_courier.hull.system_hull.tactical_radar.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -109,7 +120,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "blaster-fore"
 display_name = "entity.alliance_courier.hull.system_hull.blaster_fore.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -117,7 +128,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "sensor-radar"
 display_name = "entity.alliance_courier.hull.system_hull.sensor_radar.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -125,7 +136,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "power-reactor"
 display_name = "entity.alliance_courier.hull.system_hull.power_reactor.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -133,7 +144,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "power-battery"
 display_name = "entity.alliance_courier.hull.system_hull.power_battery.display_name"
-max_hp = 12
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20

@@ -39,9 +39,14 @@ max_failures = 0
 # the FIRST observed batch (seeds 1-5, sim_seconds 120) with headroom for seed
 # noise — re-record them alongside any accepted balance change that moves them.
 
-# Mirror-weight duel: five draws, destroyer out-damaging +265 on average. The
-# low-speed turn boost retired the two 120 s timeouts this used to produce —
-# both hulls now reach a decision inside the budget, they just survive it.
+# Mirror-weight duel: RESOLVES for the first time. 5/5 kills at a 31.8 s TTK,
+# margin +186. The deadlock was never a manoeuvring problem — it was the Harrow
+# destroyer's 900-point hull, which needed over three times the sim budget to
+# burn through. The durability ladder (900 -> 200) fixed it; the turn boost,
+# swept 0.5 -> 1.8, had moved nothing.
+#
+# The margin threshold is unchanged and still the right guard: it is what
+# catches the destroyer starting to LOSE a duel it is meant to win.
 [[matchup]]
 name   = "destroyer_vs_harrow_destroyer"
 side_a = ["destroyer"]
@@ -49,9 +54,10 @@ side_b = ["ship_harrow_destroyer"]
   [matchup.thresholds]
   min_damage_margin = 100.0
 
-# The destroyer sweeps the cruiser: 5/5 wins, TTK median 18.5 s. This matchup is
-# the binding constraint on the destroyer's blaster damage — see the floor note
-# in assets/entities/alliance_destroyer.toml.
+# The destroyer sweeps the cruiser: 5/5 wins, TTK median 14.6 s (the cruiser
+# came DOWN 420 -> 300 on the ladder). Historically the binding constraint on
+# the destroyer's blaster damage — see the floor note in
+# assets/entities/alliance_destroyer.toml — though the ladder has loosened it.
 [[matchup]]
 name   = "destroyer_vs_harrow_cruiser"
 side_a = ["destroyer"]
@@ -60,23 +66,34 @@ side_b = ["ship_harrow_cruiser"]
   min_win_rate   = 1.0
   max_ttk_median = 30.0
 
-# The patrol escort still loses 5/5, but it is a fight now rather than a
-# fly-past: TTK median 12.4 s and a +76 damage margin, after the blaster tuning
-# pass took it off a 9.3 s single-approach kill.
+# The patrol is now the batch's closest fight, and its thresholds are RE-RECORDED
+# rather than merely re-observed. Hull 120 -> 300 on the ladder, on top of the
+# earlier blaster nerf, turned a 9.3 s fly-past into a knife-edge grind: the
+# destroyer deals 358-416 and takes 318-411, and seed 5 flips to a loss.
+#
+# `min_win_rate` drops 1.0 -> 0.8, which encodes NEW INTENT — that a patrol may
+# occasionally beat a lone destroyer. If that is not the design, the lever is the
+# patrol's 300 hull, not this number.
+#
+# `max_ttk_median` 15 -> 45 tracks the same change: median 34.7 s with a 91.8 s
+# tail. Restoring blaster damage to 20 would put this back to a 21 s 5/5 sweep.
 [[matchup]]
 name   = "destroyer_vs_harrow_patrol"
 side_a = ["destroyer"]
 side_b = ["ship_harrow_patrol"]
   [matchup.thresholds]
-  min_win_rate   = 1.0
-  max_ttk_median = 15.0
+  min_win_rate   = 0.8
+  max_ttk_median = 45.0
 
-# The warhawk battleship wins on weight of fire: 0/5, margin -158. A destroyer
-# that starts BEATING it — or getting crushed far harder — is worth a look.
+# The warhawk battleship wins on weight of fire: 0/5, margin -239 after the
+# ladder took it 280 -> 400 (it now correctly tops the Dynasty ladder). The floor
+# is RE-RECORDED -200 -> -300: the old one was set against a lighter warhawk and
+# the loss is deeper by design. A destroyer that starts BEATING it — or getting
+# crushed far harder still — is worth a look.
 [[matchup]]
 name   = "destroyer_vs_harrow_warhawk"
 side_a = ["destroyer"]
 side_b = ["ship_harrow_warhawk"]
   [matchup.thresholds]
   max_win_rate      = 0.0
-  min_damage_margin = -200.0
+  min_damage_margin = -300.0

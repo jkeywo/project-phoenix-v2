@@ -72,10 +72,21 @@ text          = "entity.alliance_destroyer.behaviour.doctrine.hold_station.text"
 base_priority = 20.0
 target_speed  = 0.0
 
+# ── Durability ladder (#915 tuning pass) ─────────────────────────────────────
+# The whole fleet was re-pegged in one pass, because these numbers only mean
+# anything relative to each other. Dynasty hulls carry a monolithic
+# `[hull] hull_integrity`; Alliance hulls have none, and their equivalent pool
+# is the SUM of the per-system `max_hp` below. Shields sit on top of both.
+#
+#   Dynasty   courier 100 | destroyer 200 | patrol/cruiser 300 | warhawk 400
+#   Alliance  courier 200 | destroyer 300 | cruiser 500 | battleship 800
+#
+# The Alliance figures were reached by scaling each hull's authored system HP
+# proportionally, so the relative weighting between systems is unchanged.
 [[hull.system_hull]]
 system_id = "power-reactor"
 display_name = "entity.alliance_destroyer.hull.system_hull.power_reactor.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -83,7 +94,7 @@ debuff_magnitude = 0.15
 [[hull.system_hull]]
 system_id = "power-battery"
 display_name = "entity.alliance_destroyer.hull.system_hull.power_battery.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -91,7 +102,7 @@ debuff_magnitude = 0.15
 [[hull.system_hull]]
 system_id = "core"
 display_name = "entity.alliance_destroyer.hull.system_hull.core.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.10
@@ -99,7 +110,7 @@ debuff_magnitude = 0.10
 [[hull.system_hull]]
 system_id = "helm-engine-port"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_engine_port.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -107,7 +118,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_engine_starboard.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -115,7 +126,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-radar"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_radar.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -123,7 +134,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-lateral-thrust"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_lateral_thrust.display_name"
-max_hp = 10
+max_hp = 14
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -131,7 +142,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "tactical-radar"
 display_name = "entity.alliance_destroyer.hull.system_hull.tactical_radar.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -139,7 +150,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "sensor-radar"
 display_name = "entity.alliance_destroyer.hull.system_hull.sensor_radar.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -147,7 +158,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "phaser-omni"
 display_name = "entity.alliance_destroyer.hull.system_hull.phaser_omni.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -155,7 +166,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "blaster-port"
 display_name = "entity.alliance_destroyer.hull.system_hull.blaster_port.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -163,7 +174,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "blaster-starboard"
 display_name = "entity.alliance_destroyer.hull.system_hull.blaster_starboard.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -171,7 +182,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore"
 display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_fore.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -179,7 +190,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft"
 display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_aft.display_name"
-max_hp = 15
+max_hp = 22
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20

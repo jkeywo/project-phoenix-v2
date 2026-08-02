@@ -42,7 +42,7 @@ describe('Slice 5: Entity Mode full cycle', () => {
     await ctx.view._internal.loadEntity('assets/entities/ship_harrow_patrol.toml');
 
     const hull = ctx.view.shell.getCard('hull');
-    expect(hull.data.hull_integrity).toBe(120);
+    expect(hull.data.hull_integrity).toBe(300);
 
     ctx.view._internal.handleCardEdit('hull', { hull_integrity: 99.5 });
 
@@ -55,7 +55,7 @@ describe('Slice 5: Entity Mode full cycle', () => {
 
     const undoEntries = ctx.modeShell.getUndoHistory('Entity', path);
     expect(undoEntries.length).toBe(1);
-    expect(undoEntries[0].hull.hull_integrity).toBe(120);
+    expect(undoEntries[0].hull.hull_integrity).toBe(300);
   });
 
   it('undo restores the previous hull.hull_integrity value', async () => {
@@ -66,7 +66,7 @@ describe('Slice 5: Entity Mode full cycle', () => {
     expect(restoreCb).toBeDefined();
     restoreCb(ctx.modeShell, 'assets/entities/ship_harrow_patrol.toml', 'undo');
 
-    expect(ctx.view.shell.getParsedEntity().hull.hull_integrity).toBe(120);
+    expect(ctx.view.shell.getParsedEntity().hull.hull_integrity).toBe(300);
   });
 
   it('save writes the file and clears dirty', async () => {

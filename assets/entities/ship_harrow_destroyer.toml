@@ -138,8 +138,14 @@ description = "entity.ship_harrow_destroyer.target.description"
 
 # Lighter than the Lancer: this hull trades staying power for the speed and turn
 # rate the pass depends on.
+#
+# 900 -> 200 (#915 tuning pass). 900 was an outlier against this hull's own
+# class ladder — patrol 120, warhawk 280, cruiser 420 — and it made the demo's
+# mirror duel arithmetically unwinnable: the Alliance destroyer lands ~285 hull
+# damage per 120 s, so a 900-point pool needs over three times the sim budget
+# to burn through. Five seeds produced five identical draws because of it.
 [hull]
-hull_integrity = 900.0
+hull_integrity = 200.0
 
 # Single omni arc, as on every other NPC hull: NPCs have no `[shields]` station,
 # so the auto-generated `[[system]]` entry is ownerless and `ai_only`.

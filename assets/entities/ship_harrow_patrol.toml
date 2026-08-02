@@ -45,8 +45,12 @@ tags = ["ship"]
 threat_level = "medium"
 description = "entity.ship_harrow_patrol.target.description"
 
+# 120 -> 300 (#915 tuning pass), joining the cruiser on the ladder's middle
+# rung. This roughly doubles the patrol's staying power and is the opposite
+# direction to the blaster nerf that softened the same duel — the two are
+# deliberate and the batch measures the net.
 [hull]
-hull_integrity = 120.0
+hull_integrity = 300.0
 
 # Single omni shield arc (issue #514). NPCs have no `[shields]` station so
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.

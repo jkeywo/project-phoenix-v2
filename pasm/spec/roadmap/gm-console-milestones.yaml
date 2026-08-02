@@ -1,0 +1,151 @@
+entities:
+  - component: gm-console-milestone-sequence
+    core:
+      status: accepted
+      confidence: confirmed
+      title: GM Console Milestones to Fully-Featured GM Interface
+      summary: "The GM console (PRD #930) arrives in three MVP milestones after P2P mesh delivery (#854) — GM peer tracer, directing, performing — then grows to a fully-featured facilitation interface through facilitation assistance, operations and safety, information control, in-sim presentation, and campaign continuity with deep pacing. External show hardware and AI-drafted NPC replies are explicitly not planned."
+      rationale:
+        - "Milestone ladder and ordering settled 2026-08-02 in the session that published PRD #930: facilitation assistance is the first post-MVP milestone, then operations and safety before information control, presentation stays in-sim only, and campaign persistence plus pacing heuristics complete the endgame."
+        - "Nothing here un-parks #930: no GM work begins before #854 nears completion, and each post-MVP milestone becomes its own PRD only when it comes due."
+        - "The prerequisites are the existing delivery roadmap's determinism (#849) and P2P (#854) milestones; #900 (god mode becomes a logged command) and #862 (snapshot tracer) land en route and establish the logged-override and snapshot patterns GM work reuses."
+    architecture:
+      kind: roadmap-sequence
+      authority: non-authoritative
+      coordinates:
+        - roadmap-deterministic-simulation-foundation
+        - roadmap-p2p-multiship-delivery
+        - gm-milestone-peer-tracer
+        - gm-milestone-directing
+        - gm-milestone-performing
+        - gm-milestone-facilitation-assistance
+        - gm-milestone-operations-safety
+        - gm-milestone-information-control
+        - gm-milestone-presentation
+        - gm-milestone-campaign-and-pacing
+
+  - component: gm-milestone-peer-tracer
+    core:
+      status: accepted
+      confidence: confirmed
+      title: GM Peer Exists (Tracer)
+      summary: "Deliver PRD #930 modules 1, 2, and 6 plus a skeletal surface: GM session role and lobby policy (own ready state, force-start override, crew-visible presence, paused-snapshot drop-in), the gm: command-admission token tier, a headless-sim GM page that joins the #854 mesh as a full NPC-ownership roster member, a basic omniscient map component, a live activity feed over the balance-event stream, and pause/resume."
+      rationale:
+        - "A GM-only session running the world end-to-end is the tracer: it proves topology (host-class peer, local omniscient reads), the admission tier, and lobby role in one vertical slice before any directing tools exist."
+        - "Exit criteria: a GM-only session runs the world; a GM can join a crewed game, watch everything live, and pause it."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [roadmap-p2p-multiship-delivery]
+      runs_in: [host-browser-runtime]
+
+  - component: gm-milestone-directing
+    core:
+      status: accepted
+      confidence: confirmed
+      title: GM Directing
+      summary: "Deliver PRD #930 modules 3 and 4 and part of 8: the GM dispatch bridge into the trigger-action pipeline with idempotency and attribution; new action kinds (set doctrine, inject fault, restore, reveal/conceal, safe despawn, trigger fire/delay/skip) that are simultaneously TOML-authorable; the mission panel showing triggers with eligibility and fire/delay/skip controls; scenario-authored quick actions; and the entity dossier."
+      rationale:
+        - "Exit criteria: a GM can pace Combat Test end-to-end — delay a wave, spring one early, redirect an NPC, rescue a softlock."
+        - "Every new action kind follows the trigger-action extension contract so scenario authors gain the same vocabulary the GM uses."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-peer-tracer]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: gm-milestone-performing
+    core:
+      status: accepted
+      confidence: confirmed
+      title: GM Performing (PRD 930 MVP Complete)
+      summary: "Deliver PRD #930 modules 5 and 7 and the rest of 8: the comms studio (send-as-entity, scripted hail initiation, per-ship history), per-ship knowledge views (contact picture, objectives, comms inbox), and scenario-authored GM role presets in world TOML with the preset loader."
+      rationale:
+        - "Exit criteria: run a real multi-crew event with one or more GMs; PRD #930's acceptance holds in full."
+        - "Role presets differentiate GM interfaces (filters, quick-action panels, scripts), never permissions — all GMs remain mechanically equal, last-write-wins."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-directing]
+      runs_in: [host-browser-runtime]
+
+  - component: gm-milestone-facilitation-assistance
+    core:
+      status: proposed
+      confidence: provisional
+      title: GM Facilitation Assistance
+      summary: "Advisory attention tooling so one GM can run a large session: a prioritized attention queue (pending comms, eligible beats, idle NPCs, disconnected stations), quiet-time detection, station workload indicators limited to broad states (underused/engaged/overloaded), declarative per-mission GM panels as typed widgets in world TOML extending the role-preset schema, and per-operator attention filtering for multi-GM sessions."
+      rationale:
+        - "Chosen as the first post-MVP milestone: the MVP gives the GM hands; this gives the GM eyes, which is the binding constraint at real events."
+        - "All assistance is advisory, never prescriptive, and avoids false precision — broad workload states only."
+        - "Exit criteria: one GM can run a large session without missing important activity."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-performing]
+      runs_in: [host-browser-runtime]
+
+  - component: gm-milestone-operations-safety
+    core:
+      status: proposed
+      confidence: provisional
+      title: GM Operations and Safety
+      summary: "Recoverability for live events: an action log UI over the shared command log, undo for invertible actions (spawn/despawn, faction and doctrine restore) with the UI distinguishing technically from fictionally reversible, checkpoint/bookmark and restore reusing the #862 snapshot machinery, and a peer-health/technical panel (connected peers, station assignments, tick health)."
+      rationale:
+        - "Sequenced before information control: recoverability protects real events as soon as GMs start running them; false-info drama can wait."
+        - "The tick-stamped command log from #849/#854 already carries attribution and replay; this milestone is UI and inverse-action definitions, not new logging infrastructure."
+        - "Exit criteria: a live event survives GM mistakes and crashes without stopping the game."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-performing]
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime]
+
+  - component: gm-milestone-information-control
+    core:
+      status: proposed
+      confidence: provisional
+      title: GM Information Control
+      summary: "False-information injection through the radar-projection seam: misclassification, ghost contacts, and degraded or delayed intel, extending the knowledge model (truth, sensed, interpreted, presented) that the directing milestone's reveal/conceal deliberately left simple."
+      rationale:
+        - "Deferred out of the MVP by explicit PRD #930 decision so the radar-projection seam is extended deliberately rather than under MVP pressure."
+        - "Exit criteria: a GM can control what a crew believes, not just what it can detect."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-operations-safety]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: gm-milestone-presentation
+    core:
+      status: proposed
+      confidence: provisional
+      title: GM In-Sim Presentation Control
+      summary: "GM cue control of the shared host display: forcing viewscreen modes, incoming-communication takeover, title cards, and sound cues, all issued through the same dispatch path as mission actions so scenarios can author the same cues. Strictly in-sim; no external hardware."
+      rationale:
+        - "Settled 2026-08-02: in-sim presentation survives as its own milestone because the viewscreen is already the shared host display, so cue control is cheap drama with no hardware dependency."
+        - "External show hardware (DMX, Hue, OBS, OSC) is explicitly not planned; the cue/event path should simply not preclude a future integration."
+        - "Exit criteria: a GM can stage scene transitions and reveals on the viewscreen."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-information-control]
+      runs_in: [host-browser-runtime]
+
+  - component: gm-milestone-campaign-and-pacing
+    core:
+      status: proposed
+      confidence: provisional
+      title: GM Campaign Continuity and Deep Pacing
+      summary: "The endgame pair: campaign persistence (ship, crew, and scenario state carried across sessions on the snapshot and save-load machinery) and the deeper pacing-heuristics tier (pressure dimensions, beat-stacking warnings, suggestions of authored actions during lulls — advisory only)."
+      rationale:
+        - "Both were explicitly kept in the fully-featured end state on 2026-08-02, while AI-drafted NPC replies were explicitly excluded."
+        - "Pacing heuristics build on the facilitation-assistance milestone's attention queue; campaign persistence builds on #848's adapters and the campaign-continuity projection (#867)."
+        - "Exit criteria: multi-session campaigns with GM continuity."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-facilitation-assistance, roadmap-authoritative-snapshots]
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime]

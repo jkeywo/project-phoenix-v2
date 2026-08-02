@@ -226,8 +226,26 @@
 # would be a deadlock. A hull whose forward bank bears on its own bow can strip
 # the arc it is about to shoot through, so the same bow hold is self-completing.
 # The shared intent is "only point the bow when pointing it accomplishes
-# something"; the literals differ because the hulls differ, and a hull that wants
-# the stricter reading authors it on its TUBES, where the loadout lives.
+# something"; the literals differ because the hulls differ.
+#
+# So it is a PARAMETER rather than a fork (issue #878, moving
+# `ship_harrow_cruiser.toml` onto this file). `torpedo_run_shield_gap` is the
+# minimum `target_facing_shield_down` reading the run demands, and the fact is a
+# boolean 0/1:
+#
+#   * `0.0` (the class default) — "any reading will do". `>= 0` admits both, so
+#     the entry below is exactly the range-and-readiness guard the measurements
+#     above chose for the player cruiser, and the extra exit is dead (`< 0` is
+#     unreachable). Nothing about a hull that leaves this alone changes.
+#   * `1.0` — the Harrow's reading. The run opens only on a struck-down arc and
+#     ENDS when the arc comes back, which is the exit the stricter entry owes:
+#     a hull that kept its bow on a recovered shield would be giving away the
+#     broadside for nothing.
+#
+# The launcher's own gate is a separate and stricter thing again, and stays on the
+# TUBES where the loadout lives (`fact(target_facing_shields) <= 0` on both Harrow
+# tubes): this parameter decides when the MANOEUVRE is worth flying, not when the
+# shot is takeable.
 #
 # ── The range gate, and why the leg needs one ────────────────────────────────
 #
@@ -300,7 +318,8 @@
 # TORPEDO RUN `torpedo_run_range` — how close before a loaded salvo is worth
 #             breaking the ring for, and the guard that stops the leg freezing the
 #             run-in; `torpedo_bearing_speed` — the throttle flown with the bow on
-#             the target.
+#             the target; `torpedo_run_shield_gap` — whether the run also demands
+#             a struck-down striking arc (see above; 0 = no, 1 = yes).
 # SAFE RANGE  `safe_range_margin` — world units of daylight wanted BEYOND the
 #             target's own longest direct-fire reach, plus `orbit_speed`,
 #             `orbit_spiral_gain`, `safe_ring_tolerance`,
@@ -357,6 +376,9 @@ rule = []
 # fine systems and neither may read the other's memory.
 engage_range = 220.0
 torpedo_run_range = 50.0
+# Minimum `target_facing_shield_down` reading the bow hold demands. 0.0 = any —
+# see the header. A hull that wants the Harrow's stricter reading authors 1.0.
+torpedo_run_shield_gap = 0.0
 # The posture rung at which the aggressive half of the doctrine unlocks.
 press_posture = 1.0
 
@@ -421,7 +443,7 @@ id = "orbit"
   [[helm_console.engines_ai.state.transition]]
   priority = 20
   to = "torpedo_run"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0 and fact(target_facing_shield_down) >= param(torpedo_run_shield_gap)"
 
   # A transition guarded on hazard urgency here would drop the hull out of the
   # ring for the duration of a detour it is already handling additively, and
@@ -456,6 +478,13 @@ id = "torpedo_run"
   priority = 20
   to = "acquire"
   when = "fact(target_valid) < 1"
+
+  # THE WINDOW CLOSED — dead unless the hull demanded one (`torpedo_run_shield_gap
+  # = 0.0` makes `< 0` unreachable). See the header.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 15
+  to = "orbit"
+  when = "fact(target_facing_shield_down) < param(torpedo_run_shield_gap) and fact(torpedoes_in_flight) < 1"
 
   [[helm_console.engines_ai.state.transition]]
   priority = 10
@@ -551,6 +580,9 @@ combat_orbit_spiral_gain = 4.0
 # nobody chose.
 torpedo_bearing_speed = 0.0
 torpedo_run_range = 50.0
+# Restated on this axis because its OWN guards reference it; content validation
+# rejects an undeclared `param(...)`. See the header.
+torpedo_run_shield_gap = 0.0
 # ── The six scalars the HOST reads off this axis to fly the DEFENSIVE ring ────
 # Gated as one unit (`RECOVERY_PARAMS`): omit any one and the host declines the
 # standoff arm outright, which would leave `shadow` — the leg this doctrine rests
@@ -695,7 +727,7 @@ yields_to_arc_requests = false
   [[helm_console.steering_ai.state.transition]]
   priority = 20
   to = "torpedo_run"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0 and fact(target_facing_shield_down) >= param(torpedo_run_shield_gap)"
 
   [[helm_console.steering_ai.state.transition]]
   priority = 10
@@ -722,6 +754,15 @@ id = "torpedo_run"
   priority = 20
   to = "acquire"
   when = "fact(target_valid) < 1"
+
+  # THE WINDOW CLOSED — dead unless the hull demanded one (`torpedo_run_shield_gap
+  # = 0.0` makes `< 0` unreachable). `torpedoes_in_flight` is the same conjunct
+  # the other two exits carry and means the same thing: a hull does not turn away
+  # from rounds it has committed, so a recovering arc cannot release it mid-salvo.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 15
+  to = "orbit"
+  when = "fact(target_facing_shield_down) < param(torpedo_run_shield_gap) and fact(torpedoes_in_flight) < 1"
 
   # THE SALVO IS SPENT, and re-entering `orbit` here is what re-draws the
   # circulation direction — so the ring resumed after a torpedo run is not

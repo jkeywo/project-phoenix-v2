@@ -1217,8 +1217,15 @@ fn the_harrow_battleship_takes_up_its_artillery_standoff_in_a_real_run() {
 
     // The hull's own authored band, so this asserts against content rather than
     // against numbers restated here.
-    let hull = EntityConfig::from_toml(include_str!("../assets/entities/ship_harrow_warhawk.toml"))
-        .expect("the shipped battleship hull must parse");
+    let hull = EntityConfig::from_toml(
+        project_phoenix::entity_includes::resolve_from_disk(
+            "assets/entities/ship_harrow_warhawk.toml",
+        )
+        .expect("ship_harrow_warhawk must resolve")
+        .toml
+        .as_str(),
+    )
+    .expect("the shipped battleship hull must parse");
     let param = |name: &str| -> f32 {
         hull.helm_console
             .as_ref()
@@ -1319,8 +1326,15 @@ fn the_harrow_battleship_takes_up_its_artillery_standoff_in_a_real_run() {
 fn the_harrow_battleship_takes_its_close_defence_opportunities_in_a_real_run() {
     use project_phoenix::entity_config::EntityConfig;
 
-    let hull = EntityConfig::from_toml(include_str!("../assets/entities/ship_harrow_warhawk.toml"))
-        .expect("the shipped battleship hull must parse");
+    let hull = EntityConfig::from_toml(
+        project_phoenix::entity_includes::resolve_from_disk(
+            "assets/entities/ship_harrow_warhawk.toml",
+        )
+        .expect("ship_harrow_warhawk must resolve")
+        .toml
+        .as_str(),
+    )
+    .expect("the shipped battleship hull must parse");
     let tube_ids: Vec<String> = hull
         .torpedoes
         .as_ref()

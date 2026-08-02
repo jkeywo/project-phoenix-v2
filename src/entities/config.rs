@@ -4642,6 +4642,37 @@ mod tests {
     use crate::entity_tags::EntityTag;
     use crate::simmath;
 
+    /// One shipped hull through the REAL load path — include resolution and all.
+    ///
+    /// Since issue #878 every Harrow hull is COMPOSED: its movement doctrine and
+    /// its ship-level declarations arrive from `assets/entities/fragments/ai/`,
+    /// so the authored file alone is not the document the game spawns. An
+    /// `include_str!` here would assert on unresolved text and pass while the
+    /// resolved hull said something else entirely;
+    /// `include_resolve::tests::shipped_tree::include_str_baked_hulls_are_all_uncomposed`
+    /// is the guard that names any site which forgets.
+    /// The resolved document as TEXT: every assertion below parses it exactly as
+    /// the loader does, and the tests that strike a line out of it to prove the
+    /// load fails without that line find the line wherever it is now authored —
+    /// hull or fragment.
+    fn resolved_text(stem: &str) -> String {
+        crate::entity_includes::resolve_from_disk(&format!("assets/entities/{stem}.toml"))
+            .unwrap_or_else(|e| panic!("{stem} must resolve: {e}"))
+            .toml
+    }
+
+    fn harrow_destroyer_toml() -> String {
+        resolved_text("ship_harrow_destroyer")
+    }
+
+    fn harrow_cruiser_toml() -> String {
+        resolved_text("ship_harrow_cruiser")
+    }
+
+    fn harrow_warhawk_toml() -> String {
+        resolved_text("ship_harrow_warhawk")
+    }
+
     #[test]
     fn all_sections_present_deserializes_to_some() {
         let toml_str = r##"
@@ -6088,7 +6119,7 @@ base_priority = 35.0
     fn harrow_destroyer_template_parses_with_harrow_faction() {
         // (#472) The enemy destroyer is Harrow-factioned so the player ship's
         // auto-fire (Federation faction) engages it.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let toml_str = &resolved_text("ship_harrow_destroyer");
         let config =
             EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         let faction = config
@@ -6103,7 +6134,7 @@ base_priority = 35.0
 
     #[test]
     fn harrow_destroyer_template_has_hull() {
-        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let toml_str = &resolved_text("ship_harrow_destroyer");
         let config =
             EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         assert!(
@@ -6119,7 +6150,7 @@ base_priority = 35.0
 
     #[test]
     fn harrow_destroyer_template_has_helm_and_weapons_console() {
-        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let toml_str = &resolved_text("ship_harrow_destroyer");
         let config =
             EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         assert!(
@@ -6342,13 +6373,13 @@ automated_systems = []
         ] {
             let toml_str = match path {
                 "../../assets/entities/ship_harrow_destroyer.toml" => {
-                    include_str!("../../assets/entities/ship_harrow_destroyer.toml")
+                    &resolved_text("ship_harrow_destroyer")
                 }
                 "../../assets/entities/ship_harrow_patrol.toml" => {
-                    include_str!("../../assets/entities/ship_harrow_patrol.toml")
+                    &resolved_text("ship_harrow_patrol")
                 }
                 "../../assets/entities/ship_harrow_warhawk.toml" => {
-                    include_str!("../../assets/entities/ship_harrow_warhawk.toml")
+                    &resolved_text("ship_harrow_warhawk")
                 }
                 _ => unreachable!(),
             };
@@ -6429,7 +6460,7 @@ hull_max_hp = 6
         // (#892) Re-pointed off the retired `pirate_raider.toml` duplicate. The
         // regen rate is load-bearing here, not incidental: the hull's #788
         // recovery doctrine sits out its standoff orbit at exactly this rate.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let toml_str = &resolved_text("ship_harrow_destroyer");
         let config =
             EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         assert_eq!(
@@ -6451,7 +6482,7 @@ hull_max_hp = 6
         // no phaser bank at all (blasters only — see
         // `harrow_destroyer_carries_forward_blasters_and_no_torpedoes`), so it
         // could not carry a phaser-pierce assertion.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
+        let toml_str = &resolved_text("ship_harrow_patrol");
         let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_patrol.toml must parse");
         let wc = config.weapons_console.as_ref().unwrap();
         let bank = wc.phaser_banks.first().expect("must have a phaser bank");
@@ -6462,7 +6493,7 @@ hull_max_hp = 6
     fn ship_harrow_patrol_template_has_two_phaser_banks_and_shields() {
         // (#474) Cruiser gained weapons + shields.
         // (#514) Migrated to `[[shield_arc]]` block.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
+        let toml_str = &resolved_text("ship_harrow_patrol");
         let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_patrol.toml must parse");
         let wc = config
             .weapons_console
@@ -6491,7 +6522,7 @@ hull_max_hp = 6
         // (#792) Gained a bow artillery blaster bank alongside the two beam
         // banks — asserted here as well, because "two banks" alone would go on
         // passing if the artillery piece were dropped.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_warhawk.toml");
+        let toml_str = &resolved_text("ship_harrow_warhawk");
         let config =
             EntityConfig::from_toml(toml_str).expect("ship_harrow_warhawk.toml must parse");
         let wc = config
@@ -6540,9 +6571,6 @@ hull_max_hp = 6
 
     // ── The Harrow Battleship artillery platform (issue #792) ────────────────
 
-    const HARROW_WARHAWK_TOML: &str =
-        include_str!("../../assets/entities/ship_harrow_warhawk.toml");
-
     /// AC1/AC2/AC3, as content: both travel axes author the three-state machine,
     /// the yaw channel resolves the SEVENTH mode verb in the hold and tracks on
     /// the way in, and every scalar the host reads by name is present on the
@@ -6559,7 +6587,7 @@ hull_max_hp = 6
     /// hull's flight time is a different bearing from the one the gun fires on.
     #[test]
     fn harrow_warhawk_authors_the_artillery_machine_on_both_travel_axes() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let hc = cfg
             .helm_console
             .as_ref()
@@ -6577,10 +6605,16 @@ hull_max_hp = 6
             let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
             assert_eq!(
                 ids,
-                vec!["acquire", "reposition", "hold"],
-                "{name} authors the three-state artillery machine"
+                vec!["shadow", "acquire", "reposition", "hold"],
+                "{name} resolves to the class artillery machine"
             );
-            assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
+            // `shadow` and `initial_state = "shadow"` arrive with the class
+            // doctrine (issue #878): the shared fragment RESTS defensive on a
+            // standoff ring and a hull unlocks the gun line by posture. This hull
+            // authors `press_posture = 0.0`, the lowest rung, so the gate is open
+            // on the first tick and the defensive leg is left immediately and
+            // never re-entered.
+            assert_eq!(ai.initial_state.as_deref(), Some("shadow"));
             assert!(
                 ai.to_policy().expect("must decode").machine().is_some(),
                 "{name} must decode to a machine"
@@ -6638,20 +6672,27 @@ hull_max_hp = 6
                 "steering_ai must author `{required}`"
             );
         }
-        // ...and the absences. This hull circles nothing, so it declares no
-        // circulation slot; and it authors no shield-recovery, combat-orbit or
-        // bow-hold scalars, which is what makes the artillery arm the ONLY leg
-        // set the host can publish for it.
+        // ...and the absences that are still absences.
+        //
+        // Issue #878 composed this hull on `fragments/ai/movement_artillery.toml`,
+        // and the class doctrine's DEFENSIVE leg — the standoff ring it rests on
+        // while the alert is down — genuinely circles, so the six recovery
+        // scalars and the circulation slot arrive with it and are no longer
+        // absences to assert. What has NOT changed is that this hull's gun line
+        // borrows nothing: it authors no combat-orbit and no bow-hold scalar, so
+        // the artillery arm and the class standoff are the only leg sets the host
+        // can publish for it. (`press_posture = 0.0` then makes the standoff
+        // unreachable in practice — see the doctrine-tuning note on the hull —
+        // but the fragment gates those six as one unit, so they stay declared.)
         assert!(
-            !steering
+            steering
                 .memory
                 .contains_key(crate::ship::helm_ai::ORBIT_DIRECTION_MEMORY),
-            "an artillery platform never circles: a declared circulation slot \
-             would be content nobody reads"
+            "the class standoff ring needs its circulation slot declared, so its \
+             pre-engagement value is authored rather than implicit"
         );
-        for absent in crate::ship::helm_ai::RECOVERY_PARAMS
+        for absent in crate::ship::helm_ai::COMBAT_ORBIT_PARAMS
             .iter()
-            .chain(crate::ship::helm_ai::COMBAT_ORBIT_PARAMS)
             .chain(crate::ship::helm_ai::TORPEDO_BEARING_PARAMS)
         {
             assert!(
@@ -6672,7 +6713,7 @@ hull_max_hp = 6
     /// the acceptance criterion names.
     #[test]
     fn harrow_warhawk_hold_range_is_ninety_percent_of_its_artillery_envelope() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let steering = cfg
             .helm_console
             .as_ref()
@@ -6729,7 +6770,7 @@ hull_max_hp = 6
     /// what buys a manoeuvring target time to leave the predicted intercept.
     #[test]
     fn harrow_warhawk_bow_bolt_is_powerful_and_slow() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let wc = cfg.weapons_console.as_ref().unwrap();
         let bolt = &wc.blaster_banks[0];
         assert_eq!(bolt.facing_deg, 0.0, "the artillery piece is a BOW mount");
@@ -6899,7 +6940,7 @@ hull_max_hp = 6
     /// silence and every helm assertion above still passes.
     #[test]
     fn harrow_warhawk_declares_its_artillery_bank_as_a_system() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let bank_id = cfg.weapons_console.as_ref().unwrap().blaster_banks[0]
             .id
             .clone();
@@ -6940,7 +6981,7 @@ hull_max_hp = 6
     /// how an artillery platform becomes an orbiting one.
     #[test]
     fn harrow_warhawk_authors_no_hazard_guarded_transition() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         for (name, ai) in [
             ("engines_ai", hc.engines_ai.as_ref().unwrap()),
@@ -6994,7 +7035,7 @@ hull_max_hp = 6
     /// that this is not hypothetical.
     #[test]
     fn harrow_warhawk_holds_its_impulse_drive_idle() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         let impulse_ai = hc.impulse_ai.as_ref().expect(
             "the battleship must author `[helm_console.impulse_ai]`: an ABSENT block \
@@ -7032,7 +7073,7 @@ hull_max_hp = 6
     /// take the battleship off the firing position this issue exists to hold.
     #[test]
     fn harrow_warhawk_authors_no_boost_drive_and_no_helm_radar() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         assert!(
             hc.boost.is_none(),
@@ -7124,10 +7165,10 @@ hull_max_hp = 6
             ),
         ] {
             assert!(
-                HARROW_WARHAWK_TOML.contains(line),
+                &harrow_warhawk_toml().contains(line),
                 "precondition: the hull must author `{line}` for this to remove it"
             );
-            let stripped = HARROW_WARHAWK_TOML.replace(line, "");
+            let stripped = &harrow_warhawk_toml().replace(line, "");
             let err = EntityConfig::from_toml(&stripped)
                 .expect_err("a guard on an undeclared param must fail the entity load")
                 .to_string();
@@ -7158,7 +7199,7 @@ hull_max_hp = 6
     /// the old one.
     #[test]
     fn harrow_warhawk_beams_double_up_across_the_bow_for_a_closing_player() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let wc = cfg
             .weapons_console
             .as_ref()
@@ -7259,7 +7300,7 @@ hull_max_hp = 6
     /// asserted.
     #[test]
     fn harrow_warhawk_carries_two_opposed_launchers_that_decide_independently() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let torpedoes = cfg
             .torpedoes
             .as_ref()
@@ -7429,7 +7470,7 @@ hull_max_hp = 6
     /// facing for one aimed at where the target IS.
     #[test]
     fn harrow_warhawk_close_defence_adds_no_steering_content() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         assert!(
             cfg.torpedoes.as_ref().is_some_and(|t| !t.tubes.is_empty()),
             "precondition: the hull carries launchers, or this proves nothing"
@@ -7443,7 +7484,7 @@ hull_max_hp = 6
             let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
             assert_eq!(
                 ids,
-                vec!["acquire", "reposition", "hold"],
+                vec!["shadow", "acquire", "reposition", "hold"],
                 "{name} must still be the three-state artillery machine: the \
                  launchers take the bearing the gun line gives them and never ask \
                  for one"
@@ -7513,7 +7554,7 @@ hull_max_hp = 6
     /// off, which is a default rather than a decision until something says so.
     #[test]
     fn harrow_warhawk_close_defence_cannot_shove_it_off_the_firing_position() {
-        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_warhawk_toml()).expect("hull must parse");
         let banks = &cfg.weapons_console.as_ref().unwrap().blaster_banks;
         assert!(!banks.is_empty(), "precondition: the hull mounts a blaster");
         for bank in banks {
@@ -7566,7 +7607,7 @@ hull_max_hp = 6
         // Destroy entry ONLY — it has no Patrol doctrine for the priority
         // ordering here to compare against, and after #892 the Ironveil is the
         // shipped hull that still carries both.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
+        let toml_str = &resolved_text("ship_harrow_patrol");
         let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_patrol.toml must parse");
         let behaviour = config
             .behaviour
@@ -7602,7 +7643,7 @@ hull_max_hp = 6
         // utility scorer. Verify the destroy-hostiles objective carries the
         // Destroy directive kind so `ai_target_selection` picks it up.
         // (#892) Re-pointed off the retired `pirate_raider.toml`.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let toml_str = &resolved_text("ship_harrow_destroyer");
         let config =
             EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         let behaviour = config.behaviour.expect("behaviour must be Some");
@@ -9739,9 +9780,6 @@ yields_to_arc_requests = false
 
     // ── The Harrow Destroyer hull (issue #883) ───────────────────────────────
 
-    const HARROW_DESTROYER_TOML: &str =
-        include_str!("../../assets/entities/ship_harrow_destroyer.toml");
-
     /// AC4, both halves. Forward blasters are PRESENT and correctly forward
     /// (narrow arc dead ahead); torpedoes are ABSENT — no magazine, no tubes,
     /// and no torpedo system entry.
@@ -9752,7 +9790,7 @@ yields_to_arc_requests = false
     /// silently, and nothing else in the suite would notice.
     #[test]
     fn harrow_destroyer_carries_forward_blasters_and_no_torpedoes() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML)
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml())
             .expect("the destroyer hull must pass content validation");
 
         let wc = cfg
@@ -9806,7 +9844,7 @@ yields_to_arc_requests = false
     /// escape leg silently loses its back half.
     #[test]
     fn harrow_destroyer_authors_the_fly_through_machine_on_all_three_axes() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml()).expect("hull must parse");
         let hc = cfg
             .helm_console
             .as_ref()
@@ -9831,6 +9869,7 @@ yields_to_arc_requests = false
             assert_eq!(
                 ids,
                 vec![
+                    "shadow",
                     "acquire",
                     "inbound",
                     "escape",
@@ -9839,9 +9878,16 @@ yields_to_arc_requests = false
                     "pressed_pivot",
                     "pressed_pass",
                 ],
-                "{name} authors the pass + recovery + pressed machine (issue #789)"
+                "{name} resolves to the class pass + recovery + pressed machine \
+                 (issues #789, #878)"
             );
-            assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
+            // `shadow` and `initial_state = "shadow"` arrive with the class
+            // doctrine (issue #878): the shared fragment RESTS defensive and a
+            // hull unlocks the aggressive half by posture. This hull authors
+            // `press_posture = 0.0`, the lowest rung, so the gate is open on the
+            // first tick and the defensive leg is left immediately and never
+            // re-entered.
+            assert_eq!(ai.initial_state.as_deref(), Some("shadow"));
             let policy = ai.to_policy().expect("must decode");
             assert!(
                 policy.machine().is_some(),
@@ -9894,7 +9940,7 @@ yields_to_arc_requests = false
     /// that; only this pin can.
     #[test]
     fn harrow_destroyer_boosts_the_pressed_pivot_with_a_drive_that_turns_harder() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
 
         let pivot = hc
@@ -9946,7 +9992,7 @@ yields_to_arc_requests = false
     ///   strict subset of it.
     #[test]
     fn harrow_destroyer_presses_on_failed_progress_inside_the_targets_reach() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         for (name, ai) in [
             ("engines_ai", hc.engines_ai.as_ref().unwrap()),
@@ -10028,7 +10074,7 @@ yields_to_arc_requests = false
     /// structural assertion above.
     #[test]
     fn harrow_destroyer_breaks_off_the_pressed_pass_sooner_than_an_ordinary_one() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml()).expect("hull must parse");
         let steering = cfg
             .helm_console
             .as_ref()
@@ -10077,7 +10123,7 @@ yields_to_arc_requests = false
     /// its own copy.
     #[test]
     fn harrow_destroyer_reentry_requires_both_shields_and_held_distance() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         for (name, ai) in [
             ("engines_ai", hc.engines_ai.as_ref().unwrap()),
@@ -10091,11 +10137,17 @@ yields_to_arc_requests = false
                 .unwrap_or_else(|| panic!("{name} must declare 'recover'"));
             assert_eq!(
                 recover.transition.len(),
-                1,
-                "{name}: recovery has exactly one way out"
+                2,
+                "{name}: recovery has exactly two ways out — re-entry, and the \
+                 class doctrine's posture break-off (issue #878), which \
+                 `press_posture = 0.0` makes unreachable on this hull"
             );
-            let guard = &recover.transition[0].when;
-            assert_eq!(recover.transition[0].to, "reenter");
+            let reenter_exit = recover
+                .transition
+                .iter()
+                .find(|t| t.to == "reenter")
+                .unwrap_or_else(|| panic!("{name}: recovery must reach re-entry"));
+            let guard = &reenter_exit.when;
             assert!(
                 guard.contains(crate::ship::helm_ai::SHIELD_FRACTION_FACT)
                     && guard.contains("reentry_shield_fraction"),
@@ -10121,7 +10173,7 @@ yields_to_arc_requests = false
     /// quietly fly ordinary doctrine travel instead.
     #[test]
     fn harrow_destroyer_authors_every_recovery_scalar_as_a_steering_param() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml()).expect("hull must parse");
         let steering = cfg
             .helm_console
             .as_ref()
@@ -10176,7 +10228,7 @@ yields_to_arc_requests = false
     /// entirely and quietly fall back to ordinary doctrine travel.
     #[test]
     fn harrow_destroyer_authors_every_manoeuvre_threshold_as_a_param() {
-        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_destroyer_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         let engines = hc.engines_ai.as_ref().unwrap();
         let steering = hc.steering_ai.as_ref().unwrap();
@@ -10222,9 +10274,6 @@ yields_to_arc_requests = false
 
     // ── The Harrow Cruiser hull (issue #790) ─────────────────────────────────
 
-    const HARROW_CRUISER_TOML: &str =
-        include_str!("../../assets/entities/ship_harrow_cruiser.toml");
-
     /// AC4, as content: the two banks are on the CENTRELINE, one forward and one
     /// aft, and each sweeps 270 degrees.
     ///
@@ -10241,7 +10290,7 @@ yields_to_arc_requests = false
     /// firing paths actually see.
     #[test]
     fn harrow_cruiser_carries_overlapping_fore_and_aft_270_degree_phaser_banks() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML)
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml())
             .expect("the cruiser hull must pass content validation");
         let wc = cfg
             .weapons_console
@@ -10346,7 +10395,7 @@ yields_to_arc_requests = false
     ///   salvo can never be full and the phase never launches.
     #[test]
     fn harrow_cruiser_carries_two_narrow_bow_tubes_for_the_shield_opportunity() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml()).expect("hull must parse");
         let torpedoes = cfg
             .torpedoes
             .as_ref()
@@ -10478,7 +10527,7 @@ yields_to_arc_requests = false
     /// most exposed.
     #[test]
     fn harrow_cruiser_fore_bank_still_bears_while_the_bow_is_held_on_the_target() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml()).expect("hull must parse");
         let wc = cfg.weapons_console.as_ref().unwrap();
         let fore = wc.phaser_banks.iter().find(|b| b.id == "fore").unwrap();
         // Ship-local bearing is `radar_x.atan2(radar_y)`, so `(0, +r)` is dead
@@ -10514,7 +10563,7 @@ yields_to_arc_requests = false
     /// every scalar the host reads by name is present on the Steering axis.
     #[test]
     fn harrow_cruiser_authors_the_broadside_orbit_machine_on_both_travel_axes() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml()).expect("hull must parse");
         let hc = cfg
             .helm_console
             .as_ref()
@@ -10532,10 +10581,18 @@ yields_to_arc_requests = false
             let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
             assert_eq!(
                 ids,
-                vec!["acquire", "orbit", "torpedo_run"],
-                "{name} authors the three-state orbit + shield-opportunity machine"
+                vec!["shadow", "acquire", "orbit", "torpedo_run"],
+                "{name} resolves to the class orbit + shield-opportunity machine"
             );
-            assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
+            // `shadow` and `initial_state = "shadow"` arrive with the class
+            // doctrine (issue #878): the shared fragment RESTS defensive and a
+            // hull unlocks the aggressive half by posture. This hull authors
+            // `press_posture = 0.0`, the lowest rung, so the gate is open on the
+            // first tick and the defensive leg is left immediately and never
+            // re-entered —
+            // `the_harrow_hulls_unlock_their_class_doctrine_by_posture_alone`
+            // (`authored_ai_pins.rs`) is what proves that rather than assuming it.
+            assert_eq!(ai.initial_state.as_deref(), Some("shadow"));
             assert!(
                 ai.to_policy().expect("must decode").machine().is_some(),
                 "{name} must decode to a machine"
@@ -10624,7 +10681,7 @@ yields_to_arc_requests = false
     /// motivated the rule.
     #[test]
     fn harrow_cruiser_torpedo_run_exits_carry_distinct_priorities() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         for (name, ai) in [
             ("engines_ai", hc.engines_ai.as_ref().unwrap()),
@@ -10637,7 +10694,11 @@ yields_to_arc_requests = false
                 .unwrap_or_else(|| panic!("{name} must declare 'torpedo_run'"));
             let mut priorities: Vec<i32> = run.transition.iter().map(|t| t.priority).collect();
             let authored = priorities.len();
-            assert_eq!(authored, 4, "{name} authors the four documented exits");
+            // FIVE since issue #878 composed this hull on the class fragment:
+            // the four documented here plus the class doctrine's posture
+            // break-off to `shadow`, which `press_posture = 0.0` makes
+            // unreachable on this hull.
+            assert_eq!(authored, 5, "{name} authors the documented exits");
             priorities.sort_unstable();
             priorities.dedup();
             assert_eq!(
@@ -10665,7 +10726,7 @@ yields_to_arc_requests = false
     /// would still pass, and the hull would look correct and do nothing.
     #[test]
     fn harrow_cruiser_orbits_inside_its_own_beam_envelope_and_under_power() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml()).expect("hull must parse");
         let steering = cfg
             .helm_console
             .as_ref()
@@ -10727,7 +10788,7 @@ yields_to_arc_requests = false
     /// helpfully filled in.
     #[test]
     fn harrow_cruiser_never_leaves_the_orbit_for_a_hazard() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         for (name, ai) in [
             ("engines_ai", hc.engines_ai.as_ref().unwrap()),
@@ -10741,15 +10802,19 @@ yields_to_arc_requests = false
             let exits: Vec<&str> = orbit.transition.iter().map(|t| t.to.as_str()).collect();
             assert_eq!(
                 exits,
-                vec!["torpedo_run", "acquire"],
-                "{name}: the orbit has exactly two ways out, in this priority order"
+                vec!["shadow", "torpedo_run", "acquire"],
+                "{name}: the orbit has exactly three ways out, in this priority order"
             );
+            // The `shadow` exit is the class doctrine's posture break-off and is
+            // UNREACHABLE on this hull (`press_posture = 0.0`), which is why the
+            // hazard claim below is unaffected: it is still true that no exit
+            // anywhere is guarded on hazard urgency.
             assert!(
-                orbit.transition[0]
+                orbit.transition[1]
                     .when
                     .contains(crate::ship::helm_ai::TARGET_FACING_SHIELD_DOWN_FACT),
                 "{name}: the shield opportunity is what interrupts the orbit, got `{}`",
-                orbit.transition[0].when
+                orbit.transition[1].when
             );
             // ...and the interruption stays an interruption, which takes BOTH
             // armament readings and not either alone.
@@ -10774,19 +10839,19 @@ yields_to_arc_requests = false
                 crate::ship::helm_ai::TUBES_FILLABLE_FACT,
             ] {
                 assert!(
-                    orbit.transition[0].when.contains(required),
+                    orbit.transition[1].when.contains(required),
                     "{name}: the orbit may only be given up with `{required}` \
                      satisfied — a salvo loaded, in a battery that can still fire \
                      it, got `{}`",
-                    orbit.transition[0].when
+                    orbit.transition[1].when
                 );
             }
             assert!(
-                orbit.transition[1]
+                orbit.transition[2]
                     .when
                     .contains(crate::ship::helm_ai::TARGET_VALID_FACT),
                 "{name}: losing the target is the other thing that ends the orbit, got `{}`",
-                orbit.transition[1].when
+                orbit.transition[2].when
             );
             // And the phase resumes the ring THREE ways, which is the whole of
             // the trap fix. Pinned as a set rather than as "at least one exit
@@ -10901,7 +10966,7 @@ yields_to_arc_requests = false
     /// for that, and there is no `[helm_console.boost]` block for it to use.
     #[test]
     fn harrow_cruiser_authors_no_boost_drive_and_no_boost_doctrine() {
-        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let cfg = EntityConfig::from_toml(&harrow_cruiser_toml()).expect("hull must parse");
         let hc = cfg.helm_console.as_ref().unwrap();
         assert!(
             hc.boost.is_none(),
@@ -13054,7 +13119,7 @@ ai_only = true
         // `Backfill`, which automates every system it owns, so
         // `operate_captain_ai` still raises Red Alert.
         // (#892) Re-pointed off the retired `pirate_raider.toml`.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let toml_str = &resolved_text("ship_harrow_destroyer");
         let config = EntityConfig::from_toml(toml_str).expect("the Harrow Destroyer must parse");
         let reds = red_alert_systems(&config);
         assert_eq!(

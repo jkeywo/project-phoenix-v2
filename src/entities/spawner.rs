@@ -2282,7 +2282,6 @@ regen_per_sec = 0.0
         // Regression test for PRD #597 PR-3 (correct redo): NPC ship TOMLs with
         // [[system]] blocks must produce a ShipConfigComponent containing those
         // systems — not the player ship's config, and not an empty config.
-        use crate::entity_config::EntityConfig;
         use bevy::prelude::*;
 
         let toml = r#"
@@ -2427,8 +2426,12 @@ ai_only = true
         use crate::entity_config::EntityConfig;
         use bevy::prelude::*;
 
-        let toml = include_str!("../../assets/entities/ship_harrow_lancer.toml");
-        let config = EntityConfig::from_toml(toml).expect("harrow lancer must parse");
+        // Through the REAL load path: the hull is composed since issue #878, so
+        // its ship-level AI declarations arrive from the fragment library and
+        // `include_str!` would spawn an unresolved document.
+        let config =
+            crate::entity_includes::load_entity_config("assets/entities/ship_harrow_lancer.toml")
+                .expect("harrow lancer must resolve and parse");
 
         let mut app = test_app();
         let uuid = uuid::Uuid::new_v4().to_string();

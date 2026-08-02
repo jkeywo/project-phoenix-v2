@@ -1377,9 +1377,12 @@ mod tests {
     /// the control half a miss would be indistinguishable from a bolt that was
     /// never aimed properly to begin with.
     fn warhawk_artillery_bank() -> BlasterSystem {
-        let cfg = crate::entity_config::EntityConfig::from_toml(include_str!(
-            "../../assets/entities/ship_harrow_warhawk.toml"
-        ))
+        let cfg = crate::entity_config::EntityConfig::from_toml(
+            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
+                .expect("ship_harrow_warhawk must resolve")
+                .toml
+                .as_str(),
+        )
         .expect("the shipped battleship hull must parse");
         let bank = cfg
             .weapons_console
@@ -1397,9 +1400,12 @@ mod tests {
     /// actually stops at and shoots from. Read off the shipped hull rather than
     /// written here so a retune of the gun line moves these tests with it.
     fn warhawk_hold_range() -> f32 {
-        crate::entity_config::EntityConfig::from_toml(include_str!(
-            "../../assets/entities/ship_harrow_warhawk.toml"
-        ))
+        crate::entity_config::EntityConfig::from_toml(
+            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
+                .expect("ship_harrow_warhawk must resolve")
+                .toml
+                .as_str(),
+        )
         .expect("the shipped battleship hull must parse")
         .helm_console
         .expect("the battleship declares [helm_console]")
@@ -1537,9 +1543,12 @@ mod tests {
     /// ships. Read off the hull so a retune of the fleet moves these tests with
     /// it rather than leaving them asserting against a number nobody ships.
     fn destroyer_cruise() -> f32 {
-        crate::entity_config::EntityConfig::from_toml(include_str!(
-            "../../assets/entities/ship_harrow_destroyer.toml"
-        ))
+        crate::entity_config::EntityConfig::from_toml(
+            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_destroyer.toml")
+                .expect("ship_harrow_destroyer must resolve")
+                .toml
+                .as_str(),
+        )
         .expect("the destroyer hull must parse")
         .helm_console
         .expect("the destroyer declares [helm_console]")

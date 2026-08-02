@@ -365,18 +365,49 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // depart from the impulse baseline, not three.
     ("alliance_cruiser", "engines"),
     ("alliance_cruiser", "steering"),
-    // The broadside orbit: a stateful engines/steering pair, plus two tubes
-    // that hold fire until the target's striking arc is actually down.
+    // ── The composed HARROW doctrines (issue #878) ───────────────────────────
+    //
+    // These three used to author their manoeuvres inline, hull by hull; they now
+    // take them from the SAME three fragments the player hulls fly and tune them
+    // by `param` alone. The entries do not change, and that is the finding rather
+    // than an accident: a departure from the fleet baseline is a departure
+    // whether it was typed into the hull or composed into it, so the list still
+    // names exactly the slots that fly a machine — and would still notice one
+    // collapsing back onto the fleet's stateless defaults, which is now one
+    // dropped `includes` line away rather than several hundred deleted ones.
+    //
+    // What the three of them share is `press_posture = 0.0`, the lowest rung of
+    // the posture ladder: the class doctrines rest on a standoff ring until their
+    // captain calls red alert, and a Harrow has no captain to call one. That
+    // single parameter is what makes the composed machine reduce to the inline
+    // one, and `the_harrow_hulls_unlock_their_class_doctrine_by_posture_alone`
+    // is what proves it in both directions.
+    //
+    // The broadside orbit: a stateful engines/steering pair, plus two tubes that
+    // hold fire until the target's striking arc is actually down. The MANOEUVRE's
+    // matching reading now rides `torpedo_run_shield_gap = 1.0` on the shared
+    // fragment (see `the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc`)
+    // rather than a bespoke guard; the TUBES keep theirs, because a launch gate is
+    // a property of the loadout.
     ("ship_harrow_cruiser", "engines"),
     ("ship_harrow_cruiser", "steering"),
     ("ship_harrow_cruiser", "torpedo_tube[bow_port]"),
     ("ship_harrow_cruiser", "torpedo_tube[bow_starboard]"),
-    // The lance run, and the one hull in the fleet whose AI engages boost.
+    // The lance run, and the one hull in the fleet whose AI engages boost. It is
+    // also the only hull that flies the attack pass's PRESSED short-pass loop
+    // (#789), which #878 moved into the fragment as an opt-in leg: the class
+    // default authors `pressed_min_progress` at a value no separation reading can
+    // fall under and withholds `pressed_window_ticks` entirely, so the arm is
+    // declined twice over for a hull that has not asked for it.
     ("ship_harrow_destroyer", "engines"),
     ("ship_harrow_destroyer", "steering"),
     ("ship_harrow_destroyer", "boost"),
     // The artillery platform: it holds position rather than closing, which is
-    // why its impulse axis is authored IDLE rather than permitting.
+    // why its impulse axis is IDLE rather than permitting. That declaration now
+    // arrives with `movement_artillery.toml` instead of being authored on the
+    // hull — switching the drive off is a property of the DOCTRINE, since the
+    // hold band lies inside the impulse cruise window on every hull small enough
+    // to want one — so two hulls depart from the impulse baseline identically.
     ("ship_harrow_warhawk", "engines"),
     ("ship_harrow_warhawk", "steering"),
     ("ship_harrow_warhawk", "impulse"),
@@ -1198,6 +1229,80 @@ fn posture_guard_truth_table() {
     }
 }
 
+/// **The pressed short-pass loop's DECLINING half, on the player destroyer
+/// (issue #789, generalised by #878).**
+///
+/// `alliance_destroyer` composes the same `movement_attack_pass.toml` fragment
+/// `ship_harrow_destroyer` does, but never authors a real `pressed_min_progress`
+/// or a `pressed_window_ticks` on top of it — so it gets the class default, and
+/// the class default's whole claim is that the pressed branch cannot win. The
+/// Harrow opts IN to both scalars (`ship_harrow_destroyer.toml`); this hull
+/// declining both is the other half of the same doctrine, and until now nothing
+/// resolved the escape leg against a fact set that actually FAVOURS the pressed
+/// branch to check it still loses.
+///
+/// First the structural half: `pressed_min_progress` stays below zero — the
+/// fragment's own comment on the value is that a threshold this far under zero
+/// is one no separation reading can ever fall under — and `pressed_window_ticks`
+/// is simply absent, which is the second, independent opt-in the host reads off
+/// the STEERING axis by name to publish the arm at all (see that axis's own
+/// comment in the fragment). Either one alone declines the loop; this hull
+/// declines both.
+///
+/// Then the behavioural half, resolved through the real transition resolver at
+/// the end of the dwell with every OTHER conjunct of the pressed branch set to
+/// favour it — shields spent, still inside the target's own reach, zero net
+/// separation — so `separation_progress < pressed_min_progress` is the only
+/// conjunct left that can fail. On the class default it does, and recovery wins
+/// by priority instead. A hull that quietly inherited a real threshold (or
+/// `pressed_window_ticks`) would reach `pressed_pivot` here instead, and only
+/// this assertion would notice.
+#[test]
+fn the_player_destroyer_declines_the_pressed_short_pass_loop() {
+    let steering = attack_pass_policies()
+        .into_iter()
+        .find(|(axis, _)| *axis == "steering")
+        .expect("the destroyer composes a steering policy from the fragment")
+        .1;
+
+    assert!(
+        param(&steering, "pressed_min_progress") < 0.0,
+        "the player destroyer's steering axis must keep the class default below \
+         zero, or the pressed branch's guard could actually be reachable by a \
+         real separation reading"
+    );
+    assert!(
+        steering.params.get("pressed_window_ticks").is_none(),
+        "the player destroyer must NOT author `pressed_window_ticks` — the host \
+         reads it off this axis by name to publish the pressed arm at all, so \
+         authoring it (even alongside a declined threshold) would turn the arm \
+         on for a hull that never asked for it"
+    );
+
+    let dwell = param(&steering, "escape_duration_secs");
+    let dwell_done = machine_memory(&steering, dwell);
+    // Every conjunct but the pressed one is set to FAVOUR the pressed branch:
+    // posture still pressed, shields spent, still inside the target's own
+    // reach, and no ground gained. If the pressed transition were ever
+    // reachable on this hull, this is the fact set that would reach it.
+    let pressed_favouring = facts(&[
+        ("posture", param(&steering, "press_posture")),
+        ("shield_fraction", 0.0),
+        ("inside_threat_range", 1.0),
+        ("separation_progress", 0.0),
+    ]);
+    assert_eq!(
+        steering
+            .resolve_transition("escape", &pressed_favouring, &dwell_done, &[])
+            .map(|t| t.to.as_str()),
+        Some("recover"),
+        "the player destroyer's escape leg must fall through to ordinary \
+         recovery even when every other conjunct of the pressed branch is \
+         satisfied — the declined threshold is what has to stop it, and a \
+         `pressed_pivot` here means the class default has quietly become live"
+    );
+}
+
 /// **The targeting half of issue #875 AC5, on the COMPOSED hull.** A Sensors
 /// designation still redirects the backfilled destroyer's guns, and still loses
 /// to a named mission objective.
@@ -1759,6 +1864,15 @@ fn the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament(
             "{axis}: `torpedo_run_range` must be a live threshold. At zero the leg \
              can never open and the ring is handed straight back to Channel 3."
         );
+        // The striking-arc reading the composing hull DEMANDS (issue #878). The
+        // class default is 0.0 — "any reading will do", which is what the player
+        // cruiser measured best — and a hull that wants the Harrow's stricter
+        // entry authors 1.0. Seeding the fact at exactly that threshold keeps
+        // every assertion below a statement about the armament guards whichever
+        // reading the hull composing this fragment has chosen, and the parameter
+        // itself is pinned as a switch by
+        // `the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc`.
+        let gap = param(&p, "torpedo_run_shield_gap");
         let memory = machine_memory(&p, 0.0);
         let at = |range: f64, full: f64, fillable: f64, in_flight: f64| {
             facts(&[
@@ -1768,6 +1882,7 @@ fn the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament(
                 ("tubes_full", full),
                 ("tubes_fillable", fillable),
                 ("torpedoes_in_flight", in_flight),
+                ("target_facing_shield_down", gap),
             ])
         };
 
@@ -1830,6 +1945,205 @@ fn the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament(
             "{axis}/torpedo_run: the target is gone ⇒ `acquire`, not `orbit`. There \
              is no bow to hold on nothing, and no ring to hold either."
         );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The composed HARROW hulls (issue #878)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Every Harrow hull that composes a class MOVEMENT fragment, paired with the
+/// travelling leg its doctrine's defensive `shadow` state opens into.
+const COMPOSED_HARROW_HULLS: &[(&str, &str)] = &[
+    ("ship_harrow_destroyer", "acquire"),
+    ("ship_harrow_cruiser", "acquire"),
+    ("ship_harrow_warhawk", "acquire"),
+];
+
+/// **The whole of issue #878's authoring claim, as a truth table: a Harrow
+/// unlocks its class doctrine by POSTURE PARAMETER and by nothing else.**
+///
+/// The shared movement fragments rest in `shadow` — a standoff ring outside the
+/// target's own guns — and open the aggressive half on `fact(posture) >=
+/// param(press_posture)`. The Alliance hulls leave `press_posture` at the class
+/// default of 1 and wait for their captain to call red alert. A Harrow has no
+/// bridge crew to call one and its captain policy (#912) stands the alert down
+/// out of combat, so it authors the LOWEST rung instead and is permanently
+/// pressed.
+///
+/// That single number is the entire difference between the player fleet's
+/// doctrine and the Harrow's, so it is asserted in both directions on every axis
+/// of every composed hull:
+///
+/// * the gate OPENS at the seeded defensive reading (`posture = 0`), which is
+///   what makes the hull fight at all — the failure it catches is a Harrow that
+///   quietly acquires the class default and then shadows politely for ever,
+///   outside its own weapons range, with every structural test still green;
+/// * every break-off guard is UNREACHABLE, which is what makes the composed
+///   machine reduce to exactly the inline one it replaced (#883/#790/#792) —
+///   there is no posture reading at which a Harrow gives up its manoeuvre,
+///   because there is no rung below the one it presses at.
+///
+/// Read off the shipped files, so a retune in TOML retunes this pin with it
+/// (AGENTS.md rule #11).
+#[test]
+fn the_harrow_hulls_unlock_their_class_doctrine_by_posture_alone() {
+    for (stem, opens_into) in COMPOSED_HARROW_HULLS {
+        let cfg = entity(stem);
+        let helm = cfg
+            .helm_console
+            .as_ref()
+            .unwrap_or_else(|| panic!("{stem} authors [helm_console]"));
+        let axes = [
+            ("engines", helm.engines_ai.as_ref()),
+            ("steering", helm.steering_ai.as_ref()),
+            ("boost", helm.boost_ai.as_ref()),
+        ];
+        let mut machines = 0usize;
+        for (axis, ai) in axes {
+            let Some(ai) = ai else { continue };
+            let p = policy(ai);
+            let Some(machine) = p.machine().cloned() else {
+                continue;
+            };
+            machines += 1;
+            assert_eq!(
+                machine.initial, "shadow",
+                "{stem}/{axis}: the class doctrine RESTS defensive, and a hull that \
+                 booted into an aggressive leg would press once before the first \
+                 posture reading arrived"
+            );
+            let press = param(&p, "press_posture");
+            assert_eq!(
+                press, 0.0,
+                "{stem}/{axis}: a Harrow is ALWAYS pressed and says so by authoring \
+                 the lowest rung of the posture ladder. Anything above it and this \
+                 hull holds a standoff ring outside its own guns until a captain it \
+                 does not have calls red alert."
+            );
+
+            // The seeded DEFENSIVE reading — the only one an unmanned Harrow ever
+            // produces, since its captain stands the alert down out of combat.
+            let defensive = facts(&[("posture", 0.0)]);
+            let memory = machine_memory(&p, 0.0);
+            assert_eq!(
+                p.resolve_transition("shadow", &defensive, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some(*opens_into),
+                "{stem}/{axis}: the gate must be OPEN at the resting posture — this \
+                 is what makes the hull leave the ring on its first evaluation and \
+                 start the fight it exists to start"
+            );
+
+            // …and NO leg anywhere can be broken off by posture, because no
+            // reading is below the rung this hull presses at. Resolved through the
+            // real transition resolver from every leg, with the state clock run
+            // well past any authored dwell so a break-off deferred to the end of a
+            // commitment is eligible too, and with every other fact ABSENT so the
+            // only guards that can fire are the posture-only ones. A future
+            // fragment adding a break-off to a new leg is covered without this pin
+            // being edited.
+            let long_dwell = machine_memory(&p, 1.0e6);
+            for leg in &machine.states {
+                if leg.id == "shadow" {
+                    continue;
+                }
+                assert_ne!(
+                    p.resolve_transition(&leg.id, &defensive, &long_dwell, &[])
+                        .map(|t| t.to.as_str()),
+                    Some("shadow"),
+                    "{stem}/{axis}/{}: the class doctrine's posture break-off must be \
+                     unreachable on an always-pressed hull. If it can fire, the \
+                     composed doctrine no longer reduces to the inline manoeuvre it \
+                     replaced — the hull would abandon its attack at the resting \
+                     posture, which is every tick of an unmanned Harrow's life.",
+                    leg.id
+                );
+            }
+        }
+        assert!(
+            machines >= 2,
+            "{stem}: a composed movement doctrine is a machine on BOTH travel axes \
+             or it is not a class doctrine — found {machines}"
+        );
+    }
+}
+
+/// **The Harrow cruiser's ring still breaks only for a struck-down arc, and the
+/// player cruiser's still does not (issue #878).**
+///
+/// `movement_broadside_orbit.toml` gained `torpedo_run_shield_gap` so one file
+/// could carry both readings, and the parameter is a SWITCH rather than a tuning:
+/// at `0.0` the bow hold opens on range and readiness alone (what the player
+/// cruiser measured best) and the arc-recovered exit is unreachable; at `1.0` the
+/// entry demands the striking arc be down and the exit fires when it comes back.
+///
+/// Asserted through the real transition resolver on both shipped hulls, because
+/// the failure it catches is silent in either direction: a Harrow that acquired
+/// the permissive reading would cut thrust and hold its bow on a target it cannot
+/// hurt (its rounds author `damage_shields = 0`), and a player cruiser that
+/// acquired the strict one would wait bow-on for a window its own beams open at
+/// about one damage per second into a regenerating arc — measured on
+/// `probe_aggressor` at 0 opened runs in 901 ticks.
+#[test]
+fn the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc() {
+    for (stem, gap, arc_up_opens_the_run) in [
+        ("ship_harrow_cruiser", 1.0, false),
+        ("alliance_cruiser", 0.0, true),
+    ] {
+        let cfg = entity(stem);
+        let helm = cfg.helm_console.as_ref().expect("[helm_console]");
+        for (axis, ai) in [
+            ("engines", helm.engines_ai.as_ref()),
+            ("steering", helm.steering_ai.as_ref()),
+        ] {
+            let p = policy(ai.expect("a composed travel axis"));
+            assert_eq!(
+                param(&p, "torpedo_run_shield_gap"),
+                gap,
+                "{stem}/{axis}: the two readings differ by this parameter and \
+                 nothing else"
+            );
+            let memory = machine_memory(&p, 0.0);
+            let ready = |arc_down: f64| {
+                facts(&[
+                    ("posture", param(&p, "press_posture")),
+                    ("target_valid", 1.0),
+                    ("range_to_target", param(&p, "torpedo_run_range")),
+                    ("tubes_full", 1.0),
+                    ("tubes_fillable", 1.0),
+                    ("torpedoes_in_flight", 0.0),
+                    ("target_facing_shield_down", arc_down),
+                ])
+            };
+            assert_eq!(
+                p.resolve_transition("orbit", &ready(1.0), &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("torpedo_run"),
+                "{stem}/{axis}: a struck-down arc with a loaded salvo opens the bow \
+                 hold on BOTH readings — that is the case the leg exists for"
+            );
+            assert_eq!(
+                p.resolve_transition("orbit", &ready(0.0), &memory, &[])
+                    .map(|t| t.to.as_str())
+                    == Some("torpedo_run"),
+                arc_up_opens_the_run,
+                "{stem}/{axis}: with the arc UP the permissive reading must still \
+                 open the run and the strict one must refuse it. This is the whole \
+                 of the parameter."
+            );
+            // …and the exit that owes the strict entry its bound: the arc coming
+            // back releases the hull, but only where an arc was demanded.
+            assert_eq!(
+                p.resolve_transition("torpedo_run", &ready(0.0), &memory, &[])
+                    .map(|t| t.to.as_str())
+                    == Some("orbit"),
+                !arc_up_opens_the_run,
+                "{stem}/{axis}: a hull that breaks its ring FOR a shield gap must \
+                 resume the ring when the gap closes; one that never asked for a gap \
+                 has nothing to be released by"
+            );
+        }
     }
 }
 

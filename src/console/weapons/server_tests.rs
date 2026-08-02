@@ -7586,9 +7586,12 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
     use crate::entity_spawner::EntityUuid;
     use bevy::ecs::system::RunSystemOnce;
 
-    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
-        "../../../assets/entities/ship_harrow_cruiser.toml"
-    ))
+    let hull = crate::entity_config::EntityConfig::from_toml(
+        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
+            .expect("ship_harrow_cruiser must resolve")
+            .toml
+            .as_str(),
+    )
     .expect("the shipped cruiser hull must parse");
     let torpedoes = hull.torpedoes.as_ref().expect("the cruiser carries tubes");
 
@@ -7858,9 +7861,12 @@ fn torpedo_launch_targets(app: &mut App, ship: Entity) -> Vec<SystemId> {
 /// validate, and simply never fire, which is invisible everywhere else.
 #[test]
 fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
-    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
-        "../../../assets/entities/ship_harrow_warhawk.toml"
-    ))
+    let hull = crate::entity_config::EntityConfig::from_toml(
+        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
+            .expect("ship_harrow_warhawk must resolve")
+            .toml
+            .as_str(),
+    )
     .expect("the shipped battleship hull must parse");
     let torpedoes = hull
         .torpedoes
@@ -7940,9 +7946,12 @@ fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
 /// and the guard fires anyway.
 #[test]
 fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
-    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
-        "../../../assets/entities/ship_harrow_warhawk.toml"
-    ))
+    let hull = crate::entity_config::EntityConfig::from_toml(
+        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
+            .expect("ship_harrow_warhawk must resolve")
+            .toml
+            .as_str(),
+    )
     .expect("the shipped battleship hull must parse");
     let torpedoes = hull
         .torpedoes
@@ -8038,9 +8047,12 @@ fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
 fn warhawk_torpedo_opportunity_never_commands_the_helm() {
     use bevy::ecs::system::RunSystemOnce;
 
-    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
-        "../../../assets/entities/ship_harrow_warhawk.toml"
-    ))
+    let hull = crate::entity_config::EntityConfig::from_toml(
+        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
+            .expect("ship_harrow_warhawk must resolve")
+            .toml
+            .as_str(),
+    )
     .expect("the shipped battleship hull must parse");
     let torpedoes = hull
         .torpedoes
@@ -11871,9 +11883,12 @@ fn shipped_player_phaser_policy() -> crate::ai::policy::AiPolicy {
 /// The SHIPPED Harrow phaser policy: the same predicate text, the always-armed
 /// threshold.
 fn shipped_harrow_phaser_policy() -> crate::ai::policy::AiPolicy {
-    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
-        "../../../assets/entities/ship_harrow_patrol.toml"
-    ))
+    let hull = crate::entity_config::EntityConfig::from_toml(
+        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_patrol.toml")
+            .expect("ship_harrow_patrol must resolve")
+            .toml
+            .as_str(),
+    )
     .expect("the shipped Harrow patrol hull must parse");
     hull.weapons_console
         .as_ref()

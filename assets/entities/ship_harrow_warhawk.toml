@@ -149,6 +149,32 @@
 # fore tube bearing on a collapsed arc refuses the shot because the aft tube is
 # still on its reload — which is the opposite of opportunistic.
 
+# ── Composed on the shared fragment library (issue #878) ──────────────────────
+#
+# The gun line above is no longer authored here. It is
+# `fragments/ai/movement_artillery.toml` — the same file `alliance_battleship.toml`
+# flies — and this hull tunes it with ONE parameter (`press_posture`, below).
+# That is the whole point of the migration: one library serves the player fleet
+# and the Harrow, and "aggressive" is a number rather than a second copy of the
+# machine.
+#
+# Order is significant: fragments merge in declared order and this file merges
+# last, so the includer always wins. `movement_artillery.toml` is listed AFTER
+# `fleet_baseline.toml` because it REPLACES the baseline's two travel axes and
+# its Impulse policy.
+#
+# What is still authored below is what makes this hull ITSELF — its guns, its
+# tubes, its stations and systems, its doctrine — plus the two ship-level
+# declarations a Harrow deliberately does not share with the fleet: the
+# stand-down `[captain_console.ai]` (#912) and `[power]` + `[power.ai_policy]`,
+# re-authored whole so the baseline's resting `sensors` rule cannot demote a hull
+# that authors no `[power_groups.*]` (#923). `ship_harrow_patrol.toml` carries the
+# fuller note on both.
+includes = [
+  "fragments/ai/fleet_baseline.toml",
+  "fragments/ai/movement_artillery.toml",
+]
+
 name = "entity.ship_harrow_warhawk.name"
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
@@ -221,253 +247,45 @@ trail_lifetime_secs = 0.65
 # (an unauthored radar range means UNLIMITED helm visibility, which is what lets
 # a 200-unit envelope resolve a target at all).
 
-# ── The impulse drive is switched OFF, and it has to be switched off HERE ──────
+# ── Doctrine tuning: parameters only (issue #878) ─────────────────────────────
 #
-# This is the one hull whose held radius lies INSIDE the impulse cruise window,
-# and until #792 that made the whole doctrine above decorative in production.
+# The whole specialisation of the shared artillery doctrine, and the entire
+# authoring interface this hull has to it. No rule, state or transition is
+# restated: `param` is an ordinary TOML table and deep-merges, so naming one key
+# retunes that threshold and leaves the machine alone.
 #
-# `entities::spawner` attaches an `ImpulseConfigResource` to every hull that
-# declares a `[helm_console]`, taking the parse defaults — engage at 200 units,
-# cancel at 40. The authored hold band (180) sits entirely inside that window. So
-# the battleship would fly its run-in, engage impulse somewhere around 210 while
-# its bow was lined up on the target, reach `hold` at 180 and command
-# `SetThrust{0.0}` every tick — and be ignored, because the impulse autopilot in
-# `integrate_ship_physics` hard-OVERRIDES commanded throttle with `thrust = 1.0`
-# for as long as the drive is engaged. The hull sailed through its own gun line
-# at max speed and only stopped at the drive's 40-unit release range, ~22 units
-# from the target: AC2's stopping point missed by a factor of eight, AC3's "holds
-# station" not happening at all, and the `max_yaw_rate` retune above undone into
-# the bargain, since the same autopilot scales steering by the 0.1 impulse
-# multiplier (0.20 rad/s of authored authority becoming 0.02).
+# ONE key, and it is the aggression knob. `press_posture` is the rung of the
+# host-seeded `posture` fact at which the class doctrine's aggressive half
+# unlocks — 0 DEFENSIVE, 1 PRESSED, seeded from this ship's own red alert. The
+# Alliance hulls leave it at the class default of 1 and rest on a standoff ring
+# until their captain calls the alert. A HARROW IS ALWAYS PRESSED, and this is
+# where that is said: at the lowest rung `fact(posture) >= param(press_posture)`
+# holds from the first tick and every `fact(posture) < param(press_posture)`
+# break-off guard is unreachable, so the machine leaves `shadow` immediately and
+# never returns to it. What is left is exactly the acquire → reposition → hold
+# gun line this hull flew inline before it was composed (#792).
 #
-# The sibling hulls escape this by accident rather than by design: the cruiser's
-# combat ring settles at ~35 units, inside the 40-unit cancel distance, and the
-# destroyer's legs are high-speed passes anyway.
+# It is the SAME lever as `min_alert_to_fire = 0` on the banks below and it is
+# there for the same reason: a Harrow has no bridge crew to call red alert, and
+# its captain policy (#912) stands the alert down out of combat, so a hull that
+# waited for one would sit on a standoff ring outside its own guns for ever and
+# never start the fight it exists to start. Note what it deliberately does NOT
+# do: it changes no red-alert STATE, so every fact, comms, repair and arc-overlay
+# reading keyed on the alert is exactly where #912 left it.
 #
-# ## Why an `impulse_ai` idle and not `use_impulse = false`
-#
-# `[[behaviour.doctrine]] use_impulse = false` reads like the obvious lever and is
-# the wrong one, because doctrine is the part of a hull a SCENARIO replaces.
-# `assets/worlds/combat_test.toml`'s wave 8 and `assets/worlds/duel.toml` both
-# hand this hull a doctrine list of their own, and neither authors `use_impulse`
-# — and `effective_use_impulse()` defaults to TRUE for every non-Patrol directive,
-# so each of them would silently switch the drive back on and restore the bug in
-# exactly the scenarios the hull is fought in. A tightened
-# `impulse_engage_distance` has the same shape of problem from the other end: it
-# is a geometry that has to stay correct against a band a designer retunes.
-#
-# The `impulse` fine system's own policy is not doctrine and no shipped scenario
-# overrides it. An explicit `idle` is a legal, distinct-from-silence declaration
-# (the same one `default_boost_ai_config` makes for AI boost): `ai_helm_impulse`
-# resolves the channel to nothing and emits neither `StartImpulseCharge` nor
-# `CancelImpulse`, whatever geometry or doctrine it is handed. The drive is
-# simply not part of this hull's manoeuvre — which is the same statement the
-# missing `[helm_console.boost_ai]` above makes about the other overdrive, and
-# for the same reason: a battleship that lights an engine is leaving its firing
-# position.
-[helm_console.impulse_ai]
-idle = true
-
-# ── Engines (longitudinal) doctrine ───────────────────────────────────────────
-#
-# All three states author the same unconditional "actuate the planner's desired
-# travel". The hold's throttle is `artillery_hold_speed` (0.0 — hold station),
-# one of the authored scalars the HOST reads off the Steering axis and folds into
-# the planner solution, so this axis never learns which leg it is flying. In
-# `acquire` and `reposition` the planner has no host-flown leg selected and falls
-# through to ordinary doctrine travel, which closes at the `[[behaviour.doctrine]]`
-# `target_speed` below.
-[helm_console.engines_ai]
-initial_state = "acquire"
-
+# Everything else — the 200/180 band, the zero hold throttle, the 0.03/0.6
+# steering response — is the artillery class default and is authored once in
+# `fragments/ai/movement_artillery.toml`. The fragment also supplies the
+# `[helm_console.impulse_ai]` idle this hull used to author inline: an artillery
+# hold band lies inside the impulse drive's default cruise window on every hull
+# small enough to want one, and an engaged drive hard-overrides commanded
+# throttle, so switching the drive off is a property of the DOCTRINE and now
+# lives with it.
 [helm_console.engines_ai.param]
-# Restated on this axis because its OWN guards reference them; content validation
-# rejects an undeclared `param(...)`. Engines runs an independent copy of the
-# machine from the SAME shared fact snapshot, so it reaches each leg on its own
-# reading rather than by consulting Steering's state — the two axes are separate
-# fine systems and neither may read the other's memory.
-max_artillery_range = 200.0
-artillery_hold_range = 180.0
-
-[helm_console.engines_ai.memory]
-min_range_seen = 1000000.0
-escape_heading_rad = 0.0
-
-[[helm_console.engines_ai.state]]
-id = "acquire"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  # A target that appears ALREADY inside the band is not something to close on.
-  # Higher priority than the reposition arm below so the two cannot both fire on
-  # the tick a target resolves at 150 units.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 10
-  to = "hold"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(artillery_hold_range)"
-
-  [[helm_console.engines_ai.state.transition]]
-  priority = 0
-  to = "reposition"
-  when = "fact(target_valid) > 0 and fact(range_to_target) > param(artillery_hold_range)"
-
-[[helm_console.engines_ai.state]]
-id = "reposition"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  # Losing the target outranks everything: there is no position to take up
-  # against nothing.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-  # AC2. The run-in ends at the INNER edge of the band, never at the outer one —
-  # see the header for why the two are different numbers.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 0
-  to = "hold"
-  when = "fact(range_to_target) <= param(artillery_hold_range)"
-
-[[helm_console.engines_ai.state]]
-id = "hold"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  [[helm_console.engines_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-  # AC1, and the ONLY way out of the hold that does not involve losing the
-  # target. Note what is absent: nothing here fires when the range SHRINKS. A
-  # player closing on this ship cannot make it give ground (AC5).
-  [[helm_console.engines_ai.state.transition]]
-  priority = 0
-  to = "reposition"
-  when = "fact(range_to_target) > param(max_artillery_range)"
-
-# ── Steering (yaw) doctrine ───────────────────────────────────────────────────
-#
-# The axis that carries the manoeuvre. `acquire` and `reposition` track the
-# target so the battleship closes on it; `hold` answers with the SEVENTH yaw mode
-# verb, `hold_artillery_position` — neither "track the target" nor "hold a ring"
-# nor "point at where it is" but "point at where it WILL BE when my bolt gets
-# there". The host reads the leg off this verb and never off a state's name, so
-# these states could be called anything.
-[helm_console.steering_ai]
-initial_state = "acquire"
+press_posture = 0.0
 
 [helm_console.steering_ai.param]
-# ── The three scalars the HOST reads off this axis to fly the gun line ────────
-# Steering owns them because Steering's yaw verb is what tells the host which leg
-# is being flown. Omit ANY ONE and the host declines the artillery arm outright —
-# the battleship falls back to ordinary doctrine travel rather than holding a
-# position at an invented range or an invented throttle.
-#
-# The outer edge of the envelope, world units. Matches the bow bank's authored
-# `range` today, and is authored separately on purpose: `range` is where a bolt
-# stops existing, this is where a designer decided the gun line stops being worth
-# holding.
-max_artillery_range = 200.0
-# The inner edge — ninety per cent of the outer one, authored as a real value
-# because a designer tunes the band and not a ratio buried in Rust. Repositioning
-# stops here; see the header for why the gap between the two is the hysteresis.
-artillery_hold_range = 180.0
-# Throttle fraction flown while the position is held. Authored ZERO: an artillery
-# platform that keeps closing is not an artillery platform. See the header for
-# why this needs a name of its own rather than borrowing a sibling hull's.
-artillery_hold_speed = 0.0
-# Steering response. A tighter deadband than either sibling's (the cruiser's is
-# 0.05) because the whole of the hold's output is yaw: a lead solution that the
-# hull declines to chase inside 0.03 rad is a lead solution 5 units wide at 180
-# units, which is most of a ship. The saturation angle is wide, because a
-# battleship correcting a small lead error at full steering authority would
-# oscillate around the solution rather than settle on it.
-tracking_deadband_rad = 0.03
-tracking_full_steer_rad = 0.6
-
-[helm_console.steering_ai.memory]
-min_range_seen = 1000000.0
-escape_heading_rad = 0.0
-
-# NOTE another deliberate absence: no `orbit_direction` slot. This hull never
-# circles anything, so it needs no circulation to draw — and the host only draws
-# one for a state whose own yaw verb is an orbit.
-
-[[helm_console.steering_ai.state]]
-id = "acquire"
-
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "actuate_desired_facing"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 10
-  to = "hold"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(artillery_hold_range)"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 0
-  to = "reposition"
-  when = "fact(target_valid) > 0 and fact(range_to_target) > param(artillery_hold_range)"
-
-[[helm_console.steering_ai.state]]
-id = "reposition"
-
-  # Ordinary target tracking on the way in. The bow is on the target rather than
-  # on a lead solution, which is correct: nothing is being fired at this range,
-  # and a run-in aimed at an intercept would arrive off to one side of it.
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "actuate_desired_facing"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 0
-  to = "hold"
-  when = "fact(range_to_target) <= param(artillery_hold_range)"
-
-# THE manoeuvre.
-[[helm_console.steering_ai.state]]
-id = "hold"
-
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "hold_artillery_position"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 0
-  to = "reposition"
-  when = "fact(range_to_target) > param(max_artillery_range)"
+press_posture = 0.0
 
 [weapons_console]
 
@@ -1041,221 +859,6 @@ id = "power-battery"
 kind = "power_battery"
 station = "engineering"
 
-# ── AI target selectors (PRD #774 US7, issue #885b) ───────────────────────────
-#
-# The five per-system target selectors, AUTHORED rather than synthesised. Each
-# answers "which entity is this system's target?" for whoever operates the
-# station, and each reproduces exactly what the matching
-# `default_*_target_selector_config()` in `src/entities/config.rs` used to
-# invent at spawn. The reasoning behind every number lives on those functions
-# and on the constant blocks above them; `default_ai_policy_pins` spawns every
-# shipped hull and compares the two, so a transcription slip fails the build
-# rather than quietly changing how this ship picks targets.
-#
-# All five attach on `[behaviour]` ALONE, not on the console section they name,
-# so a hull owes all five whether or not it declares `[sensors_console]`,
-# `[navigation_console]`, `[repair]` or `[comms_console]`.
-#
-# `horizon` is a static outer bound, NOT the live range gate — each host owns
-# its own (Sensors' damage-scaled radar reach, Comms' authored `[comms].range`).
-# Do not "helpfully" tighten it to look like a range.
-#
-# A score term's magnitude is its own `weight` field. A `param` entry exists
-# only where a `when` guard names one: Repair's `deficit_band_*` and Comms'
-# `score_band_*` are the whole set.
-
-# Sensors — rank detectable hostiles by which SOURCE surfaced them:
-# combat-lock >> objective >> radar. `switch_margin` is 0 because the gaps
-# between the tiers ARE the anti-thrash mechanism.
-[sensors_console.selector]
-sources = ["combat-lock", "objective-destroy", "radar-contacts"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
-
-[[sensors_console.selector.score]]
-when = "candidate_fact(source_combat_lock) > 0"
-weight = 1000.0
-
-[[sensors_console.selector.score]]
-when = "candidate_fact(source_objective) > 0"
-weight = 100.0
-
-[[sensors_console.selector.score]]
-when = "candidate_fact(source_radar) > 0"
-weight = 1.0
-
-# Tactical — the ship's firing target. `combat-lock` is deliberately ABSENT from
-# the sources: it is Tactical's own output, so unioning it would be circular.
-# The current lock reaches the ranking as the host-pushed `source_retained`
-# retention candidate, which is why that marker appears in the guards but in no
-# source list.
-#
-# PRECEDENCE INVARIANT — terms are additive and one candidate can carry several
-# markers at once, so the weights are sized to beat the maximum non-objective
-# stack by more than `switch_margin`: 500 + 200 + 100 + 1 = 801 < 1000 - 50.
-# A named Destroy objective therefore always wins AND survives hysteresis
-# retention, while `retained` still exceeds `last_attacker` so an established
-# engagement is not broken off by a fresh attacker. Retune against that
-# inequality, not term by term.
-[weapons_console.selector]
-sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts"]
-horizon = 1e9
-switch_margin = 50.0
-# Independent revalidation: `detectable` is required of everything, and beyond
-# that a candidate is engageable either because the host already vetted it
-# (objective order / last attacker / retained lock) OR because it is
-# independently hostile. That disjunction honours a mission naming a factionless
-# target while refusing a FRIENDLY Sensors designation, which carries only
-# `source_sensors_designation`.
-eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0)"
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_objective) > 0"
-weight = 1000.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_sensors_designation) > 0"
-weight = 500.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_retained) > 0"
-weight = 200.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_last_attacker) > 0"
-weight = 100.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_radar) > 0"
-weight = 1.0
-
-# Navigation — rank destinations into the shared Waypoint. Only the objective
-# source marks its resolved destination `reachable`, so this policy drives the
-# AI waypoint from objectives alone; `chart-contacts` is surfaced so an author
-# can widen the eligibility, and by default only ENRICHES a coincident objective
-# destination rather than independently steering the ship.
-[navigation_console.selector]
-sources = ["navigation-objectives", "chart-contacts"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(reachable) > 0"
-
-[[navigation_console.selector.score]]
-when = "candidate_fact(source_nav_objective) > 0"
-weight = 100.0
-
-[[navigation_console.selector.score]]
-when = "candidate_fact(source_chart_contact) > 0"
-weight = 1.0
-
-# Repair — rank this ship's damaged stations for the next free team. Two
-# additive ladders whose tier rungs STRICTLY dominate the deficit rungs
-# (3 x 100 = 300 < 1000), reproducing the retired `(tier desc, deficit desc)`
-# comparator. `assigned < 1` is what makes N free teams pick N DISTINCT
-# stations. `tier_ordinal` is the DamageTier discriminant (Operational 0,
-# Damaged 1, Disabled 2, Destroyed 3) — a structural enum ordinal, which is why
-# its bounds are literals rather than params; Destroyed is excluded because a
-# repair team alone cannot lift the latch.
-#
-# Authored on every hull whether or not it crews repair teams: the teams gate
-# dispatch, so a ship that gains them later already has its ranking.
-[repair.selector]
-sources = ["damaged-stations", "core-bucket"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(source_repair_request) > 0 and candidate_fact(assigned) < 1 and candidate_fact(tier_ordinal) > 0 and candidate_fact(tier_ordinal) < 3"
-
-# The bands sit INSIDE the urgent range and deliberately NOT at the DamageTier
-# thresholds — because tier strictly dominates, the deficit ladder only ever
-# discriminates within one tier, so bands at the tier boundaries would all fire
-# together for every Disabled station and discriminate nothing.
-[repair.selector.param]
-deficit_band_low = 0.80
-deficit_band_mid = 0.90
-deficit_band_high = 0.95
-
-[[repair.selector.score]]
-when = "candidate_fact(tier_ordinal) >= 1"
-weight = 1000.0
-
-[[repair.selector.score]]
-when = "candidate_fact(tier_ordinal) >= 2"
-weight = 1000.0
-
-[[repair.selector.score]]
-when = "candidate_fact(tier_ordinal) >= 3"
-weight = 1000.0
-
-[[repair.selector.score]]
-when = "candidate_fact(damage_fraction) >= param(deficit_band_low)"
-weight = 100.0
-
-[[repair.selector.score]]
-when = "candidate_fact(damage_fraction) >= param(deficit_band_mid)"
-weight = 100.0
-
-[[repair.selector.score]]
-when = "candidate_fact(damage_fraction) >= param(deficit_band_high)"
-weight = 100.0
-
-# Comms hail — rank who to hail. The most gated of the five, and the only one
-# whose eligibility reads a `self_fact`: `comms_available`, so a Disabled or
-# Destroyed Comms system stops the ship hailing at all. `source_hail_objective`
-# keeps the baseline — only targets an active Hail directive actually names are
-# ranked. `has_open_hail_thread < 1` is the anti-respam gate and it TERMINATES:
-# a hail arms it even when it fires no `on_hailed` template, and it re-arms on a
-# human `ClearComms` or on the target ceasing to be a live candidate, which is
-# what an unmanned ship relies on. `switch_margin` is 0 and the host passes no
-# current target: a hail is a ONE-SHOT event, so there is nothing to retain.
-[comms_console.selector]
-sources = ["hail-objectives", "comms-contacts"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(source_hail_objective) > 0 and candidate_fact(in_range) > 0 and candidate_fact(objective_score) > 0 and candidate_fact(has_open_hail_thread) < 1 and self_fact(comms_available) > 0"
-
-# The bands straddle the `base_priority` values the shipped content actually
-# authors (20 / 30 / 35 / 40 / 45 / 50 / 80 / 100), splitting them four ways.
-# Bands outside that range would fire for all or none and collapse the ranking
-# onto the smallest-UUID tie-break.
-[comms_console.selector.param]
-score_band_low = 25.0
-score_band_mid = 45.0
-score_band_high = 75.0
-
-[[comms_console.selector.score]]
-when = "candidate_fact(objective_score) >= param(score_band_low)"
-weight = 100.0
-
-[[comms_console.selector.score]]
-when = "candidate_fact(objective_score) >= param(score_band_mid)"
-weight = 100.0
-
-[[comms_console.selector.score]]
-when = "candidate_fact(objective_score) >= param(score_band_high)"
-weight = 100.0
-
-# ── AI fine-system policies (PRD #774 US7, issue #885b) ───────────────────────
-#
-# The ship-level AI policies, AUTHORED rather than synthesised. Each answers
-# "which verb does this fine system emit on which channel?" for whoever operates
-# the station, and each reproduces exactly what the matching
-# `default_*_ai_config()` in `src/entities/config.rs` used to invent at spawn.
-# The reasoning behind every rule lives on those functions;
-# `default_ai_policy_pins` spawns every shipped hull and compares the two, so a
-# transcription slip fails the build rather than quietly changing how this ship
-# behaves.
-#
-# Like the selectors above, these attach on `[behaviour]` ALONE, not on the
-# console section they name — so a hull owes them whether or not it declares
-# `[captain_console]`, `[shields_console]` or `[power]`. Authoring them is what
-# brings those sections into existence on hulls that carried none.
-#
-# A rule's `when` is a guard, not a capability check: the host keeps every
-# availability, cooldown, range and arc gate it had. `idle = true` (see Boost) is
-# a first-class declaration meaning "this system deliberately takes no AI
-# action" — it is NOT the same as an empty block, which validation rejects.
-
 # Captain — raise Red Alert while the ship has been in combat within
 # `combat_window_secs`, otherwise stand down. The window is a named parameter so
 # a designer retunes the ship's nerve without recompiling.
@@ -1276,36 +879,6 @@ when = "true"
 verb = "set_red_alert"
 value = false
 
-# Helm lateral — always actuate. The dodge (and the docking translation) run off
-# the shared hazard surface, so again only the decision is authored here.
-[helm_console.lateral_ai]
-
-[[helm_console.lateral_ai.rule]]
-priority = 0
-channel = "lateral"
-when = "true"
-verb = "actuate_lateral_thrust"
-
-# Helm vertical — always actuate. `VerticalMovementMode` stays a host-side
-# CAPABILITY gate rather than a policy scalar, so a Planar hull still takes no
-# vertical component no matter what this rule says.
-[helm_console.vertical_ai]
-
-[[helm_console.vertical_ai.rule]]
-priority = 0
-channel = "vertical"
-when = "true"
-verb = "actuate_vertical_thrust"
-
-# Helm boost — an explicit IDLE declaration, and the only one in the set. No AI
-# on this hull engages the boost drive, so the honest declaration is "takes no
-# AI boost action" rather than a rule that never fires. `idle = true` is a legal
-# declaration distinct from silence; an empty block is rejected at load. A hull
-# opts in by replacing this with a rule on the `boost` channel —
-# `ship_harrow_destroyer.toml` is the worked example.
-[helm_console.boost_ai]
-idle = true
-
 # Torpedo magazine — always grant a claim the host has already found legal. The
 # offline + non-empty gates remain the hard authority; this policy is the
 # authored arbiter layered on top, which is where a hull would ration rounds
@@ -1317,35 +890,6 @@ priority = 0
 channel = "torpedo_magazine_grant"
 when = "true"
 verb = "grant_torpedo_round"
-
-# Shields focus — two rules on one channel, both emitting the value-less
-# `focus_shield_arc`. WHICH of the four arcs is focused is not in the policy: it
-# comes from the retained ranking kernel, which reads the four params below
-# directly out of `param`. `damage_window_secs`, `min_damage_window_secs` and
-# `health_ratio_threshold` are therefore live tunables even though no `when`
-# names them — do not delete them for looking unreferenced.
-#
-# The priority-10 damage rule and the priority-0 fallback emit the same verb and
-# the fallback is unconditional, so today the channel resolves identically
-# whatever `recent_damage_pct_max` reads. The rule is transcribed as-is because
-# this migration changes no behaviour; the redundancy is recorded on #885.
-[shields_console.ai_policy.param]
-damage_window_secs = 4.0
-min_damage_window_secs = 1.0
-damage_pct_threshold = 50.0
-health_ratio_threshold = 50.0
-
-[[shields_console.ai_policy.rule]]
-priority = 10
-channel = "shield_focus"
-when = "fact(recent_damage_pct_max) >= param(damage_pct_threshold)"
-verb = "focus_shield_arc"
-
-[[shields_console.ai_policy.rule]]
-priority = 0
-channel = "shield_focus"
-when = "true"
-verb = "focus_shield_arc"
 
 # Reactor + battery. Transcribed from `PowerConfig::default()`, which is what
 # this hull ran on before it declared the section: authoring
@@ -1395,21 +939,3 @@ channel = "weapons"
 when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
-
-# Comms dialogue response — answer an open hail with its FIRST response. Guarded
-# twice, and both guards matter: an unguarded rule would re-emit a response the
-# router refuses, every tick, for as long as the dialogue stays open.
-#   * `comms_available` — a Disabled or Destroyed Comms system stops the ship
-#     answering as well as hailing.
-#   * `sender_in_range` — the router refuses a response whose sender has left
-#     comms range, so without this the officer's rejection re-flashes forever.
-# WHICH message is being answered comes from the host; only the response INDEX
-# rides the verb. A ship that should answer nothing declares `idle = true`.
-[comms_console.ai]
-
-[[comms_console.ai.rule]]
-priority = 0
-channel = "comms_respond"
-when = "fact(comms_available) > 0 and fact(sender_in_range) > 0"
-verb = "respond_to_message"
-response_index = 0

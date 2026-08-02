@@ -10962,9 +10962,12 @@ verb = "engage_boost"
     const BOGEY: &str = "bogey";
 
     fn destroyer_hull() -> crate::entity_config::EntityConfig {
-        crate::entity_config::EntityConfig::from_toml(include_str!(
-            "../../assets/entities/ship_harrow_destroyer.toml"
-        ))
+        crate::entity_config::EntityConfig::from_toml(
+            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_destroyer.toml")
+                .expect("ship_harrow_destroyer must resolve")
+                .toml
+                .as_str(),
+        )
         .expect("the shipped destroyer hull must parse")
     }
 
@@ -11046,7 +11049,32 @@ verb = "engage_boost"
         set_helm_control_source(&mut app, ControlSource::Ai);
         let uuid = uuid::Uuid::new_v4();
         set_bogey(&mut app, uuid, bogey_pos, 0.0, 0.0);
+        leave_the_defensive_leg(&mut app, "acquire");
         (app, uuid)
+    }
+
+    /// Spend the ONE tick the composed class doctrine takes to leave its
+    /// defensive resting leg (issue #878).
+    ///
+    /// The shared movement fragments boot into `shadow` and unlock the aggressive
+    /// half on `fact(posture) >= param(press_posture)`. Every Harrow authors the
+    /// lowest rung (`press_posture = 0.0`), so the host-seeded posture satisfies
+    /// it on the very first evaluation — but it is still an evaluation, and the
+    /// fixtures below were written against machines that booted straight into
+    /// their first travelling leg. Settling it here keeps those tests statements
+    /// about the MANOEUVRE rather than about the one tick in front of it, and
+    /// asserting the leg was actually left is what stops the settle hiding a gate
+    /// that never opened.
+    fn leave_the_defensive_leg(app: &mut App, into: &str) {
+        tick(app);
+        assert_eq!(
+            steering_state(app),
+            into,
+            "`press_posture = 0.0` must open the gate on the machine's FIRST \
+             evaluation — a Harrow is always pressed, and a hull left shadowing \
+             would hold a ring outside its own guns and never start the fight it \
+             exists to start"
+        );
     }
 
     fn steering_state(app: &mut App) -> String {
@@ -11894,12 +11922,16 @@ verb = "engage_boost"
 
         set_helm_control_source(&mut app, ControlSource::Human);
         tick(&mut app);
+        // "shadow" IS the authored initial state since issue #878 composed this
+        // hull on the class fragment: the shared doctrine boots defensive and the
+        // Harrow unlocks the aggressive half by posture. A human-flown axis is
+        // reset to what the FILE says, whatever that is, which is the claim.
         assert_eq!(
             steering_state(&mut app),
-            "acquire",
+            "shadow",
             "a human-flown axis resets to the authored initial state"
         );
-        assert_eq!(engines_state(&mut app), "acquire");
+        assert_eq!(engines_state(&mut app), "shadow");
         assert!(
             !pass_surface(&mut app).active,
             "and the planner stops being offered a pass at all"
@@ -12061,18 +12093,19 @@ verb = "engage_boost"
         }
         assert_eq!(
             steering_state(&mut app),
-            "acquire",
+            "shadow",
             "a shot-out steering actuator must reset its machine to the authored \
-             initial state, not park it mid-escape"
+             initial state (the class doctrine's defensive leg since issue #878), \
+             not park it mid-escape"
         );
         assert_eq!(
             engines_state(&mut app),
-            "acquire",
+            "shadow",
             "Engines runs its own copy of the machine and resets on its own gate"
         );
         assert_eq!(
             boost_policy_state(&mut app).current,
-            "acquire",
+            "shadow",
             "and so does Boost"
         );
         assert!(
@@ -13267,9 +13300,12 @@ verb = "engage_boost"
     // untestable.
 
     fn cruiser_hull() -> crate::entity_config::EntityConfig {
-        crate::entity_config::EntityConfig::from_toml(include_str!(
-            "../../assets/entities/ship_harrow_cruiser.toml"
-        ))
+        crate::entity_config::EntityConfig::from_toml(
+            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
+                .expect("ship_harrow_cruiser must resolve")
+                .toml
+                .as_str(),
+        )
         .expect("the shipped cruiser hull must parse")
     }
 
@@ -13332,6 +13368,7 @@ verb = "engage_boost"
         set_helm_control_source(&mut app, ControlSource::Ai);
         let uuid = uuid::Uuid::new_v4();
         set_bogey(&mut app, uuid, bogey_pos, 0.0, 0.0);
+        leave_the_defensive_leg(&mut app, "acquire");
         (app, uuid)
     }
 
@@ -13495,11 +13532,19 @@ verb = "engage_boost"
             pass.combat_orbit_spiral_gain,
             cruiser_steering_param(COMBAT_ORBIT_SPIRAL_GAIN_PARAM)
         );
-        assert_eq!(
-            pass.safe_range, 0.0,
-            "the shield-recovery ring is untouched: this hull authors no recovery \
-             doctrine, so `safe_range` must stay at its default rather than being \
-             quietly repurposed"
+        // The two rings are DIFFERENT rings and neither may masquerade as the
+        // other. Since issue #878 this hull composes the class doctrine, whose
+        // defensive `shadow` leg genuinely holds a standoff derived from the
+        // TARGET's reach plus the authored margin — so `safe_range` is published
+        // now where it used to be an unauthored zero. What the assertion above
+        // still guards is the thing that mattered: the FIGHTING ring is the hull's
+        // own authored radius and not this one.
+        assert!(
+            pass.safe_range > 0.0
+                && pass.safe_range != cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM),
+            "the class standoff ring is derived from the target's reach and must \
+             stay distinct from the hull's own fighting radius, got {}",
+            pass.safe_range
         );
     }
 
@@ -15040,9 +15085,12 @@ verb = "engage_boost"
     // "pivots onto a lead" is only observable as a bearing that converges on one.
 
     fn warhawk_hull() -> crate::entity_config::EntityConfig {
-        crate::entity_config::EntityConfig::from_toml(include_str!(
-            "../../assets/entities/ship_harrow_warhawk.toml"
-        ))
+        crate::entity_config::EntityConfig::from_toml(
+            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
+                .expect("ship_harrow_warhawk must resolve")
+                .toml
+                .as_str(),
+        )
         .expect("the shipped battleship hull must parse")
     }
 
@@ -15200,6 +15248,7 @@ verb = "engage_boost"
         // alone — the last of the three things whose absence made this fixture a
         // world the impulse drive could not act in.
         set_ship_combat_lock(&mut app, uuid);
+        leave_the_defensive_leg(&mut app, "acquire");
         (app, uuid)
     }
 

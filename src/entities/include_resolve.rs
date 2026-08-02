@@ -2858,19 +2858,30 @@ directive_kind = "Destroy"
         /// `examples/`) belongs in this list for the same reason.
         const SOURCE_ROOTS: [&str; 2] = ["src", "tests"];
 
-        fn include_str_baked_hulls() -> Vec<(String, String)> {
-            fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+        /// Alongside the sites, returns how many `.rs` files the WALK ITSELF
+        /// read under each of `SOURCE_ROOTS` — the "did the scan reach this
+        /// root at all" reading, which has to come from this walk rather than
+        /// a second, separately-written one: a standalone directory walk would
+        /// prove only that the root exists and holds `.rs` files, not that the
+        /// enumeration above ever looked at them. It would pass unchanged if
+        /// `SOURCE_ROOTS` were trimmed to `["src"]`, or if this walk grew a bug
+        /// that returned early. Threading the count through the same recursion
+        /// the sites come from ties the "reached" evidence to the thing it is
+        /// evidence for.
+        fn include_str_baked_hulls() -> (Vec<(String, String)>, HashMap<&'static str, usize>) {
+            fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>, read: &mut usize) {
                 let entries = std::fs::read_dir(dir)
                     .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()));
                 for entry in entries {
                     let path = entry.expect("readable dir entry").path();
                     if path.is_dir() {
-                        walk(&path, out);
+                        walk(&path, out, read);
                         continue;
                     }
                     if path.extension().is_none_or(|e| e != "rs") {
                         continue;
                     }
+                    *read += 1;
                     let file = path.to_string_lossy().replace('\\', "/");
                     let src = std::fs::read_to_string(&path)
                         .unwrap_or_else(|e| panic!("{file} must be readable: {e}"));
@@ -2894,12 +2905,15 @@ directive_kind = "Destroy"
                 }
             }
             let mut out = Vec::new();
+            let mut read_per_root: HashMap<&'static str, usize> = HashMap::new();
             for root in SOURCE_ROOTS {
-                walk(std::path::Path::new(root), &mut out);
+                let mut read = 0usize;
+                walk(std::path::Path::new(root), &mut out, &mut read);
+                read_per_root.insert(root, read);
             }
             out.sort();
             out.dedup();
-            out
+            (out, read_per_root)
         }
 
         /// THE EXCUSE for the `include_str!` sites, recorded where a future
@@ -2923,32 +2937,54 @@ directive_kind = "Destroy"
         /// added after this was written too.
         #[test]
         fn include_str_baked_hulls_are_all_uncomposed() {
-            let baked = include_str_baked_hulls();
+            let (baked, read_per_root) = include_str_baked_hulls();
+            // The floor is a "did the scan actually run" check, not a budget. It
+            // stood at 20 until issue #878 composed the five Harrow hulls and
+            // moved every site that baked one onto the resolving load path — a
+            // little over half the sites in the tree, and exactly the migration
+            // this test's own doc comment predicted. Lower it again only
+            // alongside another such migration, never to make a red run green.
             assert!(
-                baked.len() > 20,
+                baked.len() >= 8,
                 "the source scan found only {} baked hull sites — it has stopped \
                  finding them, so it is guarding nothing",
                 baked.len()
             );
-            // Every source root must actually contribute, or the enumeration
-            // this AC rests on is silently partial. `tests/` is the one that
-            // was missed first time round: `tests/headless_runner.rs` bakes a
-            // hull through `../assets/entities/…`, and a src-only scan would
-            // excuse a site it had never looked at.
+            // Every source root must actually be REACHED by the SCAN ITSELF, or
+            // the enumeration this AC rests on is silently partial. `tests/` is
+            // the one that was missed first time round: `tests/headless_runner.rs`
+            // baked a hull through `../assets/entities/…`, and a src-only scan
+            // would have excused a site it had never looked at.
+            //
+            // Asserted on the walk's own per-root read count (from
+            // `include_str_baked_hulls`) rather than on a baked site being found
+            // there, because issue #878 composed the five Harrow hulls and
+            // `tests/headless_runner.rs`'s two sites — both Harrow — moved onto
+            // the resolving load path. A root with no baked site left is not a
+            // root the scan cannot see, and conflating the two would have this
+            // guard fail for the very migration it exists to demand. It is also
+            // asserted on the SAME walk rather than a second, independently
+            // written directory count: a re-implemented walk would prove the
+            // root has `.rs` files, not that this scan reaches them — trimming
+            // `SOURCE_ROOTS` to `["src"]` would still pass that.
             //
             // Spelled out as literals rather than read from `SOURCE_ROOTS`:
-            // deriving them would let the guard shrink in step with the thing
-            // it is guarding, which is exactly the regression to catch.
+            // deriving them would let the guard shrink in step with the thing it
+            // is guarding, which is exactly the regression to catch.
             for root in ["src", "tests"] {
-                let prefix = format!("{root}/");
                 assert!(
-                    baked.iter().any(|(site, _)| site.starts_with(&prefix)),
-                    "no baked `include_str!` site was found under {root}/ — either \
-                     the scan no longer reaches that source root, or the root has \
-                     been renamed and SOURCE_ROOTS is stale. Sites found: {:?}",
-                    baked.iter().map(|(s, _)| s).collect::<Vec<_>>()
+                    read_per_root.get(root).is_some_and(|&n| n > 0),
+                    "the scan itself read zero .rs files under {root}/ — either the \
+                     root has been renamed and SOURCE_ROOTS is stale, or the walk \
+                     never reached it, so the scan is looking at nothing there"
                 );
             }
+            assert!(
+                baked.iter().any(|(site, _)| site.starts_with("src/")),
+                "no baked `include_str!` site was found under src/ — the scan has \
+                 stopped parsing. Sites found: {:?}",
+                baked.iter().map(|(s, _)| s).collect::<Vec<_>>()
+            );
             let mut composed: Vec<String> = Vec::new();
             for (site, asset) in &baked {
                 let resolved = resolve_from_disk(asset)
@@ -3071,7 +3107,7 @@ directive_kind = "Destroy"
                 "assets/entities/fragments/ai/fleet_baseline.toml"
             ));
             assert!(!is_fragment("assets/entities/alliance_cruiser.toml"));
-            let baked = include_str_baked_hulls();
+            let (baked, _read_per_root) = include_str_baked_hulls();
             let fragments: Vec<&(String, String)> =
                 baked.iter().filter(|(_, a)| is_fragment(a)).collect();
             assert!(
@@ -3090,9 +3126,14 @@ directive_kind = "Destroy"
         /// rustfmt wraps a long `include_str!` path onto the next line, and the
         /// scan above must still see it.
         ///
-        /// This is the mechanism in isolation. The wrapped form is not
-        /// hypothetical — see the test below, which proves the real tree
-        /// contains sites only this tolerance reaches.
+        /// This is the mechanism in isolation, pinned synthetically rather than
+        /// against the real tree. The wrapped form is not hypothetical — issue
+        /// #878 composed the five Harrow hulls and moved every site that baked
+        /// one onto the resolving load path, and those long
+        /// `"../../assets/entities/ship_harrow_*.toml"` literals were exactly the
+        /// ones rustfmt had wrapped — but a synthetic fixture needs no wrapped
+        /// site to exist in the tree at all, so this stays load-bearing even if
+        /// the real tree later converges back to all-contiguous sites.
         #[test]
         fn the_scan_reads_a_wrapped_include_str_literal() {
             let one_line = "include_str!(\"../../assets/entities/x.toml\")";
@@ -3106,45 +3147,6 @@ directive_kind = "Destroy"
             assert!(
                 baked_literal("concat!(\"a\", \"b\"))").is_none(),
                 "a non-literal argument bakes no path this scan can name"
-            );
-        }
-
-        /// …and the tolerance is load-bearing over the REAL tree: there are
-        /// sites a contiguous `include_str!("` search cannot see.
-        ///
-        /// Stated as a comparison rather than as a frozen list of files so it
-        /// stays true when rustfmt reflows. If this ever fails because the two
-        /// counts converged, the tolerance has become free rather than wrong —
-        /// but check that the scan has not simply stopped parsing first.
-        #[test]
-        fn the_scan_covers_sites_a_contiguous_search_would_miss() {
-            let found = include_str_baked_hulls();
-            // The superseded algorithm, run per SITE: the contiguous bytes
-            // `include_str!("`, which a wrapped literal never matches.
-            let mut contiguous: std::collections::HashSet<(String, String)> =
-                std::collections::HashSet::new();
-            for (file, _) in &found {
-                let src = std::fs::read_to_string(file).expect("scanned file readable");
-                let mut rest = src.as_str();
-                while let Some(i) = rest.find("include_str!(\"") {
-                    rest = &rest[i + "include_str!(\"".len()..];
-                    let Some(end) = rest.find('"') else { break };
-                    let literal = &rest[..end];
-                    rest = &rest[end..];
-                    if let Some(j) = literal.find("assets/entities/") {
-                        contiguous.insert((file.clone(), literal[j..].to_string()));
-                    }
-                }
-            }
-            let missed: Vec<String> = found
-                .iter()
-                .filter(|pair| !contiguous.contains(*pair))
-                .map(|(file, asset)| format!("{file} bakes {asset}"))
-                .collect();
-            assert!(
-                !missed.is_empty(),
-                "no baked site needs the whitespace tolerance any more — verify the \
-                 scan is still parsing before relaxing it"
             );
         }
     }

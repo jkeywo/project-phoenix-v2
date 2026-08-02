@@ -101,6 +101,32 @@
 # could never bring to bear would be dead tonnage. The absence is load-bearing
 # content, pinned by a parse test.
 
+# ── Composed on the shared fragment library (issue #878) ──────────────────────
+#
+# The three-axis machine described above is no longer authored here. It is
+# `fragments/ai/movement_attack_pass.toml` — the same file `alliance_destroyer.toml`
+# flies — and this hull tunes it by PARAMETER alone (see "Doctrine tuning"
+# below). The fragment was this hull's descendant and is now its source: #875
+# lifted the pass out of it, and #878 gave the fragment the pressed short-pass
+# loop (#789) as an opt-in leg so the last thing that was only ever authored here
+# belongs to the library too.
+#
+# Order is significant: fragments merge in declared order and this file merges
+# last, so the includer always wins. `movement_attack_pass.toml` is listed AFTER
+# `fleet_baseline.toml` because it REPLACES the baseline's three travel axes.
+#
+# Still authored below: everything that makes this hull ITSELF — its blaster
+# pair, its mandatory boost drive, its stations and systems, its doctrine — plus
+# the two ship-level declarations a Harrow deliberately does not share with the
+# fleet: the stand-down `[captain_console.ai]` (#912) and `[power]` +
+# `[power.ai_policy]`, re-authored whole so the baseline's resting `sensors` rule
+# cannot demote a hull that authors no `[power_groups.*]` (#923).
+# `ship_harrow_patrol.toml` carries the fuller note on both.
+includes = [
+  "fragments/ai/fleet_baseline.toml",
+  "fragments/ai/movement_attack_pass.toml",
+]
+
 name = "entity.ship_harrow_destroyer.name"
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
@@ -181,634 +207,103 @@ active_duration = 5.0
 # the longer it stays pinned. That is intended: being pressed should cost.
 recharge_duration = 14.0
 
-# ── Engines (longitudinal) doctrine ───────────────────────────────────────────
+# ── Doctrine tuning: parameters only (issue #878) ─────────────────────────────
 #
-# The three states differ only in the throttle the host reads for them
-# (`approach_speed` while acquiring/inbound, `escape_speed` on the way out) —
-# the rule is the same unconditional "actuate the planner's desired travel" in
-# all three, because a pass never coasts.
-[helm_console.engines_ai]
-initial_state = "acquire"
-
-# EVERY manoeuvre threshold this hull flies by is authored here. There is no
-# default for any of them anywhere in Rust: a hull that omits them simply never
-# flies a pass (the host declines to publish the pass surface) rather than
-# falling back to an invented number.
+# The whole specialisation of the shared attack-pass doctrine, and the entire
+# authoring interface this hull has to it. No rule, state or transition is
+# restated: `param` is an ordinary TOML table and deep-merges, so naming one key
+# retunes that threshold and leaves the machine alone.
+#
+# Every shared threshold is restated on ALL THREE axes because they are three
+# INDEPENDENT copies of one machine that agree by reading the same facts — a copy
+# left on a class default would reach `inbound` (or `pressed_pivot`) at a
+# different moment from the other two and the axes would disagree about which leg
+# they are flying.
+#
+# ── The aggression override ──────────────────────────────────────────────────
+#
+# `press_posture = 0.0` is THE knob, and the same lever as `min_alert_to_fire =
+# 0` on the blasters below. `posture` is host-seeded on every helm policy host
+# from this ship's own red alert — 0 DEFENSIVE, 1 PRESSED — and the class
+# doctrine rests in `shadow`, a standoff ring outside the target's guns, until it
+# reads at least `press_posture`. At the lowest rung `fact(posture) >=
+# param(press_posture)` holds from the first tick and every `fact(posture) <
+# param(press_posture)` break-off guard is unreachable, so the hull leaves
+# `shadow` immediately, never returns, and flies exactly the
+# acquire → inbound → escape → (pressed | recover → reenter) pass it flew inline
+# before it was composed (#883/#788/#789).
+#
+# A Harrow has no bridge crew to call red alert and its captain policy (#912)
+# stands the alert down out of combat, so a hull that waited for one would hold a
+# ring outside its own 60-unit blasters for ever and never start the fight it
+# exists to start. Note what the override deliberately does NOT do: it changes no
+# red-alert STATE, so every fact, comms, repair and arc-overlay reading keyed on
+# the alert is exactly where #912 left it, and the always-armed guard on the guns
+# stays the load-bearing one.
+#
+# ── The pressed short-pass loop (#789) ───────────────────────────────────────
+#
+# Opted into by parameter, twice over, because the class default is OFF:
+# `pressed_min_progress` is authored here at the real threshold (the fragment's
+# default is a value no separation reading can fall below), and
+# `pressed_window_ticks` is the fourth scalar the HOST gates the whole arm on,
+# which the fragment deliberately does not author. This hull is the reason the
+# leg exists and it is still the only hull that flies it.
 [helm_console.engines_ai.param]
-# Throttle fraction flown while closing. "Normal speed" — not flat out, so the
-# boosted escape reads as a distinct change of pace.
-approach_speed = 0.85
-# Throttle fraction flown outbound.
-escape_speed = 1.0
-# The destroyer only commits to a run once the target is this close; further out
-# it is still lining up.
+press_posture = 0.0
+# THE aggression knob of the pass itself: how close before the hull commits to a
+# run. Far longer than the player destroyer's 120 — this hull is an interceptor
+# with a 400-unit sensor range, and the run-in is the manoeuvre.
 commit_range = 260.0
-# Closing rate (world units/s) below which the range counts as OPENING. Slightly
-# negative rather than zero so sensor jitter at the merge cannot flip the test.
-closing_rate_epsilon = -0.5
-# How far (world units) the range must re-open above the minimum seen this state
-# before closest approach is called. The confirmation half of the detector: it
-# rejects a momentary negative blip that has not actually opened any distance.
-closest_approach_hysteresis = 6.0
-# How long (seconds) the escape leg runs before the destroyer turns back for
-# another pass.
+# A longer outward leg than the class default, to match.
 escape_duration_secs = 7.0
-# ── Shield-recovery thresholds (issue #788) ───────────────────────────────────
-# Own-shield fraction at or below which the pass has cost too much to repeat:
-# the escape hands off to the standoff orbit instead of turning back in. Low, so
-# a scratched destroyer presses the attack and only a COLLAPSED one breaks off.
+# LOW: a scratched destroyer presses the attack and only a COLLAPSED one breaks
+# off, where the class default (0.35) breaks off on a dent.
 recover_shield_fraction = 0.15
-# Own-shield fraction the orbit must restore before re-entry is even considered.
-# The other half of the gate is `fact(safe_distance_held)`; both are required.
+# …and it re-enters sooner, at 75% rather than 85%.
 reentry_shield_fraction = 0.75
-# How long (seconds) the cut-thrust pivot runs before the next pass begins.
-reenter_pivot_secs = 1.5
-# ── Pressed thresholds (issue #789) ───────────────────────────────────────────
-# World units of separation the escape must have GAINED across the pressed
-# history window for it to count as working. Deliberately below what an
-# unboosted escape covers in that window (26 u/s over 1.467 s is 38.1 units), so a
-# destroyer that is merely coasting still reads as escaping; only one that is
-# being MATCHED falls under it.
+# The pressed loop, ON. World units of separation the escape must have GAINED
+# across `pressed_window_ticks` for it to count as working; deliberately below
+# what an unboosted escape covers in that window (26 u/s over 1.467 s is 38.1
+# units), so a destroyer that is merely coasting still reads as escaping and only
+# one that is being MATCHED falls under it.
 pressed_min_progress = 30.0
-# How long (seconds) the boosted, thrust-cut pivot runs before the short pass.
-# Short: the whole point is that this is faster than the ordinary
-# `reenter_pivot_secs` turn, because the drive is lit for it.
-pressed_pivot_secs = 1.2
-# The SHORT pass's own closest-approach hysteresis, in world units of re-opened
-# range. A third of the ordinary `closest_approach_hysteresis`, which is what
-# makes the pressed pass a jab rather than a second full run-in: the destroyer
-# breaks off almost the moment the gap stops shrinking.
-pressed_closest_approach_hysteresis = 2.0
-
-# Host-written private memory (issue #882: the host writes, the policy reads —
-# there is no authored write verb). `min_range_seen` starts effectively
-# infinite so the first folded range always wins the minimum.
-[helm_console.engines_ai.memory]
-min_range_seen = 1000000.0
-escape_heading_rad = 0.0
-
-[[helm_console.engines_ai.state]]
-id = "acquire"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  [[helm_console.engines_ai.state.transition]]
-  priority = 10
-  to = "inbound"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
-
-[[helm_console.engines_ai.state]]
-id = "inbound"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  # CLOSEST APPROACH. Three conjuncts, each doing distinct work:
-  #   target_valid          — never call a merge against a target we cannot see
-  #   closing_rate < eps    — the gap has started opening (the + to − crossing)
-  #   range_above_min_seen  — and it has opened far enough to be real, measured
-  #                           against the running minimum in private memory
-  [[helm_console.engines_ai.state.transition]]
-  priority = 20
-  to = "escape"
-  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
-
-  # Target lost mid-run: abandon the pass rather than merging on a ghost.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-[[helm_console.engines_ai.state]]
-id = "escape"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  # Only the authored dwell ends the escape. Nothing about the target may cut it
-  # short — that is what "commits to the outward heading" means. What the dwell
-  # ends INTO is a decision: with the shields gone, recovery; otherwise another
-  # pass. Checking here rather than mid-escape is deliberate — the escape's
-  # commitment is the doctrine's own invariant, and the shields are no more
-  # recovered a second earlier.
-  #
-  # PRESSED (issue #789) takes priority over recovery because it answers a
-  # question recovery has already assumed the answer to: recovery is a plan that
-  # begins "get away from them", and this conjunct is the check that the getting
-  # away is possible at all. It shares the shield conjunct — a destroyer with its
-  # shields up has nothing to recover, so being followed is just combat — but
-  # deliberately carries no distance-held or shield-threshold conjunct of its
-  # own. Both are things the ordinary doctrine WAITS for, and the whole finding
-  # here is that waiting is not available.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 20
-  to = "pressed_pivot"
-  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction) and fact(inside_threat_range) > 0 and fact(separation_progress) < param(pressed_min_progress)"
-
-  [[helm_console.engines_ai.state.transition]]
-  priority = 10
-  to = "recover"
-  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
-
-  [[helm_console.engines_ai.state.transition]]
-  priority = 0
-  to = "acquire"
-  when = "state_time >= param(escape_duration_secs)"
-
-# The standoff orbit. Engines simply actuate the planner's desired travel here
-# as in every other state — the ORBIT throttle (`orbit_speed`) is one of the
-# authored scalars the host publishes on the pass surface, so this axis needs no
-# knowledge that it is circling rather than closing.
-[[helm_console.engines_ai.state]]
-id = "recover"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  # BOTH halves, and neither alone (AC6). `safe_distance_held` is the bounded
-  # history window's verdict — every sample across the whole window at or beyond
-  # the safe ring — not a single-tick range reading.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 0
-  to = "reenter"
-  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
-
-# The cut-thrust pivot. `reengage_speed = 0` on the Steering axis is what makes
-# "actuate the planner's desired travel" mean zero throttle here.
-[[helm_console.engines_ai.state]]
-id = "reenter"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  [[helm_console.engines_ai.state.transition]]
-  priority = 0
-  to = "acquire"
-  when = "state_time >= param(reenter_pivot_secs)"
-
-# ── The pressed short-pass loop (issue #789) ──────────────────────────────────
-#
-# Engines actuates the planner's desired travel in both states exactly as it
-# does everywhere else; which throttle that resolves to is the Steering axis's
-# yaw verb's business (`reengage_speed` for the pivot, `approach_speed` for the
-# pass), so this axis needs no knowledge that it is jabbing rather than closing.
-[[helm_console.engines_ai.state]]
-id = "pressed_pivot"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  [[helm_console.engines_ai.state.transition]]
-  priority = 0
-  to = "pressed_pass"
-  when = "state_time >= param(pressed_pivot_secs)"
-
-[[helm_console.engines_ai.state]]
-id = "pressed_pass"
-
-  [[helm_console.engines_ai.state.rule]]
-  priority = 0
-  channel = "longitudinal"
-  when = "true"
-  verb = "actuate_desired_travel"
-
-  # The same closest-approach detector the ordinary inbound leg uses, on the
-  # same three conjuncts, differing in ONE authored scalar: the shorter
-  # `pressed_closest_approach_hysteresis`. That single substitution is what
-  # makes this a jab, and it is the reason the pressed pass needed no new host
-  # geometry at all.
-  #
-  # It ends in `escape` — the ordinary one — so every short pass is another real
-  # attempt to get out, and the escape's own end-of-dwell question decides
-  # whether the next thing is another jab or the recovery doctrine.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 20
-  to = "escape"
-  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(pressed_closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
-
-  # Target lost mid-jab: back to the ordinary acquire cycle. There is nothing
-  # left to be pressed BY.
-  [[helm_console.engines_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-# ── Steering (yaw) doctrine ───────────────────────────────────────────────────
-#
-# The axis that carries the actual difference between the two legs. `acquire`
-# and `inbound` author `actuate_desired_facing` — re-solve against the moving
-# target every tick. `escape` authors `hold_committed_heading` — fly the frozen
-# heading and stop looking at the target at all.
-#
-# Note this is NOT the same as letting the yaw channel resolve to "hold". A hold
-# holds the last steering COMMAND; a non-zero yaw at the merge instant would
-# keep the destroyer turning through the escape and curl it straight back into
-# the target it just passed.
-[helm_console.steering_ai]
-initial_state = "acquire"
 
 [helm_console.steering_ai.param]
+press_posture = 0.0
 commit_range = 260.0
-closing_rate_epsilon = -0.5
-closest_approach_hysteresis = 6.0
 escape_duration_secs = 7.0
-# Steering response. The deadband stops the hull hunting around a solved bearing
-# at the merge; the saturation angle is tighter than the shared patrol default so
-# the destroyer turns hard onto a tracking solution rather than easing onto it.
-tracking_deadband_rad = 0.02
-tracking_full_steer_rad = 0.5
-# ── Shield-recovery thresholds (issue #788) ───────────────────────────────────
-# Restated because this axis's own guards reference them; content validation
-# rejects an undeclared `param(...)`.
 recover_shield_fraction = 0.15
 reentry_shield_fraction = 0.75
-reenter_pivot_secs = 1.5
-# The six scalars the HOST reads off this axis by name to fly the standoff.
-# Steering owns them because Steering's yaw verb is what tells the host which
-# leg is being flown; omit any one of them and the host declines the recovery
-# arm outright rather than orbiting at an invented radius.
-#
-# World units added to the TARGET's own longest usable direct-fire range to get
-# the ring. The ring is therefore a property of the fight, not of this file: all
-# this hull authors is how much daylight it wants beyond the other ship's guns.
-safe_range_margin = 120.0
-# Throttle fraction flown on the ring. Not zero: a destroyer parked inside a
-# hostile's reach is not recovering, it is a target.
-orbit_speed = 0.7
-# Radians of heading offset per unit of FRACTIONAL radial error. Fractional so
-# the same gain behaves identically on an 80-unit ring and an 800-unit one —
-# otherwise this would need re-tuning every time a weapon's range changed.
-orbit_spiral_gain = 1.2
-# World units inside the ring that still count as "at safe distance" when the
-# distance history is folded. Absorbs the spiral's own overshoot, so a converging
-# orbit is not read as a breach.
-safe_ring_tolerance = 25.0
-# Length of the bounded distance history, in shared AI ticks. At the default
-# 30 Hz helm cadence this is two seconds of held standoff — the "maintained" in
-# "maintained safe distance".
-safe_distance_window_ticks = 60.0
-# Throttle flown on the re-entry pivot. ZERO: the destroyer cuts thrust and
-# turns cold before it commits to the next run. The pressed pivot reuses this
-# same throttle — a stationary pivot is a stationary pivot — and differs only in
-# having the boost drive lit for it.
-reengage_speed = 0.0
-# ── Pressed thresholds (issue #789) ───────────────────────────────────────────
-# Restated on this axis because its own guards reference them; content
-# validation rejects an undeclared `param(...)`.
 pressed_min_progress = 30.0
-pressed_pivot_secs = 1.2
-pressed_closest_approach_hysteresis = 2.0
-# Length of the separation-PROGRESS history, in shared AI ticks. The trend is
-# measured between the two ENDS of the window, so 45 samples span 44 tick
-# intervals — 1.467 seconds at the default 30 Hz helm cadence, not 1.5.
-# Its own window with its own length, not a reuse
-# of `safe_distance_window_ticks`: that one is tuned for "how long counts as a
+# Twice the class default's daylight beyond the target's own reach: a hull that
+# breaks off at 26 u/s and re-enters at full throttle needs room to turn round in.
+safe_range_margin = 120.0
+# A touch faster on the ring, and a touch more slack folding the distance history
+# — both because this hull holds a wider ring than the class default assumes.
+orbit_speed = 0.7
+safe_ring_tolerance = 25.0
+# Length of the separation-PROGRESS history, in shared AI ticks, and the fourth
+# name the HOST gates the pressed arm on: authoring it here is the second half of
+# opting in. The trend is measured between the two ENDS of the window, so 45
+# samples span 44 tick intervals — 1.467 seconds at the default 30 Hz helm
+# cadence, not 1.5. Its own window with its own length, not a reuse of
+# `safe_distance_window_ticks`: that one is tuned for "how long counts as a
 # maintained standoff before re-entry", this one for "how long a failing escape
-# takes to be obvious", and lengthening one has no business slowing the other.
-#
-# The HOST reads this by name (like the six recovery scalars above) along with
-# the three thresholds; omit any one of the four and it declines the pressed arm
-# outright and the hull flies the ordinary recovery doctrine.
+# takes to be obvious".
 pressed_window_ticks = 45.0
 
-[helm_console.steering_ai.memory]
-min_range_seen = 1000000.0
-escape_heading_rad = 0.0
-# Host-written on the tick a recovery orbit is entered, from the seeded
-# composite key. Declared here so its pre-recovery value is authored rather than
-# implicit; no guard reads it — the host does, when it publishes the pass
-# surface.
-orbit_direction = 1.0
-
-[[helm_console.steering_ai.state]]
-id = "acquire"
-
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "actuate_desired_facing"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 10
-  to = "inbound"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
-
-[[helm_console.steering_ai.state]]
-id = "inbound"
-
-  # Continuous tracking of a MOVING target: the facing is re-solved from the
-  # target's current position on every gated tick (AC1).
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "actuate_desired_facing"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 20
-  to = "escape"
-  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-[[helm_console.steering_ai.state]]
-id = "escape"
-# THE COMMITMENT IS THE LEG, so the leg keeps the facing (issue #918). A
-# channel-3 `ArcBearingRequest` overwrote the frozen heading outright — a bow-on
-# tracking solution written over the escape after the planner had solved it —
-# which on a hull flying away from the ship it just passed is a request to turn
-# straight back into it. "The target may not" bend this heading was the doctrine
-# from the start; this is what enforces it against Channel 3 as well.
-#
-# THIS leg only: `acquire` and `inbound` track the target anyway, leave the
-# default standing, and still turn to bring a family that cannot bear onto it.
-yields_to_arc_requests = false
-
-  # THE commitment (AC2). The heading was frozen by the host at the instant this
-  # transition committed; hazard avoidance may still bend it (AC3), the target
-  # may not, and since #918 neither may a weapon that cannot bear.
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "hold_committed_heading"
-
-  # See the Engines copy for why the pressed branch outranks recovery.
-  [[helm_console.steering_ai.state.transition]]
-  priority = 20
-  to = "pressed_pivot"
-  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction) and fact(inside_threat_range) > 0 and fact(separation_progress) < param(pressed_min_progress)"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 10
-  to = "recover"
-  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 0
-  to = "acquire"
-  when = "state_time >= param(escape_duration_secs)"
-
-# THE recovery leg (issue #788). The THIRD yaw mode verb: neither "track the
-# target" nor "fly a frozen heading" but "hold a ring around it". The host reads
-# the leg off this verb — never off the state's name — so these states could be
-# called anything.
-[[helm_console.steering_ai.state]]
-id = "recover"
-# THE RING NEEDS PROTECTING HERE TOO (issue #918 followed up) — this leg flies
-# the same `plan_recovery_orbit` tangent solver as `escape`'s frozen heading
-# above and is exactly as vulnerable to Channel 3's bow-on overwrite. See
-# `fragments/ai/movement_attack_pass.toml`'s `recover` state (this hull's own
-# doctrine is its hand-authored ancestor) for the identical case; this state
-# has only the one yaw rule (unconditional `hold_recovery_orbit`), so the
-# decline is unconditional too.
-yields_to_arc_requests = false
-
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "hold_recovery_orbit"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 0
-  to = "reenter"
-  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
-
-# The FOURTH yaw mode verb: track the target like `actuate_desired_facing`, but
-# paired host-side with the authored `reengage_speed` throttle instead of the
-# approach throttle. That pairing is the whole difference, and it is why this is
-# its own verb rather than a reuse.
-[[helm_console.steering_ai.state]]
-id = "reenter"
-
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "pivot_to_reengage"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 0
-  to = "acquire"
-  when = "state_time >= param(reenter_pivot_secs)"
-
-# ── The pressed short-pass loop (issue #789) ──────────────────────────────────
-#
-# NO fifth yaw verb, and that is the finding rather than a shortcut. The pressed
-# pivot is a thrust-cut turn onto the target, which is exactly what
-# `pivot_to_reengage` already means — the host pairs it with `reengage_speed`,
-# authored at zero — and the short pass is a normal-speed run at a moving
-# target, which is exactly what `actuate_desired_facing` already means. What
-# makes these states PRESSED is the boost rule on the Boost axis and the shorter
-# hysteresis on the way out, not a different way of steering.
-[[helm_console.steering_ai.state]]
-id = "pressed_pivot"
-
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "pivot_to_reengage"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 0
-  to = "pressed_pass"
-  when = "state_time >= param(pressed_pivot_secs)"
-
-[[helm_console.steering_ai.state]]
-id = "pressed_pass"
-
-  [[helm_console.steering_ai.state.rule]]
-  priority = 0
-  channel = "yaw"
-  when = "true"
-  verb = "actuate_desired_facing"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 20
-  to = "escape"
-  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(pressed_closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
-
-  [[helm_console.steering_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-# ── Boost doctrine ────────────────────────────────────────────────────────────
-#
-# A third independent copy of the same machine. It transitions on the same
-# host-seeded facts as the other two, so it reaches `escape` on the same tick —
-# by agreeing about the world, not by reading a shared pass state. `acquire` and
-# `inbound` author no boost rule at all, so the channel holds and boost stays
-# cold for the whole approach.
-[helm_console.boost_ai]
-initial_state = "acquire"
-
 [helm_console.boost_ai.param]
+press_posture = 0.0
 commit_range = 260.0
-closing_rate_epsilon = -0.5
-closest_approach_hysteresis = 6.0
 escape_duration_secs = 7.0
-# How long into the escape leg the boost burns. Shorter than the escape itself,
-# so the destroyer coasts the last stretch and the drive is recharging before it
-# turns back in.
-escape_boost_secs = 4.0
-# Do not light the drive from near-standstill (e.g. straight after a collision
-# scrub); boost is an escape accelerant, not a launch assist.
-boost_min_speed_fraction = 0.3
-# ── Shield-recovery thresholds (issue #788) ───────────────────────────────────
-# Restated so this axis reaches the same legs from the same facts — it is a
-# third independent copy of the machine, not a reader of the other two.
 recover_shield_fraction = 0.15
 reentry_shield_fraction = 0.75
-reenter_pivot_secs = 1.5
-# ── Pressed thresholds (issue #789) ───────────────────────────────────────────
 pressed_min_progress = 30.0
-pressed_pivot_secs = 1.2
-pressed_closest_approach_hysteresis = 2.0
-
-[helm_console.boost_ai.memory]
-min_range_seen = 1000000.0
-escape_heading_rad = 0.0
-
-[[helm_console.boost_ai.state]]
-id = "acquire"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 10
-  to = "inbound"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
-
-[[helm_console.boost_ai.state]]
-id = "inbound"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 20
-  to = "escape"
-  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
-
-[[helm_console.boost_ai.state]]
-id = "escape"
-
-  [[helm_console.boost_ai.state.rule]]
-  priority = 0
-  channel = "boost"
-  when = "state_time < param(escape_boost_secs) and fact(boost_available) > 0 and fact(speed_fraction) >= param(boost_min_speed_fraction)"
-  verb = "engage_boost"
-
-  # See the Engines copy for why the pressed branch outranks recovery. This is a
-  # third independent copy of the machine over the same host-seeded facts, so it
-  # reaches the same leg on the same tick without reading either sibling.
-  [[helm_console.boost_ai.state.transition]]
-  priority = 20
-  to = "pressed_pivot"
-  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction) and fact(inside_threat_range) > 0 and fact(separation_progress) < param(pressed_min_progress)"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 10
-  to = "recover"
-  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 0
-  to = "acquire"
-  when = "state_time >= param(escape_duration_secs)"
-
-# Neither recovery state authors a boost rule at all, so the channel holds and
-# the drive stays cold for the whole standoff AND for the pivot — "pivots
-# without boost" (AC7) is this absence, plus `ai_helm_boost`'s on-change release
-# when the escape's rule stops firing. It also means the drive is recharging
-# throughout the orbit, ready for the next escape.
-[[helm_console.boost_ai.state]]
-id = "recover"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 0
-  to = "reenter"
-  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
-
-[[helm_console.boost_ai.state]]
-id = "reenter"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 0
-  to = "acquire"
-  when = "state_time >= param(reenter_pivot_secs)"
-
-# ── The pressed short-pass loop (issue #789) ──────────────────────────────────
-#
-# The ONE state in the whole doctrine that lights the drive for something other
-# than running away. Boost multiplies `max_yaw_rate` as well as speed, and this
-# pivot is flown on cut thrust, so every drop of it goes into how fast the bow
-# comes round — which is the only resource a pinned destroyer is actually short
-# of.
-[[helm_console.boost_ai.state]]
-id = "pressed_pivot"
-
-  # NO `speed_fraction` conjunct, unlike the escape's rule above, and the
-  # omission is the point: this pivot is deliberately flown at zero throttle, so
-  # the escape's "do not light the drive from a standstill" guard would refuse
-  # exactly the case this state exists for. The reason that guard exists —
-  # boost as a launch assist is wasted — does not apply when the drive is being
-  # spent on yaw rather than on speed.
-  [[helm_console.boost_ai.state.rule]]
-  priority = 0
-  channel = "boost"
-  when = "fact(boost_available) > 0"
-  verb = "engage_boost"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 0
-  to = "pressed_pass"
-  when = "state_time >= param(pressed_pivot_secs)"
-
-# The CANCEL (issue #789, AC4). Like `recover` and `reenter`, this state authors
-# no boost rule at all: the channel holds, `ai_helm_boost`'s on-change release
-# fires the tick the pivot's rule stops firing, and the short pass runs in at
-# normal speed with the drive cold and recharging for the escape at the end of
-# it. An absence is exactly the kind of content that gets helpfully filled in,
-# so it is pinned by a parse test.
-[[helm_console.boost_ai.state]]
-id = "pressed_pass"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 20
-  to = "escape"
-  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(pressed_closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
-
-  [[helm_console.boost_ai.state.transition]]
-  priority = 10
-  to = "acquire"
-  when = "fact(target_valid) < 1"
+# Longer than the class default's 3.5, to match the longer escape: the drive
+# still cuts before the dwell ends, so the hull coasts the last stretch and the
+# battery is recharging before it turns back in.
+escape_boost_secs = 4.0
 
 # ── Weapons ───────────────────────────────────────────────────────────────────
 #
@@ -1053,221 +548,6 @@ id = "power-battery"
 kind = "power_battery"
 station = "engineering"
 
-# ── AI target selectors (PRD #774 US7, issue #885b) ───────────────────────────
-#
-# The five per-system target selectors, AUTHORED rather than synthesised. Each
-# answers "which entity is this system's target?" for whoever operates the
-# station, and each reproduces exactly what the matching
-# `default_*_target_selector_config()` in `src/entities/config.rs` used to
-# invent at spawn. The reasoning behind every number lives on those functions
-# and on the constant blocks above them; `default_ai_policy_pins` spawns every
-# shipped hull and compares the two, so a transcription slip fails the build
-# rather than quietly changing how this ship picks targets.
-#
-# All five attach on `[behaviour]` ALONE, not on the console section they name,
-# so a hull owes all five whether or not it declares `[sensors_console]`,
-# `[navigation_console]`, `[repair]` or `[comms_console]`.
-#
-# `horizon` is a static outer bound, NOT the live range gate — each host owns
-# its own (Sensors' damage-scaled radar reach, Comms' authored `[comms].range`).
-# Do not "helpfully" tighten it to look like a range.
-#
-# A score term's magnitude is its own `weight` field. A `param` entry exists
-# only where a `when` guard names one: Repair's `deficit_band_*` and Comms'
-# `score_band_*` are the whole set.
-
-# Sensors — rank detectable hostiles by which SOURCE surfaced them:
-# combat-lock >> objective >> radar. `switch_margin` is 0 because the gaps
-# between the tiers ARE the anti-thrash mechanism.
-[sensors_console.selector]
-sources = ["combat-lock", "objective-destroy", "radar-contacts"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
-
-[[sensors_console.selector.score]]
-when = "candidate_fact(source_combat_lock) > 0"
-weight = 1000.0
-
-[[sensors_console.selector.score]]
-when = "candidate_fact(source_objective) > 0"
-weight = 100.0
-
-[[sensors_console.selector.score]]
-when = "candidate_fact(source_radar) > 0"
-weight = 1.0
-
-# Tactical — the ship's firing target. `combat-lock` is deliberately ABSENT from
-# the sources: it is Tactical's own output, so unioning it would be circular.
-# The current lock reaches the ranking as the host-pushed `source_retained`
-# retention candidate, which is why that marker appears in the guards but in no
-# source list.
-#
-# PRECEDENCE INVARIANT — terms are additive and one candidate can carry several
-# markers at once, so the weights are sized to beat the maximum non-objective
-# stack by more than `switch_margin`: 500 + 200 + 100 + 1 = 801 < 1000 - 50.
-# A named Destroy objective therefore always wins AND survives hysteresis
-# retention, while `retained` still exceeds `last_attacker` so an established
-# engagement is not broken off by a fresh attacker. Retune against that
-# inequality, not term by term.
-[weapons_console.selector]
-sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts"]
-horizon = 1e9
-switch_margin = 50.0
-# Independent revalidation: `detectable` is required of everything, and beyond
-# that a candidate is engageable either because the host already vetted it
-# (objective order / last attacker / retained lock) OR because it is
-# independently hostile. That disjunction honours a mission naming a factionless
-# target while refusing a FRIENDLY Sensors designation, which carries only
-# `source_sensors_designation`.
-eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0)"
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_objective) > 0"
-weight = 1000.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_sensors_designation) > 0"
-weight = 500.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_retained) > 0"
-weight = 200.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_last_attacker) > 0"
-weight = 100.0
-
-[[weapons_console.selector.score]]
-when = "candidate_fact(source_radar) > 0"
-weight = 1.0
-
-# Navigation — rank destinations into the shared Waypoint. Only the objective
-# source marks its resolved destination `reachable`, so this policy drives the
-# AI waypoint from objectives alone; `chart-contacts` is surfaced so an author
-# can widen the eligibility, and by default only ENRICHES a coincident objective
-# destination rather than independently steering the ship.
-[navigation_console.selector]
-sources = ["navigation-objectives", "chart-contacts"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(reachable) > 0"
-
-[[navigation_console.selector.score]]
-when = "candidate_fact(source_nav_objective) > 0"
-weight = 100.0
-
-[[navigation_console.selector.score]]
-when = "candidate_fact(source_chart_contact) > 0"
-weight = 1.0
-
-# Repair — rank this ship's damaged stations for the next free team. Two
-# additive ladders whose tier rungs STRICTLY dominate the deficit rungs
-# (3 x 100 = 300 < 1000), reproducing the retired `(tier desc, deficit desc)`
-# comparator. `assigned < 1` is what makes N free teams pick N DISTINCT
-# stations. `tier_ordinal` is the DamageTier discriminant (Operational 0,
-# Damaged 1, Disabled 2, Destroyed 3) — a structural enum ordinal, which is why
-# its bounds are literals rather than params; Destroyed is excluded because a
-# repair team alone cannot lift the latch.
-#
-# Authored on every hull whether or not it crews repair teams: the teams gate
-# dispatch, so a ship that gains them later already has its ranking.
-[repair.selector]
-sources = ["damaged-stations", "core-bucket"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(source_repair_request) > 0 and candidate_fact(assigned) < 1 and candidate_fact(tier_ordinal) > 0 and candidate_fact(tier_ordinal) < 3"
-
-# The bands sit INSIDE the urgent range and deliberately NOT at the DamageTier
-# thresholds — because tier strictly dominates, the deficit ladder only ever
-# discriminates within one tier, so bands at the tier boundaries would all fire
-# together for every Disabled station and discriminate nothing.
-[repair.selector.param]
-deficit_band_low = 0.80
-deficit_band_mid = 0.90
-deficit_band_high = 0.95
-
-[[repair.selector.score]]
-when = "candidate_fact(tier_ordinal) >= 1"
-weight = 1000.0
-
-[[repair.selector.score]]
-when = "candidate_fact(tier_ordinal) >= 2"
-weight = 1000.0
-
-[[repair.selector.score]]
-when = "candidate_fact(tier_ordinal) >= 3"
-weight = 1000.0
-
-[[repair.selector.score]]
-when = "candidate_fact(damage_fraction) >= param(deficit_band_low)"
-weight = 100.0
-
-[[repair.selector.score]]
-when = "candidate_fact(damage_fraction) >= param(deficit_band_mid)"
-weight = 100.0
-
-[[repair.selector.score]]
-when = "candidate_fact(damage_fraction) >= param(deficit_band_high)"
-weight = 100.0
-
-# Comms hail — rank who to hail. The most gated of the five, and the only one
-# whose eligibility reads a `self_fact`: `comms_available`, so a Disabled or
-# Destroyed Comms system stops the ship hailing at all. `source_hail_objective`
-# keeps the baseline — only targets an active Hail directive actually names are
-# ranked. `has_open_hail_thread < 1` is the anti-respam gate and it TERMINATES:
-# a hail arms it even when it fires no `on_hailed` template, and it re-arms on a
-# human `ClearComms` or on the target ceasing to be a live candidate, which is
-# what an unmanned ship relies on. `switch_margin` is 0 and the host passes no
-# current target: a hail is a ONE-SHOT event, so there is nothing to retain.
-[comms_console.selector]
-sources = ["hail-objectives", "comms-contacts"]
-horizon = 1e9
-switch_margin = 0.0
-eligibility = "candidate_fact(source_hail_objective) > 0 and candidate_fact(in_range) > 0 and candidate_fact(objective_score) > 0 and candidate_fact(has_open_hail_thread) < 1 and self_fact(comms_available) > 0"
-
-# The bands straddle the `base_priority` values the shipped content actually
-# authors (20 / 30 / 35 / 40 / 45 / 50 / 80 / 100), splitting them four ways.
-# Bands outside that range would fire for all or none and collapse the ranking
-# onto the smallest-UUID tie-break.
-[comms_console.selector.param]
-score_band_low = 25.0
-score_band_mid = 45.0
-score_band_high = 75.0
-
-[[comms_console.selector.score]]
-when = "candidate_fact(objective_score) >= param(score_band_low)"
-weight = 100.0
-
-[[comms_console.selector.score]]
-when = "candidate_fact(objective_score) >= param(score_band_mid)"
-weight = 100.0
-
-[[comms_console.selector.score]]
-when = "candidate_fact(objective_score) >= param(score_band_high)"
-weight = 100.0
-
-# ── AI fine-system policies (PRD #774 US7, issue #885b) ───────────────────────
-#
-# The ship-level AI policies, AUTHORED rather than synthesised. Each answers
-# "which verb does this fine system emit on which channel?" for whoever operates
-# the station, and each reproduces exactly what the matching
-# `default_*_ai_config()` in `src/entities/config.rs` used to invent at spawn.
-# The reasoning behind every rule lives on those functions;
-# `default_ai_policy_pins` spawns every shipped hull and compares the two, so a
-# transcription slip fails the build rather than quietly changing how this ship
-# behaves.
-#
-# Like the selectors above, these attach on `[behaviour]` ALONE, not on the
-# console section they name — so a hull owes them whether or not it declares
-# `[captain_console]`, `[shields_console]` or `[power]`. Authoring them is what
-# brings those sections into existence on hulls that carried none.
-#
-# A rule's `when` is a guard, not a capability check: the host keeps every
-# availability, cooldown, range and arc gate it had. `idle = true` (see Boost) is
-# a first-class declaration meaning "this system deliberately takes no AI
-# action" — it is NOT the same as an empty block, which validation rejects.
-
 # Captain — raise Red Alert while the ship has been in combat within
 # `combat_window_secs`, otherwise stand down. The window is a named parameter so
 # a designer retunes the ship's nerve without recompiling.
@@ -1287,68 +567,6 @@ channel = "red_alert"
 when = "true"
 verb = "set_red_alert"
 value = false
-
-# Helm lateral — always actuate. The dodge (and the docking translation) run off
-# the shared hazard surface, so again only the decision is authored here.
-[helm_console.lateral_ai]
-
-[[helm_console.lateral_ai.rule]]
-priority = 0
-channel = "lateral"
-when = "true"
-verb = "actuate_lateral_thrust"
-
-# Helm vertical — always actuate. `VerticalMovementMode` stays a host-side
-# CAPABILITY gate rather than a policy scalar, so a Planar hull still takes no
-# vertical component no matter what this rule says.
-[helm_console.vertical_ai]
-
-[[helm_console.vertical_ai.rule]]
-priority = 0
-channel = "vertical"
-when = "true"
-verb = "actuate_vertical_thrust"
-
-# Helm impulse — always PERMIT the manoeuvre. The engage-vs-cancel decision is
-# still made host-side from the doctrine's `use_impulse` fact and the
-# `decide_impulse` geometry; this rule is the authored gate layered over it, and
-# `ship_harrow_warhawk.toml` is the worked example of closing it.
-[helm_console.impulse_ai]
-
-[[helm_console.impulse_ai.rule]]
-priority = 0
-channel = "impulse"
-when = "true"
-verb = "engage_impulse"
-
-# Shields focus — two rules on one channel, both emitting the value-less
-# `focus_shield_arc`. WHICH of the four arcs is focused is not in the policy: it
-# comes from the retained ranking kernel, which reads the four params below
-# directly out of `param`. `damage_window_secs`, `min_damage_window_secs` and
-# `health_ratio_threshold` are therefore live tunables even though no `when`
-# names them — do not delete them for looking unreferenced.
-#
-# The priority-10 damage rule and the priority-0 fallback emit the same verb and
-# the fallback is unconditional, so today the channel resolves identically
-# whatever `recent_damage_pct_max` reads. The rule is transcribed as-is because
-# this migration changes no behaviour; the redundancy is recorded on #885.
-[shields_console.ai_policy.param]
-damage_window_secs = 4.0
-min_damage_window_secs = 1.0
-damage_pct_threshold = 50.0
-health_ratio_threshold = 50.0
-
-[[shields_console.ai_policy.rule]]
-priority = 10
-channel = "shield_focus"
-when = "fact(recent_damage_pct_max) >= param(damage_pct_threshold)"
-verb = "focus_shield_arc"
-
-[[shields_console.ai_policy.rule]]
-priority = 0
-channel = "shield_focus"
-when = "true"
-verb = "focus_shield_arc"
 
 # Reactor + battery. Transcribed from `PowerConfig::default()`, which is what
 # this hull ran on before it declared the section: authoring
@@ -1398,21 +616,3 @@ channel = "weapons"
 when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
-
-# Comms dialogue response — answer an open hail with its FIRST response. Guarded
-# twice, and both guards matter: an unguarded rule would re-emit a response the
-# router refuses, every tick, for as long as the dialogue stays open.
-#   * `comms_available` — a Disabled or Destroyed Comms system stops the ship
-#     answering as well as hailing.
-#   * `sender_in_range` — the router refuses a response whose sender has left
-#     comms range, so without this the officer's rejection re-flashes forever.
-# WHICH message is being answered comes from the host; only the response INDEX
-# rides the verb. A ship that should answer nothing declares `idle = true`.
-[comms_console.ai]
-
-[[comms_console.ai.rule]]
-priority = 0
-channel = "comms_respond"
-when = "fact(comms_available) > 0 and fact(sender_in_range) > 0"
-verb = "respond_to_message"
-response_index = 0

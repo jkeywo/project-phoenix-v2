@@ -1312,7 +1312,14 @@ mod tests {
 
     // ── History, through the real entity-load path (issue #890) ─────────────
 
-    const DESTROYER: &str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+    /// The shipped destroyer as the loader sees it — RESOLVED, because the hull
+    /// has composed its movement doctrine out of the fragment library since issue
+    /// #878 and the guards mutated below are authored in the fragment now.
+    fn destroyer() -> String {
+        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_destroyer.toml")
+            .expect("ship_harrow_destroyer must resolve")
+            .toml
+    }
 
     /// The destroyer's own re-entry gate, which #788 could only express as a
     /// bespoke host-folded fact. The window is authored on the same param the
@@ -1320,6 +1327,17 @@ mod tests {
     const AUTHORED_WINDOW: &str =
         "history(min, range_to_target, param(safe_distance_window_ticks)) \
                                    >= param(safe_range_margin)";
+
+    /// The destroyer's UNCONDITIONAL recovery-orbit rule, in the resolved
+    /// document's rendering.
+    ///
+    /// Anchored `verb`-then-`when` because a composed hull's resolved text is
+    /// re-rendered from the merged value rather than concatenated (issue #878):
+    /// keys come out sorted and the authored indentation is gone. The `when =
+    /// "true"` half is what makes this the `recover` leg's rule and not the
+    /// `shadow` leg's, whose own `hold_recovery_orbit` is guarded on
+    /// `target_valid`.
+    const RECOVERY_ORBIT_RULE: &str = "verb = \"hold_recovery_orbit\"\nwhen = \"true\"";
 
     /// The destroyer's `recover` re-entry transition, which all THREE of its
     /// machine axes author an independent copy of. Substituted in every copy, so
@@ -1342,7 +1360,7 @@ mod tests {
     /// and the hull LOADS — the mechanism reaches content, not just unit tests.
     #[test]
     fn a_history_guard_on_a_shipped_hull_loads() {
-        crate::entities::config::EntityConfig::from_toml(DESTROYER)
+        crate::entities::config::EntityConfig::from_toml(&destroyer())
             .expect("ship_harrow_destroyer loads as shipped");
 
         // A transition guard (the position #788's bespoke fact was confined to),
@@ -1350,7 +1368,7 @@ mod tests {
         // only the Steering axis declares the standoff length as a param — the
         // authored-param spelling is exercised on the rule below.
         let transition = with_guard_everywhere(
-            DESTROYER,
+            &destroyer(),
             RECOVER_GUARD,
             r#"when = "fact(shield_fraction) >= param(reentry_shield_fraction) and history(min, range_to_target, 60) >= 0""#,
             3,
@@ -1365,9 +1383,9 @@ mod tests {
         // on the recovery-orbit verb, which only the Steering axis authors, and
         // with the window length AUTHORED as one of that axis's own params.
         let rule = with_guard(
-            DESTROYER,
-            "when = \"true\"\n  verb = \"hold_recovery_orbit\"",
-            &format!("when = \"{AUTHORED_WINDOW}\"\n  verb = \"hold_recovery_orbit\""),
+            &destroyer(),
+            RECOVERY_ORBIT_RULE,
+            &format!("verb = \"hold_recovery_orbit\"\nwhen = \"{AUTHORED_WINDOW}\""),
         );
         crate::entities::config::EntityConfig::from_toml(&rule)
             .expect("a windowed per-state rule guard is valid content on the same host");
@@ -1379,10 +1397,10 @@ mod tests {
     #[test]
     fn a_net_change_guard_on_a_shipped_hull_loads() {
         let mutated = with_guard(
-            DESTROYER,
-            "when = \"true\"\n  verb = \"hold_recovery_orbit\"",
-            "when = \"history(net_change, range_to_target, param(pressed_window_ticks)) > \
-             param(pressed_min_progress)\"\n  verb = \"hold_recovery_orbit\"",
+            &destroyer(),
+            RECOVERY_ORBIT_RULE,
+            "verb = \"hold_recovery_orbit\"\nwhen = \"history(net_change, range_to_target, \
+             param(pressed_window_ticks)) > param(pressed_min_progress)\"",
         );
         crate::entities::config::EntityConfig::from_toml(&mutated)
             .expect("a net-change window over the hull's authored span is valid content");
@@ -1417,9 +1435,9 @@ mod tests {
     #[test]
     fn a_fractional_window_param_fails_to_load() {
         let windowed = with_guard(
-            DESTROYER,
-            "when = \"true\"\n  verb = \"hold_recovery_orbit\"",
-            &format!("when = \"{AUTHORED_WINDOW}\"\n  verb = \"hold_recovery_orbit\""),
+            &destroyer(),
+            RECOVERY_ORBIT_RULE,
+            &format!("verb = \"hold_recovery_orbit\"\nwhen = \"{AUTHORED_WINDOW}\""),
         );
         let mutated = with_guard(
             &windowed,

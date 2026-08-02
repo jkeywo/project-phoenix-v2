@@ -1,0 +1,126 @@
+name: Deploy Demo
+
+# Manual only (issue #931). Never runs on push — the demo build overwrites
+# the scenario manifest and repoints the TURN credential endpoint, and doing
+# either of those on every push to main would be a silent behaviour change
+# for the dev site's own build (which .github/workflows/ci.yml owns).
+on:
+  workflow_dispatch:
+    inputs:
+      turn_worker_url:
+        description: >
+          URL of the deployed demo TURN-credentials worker
+          (phoenix-turn-credentials-demo). Defaults to the projected
+          workers.dev URL for this account; the deploy-worker step below
+          prints the actual URL wrangler reports — pass that back in on a
+          re-run if it differs (e.g. a different Cloudflare account/zone).
+        required: false
+        default: 'https://phoenix-turn-credentials-demo.project-phoenix.workers.dev'
+
+jobs:
+  deploy-demo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Steps below mirror ci.yml's `build` job exactly (toolchain, caching,
+      # trunk, wasm-bindgen, node) so the demo bundle is built the same way
+      # the dev bundle is — the only differences are the dist/ mutations
+      # after this point.
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@efdb2d034e07baadd93e3cbf257ba8b3a3a571a9
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+        with:
+          version: v0.21.14
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.120
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Build server page (WASM + JS)
+        run: TRUNK_BUILD_RELEASE=true trunk build --release
+
+      - name: Build client page (pure JS — copies client.html + gui/assets, no WASM)
+        run: node scripts/build-client.mjs
+
+      # ── Demo mutations on dist/ (issue #931) ──────────────────────────────
+      # Everything above this line is identical to ci.yml's `build` job.
+
+      - name: Swap in the curated demo scenario manifest
+        run: cp assets/scenarios.demo.toml dist/assets/scenarios.toml
+
+      # The dev worker URL is a literal in two built files: the inline script
+      # in server.html (trunk renames the build target to dist/index.html)
+      # and the copied gui/connection-manager.js (client.html's module,
+      # copied verbatim by scripts/build-client.mjs to dist/client/gui/).
+      # worker/wrangler.toml (the dev worker) and its github.io
+      # ALLOWED_ORIGIN are never touched by this workflow.
+      - name: Patch TURN credential endpoint to the demo worker
+        env:
+          DEV_TURN_URL: https://phoenix-turn-credentials.project-phoenix.workers.dev
+          DEMO_TURN_URL: ${{ inputs.turn_worker_url }}
+        run: |
+          set -euo pipefail
+          echo "patching ${DEV_TURN_URL} -> ${DEMO_TURN_URL}"
+          for f in dist/index.html dist/client/gui/connection-manager.js; do
+            if [ ! -f "$f" ]; then
+              echo "expected built file missing: $f" >&2
+              exit 1
+            fi
+            sed -i "s|${DEV_TURN_URL}|${DEMO_TURN_URL}|g" "$f"
+          done
+
+      # Sanity guard: fail the run rather than silently ship a demo build
+      # that still points at the dev worker, or one that never got the
+      # curated manifest.
+      - name: Verify demo mutations landed
+        env:
+          DEV_TURN_URL: https://phoenix-turn-credentials.project-phoenix.workers.dev
+        run: |
+          set -euo pipefail
+
+          if grep -rF "${DEV_TURN_URL}" dist/ > /tmp/dev-url-hits.txt; then
+            echo "dev worker URL still present in dist/ after patching:" >&2
+            cat /tmp/dev-url-hits.txt >&2
+            exit 1
+          fi
+          echo "ok: no occurrences of the dev worker URL in dist/"
+
+          if ! grep -qF 'ships = ["assets/entities/alliance_destroyer.toml"]' dist/assets/scenarios.toml; then
+            echo "dist/assets/scenarios.toml does not look like the demo manifest (issue #917 curated entry not found)" >&2
+            exit 1
+          fi
+          echo "ok: demo scenario manifest is in place"
+
+      - name: Deploy demo TURN worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy --config wrangler.demo.toml
+
+      - name: Deploy demo Pages site
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name project-phoenix-demo

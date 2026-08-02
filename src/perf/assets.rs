@@ -22,12 +22,20 @@
 //! entity template, because "which of my templates has no ladder" is the
 //! question the budget is asked.
 //!
-//! **Triangle and texture counts are deliberately absent.** Both live inside
-//! the GLB binary, and reading them means parsing glTF — a real dependency and
-//! a real chance of disagreeing with what Bevy actually uploads. Bytes and LOD
-//! coverage are honest today; the mesh interior is a separate piece of work
-//! that should be built against Bevy's own loader rather than a second
-//! opinion about the same file (issue #905 owns that).
+//! **Triangle and texture counts are deliberately absent from here.** Both
+//! live inside the GLB binary, and reading them off disk would mean parsing
+//! glTF — a real dependency and a real chance of disagreeing with what Bevy
+//! actually uploads. Bytes and LOD coverage are what a `stat` call can
+//! honestly say. The mesh interior is [`mesh`](super::mesh), which reads it
+//! through Bevy's own loader rather than as a second opinion about the same
+//! file (issue #905).
+//!
+//! **This scenario gates.** It is the first one to (issue #905): CI runs its
+//! report with `--gate`, so a fail exits 3 and turns the run red. It earned
+//! that by being machine-independent in fact and not only in principle — the
+//! runner's own capture of the recorded commit compares at +0.0% drift on
+//! every metric. The rule, and why the timing scenarios have not earned it,
+//! is in [the module documentation](super).
 //!
 //! The LOD generator (issue #919, `scripts/generate-lods.mjs`) records the byte
 //! size of every file it produces in `scripts/lod-manifest.toml`. It does not
@@ -306,8 +314,8 @@ max_distance = 100.0
     /// hand-edited, truncated or reverted without regenerating fails `cargo
     /// test`, not only the Node drift check in CI.
     ///
-    /// Triangle and texture budgets stay with issue #905; nothing here counts
-    /// them.
+    /// Triangle and texture budgets live in [`super::super::mesh`]; nothing
+    /// here counts them.
     #[test]
     fn the_lod_manifest_records_the_bytes_this_inventory_measures() {
         let text = std::fs::read_to_string("scripts/lod-manifest.toml")

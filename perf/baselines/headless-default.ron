@@ -1,37 +1,60 @@
-// Baseline for the default headless scenario (issue #868).
+// Baseline for the default headless scenario (issue #868, re-recorded #905).
 //
-// Recorded from three release runs of `--sim-seconds 60` against
-// assets/worlds/default.toml. Run-to-run spread on one machine was under 3%.
+// Measured by `--sim-seconds 60` against assets/worlds/default.toml, release
+// build.
 //
-// PROVENANCE WARNING: these numbers were recorded on a developer desktop, not
-// on the CI runner that compares against them. A GitHub-hosted runner is
-// materially slower, so the first CI captures are expected to warn until this
-// file is re-recorded from one of them. That is survivable precisely because
-// the comparison is warnings-only and gates nothing — re-record from a CI
-// capture artifact, in its own reviewable commit, before anyone considers
-// promoting Verdict::Fail to a merge gate.
+// RE-RECORDED ON THE MACHINE THAT COMPARES AGAINST IT. The first version of
+// this file was written from three runs on a developer desktop and warned by
+// +100% (sim.tick) and +114% (sim.run) on every CI run, because a
+// GitHub-hosted runner is materially slower. Issue #905 replaced those numbers
+// with the runner's own, adopted from the perf-capture artifact of CI run
+// 30688920069 — the green main build of e87c8711, ubuntu-latest. The
+// provenance block below records the same thing in the machine's words.
 //
-// Tolerances are wider than vellum-perf's defaults (0.25 / 1.0) for the same
-// reason: a tolerance that cries wolf gets ignored rather than obeyed, and
-// this one is knowingly calibrated against the wrong machine.
+// Tolerances stay wider than vellum-perf's defaults (0.25 / 1.0), and now for
+// the only reason left: the runner is shared, its neighbours move wall clock,
+// and a tolerance that cries wolf gets ignored rather than obeyed. They are no
+// longer compensating for the wrong machine.
+//
+// THIS SCENARIO DOES NOT GATE. Wall-clock on a shared runner fails the second
+// half of the gating rule in src/perf/mod.rs — a red build here could be a
+// neighbour. Reviewed again post-demo, against the observed spread of a run of
+// green captures rather than against a hope.
 //
 // sim.tick is held at p95 rather than max on purpose. The first tick of a run
-// loads assets and costs 35-46ms; that is startup, not steady-state simulation,
-// and a max-based expectation would measure the loader.
+// loads assets and costs tens of milliseconds; that is startup, not
+// steady-state simulation, and a max-based expectation would measure the
+// loader. sim.run is a single sample per run, so its statistic is moot — mean
+// is kept because that is what the file has always said.
+//
+// ── Recorded from a capture ─────────────────────────────────
+// Written by `phoenix-perf adopt` from a headless-native capture of scenario "headless-default".
+// build: release   device: Linux
+// rev:   e87c8711ae290bba752d6f98e7229b62739c2b4f
+//
+// Edit the prose ABOVE this block; re-recording rewrites from here down, and
+// carries every statistic and tolerance over unchanged. The numbers are the
+// capture's; the tolerances are yours.
 (
     scenario: "headless-default",
     expectations: {
-        "sim.tick": (
-            unit: millis,
-            statistic: p95,
-            expected: 0.78,
-            tolerance: (warn: 0.5, fail: 2.0),
-        ),
         "sim.run": (
             unit: seconds,
             statistic: mean,
-            expected: 2.40,
-            tolerance: (warn: 0.5, fail: 2.0),
+            expected: 5.144825412,
+            tolerance: (
+                warn: 0.5,
+                fail: 2.0,
+            ),
+        ),
+        "sim.tick": (
+            unit: millis,
+            statistic: p95,
+            expected: 1.5613720000000002,
+            tolerance: (
+                warn: 0.5,
+                fail: 2.0,
+            ),
         ),
     },
 )

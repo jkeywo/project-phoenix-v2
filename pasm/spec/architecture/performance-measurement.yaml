@@ -8,7 +8,9 @@ entities:
       rationale:
         - "The contract was written to this project's PRD shape (issue #868); its module documentation names the issue. Phoenix is its second consumer after void-and-thunder, so the types and the comparison are adopted rather than rewritten, and only the collectors are built here. Pinned to the rev pyproject.toml already pins for pasm, so the repository carries one vellum rev rather than two."
         - "Baselines are committed RON under perf/baselines/, one file per scenario, because a baseline that moves should move in a diff a human reads. A missing baseline is the normal first state for a new scenario and is never an error."
-        - "Comparison is warnings-first and reaches no exit code. Verdict::Fail becomes a merge gate only once runner methodology is stable enough that red means regression rather than a noisy neighbour; Verdict::Incomparable is surfaced separately because a broken measurement contract is not a performance result."
+        - "Comparison is warnings-first and reaches no exit code of its own. A caller that wants a gate asks for one with report --gate, which exits 3; nothing in the comparison decides to ask. Verdict::Incomparable gates wherever Verdict::Fail does, because a baselined metric missing from a capture means the budget was not checked at all, and letting that pass is how a gate stops gating without anyone deciding to stop."
+        - "GATING RULE (issue #905, deliverable 3). A scenario gates when both hold: its metrics are a function of the checkout rather than of the host, and its baseline was recorded by a machine whose measurement the comparing runner reproduces. Bytes on disk, LOD ladder depth, triangle counts and texture dimensions satisfy the first — every machine reading the same commit gets the same number — so for them any recorder satisfies the second. Wall-clock metrics satisfy neither on a shared runner: a neighbour moves them, and a gate that fires on a neighbour gets disabled rather than obeyed. Applied to the four scenarios as they stand, `assets` gates today (the runner's own capture of this commit compares at +0.0% drift on every metric); `assets-mesh` is machine-independent but was recorded on a developer desktop, so it gates as soon as a runner has recorded it; `headless-default` and `browser-automation` report only and are reviewed again post-demo, against the observed spread of a run of green captures rather than against a hope."
+        - "The perf job stays out of deploy's needs even now that it gates. A gated asset regression turns the run red — it must be fixed rather than routed around — but the page still deploys, because a download-size budget is not a reason to withhold a working build."
     architecture:
       kind: offline-tool
       authority: observational
@@ -17,7 +19,55 @@ entities:
     implementation:
       status: declared
       paths: [src/perf/mod.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
-      symbols: [profile, baseline_path, load_baseline, report, BaselineError, BASELINE_DIR]
+      symbols: [profile, baseline_path, load_baseline, report, gates, BaselineError, BASELINE_DIR]
+      tests: [cargo test]
+
+  - component: perf-mesh-interior
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Mesh Interior Measurement
+      summary: Loads every shipped assets/models/*.glb through Bevy's own asset loader in a headless app — no window, no renderer, no simulation — and counts the triangles and texture pixels the loader actually produced, per model and in total.
+      rationale:
+        - "Read through the engine's loader rather than with the gltf crate, which issue #868 rejected and #905 acts on: a parallel reader is a second opinion about a file whose first opinion is the only one that ships. Bevy decides how many primitives become how many Mesh assets, what a strip-topology or sparse accessor turns into, and which of a glTF's images are materialised at all. A number that disagrees with the engine is worse than no number, so the repository carries no direct gltf dependency and must not gain one."
+        - "Attribution is the asset server's own record: every mesh and image is a labelled sub-asset of the file it came from, and AssetServer::get_path says which. Walking StandardMaterial's optional texture slots instead would re-implement, and eventually disagree with, the loader's record of what it made."
+        - "Models load ONE AT A TIME. Loading all of them at once would be faster and would hold every decoded texture in memory at once — the shipped set is over 150 MB of GLB, and a 4K texture costs 67 MB as RGBA. A measurement pass a runner can only sometimes afford is not a measurement pass, and serial loading also makes a failure name the file that caused it."
+        - "Texture BYTES are deliberately not measured: what a GPU allocates depends on the compressed format it is uploaded in, and this pass has no GPU and therefore no supported formats. Pixels are the honest thing a headless pass can say."
+        - "A separate scenario from `assets` rather than more metrics on the same capture, because provenance is what stops two captures being compared when they should not be. An asset capture records the runtime `static-inventory` — nothing ran. This one records `bevy-loader`, because something did, and a Bevy release that changes how a primitive is decoded moves these numbers without a single asset changing."
+        - "A model the loader refuses is an error, never a skip: a model that failed to load would otherwise contribute zero triangles and read as an optimisation."
+    architecture:
+      kind: offline-tool
+      authority: observational
+      produces: [perf-capture-artifact]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/perf/mesh.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
+      symbols: [Interior, ModelInterior, measure, capture, triangles_in, pixels_in, TRIANGLES_METRIC, TRIANGLES_TOTAL_METRIC, TEXTURE_COUNT_METRIC, TEXTURE_PIXELS_METRIC]
+      tests: [cargo test]
+
+  - component: perf-baseline-adoption
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Baseline Adoption
+      summary: Records a baseline from a capture, so the numbers a runner is held to are the numbers that runner produced. Carries an existing expectation's statistic, tolerances and header prose over untouched and moves only its expected value.
+      rationale:
+        - "A baseline belongs on the machine that compares against it (issue #905, deliverable 2). A number recorded on a developer desktop and compared on a GitHub runner is not a budget, it is a warning generator — which is exactly what the headless timing baseline had become."
+        - "CI cannot commit, so the loop is two-sided: the perf job renders the baselines it WOULD record from its own captures and uploads them in the perf-capture artifact, and a human downloads that artifact and runs phoenix-perf adopt, which rewrites perf/baselines/*.ron. The result lands in a diff someone reads, which is the whole reason baselines are committed files."
+        - "Adoption records the measurement; a human owns the judgement. Statistic and tolerances survive because widening a tolerance is a decision, and the next adoption must not quietly undo it. An expectation the capture did not measure is kept and reported rather than dropped, so the next report says Incomparable out loud instead of going quiet."
+        - "Only the header survives a re-record: the RON value is regenerated from the data, and comments are not in RON's data model, so a comment written next to an expectation would be deleted by the first runner recording. Commentary therefore belongs above the provenance marker, and a test holds every committed baseline to that."
+        - "The rendered line ending is pinned to LF rather than left to the platform. A baseline is compared across a Windows desktop and a Linux runner, and a recording that swapped every line ending would put the whole file in a diff without moving a single number."
+    architecture:
+      kind: offline-tool
+      authority: observational
+      reads: [perf-capture-artifact]
+      produces: [perf-baseline-file]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/perf/baseline.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
+      symbols: [adopt, unmeasured, render, PROVENANCE_MARKER]
       tests: [cargo test]
 
   - component: perf-tick-collector
@@ -49,8 +99,9 @@ entities:
       rationale:
         - "Machine-independent by construction: bytes on disk and counts in authored TOML, so any checkout of a commit reproduces the capture exactly. That is why its baseline tolerances are tight where the timing baselines' are loose — a drift here is a real change to what a player downloads, never runner noise."
         - "Coverage is a JOIN since issue #914 moved the ladder out of entity TOML and into the model rig sidecar: the template names a model, and that model's sidecar says how many [[lod]] levels it has. Both sides are parsed as TOML rather than scanned textually, so a commented-out [[lod]] block cannot be miscounted as coverage, and a sidecar that is absent or unreadable counts as no ladder — the same conclusion the renderer draws from it."
-        - "Triangle and texture counts are deliberately out of scope: both live inside the GLB binary, and reading them means parsing glTF rather than trusting the engine's own loader. Bytes and LOD coverage are honest today; the mesh interior is separate work."
+        - "Triangle and texture counts are out of scope HERE and belong to perf-mesh-interior: both live inside the GLB binary, and reading them off disk would mean parsing glTF rather than trusting the engine's own loader. Bytes and LOD coverage are what a stat call can honestly say."
         - "A missing assets directory is an error rather than an empty inventory, because a capture that silently measured nothing would read as every asset having shrunk to zero."
+        - "This is the first scenario to gate (issue #905): the CI perf job runs its report with --gate, so a fail exits 3 and turns the run red. It earned that by being machine-independent in fact and not only in theory — the runner's own capture of the recorded commit compares at +0.0% drift on every metric."
     architecture:
       kind: offline-tool
       authority: observational
@@ -108,12 +159,14 @@ entities:
       summary: The committed, versioned expectations for one scenario — statistic, expected value, and the tolerances separating noise from a finding — as reviewable RON under perf/baselines/. One file per scenario, named for it.
       rationale:
         - "The crate owns the types and the comparison; this repository owns where the file lives and what is in it. Every committed baseline is checked to parse and to declare the scenario its own filename claims, because a mismatch would compare a capture against expectations written for something else."
-        - "The headless timing baseline was recorded on a developer desktop rather than on the runner that compares against it, and says so in its own header. It is expected to warn until re-recorded from a CI capture — survivable only because nothing gates on it."
+        - "The headless timing baseline was originally recorded on a developer desktop rather than on the runner that compares against it, and warned by more than 100% on every CI run because of it. Issue #905 re-recorded it — and recorded browser-automation for the first time — from the perf-capture artifact of a green main run, whose id and commit are in each file's provenance header."
+        - "A file is header prose followed by a generated RON value. The prose is a human's and survives re-recording; the value is the machine's and is rewritten from the capture. That split is what lets a baseline be re-recorded as often as the runner changes without losing the reasoning that justifies its tolerances."
     architecture:
       classification: authored
       owner: perf-measurement-contract
+      writers: [perf-baseline-adoption]
     implementation:
       status: declared
-      paths: [perf/baselines/headless-default.ron, perf/baselines/assets.ron, src/perf/mod.rs]
+      paths: [perf/baselines/headless-default.ron, perf/baselines/assets.ron, perf/baselines/assets-mesh.ron, perf/baselines/browser-automation.ron, src/perf/mod.rs, src/perf/baseline.rs]
       symbols: [BASELINE_DIR]
       tests: [cargo test]

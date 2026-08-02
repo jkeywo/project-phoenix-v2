@@ -1,0 +1,92 @@
+// Mesh-interior budgets for the shipped model set (issue #905).
+//
+// The inside of the .glb files that perf/baselines/assets.ron weighs from the
+// outside: how many triangles the engine builds and how much texture it is
+// handed, read through BEVY'S OWN LOADER rather than by parsing glTF a second
+// way. A number that disagrees with the engine is worse than no number — see
+// src/perf/mesh.rs for why this repository carries no `gltf` dependency.
+//
+// Recorded at 22 models, 1,436,266 triangles in total, largest model 138,790
+// triangles (alliance_destroyer.glb), three textures per model, largest sheet
+// 1024×1024.
+//
+// Machine-independent in the same sense as the asset budgets: the loader is
+// the same code on every host, so any checkout of this commit reproduces these
+// numbers. The tolerances are therefore tight — a drift here is a real change
+// to what a GPU is asked to draw, never runner noise.
+//
+// THIS SCENARIO DOES NOT GATE YET, and the reason is provenance rather than
+// doubt: it was recorded on a developer desktop, and no CI runner has ever
+// measured it. The gating rule in src/perf/mod.rs wants a scenario proven
+// machine-independent in fact before it can fail a build, which is exactly the
+// evidence `assets` has and this does not. The CI perf job now measures it and
+// uploads the baseline it would record; adopt that, confirm the numbers did
+// not move, and add --gate to the mesh step.
+//
+// Metric by metric:
+//
+// - assets.mesh.triangles.total — the whole shipped set. A browser game that
+//   streams 1.4 M triangles of models is worth watching; 5% is 70,000
+//   triangles.
+// - assets.mesh.triangles — the single heaviest model, the one that dominates
+//   a draw when it is on screen.
+// - assets.texture.pixels — the largest sheet, in pixels. Bytes are not
+//   measured: what a GPU allocates depends on the compressed format it is
+//   uploaded in, and a headless pass has no GPU and therefore no formats.
+// - assets.texture.count — how many images a model carries. Three today, for
+//   every model in the set: base colour, normal, metallic-roughness. A fourth
+//   is a pipeline change worth reading about.
+//
+// Commentary belongs in this header: `phoenix-perf adopt` regenerates the RON
+// value below from a capture, so a comment written inside it would be deleted
+// by the next recording. See src/perf/baseline.rs.
+//
+// ── Recorded from a capture ─────────────────────────────────
+// Written by `phoenix-perf adopt` from a bevy-loader capture of scenario "assets-mesh".
+// build: release   device: developer desktop (Windows, x86_64)
+// rev:   (unrecorded)
+//
+// Edit the prose ABOVE this block; re-recording rewrites from here down, and
+// carries every statistic and tolerance over unchanged. The numbers are the
+// capture's; the tolerances are yours.
+(
+    scenario: "assets-mesh",
+    expectations: {
+        "assets.mesh.triangles": (
+            unit: count,
+            statistic: max,
+            expected: 138790.0,
+            tolerance: (
+                warn: 0.1,
+                fail: 0.5,
+            ),
+        ),
+        "assets.mesh.triangles.total": (
+            unit: count,
+            statistic: max,
+            expected: 1436266.0,
+            tolerance: (
+                warn: 0.05,
+                fail: 0.25,
+            ),
+        ),
+        "assets.texture.count": (
+            unit: count,
+            statistic: max,
+            expected: 3.0,
+            tolerance: (
+                warn: 0.25,
+                fail: 1.0,
+            ),
+        ),
+        "assets.texture.pixels": (
+            unit: count,
+            statistic: max,
+            expected: 1048576.0,
+            tolerance: (
+                warn: 0.1,
+                fail: 1.0,
+            ),
+        ),
+    },
+)

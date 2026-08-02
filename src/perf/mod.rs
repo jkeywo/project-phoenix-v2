@@ -5,11 +5,16 @@
 //! consumer. What lives here is the part the crate excludes by charter: the
 //! collectors, and where the baseline files live.
 //!
-//! Three collectors, one contract:
+//! Four collectors, one contract:
 //!
 //! - [`tick`] — the headless harness loop, native.
 //! - [`assets`] — the shipped asset inventory, native, no run required.
+//! - [`mesh`] — the mesh interior read through Bevy's own loader, native.
 //! - [`browser`] — boot, preload and frame timing in the browser host, wasm.
+//!
+//! [`baseline`] is the fifth piece and not a collector: recording a baseline
+//! *from* a capture, so the numbers a runner is held to are the numbers that
+//! runner produced.
 //!
 //! Collection stays out of the simulation. Every collector here samples from
 //! outside authoritative state, so a measured run and an unmeasured run
@@ -17,11 +22,73 @@
 //!
 //! Values are benchmark evidence, not assertions. Nothing in the test suite
 //! asserts on a duration; the tests cover the pure machinery around them.
+//!
+//! # Recording a baseline (issue #905)
+//!
+//! Baselines are recorded on the machine that compares against them. CI cannot
+//! commit, so the runner renders the baseline it *would* record and uploads it
+//! with the captures; a human adopts it into a reviewable diff:
+//!
+//! ```text
+//! gh run download <run-id> -n perf-capture -D target/perf-artifact
+//! cargo run --release --features perf --bin phoenix-perf -- \
+//!     adopt --artifact target/perf-artifact
+//! git diff perf/baselines
+//! ```
+//!
+//! Adoption records the measurement and leaves the judgement alone: an
+//! existing expectation keeps its statistic and tolerances and only its
+//! `expected` moves. See [`baseline`].
+//!
+//! # When measurement gates (issue #905, deliverable 3)
+//!
+//! **Decided:** a scenario's [`vellum_perf::Verdict::Fail`] becomes a build
+//! gate when, and only when, both of these are true of it:
+//!
+//! 1. **Its metrics are a function of the checkout, not of the host.** Bytes on
+//!    disk, LOD ladder depth, triangle counts and texture dimensions are the
+//!    same on every machine that reads the same commit, so a drift is a real
+//!    change to what a player downloads or what a GPU is handed. Wall-clock
+//!    metrics are not: a shared runner's neighbours move them, and a gate that
+//!    fires on a noisy neighbour gets disabled rather than obeyed.
+//! 2. **Its baseline was recorded by a machine whose measurement the comparing
+//!    runner reproduces.** For a metric that passes (1) that is every machine,
+//!    and the runner's own captures are the proof. For a wall-clock metric it
+//!    is only the runner itself — otherwise a red build means "measured
+//!    somewhere else", which is a provenance bug wearing a regression's
+//!    clothes.
+//!
+//! Applying that rule to the four scenarios as they stand:
+//!
+//! | scenario | gates | why |
+//! |---|---|---|
+//! | `assets` | **yes** | machine-independent by construction, and the runner's own capture of the recorded commit compares at +0.0% drift on every metric |
+//! | `assets-mesh` | not yet | machine-independent in theory, but recorded on a developer desktop and never yet measured by a runner. It gates the moment one has recorded it — adopt the baseline the perf job uploads, then add `--gate` to its step |
+//! | `headless-default` | no | wall-clock on a shared runner |
+//! | `browser-automation` | no | wall-clock on a shared runner, and under WebDriver it is not even measuring the render path |
+//!
+//! The two timing scenarios are reviewed again post-demo, against the spread
+//! of a run of green captures rather than against a hope: the question is
+//! whether a runner's own p95 varies less than the tolerance, and nobody has
+//! that number yet. `Verdict::Incomparable` gates wherever `Fail` does — a
+//! metric that vanished from a capture is a broken contract, and passing it is
+//! how a budget stops being enforced without anyone deciding to stop enforcing
+//! it.
+//!
+//! The mechanism is `phoenix-perf report --gate`, which is off unless asked
+//! for; `.github/workflows/ci.yml` says which step asks. The `perf` job stays
+//! out of `deploy`'s `needs` even so: a gated asset regression turns the run
+//! red — it has to be fixed rather than routed around — but a download-size
+//! budget is not a reason to withhold a working build.
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod assets;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod baseline;
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mesh;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tick;
 
@@ -124,12 +191,30 @@ pub fn load_baseline(path: &Path) -> Result<Option<Baseline>, BaselineError> {
 ///
 /// Returns the findings and their rendering, and leaves the decision about
 /// exit codes to the caller — #868 is explicit that measurement informs
-/// optimisation before it gates correctness.
+/// optimisation before it gates correctness. The module documentation above
+/// records which scenarios have since earned a gate, and why the rest have
+/// not.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn report(capture: &Capture, baseline: &Baseline) -> (Vec<Finding>, String) {
     let findings = vellum_perf::compare(capture, baseline);
     let rendered = vellum_perf::render(&findings);
     (findings, rendered)
+}
+
+/// Whether these findings should fail a build, *for a caller that asked to
+/// gate*. Nothing here decides to ask.
+///
+/// `Incomparable` gates alongside `Fail`: a baselined metric missing from the
+/// capture, or arriving in the wrong unit, means the budget was not checked at
+/// all — and letting that through is how a gate stops gating without anyone
+/// deciding to stop. `Warn` never gates; the whole tolerance design assumes a
+/// warning is read rather than obeyed.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn gates(findings: &[Finding]) -> bool {
+    matches!(
+        vellum_perf::worst(findings),
+        vellum_perf::Verdict::Fail | vellum_perf::Verdict::Incomparable
+    )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -236,6 +321,41 @@ mod tests {
         let baseline = baseline_with("m", Unit::Millis, 10.0);
         let (findings, _) = report(&capture, &baseline);
         assert_eq!(findings[0].verdict, Verdict::Incomparable);
+    }
+
+    /// The gating rule from the module documentation, as code: drift that only
+    /// warns must never fail a build, however far out it is.
+    #[test]
+    fn a_warning_never_gates_however_loud() {
+        let capture = capture_with("m", Unit::Millis, &[19.0]);
+        let baseline = baseline_with("m", Unit::Millis, 10.0);
+        let (findings, _) = report(&capture, &baseline);
+        assert_eq!(findings[0].verdict, Verdict::Warn);
+        assert!(!gates(&findings));
+    }
+
+    #[test]
+    fn drift_past_the_fail_tolerance_gates() {
+        let capture = capture_with("m", Unit::Millis, &[30.0]);
+        let baseline = baseline_with("m", Unit::Millis, 10.0);
+        let (findings, _) = report(&capture, &baseline);
+        assert_eq!(findings[0].verdict, Verdict::Fail);
+        assert!(gates(&findings));
+    }
+
+    /// A budget that could not be checked is not a budget that passed.
+    #[test]
+    fn a_metric_the_capture_never_measured_gates() {
+        let capture = capture_with("something.else", Unit::Millis, &[1.0]);
+        let baseline = baseline_with("m", Unit::Millis, 10.0);
+        let (findings, _) = report(&capture, &baseline);
+        assert_eq!(findings[0].verdict, Verdict::Incomparable);
+        assert!(gates(&findings));
+    }
+
+    #[test]
+    fn nothing_to_report_gates_nothing() {
+        assert!(!gates(&[]));
     }
 
     #[test]

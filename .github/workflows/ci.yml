@@ -319,16 +319,35 @@ jobs:
           }
           NODE
 
-  # ── Performance measurement (issue #868, warnings-only) ──────────────────────
+  # ── Performance measurement (issue #868; gating decided in #905) ─────────────
   #
-  # Not in `deploy`'s `needs`, and deliberately so: this job reports, it does not
-  # gate. `Verdict::Fail` becomes a merge gate only once the runner methodology
-  # is stable enough that a red build means a regression rather than a noisy
-  # neighbour. Until then a regression is something a human reads in the summary.
   # Runs after smoke so the browser capture that job produces can be compared
   # here, where a Rust toolchain exists. The comparison has exactly one
   # implementation — `phoenix-perf report` — rather than a second opinion
   # written in whatever language each job happens to have.
+  #
+  # WHAT GATES (issue #905, and src/perf/mod.rs carries the rule):
+  #
+  #   assets       GATES. Bytes on disk and counts in authored TOML are a
+  #                function of the checkout, not of this runner, and the
+  #                runner's own capture compares at +0.0% drift. The last step
+  #                below re-runs its report with --gate, which exits 3.
+  #   assets-mesh  Reports. Machine-independent too, but its baseline was
+  #                recorded on a developer desktop; it gates once a runner has
+  #                recorded it — adopt the rendered baseline this job uploads,
+  #                then add --gate to the same step.
+  #   headless-default, browser-automation
+  #                Report only. Wall-clock on a shared runner is moved by
+  #                neighbours, and a gate that fires on a neighbour gets
+  #                disabled rather than obeyed. Reviewed again post-demo.
+  #
+  # Still not in `deploy`'s `needs`: a gated asset regression turns this run
+  # red, which is the point — it must be fixed rather than routed around — but
+  # it does not hold up a deploy of the page.
+  #
+  # The job also renders the baselines it WOULD record from its own captures
+  # and uploads them, because CI cannot commit. `phoenix-perf adopt` turns them
+  # into a reviewable diff on a developer's machine — see src/perf/baseline.rs.
   perf:
     needs: [test, smoke]
     runs-on: ubuntu-latest
@@ -362,12 +381,26 @@ jobs:
 
       # No simulation runs: this reads bytes on disk and counts in authored
       # TOML, so it is machine-independent and its tolerances are tight.
+      # Reported here and GATED in the last step, so a failure still leaves a
+      # full artifact behind to diagnose it from.
       - name: Measure asset budgets
         run: |
           ./target/release/phoenix-perf assets --capture target/perf/assets.json
           ./target/release/phoenix-perf report --capture target/perf/assets.json \
             > target/perf/assets-report.txt
           cat target/perf/assets-report.txt
+
+      # The mesh interior, through Bevy's own asset loader rather than a second
+      # glTF reader (issue #905). No window and no renderer — the loader runs
+      # and the meshes and images it produced are counted. Models are loaded one
+      # at a time, so peak memory is one model rather than 150 MB of decoded
+      # texture.
+      - name: Measure the mesh interior
+        run: |
+          ./target/release/phoenix-perf mesh --capture target/perf/mesh.json
+          ./target/release/phoenix-perf report --capture target/perf/mesh.json \
+            > target/perf/mesh-report.txt
+          cat target/perf/mesh-report.txt
 
       - name: Download browser capture
         uses: actions/download-artifact@v4
@@ -392,18 +425,41 @@ jobs:
               > target/perf/browser-report.txt
           fi
 
+      # A baseline belongs on the machine that compares against it, and this
+      # runner cannot commit — so it renders the baselines it would record and
+      # ships them in the artifact. Seeded from the committed files first, so
+      # every rendered baseline carries the prose and the tolerances a human
+      # wrote; only the measured numbers move. See src/perf/baseline.rs for the
+      # adoption command that turns these into a diff.
+      # continue-on-error, because this is a convenience for a human, not a
+      # gate: a run where no capture survived should fail on the measurement
+      # that died, not on the step that had nothing left to record.
+      - name: Render the baselines this runner would record
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p target/perf/baselines
+          cp perf/baselines/*.ron target/perf/baselines/ 2>/dev/null || true
+          ./target/release/phoenix-perf adopt \
+            --artifact target/perf \
+            --out-dir target/perf/baselines
+
       - name: Summarise
         if: always()
         run: |
           {
             echo '## Performance'
-            for report in headless assets browser; do
+            for report in headless assets mesh browser; do
               echo
               echo "### ${report}"
               echo '```'
               cat "target/perf/${report}-report.txt" 2>/dev/null || echo 'no report produced'
               echo '```'
             done
+            echo
+            echo 'Baselines this runner would record are in the `perf-capture`'
+            echo 'artifact under `baselines/`; adopt them with the command in'
+            echo '`src/perf/baseline.rs`.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload captures
@@ -413,6 +469,17 @@ jobs:
           name: perf-capture
           path: target/perf/
           retention-days: 14
+
+      # Last, so a red gate still leaves the full artifact and summary behind.
+      # `assets` is the one scenario that has earned this: machine-independent
+      # by construction, and this runner reproduces the committed numbers
+      # exactly. `phoenix-perf report --gate` exits 3 on a fail or on an
+      # incomparable metric — a budget that could not be checked is not a
+      # budget that passed.
+      - name: Gate on the machine-independent asset budgets
+        run: |
+          ./target/release/phoenix-perf report \
+            --capture target/perf/assets.json --gate > /dev/null
 
   # ── Demo balance regression report (issue #915, non-gating) ───────────────────
   #

@@ -6,41 +6,85 @@
 // is a real change to what a player downloads, never runner noise.
 //
 // Recorded at 22 .glb files, 156.8 MB total, largest 17.3 MB, 12 entity
-// templates with a LOD ladder and 12 naming a .glb with none.
+// templates with a LOD ladder (four levels each) and 12 naming a .glb with
+// none.
 //
 // These are a starting record, not a target. 156 MB of models is a great deal
 // for a browser game to fetch, and the point of committing it is that the
 // number is now visible in every CI run and moves in a diff someone reads.
 //
-// Triangle and texture counts are deliberately absent: both live inside the
-// GLB binary, and reading them means parsing glTF rather than trusting Bevy's
-// own loader. See the module documentation in src/perf/assets.rs.
+// THIS SCENARIO GATES (issue #905). The CI perf job runs its report with
+// --gate, so a fail here turns the run red. It earned that by being a function
+// of the checkout rather than of the host: the runner's own capture of this
+// commit compares at +0.0% drift on every metric. src/perf/mod.rs carries the
+// rule, and why the timing scenarios have not earned it.
+//
+// Metric by metric, since the tolerances now decide a build:
+//
+// - assets.glb.total.bytes — the whole download. Warns on any 5% move, because
+//   at this size 5% is 8 MB.
+// - assets.glb.bytes — the single largest model, the one that dominates a cold
+//   load.
+// - assets.glb.without_lod — LOD coverage, counted as templates with no ladder
+//   at all. A rise is "someone changed the LOD story, look at it".
+// - assets.lod.levels — how deep the ladders that exist go. A deeper ladder is
+//   an improvement, so its fail tolerance is deliberately wide: adding a fifth
+//   level should read as a warning, never as a red build.
+//
+// Triangle and texture counts are not here. They are the `assets-mesh`
+// scenario, read through Bevy's own loader rather than by parsing the GLB a
+// second way — see src/perf/mesh.rs.
+//
+// Commentary belongs in this header: `phoenix-perf adopt` regenerates the RON
+// value below from a capture, so a comment written inside it would be deleted
+// by the next recording. See src/perf/baseline.rs.
+//
+// ── Recorded from a capture ─────────────────────────────────
+// Written by `phoenix-perf adopt` from a static-inventory capture of scenario "assets".
+// build: release   device: Linux
+// rev:   e87c8711ae290bba752d6f98e7229b62739c2b4f
+//
+// Edit the prose ABOVE this block; re-recording rewrites from here down, and
+// carries every statistic and tolerance over unchanged. The numbers are the
+// capture's; the tolerances are yours.
 (
     scenario: "assets",
     expectations: {
-        // The whole download. Warns on any 5% move, because at this size 5%
-        // is 8 MB.
-        "assets.glb.total.bytes": (
-            unit: bytes,
-            statistic: max,
-            expected: 156773032.0,
-            tolerance: (warn: 0.05, fail: 0.25),
-        ),
-        // The single largest model — the one that dominates a cold load.
         "assets.glb.bytes": (
             unit: bytes,
             statistic: max,
             expected: 17298572.0,
-            tolerance: (warn: 0.1, fail: 0.5),
+            tolerance: (
+                warn: 0.1,
+                fail: 0.5,
+            ),
         ),
-        // LOD coverage. A rise here is fine and will warn; that is the
-        // intended reading — "someone changed the LOD story, look at it" —
-        // and the warning is cheap because nothing gates on it.
+        "assets.glb.total.bytes": (
+            unit: bytes,
+            statistic: max,
+            expected: 156773032.0,
+            tolerance: (
+                warn: 0.05,
+                fail: 0.25,
+            ),
+        ),
         "assets.glb.without_lod": (
             unit: count,
             statistic: max,
             expected: 12.0,
-            tolerance: (warn: 0.25, fail: 1.0),
+            tolerance: (
+                warn: 0.25,
+                fail: 1.0,
+            ),
+        ),
+        "assets.lod.levels": (
+            unit: count,
+            statistic: max,
+            expected: 4.0,
+            tolerance: (
+                warn: 0.25,
+                fail: 2.0,
+            ),
         ),
     },
 )

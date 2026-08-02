@@ -24,6 +24,7 @@
 *.json text eol=lf
 *.wgsl text eol=lf
 *.txt text eol=lf
+*.ron text eol=lf
 
 # Windows-only helper scripts keep CRLF; cmd.exe is the consumer.
 *.bat text eol=crlf

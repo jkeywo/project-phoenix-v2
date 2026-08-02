@@ -102,9 +102,33 @@ node scripts/build-client.mjs
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/
 
-# CI: ci.yml — five jobs. `pasm`, `test` and `editor-test` run in PARALLEL and
+# ── Performance measurement (issue #868, gating decided in #905) ─────────────
+# Captures are compared against committed baselines in perf/baselines/*.ron.
+# ONE of the four scenarios gates: `assets`, because bytes on disk and counts
+# in authored TOML are a function of the checkout rather than of the machine.
+# The rule for the others is in src/perf/mod.rs; the short version is that
+# wall-clock on a shared runner stays non-gating until post-demo.
+cargo run --release --features perf --bin phoenix-perf -- assets --capture target/perf/assets.json
+cargo run --release --features perf --bin phoenix-perf -- mesh   --capture target/perf/mesh.json
+cargo run --release --features perf --bin phoenix-perf -- report --capture target/perf/assets.json --gate
+#   `mesh` loads every assets/models/*.glb through Bevy's own loader (headless,
+#   one model at a time) and counts triangles and texture pixels. Minutes, not
+#   seconds — it decodes every embedded texture.
+#
+# Re-recording a baseline from the runner that compares against it. CI cannot
+# commit, so the perf job uploads the baselines it WOULD record and a human
+# adopts them into a reviewable diff:
+gh run download <run-id> -n perf-capture -D target/perf-artifact
+cargo run --release --features perf --bin phoenix-perf -- adopt --artifact target/perf-artifact
+git diff perf/baselines
+#   Adoption moves the numbers and keeps the judgement: statistics, tolerances
+#   and header prose survive. Write commentary in the HEADER — the RON value
+#   below it is regenerated. See src/perf/baseline.rs.
+
+# CI: ci.yml — seven jobs. `pasm`, `test` and `editor-test` run in PARALLEL and
 # gate independently (any one of them red fails the build); `build` needs
-# `test`; `smoke` needs `build`; `deploy` runs on main.
+# `test`; `smoke` needs `build`; `perf` needs `test` and `smoke`; `balance`
+# needs `test`; `deploy` runs on main and needs none of `perf`/`balance`.
 #
 #   pasm         uv run pytest -q tests/pasm ; uv run pasm validate
 #   test         cargo fmt --check ; cargo clippy --all-targets --all-features
@@ -114,6 +138,10 @@ npx playwright test                            # from tests/smoke/
 #   build        TRUNK_BUILD_RELEASE=true trunk build --release ;
 #                node scripts/build-client.mjs
 #   smoke        npx playwright test (against the built dist/)
+#   perf         phoenix-perf assets|mesh|report — GATES on the `assets`
+#                scenario only (report --gate, exit 3); every other scenario
+#                reports into the job summary and the perf-capture artifact
+#   balance      scripts/balance-runs.demo.toml — reports, never gates
 #
 # Keep this list in sync with .github/workflows/ci.yml — if you add a gate
 # there, add it above, and vice versa. Trusting a stale list here is how a

@@ -410,6 +410,289 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
     );
 }
 
+/// **Issue #893's headless evidence.** A tactical radar reaching Destroyed
+/// must make the ship STOP FIRING — not keep shooting the target it already
+/// locked, which was the bug #887's A/B surfaced (both battleships in that
+/// duel had `tactical-radar` Destroyed with time-to-kill still to run, and
+/// nothing about their fire changed).
+///
+/// Runs on `probe_radar_kill.toml` rather than `probe_duel.toml`: since #893
+/// also removed hit points from every shipped hull's `tactical-radar` (AC3),
+/// an organic duel between shipped hulls can no longer destroy one at all, so
+/// this world's `spawn_entity` override restores the destroyer's pre-#893
+/// hull verbatim (a deliberately damageable test-only radar — see the world's
+/// own header) to reproduce the exact scenario the decision is about.
+///
+/// The hostile's hull tracks its ORIGINAL system list, not just the radar
+/// alone — collapsing it to "just the radar" would make destroying it read as
+/// the whole ship dying (`SystemHull::is_destroyed` is "every tracked system
+/// at 0"), which is a different bug (ship death) wearing this one's clothes.
+#[test]
+fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_memory() {
+    use project_phoenix::damage::DamageTier;
+    use project_phoenix::entity_spawner::EntitySystemHull;
+    use project_phoenix::simulation::Ship;
+    use project_phoenix::system_registry::tactical_radar_system_id;
+    use project_phoenix::weapons_plugin::TacticalRadarSelection;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_radar_kill.toml".into(),
+        // The world's own `[[entity]] template_path` for "player-ship" is only
+        // a placeholder — `ship_path` (mirroring `--ship`/`PendingShipConfig`,
+        // see `duel.toml`'s own comment on the same point) is what actually
+        // selects the player's hull, and must match the world's battleship
+        // fixture or the player spawns as the `test_args()` default cruiser
+        // instead, which never lands real hull damage on this hostile at all.
+        ship_path: "assets/entities/alliance_battleship.toml".into(),
+        dt,
+        max_ticks: 0, // driven by hand below
+        // Blessed by an empirical sweep over seeds 1..15 (60 s window): most
+        // seeds either never land a hit on the radar specifically, or end the
+        // fight outright before or shortly after the radar dies (whichever
+        // ship's death is a legitimate but different bug this test does not
+        // chase). Seed 12 destroys the hostile's tactical radar at tick 754
+        // (~25.1 s) with BOTH ships still alive — the shape this test needs:
+        // a disarmed-but-living hostile to observe not firing.
+        seed: Some(12),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    app.finish();
+    app.cleanup();
+
+    let radar_id = tactical_radar_system_id();
+
+    // The one ship that is not the player — the world spawns exactly one NPC.
+    fn hostile_hull_tier(
+        app: &mut App,
+        radar_id: &project_phoenix::messages::SystemId,
+    ) -> DamageTier {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&EntitySystemHull, (With<Ship>, Without<LocalShip>)>();
+        q.single(app.world())
+            .expect("exactly one hostile ship in this duel")
+            .0
+            .tier_for(radar_id)
+    }
+    fn player_hull_total(app: &mut App) -> f32 {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&EntitySystemHull, With<LocalShip>>();
+        q.single(app.world())
+            .expect("player hull")
+            .0
+            .total_current()
+    }
+    // Cumulative damage the player has TAKEN since the run began, per the
+    // stamped balance-event ledger — never raw hull HP. Repair teams restore
+    // `EntitySystemHull` HP over time on their own authored cadence
+    // (`ship::repair`), independent of whether the hostile is still
+    // shooting, so a flat-equality check on `player_hull_total` across a
+    // window with repair running would fail even with the hostile fully
+    // disarmed: HP visibly climbs from repair while `damage_taken` — a
+    // monotonic ledger of landed hits, unaffected by healing — correctly
+    // stays flat. `build_report` folds `telemetry.balance_events` fresh each
+    // call, so calling it mid-run at two ticks and diffing is exactly "damage
+    // landed between those two ticks."
+    fn player_damage_taken(app: &mut App, args: &HeadlessArgs) -> f32 {
+        let player_uuid = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&project_phoenix::entity_spawner::EntityUuid, With<LocalShip>>();
+            q.single(app.world()).expect("player uuid").0.clone()
+        };
+        let report = build_report(app, args, 0.0);
+        report
+            .damage_by_ship
+            .get(&player_uuid)
+            .map(|l| l.damage_taken)
+            .unwrap_or(0.0)
+    }
+
+    // Run until the hostile's tactical radar reaches Destroyed. The fixture's
+    // hull authors real HP on it (see the world's header), so organic combat
+    // — the player returning fire, exactly as `probe_duel.toml` already
+    // proves it does — destroys it inside a generous 90 s window.
+    let ticks_per_check = ticks_for_sim_seconds(1.0, dt).max(1);
+    let max_ticks = ticks_for_sim_seconds(90.0, dt);
+    let mut destroyed_at_tick: Option<u64> = None;
+    let mut player_hull_at_destroy: Option<f32> = None;
+    let mut tick = 0u64;
+    while tick < max_ticks {
+        for _ in 0..ticks_per_check.min(max_ticks - tick) {
+            app.update();
+            tick += 1;
+            if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+                break;
+            }
+        }
+        if hostile_hull_tier(&mut app, &radar_id) == DamageTier::Destroyed {
+            destroyed_at_tick = Some(tick);
+            player_hull_at_destroy = Some(player_hull_total(&mut app));
+            break;
+        }
+        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+            break;
+        }
+    }
+
+    let destroyed_at_tick = destroyed_at_tick.unwrap_or_else(|| {
+        panic!(
+            "the hostile's tactical radar never reached Destroyed inside the {max_ticks}-tick \
+             probe window — the fixture may need a re-bless of `[global] seed` in \
+             probe_radar_kill.toml (see probe_duel.toml's own seed-sweep note for the pattern)"
+        )
+    });
+    let player_hull_at_destroy = player_hull_at_destroy.expect("set alongside destroyed_at_tick");
+
+    // AC1 — the SAME transition clears the standing lock.
+    let hostile_lock = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&TacticalRadarSelection, (With<Ship>, Without<LocalShip>)>();
+        q.single(app.world())
+            .expect("the hostile carries a target lock")
+            .0
+            .clone()
+    };
+    assert_eq!(
+        hostile_lock, None,
+        "the hostile's standing lock must be cleared the moment its tactical radar \
+         reaches Destroyed (tick {destroyed_at_tick})"
+    );
+
+    // AC4 (headless evidence) — run on, and the player STOPS taking damage
+    // once the hostile's own weapons settle: the disarmed hostile is not
+    // shooting the target it remembers. The hostile's weapon systems
+    // (phaser, torpedo tubes) are still fully HP'd — this isolates "lost its
+    // lock" from "lost its guns".
+    //
+    // The window is split in two rather than asserting flat equality straight
+    // off the destroy tick: `TorpedoConfig::default().lifespan` is 20 s, so a
+    // torpedo the hostile already launched (with its own captured target,
+    // independent of `TacticalRadarSelection`) keeps homing and can still
+    // land a hit for up to 20 s after the radar — and the lock — are gone.
+    // That is not the bug #893 fixes; it is ordnance already in flight. The
+    // SETTLE window absorbs that legitimate tail; only the CHECK window after
+    // it is required to be perfectly flat, which is what "stopped firing"
+    // actually means once every already-launched round has landed or
+    // expired.
+    let settle_secs = 25.0; // > the 20 s default torpedo lifespan
+    let check_secs = 15.0;
+    for _ in 0..ticks_for_sim_seconds(settle_secs, dt) {
+        app.update();
+        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+            break;
+        }
+    }
+    let player_hull_after_settle = player_hull_total(&mut app);
+    let player_damage_taken_after_settle = player_damage_taken(&mut app, &args);
+    for _ in 0..ticks_for_sim_seconds(check_secs, dt) {
+        app.update();
+        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+            break;
+        }
+    }
+    let player_hull_final = player_hull_total(&mut app);
+    let player_damage_taken_final = player_damage_taken(&mut app, &args);
+    assert_eq!(
+        player_damage_taken_final,
+        player_damage_taken_after_settle,
+        "the player took {:.1} further damage in the {check_secs}s after the settle \
+         window (radar destroyed at tick {destroyed_at_tick}; player hull was \
+         {player_hull_at_destroy:.1} at that moment, {player_hull_after_settle:.1} after \
+         the {settle_secs}s settle window, and {player_hull_final:.1} at the end — hull HP \
+         alone is not asserted on here because repair teams restore it independent of \
+         whether the hostile is still shooting) — a lock that survived the destruction \
+         would keep shooting the remembered target, which is the bug #893 decided to fix",
+        player_damage_taken_final - player_damage_taken_after_settle
+    );
+}
+
+#[test]
+#[ignore]
+fn scratch_seed_sweep_probe_radar_kill() {
+    use project_phoenix::damage::DamageTier;
+    use project_phoenix::entity_spawner::EntitySystemHull;
+    use project_phoenix::simulation::Ship;
+    use project_phoenix::system_registry::tactical_radar_system_id;
+
+    let dt = 1.0 / 30.0;
+    let radar_id = tactical_radar_system_id();
+    let world = std::env::var("SCRATCH_WORLD")
+        .unwrap_or_else(|_| "assets/worlds/probe_radar_kill.toml".into());
+    let sim_secs: f64 = std::env::var("SCRATCH_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(90.0);
+    let seed_lo: u64 = std::env::var("SCRATCH_SEED_LO")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let seed_hi: u64 = std::env::var("SCRATCH_SEED_HI")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30);
+    let ship_path = std::env::var("SCRATCH_SHIP")
+        .unwrap_or_else(|_| "assets/entities/alliance_cruiser.toml".into());
+    for seed in seed_lo..=seed_hi {
+        let args = HeadlessArgs {
+            world_path: world.clone(),
+            ship_path: ship_path.clone(),
+            dt,
+            max_ticks: 0,
+            seed: Some(seed),
+            deterministic: true,
+            ..test_args()
+        };
+        let mut app = build_headless_app(&args).expect("app should build");
+        app.finish();
+        app.cleanup();
+        let max_ticks = ticks_for_sim_seconds(sim_secs, dt);
+        let mut destroyed_at = None;
+        let mut game_over_at = None;
+        for t in 0..max_ticks {
+            app.update();
+            let hostile_tier = {
+                let mut q = app
+                    .world_mut()
+                    .query_filtered::<&EntitySystemHull, (With<Ship>, Without<LocalShip>)>();
+                q.single(app.world()).map(|h| h.0.tier_for(&radar_id))
+            };
+            if destroyed_at.is_none() && matches!(hostile_tier, Ok(DamageTier::Destroyed)) {
+                destroyed_at = Some(t);
+            }
+            if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+                game_over_at = Some(t);
+                break;
+            }
+        }
+        let hostile_cur = {
+            let mut hq = app
+                .world_mut()
+                .query_filtered::<&EntitySystemHull, (With<Ship>, Without<LocalShip>)>();
+            hq.single(app.world())
+                .map(|x| x.0.total_current())
+                .unwrap_or(-1.0)
+        };
+        let player_cur = {
+            let mut pq = app
+                .world_mut()
+                .query_filtered::<&EntitySystemHull, With<LocalShip>>();
+            pq.single(app.world())
+                .map(|x| x.0.total_current())
+                .unwrap_or(-1.0)
+        };
+        println!(
+            "seed {seed}: destroyed_at={destroyed_at:?} game_over_at={game_over_at:?} \
+             hostile_hull_current={hostile_cur:.1} player_hull_current={player_cur:.1}"
+        );
+    }
+}
+
 /// Issue #843: a scenario `game_over` action carrying `outcome = "victory"`
 /// classifies the run as a victory, end to end.
 ///

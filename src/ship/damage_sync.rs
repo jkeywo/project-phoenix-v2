@@ -94,13 +94,26 @@ pub fn detect_damage_tier_crossings(
         &ShipSystemControlSources,
         Option<&mut RepairHumanAlerted>,
         Option<&crate::entity_spawner::EntityUuid>,
+        // Issue #893: the ship's own standing Tactical target lock. `Option`
+        // because not every bare-`App` fixture in this crate spawns one.
+        Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
     )>,
     mut coord_writer: MessageWriter<CoordinationEnqueue>,
     // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
     // that never registered the message still pass parameter validation.
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
-    for (entity, hull_comp, mut last_tiers, config, sources, mut alerted, ship_uuid) in &mut ships {
+    for (
+        entity,
+        hull_comp,
+        mut last_tiers,
+        config,
+        sources,
+        mut alerted,
+        ship_uuid,
+        mut tactical_lock,
+    ) in &mut ships
+    {
         let hull = &hull_comp.0;
         for (system_id, _cur, _max) in hull.entries() {
             let current_tier = hull.tier_for(system_id);
@@ -128,6 +141,23 @@ pub fn detect_damage_tier_crossings(
 
             if current_tier > prev_tier {
                 if current_tier == DamageTier::Destroyed {
+                    // Issue #893: a tactical radar reaching Destroyed clears
+                    // the ship's standing target lock. Keyed on the SYSTEM
+                    // crossing tiers, not on who set the lock, so a human's
+                    // lock and an AI's lock clear the identical way — no
+                    // origin branch (AGENTS.md #6). The existing #887
+                    // admission gate (`sync_console_damage_tiers` marks
+                    // `tactical-radar` offline on Disabled/Destroyed, which
+                    // refuses a NEW `SetTarget` from either origin) is
+                    // untouched; this is the companion half for the lock the
+                    // ship already held when the radar went dark, which that
+                    // gate never revisited.
+                    if system_id.0 == crate::system_registry::TACTICAL_RADAR_SYSTEM_ID {
+                        if let Some(lock) = tactical_lock.as_deref_mut() {
+                            lock.0 = None;
+                        }
+                    }
+
                     let sender_origin = sources.0.source_for(system_id);
                     coord_writer.write(CoordinationEnqueue {
                         source_entity: entity,
@@ -901,6 +931,121 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, BalanceEvent::Disarmed { ship } if ship == "raider")),
             "a ship whose only weapon is destroyed must emit Disarmed, got {events:?}"
+        );
+    }
+
+    // ── Issue #893: destroying the tactical radar drops the standing lock ────
+
+    /// **AC1.** A tactical radar reaching Destroyed clears the ship's own
+    /// `TacticalRadarSelection` — the SAME way whichever origin holds the
+    /// radar, because the clear in `detect_damage_tier_crossings` is keyed on
+    /// the SYSTEM crossing tiers, never on who set the lock. Run for both
+    /// origins so a reintroduced origin branch (AGENTS.md #6) would have to
+    /// break BOTH iterations, not just one.
+    #[test]
+    fn destroying_the_tactical_radar_clears_the_lock_for_either_origin() {
+        use crate::ship::control_source::ControlSource;
+        use crate::weapons_plugin::TacticalRadarSelection;
+
+        for origin in [ControlSource::Human, ControlSource::Ai] {
+            let mut app = App::new();
+            app.add_message::<CoordinationEnqueue>();
+
+            let radar_id = crate::system_registry::tactical_radar_system_id();
+            let hull = crate::damage::SystemHull::from_config(&[(radar_id.clone(), 15.0)]);
+
+            let mut sources = ShipSystemControlSources::default();
+            sources.0.set(radar_id.clone(), origin);
+
+            let ship = app
+                .world_mut()
+                .spawn((
+                    crate::entity_spawner::EntityUuid("raider".into()),
+                    crate::entity_spawner::EntitySystemHull(hull),
+                    LastSystemTiers::default(),
+                    ShipConfigComponent::default(),
+                    sources,
+                    TacticalRadarSelection(Some("the-enemy".to_string())),
+                ))
+                .id();
+
+            app.add_systems(Update, detect_damage_tier_crossings);
+            // Seed LastSystemTiers at full HP (Operational) before the kill shot.
+            app.update();
+
+            {
+                let mut e = app.world_mut().entity_mut(ship);
+                let mut hull = e
+                    .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                    .unwrap();
+                hull.0.set_hp(&radar_id, 0.0);
+            }
+            app.update();
+
+            let lock = app
+                .world()
+                .entity(ship)
+                .get::<TacticalRadarSelection>()
+                .unwrap();
+            assert_eq!(
+                lock.0, None,
+                "{origin:?}-held tactical radar reaching Destroyed must clear the \
+                 standing lock"
+            );
+        }
+    }
+
+    /// The companion regression: Disabled (not yet Destroyed) must NOT clear
+    /// the lock. A radar that is merely damaged already refuses to admit a NEW
+    /// lock (the unchanged #887 admission gate, `sync_console_damage_tiers`
+    /// marking it offline on Disabled OR Destroyed) but keeps the one it
+    /// already holds — exactly today's behaviour. Only Destroyed is the
+    /// drop-lock transition #893 decided on.
+    #[test]
+    fn a_merely_disabled_tactical_radar_does_not_clear_the_lock() {
+        use crate::weapons_plugin::TacticalRadarSelection;
+
+        let mut app = App::new();
+        app.add_message::<CoordinationEnqueue>();
+
+        let radar_id = crate::system_registry::tactical_radar_system_id();
+        let hull = crate::damage::SystemHull::from_config(&[(radar_id.clone(), 100.0)]);
+
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("raider".into()),
+                crate::entity_spawner::EntitySystemHull(hull),
+                LastSystemTiers::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                TacticalRadarSelection(Some("the-enemy".to_string())),
+            ))
+            .id();
+
+        app.add_systems(Update, detect_damage_tier_crossings);
+        app.update();
+
+        // Drop to 20 % — below the default 25 % disabled threshold, still above 0.
+        {
+            let mut e = app.world_mut().entity_mut(ship);
+            let mut hull = e
+                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .unwrap();
+            hull.0.set_hp(&radar_id, 20.0);
+        }
+        app.update();
+
+        let lock = app
+            .world()
+            .entity(ship)
+            .get::<TacticalRadarSelection>()
+            .unwrap();
+        assert_eq!(
+            lock.0.as_deref(),
+            Some("the-enemy"),
+            "a Disabled (not Destroyed) tactical radar must NOT clear the standing \
+             lock — only Destroyed does"
         );
     }
 }

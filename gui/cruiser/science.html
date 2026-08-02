@@ -16,6 +16,12 @@
     .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     ph-sensor-radar, ph-sensor-panel, ph-shield-panel, ph-shield-facings { flex: 1; min-height: 0; }
+    /* Compact threat-bearing readout (issue #926) — same standing fact the
+       battleship's dedicated Shields console shows, condensed to one line
+       for this column's tighter layout. Hidden when Sensors holds no threat. */
+    .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 0 0 8px; flex-shrink: 0; visibility: hidden; }
+    .threat-readout.active { visibility: visible; }
+    .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 14px; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
@@ -40,6 +46,7 @@
         </div>
         <div class="col">
           <h2 data-i18n="console.science.shields">Shields</h2>
+          <div class="threat-readout" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
           <ph-shield-panel id="shield-panel"></ph-shield-panel>
           <ph-shield-facings id="shield-facings"></ph-shield-facings>
         </div>
@@ -82,6 +89,14 @@
         sp.state = sensors;
         shp.state = shields;
         shf.state = { facings: shields.facings || [], focused_facing: shields.focused_facing || null, auto: !!shields.shields_auto };
+        var threatRow = document.getElementById('threat-row');
+        if (shields.threat_bearing != null) {
+          threatRow.classList.add('active');
+          document.getElementById('threat-bearing').textContent = Math.round(shields.threat_bearing) + '°M';
+        } else {
+          threatRow.classList.remove('active');
+          document.getElementById('threat-bearing').textContent = '—';
+        }
         var tn = sensors.target_name || null;
         document.getElementById('footer-target').textContent = tn ? '\u25C9 ' + tn : 'NO TARGET';
         document.getElementById('footer-target').style.color = tn ? 'var(--tactical)' : 'var(--ink-faint)';

@@ -18,6 +18,12 @@
     ph-shield-facings, ph-power-controls, ph-repair-teams, ph-hull-integrity { flex: 1; min-height: 0; }
     /* Battery bar sits at the bottom of the Power column, under the (growing) power controls. */
     ph-battery-bar { flex: 0 0 auto; margin-top: 8px; }
+    /* Compact threat-bearing readout (issue #926) — same standing fact the
+       battleship's dedicated Shields console shows, condensed to one line
+       for this column's tighter layout. Hidden when Sensors holds no threat. */
+    .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 0 0 8px; flex-shrink: 0; visibility: hidden; }
+    .threat-readout.active { visibility: visible; }
+    .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 14px; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
@@ -36,6 +42,7 @@
       <div class="console-body">
         <div class="col">
           <h2 data-i18n="console.engineering.shields">Shields</h2>
+          <div class="threat-readout" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
           <ph-shield-facings id="shield-facings"></ph-shield-facings>
         </div>
         <div class="col">
@@ -85,6 +92,14 @@
         var p = system(s, 'power-reactor', 'power-battery');
         var r = system(s, 'repair');
         shieldEl.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
+        var threatRow = document.getElementById('threat-row');
+        if (sh.threat_bearing != null) {
+          threatRow.classList.add('active');
+          document.getElementById('threat-bearing').textContent = Math.round(sh.threat_bearing) + '°M';
+        } else {
+          threatRow.classList.remove('active');
+          document.getElementById('threat-bearing').textContent = '—';
+        }
         powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto };
         batteryEl.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !p.locked, emergency_threshold_pct: 20 };
         // Overall ship-wide hull (every damageable system), not just this

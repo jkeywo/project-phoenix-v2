@@ -1075,10 +1075,20 @@ export function buildPowerConsoleState(state) {
 
 /**
  * Payload contract for the Shields console iframe (issue #827). Rendered by
- * gui/battleship/shields.html.
+ * gui/battleship/shields.html and, via `buildSystemStationConsoleState`,
+ * every other hull's shields-owning console (e.g.
+ * gui/destroyer/engineering.html).
+ *
+ * `combat_lock_bearing` (renamed from `target_bearing`, issue #926) and
+ * `threat_bearing` are two DIFFERENT quantities: the former is this ship's
+ * own frozen Combat Lock target; the latter is the standing bearing of the
+ * nearest hostile in sensor range — the same fact the backfilled Shields
+ * focus AI reads to override its damage-based decision. Both are verbatim
+ * pass-throughs of `ShieldsBlackboard` — no client-side re-derivation.
  *
  * @typedef {{ facings: Array, hull_integrity_pct: number,
- *             focused_facing: string|null, target_bearing: number|null,
+ *             focused_facing: string|null, combat_lock_bearing: number|null,
+ *             threat_bearing: number|null,
  *             grid_status: string, own_hull: StationHullAggregate,
  *             shields_auto: boolean }} ShieldsConsolePayload
  */
@@ -1091,16 +1101,19 @@ export function buildShieldsConsoleState(state) {
   const bb = state.blackboards && state.blackboards['shields'];
   if (bb) {
     return JSON.stringify({
-      facings:            bb.facings            ?? [],
-      hull_integrity_pct: bb.hull_integrity_pct ?? 100,
-      focused_facing:     bb.focused_facing     ?? null,
-      target_bearing:     bb.target_bearing     ?? null,
-      grid_status:        bb.grid_status        ?? 'GRID NOMINAL',
+      facings:              bb.facings              ?? [],
+      hull_integrity_pct:   bb.hull_integrity_pct   ?? 100,
+      focused_facing:       bb.focused_facing       ?? null,
+      combat_lock_bearing:  bb.combat_lock_bearing  ?? null,
+      threat_bearing:       bb.threat_bearing       ?? null,
+      grid_status:          bb.grid_status          ?? 'GRID NOMINAL',
       own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
       shields_auto: state.stationRatings?.['shields'] === 'Backfill',
     });
   }
-  // Legacy fallback: read from ShieldStatus broadcast fields.
+  // Legacy fallback: read from ShieldStatus broadcast fields. Predates the
+  // ShieldsBlackboard (issue #562); `threat_bearing` has no legacy source —
+  // it was never derivable client-side, and issue #926 does not add one.
   let targetBearing = null;
   if (state.weaponsTarget && state.asteroids) {
     const target = state.asteroids.find(a => a.uuid === state.weaponsTarget);
@@ -1111,12 +1124,13 @@ export function buildShieldsConsoleState(state) {
     }
   }
   return JSON.stringify({
-    facings:            state.shieldFacings      || [],
-    hull_integrity_pct: state.hullIntegrity       || 100,
-    focused_facing:     state.shieldFocusedFacing || null,
-    target_bearing:     targetBearing,
-    grid_status:        (state.shieldFacings && state.shieldFacings.length > 0)
-                          ? 'GRID NOMINAL' : 'GRID OFFLINE',
+    facings:              state.shieldFacings      || [],
+    hull_integrity_pct:   state.hullIntegrity       || 100,
+    focused_facing:       state.shieldFocusedFacing || null,
+    combat_lock_bearing:  targetBearing,
+    threat_bearing:       null,
+    grid_status:          (state.shieldFacings && state.shieldFacings.length > 0)
+                            ? 'GRID NOMINAL' : 'GRID OFFLINE',
     own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
     shields_auto: state.stationRatings?.['shields'] === 'Backfill',
   });
@@ -1199,7 +1213,7 @@ export function buildSensorsConsoleState(state) {
         : null;
       targetSpeed     = tgt.speed     !== undefined ? tgt.speed     : null;
       targetThreat    = tgt.threat    || (targetStance === 'hostile' ? 'high' : 'low');
-      targetShieldFreq = tgt.shield_freq || null;
+      targetShieldFreq = tgt.shield_freq != null ? tgt.shield_freq : null;
       targetShields    = tgt.shields     || [];
       // Single-facing NPC shield fraction (#473). `null` for shieldless
       // entities (no [shields] block on the TOML); `0..=1` for shielded

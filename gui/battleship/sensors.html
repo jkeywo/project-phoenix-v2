@@ -51,8 +51,15 @@
             <div class="metric"><span data-i18n="console.sensors.kind">Kind</span><strong id="tgt-kind-tag" data-i18n="console.common.no_contact">NO CONTACT</strong></div>
             <div id="shield-facings" data-i18n="console.common.no_shield_data">NO SHIELD DATA</div>
             <div class="metric"><span data-i18n="console.sensors.shield_status">Shield Status</span><strong id="shields-tag" data-i18n="console.common.no_data">NO DATA</strong></div>
+            <!-- Shield Freq (issue #927) folded into this dedicated Target
+                 Analysis section rather than duplicated via the shared
+                 ph-sensor-panel below — see hide-shield-rows on that element. -->
+            <div class="metric"><span data-i18n="component.sensor_panel.shield_freq">Shield Freq</span><strong id="shield-freq-tag" data-i18n="console.common.no_data">NO DATA</strong></div>
           </div>
-          <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
+          <!-- hide-shield-rows: this console's Target Analysis panel above
+               already shows target shields (renderShieldFacings()) and
+               Shield Freq — without this the shared panel duplicated both. -->
+          <ph-sensor-panel id="sensor-panel" hide-shield-rows></ph-sensor-panel>
         </div>
       </div>
       <footer class="console-footer footer-bar">
@@ -75,6 +82,10 @@
     function renderShieldFacings(state) {
       var target = document.getElementById('shield-facings');
       var shields = state.target_shields || [];
+      var freqTag = document.getElementById('shield-freq-tag');
+      freqTag.textContent = state.target_shield_freq != null
+        ? Math.round(state.target_shield_freq * 100) + '%'
+        : t('console.common.no_data');
       if (!shields.length && state.target_shield_fraction == null) {
         target.textContent = t('console.common.no_shield_data');
         document.getElementById('shields-tag').textContent = t('console.common.no_data');

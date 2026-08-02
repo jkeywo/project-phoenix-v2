@@ -854,7 +854,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-b31926aa98427c26.js" crossorigin="anonymous" integrity="sha384-RjnR6Y/BjFyJxCapJe98Z+v45U3zR7AeyxsJZg2c+Y/0VpV76bKR+sHpNjeiiCbD"><link rel="preload" href="./project-phoenix-b31926aa98427c26_bg.wasm" crossorigin="anonymous" integrity="sha384-jXpWVDxqhMwNGwnn5O00x/wEppQj9ar3fe+QimBvfKO4hwKo46xPK9EKqH4LaWXh" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-3a7956e4262f30d8.js" crossorigin="anonymous" integrity="sha384-XWb6PpiqGv2tL5UfhhRBplY/XQzrpvilgVQaOpJ7e6XL8jNLRsNuXk+puuS1tea0"><link rel="preload" href="./project-phoenix-3a7956e4262f30d8_bg.wasm" crossorigin="anonymous" integrity="sha384-KeMDYqvRBjeefCjT+WBWP62eA24/N2/qwlcROBO5+N1vhClmDzrIqkikaMvILnbY" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1147,8 +1147,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-b31926aa98427c26.js';
-const wasm = await init({ module_or_path: './project-phoenix-b31926aa98427c26_bg.wasm' });
+import init, * as bindings from './project-phoenix-3a7956e4262f30d8.js';
+const wasm = await init({ module_or_path: './project-phoenix-3a7956e4262f30d8_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2670,6 +2670,10 @@ function finishInit() {
   window.wasm_get_instagib = wasmBindings.wasm_get_instagib;
   window.wasm_teleport_to_waypoint = wasmBindings.wasm_teleport_to_waypoint;
   window.wasm_has_navigation_waypoint = wasmBindings.wasm_has_navigation_waypoint;
+  // The logical simulation tick count (issue #895). Read-only: the smoke
+  // tests sample it to prove the sim advances on the authored fixed tick
+  // rather than the rendered frame.
+  window.wasm_sim_tick = wasmBindings.wasm_sim_tick;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
   document.getElementById('qr-toggle-btn').addEventListener('click', function() {

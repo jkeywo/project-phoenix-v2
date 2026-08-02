@@ -75,9 +75,9 @@
         document.getElementById('footer-focus').textContent = s.focused_facing || t('console.common.omni');
         document.getElementById('footer-grid').textContent = (s.grid_status || 'GRID NOMINAL') === 'GRID OFFLINE' ? t('component.shield_panel.grid_offline') : t('component.shield_panel.grid_nominal');
         var threatRow = document.getElementById('threat-row');
-        if (s.target_bearing != null) {
+        if (s.threat_bearing != null) {
           threatRow.classList.add('active');
-          document.getElementById('threat-bearing').textContent = Math.round(s.target_bearing) + '°M';
+          document.getElementById('threat-bearing').textContent = Math.round(s.threat_bearing) + '°M';
         } else {
           threatRow.classList.remove('active');
           document.getElementById('threat-bearing').textContent = '—';

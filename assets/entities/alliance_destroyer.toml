@@ -91,92 +91,104 @@ target_speed  = 0.0
 # a downed radar (weapons-console arc gating, the helm radar overlay, the
 # captain's repair targeting) is untouched and still fires for any hull that
 # authors those entries; these four simply never trigger it.
+# ── System damage degradation (#915 tuning pass) ─────────────────────────────
+# Every system below runs 0.5 / 0.15 rather than the 0.75 / 0.25 default: this
+# hull stays Operational down to half HP and keeps limping until 15%.
+#
+# This is a FEEL change, not a balance one, and the measurement says so — over
+# 25 seeded patrol duels it moved the win rate not at all (56% either way) and
+# the TTK median not at all (36.1 s), buying about 11% of damage margin. The
+# destroyer's output is pinned at ~361 in every win regardless, because it is
+# gated by volley cooldowns and firing arcs, not by system health; extra uptime
+# buys no extra offence. What it DOES buy is roughly three seconds before the
+# first knockout, which a human crew feels at the repair console even though two
+# AI backfills fighting each other do not.
 [[hull.system_hull]]
 system_id = "power-reactor"
 display_name = "entity.alliance_destroyer.hull.system_hull.power_reactor.display_name"
 max_hp = 29
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "power-battery"
 display_name = "entity.alliance_destroyer.hull.system_hull.power_battery.display_name"
 max_hp = 29
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "core"
 display_name = "entity.alliance_destroyer.hull.system_hull.core.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.10
 
 [[hull.system_hull]]
 system_id = "helm-engine-port"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_engine_port.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_engine_starboard.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "helm-lateral-thrust"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_lateral_thrust.display_name"
 max_hp = 18
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "phaser-omni"
 display_name = "entity.alliance_destroyer.hull.system_hull.phaser_omni.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-port"
 display_name = "entity.alliance_destroyer.hull.system_hull.blaster_port.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-starboard"
 display_name = "entity.alliance_destroyer.hull.system_hull.blaster_starboard.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore"
 display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_fore.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft"
 display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_aft.display_name"
 max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [repair]
@@ -240,15 +252,24 @@ collision_radius = 0.8
 visual_scale = 0.5
 # Blaster damage (#915 tuning pass). Was 20. The two forward banks are the
 # destroyer's whole offence — 2 x 3 x 20 every 5 s is ~24 dps, which folded the
-# Harrow patrol (180 EHP) in a single approach, before the fight became one.
+# Harrow patrol in a single approach, before the fight became one.
 #
-# 15 is the FLOOR, not a round number: the batch runner cliff-edges between 15
-# and 14. At 15 the patrol duel stretches to a 12.4 s median with the margin
-# down to +76 and the Harrow cruiser still falls 5/5 in 18.5 s. At 14 the
-# destroyer needs one more volley cycle than the cruiser's ring gives it and
-# the cruiser matchup collapses to 1/5. Do not push this lower without
-# retuning the cruiser duel as its own change.
-damage = 15
+# This number is a STEP FUNCTION, not a dial, because it decides how many volley
+# cycles a kill costs. Measured over 25 seeds against the patrol (the 5-seed demo
+# config cannot resolve this matchup at all — see the note in
+# scripts/balance-runs.demo.toml):
+#
+#   14  cruiser matchup collapses to 1/5
+#   15  patrol 56% win, +69 margin, 36.1 s median
+#   16  patrol 56% win, +73 margin, 36.1 s median   <- here
+#   17  patrol 100% win, +109 margin, 31.1 s median
+#   20  patrol 100% win, +184 margin, 21.1 s median
+#
+# 16 is the top of the near-even band: the patrol duel is a genuine coin flip
+# rather than a fight the destroyer is scripted to win. Anything from 17 up is a
+# guaranteed sweep. Moving between those two bands is a DESIGN choice about the
+# demo, not a tuning nudge — there is nothing in between.
+damage = 16
 shield_pierce = 0.1
 range = 35
 
@@ -285,15 +306,24 @@ collision_radius = 0.8
 visual_scale = 0.5
 # Blaster damage (#915 tuning pass). Was 20. The two forward banks are the
 # destroyer's whole offence — 2 x 3 x 20 every 5 s is ~24 dps, which folded the
-# Harrow patrol (180 EHP) in a single approach, before the fight became one.
+# Harrow patrol in a single approach, before the fight became one.
 #
-# 15 is the FLOOR, not a round number: the batch runner cliff-edges between 15
-# and 14. At 15 the patrol duel stretches to a 12.4 s median with the margin
-# down to +76 and the Harrow cruiser still falls 5/5 in 18.5 s. At 14 the
-# destroyer needs one more volley cycle than the cruiser's ring gives it and
-# the cruiser matchup collapses to 1/5. Do not push this lower without
-# retuning the cruiser duel as its own change.
-damage = 15
+# This number is a STEP FUNCTION, not a dial, because it decides how many volley
+# cycles a kill costs. Measured over 25 seeds against the patrol (the 5-seed demo
+# config cannot resolve this matchup at all — see the note in
+# scripts/balance-runs.demo.toml):
+#
+#   14  cruiser matchup collapses to 1/5
+#   15  patrol 56% win, +69 margin, 36.1 s median
+#   16  patrol 56% win, +73 margin, 36.1 s median   <- here
+#   17  patrol 100% win, +109 margin, 31.1 s median
+#   20  patrol 100% win, +184 margin, 21.1 s median
+#
+# 16 is the top of the near-even band: the patrol duel is a genuine coin flip
+# rather than a fight the destroyer is scripted to win. Anything from 17 up is a
+# guaranteed sweep. Moving between those two bands is a DESIGN choice about the
+# demo, not a tuning nudge — there is nothing in between.
+damage = 16
 shield_pierce = 0.1
 range = 35
 

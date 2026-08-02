@@ -2431,7 +2431,6 @@ ai_only = true
     /// Alert. The Harrow Lancer authors [behaviour] but no red_alert block.
     #[test]
     fn spawned_behaviour_npc_red_alert_is_ai_operated() {
-        use crate::entity_config::EntityConfig;
         use bevy::prelude::*;
 
         // Through the REAL load path: the hull is composed since issue #878, so

@@ -7169,7 +7169,7 @@ hull_max_hp = 6
                 "precondition: the hull must author `{line}` for this to remove it"
             );
             let stripped = &harrow_warhawk_toml().replace(line, "");
-            let err = EntityConfig::from_toml(&stripped)
+            let err = EntityConfig::from_toml(stripped)
                 .expect_err("a guard on an undeclared param must fail the entity load")
                 .to_string();
             assert!(

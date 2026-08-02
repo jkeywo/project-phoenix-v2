@@ -468,6 +468,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     .add_systems(
         OnEnter(GamePhase::InProgress),
         (
+            // The run boundary for the command log (issue #898). First in the
+            // chain because it is the *start* of a run's input record: every
+            // command the systems after it cause to be admitted belongs to the
+            // round that is beginning, and a second round reached through
+            // `ReturnToLobby` must not inherit the first round's log. Sits
+            // beside `reset_broadcast_caches_on_start` because it is the same
+            // kind of thing — per-run state that a multi-game session has to
+            // hand back.
+            crate::command_admission::reset_command_log,
             reset_broadcast_caches_on_start,
             crate::world::server::seed_ship_power_counter,
             spawn_game_start_entities,
@@ -488,30 +497,40 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .chain()
             .after(crate::lobby::LobbySystemSet)
             .before(crate::sim_sets::SimSet::Input),
-    )
-    // Command admission moves with the sim into `FixedUpdate` (issue #895):
-    // inbound messages are drained once per FRAME in `PreUpdate`, so admitting
-    // per frame would clear-and-refill `AdmittedCommands` zero or several
-    // times per tick. Here it runs exactly once per tick, before
-    // `SimSet::Input`, whatever the frame rate.
-    .add_systems(
-        FixedUpdate,
-        (
-            admit_system_commands,
-            crate::command_admission::clear_inter_system_queue,
-        )
-            .in_set(crate::command_admission::AdmissionSet)
-            .after(crate::lobby::LobbySystemSet)
-            .before(crate::sim_sets::SimSet::Input)
-            .run_if(in_state(GamePhase::InProgress)),
-    )
+    );
+
+    // The command admission seam (issue #898): the tick-stamped command log,
+    // the future-tick queue it drains, `CommandDelay`, and
+    // `admit_system_commands` itself — one call, because a half-wired seam
+    // fails silently in three different ways. See `register_admission_seam`.
+    //
+    // Admission moves with the sim into `FixedUpdate` (issue #895): inbound
+    // messages are drained once per FRAME in `PreUpdate`, so admitting per
+    // frame would clear-and-refill `AdmittedCommands` zero or several times per
+    // tick. The helper places it exactly once per tick, before `SimSet::Input`,
+    // whatever the frame rate.
+    //
+    // **Registered exactly here on purpose.** `admit_system_commands` and the
+    // `reconcile_runtime_entities` block above are both `.after(LobbySystemSet)
+    // .before(SimSet::Input)` with no edge between them, so their relative order
+    // is a tie — and Bevy's single-threaded executor (which `--deterministic`
+    // selects) breaks ties by REGISTRATION order. Reconcile spawns and despawns
+    // ships; admission resolves commands to ships. Hoisting this call earlier in
+    // the function reverses that tie, and the headless duel probes — which are
+    // combat-chaotic — change outcome. Keep the call where the systems it
+    // registers used to be added.
+    crate::command_admission::register_admission_seam(
+        app,
+        crate::command_admission::AdmissionGate::InProgressOnly,
+    );
+
     // Unrouted-command lint (issue #833). Production wires the admission seam
-    // inline (above) rather than via `AdmissionPlugin`, so the lint is added
-    // here too. Warning-only, ordered after every consumer set; observes the
-    // tick's admitted set before next tick's clear. The `AdmittedConsumerRegistry`
-    // it reads is populated by each consumer plugin's `register_admitted_consumer`
-    // call at build time.
-    .add_systems(
+    // through `register_admission_seam` (above) rather than via
+    // `AdmissionPlugin`, so the lint is added here too. Warning-only, ordered
+    // after every consumer set; observes the tick's admitted set before next
+    // tick's clear. The `AdmittedConsumerRegistry` it reads is populated by each
+    // consumer plugin's `register_admitted_consumer` call at build time.
+    app.add_systems(
         FixedUpdate,
         crate::command_admission::warn_unrouted_admitted_commands
             .after(crate::sim_sets::SimSet::Broadcast)
@@ -4158,6 +4177,15 @@ station = "pilot"
 
     fn test_app() -> App {
         let mut app = App::new();
+        // The admission seam, through the same one call production uses
+        // (issue #898) — resources and system together, so this fixture cannot
+        // drift into having one without the other. Ungated: the fixture spawns
+        // its ships by hand and never runs the lobby countdown, so it never
+        // reaches `GamePhase::InProgress`.
+        crate::command_admission::register_admission_seam(
+            &mut app,
+            crate::command_admission::AdmissionGate::EveryTick,
+        );
         app.configure_sets(
             FixedUpdate,
             (
@@ -4206,15 +4234,6 @@ station = "pilot"
         .add_systems(
             OnEnter(GamePhase::InProgress),
             reset_broadcast_caches_on_start,
-        )
-        .add_systems(
-            FixedUpdate,
-            (
-                admit_system_commands,
-                crate::command_admission::clear_inter_system_queue,
-            )
-                .after(crate::lobby::LobbySystemSet)
-                .before(crate::sim_sets::SimSet::Input),
         )
         .add_systems(
             FixedUpdate,

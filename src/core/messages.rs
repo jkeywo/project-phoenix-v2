@@ -2711,7 +2711,15 @@ pub struct PowerBlackboard {
 /// The source identity is stripped at admission; `response_token` carries the
 /// originating client's token purely for routing replies (not for behavioral
 /// branching).
-#[derive(Clone, Debug)]
+///
+/// Deliberately **not** `Serialize` (issue #898). This type is in-process only.
+/// The command log's entry type is
+/// [`crate::command_admission::log::LoggedCommand`], which carries this
+/// command's target and payload but replaces `response_token` with the routed
+/// ship's `EntityUuid` — because the log's destinations are save files and
+/// peers, and a session token is a bearer credential (AGENTS.md constraint 2).
+/// Adding a `Serialize` derive here is how that would quietly come undone.
+#[derive(Clone, Debug, PartialEq)]
 pub struct AdmittedCommand {
     pub target: SystemId,
     pub payload: SystemControlPayload,

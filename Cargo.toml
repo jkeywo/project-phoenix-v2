@@ -176,6 +176,25 @@ vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baa
 # generators in the renderer, pfx and asteroid modules, which are deliberately
 # not part of the seeded simulation.
 vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9" }
+# The replay-as-save contract behind `crate::command_admission::log` (issue
+# #898). Same vellum rev as the two above, for the same reason. Zero
+# dependencies of its own, so it is a non-event for the wasm build.
+#
+# What phoenix takes from it is a *shape*, not a scheduler: `Simulation` states
+# the three rules a command log rests on — same commands on the same seed reach
+# the same state, a refusal changes nothing at all, and a refusal never reaches
+# the log — and the `testkit` feature (a dev-dependency, below) checks them
+# against a real implementation instead of a toy. The crate has no notion of a
+# tick: `LoggedCommand { tick, command }` is phoenix's, because the tick a
+# command applies on is phoenix's contract with its lockstep peers (#854), not
+# vellum's.
+vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9" }
+
+[dev-dependencies]
+# The contract checks (`vellum_replay::contract`), which the crate gates behind
+# `testkit` precisely so no shipped binary pulls them in. Cargo unifies this
+# with the dependency above for test builds only.
+vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9", features = ["testkit"] }
 
 # Native: parallel physics enabled
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

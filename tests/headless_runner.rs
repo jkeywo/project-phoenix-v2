@@ -3207,3 +3207,253 @@ fn the_simulation_reaches_the_same_state_at_wildly_different_frame_rates() {
          something in the sim still advances per frame"
     );
 }
+
+// ── Command log (issue #898) ──────────────────────────────────────────────────
+
+/// Option A's load-bearing claim, at run scale: a headless run is crewed
+/// entirely by AI, and it records **nothing**.
+///
+/// The two assertions are a pair. The AI is demonstrably issuing orders — every
+/// tick's `AdmittedCommands`, summed over the run — and none of them reached
+/// the log, because none of them crossed a network boundary. What makes the
+/// omission safe is the other half of the contract, proved in
+/// `tests/rng_determinism.rs`: two runs of this same class of scenario on one
+/// seed produce byte-identical reports, so a replay re-derives every one of
+/// those decisions rather than needing them written down. Logging them as well
+/// would apply each order twice.
+///
+/// This is also the standing guard against the mistake that would break the
+/// whole design: if some future AI decider ever routed its orders through
+/// `InboundMessage` instead of `emit_ai_command`, they would start being
+/// recorded, the replay would double-count them, and this test would go red
+/// first.
+///
+/// # Why the emissions are counted, not sampled
+///
+/// The "the AI is demonstrably issuing orders" half used to read
+/// `AdmittedCommands` once, after the run, and require it non-empty. That
+/// asserts on ONE tick's buffer — the last one — and whether that tick held
+/// anything is a parity question: the buffer is cleared and refilled every
+/// tick, and the deciders run on the AI cadence (every
+/// `sim_tick_hz / ai_tick_hz`-th tick, so every second tick at the shipped
+/// rates). Land the run's final tick between decisions and the buffer is
+/// legitimately empty and the test fails with nothing wrong; equally, it would
+/// keep passing if the AI had fallen silent for every tick but the last.
+///
+/// A `FixedLast` probe accumulating each tick's buffer answers the question
+/// actually being asked — *did this run's AI issue orders at all?* — and is
+/// indifferent to where the run happens to stop. `FixedLast` because that is
+/// after the whole `SimSet` chain has run for the tick and before the next
+/// tick's admission clears the buffer.
+#[test]
+fn an_ai_crewed_run_records_no_commands() {
+    use project_phoenix::command_admission::CommandLog;
+    use project_phoenix::messages::AdmittedCommands;
+
+    /// Every command that sat in any ship's `AdmittedCommands`, summed over
+    /// every tick of the run.
+    #[derive(Resource, Default)]
+    struct EmissionTally(usize);
+
+    fn tally_emissions(mut tally: ResMut<EmissionTally>, ships: Query<&AdmittedCommands>) {
+        tally.0 += ships.iter().map(|a| a.0.len()).sum::<usize>();
+    }
+
+    let args = HeadlessArgs {
+        max_ticks: 200,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    app.init_resource::<EmissionTally>()
+        .add_systems(FixedLast, tally_emissions);
+    run(&mut app, args.max_ticks);
+
+    let emitted = app.world().resource::<EmissionTally>().0;
+    assert!(
+        emitted > 0,
+        "no ship held an admitted command on ANY tick of the run, so the AI \
+         emitted nothing at all and an empty log would prove nothing"
+    );
+
+    let log = app.world().resource::<CommandLog>();
+    assert!(
+        log.is_empty(),
+        "an AI-crewed run must record no commands — the log carries the \
+         network boundary, and the simulation re-derives everything else. \
+         The AI issued {emitted} order(s) across the run, none of which \
+         belonged in the log. Recorded: {:?}",
+        log.entries()
+    );
+}
+
+/// A run's log is replayable in principle: every command that crossed the
+/// boundary is in it, in order, stamped with the tick it applied on, and those
+/// ticks never go backwards.
+///
+/// Driving a whole replay from this is #901's job. What is checked here is the
+/// property such a driver depends on and cannot repair — that the record is
+/// complete and monotonic — against the real production wiring rather than a
+/// bare-`App` fixture. `red-alert` is the target because every shipped hull
+/// declares it `automated`, so it answers to an `ai:` token in a run with
+/// nobody connected; the point being made is about the *boundary*, not about
+/// who was on the far side of it.
+#[test]
+fn a_runs_log_records_every_boundary_command_in_tick_order() {
+    use project_phoenix::command_admission::ai_emit::AI_BACKFILL_TOKEN;
+    use project_phoenix::command_admission::CommandLog;
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemControlPayload, SystemId};
+    use project_phoenix::sim_tick::SimTick;
+
+    fn send(app: &mut App, active: bool) {
+        app.world_mut()
+            .resource_mut::<Messages<InboundMessage>>()
+            .write(InboundMessage {
+                token: AI_BACKFILL_TOKEN.into(),
+                msg: ClientMessage::ControlSystem {
+                    target: SystemId("red-alert".into()),
+                    payload: SystemControlPayload::SetRedAlert { active },
+                },
+            });
+    }
+
+    let args = HeadlessArgs {
+        max_ticks: 200,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    // Far enough in that the auto-start countdown has put the run InProgress,
+    // which is what admission is gated on.
+    run(&mut app, 120);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+
+    // Three commands across three separate ticks, plus two in one tick, so the
+    // record has to get both the across-tick and the within-tick order right.
+    let mut expected: Vec<u64> = Vec::new();
+    for active in [true, false, true] {
+        expected.push(app.world().resource::<SimTick>().0);
+        send(&mut app, active);
+        run(&mut app, 1);
+    }
+    let paired_tick = app.world().resource::<SimTick>().0;
+    send(&mut app, false);
+    send(&mut app, true);
+    expected.push(paired_tick);
+    expected.push(paired_tick);
+    run(&mut app, 1);
+
+    let log = app.world().resource::<CommandLog>();
+    let ticks: Vec<u64> = log.entries().iter().map(|e| e.tick).collect();
+    assert_eq!(
+        ticks, expected,
+        "every boundary command must be recorded, stamped with the tick it \
+         applied on — one entry per command, in arrival order"
+    );
+    assert!(
+        log.ticks_are_monotonic(),
+        "recorded ticks must never go backwards, or a replay could not apply \
+         them against a clock that only advances"
+    );
+    assert_eq!(
+        log.for_tick(paired_tick).count(),
+        2,
+        "two commands admitted in one tick both belong to that tick"
+    );
+    let alternating: Vec<bool> = log
+        .entries()
+        .iter()
+        .map(|e| match &e.payload {
+            SystemControlPayload::SetRedAlert { active } => *active,
+            other => panic!("unexpected payload in the log: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        alternating,
+        vec![true, false, true, false, true],
+        "the log preserves the order the commands arrived in, not just their \
+         count"
+    );
+}
+
+/// A second round starts a fresh log (issue #898 review).
+///
+/// `ReturnToLobby` from `GameOver` puts everyone back in the lobby for another
+/// round (`lobby::handler::handle_return_to_lobby`), and `OnEnter(InProgress)`
+/// runs again. Without the reset hung on that chain, round two appends to round
+/// one's log and the pair "master seed + command log" stops describing a single
+/// run — silently, because `SimTick` keeps counting and the merged log stays
+/// perfectly monotonic. Nothing downstream can detect it afterwards, so the
+/// guard belongs at the boundary.
+///
+/// Drives the real `add_simulation_plugins_with` wiring rather than a fixture:
+/// the reset is registered in `server_app`'s `OnEnter` chain, and a fixture that
+/// registered it by hand would prove only that the system works, not that
+/// production calls it.
+#[test]
+fn a_second_round_starts_a_fresh_command_log() {
+    use project_phoenix::command_admission::ai_emit::AI_BACKFILL_TOKEN;
+    use project_phoenix::command_admission::{CommandLog, PendingCommands};
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemControlPayload, SystemId};
+
+    let args = HeadlessArgs {
+        max_ticks: 200,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, 150);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: the first round is under way"
+    );
+
+    // Round one takes a command across the boundary.
+    app.world_mut()
+        .resource_mut::<Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: AI_BACKFILL_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId("red-alert".into()),
+                payload: SystemControlPayload::SetRedAlert { active: true },
+            },
+        });
+    run(&mut app, 1);
+    assert_eq!(
+        app.world().resource::<CommandLog>().len(),
+        1,
+        "precondition: round one recorded the command, so there is something \
+         for round two to inherit"
+    );
+
+    // GameOver → Lobby → InProgress: the shape `ReturnToLobby` produces.
+    // Driven through `NextState` because the phases are what the reset hangs
+    // on; the lobby handler's own path to them is its test's business.
+    for phase in [GamePhase::GameOver, GamePhase::Lobby, GamePhase::InProgress] {
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(phase.clone());
+        app.update();
+        assert_eq!(
+            app.world().resource::<State<GamePhase>>().get(),
+            &phase,
+            "the run must actually reach {phase:?}"
+        );
+    }
+
+    assert!(
+        app.world().resource::<CommandLog>().is_empty(),
+        "a second round must start from an empty log — otherwise seed + log \
+         describes two runs at once, and a replay would apply round one's \
+         commands to round two's world. Inherited: {:?}",
+        app.world().resource::<CommandLog>().entries()
+    );
+    assert!(
+        app.world().resource::<PendingCommands>().is_empty(),
+        "and no command from round one may still be queued for a future tick"
+    );
+}

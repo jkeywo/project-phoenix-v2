@@ -258,6 +258,9 @@ entities:
       summary: Admission layer that validates incoming system commands before simulation handlers run.
       rationale:
         - "Issue #738: the seam owns the AI side of the typed input path too. Every console/system AI operator used to carry its own byte-identical emit_*_ai_command helper (helm #824, shields #826, sensors #828, navigation/repair #830, power #831, captain) that built an ai:<uuid> token, fabricated an empty ShipConfig for entities with no ShipConfigComponent, and called validate_and_admit. Those seven copies collapsed into command_admission::ai_emit::emit_ai_command, so the token shape and the unconfigured-ship admission context are decided in exactly one place."
+        - "Issue #898 makes this seam the place a run's inputs are WRITTEN DOWN, and settles what that means. PRD #849 described a log carrying 'human and AI commands both stamped for a future tick', which cannot be built as written: AI decisions never cross a network boundary — emit_ai_command writes them in-process, mid-tick, straight into the target ship's AdmittedCommands. OPTION A IS THE DECISION: the log records the network boundary, and nothing a replaying instance can re-derive for itself. Every command admit_system_commands accepts is recorded in acceptance order, stamped with the logical tick it applies on; every emit_ai_command emission is absent and keeps its same-tick guarantee untouched. What makes the omission safe is that replaying the log from the same master seed regenerates identical AI behaviour, so recording AI decisions too would DOUBLE-COUNT them — the replay would apply each order once from the log and once from the decider that re-derived it. That is what makes AI determinism load-bearing, and why #895 put the AI cadence on the logical tick and #897 seeded the RNG per call site first. The recorder does not ask whether a command came from a human or an AI: it records at a SEAM, not by origin, which is the only reading compatible with the human/AI symmetry constraint. If #854 later has a peer send an NPC's orders over the wire those are logged too — correctly, because a remote peer's decisions are not something this instance re-derives."
+        - "Issue #898 leaves 'commands apply the tick they are admitted' INTACT, and names the one place a future slice may amend it. CommandDelay is the lockstep input delay in logical ticks: a logged command's apply tick is SimTick at admission plus CommandDelay, and CommandDelay is 0 for a local host, so the apply tick IS the admission tick and the command lands in AdmittedCommands in the same run of the same system, in the same order, as it did before the log existed. What changed is that the tick is written down rather than implied, and that admission drains from an ordered (apply tick, arrival) queue keyed on it — a pass-through today BY CONFIGURATION rather than by construction. A non-zero CommandDelay is P2P lockstep's (#854) to negotiate once there is a second peer to agree one with, and setting one is therefore the DELIBERATE amendment point for that rule, not something the plumbing can do by accident. CommandDelay is a resource rather than TOML gameplay data precisely because no designer tunes it and a wrong value is a desync, not a balance change."
+        - "Issue #898 review: a LoggedCommand carries a non-secret routing key, never the sender's session token. A session token is a bearer credential — it is the whole of a client's identity — and the log's destinations are exactly the two places such a string must not reach: a save file on disk and a peer over the wire. So a log entry is the non-secret PROJECTION of an AdmittedCommand: same target and payload, but response_token replaced by a ShipKey, the routed ship's EntityUuid. That key is deterministic (the seeded simulation mints it) and is already the vocabulary snapshots, balance events and damage ledgers name ships in, so a replay resolves it with machinery that exists. It suffices because routing is a DESTINATION, not an identity — admission resolves a token to one ship's AdmittedCommands, and the key names that ship directly. The raw token stays on the in-process AdmittedCommand, which is deliberately NOT Serialize. Two further review points: registration of the log resources and of admit_system_commands is folded into one register_admission_seam call, because a half-wired seam fails silently three ways (the system alone fails Bevy parameter validation and skips admission entirely; the resources alone leave an always-empty log that reads as 'this run had no input'; either half twice double-counts). And reset_command_log clears the log and the pending queue in OnEnter(GamePhase::InProgress), because a second round reached through ReturnToLobby would otherwise append to round one's log — silently, since SimTick keeps counting and the merged log stays monotonic."
     architecture:
       kind: service
       authority: authoritative
@@ -275,6 +278,7 @@ entities:
       paths:
         - src/command_admission/mod.rs
         - src/command_admission/ai_emit.rs
+        - src/command_admission/log.rs
       symbols:
         - AdmissionPlugin
         - AdmissionSet
@@ -282,6 +286,14 @@ entities:
         - validate_and_admit
         - emit_ai_command
         - ai_token_for
+        - register_admission_seam
+        - CommandLog
+        - CommandDelay
+        - PendingCommands
+        - LoggedCommand
+        - ShipKey
+        - stamp_accepted_command
+        - reset_command_log
       messages:
         - ControlSystem
       tests:
@@ -293,6 +305,34 @@ entities:
           The admission seam is its own module. Unauthorised tokens, offline
           ratings, damage-driven offline systems, and AI-controlled systems are
           all rejected by is_command_authorized before any router runs.
+      - kind: test
+        reference: a_seed_and_its_command_log_reproduce_the_run
+        summary: >-
+          Option A's claim at run scale. A seeded headless run takes commands
+          across the production boundary and keeps the log; the same seed
+          replayed with only that log re-injected, each entry on its recorded
+          tick, produces a byte-identical build_report. A third run with no
+          commands reaches a different report, so the equality is a replay
+          rather than a tautology.
+      - kind: test
+        reference: an_ai_crewed_run_records_no_commands
+        summary: >-
+          The other half of Option A. An AI-crewed run issues orders on every
+          tick (accumulated by a FixedLast probe) and records none of them,
+          because none crossed the network boundary.
+      - kind: test
+        reference: the_log_round_trips_through_ron_without_the_token
+        summary: >-
+          The log serialises to RON carrying the routed ship's key and no
+          session token — asserted at the exact point the log would become a
+          file on disk or a frame on the wire.
+      - kind: test
+        reference: a_second_round_starts_a_fresh_command_log
+        summary: >-
+          Driving GameOver then Lobby then InProgress through the real
+          add_simulation_plugins_with wiring leaves an empty log and an empty
+          pending queue, so a second round's seed plus log still describes one
+          run.
 
   - component: host-repair-router
     core:

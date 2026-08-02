@@ -854,7 +854,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-f13eb94b17738868.js" crossorigin="anonymous" integrity="sha384-dsgZp1yv8GHRwkQ5yzAeT506LIdNMGhSuvF24OXds9y1vZuTRdJBCJm/PnAtBhKM"><link rel="preload" href="./project-phoenix-f13eb94b17738868_bg.wasm" crossorigin="anonymous" integrity="sha384-viYZGJw1y7I2FK5NERjoNyhKNT9nKi099amqspsjDrdfPARIWG9LnSgVzPQoi/c0" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-8049d0c826af50db.js" crossorigin="anonymous" integrity="sha384-BOQbzkRY9MEW/Zmgk28kyI5ieTLm7lUQ791nf2qxUt1yIZZ9k6pkpkJ9DnnjWJPk"><link rel="preload" href="./project-phoenix-8049d0c826af50db_bg.wasm" crossorigin="anonymous" integrity="sha384-KY8Hz8TTG+P7KMJVkja6lya8LptfEV+q4kfB07GxCeZQsRhfz71wrcls06JwFIWF" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1147,8 +1147,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-f13eb94b17738868.js';
-const wasm = await init({ module_or_path: './project-phoenix-f13eb94b17738868_bg.wasm' });
+import init, * as bindings from './project-phoenix-8049d0c826af50db.js';
+const wasm = await init({ module_or_path: './project-phoenix-8049d0c826af50db_bg.wasm' });
 
 
 window.wasmBindings = bindings;

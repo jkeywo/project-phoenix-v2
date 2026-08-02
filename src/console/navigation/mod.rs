@@ -12,6 +12,16 @@ pub struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // The shared AI decision cadence (issue #889): `operate_navigation_ai`
+        // was one of four hosts #895's FixedUpdate migration left ungated —
+        // named deciders (helm axes, shields, power, torpedo, captain,
+        // sensors) got `run_if(ai_tick_ready)`/`run_if(ai_snapshot_ready)`, but
+        // Navigation, Repair and both Comms hosts were never enumerated and so
+        // kept running once per FIXED STEP with no gate at all. `register_ai_cadence`
+        // is idempotent — every plugin that adds a gated system calls it, so
+        // `NavigationPlugin` used standalone (as several fixtures do) still
+        // gets `AiTickReady` inserted rather than panicking on a missing `Res`.
+        crate::ai::cadence::register_ai_cadence(app);
         // Admitted-command consumer (issue #833): `handle_navigation_waypoint`
         // reads the `navigation` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(NAVIGATION_SYSTEM_ID));
@@ -37,7 +47,9 @@ impl Plugin for NavigationPlugin {
         )
         .add_systems(
             FixedUpdate,
-            operate_navigation_ai.in_set(crate::sim_sets::SimSet::Physics),
+            operate_navigation_ai
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .run_if(crate::ai::cadence::ai_tick_ready),
         )
         // The single, origin-agnostic Channel-3 clearance issuer (issue #702
         // follow-up): runs after BOTH waypoint writers — `operate_navigation_ai`

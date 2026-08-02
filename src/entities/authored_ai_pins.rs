@@ -624,6 +624,41 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
     );
 }
 
+/// Every shipped fine-system policy authors NO explicit `evaluate_every_ticks`
+/// (issue #889's PASM-tracked runtime gap: the field decodes to the parse
+/// default of 1 — "every arm of the shared base cadence" — everywhere in the
+/// fleet). Wiring the field at runtime (`crate::ai::cadence::
+/// evaluate_every_ticks_ready`, read by `ai_power_allocation` and
+/// `operate_comms_response_ai` off the sibling `PowerAiCadence` /
+/// `CommsResponseAiCadence` components) must not change shipped behaviour:
+/// this pin is what proves it stayed unchanged rather than merely asserting
+/// it in a commit message.
+#[test]
+fn every_shipped_policy_authors_the_default_evaluate_every_ticks() {
+    let hulls = ai_hulls();
+    assert!(!hulls.is_empty(), "no AI-bearing hull found to pin against");
+
+    let mut checked = 0usize;
+    for (hull, config) in &hulls {
+        for (slot, cfg) in authored_policies(config) {
+            assert_eq!(
+                cfg.evaluate_every_ticks, 1,
+                "{hull}/{slot} authors evaluate_every_ticks = {}, but no shipped hull is \
+                 meant to yet — the runtime multiplier (issue #889) is proven behaviour- \
+                 preserving BECAUSE every shipped policy decides on every arm. If a hull \
+                 now deliberately authors a slower cadence, add it here explicitly rather \
+                 than silently widening this pin.",
+                cfg.evaluate_every_ticks
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 0,
+        "no authored policy was found anywhere in the fleet to check"
+    );
+}
+
 /// …and the five selectors are unanimous across the whole fleet.
 ///
 /// Stage 5b authored all fifty as byte-identical copies of one canonical

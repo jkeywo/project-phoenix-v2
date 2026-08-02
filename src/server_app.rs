@@ -2925,13 +2925,16 @@ fn spawn_game_start_entities(
             // `fact(power_rating)` were permanently ABSENT — the #779
             // empty-facts failure mode. Both are resolved by the same shared
             // helper the spawner calls, so the two paths cannot drift.
-            let (comms_selector, comms_response_policy) =
+            let (comms_selector, comms_response_policy, comms_response_cadence) =
                 crate::console::comms::server::comms_console_ai_components(&config);
             if let Some(sel) = comms_selector {
                 commands.entity(spawned).insert(sel);
             }
             if let Some(policy) = comms_response_policy {
                 commands.entity(spawned).insert(policy);
+            }
+            if let Some(cadence) = comms_response_cadence {
+                commands.entity(spawned).insert(cadence);
             }
 
             // Repair target selector (issue #785) — same player-ship gap. Less
@@ -3239,11 +3242,14 @@ fn spawn_game_start_entities(
             // iterating `With<Ship>` sees the ship's own policy. `to_policy`
             // cannot fail: validated at load.
             if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
-                commands
-                    .entity(spawned)
-                    .insert(crate::ship::power::PowerAiPolicy(
-                        ai.to_policy().unwrap_or_default(),
-                    ));
+                commands.entity(spawned).insert((
+                    crate::ship::power::PowerAiPolicy(ai.to_policy().unwrap_or_default()),
+                    // Carried from the SAME authored block (issue #889's
+                    // evaluate_every_ticks, wired at runtime): a resolved
+                    // `AiPolicy` alone forgets this field, so it rides
+                    // alongside as a sibling component.
+                    crate::ship::power::PowerAiCadence(ai.evaluate_every_ticks),
+                ));
             }
 
             // Power multipliers

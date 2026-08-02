@@ -127,6 +127,12 @@ pub struct RepairPlugin;
 
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
+        // The shared AI decision cadence (issue #889): `operate_repair_ai` was
+        // one of four hosts #895's FixedUpdate migration left ungated — see
+        // the identical note on `NavigationPlugin::build`. `register_ai_cadence`
+        // is idempotent, so `RepairPlugin` used standalone still gets
+        // `AiTickReady` inserted rather than panicking on a missing `Res`.
+        crate::ai::cadence::register_ai_cadence(app);
         // The dispatch router registers itself in Physics, pinning its own
         // `.after(operate_repair_ai)` ordering (issue #830). See `super::dispatch`.
         super::dispatch::register_repair_dispatch(app);
@@ -151,7 +157,9 @@ impl Plugin for RepairPlugin {
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(super::dispatch::handle_dispatch_repair_team)
                     .after(super::dispatch::handle_set_repair_priority),
-                operate_repair_ai.in_set(crate::sim_sets::SimSet::Physics),
+                operate_repair_ai
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
                 publish_repair_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         )

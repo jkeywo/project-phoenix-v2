@@ -70,6 +70,22 @@ pub struct AiTickReady(pub bool);
 #[derive(Resource)]
 pub struct AiSnapshotReady(pub bool);
 
+/// The shared AI base cadence's INTERVAL in raw sim ticks — `sim_tick_hz /
+/// ai_tick_hz`, the same `per_ai` [`tick_ai_cadence`] derives [`AiTickReady`]
+/// from. Written alongside the two latches so a host whose fine-system
+/// authors a per-host `evaluate_every_ticks` multiple (issue #889's
+/// PASM-tracked runtime gap — the field was parsed and validated but no host
+/// read it) can derive its OWN slower arm — `tick % (base_interval * n) == 0`,
+/// see [`evaluate_every_ticks_ready`] — from the tick count alone, with no
+/// second derivation of `sim_tick_hz / ai_tick_hz` anywhere else in the crate.
+///
+/// `1` in the no-world fixture arm, matching [`tick_ai_cadence`]'s own `(1,
+/// 1)` fallback: without an authored `WorldConfig` every base tick already
+/// decides, so a per-host `n` still divides the SAME tick count a fixture
+/// steps by hand.
+#[derive(Resource, Default)]
+pub struct AiBaseInterval(pub u64);
+
 /// Derive both latches from the logical tick count.
 ///
 /// Registered in `FixedLast`, after
@@ -83,6 +99,7 @@ pub fn tick_ai_cadence(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut ready: ResMut<AiTickReady>,
     mut snapshot_ready: ResMut<AiSnapshotReady>,
+    mut base_interval: ResMut<AiBaseInterval>,
 ) {
     let (per_ai, snapshot_every) = match world_config.as_deref() {
         Some(wc) => (
@@ -101,6 +118,35 @@ pub fn tick_ai_cadence(
     let per_snapshot = (per_ai * snapshot_every).max(1);
     ready.0 = tick.0.is_multiple_of(per_ai);
     snapshot_ready.0 = tick.0.is_multiple_of(per_snapshot);
+    base_interval.0 = per_ai;
+}
+
+/// Whether an authored `evaluate_every_ticks = n` multiple (issue #889) is due
+/// to decide on THIS tick, given the shared base interval [`tick_ai_cadence`]
+/// derives.
+///
+/// `n <= 1` reduces to "every base-cadence arm" — the shipped default, and
+/// exactly the ticks [`AiTickReady`] already arms on, so a host adopting this
+/// check changes nothing for any content that never authors the field. Pure
+/// function of the raw tick count: no timer, no per-host clock, and the
+/// "phase" (which arms count as the 0th, nth, 2nth, ... of this host's own
+/// slower cadence) is anchored to `SimTick` 0 — the same anchor `AiTickReady`
+/// and `AiSnapshotReady` use — so two hosts authoring the same `n` (or the
+/// same host on two lockstep peers) agree on which arms fire without
+/// coordinating with each other.
+///
+/// Callers gate on this INSTEAD OF re-deriving `sim_tick_hz / ai_tick_hz`
+/// themselves: `base_interval` already IS that derivation, read from
+/// [`AiBaseInterval`] once per tick by every caller, so the arithmetic lives
+/// in this one function rather than in each of the hosts that read it.
+pub fn evaluate_every_ticks_ready(
+    tick: u64,
+    base_interval: u64,
+    evaluate_every_ticks: u32,
+) -> bool {
+    let n = (evaluate_every_ticks as u64).max(1);
+    let base = base_interval.max(1);
+    tick.is_multiple_of(base * n)
 }
 
 /// Read-only run condition: the shared AI base cadence.
@@ -126,6 +172,7 @@ pub fn register_ai_cadence(app: &mut App) {
     crate::sim_tick::register_sim_tick(app);
     app.insert_resource(AiTickReady(true))
         .insert_resource(AiSnapshotReady(true))
+        .insert_resource(AiBaseInterval(1))
         .add_systems(
             FixedLast,
             tick_ai_cadence.after(crate::sim_tick::advance_sim_tick),
@@ -296,6 +343,76 @@ mod tests {
         assert_eq!(
             snapshot, 6,
             "the fixture arm must arm the SNAPSHOT latch every step too"
+        );
+    }
+
+    // ── evaluate_every_ticks (issue #889's PASM-tracked runtime gap) ────────
+
+    /// `evaluate_every_ticks <= 1` must reduce to exactly the base cadence:
+    /// every shipped hull authors no explicit value (the TOML parse default is
+    /// 1), so this is the pin that keeps shipped behaviour unchanged. Driven
+    /// against the REAL derived base interval, not a hand-picked number.
+    #[test]
+    fn n_equal_one_reduces_to_every_base_tick() {
+        let mut app = cadence_app(10);
+        app.insert_resource(world_config(60.0, 30.0, 10.0));
+
+        let mut base_arms = 0usize;
+        let mut n1_arms = 0usize;
+        for _ in 0..12 {
+            app.update();
+            let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+            let base_interval = app.world().resource::<AiBaseInterval>().0;
+            if app.world().resource::<AiTickReady>().0 {
+                base_arms += 1;
+            }
+            if evaluate_every_ticks_ready(tick, base_interval, 1) {
+                n1_arms += 1;
+            }
+        }
+        assert_eq!(
+            base_arms, n1_arms,
+            "evaluate_every_ticks = 1 must decide on exactly the ticks \
+             AiTickReady already arms on — no host adopting this check may \
+             change behaviour for content that never authors the field"
+        );
+    }
+
+    /// A fixture authors `evaluate_every_ticks = 3`: it must decide on exactly
+    /// every third arm of the shared base latch, never more, never fewer, and
+    /// the arms it picks must be the 3rd, 6th, 9th, ... — not merely "a third
+    /// of them" in some other pattern. `base_interval` (2, from 60/30 Hz) keeps
+    /// the test honest that the multiple stacks ON TOP of the base derivation
+    /// rather than replacing it: the host's own arm is every 6th SIM tick.
+    #[test]
+    fn n_equal_three_decides_on_exactly_every_third_arm() {
+        let mut app = cadence_app(10);
+        app.insert_resource(world_config(60.0, 30.0, 10.0));
+
+        let mut base_arm_index = 0u64; // 1-based count of AiTickReady arms seen
+        let mut due_at_base_arm: Vec<u64> = Vec::new();
+        for _ in 0..24 {
+            app.update();
+            if !app.world().resource::<AiTickReady>().0 {
+                continue;
+            }
+            base_arm_index += 1;
+            let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+            let base_interval = app.world().resource::<AiBaseInterval>().0;
+            assert_eq!(
+                base_interval, 2,
+                "60/30 Hz must derive a 2-sim-tick base interval"
+            );
+            if evaluate_every_ticks_ready(tick, base_interval, 3) {
+                due_at_base_arm.push(base_arm_index);
+            }
+        }
+        assert_eq!(
+            due_at_base_arm,
+            vec![3, 6, 9, 12],
+            "evaluate_every_ticks = 3 must decide on exactly every third arm \
+             of the shared base latch (12 base arms in 24 sim ticks at a \
+             2-tick base interval), not some other fraction of them"
         );
     }
 }

@@ -556,6 +556,15 @@ fn ai_power_allocation(
     // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
     // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
     origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The shared AI base cadence's raw tick + interval (issue #889's
+    // evaluate_every_ticks, wired at runtime). `Option<Res<_>>` for the usual
+    // bare-`App` reason: `power_test_app` below never calls
+    // `register_ai_cadence`, so these read the same (0, 1) fallback
+    // `evaluate_every_ticks_ready` already treats as "always due" — identical
+    // to this system's pre-existing (ungated w.r.t. per-host cadence)
+    // behaviour in every such fixture.
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    base_interval: Option<Res<crate::ai::cadence::AiBaseInterval>>,
     mut ships: Query<
         (
             Entity,
@@ -566,6 +575,7 @@ fn ai_power_allocation(
             Option<&crate::ship_plugin::LastHelmInput>,
             Option<&crate::ship::power::PowerConfigResource>,
             Option<&crate::ship::power::PowerAiPolicy>,
+            Option<&crate::ship::power::PowerAiCadence>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
             &mut crate::messages::AdmittedCommands,
@@ -577,6 +587,8 @@ fn ai_power_allocation(
     >,
 ) {
     let now = time.elapsed_secs();
+    let tick = tick.map(|t| t.0).unwrap_or(0);
+    let base_interval = base_interval.map(|b| b.0).unwrap_or(1);
 
     // OBJECTIVE fact, scored once per tick: does the active pool carry a Destroy
     // directive? A broad "the ship has something to kill" signal an authored rule
@@ -599,6 +611,7 @@ fn ai_power_allocation(
         last_helm_comp,
         cfg_comp,
         policy_comp,
+        cadence_comp,
         ship_config,
         combat_activity,
         mut admitted,
@@ -631,6 +644,20 @@ fn ai_power_allocation(
             continue;
         };
         let policy: &crate::ai::policy::AiPolicy = &policy_comp.0;
+
+        // Per-host multiplier on the shared base cadence (issue #889's
+        // evaluate_every_ticks, wired at runtime): a ship whose
+        // `[power.ai_policy]` authors `evaluate_every_ticks = n` decides on
+        // every Nth arm of `ai_tick_ready`, not every arm. `1` (every shipped
+        // hull today) reduces this to a no-op — see `AiBaseInterval`'s docs.
+        let evaluate_every_ticks = cadence_comp.map(|c| c.0).unwrap_or(1);
+        if !crate::ai::cadence::evaluate_every_ticks_ready(
+            tick,
+            base_interval,
+            evaluate_every_ticks,
+        ) {
+            continue;
+        }
 
         // The read-only scenario flag chain (AC3), anchored at the layer that
         // spawned THIS ship (issue #891 stage 2) — correctly layered, so

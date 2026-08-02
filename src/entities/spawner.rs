@@ -396,8 +396,13 @@ pub fn spawn_entity(
         // is PRD #774 US7's requirement. `to_policy` cannot fail here: the block
         // was validated in `EntityConfig::from_toml`.
         if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
-            entity_commands.insert(crate::power_plugin::PowerAiPolicy(
-                ai.to_policy().unwrap_or_default(),
+            entity_commands.insert((
+                crate::power_plugin::PowerAiPolicy(ai.to_policy().unwrap_or_default()),
+                // Carried from the SAME authored block (issue #889's
+                // evaluate_every_ticks, wired at runtime): a resolved
+                // `AiPolicy` alone forgets this field, so it rides alongside
+                // as a sibling component.
+                crate::power_plugin::PowerAiCadence(ai.evaluate_every_ticks),
             ));
         }
         // Per-entity power multipliers. Seeded from any per-console TOML
@@ -549,13 +554,16 @@ pub fn spawn_entity(
         // to the player ship — the only ship either Comms AI host actually runs
         // on, since both are filtered `With<LocalShip>`. Each half is `None` when
         // its block is unauthored, and nothing is attached for it.
-        let (comms_selector, comms_response_policy) =
+        let (comms_selector, comms_response_policy, comms_response_cadence) =
             crate::console::comms::server::comms_console_ai_components(config);
         if let Some(sel) = comms_selector {
             entity_commands.insert(sel);
         }
         if let Some(policy) = comms_response_policy {
             entity_commands.insert(policy);
+        }
+        if let Some(cadence) = comms_response_cadence {
+            entity_commands.insert(cadence);
         }
         // Shields AI config — loaded from [shields_console.ai] if present,
         // otherwise the parse-time default. Inserted for every entity carrying

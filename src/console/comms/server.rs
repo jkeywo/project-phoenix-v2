@@ -24,6 +24,13 @@ pub struct CommsConsolePlugin;
 
 impl Plugin for CommsConsolePlugin {
     fn build(&self, app: &mut App) {
+        // The shared AI decision cadence (issue #889): `operate_comms_ai` and
+        // `operate_comms_response_ai` were two of four hosts #895's FixedUpdate
+        // migration left ungated — see the identical note on
+        // `NavigationPlugin::build`. `register_ai_cadence` is idempotent, so
+        // `CommsConsolePlugin` used standalone still gets `AiTickReady`
+        // inserted rather than panicking on a missing `Res`.
+        crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
             FixedUpdate,
             (
@@ -34,7 +41,8 @@ impl Plugin for CommsConsolePlugin {
                 // `handle_set_torpedo_volley_target` (issue #753).
                 operate_comms_ai
                     .in_set(crate::sim_sets::SimSet::Input)
-                    .before(handle_hail),
+                    .before(handle_hail)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
                 // Same shape for the dialogue-response policy (issue #786): the
                 // `RespondToMessage` the Comms AI emits must be drained by the
                 // SAME `handle_respond_to_message` router a human's response
@@ -54,7 +62,8 @@ impl Plugin for CommsConsolePlugin {
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(operate_comms_ai)
                     .after(handle_hail)
-                    .before(handle_respond_to_message),
+                    .before(handle_respond_to_message)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
             ),
         );
     }
@@ -781,6 +790,22 @@ pub struct CommsTargetSelector {
 #[derive(Component, Clone, Debug)]
 pub struct CommsResponseAiPolicy(pub crate::ai::policy::AiPolicy);
 
+/// Per-ship multiplier on the shared AI base cadence for `[comms_console.ai]`
+/// (issue #889's PASM-tracked runtime gap: `evaluate_every_ticks` was parsed
+/// and validated but no host read it). `operate_comms_response_ai` decides on
+/// every Nth arm of the shared `ai_tick_ready` latch rather than every arm.
+///
+/// A sibling component to [`CommsResponseAiPolicy`] rather than a field on it
+/// (or on the shared [`crate::ai::policy::AiPolicy`] type), for the same
+/// reason `PowerAiCadence` sits beside `PowerAiPolicy`: dozens of call sites
+/// across the crate build an `AiPolicy` by literal, and a sibling component
+/// keeps wiring one host's cadence from touching all of them.
+///
+/// `1` — the parse default, and what every shipped hull authors today — means
+/// "every arm", identical to behaviour before this component existed.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct CommsResponseAiCadence(pub u32);
+
 /// Resolve a ship's two Comms-console AI components from its `EntityConfig`
 /// (issue #786).
 ///
@@ -806,7 +831,11 @@ pub struct CommsResponseAiPolicy(pub crate::ai::policy::AiPolicy);
 /// were validated in `EntityConfig::from_toml`.
 pub fn comms_console_ai_components(
     config: &crate::entity_config::EntityConfig,
-) -> (Option<CommsTargetSelector>, Option<CommsResponseAiPolicy>) {
+) -> (
+    Option<CommsTargetSelector>,
+    Option<CommsResponseAiPolicy>,
+    Option<CommsResponseAiCadence>,
+) {
     let selector = config
         .comms_console
         .as_ref()
@@ -815,12 +844,13 @@ pub fn comms_console_ai_components(
             selector: s.to_selector().unwrap_or_default(),
             power_rating: config.power_rating.map(|r| r as f32),
         });
-    let policy = config
-        .comms_console
-        .as_ref()
-        .and_then(|cc| cc.ai.as_ref())
-        .map(|ai| CommsResponseAiPolicy(ai.to_policy().unwrap_or_default()));
-    (selector, policy)
+    let ai_cfg = config.comms_console.as_ref().and_then(|cc| cc.ai.as_ref());
+    let policy = ai_cfg.map(|ai| CommsResponseAiPolicy(ai.to_policy().unwrap_or_default()));
+    // Carried from the SAME authored block `policy` decodes from (issue #889's
+    // evaluate_every_ticks): a resolved `AiPolicy` alone forgets this field, so
+    // it rides alongside as a sibling component rather than being lost.
+    let cadence = ai_cfg.map(|ai| CommsResponseAiCadence(ai.evaluate_every_ticks));
+    (selector, policy, cadence)
 }
 
 /// One hail candidate's observable readings, resolved host-side before the pure
@@ -1523,6 +1553,15 @@ pub fn operate_comms_response_ai(
     origin_q: Query<&crate::world::server::EntityOriginLayer>,
     sessions: Res<crate::lobby::Sessions>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
+    // The shared AI base cadence's raw tick + interval (issue #889's
+    // evaluate_every_ticks, wired at runtime). `Option<Res<_>>` for the usual
+    // bare-`App` reason: several fixtures below register this system directly
+    // without `register_ai_cadence`, so these read the same (0, 1) fallback
+    // `evaluate_every_ticks_ready` already treats as "always due" — identical
+    // to this system's pre-existing (ungated w.r.t. per-host cadence)
+    // behaviour in every such fixture.
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    base_interval: Option<Res<crate::ai::cadence::AiBaseInterval>>,
     mut ships: Query<
         (
             Entity,
@@ -1533,6 +1572,7 @@ pub fn operate_comms_response_ai(
             Option<&crate::ship_state::ShipRedAlert>,
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&CommsResponseAiPolicy>,
+            Option<&CommsResponseAiCadence>,
             // The authored ship `power_rating` lives on the CO-LOCATED selector
             // component (both are inserted on the same entity at spawn), so it
             // is read from there rather than left permanently absent — the #779
@@ -1547,6 +1587,8 @@ pub fn operate_comms_response_ai(
     let (Some(comms), Some(inbox)) = (comms.as_deref(), inbox.as_deref()) else {
         return;
     };
+    let tick = tick.map(|t| t.0).unwrap_or(0);
+    let base_interval = base_interval.map(|b| b.0).unwrap_or(1);
 
     for (
         entity,
@@ -1557,6 +1599,7 @@ pub fn operate_comms_response_ai(
         red_alert,
         hull,
         policy_comp,
+        cadence_comp,
         selector_comp,
     ) in ships.iter_mut()
     {
@@ -1574,6 +1617,19 @@ pub fn operate_comms_response_ai(
             continue;
         };
         let policy = &policy_comp.0;
+        // Per-host multiplier on the shared base cadence (issue #889's
+        // evaluate_every_ticks, wired at runtime): a ship whose
+        // `[comms_console.ai]` authors `evaluate_every_ticks = n` decides on
+        // every Nth arm of `ai_tick_ready`, not every arm. `1` (every shipped
+        // hull today) reduces this to a no-op.
+        let evaluate_every_ticks = cadence_comp.map(|c| c.0).unwrap_or(1);
+        if !crate::ai::cadence::evaluate_every_ticks_ready(
+            tick,
+            base_interval,
+            evaluate_every_ticks,
+        ) {
+            continue;
+        }
         // The read-only scenario flag chain (AC4), anchored at the layer that
         // spawned THIS ship (issue #891 stage 2).
         let flag_chain = crate::world::server::entity_flag_chain(
@@ -3802,7 +3858,7 @@ mod tests {
     fn attach_comms_console_ai_from_toml(app: &mut App, toml: &str) {
         let config = crate::entity_config::EntityConfig::from_toml(toml)
             .expect("the fixture template must parse and validate");
-        let (selector, policy) = comms_console_ai_components(&config);
+        let (selector, policy, cadence) = comms_console_ai_components(&config);
         let entity = {
             let mut q = app
                 .world_mut()
@@ -3837,6 +3893,9 @@ mod tests {
         }
         if let Some(policy) = policy {
             app.world_mut().entity_mut(entity).insert(policy);
+        }
+        if let Some(cadence) = cadence {
+            app.world_mut().entity_mut(entity).insert(cadence);
         }
     }
 

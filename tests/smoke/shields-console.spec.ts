@@ -12,7 +12,7 @@ const NOMINAL_STATE = {
   ],
   hull_integrity_pct: 78,
   focused_facing: 'Fore',
-  target_bearing: 272,
+  threat_bearing: 272,
   grid_status: 'GRID NOMINAL',
 };
 
@@ -28,7 +28,7 @@ test('shields console: variable arc count renders correctly', async ({ page }) =
     facings: [{ arc_id: 'all', label: 'All', hp: 15, max_hp: 15, online: true, offline_remaining: 0, is_focused: false, center_deg: 0, width_deg: 360 }],
     hull_integrity_pct: 100,
     focused_facing: null,
-    target_bearing: null,
+    threat_bearing: null,
     grid_status: 'GRID NOMINAL',
   });
   await expect(page.locator('ph-shield-facings .arc-path')).toHaveCount(1);
@@ -57,7 +57,7 @@ test('shields console: hull bar reflects hull_integrity_pct', async ({ page }) =
   await expect(page.locator('#hull-tag')).toHaveText('78%');
 });
 
-test('shields console: threat indicator visible when target_bearing set', async ({ page }) => {
+test('shields console: threat indicator visible when threat_bearing set', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => (window as any).__updateConsole('shields', JSON.stringify(s)), NOMINAL_STATE);
   await expect(page.locator('#threat-row')).toHaveClass(/active/);
@@ -66,7 +66,7 @@ test('shields console: threat indicator visible when target_bearing set', async 
 
 test('shields console: threat indicator hidden when no target', async ({ page }) => {
   await page.goto(CONSOLE_URL);
-  await page.evaluate((s) => (window as any).__updateConsole('shields', JSON.stringify(s)), { ...NOMINAL_STATE, target_bearing: null });
+  await page.evaluate((s) => (window as any).__updateConsole('shields', JSON.stringify(s)), { ...NOMINAL_STATE, threat_bearing: null });
   await expect(page.locator('#threat-row')).not.toHaveClass(/active/);
 });
 

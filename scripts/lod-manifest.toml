@@ -65,18 +65,22 @@ declared_by = ["assets/models/asteroid_common_3.cosmetic.toml", "assets/models/a
 
 [[output]]
 path = "assets/models/asteroid_common_4_lod1.glb"
-source = "assets/models/asteroid_common_4.glb"
-source_sha256 = "e11421c335284eb7bd17c6da9c0d4244f585c5e0f41872cffe06e2db8073f539"
-params = { ratio = 0.25, error = 0.01, texture_size = 512 }
-output_sha256 = "8ea63531e30cd803b4239c2e53ab2d2a529a5fe0167adf65ee5eb2273b3143f4"
-output_bytes = 1865756
+source = "assets/models/asteroid_common_4.remesh.glb"
+source_sha256 = "d5d584eadf11d6219d25579a62e240c1416c6a76daa90fb37f93383b83c4fac4"
+origin = "assets/models/asteroid_common_4.glb"
+origin_sha256 = "e11421c335284eb7bd17c6da9c0d4244f585c5e0f41872cffe06e2db8073f539"
+params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
+output_sha256 = "6d72f19787bc11d148c5ea840fa8bcf1e8618056a26e8b2c431dcfdbcf0f2e88"
+output_bytes = 1155700
 declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_4_lod2.glb"
-source = "assets/models/asteroid_common_4.glb"
-source_sha256 = "e11421c335284eb7bd17c6da9c0d4244f585c5e0f41872cffe06e2db8073f539"
-params = { ratio = 0.05, error = 0.1, texture_size = 256 }
-output_sha256 = "fe1d57dc6eb327778f2be402314cc659af518a24fe510441a7378ec380155c8b"
-output_bytes = 904020
+source = "assets/models/asteroid_common_4.remesh.glb"
+source_sha256 = "d5d584eadf11d6219d25579a62e240c1416c6a76daa90fb37f93383b83c4fac4"
+origin = "assets/models/asteroid_common_4.glb"
+origin_sha256 = "e11421c335284eb7bd17c6da9c0d4244f585c5e0f41872cffe06e2db8073f539"
+params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
+output_sha256 = "46d02983a106add482211e250ac286c44f989567924705fbdb6c125787dd4070"
+output_bytes = 368944
 declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]

@@ -1947,6 +1947,7 @@ mod tests {
                 .insert(crate::ai::server::AiProfile {
                     aggression: 0.8,
                     sensor_range: 120.0,
+                    ..Default::default()
                 });
         }
 
@@ -2265,6 +2266,7 @@ mod tests {
                 crate::ai::server::AiProfile {
                     aggression: 0.5,
                     sensor_range: 120.0,
+                    ..Default::default()
                 },
             ))
             .id();

@@ -220,6 +220,25 @@ pub fn ai_high_fidelity_components() -> AiHighFidelityComponents {
 pub struct AiProfile {
     pub aggression: f32,
     pub sensor_range: f32,
+    /// See [`crate::entity_config::AiProfileConfig::low_lod_cruise_fraction`].
+    pub low_lod_cruise_fraction: f32,
+    /// See [`crate::entity_config::AiProfileConfig::low_lod_speed_decay_per_sec`].
+    pub low_lod_speed_decay_per_sec: f32,
+    /// See [`crate::entity_config::AiProfileConfig::low_lod_turn_rate_fraction`].
+    pub low_lod_turn_rate_fraction: f32,
+}
+
+impl Default for AiProfile {
+    fn default() -> Self {
+        Self {
+            aggression: 0.5,
+            sensor_range: 100.0,
+            low_lod_cruise_fraction: crate::entity_config::default_low_lod_cruise_fraction(),
+            low_lod_speed_decay_per_sec: crate::entity_config::default_low_lod_speed_decay_per_sec(
+            ),
+            low_lod_turn_rate_fraction: crate::entity_config::default_low_lod_turn_rate_fraction(),
+        }
+    }
 }
 
 /// Tracks time since last LOD state transition for dwell-based demotion.
@@ -982,6 +1001,51 @@ fn active_waypoint_route(
         })
 }
 
+/// The named target of this ship's top-scoring standing `Destroy` directive,
+/// read from the same pre-scored `scored_objectives` pool `active_waypoint_route`
+/// reads (issue #933 review follow-up).
+///
+/// Resolving through the scored pool — rather than the first `directive_kind
+/// == "Destroy"` entry in authoring order — is what makes this agree with the
+/// high-LOD Helm (`plan_helm_travel`, `ai/core.rs`) and with
+/// `score_doctrine_pool`'s own `zero_gates`: a Destroy directive gated on
+/// `not_attacked` scores 0 once the ship has been hit and is filtered out
+/// here exactly as it is there, so a demoted, attacked ship stops steering at
+/// a target the high-LOD Helm has already given up on (the shipped
+/// `assault-starbase` doctrine in `combat_test.toml` is the concrete case).
+///
+/// `scored_objectives` is populated by `aggregate_doctrine_blackboards`, which
+/// runs over every `BehaviourSection` ship regardless of LOD and scores against
+/// that ship's own `hull_fraction`/`red_alert`/`attacked` facts — the same
+/// facts `WorldConditions` needs — so a demoted ship's pool is exactly as
+/// current as a high-LOD ship's; low LOD does not narrow what this can see.
+/// An empty `target` (auto-acquire, no single position) is treated the same
+/// as "no qualifying directive": there is nothing deterministic to turn
+/// toward, only the cruise-speed decay applies.
+fn active_destroy_target(blackboards: &crate::server_app::ShipSystemBlackboards) -> Option<String> {
+    let bb = match blackboards
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())
+    {
+        Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v,
+        _ => return None,
+    };
+    bb.scored_objectives
+        .iter()
+        .filter(|o| {
+            o.score > 0.0
+                && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+                && matches!(o.directive, crate::messages::AiDirective::Destroy { .. })
+        })
+        .max_by(|a, b| a.score.total_cmp(&b.score))
+        .and_then(|o| match &o.directive {
+            crate::messages::AiDirective::Destroy { target } if !target.is_empty() => {
+                Some(target.clone())
+            }
+            _ => None,
+        })
+}
+
 /// Advance every ship's objective cursors as it reaches its waypoints.
 ///
 /// Runs in `SimSet::Modifiers` — after `Physics` has moved the ships this
@@ -1106,14 +1170,35 @@ pub(crate) fn advance_objective_cursors(
 /// `combat_test.toml` declares — `before_the_fire.toml` spawns the same hull and
 /// declares neither. It is inert there today because the speed ramp lives in the
 /// `Some(target_pos)` branch, so a hull that never had a flyable route sits at
-/// `forward_speed == 0` and drifts nowhere. A ship *demoted* from high LOD
-/// carrying real speed would drift on forever. That is deliberately left alone:
-/// it is the same drift every low-LOD ship with nothing to steer toward already
-/// gets (no objective, an untargeted Destroy with no hostile in range), and the
-/// defect in the warhawk case is content — a world that spawns a hull without
-/// declaring its patrol anchors — which holding station would hide rather than
-/// fix. Arrival is different in kind: there the route *did* resolve and the ship
-/// is where it was sent.
+/// `forward_speed == 0` and drifts nowhere. The defect in the warhawk case is
+/// content — a world that spawns a hull without declaring its patrol anchors —
+/// which holding station would hide rather than fix. Arrival is different in
+/// kind: there the route *did* resolve and the ship is where it was sent.
+///
+/// # A demoted ship's frozen exit speed does not dead-reckon forever (issue #933)
+///
+/// A ship *demoted* from high LOD mid-manoeuvre used to carry whatever
+/// `forward_speed`/`yaw` it had at that instant into the dumb drift above and
+/// keep it forever — any hull demoted while moving fast (boosted or otherwise)
+/// left the scenario permanently. Two authored corrections now apply in the
+/// dumb-drift branch, gated on `LodTransitionTimer` being present (i.e. this
+/// ship has been through at least one High↔Low transition already — a ship
+/// still in its very first Low stretch since spawn, never yet promoted, is
+/// closing on its authored spawn heading for the first time, not dead-
+/// reckoning a frozen exit velocity, and is left on the pre-#933 drift so an
+/// assault wave's scripted approach is untouched). Both corrections read off
+/// the ship's own `AiProfile` and are pure functions of tick + state (no RNG):
+/// the frozen speed decays toward `AiProfile::low_lod_cruise_fraction *
+/// max_speed` at `AiProfile::low_lod_speed_decay_per_sec`
+/// (`ai::lod::decay_speed_toward`), and a ship whose doctrine carries a
+/// standing `Destroy` directive naming a target that resolves in the
+/// (possibly stale) `WorldSnapshot` turns its dead-reckoned heading toward it
+/// at `AiProfile::low_lod_turn_rate_fraction * max_yaw_rate`
+/// (`ai::lod::step_yaw_toward`). An untargeted Destroy (empty `target`, the
+/// same "no hostile in range" case the warhawk's routeless drift already
+/// covers) gets the cruise decay only — there is no single position to turn
+/// toward. A bare test entity with no `AiProfile` component at all keeps the
+/// pre-#933 unmodified drift regardless of transition history.
 ///
 /// Read-only with respect to the cursor: arrival detection and advancement
 /// belong to `advance_objective_cursors` in `SimSet::Modifiers`.
@@ -1142,12 +1227,15 @@ pub(crate) fn advance_objective_cursors(
 fn simulate_low_lod_ships(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    world_snapshot: Option<Res<WorldSnapshot>>,
     mut ships: Query<
         (
             &mut ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
             Option<&ObjectiveCursors>,
             Option<&crate::entities::spawner::HelmConsoleSection>,
+            Option<&AiProfile>,
+            Option<&LodTransitionTimer>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -1163,8 +1251,12 @@ fn simulate_low_lod_ships(
     const LOW_LOD_SPEED_FRACTION: f32 = 0.4;
     // Simple ramp rate so forward_speed doesn't snap from 0 to max in one tick.
     const LOW_LOD_ACCEL_PER_SEC: f32 = 10.0;
+    // Fallback used only when a ship has no `HelmConsoleSection` at all — its
+    // authored `max_yaw_rate` is unavailable, so the dead-reckoning fallback's
+    // return-steering (issue #933) needs *some* turn-rate ceiling to clamp to.
+    const LOW_LOD_DEFAULT_MAX_YAW_RATE: f32 = 0.5;
 
-    for (mut physics, blackboards, cursors, helm_section) in &mut ships {
+    for (mut physics, blackboards, cursors, helm_section, ai_profile, lod_timer) in &mut ships {
         let max_speed = helm_section
             .map(|h| h.0.max_speed)
             .filter(|&s| s > 0.0)
@@ -1234,8 +1326,78 @@ fn simulate_low_lod_ships(
         }
 
         // Dumb forward-move fallback: no patrol objective, no cursor component,
-        // or a stalled/terminal patrol. Preserves the pre-existing low-LOD
-        // drift so non-patrol ships keep moving instead of standing still.
+        // or a stalled/terminal patrol. This used to be a pure frozen-velocity
+        // extrapolation — whatever forward_speed and yaw the ship had at the
+        // moment of demotion, it kept forever, so a hull demoted mid-manoeuvre
+        // at boosted speed left the scenario permanently (issue #933). Two
+        // authored, deterministic corrections apply now, both driven off this
+        // ship's own `AiProfile`, and both gated on `LodTransitionTimer` being
+        // present — i.e. this ship has been through at least one LOD
+        // transition already. A ship in its very first Low-fidelity stretch
+        // since spawn (no timer yet: it has never been High) has not been
+        // "demoted" in the sense issue #933 means and keeps the old drift
+        // unmodified — it is still closing distance for the first time on
+        // whatever heading/speed its template or a `spawn_entity` override
+        // set, which is deliberate authored content (e.g. an assault wave
+        // flying in from its spawn anchor), not a frozen exit velocity. Only
+        // once a ship has actually been promoted and demoted does the
+        // dead-reckoning correction apply. A bare test entity with no
+        // `AiProfile` at all is left alone regardless, preserving existing
+        // coverage that never opted into low-LOD authoring:
+        if let (Some(profile), true) = (ai_profile, lod_timer.is_some()) {
+            // (1) Decay the frozen speed toward a sane cruise fraction of this
+            // hull's authored max_speed rather than dead-reckoning at whatever
+            // speed it happened to be going the moment it was demoted.
+            let cruise_speed = max_speed * profile.low_lod_cruise_fraction;
+            physics.forward_speed = crate::ai::lod::decay_speed_toward(
+                physics.forward_speed,
+                cruise_speed,
+                profile.low_lod_speed_decay_per_sec,
+                dt,
+            );
+
+            // (2) A ship carrying a *top-scoring, still-qualifying* standing
+            // `Destroy` directive with a named (non-empty) target that
+            // resolves in the (possibly stale) `WorldSnapshot` gently turns
+            // its dead-reckoned heading back toward it, instead of coasting
+            // on its frozen exit heading. Untargeted Destroy directives
+            // (auto-acquire, empty target) — and any Destroy that scores 0
+            // under its own `zero_gates` (e.g. `not_attacked` once this ship
+            // has taken fire) — have no single position to turn toward and
+            // get the cruise decay above only. Resolved through the scored
+            // pool (`active_destroy_target`) rather than the first
+            // `directive_kind == "Destroy"` entry in authoring order, so this
+            // agrees with `plan_helm_travel`/`score_doctrine_pool` instead of
+            // steering a demoted ship at a target the high-LOD Helm has
+            // already given up on (issue #933 review follow-up).
+            let destroy_target_pos =
+                blackboards
+                    .and_then(active_destroy_target)
+                    .and_then(|target_name| {
+                        world_snapshot.as_ref().and_then(|snap| {
+                            snap.entities
+                                .iter()
+                                .find(|e| e.name.as_deref() == Some(target_name.as_str()))
+                                .map(|e| e.position)
+                        })
+                    });
+
+            if let Some(target_pos) = destroy_target_pos {
+                let dx = target_pos[0] - physics.x;
+                let dz = target_pos[2] - physics.z;
+                if dx * dx + dz * dz > f32::EPSILON {
+                    let desired_yaw = simmath::atan2(dx, -dz);
+                    let max_yaw_rate = helm_section
+                        .map(|h| h.0.max_yaw_rate)
+                        .filter(|&r| r > 0.0)
+                        .unwrap_or(LOW_LOD_DEFAULT_MAX_YAW_RATE);
+                    let max_step = max_yaw_rate * profile.low_lod_turn_rate_fraction * dt;
+                    physics.yaw =
+                        crate::ai::lod::step_yaw_toward(physics.yaw, desired_yaw, max_step);
+                }
+            }
+        }
+
         physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
         physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
     }
@@ -2559,6 +2721,7 @@ verb = "fire_blaster"
                 AiProfile {
                     aggression: 0.5,
                     sensor_range,
+                    ..Default::default()
                 },
             ))
             .id()
@@ -2715,6 +2878,473 @@ verb = "fire_blaster"
         );
     }
 
+    /// Promotion on re-entering the ring restores full doctrine cleanly
+    /// (issue #933 AC2 — existing behaviour, pinned here). This is the same
+    /// `ai_high_fidelity_components()` unit `the_high_fidelity_component_set_
+    /// carries_every_per_ship_ai_component` already pins in isolation; this
+    /// test pins it end-to-end through the actual demote → re-enter cycle
+    /// that `lod_ai_ships` drives, so a future change to either the demote or
+    /// promote arm can't quietly stop restoring the full set on re-entry.
+    #[test]
+    fn demoted_npc_repromoted_on_re_entry_restores_full_high_fidelity_components() {
+        let mut app = build_lod_test_app();
+        spawn_player(&mut app, 0.0, 0.0);
+        let npc = spawn_npc(&mut app, 50.0, 0.0, 100.0);
+
+        // Promote (within range).
+        tick_with_dt(&mut app, 0.1);
+        assert!(app.world().get::<AiHighFidelity>(npc).is_some());
+        assert!(app
+            .world()
+            .get::<crate::ship::helm_ai::HelmBoostAiPolicyState>(npc)
+            .is_some());
+
+        // Demote: move far outside range + hysteresis, wait out the dwell.
+        app.world_mut()
+            .entity_mut(npc)
+            .insert(Transform::from_xyz(500.0, 0.0, 0.0));
+        app.world_mut().entity_mut(npc).insert(ShipPhysics {
+            x: 500.0,
+            z: 0.0,
+            forward_speed: 10.0,
+            yaw: 0.0,
+            ..Default::default()
+        });
+        for _ in 0..30 {
+            tick_with_dt(&mut app, 0.1);
+        }
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "must have demoted before re-entry can be tested"
+        );
+        assert!(
+            app.world()
+                .get::<crate::ship::helm_ai::HelmBoostAiPolicyState>(npc)
+                .is_none(),
+            "demotion must strip the whole high-fidelity component set, not just the marker"
+        );
+
+        // Re-enter: move back within sensor range.
+        app.world_mut()
+            .entity_mut(npc)
+            .insert(Transform::from_xyz(50.0, 0.0, 0.0));
+        app.world_mut().entity_mut(npc).insert(ShipPhysics {
+            x: 50.0,
+            z: 0.0,
+            forward_speed: 10.0,
+            yaw: 0.0,
+            ..Default::default()
+        });
+        tick_with_dt(&mut app, 0.1);
+
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_some(),
+            "NPC re-entering sensor range must be promoted back to AiHighFidelity"
+        );
+        assert!(
+            app.world()
+                .get::<crate::ship::helm_ai::HelmBoostAiPolicyState>(npc)
+                .is_some(),
+            "re-promotion must restore the FULL high-fidelity component set, \
+             not just the AiHighFidelity marker"
+        );
+    }
+
+    // ── Dead-reckoning fallback: decay + return-to-target (issue #933) ─────────
+
+    /// The named AC3 test: demote a ship mid-escape (moving fast, away from
+    /// its standing `Destroy` target) and assert it re-enters the engagement
+    /// envelope (comes back within `sensor_range` of its target) within a
+    /// bounded simulated time, rather than dead-reckoning its exit velocity
+    /// off into the void forever.
+    #[test]
+    fn demoted_ship_mid_escape_returns_to_engagement_envelope_within_bounded_time() {
+        let mut app = build_lod_test_app();
+
+        // Standing target the ship's Destroy directive names, resolvable via
+        // WorldSnapshot exactly as the production build_world_snapshot pass
+        // would publish it — parked at the origin.
+        app.insert_resource(WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::nil(),
+                name: Some("target-ship".to_string()),
+                position: [0.0, 0.0, 0.0],
+                faction: None,
+                shields: None,
+                hull_fraction: None,
+                yaw: None,
+                radius: 5.0,
+                forward_speed: 0.0,
+                movable: true,
+                dangerous: true,
+                size_rating: 5.0,
+                direct_fire_range: 0.0,
+                weapon_arcs: vec![],
+            }],
+        });
+
+        let sensor_range = 100.0_f32;
+        // Demoted mid-escape: parked well outside the ring, at a boosted
+        // speed, yaw pointed directly AWAY from the target (forward = (0, 1)
+        // at yaw = PI in this sim's (sin(yaw), -cos(yaw)) convention).
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 300.0),
+                ShipPhysics {
+                    x: 0.0,
+                    z: 300.0,
+                    forward_speed: 80.0,
+                    yaw: std::f32::consts::PI,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range,
+                    ..Default::default()
+                },
+                // Marks this ship as having been through at least one High↔Low
+                // transition already — it really was demoted, not just still
+                // approaching for the first time (see the gating note on
+                // `simulate_low_lod_ships`).
+                LodTransitionTimer {
+                    last_state_change_secs: 0.0,
+                },
+                BehaviourSection(crate::entity_config::BehaviourConfig {
+                    doctrine: vec![crate::entity_config::DoctrineObjective {
+                        id: "assault".into(),
+                        text: "Destroy target-ship".into(),
+                        directive_kind: Some("Destroy".into()),
+                        directive_target: Some("target-ship".into()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+                // What `aggregate_doctrine_blackboards` would have published
+                // this tick for the doctrine above once scored: a single
+                // Destroy entry, ungated, so it scores above 0 and qualifies
+                // as the standing target `active_destroy_target` resolves.
+                blackboards_with_destroy_pool(&[("assault", 1.0, "target-ship")]),
+                crate::entities::spawner::HelmConsoleSection(
+                    crate::entity_config::EntityConfig::from_toml(
+                        "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
+                    )
+                    .unwrap()
+                    .helm_console
+                    .unwrap(),
+                ),
+            ))
+            .id();
+
+        let distance_to_target = |app: &App| -> f32 {
+            let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+            (physics.x * physics.x + physics.z * physics.z).sqrt()
+        };
+
+        assert!(
+            distance_to_target(&app) > sensor_range,
+            "test setup: must start outside the engagement envelope"
+        );
+
+        // Bounded time: 60 simulated seconds at 10 Hz. If the old frozen dead-
+        // reckoning fallback were still in place this ship would only ever
+        // move farther away (300 + 80*t) and this loop would time out.
+        let bound_ticks = 600;
+        let mut re_entered = false;
+        for _ in 0..bound_ticks {
+            tick_with_dt(&mut app, 0.1);
+            if distance_to_target(&app) <= sensor_range {
+                re_entered = true;
+                break;
+            }
+        }
+
+        assert!(
+            re_entered,
+            "demoted ship must re-enter the engagement envelope (distance <= {sensor_range}) \
+             within {bound_ticks} ticks; final distance was {}",
+            distance_to_target(&app)
+        );
+    }
+
+    /// Companion negative-ish check: without a standing named `Destroy`
+    /// target (untargeted / no doctrine at all), the fallback still decays
+    /// the frozen speed toward cruise rather than holding the boosted exit
+    /// speed forever — it just has nothing to turn toward, so it does not
+    /// necessarily return. Pins the decay half of #933 independently of the
+    /// steering half.
+    #[test]
+    fn demoted_ship_with_no_destroy_target_still_decays_frozen_speed_toward_cruise() {
+        let mut app = build_lod_test_app();
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 300.0),
+                ShipPhysics {
+                    x: 0.0,
+                    z: 300.0,
+                    forward_speed: 80.0,
+                    yaw: std::f32::consts::PI,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 100.0,
+                    ..Default::default()
+                },
+                LodTransitionTimer {
+                    last_state_change_secs: 0.0,
+                },
+                crate::entities::spawner::HelmConsoleSection(
+                    crate::entity_config::EntityConfig::from_toml(
+                        "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
+                    )
+                    .unwrap()
+                    .helm_console
+                    .unwrap(),
+                ),
+            ))
+            .id();
+
+        for _ in 0..100 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        // cruise_fraction defaults to 0.5 -> cruise speed = 100.0 * 0.5 = 50.0
+        assert!(
+            (physics.forward_speed - 50.0).abs() < 0.5,
+            "frozen speed must have decayed to the authored cruise fraction of max_speed, got {}",
+            physics.forward_speed
+        );
+    }
+
+    /// Review follow-up on issue #933: the low-LOD return-steer must resolve
+    /// its Destroy target through the *scored* pool, honoring `zero_gates`,
+    /// not just grab the first `Destroy` entry in authoring order.
+    ///
+    /// Shipped counter-example this pins: `combat_test.toml`'s wave ships
+    /// author `assault-starbase` (Destroy "Starbase Alpha") gated on
+    /// `zero_gates = [{condition = "not_attacked"}]`. Once the ship has been
+    /// attacked, `score_doctrine_pool` scores that directive at 0 — exactly
+    /// like the high-LOD `plan_helm_travel`, which filters `score > 0.0` and
+    /// so stops steering at the starbase. A demoted, attacked ship must agree:
+    /// with its only Destroy directive scored at 0 (the gate having fired),
+    /// `active_destroy_target` must find nothing to steer toward and the
+    /// dead-reckoning fallback must fall back to decay-only, never turning
+    /// the frozen exit heading back toward that target.
+    #[test]
+    fn demoted_attacked_ship_does_not_steer_toward_a_zero_gated_destroy_target() {
+        let mut app = build_lod_test_app();
+
+        app.insert_resource(WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::nil(),
+                name: Some("target-ship".to_string()),
+                position: [0.0, 0.0, 0.0],
+                faction: None,
+                shields: None,
+                hull_fraction: None,
+                yaw: None,
+                radius: 5.0,
+                forward_speed: 0.0,
+                movable: true,
+                dangerous: true,
+                size_rating: 5.0,
+                direct_fire_range: 0.0,
+                weapon_arcs: vec![],
+            }],
+        });
+
+        // Same mid-escape setup as the positive case: parked outside sensor
+        // range, boosted speed, yaw pointed directly away from the target.
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 300.0),
+                ShipPhysics {
+                    x: 0.0,
+                    z: 300.0,
+                    forward_speed: 80.0,
+                    yaw: std::f32::consts::PI,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 100.0,
+                    ..Default::default()
+                },
+                LodTransitionTimer {
+                    last_state_change_secs: 0.0,
+                },
+                BehaviourSection(crate::entity_config::BehaviourConfig {
+                    doctrine: vec![crate::entity_config::DoctrineObjective {
+                        id: "assault-starbase".into(),
+                        text: "Destroy target-ship".into(),
+                        directive_kind: Some("Destroy".into()),
+                        directive_target: Some("target-ship".into()),
+                        base_priority: 100.0,
+                        zero_gates: vec![crate::objectives::ZeroGateCondition {
+                            condition: "not_attacked".into(),
+                            threshold: None,
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+                // The gate has already fired: this ship has been attacked, so
+                // `score_doctrine_pool` would score `assault-starbase` at 0 —
+                // reflected here exactly as `aggregate_doctrine_blackboards`
+                // would publish it for an attacked ship.
+                blackboards_with_destroy_pool(&[("assault-starbase", 0.0, "target-ship")]),
+                crate::entities::spawner::HelmConsoleSection(
+                    crate::entity_config::EntityConfig::from_toml(
+                        "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
+                    )
+                    .unwrap()
+                    .helm_console
+                    .unwrap(),
+                ),
+            ))
+            .id();
+
+        let distance_to_target = |app: &App| -> f32 {
+            let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+            (physics.x * physics.x + physics.z * physics.z).sqrt()
+        };
+
+        let start_distance = distance_to_target(&app);
+
+        for _ in 0..600 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        assert!(
+            distance_to_target(&app) >= start_distance,
+            "a zero-gated (score == 0) Destroy directive must not steer the ship back — \
+             distance to target must not have decreased, started at {start_distance}, \
+             ended at {}",
+            distance_to_target(&app)
+        );
+    }
+
+    /// Companion to the zero-gate test above: resolution must pick the
+    /// TOP-SCORING Destroy directive, not the first one in authoring order.
+    /// A low-scoring (here, zero-scored/gated) decoy entry authored first
+    /// must be skipped in favor of a higher-scoring entry authored after it.
+    #[test]
+    fn demoted_ship_resolves_destroy_target_by_score_not_authoring_order() {
+        let mut app = build_lod_test_app();
+
+        app.insert_resource(WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::nil(),
+                    name: Some("decoy-ship".to_string()),
+                    position: [0.0, 0.0, 5_000.0],
+                    faction: None,
+                    shields: None,
+                    hull_fraction: None,
+                    yaw: None,
+                    radius: 5.0,
+                    forward_speed: 0.0,
+                    movable: true,
+                    dangerous: true,
+                    size_rating: 5.0,
+                    direct_fire_range: 0.0,
+                    weapon_arcs: vec![],
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::nil(),
+                    name: Some("target-ship".to_string()),
+                    position: [0.0, 0.0, 0.0],
+                    faction: None,
+                    shields: None,
+                    hull_fraction: None,
+                    yaw: None,
+                    radius: 5.0,
+                    forward_speed: 0.0,
+                    movable: true,
+                    dangerous: true,
+                    size_rating: 5.0,
+                    direct_fire_range: 0.0,
+                    weapon_arcs: vec![],
+                },
+            ],
+        });
+
+        let sensor_range = 100.0_f32;
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 300.0),
+                ShipPhysics {
+                    x: 0.0,
+                    z: 300.0,
+                    forward_speed: 80.0,
+                    yaw: std::f32::consts::PI,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range,
+                    ..Default::default()
+                },
+                LodTransitionTimer {
+                    last_state_change_secs: 0.0,
+                },
+                // First in authoring order is the zero-scored decoy; the
+                // real, higher-scoring target is authored second. Resolution
+                // must still pick "target-ship".
+                blackboards_with_destroy_pool(&[
+                    ("decoy", 0.0, "decoy-ship"),
+                    ("assault", 1.0, "target-ship"),
+                ]),
+                crate::entities::spawner::HelmConsoleSection(
+                    crate::entity_config::EntityConfig::from_toml(
+                        "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
+                    )
+                    .unwrap()
+                    .helm_console
+                    .unwrap(),
+                ),
+            ))
+            .id();
+
+        let distance_to_target = |app: &App| -> f32 {
+            let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+            (physics.x * physics.x + physics.z * physics.z).sqrt()
+        };
+
+        assert!(
+            distance_to_target(&app) > sensor_range,
+            "test setup: must start outside the engagement envelope"
+        );
+
+        let bound_ticks = 600;
+        let mut re_entered = false;
+        for _ in 0..bound_ticks {
+            tick_with_dt(&mut app, 0.1);
+            if distance_to_target(&app) <= sensor_range {
+                re_entered = true;
+                break;
+            }
+        }
+
+        assert!(
+            re_entered,
+            "demoted ship must steer toward the top-scoring Destroy target \
+             (target-ship at the origin), not the zero-scored decoy at z=5000; \
+             final distance to origin was {}",
+            distance_to_target(&app)
+        );
+    }
+
     // ── Low-LOD patrol wiring (ObjectiveCursors / advance_cursor) ───────────────
 
     /// Build a `ShipSystemBlackboards` carrying a single Helm-relevant Patrol
@@ -2753,6 +3383,46 @@ verb = "fire_blaster"
         bb
     }
 
+    /// Build a `ShipSystemBlackboards` carrying an already-scored Destroy pool
+    /// (mirrors what `aggregate_doctrine_blackboards` + `score_doctrine_pool`
+    /// publish for a ship's standing Destroy doctrine, `zero_gates` already
+    /// applied). Entries are given in authoring order so a test can put a
+    /// low-/zero-scoring entry first and a higher-scoring one after it —
+    /// exactly the shape the #933 review follow-up caught: the low-LOD Destroy
+    /// steer must resolve by score, not by position in this slice.
+    fn blackboards_with_destroy_pool(
+        entries: &[(&str, f32, &str)],
+    ) -> crate::server_app::ShipSystemBlackboards {
+        let mut bb = crate::server_app::ShipSystemBlackboards::default();
+        bb.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
+                scored_objectives: entries
+                    .iter()
+                    .map(|(id, score, target)| crate::messages::ScoredObjective {
+                        id: id.to_string(),
+                        score: *score,
+                        directive: crate::messages::AiDirective::Destroy {
+                            target: target.to_string(),
+                        },
+                        source: crate::messages::ObjectiveSource::Doctrine,
+                        relevance: vec![crate::messages::SystemAffinity::Helm],
+                        snapshot: crate::messages::ObjectiveSnapshot {
+                            id: id.to_string(),
+                            text: "Destroy".to_string(),
+                            mandatory: false,
+                            status: crate::messages::ObjectiveStatus::Active,
+                            targets: vec![],
+                            source: crate::messages::ObjectiveSource::Doctrine,
+                        },
+                    })
+                    .collect(),
+                ..Default::default()
+            }),
+        );
+        bb
+    }
+
     /// Spawn a low-LOD patrolling NPC at `(x, z)` carrying the TOML-authored
     /// `BehaviourSection` the cursor evaluator reads its arrival radius from.
     fn spawn_patrolling_npc(
@@ -2778,6 +3448,7 @@ verb = "fire_blaster"
                 AiProfile {
                     aggression: 0.5,
                     sensor_range: 100.0,
+                    ..Default::default()
                 },
                 EntityUuid(uuid.to_string()),
                 BehaviourSection(BehaviourConfig::default()),
@@ -2959,6 +3630,7 @@ verb = "fire_blaster"
                 AiProfile {
                     aggression: 0.5,
                     sensor_range: 100.0,
+                    ..Default::default()
                 },
                 EntityUuid("npc-reach".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
@@ -3473,6 +4145,7 @@ verb = "fire_blaster"
                 AiProfile {
                     aggression: 0.5,
                     sensor_range: 100.0,
+                    ..Default::default()
                 },
                 ObjectiveCursors::default(),
                 crate::server_app::ShipSystemBlackboards::default(),

@@ -235,6 +235,38 @@ fn default_maintain_range() -> f32 {
 pub struct AiProfileConfig {
     pub aggression: f32,
     pub sensor_range: f32,
+    /// Low-LOD dead-reckoning fallback (issue #933): fraction of this hull's
+    /// authored `max_speed` that a demoted ship's frozen exit speed decays
+    /// toward when it has no route to steer by. Defaults to a sane non-zero
+    /// cruise fraction rather than `0.0` — the issue's intent is that the
+    /// decay is *on* out of the box, not an opt-in a designer has to remember.
+    #[serde(default = "default_low_lod_cruise_fraction")]
+    pub low_lod_cruise_fraction: f32,
+    /// Rate (world-units/s²) at which the low-LOD fallback's dead-reckoned
+    /// speed decays toward `low_lod_cruise_fraction * max_speed`. Issue #933.
+    #[serde(default = "default_low_lod_speed_decay_per_sec")]
+    pub low_lod_speed_decay_per_sec: f32,
+    /// Fraction of this hull's authored `max_yaw_rate` the low-LOD fallback
+    /// may spend turning a standing `Destroy` directive's dead-reckoned
+    /// heading back toward its named target, once that target resolves in
+    /// the (possibly stale) `WorldSnapshot`. Issue #933.
+    #[serde(default = "default_low_lod_turn_rate_fraction")]
+    pub low_lod_turn_rate_fraction: f32,
+}
+
+/// See [`AiProfileConfig::low_lod_cruise_fraction`].
+pub(crate) fn default_low_lod_cruise_fraction() -> f32 {
+    0.5
+}
+
+/// See [`AiProfileConfig::low_lod_speed_decay_per_sec`].
+pub(crate) fn default_low_lod_speed_decay_per_sec() -> f32 {
+    8.0
+}
+
+/// See [`AiProfileConfig::low_lod_turn_rate_fraction`].
+pub(crate) fn default_low_lod_turn_rate_fraction() -> f32 {
+    0.5
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

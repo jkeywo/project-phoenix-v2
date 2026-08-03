@@ -733,13 +733,13 @@ pub fn spawn_entity(
         entity_commands.insert(crate::ai_plugin::AiProfile {
             aggression: profile.aggression,
             sensor_range: profile.sensor_range,
+            low_lod_cruise_fraction: profile.low_lod_cruise_fraction,
+            low_lod_speed_decay_per_sec: profile.low_lod_speed_decay_per_sec,
+            low_lod_turn_rate_fraction: profile.low_lod_turn_rate_fraction,
         });
     } else {
         // Ships without an [ai_profile] section get a sensible default.
-        entity_commands.insert(crate::ai_plugin::AiProfile {
-            aggression: 0.5,
-            sensor_range: 100.0,
-        });
+        entity_commands.insert(crate::ai_plugin::AiProfile::default());
     }
 
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.

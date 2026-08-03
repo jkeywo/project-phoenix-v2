@@ -81,6 +81,68 @@ pub fn evaluate_lod(
     }
 }
 
+/// Decay (or ramp) `current_speed` toward `target_speed` at `rate_per_sec`
+/// (world-units/s²), clamped so a single tick can never overshoot past the
+/// target in either direction.
+///
+/// Used by the low-LOD dead-reckoning fallback (issue #933) to bring a
+/// demoted ship's frozen exit speed back to a sane cruise speed instead of
+/// carrying its exit velocity — however fast it happened to be moving at the
+/// moment of demotion, boosted or otherwise — forever. Pure function of its
+/// arguments: no RNG, no hidden state.
+///
+/// A non-positive `rate_per_sec` or `dt` is treated as "no decay this call"
+/// rather than dividing/stepping by a degenerate value, so a malformed
+/// authored rate fails toward leaving the speed exactly where it was (safe)
+/// rather than snapping it instantaneously to the target or NaN-ing out.
+pub fn decay_speed_toward(
+    current_speed: f32,
+    target_speed: f32,
+    rate_per_sec: f32,
+    dt: f32,
+) -> f32 {
+    // `<= 0.0` alone would miss NaN (every NaN comparison is `false`, so a NaN
+    // rate/dt would fall through and silently no-op the clamps below into
+    // NaN propagation); `is_nan()` catches it explicitly.
+    if rate_per_sec.is_nan() || rate_per_sec <= 0.0 || dt.is_nan() || dt <= 0.0 {
+        return current_speed;
+    }
+    let step = rate_per_sec * dt;
+    if current_speed > target_speed {
+        (current_speed - step).max(target_speed)
+    } else if current_speed < target_speed {
+        (current_speed + step).min(target_speed)
+    } else {
+        current_speed
+    }
+}
+
+/// Turn `current_yaw` toward `desired_yaw` by at most `max_step` radians,
+/// taking the shorter way around the circle.
+///
+/// Used by the low-LOD dead-reckoning fallback (issue #933) to gently steer a
+/// demoted `Destroy`-directive ship's dead-reckoned heading back toward its
+/// standing target instead of coasting on its frozen exit heading forever.
+/// Pure function of its arguments: no RNG, no hidden state.
+///
+/// A non-positive `max_step` returns `current_yaw` unchanged rather than
+/// turning backwards or NaN-ing out on a malformed authored turn rate.
+pub fn step_yaw_toward(current_yaw: f32, desired_yaw: f32, max_step: f32) -> f32 {
+    if max_step.is_nan() || max_step <= 0.0 {
+        return current_yaw;
+    }
+    let two_pi = std::f32::consts::TAU;
+    // Normalize the shortest signed delta into (-PI, PI] so a turn never goes
+    // the "long way" around the circle.
+    let mut delta = (desired_yaw - current_yaw) % two_pi;
+    if delta > std::f32::consts::PI {
+        delta -= two_pi;
+    } else if delta < -std::f32::consts::PI {
+        delta += two_pi;
+    }
+    current_yaw + delta.clamp(-max_step, max_step)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +345,134 @@ mod tests {
     fn negative_infinity_sensor_range_behaves_like_zero() {
         let result = evaluate_lod(LodState::High, 1.0, f32::NEG_INFINITY, 10.0, 0.0, 2.0, 0.2);
         assert_eq!(result, LodState::Low);
+    }
+
+    // ── decay_speed_toward (issue #933) ─────────────────────────────────────
+
+    #[test]
+    fn decay_speed_toward_steps_down_toward_a_lower_target() {
+        let result = decay_speed_toward(100.0, 20.0, 8.0, 1.0);
+        assert_eq!(result, 92.0);
+    }
+
+    #[test]
+    fn decay_speed_toward_does_not_overshoot_past_the_target() {
+        let result = decay_speed_toward(22.0, 20.0, 8.0, 1.0);
+        assert_eq!(
+            result, 20.0,
+            "one big step must clamp at the target, not undershoot below it"
+        );
+    }
+
+    #[test]
+    fn decay_speed_toward_ramps_up_toward_a_higher_target() {
+        let result = decay_speed_toward(0.0, 20.0, 8.0, 1.0);
+        assert_eq!(result, 8.0);
+    }
+
+    #[test]
+    fn decay_speed_toward_holds_steady_once_at_target() {
+        let result = decay_speed_toward(20.0, 20.0, 8.0, 1.0);
+        assert_eq!(result, 20.0);
+    }
+
+    #[test]
+    fn decay_speed_toward_many_ticks_converges_on_target() {
+        let mut speed = 100.0f32;
+        for _ in 0..700 {
+            speed = decay_speed_toward(speed, 20.0, 8.0, 1.0 / 60.0);
+        }
+        assert!(
+            (speed - 20.0).abs() < 1.0,
+            "expected convergence toward 20.0 within ~700 ticks (~11.7s at 8 units/s^2), got {speed}"
+        );
+    }
+
+    #[test]
+    fn decay_speed_toward_zero_rate_is_a_no_op() {
+        let result = decay_speed_toward(100.0, 20.0, 0.0, 1.0);
+        assert_eq!(
+            result, 100.0,
+            "a malformed zero rate must not snap the speed"
+        );
+    }
+
+    #[test]
+    fn decay_speed_toward_negative_rate_is_a_no_op() {
+        let result = decay_speed_toward(100.0, 20.0, -5.0, 1.0);
+        assert_eq!(result, 100.0);
+    }
+
+    #[test]
+    fn decay_speed_toward_zero_dt_is_a_no_op() {
+        let result = decay_speed_toward(100.0, 20.0, 8.0, 0.0);
+        assert_eq!(result, 100.0);
+    }
+
+    // ── step_yaw_toward (issue #933) ─────────────────────────────────────────
+
+    #[test]
+    fn step_yaw_toward_turns_toward_a_nearby_target_without_overshoot() {
+        let result = step_yaw_toward(0.0, 0.1, 1.0);
+        assert!(
+            (result - 0.1).abs() < 1e-6,
+            "small delta within max_step must land exactly on target"
+        );
+    }
+
+    #[test]
+    fn step_yaw_toward_clamps_to_max_step_for_a_large_delta() {
+        let result = step_yaw_toward(0.0, 3.0, 0.5);
+        assert!((result - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn step_yaw_toward_takes_the_shorter_way_around_the_wrap() {
+        // From just past +PI to just past -PI is a tiny step the "short way"
+        // across the wrap, not a near-2*PI step the "long way".
+        let current = std::f32::consts::PI - 0.05;
+        let desired = -std::f32::consts::PI + 0.05;
+        let result = step_yaw_toward(current, desired, 1.0);
+        // Expect it to have advanced past PI (wrapping) rather than swinging
+        // all the way back down toward 0.
+        let two_pi = std::f32::consts::TAU;
+        let mut delta = (desired - result) % two_pi;
+        if delta > std::f32::consts::PI {
+            delta -= two_pi;
+        } else if delta < -std::f32::consts::PI {
+            delta += two_pi;
+        }
+        assert!(
+            delta.abs() < 0.06,
+            "expected to have nearly reached desired via the short way, remaining delta {delta}"
+        );
+    }
+
+    #[test]
+    fn step_yaw_toward_many_ticks_converges_on_desired() {
+        let mut yaw = 0.0f32;
+        let desired = std::f32::consts::FRAC_PI_2;
+        for _ in 0..200 {
+            yaw = step_yaw_toward(yaw, desired, 0.02);
+        }
+        assert!(
+            (yaw - desired).abs() < 1e-3,
+            "expected convergence, got {yaw}"
+        );
+    }
+
+    #[test]
+    fn step_yaw_toward_zero_max_step_is_a_no_op() {
+        let result = step_yaw_toward(0.5, 2.0, 0.0);
+        assert_eq!(
+            result, 0.5,
+            "a malformed zero turn rate must not snap the heading"
+        );
+    }
+
+    #[test]
+    fn step_yaw_toward_negative_max_step_is_a_no_op() {
+        let result = step_yaw_toward(0.5, 2.0, -1.0);
+        assert_eq!(result, 0.5);
     }
 }

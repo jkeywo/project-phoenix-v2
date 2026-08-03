@@ -5,7 +5,7 @@
 // hardcoding a list in viewer.html, which would silently go stale every time a
 // model is added or renamed. Run as a Trunk pre_build hook (viewer-trunk.toml).
 
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const MODELS_DIR = path.join(process.cwd(), 'assets', 'models');
@@ -40,5 +40,21 @@ const models = files
     };
   });
 
-await writeFile(OUT, JSON.stringify({ models }, null, 2) + '\n');
-console.log(`[generate-model-index] ${models.length} models → ${path.relative(process.cwd(), OUT)}`);
+// Write only when the content actually differs.
+//
+// This runs as a Trunk pre_build hook, and it writes INTO a watched directory
+// (assets/models/), so an unconditional write is a build that triggers the next
+// build forever — the viewer's page reloading itself every minute or two while
+// nobody touches anything. viewer-trunk.toml lists this file under `[watch]
+// ignore` for exactly that reason, and the loop happens anyway, so the write
+// itself is what has to stop: a rewrite with identical bytes still moves the
+// mtime, and the mtime is what a file watcher reads.
+const next = JSON.stringify({ models }, null, 2) + '\n';
+const current = await readFile(OUT, 'utf8').catch(() => null);
+const relative = path.relative(process.cwd(), OUT);
+if (current === next) {
+  console.log(`[generate-model-index] ${models.length} models — ${relative} already current`);
+} else {
+  await writeFile(OUT, next);
+  console.log(`[generate-model-index] ${models.length} models → ${relative}`);
+}

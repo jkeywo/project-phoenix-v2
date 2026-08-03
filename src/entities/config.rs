@@ -420,6 +420,20 @@ pub enum MeshShape {
     Torus,
 }
 
+impl MeshShape {
+    /// Parse the lowercase name TOML uses, or `None` for anything else —
+    /// including the empty string, which is how the model viewer's panel says
+    /// "this level is a GLB, not a shape".
+    pub fn parse(name: &str) -> Option<MeshShape> {
+        match name {
+            "sphere" => Some(MeshShape::Sphere),
+            "cuboid" => Some(MeshShape::Cuboid),
+            "torus" => Some(MeshShape::Torus),
+            _ => None,
+        }
+    }
+}
+
 /// Visual mesh definition for an entity.
 ///
 /// Present in entity TOMLs as a `[mesh]` section. The renderer creates the
@@ -451,7 +465,8 @@ pub struct MeshConfig {
     #[serde(default)]
     pub variant: Option<String>,
     pub shape: MeshShape,
-    /// RGB colour `[r, g, b]` in linear 0–1 range.
+    /// RGB colour `[r, g, b]`, sRGB 0–1 — the renderer feeds it straight to
+    /// `Color::srgb` (`procedural_mesh_material`).
     pub colour: Vec<f32>,
     /// Sphere radius, or torus major radius. Ignored for `cuboid`.
     #[serde(default)]
@@ -518,7 +533,9 @@ pub struct LodLevel {
     /// Procedural shape for this band. Used only when `model` is `None`.
     #[serde(default)]
     pub shape: Option<MeshShape>,
-    /// RGB colour `[r, g, b]` (linear 0–1). Falls back to `MeshConfig::colour`.
+    /// RGB colour `[r, g, b]`, sRGB 0–1 — the renderer feeds it straight to
+    /// `Color::srgb` (`procedural_mesh_material`). Falls back to
+    /// [`MeshConfig::colour`].
     #[serde(default)]
     pub colour: Option<Vec<f32>>,
     /// Sphere radius / torus major radius. Falls back to `MeshConfig::radius`.
@@ -533,6 +550,34 @@ pub struct LodLevel {
     /// Emissive multiplier. Falls back to `MeshConfig::emissive`.
     #[serde(default)]
     pub emissive: Option<f32>,
+    /// Euler `[x, y, z]` rotation in radians for a **procedural** level.
+    ///
+    /// Applied to the level's own visual, never to the entity: an entity's
+    /// rotation is simulation state — physics owns it on anything that moves —
+    /// so writing it here would fight the sim every time the level changed. A
+    /// GLB level takes its orientation from its rig sidecar's `[base] rotation`
+    /// instead, which is why this is ignored for one.
+    ///
+    /// It exists for the same reason a level has a `scale`: a sphere standing
+    /// in for a hull wants to point the way the hull points.
+    #[serde(default)]
+    pub rotation: Option<[f32; 3]>,
+    /// Non-uniform `[x, y, z]` scale for this level, multiplied onto the
+    /// entity's own uniform [`MeshConfig::scale`].
+    ///
+    /// The flat `[mesh]` scale is a single number, which is all a model needs —
+    /// but a procedural level is a *stand-in* for a model, and a sphere is the
+    /// wrong shape for almost everything it stands in for. Three numbers turn
+    /// that sphere into an ellipsoid roughly the proportions of the thing it
+    /// replaces, which is the difference between a distant hull reading as a
+    /// hull and reading as a ball.
+    ///
+    /// Applies to GLB levels too, for the same reason a level may override any
+    /// other visual field. Omitted means `[1, 1, 1]` — the entity's own scale,
+    /// unchanged — and every level recomputes it on switch, so moving between
+    /// levels that do and do not declare one is symmetric.
+    #[serde(default)]
+    pub scale: Option<[f32; 3]>,
     /// How this level's `model` was decimated out of a source GLB (issue #919).
     /// Authored as a `[lod.generate]` sub-table. Build-time provenance only —
     /// see [`LodGeneration`]; the renderer never reads it.
@@ -594,6 +639,14 @@ pub struct LodGeneration {
     /// Voxel size for the optional Blender voxel-remesh pre-pass
     /// (`scripts/blender-voxel-remesh.py`), for meshes that decimate badly.
     /// Omitted means no pre-pass, which is the case for every shipped ladder.
+    ///
+    /// **In the model's own units — the raw GLB geometry, before `[base] scale`.**
+    /// Every other number in this file (`max_distance`, `[extents]`) is
+    /// post-scale world units, so on a rock scaled 4.2x the two are nothing
+    /// alike: `1.0` against an extent of 8 looks small and in fact spans half
+    /// the mesh, which remeshes the asteroid into a cube. Divide the extent by
+    /// the base scale to see what the model measures, then take a small
+    /// fraction of that (a sixty-fourth is a reasonable start).
     #[serde(default)]
     pub remesh_voxel_size: Option<f32>,
 }

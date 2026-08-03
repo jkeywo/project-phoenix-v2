@@ -21,6 +21,8 @@ pub mod glb_visual;
 pub mod include_resolve;
 pub mod loader;
 pub mod marker_validate;
+/// Triangle and pixel counting, shared by the perf pass and the model viewer.
+pub mod mesh_stats;
 pub mod model_rig;
 pub mod planet;
 pub mod spawner;

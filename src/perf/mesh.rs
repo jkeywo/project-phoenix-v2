@@ -57,7 +57,7 @@ use bevy::app::TaskPoolPlugin;
 use bevy::asset::{AssetApp, AssetPlugin, AssetServer, Assets, LoadState};
 use bevy::gltf::{Gltf, GltfPlugin};
 use bevy::image::Image;
-use bevy::mesh::{Mesh, PrimitiveTopology};
+use bevy::mesh::Mesh;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 use bevy::scene::ScenePlugin;
@@ -135,30 +135,12 @@ impl std::fmt::Display for MeasureError {
     }
 }
 
-/// Triangles in one loaded mesh.
-///
-/// Indexed geometry is counted from the index buffer and unindexed from the
-/// vertex count, which is what the GPU draws in each case. A topology that
-/// draws no triangles contributes none rather than a nonsense third of a line
-/// list.
-pub fn triangles_in(mesh: &Mesh) -> u64 {
-    let drawn = match mesh.indices() {
-        Some(indices) => indices.len() as u64,
-        None => mesh.count_vertices() as u64,
-    };
-    match mesh.primitive_topology() {
-        PrimitiveTopology::TriangleList => drawn / 3,
-        // A strip of n vertices draws n-2 triangles, and fewer than three
-        // vertices draws none.
-        PrimitiveTopology::TriangleStrip => drawn.saturating_sub(2),
-        _ => 0,
-    }
-}
-
-/// Pixels in one loaded image.
-pub fn pixels_in(image: &Image) -> u64 {
-    u64::from(image.width()) * u64::from(image.height())
-}
+// The counting itself moved to `entities::mesh_stats` when the model viewer
+// grew a triangle/texture readout (it runs in wasm, and this module is native
+// and `--features perf`). Re-exported rather than reimplemented: a budget and
+// the panel a person tunes against it must not be able to disagree about what
+// a triangle is.
+pub use crate::entities::mesh_stats::{pixels_in, triangles_in};
 
 /// Load every `assets/models/*.glb` under `root` through Bevy and report what
 /// came out.
@@ -359,7 +341,7 @@ mod tests {
     use super::*;
     use crate::perf::profile;
     use bevy::asset::RenderAssetUsages;
-    use bevy::mesh::Indices;
+    use bevy::mesh::{Indices, PrimitiveTopology};
 
     fn indexed(topology: PrimitiveTopology, indices: Vec<u32>, vertices: usize) -> Mesh {
         let mut mesh = Mesh::new(topology, RenderAssetUsages::default());

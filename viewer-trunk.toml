@@ -14,17 +14,46 @@ dist = "dist-viewer"
 public_url = "./"
 
 [watch]
-# Editing a .wgsl or a .model.toml triggers a rebuild + page reload. Bevy's
-# asset hot-reload does not work on wasm, so this reload IS the iteration loop.
-# Cargo is warm, so a shader-only change is a re-link and copy, not a compile.
-watch_path = ["assets/shaders/", "assets/models/", "viewer.html", "src/"]
+# Editing a .wgsl triggers a rebuild + page reload. Bevy's asset hot-reload does
+# not work on wasm, so this reload IS the shader iteration loop. Cargo is warm,
+# so a shader-only change is a re-link and copy, not a compile.
+#
+# `assets/models/` is deliberately NOT watched. It was, back when the only way
+# to touch a rig sidecar was to open it in an editor and want a reload. The LOD
+# panel now writes those files itself — three sidecars per Save, a .glb per
+# generated level — and every one of those writes cost a full wasm rebuild and
+# a page reload, mid-edit and mid-run. The panel owns that refresh instead: it
+# offers a reload once a generator run finishes, which is the only moment a new
+# .glb can actually be picked up.
+#
+# Hand-editing a sidecar therefore needs a manual browser reload. That is the
+# trade: one keypress when you edit by hand, against the tool reloading the page
+# underneath you every time it saves.
+watch_path = ["assets/shaders/", "viewer.html", "src/"]
 include = "*.toml"
-# The pre_build hook regenerates this inside a watched directory; without the
-# ignore, each build triggers the next one forever.
+# The pre_build hook regenerates this inside assets/models/. Now that the
+# directory is unwatched it cannot start a build at all, but the ignore stays as
+# a second line of defence — and it is NOT what broke the build→build loop:
+# it does not suppress the rebuild in trunk 0.21 (observed: every build queued
+# the next one, ~60-105s apart, forever). What stops it is the hook itself,
+# which now writes only when the content differs — see generate-model-index.mjs.
 ignore = ["assets/models/index.json"]
 
 [serve]
 port = 8081
+
+# Both paths go to the static server scripts/dev-viewer.mjs starts on :8082 —
+# `/assets/` for the model tree (proxied rather than copied; see that script)
+# and `/api/` for the LOD panel's reads, saves and generator runs. Declared here
+# rather than as `trunk serve --proxy-backend` flags because that CLI form
+# mounts exactly one proxy, and the page needs both on one origin.
+[[proxy]]
+backend = "http://127.0.0.1:8082/assets/"
+rewrite = "/assets/"
+
+[[proxy]]
+backend = "http://127.0.0.1:8082/api/"
+rewrite = "/api/"
 
 # Keeps the model dropdown in step with what is actually on disk.
 [[hooks]]

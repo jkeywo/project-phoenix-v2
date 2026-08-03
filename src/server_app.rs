@@ -3907,17 +3907,28 @@ fn quantize_key(v: f32) -> i32 {
 /// identical primitives (e.g. every distant asteroid's far-LOD sphere) share a
 /// single mesh handle and a single material handle. Reusing handles lets the
 /// renderer batch/instance the draws instead of issuing one per entity.
+/// `pub(crate)` for the model viewer, which builds a ladder's procedural far
+/// level through the same constructor rather than growing its own sphere.
 #[derive(Resource, Default)]
-struct ProceduralMeshCache {
+pub(crate) struct ProceduralMeshCache {
     meshes: HashMap<ProcMeshKey, Handle<Mesh>>,
     materials: HashMap<ProcMatKey, Handle<StandardMaterial>>,
+}
+
+/// A procedural LOD level's own rotation, as a quaternion. Identity when the
+/// level declares none.
+fn level_rotation(level: &crate::entity_config::LodLevel) -> Quat {
+    level
+        .rotation
+        .map(|r| Quat::from_euler(EulerRot::XYZ, r[0], r[1], r[2]))
+        .unwrap_or(Quat::IDENTITY)
 }
 
 /// Build — or fetch from `cache` — the `Mesh3d`/material handles for a
 /// procedural primitive. Mirrors PATH B of the flat renderer but routes through
 /// the cache so identical primitives share handles. Shared by the flat renderer
 /// and the LOD system.
-fn procedural_mesh_material(
+pub(crate) fn procedural_mesh_material(
     cache: &mut ProceduralMeshCache,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -4007,18 +4018,18 @@ struct MeshLods {
     base: crate::entity_config::MeshConfig,
     /// Active level index; `None` until the first evaluation establishes it.
     current: Option<usize>,
-    /// The spawned GLB `SceneRoot` child when the active level is a GLB level.
+    /// The child carrying the active level's visual — a GLB level's
+    /// `SceneRoot`, or a shape level's `Mesh3d`.
     scene_child: Option<Entity>,
-    /// True when the active level's `Mesh3d`/`MeshMaterial3d` live on the parent.
-    procedural_on_parent: bool,
     /// Whether this entity is the local player's ship (GLB starts hidden).
     is_local_ship: bool,
 }
 
 /// Remove whichever visual the active LOD level installed, so a new level can be
-/// built cleanly. Despawns the GLB child (via `try_despawn`, safe if it was
-/// already removed — Bevy 0.18 `despawn` panics on an already-despawned entity)
-/// and/or strips the parent's procedural mesh + material.
+/// built cleanly. Both kinds of level hang their visual off a child — a GLB's
+/// `SceneRoot`, a shape's `Mesh3d` — so this despawns exactly one entity, via
+/// `try_despawn` (safe if it was already removed; Bevy 0.18 `despawn` panics on
+/// an already-despawned entity).
 ///
 /// Note: this intentionally does NOT remove `ModelMarkers`. On a GLB→GLB switch
 /// the new level's `spawn_glb_visual` re-inserts `ModelMarkers`, and because
@@ -4026,16 +4037,9 @@ struct MeshLods {
 /// insert) would clobber the new markers. `ModelMarkers` is instead cleared
 /// explicitly in the procedural branch of [`update_mesh_lod`] when switching
 /// away from a GLB level to a shape level.
-fn teardown_lod_visual(commands: &mut Commands, entity: Entity, lods: &mut MeshLods) {
+fn teardown_lod_visual(commands: &mut Commands, lods: &mut MeshLods) {
     if let Some(child) = lods.scene_child.take() {
         commands.entity(child).try_despawn();
-    }
-    if lods.procedural_on_parent {
-        commands
-            .entity(entity)
-            .remove::<Mesh3d>()
-            .remove::<MeshMaterial3d<StandardMaterial>>();
-        lods.procedural_on_parent = false;
     }
 }
 
@@ -4129,7 +4133,6 @@ fn render_spawned_entities(
                         base: cfg.clone(),
                         current: None,
                         scene_child: None,
-                        procedural_on_parent: false,
                         is_local_ship: local_ship.is_some(),
                     });
                 } else {
@@ -4246,7 +4249,7 @@ fn update_mesh_lod(
     camera: Query<&GlobalTransform, With<crate::server::renderer::GameCamera>>,
     mut lod_entities: Query<(
         Entity,
-        &Transform,
+        &mut Transform,
         &mut MeshLods,
         Option<&PendingSceneHandle>,
     )>,
@@ -4259,7 +4262,7 @@ fn update_mesh_lod(
     };
     let cam_pos = cam_tf.translation();
 
-    for (entity, transform, mut lods, pending) in lod_entities.iter_mut() {
+    for (entity, mut transform, mut lods, pending) in lod_entities.iter_mut() {
         // Use the entity's LOCAL transform, not its `GlobalTransform`: on the
         // frame an entity is first rendered its `MeshLods` is inserted this same
         // Update, but global transforms aren't propagated until PostUpdate, so a
@@ -4277,6 +4280,14 @@ fn update_mesh_lod(
         let Some(level) = lods.levels.get(target).cloned() else {
             continue;
         };
+
+        // Recompute the entity's scale from the flat `[mesh] scale` and this
+        // level's optional `[x, y, z]`. Recomputed rather than multiplied in,
+        // so switching between levels that do and do not declare one is
+        // symmetric and leaves nothing to unwind: a level with no `scale` puts
+        // the entity back to exactly what it spawned with.
+        transform.scale =
+            Vec3::splat(lods.base.scale) * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
 
         if let Some(model_path) = level.model.as_deref() {
             let variant = level.variant.clone().or_else(|| lods.base.variant.clone());
@@ -4298,14 +4309,14 @@ fn update_mesh_lod(
                 GlbSpawnOutcome::Failed => {
                     // Give up on this level; drop the old visual and settle so we
                     // stop retrying it every frame.
-                    teardown_lod_visual(&mut commands, entity, &mut lods);
+                    teardown_lod_visual(&mut commands, &mut lods);
                     lods.current = Some(target);
                 }
                 GlbSpawnOutcome::Spawned(child) => {
                     if lods.is_local_ship {
                         decorate_local_ship_model(&mut commands, child);
                     }
-                    teardown_lod_visual(&mut commands, entity, &mut lods);
+                    teardown_lod_visual(&mut commands, &mut lods);
                     lods.scene_child = Some(child);
                     lods.current = Some(target);
                 }
@@ -4331,15 +4342,26 @@ fn update_mesh_lod(
                 &colour,
                 emissive_mul,
             );
-            teardown_lod_visual(&mut commands, entity, &mut lods);
+            teardown_lod_visual(&mut commands, &mut lods);
             // Switching to a shape level: drop any `ModelMarkers` left by a prior
-            // GLB level (no-op if absent). Enqueued after teardown and before the
-            // mesh insert, so it never races a freshly-inserted marker map.
+            // GLB level (no-op if absent). Enqueued after teardown, so it never
+            // races a freshly-inserted marker map.
             commands
                 .entity(entity)
-                .remove::<crate::model_rig::ModelMarkers>()
-                .insert((Mesh3d(mesh), MeshMaterial3d(mat)));
-            lods.procedural_on_parent = true;
+                .remove::<crate::model_rig::ModelMarkers>();
+            // The mesh goes on a CHILD, as a GLB level's `SceneRoot` does, so
+            // the level can carry its own rotation. Rotating the entity itself
+            // is not available: an entity's rotation is simulation state, and
+            // physics rewrites it every tick on anything that moves.
+            let child = commands
+                .spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(mat),
+                    Transform::from_rotation(level_rotation(&level)),
+                ))
+                .id();
+            commands.entity(entity).add_child(child);
+            lods.scene_child = Some(child);
             lods.current = Some(target);
         } else {
             // Neither model nor shape — invalid level. Settle so we don't spin.

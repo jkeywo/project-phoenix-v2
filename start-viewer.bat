@@ -24,11 +24,12 @@ if %errorlevel% neq 0 (
 echo === Starting model viewer on http://localhost:8081 ===
 echo Press Ctrl+C to stop.
 
-REM Give Trunk a head start on the first build before opening
-REM the tab, otherwise the browser lands on a connection error.
-REM Fully-qualified timeout.exe: a Git Bash / MSYS `timeout` earlier on PATH
-REM takes GNU-style arguments and fails on /t.
-start "" /B cmd /c ""%SystemRoot%\System32\timeout.exe" /t 8 /nobreak > NUL && start "" http://localhost:8081/"
+REM Open the tab only once Trunk is actually listening. Trunk does not bind its
+REM port until the FIRST wasm build finishes, which is minutes from cold — a
+REM fixed head start (this used to wait 8 seconds) drops the browser on a dead
+REM port and the tab shows a connection error nobody thinks to refresh.
+start "" /B powershell -NoProfile -Command ^
+  "while (-not (Test-NetConnection -ComputerName localhost -Port 8081 -InformationLevel Quiet -WarningAction SilentlyContinue)) { Start-Sleep -Seconds 2 }; Start-Process 'http://localhost:8081/'"
 
 REM dev-viewer.mjs runs Trunk plus the static server that /assets
 REM is proxied to — see the comments in that script for why the

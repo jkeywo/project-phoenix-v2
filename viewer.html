@@ -12,10 +12,11 @@
         data-cargo-no-default-features data-cargo-features="viewer" />
   <!-- Deliberately NO `rel="copy-dir"` for assets. server.html copies the whole
        tree, but that is ~300 MB and Trunk's staging rename of it fails on
-       Windows (`os error 5`). Instead `scripts/link-viewer-assets.mjs` points
-       dist-viewer/assets at the real assets/ directory, so the viewer reads
+       Windows (`os error 5`). Instead scripts/dev-viewer.mjs serves assets/ on
+       :8082 and viewer-trunk.toml proxies /assets/ to it, so the viewer reads
        models and shaders straight from the repo — nothing to copy, and an
-       edited .wgsl is live on the next reload. -->
+       edited .wgsl is live on the next reload. The same proxy carries /api/,
+       which is how the LOD panel below reads and writes rig sidecars. -->
 
   <style>
     :root {
@@ -25,6 +26,9 @@
       --text: #c8d4ea;
       --muted: #7d8aa6;
       --accent: #4ea3ff;
+      --warn: #ffb454;
+      --error: #ff7a7a;
+      --ok: #6ddf9b;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -34,17 +38,25 @@
     }
     #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
 
-    #panel {
-      position: fixed; top: 12px; left: 12px; width: 290px;
+    /* Two floating panels: what to look at on the left, the LOD ladder and
+       what it costs on the right, so a ladder with several open levels does
+       not push the lighting controls off the bottom of the screen. */
+    .panel {
+      position: fixed; top: 12px;
       max-height: calc(100vh - 24px); overflow-y: auto;
       background: var(--panel); border: 1px solid var(--border);
       border-radius: 8px; padding: 12px 14px;
       backdrop-filter: blur(8px);
     }
-    #panel h1 {
+    #panel { left: 12px; width: 300px; }
+    #lodPanel { right: 12px; width: 360px; }
+    .panel h1 {
       margin: 0 0 10px; font-size: 12px; letter-spacing: 0.12em;
       text-transform: uppercase; color: var(--muted); font-weight: 600;
     }
+    /* The first fieldset sits directly under the panel title, which is already
+       a heading — no second rule between them. */
+    .panel > fieldset:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
     fieldset {
       border: 0; border-top: 1px solid var(--border);
       margin: 14px 0 0; padding: 10px 0 0;
@@ -54,10 +66,12 @@
       text-transform: uppercase; color: var(--muted);
     }
     label { display: block; margin: 8px 0 3px; color: var(--muted); font-size: 11px; }
-    select, input[type="range"], input[type="color"] { width: 100%; }
-    select {
+    select, input[type="range"], input[type="color"], input[type="text"],
+    input[type="number"] { width: 100%; }
+    select, input[type="text"], input[type="number"] {
       background: #10141f; color: var(--text);
       border: 1px solid var(--border); border-radius: 4px; padding: 5px 6px;
+      font: inherit;
     }
     input[type="range"] { accent-color: var(--accent); margin: 0; }
     input[type="color"] {
@@ -66,16 +80,18 @@
     }
     .row { display: flex; align-items: center; gap: 8px; }
     .row > span { flex: 0 0 52px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
-    .modes { display: flex; gap: 4px; margin-top: 4px; }
-    .modes button {
-      flex: 1; padding: 6px 0; cursor: pointer;
-      background: #10141f; color: var(--muted);
+    button {
+      cursor: pointer; background: #10141f; color: var(--muted);
       border: 1px solid var(--border); border-radius: 4px;
-      font: inherit; font-size: 11px;
+      font: inherit; font-size: 11px; padding: 6px 8px;
     }
-    .modes button[aria-pressed="true"] {
+    button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+    button:disabled { opacity: 0.45; cursor: default; }
+    button[aria-pressed="true"] {
       background: var(--accent); border-color: var(--accent); color: #05080f; font-weight: 600;
     }
+    .modes { display: flex; gap: 4px; margin-top: 4px; }
+    .modes button { flex: 1; padding: 6px 0; }
     .check { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--text); }
     .check input { accent-color: var(--accent); }
     #hint { margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.6; }
@@ -83,13 +99,51 @@
       position: fixed; bottom: 12px; left: 12px;
       color: var(--muted); font-size: 11px;
     }
-    #status.error { color: #ff7a7a; }
+    #status.error { color: var(--error); }
+
+    /* ── LOD ladder ─────────────────────────────────────────────────────── */
+    .level {
+      border: 1px solid var(--border); border-radius: 5px;
+      margin-top: 8px; padding: 6px 8px 8px;
+    }
+    .level.live { border-color: var(--accent); }
+    .level > header {
+      display: flex; align-items: center; gap: 6px;
+      color: var(--text); font-size: 11px;
+    }
+    .level > header .band { flex: 1; color: var(--muted); }
+    .level > header .tag { color: var(--accent); font-weight: 600; }
+    .grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 6px;
+    }
+    .grid label { margin: 4px 0 0; }
+    .grid .wide { grid-column: 1 / -1; }
+    .actions { display: flex; gap: 4px; margin-top: 8px; }
+    .actions > * { flex: 1; }
+    .sub {
+      margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border);
+    }
+    .note { color: var(--muted); font-size: 11px; margin-top: 6px; }
+    .note.bad { color: var(--error); }
+    .note.good { color: var(--ok); }
+    .note.warn { color: var(--warn); }
+    #lodLog {
+      margin: 8px 0 0; padding: 6px; max-height: 220px; overflow: auto;
+      background: #05070d; border: 1px solid var(--border); border-radius: 4px;
+      color: var(--muted); font-size: 10.5px; white-space: pre-wrap; word-break: break-word;
+    }
+    dl.cost {
+      display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+      margin: 6px 0 0; font-size: 11px;
+    }
+    dl.cost dt { color: var(--muted); }
+    dl.cost dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
   <canvas id="canvas"></canvas>
 
-  <div id="panel">
+  <div id="panel" class="panel">
     <h1>Model Viewer</h1>
 
     <label for="model">Model</label>
@@ -146,9 +200,59 @@
 
     <div id="hint">
       Drag to orbit · right-drag to pan · wheel to zoom.<br />
+      <b>view</b> holds one level; <b>Auto</b> swaps them by distance as the game
+      does; <b>range</b> puts the camera at the band's far edge.<br />
       URL params: <code>?model=</code> <code>?variant=</code>
       <code>?entity=</code> <code>?lighting=</code> <code>?gizmos=1</code>
     </div>
+  </div>
+
+  <div id="lodPanel" class="panel">
+    <h1>Level of Detail</h1>
+    <fieldset>
+      <legend>Ladder</legend>
+      <div class="modes" id="lodModes">
+        <button data-lod="base" aria-pressed="true">Base</button>
+        <button data-lod="auto" aria-pressed="false">Auto</button>
+        <button data-lod="fixed" aria-pressed="false">Hold</button>
+      </div>
+
+      <!-- Auto mode swaps levels by camera distance exactly as the game does,
+           so sweeping this is the "what does it look like LODded" control: drag
+           out and watch the levels change at their real thresholds. -->
+      <label for="distance">Camera distance</label>
+      <div class="row">
+        <input type="range" id="distance" min="1" max="400" step="1" value="30" />
+        <span id="distanceOut">30</span>
+      </div>
+
+      <label for="levelPick">Level</label>
+      <select id="levelPick"></select>
+      <div id="ladder"></div>
+      <p class="note" id="ladderNote"></p>
+      <div class="actions">
+        <button id="addLevel">+ level</button>
+        <button id="revertLadder">Revert</button>
+        <button id="saveLadder">Save</button>
+      </div>
+      <label for="copyFrom">Copy ladder from</label>
+      <select id="copyFrom"><option value="">—</option></select>
+      <p class="note" id="runNote"></p>
+      <pre id="lodLog" hidden></pre>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cost</legend>
+      <dl class="cost">
+        <dt>Showing</dt><dd id="costShowing">—</dd>
+        <dt>Distance</dt><dd id="costDistance">—</dd>
+        <dt>Triangles</dt><dd id="costTriangles">—</dd>
+        <dt>Meshes</dt><dd id="costMeshes">—</dd>
+        <dt>Textures</dt><dd id="costTextures">—</dd>
+        <dt>Largest tex</dt><dd id="costLargest">—</dd>
+        <dt>File</dt><dd id="costBytes">—</dd>
+      </dl>
+    </fieldset>
   </div>
 
   <div id="status">Loading…</div>
@@ -159,6 +263,19 @@
     const setStatus = (text, isError = false) => {
       status.textContent = text;
       status.classList.toggle('error', isError);
+    };
+
+    // Saving a sidecar rewrites a file Trunk watches, so the page reloads
+    // mid-edit. Remember enough to come back to the same model and level rather
+    // than to the default cruiser at the default distance.
+    const SESSION_KEY = 'phoenix-viewer-panel';
+    const session = (() => {
+      try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? '{}'); }
+      catch { return {}; }
+    })();
+    const remember = (patch) => {
+      Object.assign(session, patch);
+      try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch { /* private mode */ }
     };
 
     // Trunk fires TrunkApplicationStarted and sets window.wasmBindings once the
@@ -194,10 +311,36 @@
       setStatus('Ready');
     }, 0);
 
+    // ── Formatting ─────────────────────────────────────────────────────────
+    const fmtInt = (n) => Number(n).toLocaleString('en-GB');
+    const fmtBytes = (bytes) => {
+      if (bytes === null || bytes === undefined) return '—';
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    };
+    const num = (value) => (value === '' || value === null ? undefined : Number(value));
+
+    // ── The dev server ─────────────────────────────────────────────────────
+    // Same origin: viewer-trunk.toml proxies /api/ to scripts/dev-viewer.mjs.
+    const api = async (path, options) => {
+      const response = await fetch(`api/${path}`, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((body.problems ?? ['request failed']).join('\n'));
+      return body;
+    };
+    const postJson = (path, body) => api(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
     // ── Model dropdown, from the generated index ───────────────────────────
     const modelSelect = document.getElementById('model');
     const variantSelect = document.getElementById('variant');
+    const copyFrom = document.getElementById('copyFrom');
     let models = [];
+    let ladderIndex = {};
 
     function populateVariants(model) {
       variantSelect.innerHTML = '<option value="">(base)</option>';
@@ -207,7 +350,18 @@
         option.textContent = variant;
         variantSelect.append(option);
       }
-      variantSelect.value = params.get('variant') ?? '';
+      variantSelect.value = params.get('variant') ?? session.variant ?? '';
+    }
+
+    /** Mark models with no ladder — that list is the authoring backlog. */
+    function labelModels() {
+      for (const option of modelSelect.options) {
+        const stem = option.textContent.split(' ')[0];
+        const entry = ladderIndex[stem];
+        option.textContent = entry && entry.levels
+          ? `${stem} · ${entry.levels} LOD`
+          : `${stem} · no LOD`;
+      }
     }
 
     try {
@@ -219,16 +373,35 @@
         option.textContent = model.name;
         modelSelect.append(option);
       }
-      const current = params.get('model') ?? 'assets/models/alliance_cruiser.glb';
-      modelSelect.value = current;
-      populateVariants(models.find((m) => m.path === current));
+      const current = params.get('model') ?? session.model ?? 'assets/models/alliance_cruiser.glb';
+      modelSelect.value = models.some((m) => m.path === current)
+        ? current
+        : models[0]?.path ?? '';
+      populateVariants(models.find((m) => m.path === modelSelect.value));
     } catch (err) {
       setStatus('Could not read assets/models/index.json — run the build once', true);
+    }
+
+    try {
+      ladderIndex = (await api('lod/index')).levels;
+      labelModels();
+      for (const [stem, entry] of Object.entries(ladderIndex)) {
+        if (!entry.levels) continue;
+        const option = document.createElement('option');
+        option.value = stem;
+        option.textContent = `${stem} (${entry.levels})`;
+        copyFrom.append(option);
+      }
+    } catch (err) {
+      // The panel still renders models; only the ladder half is unavailable.
+      setStatus(`LOD API unavailable: ${err.message}`, true);
     }
 
     const loadCurrent = () => {
       wasm.viewer_load_model(modelSelect.value, variantSelect.value || undefined);
       setStatus(`Loading ${modelSelect.value}…`);
+      remember({ model: modelSelect.value, variant: variantSelect.value });
+      loadLadder();
     };
 
     modelSelect.addEventListener('change', () => {
@@ -236,6 +409,740 @@
       loadCurrent();
     });
     variantSelect.addEventListener('change', loadCurrent);
+
+    // ── LOD ladder ─────────────────────────────────────────────────────────
+    //
+    // One level at a time. A ladder is four levels of a dozen fields each, and
+    // laying them all out at once buried the thing being looked at — so the
+    // dropdown picks a level and the panel shows that level's settings and its
+    // own generate controls. The generator takes a filter, so "generate this
+    // level" is a real operation rather than a whole-model run in disguise.
+    const ladderEl = document.getElementById('ladder');
+    const ladderNote = document.getElementById('ladderNote');
+    const runNote = document.getElementById('runNote');
+    const logEl = document.getElementById('lodLog');
+    const saveButton = document.getElementById('saveLadder');
+    const revertButton = document.getElementById('revertLadder');
+    const addButton = document.getElementById('addLevel');
+    const levelPick = document.getElementById('levelPick');
+
+    /** The working copy the panel edits, and what the sidecars currently say. */
+    const ladder = { levels: [], saved: [], state: null, dirty: false, selected: 0 };
+    let lodMode = session.lodMode ?? 'base';
+    let lodIndex = session.lodIndex ?? 0;
+
+    const setNote = (element, text, kind = '') => {
+      element.textContent = text;
+      element.className = `note ${kind}`.trim();
+    };
+
+    async function loadLadder() {
+      ladderEl.replaceChildren();
+      try {
+        ladder.state = await api(
+          `lod?model=${encodeURIComponent(modelSelect.value)}` +
+            `&variant=${encodeURIComponent(variantSelect.value)}`,
+        );
+        // The engine resolves exactly ONE sidecar — `<stem>.<variant>.toml` —
+        // and an absent one is an identity rig with no ladder. The asteroids
+        // ship no `.model.toml`, so the default "(base)" variant has no ladder
+        // to render: switch to a variant that does, rather than listing levels
+        // whose `view` button the engine would ignore.
+        const elsewhere = ladder.state.ladderVariants ?? [];
+        if (!ladder.state.levels.length && elsewhere.length) {
+          const target = elsewhere.find(
+            (v) => [...variantSelect.options].some((o) => o.value === v),
+          );
+          if (target !== undefined && target !== variantSelect.value) {
+            variantSelect.value = target;
+            loadCurrent();
+            return;
+          }
+        }
+        ladder.saved = ladder.state.levels;
+        ladder.levels = structuredClone(ladder.saved);
+        ladder.dirty = false;
+        ladder.selected = Math.min(ladder.selected, Math.max(ladder.levels.length - 1, 0));
+        sizeDistanceSlider();
+        renderLadder();
+      } catch (err) {
+        setNote(ladderNote, err.message, 'bad');
+      }
+    }
+
+    /** The band a level covers, as text. */
+    function bandLabel(index) {
+      const lower = index === 0 ? 0 : ladder.levels[index - 1]?.max_distance ?? 0;
+      const upper = ladder.levels[index]?.max_distance;
+      return upper === undefined ? `${lower}+` : `${lower}–${upper}`;
+    }
+
+    /** Where to put the camera to see a level's band: its far edge. */
+    function bandDistance(index) {
+      const upper = ladder.levels[index]?.max_distance;
+      if (upper !== undefined) return upper;
+      const lower = index === 0 ? 0 : ladder.levels[index - 1]?.max_distance ?? 0;
+      // The fallback level has no far edge; twice its near edge is far enough
+      // inside it to be looking at the right thing.
+      return lower ? lower * 2 : 100;
+    }
+
+    /**
+     * Hand the working copy to the engine.
+     *
+     * The sidecar is still the authority — this is the *unsaved* ladder, so a
+     * switch distance can be dragged and judged in Auto mode before it is
+     * written. Pushed level by level rather than as JSON: serde_json is
+     * confined to codec.rs, and these are scalars.
+     */
+    function pushLadder() {
+      wasm.viewer_ladder_begin();
+      for (const level of ladder.levels) {
+        const scale = Array.isArray(level.scale) ? level.scale : [1, 1, 1];
+        const rot = Array.isArray(level.rotation) ? level.rotation : [0, 0, 0];
+        // A negative red channel is "this level declares no colour"; a real one
+        // is 0–1 sRGB, which is what the renderer feeds to `Color::srgb`.
+        const col = Array.isArray(level.colour) ? level.colour : [-1, 0, 0];
+        wasm.viewer_ladder_push(
+          level.max_distance === undefined ? Infinity : Number(level.max_distance),
+          level.model ?? '',
+          level.variant ?? '',
+          level.shape ?? '',
+          Number(scale[0] ?? 1), Number(scale[1] ?? 1), Number(scale[2] ?? 1),
+          Number(rot[0] ?? 0), Number(rot[1] ?? 0), Number(rot[2] ?? 0),
+          Number(col[0] ?? -1), Number(col[1] ?? 0), Number(col[2] ?? 0),
+        );
+      }
+      wasm.viewer_ladder_commit();
+    }
+
+    function markDirty() {
+      ladder.dirty = true;
+      saveButton.disabled = false;
+      revertButton.disabled = false;
+      setNote(ladderNote, 'Unsaved ladder edits.', 'warn');
+    }
+
+    /** One labelled input bound straight into the working copy. */
+    function field(parent, { label, value, key, target, type = 'number', step, wide = false, placeholder = '' }) {
+      const wrap = document.createElement('div');
+      if (wide) wrap.className = 'wide';
+      const labelEl = document.createElement('label');
+      labelEl.textContent = label;
+      const input = document.createElement('input');
+      input.type = type;
+      if (step) input.step = step;
+      input.placeholder = placeholder;
+      input.value = value ?? '';
+      input.addEventListener('input', () => {
+        const parsed = type === 'number' ? num(input.value) : (input.value || undefined);
+        if (parsed === undefined) delete target[key];
+        else target[key] = parsed;
+        markDirty();
+        // Live: an edited band or shape applies to Auto mode on the next frame.
+        pushLadder();
+        if (key === 'max_distance') {
+          refreshLevelOptions();
+          sizeDistanceSlider();
+        }
+        if (key === 'remesh_voxel_size') remeshHint();
+      });
+      labelEl.append(input);
+      wrap.append(labelEl);
+      parent.append(wrap);
+      return input;
+    }
+
+    /**
+     * A comma-separated `[x, y, z]` field.
+     *
+     * Kept as text rather than three number inputs: it is one value, it is
+     * usually typed in one go, and "1, 1, 1" (or an empty box) means "no scale
+     * of its own" — which has to delete the key rather than write three ones,
+     * or every level in the tree would grow a redundant `scale`.
+     */
+    function triple(parent, { label, value, key, target, placeholder, empty = [1, 1, 1] }) {
+      const wrap = document.createElement('div');
+      wrap.className = 'wide';
+      const labelEl = document.createElement('label');
+      labelEl.textContent = label;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = placeholder;
+      input.value = Array.isArray(value) ? value.join(', ') : '';
+      input.addEventListener('input', () => {
+        const parts = input.value.split(',').map((p) => Number(p.trim()));
+        const usable = parts.length === 3 && parts.every((n) => Number.isFinite(n));
+        if (!usable || parts.every((n, i) => n === empty[i])) delete target[key];
+        else target[key] = parts;
+        markDirty();
+        pushLadder();
+      });
+      labelEl.append(input);
+      wrap.append(labelEl);
+      parent.append(wrap);
+      return input;
+    }
+
+    /**
+     * A colour picker for a procedural level.
+     *
+     * The sidecar stores `[r, g, b]` as sRGB 0–1 — the renderer hands them
+     * straight to `Color::srgb` — so this is the same conversion the lighting
+     * sliders use, and the swatch shows what the level will actually be. The
+     * checkbox clears the key rather than writing a colour, because an omitted
+     * `colour` inherits the entity's, and every rock sharing one ladder is
+     * tinted differently by exactly that inheritance.
+     */
+    function colourField(parent, level) {
+      const wrap = document.createElement('div');
+      wrap.className = 'wide';
+
+      const row = document.createElement('label');
+      row.className = 'check';
+      const on = document.createElement('input');
+      on.type = 'checkbox';
+      on.checked = Array.isArray(level.colour);
+      const picker = document.createElement('input');
+      picker.type = 'color';
+      picker.style.flex = '1';
+      const toHex = (c) =>
+        '#' + c.slice(0, 3)
+          .map((v) => Math.round(Math.min(Math.max(v, 0), 1) * 255).toString(16).padStart(2, '0'))
+          .join('');
+      picker.value = Array.isArray(level.colour) ? toHex(level.colour) : '#808080';
+      picker.disabled = !on.checked;
+
+      const write = () => {
+        // Four decimals: enough to round-trip a byte channel, short enough to
+        // keep the sidecar readable.
+        level.colour = hexToRgb(picker.value).map((v) => Math.round(v * 10000) / 10000);
+        markDirty();
+        pushLadder();
+      };
+      on.addEventListener('change', () => {
+        picker.disabled = !on.checked;
+        if (on.checked) write();
+        else {
+          delete level.colour;
+          markDirty();
+          pushLadder();
+        }
+      });
+      picker.addEventListener('input', write);
+
+      row.append(on, document.createTextNode(' colour'), picker);
+      wrap.append(row);
+      parent.append(wrap);
+    }
+
+    /** Repopulate the level dropdown from the working copy. */
+    function refreshLevelOptions() {
+      const previous = ladder.selected;
+      levelPick.replaceChildren();
+      ladder.levels.forEach((level, index) => {
+        const option = document.createElement('option');
+        option.value = String(index);
+        const what = level.model ? level.model.split('/').pop() : (level.shape ?? '—');
+        const bytes = ladder.state?.files?.[index]?.bytes;
+        option.textContent =
+          `LOD ${index} · ${bandLabel(index)} · ${what}` +
+          (bytes ? ` · ${fmtBytes(bytes)}` : '');
+        levelPick.append(option);
+      });
+      if (!ladder.levels.length) {
+        const option = document.createElement('option');
+        option.textContent = 'no levels';
+        levelPick.append(option);
+      }
+      levelPick.value = String(Math.min(previous, Math.max(ladder.levels.length - 1, 0)));
+    }
+
+    function renderLadder() {
+      saveButton.disabled = !ladder.dirty;
+      revertButton.disabled = !ladder.dirty;
+      refreshLevelOptions();
+      ladderEl.replaceChildren();
+
+      const rig = ladder.state?.variant || 'base';
+      if (!ladder.levels.length) {
+        setNote(
+          ladderNote,
+          `No ladder in the ${rig} rig sidecar. Add a level, or copy one from a model that has it.`,
+        );
+        remeshHint();
+        return;
+      }
+      if (!ladder.dirty) {
+        // Read from the rendered variant's sidecar; written to all of them,
+        // because they share the generated files and must agree about them.
+        const written = ladder.state?.sidecars?.map((s) => s.path.split('/').pop()).join(', ');
+        setNote(ladderNote, `${rig} rig · saved in ${written}`);
+      }
+
+      const index = ladder.selected;
+      const level = ladder.levels[index];
+      if (!level) return;
+
+      const card = document.createElement('div');
+      card.className = 'level';
+      card.dataset.level = String(index);
+
+      const header = document.createElement('header');
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = `LOD ${index}`;
+      const band = document.createElement('span');
+      band.className = 'band';
+      band.textContent = bandLabel(index);
+      const bytes = document.createElement('span');
+      bytes.textContent = fmtBytes(ladder.state?.files?.[index]?.bytes);
+      header.append(tag, band, bytes);
+      card.append(header);
+
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      field(grid, {
+        label: 'max distance', key: 'max_distance', target: level,
+        value: level.max_distance, step: 'any', placeholder: '∞',
+      });
+      field(grid, {
+        label: 'shape', key: 'shape', target: level, type: 'text',
+        value: level.shape, placeholder: 'sphere',
+      });
+      field(grid, {
+        label: 'model', key: 'model', target: level, type: 'text', wide: true,
+        value: level.model, placeholder: 'assets/models/…_lod1.glb',
+      });
+      // `scale` is three numbers in one box: a sphere standing in for a hull
+      // wants to be hull-shaped, and typing "3, 1, 0.5" beats three inputs.
+      triple(grid, {
+        label: 'scale x, y, z', key: 'scale', target: level,
+        value: level.scale, placeholder: '1, 1, 1',
+      });
+      // Shape-only, because that is where they mean anything: a GLB level
+      // takes its colour from its own material and its orientation from its
+      // rig sidecar's `[base] rotation`.
+      if (level.shape) {
+        triple(grid, {
+          label: 'rotation x, y, z (rad)', key: 'rotation', target: level,
+          value: level.rotation, placeholder: '0, 0, 0', empty: [0, 0, 0],
+        });
+        colourField(grid, level);
+      }
+      card.append(grid);
+
+      // The `[lod.generate]` half: present only on a level this repo makes.
+      const generated = document.createElement('label');
+      generated.className = 'check';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.checked = !!level.generate;
+      toggle.addEventListener('change', () => {
+        if (toggle.checked) level.generate = { source: ladder.state?.source?.model };
+        else delete level.generate;
+        markDirty();
+        renderLadder();
+      });
+      generated.append(toggle, document.createTextNode(' generated by the optimiser'));
+      card.append(generated);
+
+      if (level.generate) {
+        const gen = document.createElement('div');
+        gen.className = 'grid';
+        field(gen, {
+          label: 'source', key: 'source', target: level.generate, type: 'text', wide: true,
+          value: level.generate.source, placeholder: ladder.state?.source?.model,
+        });
+        field(gen, {
+          label: 'ratio', key: 'ratio', target: level.generate,
+          value: level.generate.ratio, step: 'any', placeholder: '0.25',
+        });
+        field(gen, {
+          label: 'error', key: 'error', target: level.generate,
+          value: level.generate.error, step: 'any', placeholder: '0.01',
+        });
+        field(gen, {
+          label: 'texture px', key: 'texture_size', target: level.generate,
+          value: level.generate.texture_size, step: '1', placeholder: '512',
+        });
+        // `remesh_voxel_size` is in the model's OWN units — the raw geometry,
+        // before the rig's base scale. On a rock scaled 4.2x that is nothing
+        // like the `max_distance` and `[extents]` numbers right above it, and
+        // a value chosen against those rebuilds the mesh as a cube. Say what
+        // the model measures, and suggest a size that resolves it.
+        const own = ladder.state?.modelExtent;
+        field(gen, {
+          label: own ? `voxel (model ${own.toFixed(2)}u)` : 'voxel remesh',
+          key: 'remesh_voxel_size', target: level.generate,
+          value: level.generate.remesh_voxel_size, step: 'any',
+          placeholder: own ? `off · try ${(own / 64).toFixed(3)}` : 'off',
+        });
+        card.append(gen);
+
+        // Per-level generate controls. The generator filters on any substring
+        // of a target's output/source/sidecar paths, so handing it this level's
+        // output regenerates exactly this level.
+        const sub = document.createElement('div');
+        sub.className = 'sub';
+        const remesh = document.createElement('label');
+        remesh.className = 'check';
+        const remeshInput = document.createElement('input');
+        remeshInput.type = 'checkbox';
+        remeshInput.checked = remeshWanted;
+        remeshInput.addEventListener('change', () => {
+          remeshWanted = remeshInput.checked;
+          remeshHint();
+        });
+        remesh.append(remeshInput, document.createTextNode(' Blender voxel pre-pass'));
+
+        const force = document.createElement('label');
+        force.className = 'check';
+        const forceInput = document.createElement('input');
+        forceInput.type = 'checkbox';
+        forceInput.checked = forceWanted;
+        forceInput.addEventListener('change', () => { forceWanted = forceInput.checked; });
+        force.append(forceInput, document.createTextNode(' Accept a level that grew'));
+
+        const runRow = document.createElement('div');
+        runRow.className = 'actions';
+        const run = document.createElement('button');
+        run.id = 'runGenerate';
+        run.textContent = `Generate LOD ${index}`;
+        run.addEventListener('click', () => startGenerate(index));
+        runRow.append(run);
+
+        sub.append(remesh, force, runRow);
+        card.append(sub);
+
+        if (level.generate.remesh_voxel_size) {
+          // The pre-pass rebuilds the surface from voxels and keeps no UVs, so
+          // a level made this way renders untextured however big texture_size
+          // is. Stated here because the symptom (a grey LOD 2) looks like a
+          // decimation bug rather than a documented consequence.
+          const warn = document.createElement('p');
+          warn.className = 'note warn';
+          warn.textContent =
+            'A voxel remesh discards UVs and materials — this level will render untextured.';
+          card.append(warn);
+        }
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const view = document.createElement('button');
+      view.textContent = 'view';
+      view.addEventListener('click', () => setLodMode('fixed', index));
+      const range = document.createElement('button');
+      range.textContent = 'range';
+      range.addEventListener('click', () => setDistance(bandDistance(index)));
+      const remove = document.createElement('button');
+      remove.textContent = 'remove';
+      remove.addEventListener('click', () => {
+        ladder.levels.splice(index, 1);
+        ladder.selected = Math.max(0, Math.min(index, ladder.levels.length - 1));
+        markDirty();
+        renderLadder();
+      });
+      actions.append(view, range, remove);
+      card.append(actions);
+
+      ladderEl.append(card);
+      remeshHint();
+      pushLadder();
+    }
+
+    /** Ring the shown level's card when it is the one on screen. */
+    function highlightLive(current = null) {
+      for (const card of ladderEl.querySelectorAll('.level')) {
+        card.classList.toggle('live', Number(card.dataset.level) === current);
+      }
+    }
+
+    levelPick.addEventListener('change', () => {
+      ladder.selected = Number(levelPick.value) || 0;
+      renderLadder();
+      // Picking a level in Hold mode is the same gesture as pressing `view`.
+      if (lodMode === 'fixed') setLodMode('fixed', ladder.selected);
+    });
+
+    addButton.addEventListener('click', () => {
+      const last = ladder.levels[ladder.levels.length - 1];
+      const level = { max_distance: undefined, model: '' };
+      // A ladder ends with an unbounded fallback level. Inserting before it
+      // keeps that property, so the new level is a real band rather than dead
+      // code after the catch-all.
+      if (last && last.max_distance === undefined) {
+        const previous = ladder.levels[ladder.levels.length - 2]?.max_distance ?? 0;
+        level.max_distance = previous ? previous * 2 : 100;
+        ladder.levels.splice(ladder.levels.length - 1, 0, level);
+        ladder.selected = ladder.levels.length - 2;
+      } else {
+        ladder.levels.push(level);
+        ladder.selected = ladder.levels.length - 1;
+      }
+      markDirty();
+      renderLadder();
+    });
+
+    revertButton.addEventListener('click', () => {
+      ladder.levels = structuredClone(ladder.saved);
+      ladder.dirty = false;
+      renderLadder();
+    });
+
+    saveButton.addEventListener('click', async () => {
+      saveButton.disabled = true;
+      try {
+        const result = await postJson(
+          `lod?variant=${encodeURIComponent(variantSelect.value)}`,
+          { model: modelSelect.value, levels: ladder.levels },
+        );
+        ladder.state = result.state;
+        ladder.saved = result.state.levels;
+        ladder.levels = structuredClone(ladder.saved);
+        ladder.dirty = false;
+        renderLadder();
+        setNote(
+          ladderNote,
+          result.written.length
+            ? `Wrote ${result.written.map((p) => p.split('/').pop()).join(', ')}`
+            : 'No change to write.',
+          'good',
+        );
+      } catch (err) {
+        setNote(ladderNote, err.message, 'bad');
+        saveButton.disabled = false;
+      }
+    });
+
+    copyFrom.addEventListener('change', async () => {
+      const from = copyFrom.value;
+      copyFrom.value = '';
+      if (!from) return;
+      try {
+        const result = await api(
+          `lod/template?from=${encodeURIComponent(from)}` +
+            `&model=${encodeURIComponent(modelSelect.value)}` +
+            `&variant=${encodeURIComponent(variantSelect.value)}`,
+        );
+        ladder.levels = result.levels;
+        ladder.selected = 0;
+        markDirty();
+        renderLadder();
+        setNote(
+          ladderNote,
+          `Proposed from ${result.from}, distances × ${result.scaledBy.toFixed(2)}. Check them, then Save.`,
+          'warn',
+        );
+      } catch (err) {
+        setNote(ladderNote, err.message, 'bad');
+      }
+    });
+
+    // ── The optimiser ──────────────────────────────────────────────────────
+    let pollTimer = null;
+    let remeshWanted = false;
+    let forceWanted = false;
+
+    /**
+     * A level that declares `remesh_voxel_size` needs `--remesh` to rebuild its
+     * `.remesh.glb` intermediate — unless one is already checked in, which is
+     * why this says so rather than refusing to run. A voxel coarser than an
+     * eighth of the model cannot describe its silhouette at all, which is worth
+     * saying before a Blender run and a reload rather than after.
+     */
+    function remeshHint() {
+      const level = ladder.levels[ladder.selected];
+      const voxel = level?.generate?.remesh_voxel_size;
+      const own = ladder.state?.modelExtent;
+      if (voxel && own && voxel > own / 8) {
+        setNote(
+          runNote,
+          `Voxel ${voxel} is coarser than an eighth of this model (${own.toFixed(2)}u in its own ` +
+            `units) — it will remesh to a box. Try ${(own / 64).toFixed(3)}.`,
+          'bad',
+        );
+      } else if (voxel && !remeshWanted) {
+        setNote(
+          runNote,
+          'This level declares a voxel pre-pass — tick it, unless the .remesh.glb is already on disk.',
+          'warn',
+        );
+      } else if (/^(This level declares|Voxel )/.test(runNote.textContent)) {
+        setNote(runNote, '');
+      }
+    }
+
+    function showRun(run) {
+      logEl.hidden = false;
+      const wasAtBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 20;
+      logEl.textContent = run.log;
+      if (wasAtBottom) logEl.scrollTop = logEl.scrollHeight;
+      const button = document.getElementById('runGenerate');
+      if (button) button.disabled = run.active;
+      if (run.active) {
+        setNote(runNote, `Running… ${Math.round((run.elapsedMs ?? 0) / 1000)}s`, 'warn');
+        return;
+      }
+      clearInterval(pollTimer);
+      pollTimer = null;
+      if (run.code === 0) {
+        // Re-fetch the regenerated files in place. Trunk no longer watches
+        // assets/models/, and the engine re-requests through
+        // `AssetServer::reload` and rebuilds the subject when the new bytes
+        // land — so the page, the panel and the camera all stay where they are.
+        wasm.viewer_reload_assets();
+        // Re-assert after the ladder reload, whose re-render refreshes the
+        // remesh hint into this same note.
+        loadLadder().then(() => setNote(runNote, 'Done — reloaded in place.', 'good'));
+      } else if (run.code !== null) {
+        setNote(runNote, `Generator exited ${run.code} — see the log.`, 'bad');
+      }
+    }
+
+    function pollRun() {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try { showRun(await api('lod/generate')); }
+        catch (err) { setNote(runNote, err.message, 'bad'); }
+      }, 1000);
+    }
+
+    async function startGenerate(index) {
+      if (ladder.dirty) {
+        setNote(runNote, 'Save the ladder first — the generator reads the sidecars.', 'bad');
+        return;
+      }
+      const button = document.getElementById('runGenerate');
+      if (button) button.disabled = true;
+      try {
+        showRun(await postJson('lod/generate', {
+          model: modelSelect.value,
+          variant: variantSelect.value,
+          level: index,
+          remesh: remeshWanted,
+          force: forceWanted,
+        }));
+        pollRun();
+      } catch (err) {
+        setNote(runNote, err.message, 'bad');
+        if (button) button.disabled = false;
+      }
+    }
+
+    // A run writes .glb files Trunk watches, so the page can reload underneath
+    // it. The run itself lives in the dev server, so pick the transcript back
+    // up rather than coming back looking idle.
+    api('lod/generate')
+      .then((run) => {
+        if (!run.command) return;
+        showRun(run);
+        if (run.active) pollRun();
+      })
+      .catch(() => { /* no API, no runs */ });
+
+    // ── Camera distance ────────────────────────────────────────────────────
+    //
+    // The "show me it LODded" control. In Auto mode the engine swaps levels off
+    // this exact distance, so dragging the slider walks the ladder through its
+    // real thresholds; the readout and the Cost panel say which level answered.
+    const distanceInput = document.getElementById('distance');
+    const distanceOut = document.getElementById('distanceOut');
+    let draggingDistance = false;
+
+    function setDistance(value) {
+      distanceInput.value = String(Math.round(value));
+      distanceOut.textContent = distanceInput.value;
+      wasm.viewer_set_camera_distance(Number(distanceInput.value));
+    }
+
+    /** Fit the slider's range to the ladder, so its full sweep is the ladder. */
+    function sizeDistanceSlider() {
+      const bounded = ladder.levels
+        .map((l) => l.max_distance)
+        .filter((d) => typeof d === 'number');
+      const far = bounded.length ? Math.max(...bounded) : 0;
+      distanceInput.max = String(Math.max(Math.round(far * 1.5), 100));
+    }
+
+    distanceInput.addEventListener('pointerdown', () => { draggingDistance = true; });
+    addEventListener('pointerup', () => { draggingDistance = false; });
+    distanceInput.addEventListener('input', () => {
+      distanceOut.textContent = distanceInput.value;
+      wasm.viewer_set_camera_distance(Number(distanceInput.value));
+    });
+    // ── LOD mode ───────────────────────────────────────────────────────────
+    const lodModeButtons = [...document.querySelectorAll('#lodModes button')];
+
+    function setLodMode(mode, index = lodIndex) {
+      lodMode = mode;
+      lodIndex = index;
+      for (const button of lodModeButtons) {
+        button.setAttribute('aria-pressed', String(button.dataset.lod === mode));
+      }
+      wasm.viewer_set_lod_mode(mode, index);
+      remember({ lodMode: mode, lodIndex: index });
+    }
+    for (const button of lodModeButtons) {
+      button.addEventListener('click', () =>
+        // "Hold" is the dropdown's level; the other two ignore the index.
+        setLodMode(button.dataset.lod, ladder.selected));
+    }
+
+    // ── Cost readout ───────────────────────────────────────────────────────
+    const cost = {
+      showing: document.getElementById('costShowing'),
+      distance: document.getElementById('costDistance'),
+      triangles: document.getElementById('costTriangles'),
+      meshes: document.getElementById('costMeshes'),
+      textures: document.getElementById('costTextures'),
+      largest: document.getElementById('costLargest'),
+      bytes: document.getElementById('costBytes'),
+    };
+
+    setInterval(() => {
+      let stats;
+      try { stats = JSON.parse(wasm.viewer_stats() || '{}'); } catch { return; }
+      if (!Object.keys(stats).length) return;
+
+      const level = stats.level;
+      cost.showing.textContent = level === null
+        ? (stats.levels ? `base (${stats.levels} levels)` : 'base')
+        : `LOD ${level} of ${stats.levels}`;
+      cost.distance.textContent = `${stats.distance.toFixed(1)} u`;
+      cost.triangles.textContent = stats.settled ? fmtInt(stats.triangles) : '…';
+      cost.meshes.textContent = fmtInt(stats.meshes);
+      // Bevy can release an image once it is uploaded, so say when the pixel
+      // total covers fewer images than the materials reference.
+      cost.textures.textContent = stats.textures === stats.measuredTextures
+        ? fmtInt(stats.textures)
+        : `${fmtInt(stats.measuredTextures)}/${fmtInt(stats.textures)}`;
+      cost.largest.textContent = stats.largestTexture ? `${stats.largestTexture} px` : '—';
+      // The status line tracks the load rather than staying on "Loading…"
+      // forever, which is what it did before there was anything watching.
+      if (!status.classList.contains('error')) {
+        setStatus(stats.settled
+          ? `${modelSelect.value}${level === null ? '' : ` · LOD ${level}`}`
+          : `Loading ${modelSelect.value}…`);
+      }
+      const bytes = level === null
+        ? ladder.state?.source?.bytes
+        : ladder.state?.files?.[level]?.bytes;
+      cost.bytes.textContent = fmtBytes(bytes);
+      highlightLive(level);
+
+      // The wheel zooms too, so let the slider track the camera rather than
+      // sitting at a stale value the moment anyone scrolls.
+      if (!draggingDistance) {
+        const rounded = String(Math.round(stats.distance));
+        if (distanceInput.value !== rounded) {
+          if (Number(rounded) > Number(distanceInput.max)) distanceInput.max = rounded;
+          distanceInput.value = rounded;
+          distanceOut.textContent = rounded;
+        }
+      }
+    }, 250);
 
     // ── Lighting ───────────────────────────────────────────────────────────
     const modeButtons = [...document.querySelectorAll('#modes button')];
@@ -303,6 +1210,11 @@
     document.getElementById('skyboxOut').textContent = skybox.value;
     gizmos.checked = params.get('gizmos') === '1';
     setMode(params.get('lighting') ?? 'ambient');
+
+    // The model the panel restored is not necessarily the one Rust parsed out
+    // of the URL, so tell it explicitly, then bring the ladder up.
+    loadCurrent();
+    setLodMode(lodMode, lodIndex);
   </script>
 </body>
 </html>

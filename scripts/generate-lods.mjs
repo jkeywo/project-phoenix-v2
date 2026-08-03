@@ -340,8 +340,15 @@ export function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-/** A TOML float literal: whole numbers still need a decimal point. */
-function tomlFloat(value) {
+/**
+ * A TOML float literal: whole numbers still need a decimal point.
+ *
+ * Exported because the viewer's LOD panel writes the same `[lod.generate]`
+ * numbers back into the same sidecars (scripts/viewer-lods.mjs). Two spellings
+ * of `50` would make every hand-edited ladder churn the moment the panel
+ * touched it.
+ */
+export function tomlFloat(value) {
   return Number.isInteger(value) ? `${value}.0` : String(value);
 }
 

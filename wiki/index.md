@@ -20,7 +20,7 @@ Current implementation orientation only. For intended design use [`pasm/spec/`](
 
 ## Tooling
 
-- [Model Viewer](./concepts/model-viewer.md) — standalone shader/lighting iteration harness (`npm run dev:viewer`)
+- [Model Viewer](./concepts/model-viewer.md) — standalone shader/lighting iteration harness, and the LOD ladder editor (`npm run dev:viewer`)
 - [LOD Generation](./concepts/lod-generation.md) — sidecar-declared decimation + the manifest CI checks (`npm run lods`)
 - [Build & Deployment](./concepts/build-and-deployment.md)
 

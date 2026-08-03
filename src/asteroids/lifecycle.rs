@@ -1359,4 +1359,182 @@ asteroid_type_paths = ["x.toml"]
             "the new field's outer band (dist > 240) must have spawned rocks"
         );
     }
+
+    /// (#924) A single-cell crossing must spawn exactly the newly-entered
+    /// edge cells, despawn exactly the newly-exited trailing cells, and
+    /// leave every interior survivor's entity untouched. Before the fix,
+    /// slot addressing was keyed by offset-from-player: despawn slots were
+    /// computed against the OLD arena origin, the arena was updated, spawn
+    /// slots were computed against the NEW origin, and every surviving
+    /// slot's contents were left addressed by the stale offset — so a
+    /// one-cell move silently skipped newly-entered edge cells (their slot
+    /// looked occupied) and left trailing rocks stranded (never despawned).
+    /// Ring addressing (`cell.rem_euclid(size)`) makes a cell's slot
+    /// independent of the player's position, so this test would have caught
+    /// the bug: interior cells must keep the exact same `Entity`, not a
+    /// respawned one.
+    #[test]
+    fn single_cell_crossing_reindexes_only_entered_and_exited_cells() {
+        let mut app = test_app();
+        let res = 10.0f32;
+        let spawn_cells = 4u32;
+        let despawn_cells = 4u32;
+        // inner_radius 0, huge outer_radius: every cell near the player is
+        // eligible, so occupancy across the small area under test is exact
+        // and predictable.
+        let f = torus_field(0.0, 100_000.0, res, spawn_cells, despawn_cells);
+
+        set_ship_pos(&mut app, 0.0, 0.0);
+        app.world_mut()
+            .spawn((AsteroidFieldSection(f), Transform::default()));
+        app.update(); // full rebuild at grid cell (0, 0)
+
+        let cell_of = |t: &Transform| -> (i32, i32) {
+            (
+                (t.translation.x / res).round() as i32,
+                (t.translation.z / res).round() as i32,
+            )
+        };
+
+        let before: std::collections::HashMap<(i32, i32), Entity> = {
+            let mut q = app.world_mut().query::<(Entity, &Transform, &Asteroid)>();
+            q.iter(app.world())
+                .map(|(e, t, _)| (cell_of(t), e))
+                .collect()
+        };
+        assert!(!before.is_empty(), "no asteroids spawned before the move");
+
+        // Cross exactly one cell boundary: grid cell (0, 0) -> (1, 0).
+        set_ship_pos(&mut app, res, 0.0);
+        app.update();
+
+        let after: std::collections::HashMap<(i32, i32), Entity> = {
+            let mut q = app.world_mut().query::<(Entity, &Transform, &Asteroid)>();
+            q.iter(app.world())
+                .map(|(e, t, _)| (cell_of(t), e))
+                .collect()
+        };
+
+        let dc = despawn_cells as i32;
+
+        // Interior survivors: cells within both the old and new despawn
+        // window must be the exact same Entity — no despawn/respawn churn.
+        let mut interior_checked = 0;
+        for (&(cx, cz), &entity) in &before {
+            let in_old_window = cx.abs().max(cz.abs()) <= dc;
+            let in_new_window = (cx - 1).abs().max(cz.abs()) <= dc;
+            if in_old_window && in_new_window {
+                interior_checked += 1;
+                assert_eq!(
+                    after.get(&(cx, cz)),
+                    Some(&entity),
+                    "interior survivor cell {:?} churned (despawned/respawned) \
+                     across a one-cell move",
+                    (cx, cz)
+                );
+            }
+        }
+        assert!(
+            interior_checked > 0,
+            "test set-up produced no interior survivor cells to check"
+        );
+
+        // Trailing despawn: the old window's leftmost column exits the new
+        // window and must be gone.
+        let trailing_col = -dc;
+        let mut trailing_checked = 0;
+        for &(cx, cz) in before.keys() {
+            if cx == trailing_col {
+                trailing_checked += 1;
+                assert!(
+                    !after.contains_key(&(cx, cz)),
+                    "trailing cell {:?} should have despawned after the crossing",
+                    (cx, cz)
+                );
+            }
+        }
+        assert!(
+            trailing_checked > 0,
+            "test set-up produced no trailing cells to check"
+        );
+
+        // Edge spawn: the newly-entered spawn column (beyond the old spawn
+        // window) must now hold asteroids that did not exist before.
+        let entered_col = 1 + spawn_cells as i32;
+        let mut edge_checked = 0;
+        for &(cx, cz) in after.keys() {
+            if cx == entered_col {
+                edge_checked += 1;
+                assert!(
+                    !before.contains_key(&(cx, cz)),
+                    "edge cell {:?} existed before the move — test set-up is wrong",
+                    (cx, cz)
+                );
+            }
+        }
+        assert!(
+            edge_checked > 0,
+            "no asteroids spawned in the newly-entered edge column"
+        );
+    }
+
+    /// (#924) Several sequential one-cell moves must land in the same state
+    /// as a single full rebuild at the destination. Ring addressing means a
+    /// cell's slot never depends on the path taken to reach the current
+    /// player position, so a walk of individual steps and one big jump to
+    /// the same place must agree exactly — no drift accumulates from
+    /// repeated incremental deltas.
+    #[test]
+    fn multi_step_walk_matches_full_rebuild_at_destination() {
+        let res = 10.0f32;
+        let spawn_cells = 4u32;
+        let despawn_cells = 4u32;
+        let field = || torus_field(0.0, 100_000.0, res, spawn_cells, despawn_cells);
+
+        let cells = |app: &mut App| -> std::collections::HashSet<(i32, i32)> {
+            let mut q = app.world_mut().query::<(&Transform, &Asteroid)>();
+            q.iter(app.world())
+                .map(|(t, _)| {
+                    (
+                        (t.translation.x / res).round() as i32,
+                        (t.translation.z / res).round() as i32,
+                    )
+                })
+                .collect()
+        };
+
+        // Walk: five sequential one-cell moves along +x, each within
+        // spawn_cells so none of them force a full rebuild on their own.
+        let mut walked = test_app();
+        set_ship_pos(&mut walked, 0.0, 0.0);
+        walked
+            .world_mut()
+            .spawn((AsteroidFieldSection(field()), Transform::default()));
+        walked.update(); // full rebuild at (0, 0)
+        for step in 1..=5 {
+            set_ship_pos(&mut walked, step as f32 * res, 0.0);
+            walked.update();
+        }
+
+        // Direct: a single full rebuild landing at the same destination.
+        let mut direct = test_app();
+        set_ship_pos(&mut direct, 5.0 * res, 0.0);
+        direct
+            .world_mut()
+            .spawn((AsteroidFieldSection(field()), Transform::default()));
+        direct.update();
+
+        let walked_cells = cells(&mut walked);
+        let direct_cells = cells(&mut direct);
+        assert!(!walked_cells.is_empty(), "walk produced no asteroids");
+        assert_eq!(
+            walked_cells.len(),
+            direct_cells.len(),
+            "walked population size must match a direct full rebuild at the destination"
+        );
+        assert_eq!(
+            walked_cells, direct_cells,
+            "walked cell occupancy must match a direct full rebuild at the destination"
+        );
+    }
 }

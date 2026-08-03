@@ -36,6 +36,27 @@ pub fn compute_player_grid_cell(world_x: f32, world_z: f32, resolution: f32) -> 
 ///
 /// Returns `None` if the cell is out of range (Chebyshev distance from player
 /// exceeds `despawn_cells`).
+///
+/// Slot addressing is by **absolute cell**, not by offset from the player:
+/// `target_gx.rem_euclid(size)` / `target_gz.rem_euclid(size)`, where
+/// `size = 2 * despawn_cells + 1` is the window's fixed side length. This
+/// makes the mapping translation-invariant — a given world cell always lands
+/// in the same slot regardless of where the player currently is, as long as
+/// the window size hasn't changed (that only happens on `full_rebuild`).
+///
+/// This matters for the incremental delta path (issue #924): with the prior
+/// player-relative addressing (`dx.wrapping_add(d)`), the same world cell
+/// mapped to a *different* slot after the player moved even one cell, so
+/// despawning old-window cells against the old player position and spawning
+/// new-window cells against the new player position left every surviving
+/// cell's storage keyed by a slot index that no longer matched the ring's
+/// current layout. Ring addressing removes the need to re-address survivors
+/// at all: because any two cells simultaneously within Chebyshev distance
+/// `despawn_cells` of the *same* center necessarily have distinct residues
+/// mod `size` (there are exactly `size` residues and `size` cells across the
+/// window's side), no two live cells can ever collide in the same slot, and
+/// a cell's slot is stable across every incremental step that doesn't change
+/// `size`.
 pub fn compute_slot_for_world_cell(
     player_gx: i32,
     player_gz: i32,
@@ -49,8 +70,9 @@ pub fn compute_slot_for_world_cell(
     if dx.abs() > d || dz.abs() > d {
         return None;
     }
-    let slot_x = dx.wrapping_add(d) as usize;
-    let slot_z = dz.wrapping_add(d) as usize;
+    let size = 2 * d + 1;
+    let slot_x = target_gx.rem_euclid(size) as usize;
+    let slot_z = target_gz.rem_euclid(size) as usize;
     Some((slot_x, slot_z))
 }
 
@@ -150,18 +172,23 @@ mod tests {
     // ── compute_slot_for_world_cell ──────────────────────────────────────
 
     #[test]
-    fn slot_at_player_center_is_despawn_cells() {
-        assert_eq!(compute_slot_for_world_cell(0, 0, 0, 0, 2), Some((2, 2)),);
+    fn slot_at_player_center_is_target_cell_mod_size() {
+        // Ring addressing: slot = target_cell.rem_euclid(size). At the origin
+        // cell (0, 0), that's (0, 0) regardless of window size.
+        assert_eq!(compute_slot_for_world_cell(0, 0, 0, 0, 2), Some((0, 0)),);
     }
 
     #[test]
     fn slot_positive_offset_from_player() {
-        assert_eq!(compute_slot_for_world_cell(0, 0, 2, 1, 2), Some((4, 3)),);
+        // size = 2*2+1 = 5; target (2, 1) is within range and rem_euclid(5)
+        // is a no-op for small positive values.
+        assert_eq!(compute_slot_for_world_cell(0, 0, 2, 1, 2), Some((2, 1)),);
     }
 
     #[test]
     fn slot_negative_offset_from_player() {
-        assert_eq!(compute_slot_for_world_cell(0, 0, -2, -2, 2), Some((0, 0)),);
+        // size = 5; target (-2, -2) wraps to (3, 3) under rem_euclid(5).
+        assert_eq!(compute_slot_for_world_cell(0, 0, -2, -2, 2), Some((3, 3)),);
     }
 
     #[test]
@@ -176,16 +203,23 @@ mod tests {
 
     #[test]
     fn slot_edge_max_distance_in_range() {
-        assert_eq!(compute_slot_for_world_cell(5, 5, 7, 3, 2), Some((4, 0)),);
+        // size = 5; target (7, 3) rem_euclid(5) → (2, 3).
+        assert_eq!(compute_slot_for_world_cell(5, 5, 7, 3, 2), Some((2, 3)),);
     }
 
     #[test]
-    fn slot_as_player_moves_ring_buffer_shifts() {
-        // Same world cell (2, 2) maps to different slots when player moves
+    fn slot_is_stable_regardless_of_player_position() {
+        // Ring addressing (#924): the same world cell (2, 2) must map to the
+        // SAME slot whether the player is at (0, 0) or has moved to (1, 1) —
+        // as long as the cell stays in range of both. This is the invariant
+        // that lets the incremental delta path skip re-addressing survivors:
+        // a cell's slot never moves out from under it just because the
+        // player did.
         let slot_a = compute_slot_for_world_cell(0, 0, 2, 2, 2);
         let slot_b = compute_slot_for_world_cell(1, 1, 2, 2, 2);
-        assert_eq!(slot_a, Some((4, 4)));
-        assert_eq!(slot_b, Some((3, 3)));
+        assert_eq!(slot_a, Some((2, 2)));
+        assert_eq!(slot_b, Some((2, 2)));
+        assert_eq!(slot_a, slot_b);
     }
 
     // ── eval_on_player_move ──────────────────────────────────────────────

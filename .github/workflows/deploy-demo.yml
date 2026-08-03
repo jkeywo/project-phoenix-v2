@@ -134,8 +134,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          if ! npx wrangler@3 pages project list | grep -q "project-phoenix-demo"; then
-            npx wrangler@3 pages project create project-phoenix-demo --production-branch=main
+          # wrangler@3's project-create endpoint is stale and returns the
+          # generic 8000000 error; use the current major, matching what the
+          # wrangler-action deploy steps run.
+          if ! npx wrangler@4 pages project list | grep -q "project-phoenix-demo"; then
+            npx wrangler@4 pages project create project-phoenix-demo --production-branch=main
             echo "created Pages project project-phoenix-demo"
           else
             echo "Pages project already exists"

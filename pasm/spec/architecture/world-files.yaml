@@ -386,6 +386,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/server.rs, src/world/layers.rs]
+      symbols: [WorldLayerMap, WorldRuntime, PendingWorldLayerChanges, WorldLayerChange, EntityOriginLayer]
 
   - component: world-trigger-action-dispatcher
     core:

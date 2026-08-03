@@ -29,6 +29,10 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/faction.rs, assets/factions]
+      # FactionRegistryResource (the Bevy resource newtype) lives in
+      # src/entities/config_cache.rs, outside this entity's declared paths;
+      # named for completeness even though the scanner cannot observe it here.
+      symbols: [FactionRegistry, FactionConfig]
 
   - component: npc-ai-controller-provisioner
     core:

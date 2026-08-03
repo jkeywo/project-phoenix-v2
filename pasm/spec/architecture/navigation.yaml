@@ -41,6 +41,7 @@ entities:
     implementation:
       status: declared
       paths: [src/console/navigation/mod.rs, src/core/messages.rs]
+      symbols: [NavigationWaypoint, WaypointMode]
 
   - component: navigation-anchor-refresher
     core:

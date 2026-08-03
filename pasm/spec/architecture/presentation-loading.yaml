@@ -64,6 +64,7 @@ entities:
     implementation:
       status: declared
       paths: [src/server/asset_preload.rs, src/core/messages.rs]
+      symbols: [AssetPreloadResource]
 
   - component: model-rig-and-marker-loader
     core:
@@ -96,6 +97,7 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/model_rig.rs]
+      symbols: [ModelRig, ModelMarkers]
 
   - component: host-presentation-effects
     core:

@@ -196,6 +196,15 @@ vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07b
 # with the dependency above for test builds only.
 vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9", features = ["testkit"] }
 
+# `bevy/debug` (issue #894): without it, `ComponentInfo::name()` (used by
+# `tests/authoritative_state_enumeration.rs` to enumerate the sim app's
+# registered components/resources) returns a fixed "<Enable the debug
+# feature...>" placeholder for every type, making the enumeration guard blind.
+# Declared here rather than in `[dependencies]` so no shipped binary (server,
+# headless, wasm) pays for it — Cargo unifies it into the SAME `bevy` instance
+# for test builds only, the same pattern `vellum-replay`/`testkit` uses above.
+bevy = { version = "0.18.1", features = ["debug"] }
+
 # Native: SERIAL physics, deliberately matching wasm (issue #896).
 #
 # This stanza used to carry `features = ["parallel"]`, and the wasm stanza below

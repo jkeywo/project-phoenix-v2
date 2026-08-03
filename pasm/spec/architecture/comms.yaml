@@ -35,6 +35,7 @@ entities:
     implementation:
       status: declared
       paths: [src/console/comms/inbox.rs, src/console/comms/server.rs, src/comms/server.rs, src/core/messages.rs]
+      symbols: [CommsInboxRes, CommsInbox]
 
   - state: comms-dialogue-state
     core:
@@ -49,6 +50,7 @@ entities:
     implementation:
       status: declared
       paths: [src/comms/content.rs, src/comms/server.rs, src/console/comms/server.rs]
+      symbols: [CommsRuntime, ActiveDialogue, PendingFollowUp]
 
   - component: comms-range-enforcer
     core:
@@ -81,7 +83,11 @@ entities:
       writers: [comms-range-enforcer]
     implementation:
       status: declared
-      paths: [src/comms/server.rs, src/console/comms/server.rs]
+      paths: [src/comms/server.rs, src/console/comms/server.rs, src/comms/component.rs]
+      # The flags are fields on CommsRuntime (range_flags/range_active), not a
+      # dedicated type; CommsRange is the per-entity authored range component
+      # they are computed from.
+      symbols: [CommsRuntime, CommsRange]
 
   - component: comms-blackboard-publisher
     core:

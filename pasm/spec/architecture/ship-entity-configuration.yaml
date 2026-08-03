@@ -144,6 +144,11 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/spawner.rs, src/core/messages.rs]
+      # The stable world/runtime identity components; the live ECS Entity
+      # handle itself is deliberately NOT a symbol here — it is exactly the
+      # unstable-across-instances handle #894 and this slice name as the
+      # thing fold order must never key on.
+      symbols: [EntityUuid, EntityId, EntityName]
       messages: [EntitySpawned, EntityDespawned]
 
   - component: model-marker-contract

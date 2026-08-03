@@ -127,6 +127,9 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/config.rs, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml, assets/entities/alliance_battleship.toml]
+      # `manual_overview` is a field on StationConfig, not a dedicated type —
+      # the closest real symbol is the struct that carries it.
+      symbols: [StationConfig]
 
   - component: system-manual-section-provider
     core:

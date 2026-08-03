@@ -65,6 +65,7 @@ entities:
     implementation:
       status: declared
       paths: [src/asteroids/lifecycle.rs, src/asteroids/window.rs]
+      symbols: [AsteroidWindow, AsteroidData, AsteroidEntityMap]
 
   - component: asteroid-destruction-respawn-policy
     core:

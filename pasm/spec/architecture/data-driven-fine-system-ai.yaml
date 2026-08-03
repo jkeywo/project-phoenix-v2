@@ -150,6 +150,16 @@ entities:
       # owns it and the selector remains a writer of the selected-target facet.
       owner: fine-system-ai-policy-runtime
       writers: [fine-system-ai-policy-runtime, per-system-target-ranking-policy]
+    implementation:
+      status: declared
+      paths: [src/ai/policy.rs, src/world/flags.rs, src/bounded_history.rs, src/composite_rng.rs]
+      # Per-fine-system component (e.g. HelmBoostAiPolicyState) holding
+      # AiPolicyRuntimeState { current, entered_at_secs, memory }; memory is
+      # AiPolicyMemory, which since #890 also carries the capacity-bounded
+      # AiHistory windows. The selected-target facet is carried by the
+      # selector's own retained pick (SensorRadarSelection,
+      # TacticalRadarSelection), not by this component.
+      symbols: [AiPolicyRuntimeState, AiPolicyMemory, AiHistory]
 
   - component: fine-system-ai-policy-runtime
     core:

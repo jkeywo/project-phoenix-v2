@@ -1,0 +1,210 @@
+entities:
+  - component: authoritative-state-digest-boundary
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Authoritative-State Digest Boundary
+      summary: The decided, recorded boundary for a future cross-instance authoritative-state digest (issue #894, parent #849) — which types are in the fold, the order they fold in, how floats canonicalise, and what a digest's own type-shape pinning constraint means for this repository. No digest is computed here; this slice is the record a later implementation is checked against, and the enforcement test (below) is what keeps the record honest as new state is added.
+      rationale:
+        - "This issue authors no new classification vocabulary for WHAT is in scope. `pasm/spec/architecture/` already carries the `classification: authoritative` vocabulary (`derived`, `replicated`, `local`, `ephemeral`, `observational`, `local-view`, `player-knowledge`, `authored` for the rest) across 113 `state` entities, 73 of them authoritative — reviewed and meaning what this record needs. A second, bespoke list would drift against the first the day either one moved. `EntitySnapshot` (`src/core/messages.rs`) is the tempting shortcut and is wrong: it carries `radar_icon`, `region_colour`, `colour`, `radar_size` — authored presentation, not authoritative state — which is why AC5's reviewer table below states the rejection explicitly rather than leaving it to be re-discovered."
+        - "The one vocabulary GAP: no existing classification term means 'structurally empty at the fold point'. `InterSystemQueue` (`inter-system-message-state`, owned by `src/core/messages.rs`, cleared every tick by `clear_inter_system_queue` in `command_admission::mod` before `SimSet::Input`) is authoritative in the existing sense — it is real inter-system-message state, not derived or presentation — but by the time a digest could fold over it in `RenderInterp`, it is always empty, on every instance, deterministically. Folding it changes nothing a divergence could ever move, so it is out for a reason distinct from every existing term, and gets the one new term this issue adds: `cleared-at-fold`."
+        - "Binding is the size of the actual work, not the boundary decision. 113 conceptual PASM state entities against 171 Rust components and 134 resources is a real granularity mismatch, and 73 authoritative entities across 25 `pasm/spec/architecture/*.yaml` files have had `implementation.symbols` back-filled with real Rust type names as part of this issue (see each file's `state` entries) — the artefact that makes AC5 ('is X in the digest?', answerable from the record alone) literally true rather than aspirational. A handful of back-filled entries could not name one dedicated Rust type honestly (a `thread_local!` pair, a field on a larger resource, a value composed on read rather than stored) and say so in an inline comment next to their `symbols:` list rather than inventing a type that does not exist."
+        - "Cross-reference for what happens with this record once #848 exists: #849's sequencing note puts this issue before #848, so the authoritative snapshot type does not exist yet. The two lists this record settles — the fold set and the exclusion classes — become the binding specification #848's snapshot type must satisfy, rather than something #848 re-litigates."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - pasm/spec/architecture/deterministic-simulation.yaml
+        - tests/authoritative_state_enumeration.rs
+      tests: [cargo test]
+
+  - component: digest-fold-order-policy
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Digest Fold Order Policy
+      summary: The fold order a future digest must use — a structured (namespace, tick, seq) tuple compared as a tuple, never as a rendered string, with namespaces folded in one fixed declared sequence and never merged into a single sorted run.
+      rationale:
+        - "SORT ON THE STRUCTURED VALUE, NEVER ITS STRING RENDERING. Once IDs become tick-scoped counters (issue #907), a naive string render `\"{tick}-{seq}\"` sorts `\"10-1\"` before `\"2-1\"` — stable within one instance, identical across two instances that agree, and WRONG: fold order becomes a function of how many ticks have elapsed, silently, while every same-seed comparison still passes. The key is `(namespace, tick, seq)` compared as a tuple of numbers. The string form stays for the wire and for human debugging only; where a string key is unavoidable its rendering is zero-padded fixed-width so lexicographic and numeric order coincide — a requirement recorded here rather than assumed at the point someone needs it."
+        - "NAMESPACES FOLD IN A FIXED DECLARED SEQUENCE, NEVER MERGED. `AsteroidUuid` (`src/server_app.rs`) is a DIFFERENT namespace from `EntityUuid` (`src/entities/spawner.rs`), deliberately — the comment at `src/ai/server.rs:347` records why asteroids carry their own id rather than being back-filled onto `EntityUuid`: streamed lifecycle identity (`src/asteroids/lifecycle.rs`) is not spawner identity, and conflating them would drag the rocks into radar/networking/targeting paths that key on `EntityUuid`. So 'sort by stable world id' is underspecified without an ordering ACROSS namespaces too. The declared sequence for the fold: `EntityUuid` (all entities, in id order), then `AsteroidUuid` (all asteroids, in id order). A THIRD namespace appends to the sequence; it must never be merged into one flat sorted run across namespaces, because a merge means a new namespace reorders every id that sorts near it and invalidates every previously recorded digest, where an appended sequence only ever adds new fold positions after the existing ones. Namespace membership is part of the minted id itself, so no id can collide across namespaces and the sort key and the fold grouping come from the same value."
+        - "NEVER ECS ENTITY HANDLE. Bevy query iteration is archetype order — stable within one process, not across two instances that spawned entities in a different order or count. `handle_collisions` (`src/server_app.rs`) already demonstrates the fix issue #896 applied for its own reason (collision resolution order determinism): it sorts `ship_query.iter()` by `(uuid, entity.index())` rather than iterating `ship_query.iter_mut()` directly, with `entity.index()` used only as a same-uuid tiebreak, never as the primary key. A digest fold must do the same for every type it walks — the ordering constraint is general, not specific to collisions."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      reads: [spawned-entity-state, asteroid-window-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/spawner.rs, src/asteroids/lifecycle.rs, src/ai/server.rs, src/server_app.rs]
+      symbols: [EntityUuid, AsteroidUuid]
+
+  - component: digest-float-canonicalisation-policy
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Digest Float Canonicalisation Policy
+      summary: Floats fold by canonical bit pattern with no quantisation — NaN's roughly 16 million bit patterns collapse to one payload, and -0.0 folds as +0.0 (compares equal, differs in bits) — and cross-host bit-exactness is recorded as a stated PRECONDITION of the digest, not something it guarantees on its own.
+      rationale:
+        - "NO QUANTISATION. Rounding before folding is the tempting alternative and it is a trap: it converts 'the digest catches divergence' into 'the digest catches divergence once it exceeds the quantum' — which reports the WRONG tick a split happened on, destroying the one thing a per-tick digest exists to answer. Bit-pattern folding with NaN collapse and signed-zero normalisation is the only rule that keeps 'the tick the digest disagrees on' meaning 'the tick simulation state first diverged'."
+        - "BIT-EXACTNESS ACROSS HOSTS IS A PRECONDITION THIS POLICY DEPENDS ON, NOT SOMETHING IT PROVIDES. IEEE-754 guarantees `+ - * / sqrt` identical across native and wasm; it guarantees NOTHING about transcendental call sites. This repository's own count as of this issue: 59 `sin`, 56 `cos`, 23 `atan2`, 3 `tan`, 3 `powf`, 1 `exp` in `src/`, plus Rapier's own solver internals. Native<->wasm equality is a product requirement (the host and a headless native run must reach the same digest), so those call sites move onto a shared pure-Rust `libm` rather than the platform math library — see the two issues filed alongside this one: #908 (phoenix's own call sites + a clippy lint forbidding new ungated ones) and #909 (dependency features + cross-target vectors, i.e. Rapier)."
+        - "BIT-EXACTNESS ALSO NEEDS SERIAL PHYSICS, JOINTLY. Issue #896 already made Rapier's broadphase serial on both targets for exactly this reason — a parallel broadphase orders contacts differently from the serial one the browser is stuck with, and parallel float accumulation reorders independently of which `libm` is underneath. The two preconditions (shared `libm`, serial solve) are independent and both required; neither alone is sufficient for cross-host bit-exactness."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      depends_on: [libm-shared-math-policy]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/physics.rs, Cargo.toml]
+
+  - component: libm-shared-math-policy
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Shared libm Math Policy
+      summary: Placeholder reference for issues #908 (this crate's own transcendental call sites + a clippy lint) and #909 (dependency features + cross-target vectors, chiefly Rapier), which the float canonicalisation policy above depends on for its cross-host bit-exactness precondition. Filed alongside #894/#907; not built by this issue.
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [Cargo.toml]
+
+  - component: digest-type-shape-pinning-constraint
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Digest Type-Shape Pinning Constraint
+      summary: "AC4: a digest is a statement about a type's SHAPE, not only its contents (vellum-digest's own caveat, quoted in the parent issue). The moment a digest folds over a set of types, each folded type's field order and enum variant order becomes pinned surface — reordering either is a re-blessing event, not a routine refactor."
+      rationale:
+        - "This is why the boundary is decided and recorded BEFORE any code computes a digest (AC1): choosing the folded set incidentally, inside the first slice that happens to need a hash, would freeze an arbitrary set of types' shapes forever with nobody having decided to pin them."
+        - "'Re-blessing' names the cost precisely: every RECORDED digest computed before the reorder becomes invalid the moment the shape changes, whether or not the reorder changed any runtime BEHAVIOUR. A field reorder that is a pure no-op for every consumer still moves the fold, because the fold is over the type's memory shape, not its semantics. `tests/registration_order_determinism.rs` and `tests/rng_determinism.rs` name their own precedent for a comparable 're-bless the probe' event (see git history: 'test(#896): re-bless the duel probe for same-tick contacts')."
+        - "SimRng joining the fold (see the reviewer table below) makes this concrete immediately: `SimRng` moves onto `Pcg32` in issue #897, specifically because `Pcg32` is `Serialize` and therefore has a nameable shape a digest can fold over deterministically. A field added to `Pcg32`, or its six streams reordered, is a re-blessing event under this constraint the moment `SimRng` is actually in a computed digest."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/sim_rng.rs]
+      symbols: [SimRng, SimStream]
+
+  - component: digest-render-interp-fold-point
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Digest Fold Point — Inside the RenderInterp Bracket
+      summary: A digest folds INSIDE the RenderInterp bracket — after `SimSet` has fully advanced the tick and before any frame-time interpolation of positions for smooth rendering at a variable frame rate — never at frame time itself. RenderInterp is presentation and is explicitly excluded from the fold (see the exclusion classes below); it is named here separately because, unlike an ordinary excluded UI widget, it lives directly on simulation entities and carries transform-shaped data, making it the single easiest exclusion to get wrong by accident.
+      rationale:
+        - "Issue #895 settled fixed-tick simulation: `SimSet` runs in Bevy's `FixedUpdate` at the authored `sim_tick_hz`, counted by `SimTick` (`src/sim_tick.rs`). A frame at 144Hz and a frame at 30Hz both observe the SAME committed tick state between two `FixedUpdate` steps; what differs between them is how far a renderer has interpolated a transform TOWARD the next not-yet-committed tick for smooth on-screen motion. Folding at frame time would hash that interpolated, frame-rate-dependent position — two instances that agree on every simulation tick would still produce different digests purely because they render at different frame rates, which is exactly backwards for a mechanism whose entire purpose is telling two AGREEING instances apart from two DIVERGING ones."
+        - "'RenderInterp bracket' names the point in the tick/frame relationship where the fold must sit: after the authoritative tick has fully committed (all of `SimSet` has run) and before rendering has interpolated anything derived from it. No literal `RenderInterp` type exists in this repository as of this issue — it is the exclusion-worthy CONCEPT this record pins in advance of any interpolation system being built, so that whoever builds frame-time smoothing inherits an already-settled exclusion rather than discovering the trap by shipping a digest that intermittently disagrees between a 30Hz and a 144Hz instance of the same seed."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      reads: [game-phase-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/sim_tick.rs, src/sim_sets.rs]
+      symbols: [SimTick, SimSet]
+
+  - component: digest-exclusion-classes
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Digest Exclusion Classes
+      summary: The explicit, reason-coded exclusion classes for state that is real but must never enter the fold — reusing the existing PASM `classification` vocabulary rather than inventing a parallel one, plus the one new term this issue adds for structurally-empty-at-fold state.
+      rationale:
+        - "PRESENTATION (classification: derived / local-view, or the RenderInterp bracket above). The single most dangerous exclusion on this list, because unlike a UI widget it lives on simulation entities and carries transform-shaped data that looks authoritative at a glance. Excluded: RenderInterp (frame-time interpolated transforms — see the fold-point entry above)."
+        - "BROADCAST CACHES (classification: replicated, one-directional mirrors of already-authoritative state). Excluded: `LastBroadcastEntityPositions`, `LastBroadcastEntityHealth`, `LastBroadcastHull`, `LastBroadcastShields`, `LastBroadcastBlackboards` (`src/core/broadcast/cache_registry.rs` — only the first two carry an `Entity` segment in their real name), plus the same family in a different console, `LastWeaponsUpdate` (`src/console/weapons/blackboard.rs`) — each is a delta-suppression cache of what was last SENT over the wire, not a second copy of simulation truth; folding it would fold the network layer's own bookkeeping."
+        - "TIMERS / OUTBOXES (classification: derived, or cleared-at-fold for a queue that is provably empty at the fold point). Excluded: `SimBroadcastTimer` (a cadence gate, pure function of the tick count which is itself in the digest — folding it would fold a value wholly derivable from something already folded), `SimOutbox` (outbound wire messages already drained once sent — folding it folds transport state, not sim state), `DamageLog` (a telemetry/balance-tracer append log, read by tooling, never read back by simulation logic that decides an outcome)."
+        - "DERIVED STATE — the AI cadence latches (classification: derived). Excluded: `AiTickReady`, `AiSnapshotReady`, `AiBaseInterval`. As of issue #895 these are PURE FUNCTIONS of the tick counter (`sim_tick_hz / ai_tick_hz` logical ticks per decision, `src/ai/cadence.rs`), and the tick counter is already in the fold via `SimTick`. `AiBaseInterval` is the same family as its two latch siblings — the shared base-cadence interval `tick_ai_cadence` derives alongside them, written every tick from the same `sim_tick_hz / ai_tick_hz` ratio — so it excludes for the identical reason, not a new one. The reason code matters distinctly from 'nobody thought about it': a reviewer who sees a timer excluded with no reason given would reasonably suspect an oversight, where 'derived, and its source is already folded' says plainly that excluding it loses no information the digest could otherwise catch."
+        - "CLEARED-AT-FOLD (the one new term this issue adds; not an existing classification value). `InterSystemQueue` (`inter-system-message-state`) is real authoritative inter-system-message state — not derived, not a cache, not presentation — but `clear_inter_system_queue` (`command_admission::mod`) empties it every tick before `SimSet::Input`, so by the `RenderInterp` fold point it is ALWAYS empty on every correctly-running instance. A digest fold gains nothing folding a value that is provably constant at the fold point on every instance that agrees; a value that is NOT empty there is itself a bug the admission pipeline already needs to catch, independent of any digest."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      reads: [inter-system-message-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/ai/cadence.rs
+        - src/core/messages.rs
+        - src/sim_tick.rs
+        - src/core/broadcast/cache_registry.rs
+        - src/console/weapons/blackboard.rs
+        - src/server_app.rs
+        - src/debug_overlay.rs
+      # src/command_admission/mod.rs (clear_inter_system_queue's real home) is
+      # deliberately NOT a declared path here: it is also host-command-admission's
+      # (engineering-damage.yaml) primary implementation file, and PASM's
+      # dependency-drift scanner treats a file claimed by two entities as
+      # ambiguously owned, dropping every observed import edge through it —
+      # which silently broke host-command-admission's four declared
+      # dependency edges (admitted-command-router, system-command-admission-policy,
+      # and the two routers/operators that depend on host-command-admission
+      # in turn) the moment this issue's symbol backfill added it here.
+      # clear_inter_system_queue stays named in the CLEARED-AT-FOLD rationale
+      # above (prose, not a checked `symbols` entry) rather than reclaiming the
+      # file and re-breaking that scan.
+      symbols:
+        - InterSystemQueue
+        - AiTickReady
+        - AiSnapshotReady
+        - AiBaseInterval
+        - SimBroadcastTimer
+        - SimOutbox
+        - DamageLog
+        - LastBroadcastEntityPositions
+        - LastBroadcastEntityHealth
+        - LastBroadcastHull
+        - LastBroadcastShields
+        - LastBroadcastBlackboards
+        - LastWeaponsUpdate
+
+  - component: digest-boundary-reviewer-answers
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Digest Boundary — Reviewer Answers (AC5)
+      summary: "AC5's own test: a reviewer must be able to answer 'is this type in the digest?' from this record alone, without reading any fold implementation (none exists yet). The settled in/out calls, stated verbatim so nothing here is left to inference:"
+      rationale:
+        - "IN: `SimRng` (issue #897 moves it onto `Pcg32`, which is `Serialize`; included so DIVERGENT DRAW COUNT is caught the tick it happens rather than the later tick it becomes an observable wrong number — see the type-shape entry above for why this is a recorded, knowingly-accepted re-blessing cost, not a free inclusion)."
+        - "IN: `GamePhase` (the round's own authoritative phase — Lobby/Loading/InProgress/GameOver — is exactly the kind of coarse divergence a digest must catch first)."
+        - "IN: `GameOverReason` (the authoritative reason the round ended; two instances reaching GameOver for different reasons on the same seed is a correctness bug, not a cosmetic difference)."
+        - "IN: `WorldResource` (the loaded world's own authoritative runtime state)."
+        - "IN: `CaptainPriorityBoost` (an authoritative per-ship AI/command modifier, not a presentation value)."
+        - "IN: ship physics and hull (`ShipPhysics`/`ShipPhysicsComponent`, `EntitySystemHull` and friends) — the position/velocity/orientation and damage state a divergence most directly shows up as."
+        - "IN: collisions (the attribution a collision resolves to — victim, damage, shield-absorbed, hull-damage — not merely its aggregate effect on hull totals, per issue #896's own fingerprint design in `src/headless/fingerprint.rs`)."
+        - "OUT: `RenderInterp` (see the fold-point entry above — frame-time interpolated presentation, the most dangerous exclusion on this list precisely because it sits on simulation entities)."
+        - "REJECTED AS A SHORTCUT: `EntitySnapshot` (`src/core/messages.rs:1033`) is NOT the digest boundary and must not be treated as one. It carries `radar_icon`, `region_colour`, `colour`, `radar_size` — authored PRESENTATION fields mixed into what looks like a convenient one-stop entity view. Using it as the fold set would silently pull authored presentation into the pinned surface the type-shape constraint (AC4) protects."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      reads: [game-phase-state, world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/sim_rng.rs, src/core/messages.rs, src/headless/fingerprint.rs, src/server_app.rs, src/lobby/server.rs]
+      symbols: [SimRng, GamePhase, GameOverReason, WorldResource, CaptainPriorityBoost, EntitySnapshot]
+
+  - component: vellum-digest-primitive-reference
+    core:
+      status: proposed
+      confidence: confirmed
+      title: vellum-digest Primitive Reference
+      summary: Names `vellum-digest` (`digest_postcard` / `fold_digest`, at the fleet's pinned rev) as the primitive issue #901 will bind this boundary to — recorded here for traceability, deliberately NOT wired as a dependency by this issue. This issue authors the boundary and its enforcement test; #901 is the one that computes an actual digest.
+      rationale:
+        - "Naming the primitive without depending on it keeps this issue's deliverable honest: a record-and-enforce issue that quietly pulled in the compute dependency would blur 'the boundary is decided' with 'the digest is implemented', which is precisely the ordering #849 asks this issue to get right — decide before any code needs a hash."
+        - "The rev to bind to when #901 lands is the same rev the fleet's other vellum consumption already pins (see `pyproject.toml`'s pasm dependency for the pattern this repository already follows: one pinned rev, not two)."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [pyproject.toml]

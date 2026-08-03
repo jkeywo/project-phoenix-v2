@@ -39,6 +39,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/state.rs, src/console/captain/server.rs]
+      symbols: [ShipRedAlert]
 
   - state: red-alert-status-replica
     core:

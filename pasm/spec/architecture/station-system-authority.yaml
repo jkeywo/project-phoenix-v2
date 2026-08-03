@@ -129,7 +129,12 @@ entities:
       replicas: [station-rating-replica]
     implementation:
       status: declared
-      paths: [src/ship/rating.rs, src/lobby/session.rs]
+      paths: [src/ship/rating.rs, src/lobby/session.rs, src/ship/components.rs]
+      # ActiveStationRatings is the in-round per-ship component; the pending
+      # (pre-spawn, lobby-chosen) half of the summary lives on
+      # SessionManager's pending_ratings map / Player.last_rating instead —
+      # two carriers for one PASM state, noted rather than papered over.
+      symbols: [ActiveStationRatings, SessionManager]
 
   - component: station-backfill-transition
     core:

@@ -45,7 +45,11 @@ entities:
       writers: [world-content-pack-catalog]
     implementation:
       status: declared
-      paths: [assets/worlds]
+      paths: [assets/worlds, src/world/manifest.rs, src/world/config.rs]
+      # The catalog listing is Manifest/ScenarioCatalog (see
+      # base-scenario-manifest); WorldConfig is the parsed per-world content
+      # each catalog entry resolves to once loaded.
+      symbols: [Manifest, ScenarioCatalog, WorldConfig]
 
   - component: default-world-content
     core:

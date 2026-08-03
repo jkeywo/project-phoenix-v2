@@ -30,6 +30,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/viewscreen.rs, src/core/messages.rs, src/server/renderer.rs]
+      symbols: [ViewscreenResolution, ViewscreenArbiter]
 
   - component: viewscreen-source-registry
     core:
@@ -170,7 +171,12 @@ entities:
       writers: [host-debug-simulation-controls]
     implementation:
       status: declared
-      paths: [src/server/bridge.rs]
+      paths: [src/server/bridge.rs, src/debug_overlay.rs, src/server_app.rs]
+      # Instagib has no typed resource: INSTAGIB is a raw `thread_local!<bool>`
+      # in src/server/bridge.rs, read by is_instagib(). Pause and god mode are
+      # real Bevy resources; recorded together with an honest note on the
+      # third.
+      symbols: [DebugPaused, GodMode, is_instagib]
 
   - component: host-debug-waypoint-teleport
     core:

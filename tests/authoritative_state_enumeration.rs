@@ -1,0 +1,447 @@
+//! Deny-by-default enumeration guard for the authoritative-state digest
+//! boundary (issue #894, parent #849).
+//!
+//! # What this proves
+//!
+//! #894 decided and recorded WHICH types a future digest folds over — the
+//! record lives at `pasm/spec/architecture/deterministic-simulation.yaml`
+//! (the fold policy itself) plus `implementation.symbols` back-filled onto
+//! every `classification: authoritative` `state` entity across
+//! `pasm/spec/architecture/*.yaml` (73 entities, 25 files). A record nobody
+//! checks against the running app is a record that silently stops being true
+//! the first time someone adds a new component and forgets it exists.
+//!
+//! This guard builds the real headless sim app, reads back EVERY
+//! crate-local component and resource Bevy actually registered
+//! (`app.world().components()` — Bevy 0.18 stores components and resources in
+//! the same registry, see `bevy_ecs::component::ComponentInfo`'s own doc
+//! comment), and requires each one to be accounted for by exactly one of:
+//!
+//! 1. [`AUTHORITATIVE_SYMBOLS`] — transcribed, not invented, from the
+//!    `implementation.symbols` lists this issue back-filled onto PASM. Every
+//!    name here is literally readable out of a `pasm/spec/architecture/*.yaml`
+//!    file today.
+//! 2. [`EXCLUSIONS`] — real, legitimately-registered non-authoritative state,
+//!    with the reason class the PASM record
+//!    (`deterministic-simulation.yaml`'s `digest-exclusion-classes` entity)
+//!    uses: `presentation` / `cache` / `timer` / `derived` / `test-infra`.
+//! 3. [`UNCLASSIFIED_BASELINE`] — the honest remainder. Issue #894's own
+//!    scope note: 113 conceptual PASM state entities against 171 Rust
+//!    components and 134 resources is a real granularity mismatch, and fully
+//!    classifying all of it is bigger than this issue's acceptance criteria.
+//!    Rather than pretend otherwise, the gap is made COUNTABLE — the same
+//!    discipline `entities::ai_declaration_manifest::EXPECTED_UNDECLARED`
+//!    already uses for PRD #774's undeclared-AI worklist. The baseline is a
+//!    ratchet: it may shrink (someone classifies a type into (1) or (2) and
+//!    removes its entry) but a computed set with anything NOT in the
+//!    committed baseline fails immediately, naming the type and pointing
+//!    here and at `pasm/spec/architecture/deterministic-simulation.yaml`.
+//!
+//! A type that is new since this issue and unclassified in every one of the
+//! three lists is exactly the failure #894 exists to prevent: "someone adds
+//! `CloakState` next quarter, nobody adds it to the list, and the digest
+//! silently stops covering divergent state" (deterministic-simulation.yaml).
+//!
+//! # Why Bevy's own registry rather than a derive or marker trait
+//!
+//! A hand-written allowlist of ~40 types out of 171 components fails the
+//! exact way this issue exists to prevent — the list is explicit AND wrong.
+//! Reading `app.world().components()` instead means the source of truth is
+//! what the sim app ACTUALLY registers, not what a crate-wide grep finds:
+//! viewer-only and editor-only components never enter the headless sim app
+//! and self-exclude, without this guard needing to know they exist.
+//!
+//! # Why this is its own test binary
+//!
+//! Same reason as `tests/registration_order_determinism.rs` and
+//! `tests/rng_determinism.rs`: `--deterministic` pins Bevy's `TaskPoolPlugin`
+//! to a single thread, and task pools are process-global, initialised by
+//! whichever app builds first. Sharing a binary with another headless test
+//! would mean inheriting a pool a neighbour already created.
+
+#![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
+use bevy::prelude::*;
+use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
+
+/// `rng_coverage.toml` (issue #837), same as
+/// `tests/registration_order_determinism.rs`: two NPCs in weapons range, an
+/// asteroid field, a radiation zone — beam, blaster, torpedo, collision and
+/// region damage all fire inside the window below, which is what registers
+/// the widest realistic set of components/resources a single run can reach.
+const WORLD: &str = "assets/worlds/rng_coverage.toml";
+const TICKS: u64 = 300;
+const SEED: u64 = 20260894;
+
+/// Every Rust type name that appears in `implementation.symbols` on a
+/// `classification: authoritative` `state` entity, across every file in
+/// `pasm/spec/architecture/*.yaml`, as of this issue's symbol-backfill pass.
+///
+/// Transcribed, not curated: every entry here is one this guard's own author
+/// could point at inside a committed `.yaml` file. A handful of PASM entries
+/// could not honestly name a dedicated Rust TYPE (a `thread_local!` pair, a
+/// field on a larger resource, a value composed fresh on every read rather
+/// than stored) — see the inline comment next to that entity's `symbols:` key
+/// in its `.yaml` file for which and why. Those entries' function/accessor
+/// names are still listed here for traceability; they simply never match a
+/// registered Bevy component or resource, which is harmless — this list is a
+/// superset check, not an exact-membership one.
+///
+/// This is the FULL union across all 73 entities (the 21 this issue
+/// back-filled plus the 52 that already had `implementation.symbols` before
+/// it) — regenerated mechanically from the `.yaml` files themselves, not
+/// hand-curated, so it cannot silently drift from what PASM actually says.
+/// `WorldResource` (the AC5 "IN" call) has no dedicated PASM `state` entity of
+/// its own as of this issue — it is named directly in
+/// `digest-boundary-reviewer-answers` instead — so it is listed separately
+/// below rather than mixed into this transcription.
+#[rustfmt::skip]
+const AUTHORITATIVE_SYMBOLS: &[&str] = &[
+    "ActiveBeam", "ActiveDialogue", "ActiveStationRatings", "AiDirective", "AiHistory",
+    "AiPolicyMemory", "AiPolicyRuntimeState", "AiWorldEntity", "AssetPreloadResource",
+    "AsteroidData", "AsteroidEntityMap", "AsteroidWindow", "BlasterVolleyState", "BoostCommand",
+    "BoostState", "CaptainPriorityBoost", "CommsInbox", "CommsInboxRes", "CommsRange",
+    "CommsRuntime", "ControlSourceResolver", "CoordinationLagQueue", "CoordinationQueue",
+    "CurrentPhaserMode", "DamageRecord", "DebugPaused", "DesiredMotion", "EntityConfig",
+    "EntityId", "EntityName", "EntityOriginLayer", "EntityUuid", "FactionConfig",
+    "FactionRegistry", "FieldOrigin", "FlagStore", "GameOverReason", "GamePhase", "GodMode",
+    "HazardAssessment", "HazardAssessmentRaw", "HazardContribution", "HelmAiShipFrame",
+    "HelmAiSurfacesFrame", "HelmBoostAiPolicy", "HelmCapabilityConfig", "HelmCapabilitySection",
+    "HelmImpulseAiPolicy", "INTENT_NARRATION_SPAWN_SITES", "ImpulseCommand", "ImpulsePhase",
+    "ImpulseState", "LastHelmInput", "LateralThrustInput", "Manifest", "MergeStep",
+    "ModelMarkers", "ModelRig", "NavigationWaypoint", "ObjectiveManager",
+    "PendingArcBearingRequest", "PendingFollowUp", "PendingWorldLayerChanges", "PhaserCooldown",
+    "Player", "PowerBlackboard", "Provenance", "QualifiedRef", "RecentCombatActivity",
+    "RegionEffectKind", "RepairBlackboard", "RepairTeams", "ResolvedTemplate", "ScenarioCatalog",
+    "ScenarioCatalogWire", "ScoredObjective", "SensorRadarSelection", "SessionManager",
+    "Severity", "ShieldSystem", "ShieldsDamageHistory", "ShipBoost", "ShipConfig", "ShipImpulse",
+    "ShipIntentNarration", "ShipModifiers", "ShipPhysics", "ShipRedAlert", "SimRng",
+    "SimRngState", "SourceLocation", "StationConfig", "SteeringInput", "SystemBlackboard",
+    "SystemHull", "TacticalRadarSelection", "TeamSlot", "ThrustInput", "Torpedo",
+    "TorpedoDetonation", "TorpedoSystem", "TorpedoTube", "TubeBurstState", "VerticalMovementMode",
+    "ViewscreenArbiter", "ViewscreenResolution", "WaypointMode", "WorldConfig", "WorldEntity",
+    "WorldEventBuffer", "WorldFinding", "WorldLayerChange", "WorldLayerMap", "WorldRuntime",
+    "WorldSnapshot", "WorldSource", "WorldView",
+    // Function/accessor names transcribed for traceability even though they
+    // never match a registered component/resource (see the doc comment
+    // above) — harmless in a superset check.
+    "apply_arc_bearing_request", "apply_world_layer_changes", "assess_hazards",
+    "assign_named_entity_uuids", "build_catalog", "build_helm_ai_surfaces_frame",
+    "clear_mod_pack_overlay", "encode_local_facing", "encode_local_velocity", "is_instagib",
+    "mod_pack_overlay_get", "on_site_systems", "seed_helm_actuator_facts",
+    "set_mod_pack_overlay", "spawn_immediate_entities_internal", "sync_ship_position",
+    "tick_boost", "tick_impulse", "visible_entities", "wasm_load_world", "wasm_select_ship",
+    // Named directly in `digest-boundary-reviewer-answers` (AC5's verbatim
+    // "IN" calls) rather than backed by its own PASM `state` entity's
+    // `implementation.symbols` as of this issue.
+    "WorldResource",
+    // Named in `digest-fold-order-policy` (the namespace-sequence rule) as
+    // the second minted-id namespace, sibling to `EntityUuid` above.
+    "AsteroidUuid",
+    // The tick counter itself — the digest-exclusion-classes rationale
+    // already depends on this being in the fold ("the tick counter is
+    // already in the fold via SimTick") to justify excluding the AI cadence
+    // latches as pure functions of it; stated as an explicit member here too.
+    "SimTick",
+];
+
+/// Real, legitimately-registered non-authoritative state, with the reason
+/// class `deterministic-simulation.yaml`'s `digest-exclusion-classes` entity
+/// records: `presentation` | `cache` | `timer` | `derived` | `test-infra`.
+///
+/// `EntitySnapshot` (`src/core/messages.rs`) is deliberately ABSENT from both
+/// this list and [`AUTHORITATIVE_SYMBOLS`] rather than excluded here: it
+/// carries no `#[derive(Component)]`/`#[derive(Resource)]` at all (a plain
+/// wire-message struct), so it can never appear in the registry this guard
+/// scans. Its rejection as a digest-boundary shortcut is recorded in
+/// `deterministic-simulation.yaml` (`digest-boundary-reviewer-answers`) for a
+/// reviewer reading the PASM record, not re-proven here.
+#[rustfmt::skip]
+const EXCLUSIONS: &[(&str, &str)] = &[
+    // Presentation — RenderInterp does not exist as a literal type as of this
+    // issue (see `digest-render-interp-fold-point` in
+    // deterministic-simulation.yaml); nothing to list here until it is built,
+    // at which point it belongs on this line with reason "presentation".
+
+    // Broadcast caches — one-directional delta-suppression mirrors of
+    // already-authoritative state, not a second copy of simulation truth.
+    // (`src/core/broadcast/cache_registry.rs` — only the first two carry an
+    // `Entity` segment in their real name; `LastBroadcastHull`,
+    // `LastBroadcastShields` and `LastBroadcastBlackboards` do not.)
+    ("LastBroadcastEntityPositions", "cache"),
+    ("LastBroadcastEntityHealth", "cache"),
+    ("LastBroadcastHull", "cache"),
+    ("LastBroadcastShields", "cache"),
+    ("LastBroadcastBlackboards", "cache"),
+    // Same family, a different console (`src/console/weapons/blackboard.rs`):
+    // "The broadcaster compares against this to skip identical ticks."
+    ("LastWeaponsUpdate", "cache"),
+    // The broadcaster's own per-phase live delivery registry
+    // (`src/core/broadcast/broadcaster.rs`) — transport bookkeeping, not a
+    // second copy of simulation truth.
+    ("BroadcastRegistry", "cache"),
+
+    // Timers / outboxes.
+    ("SimBroadcastTimer", "timer"),
+    ("SimOutbox", "timer"),
+    ("DamageLog", "timer"),
+
+    // Derived — AI cadence latches, pure functions of SimTick (already in
+    // the fold via SimRng/GamePhase's own tick-scoped siblings).
+    ("AiTickReady", "derived"),
+    ("AiSnapshotReady", "derived"),
+    // Derived — the shared AI base-cadence interval `tick_ai_cadence` writes
+    // alongside the two latches above, same tick-derivation, same family.
+    ("AiBaseInterval", "derived"),
+
+    // Cleared-at-fold (the one new classification term this issue adds,
+    // deterministic-simulation.yaml's `digest-exclusion-classes`):
+    // structurally empty by the RenderInterp fold point on every
+    // correctly-running instance.
+    ("InterSystemQueue", "cleared-at-fold"),
+];
+
+/// The honest remainder: every crate-local component/resource the sim app
+/// registers that neither [`AUTHORITATIVE_SYMBOLS`] nor [`EXCLUSIONS`]
+/// reaches yet, computed from a real run and committed here as a ratchet.
+///
+/// This is NOT a claim that any of these 171-components/134-resources-worth
+/// of remaining state SHOULD stay out of the digest forever — issue #894's
+/// own scope note says classifying all of it is bigger than this issue's
+/// acceptance criteria. It is the worklist: shrinking this list means moving
+/// an entry into `AUTHORITATIVE_SYMBOLS` (with a PASM `implementation.symbols`
+/// entry to match) or into `EXCLUSIONS` (with a reason). Growing it silently
+/// is exactly what `unclassified_types_match_the_committed_baseline` exists
+/// to prevent — a brand-new type lands here as a test FAILURE naming it,
+/// never as a quiet pass.
+///
+/// Computed from a real run of `WORLD` at `TICKS` (issue #894's own pass, the
+/// day the enumeration guard was written) via
+/// `every_registered_type_maps_to_the_digest_record`'s own failure message —
+/// run it, copy the printed list, and replace this array when the change is
+/// intentional.
+#[rustfmt::skip]
+const UNCLASSIFIED_BASELINE: &[&str] = &[
+    "AdmittedCommands", "AdmittedConsumerRegistry", "AiHighFidelity",
+    "AiPolicyTickClock", "AiProfile", "AiTokenRegistry", "Asteroid", "AsteroidFieldSection",
+    "AsteroidShieldPierce", "BankConfigResource", "BeamContext", "BehaviourSection",
+    "BlasterBankAiPolicies", "BlasterSystemResource", "BoostConfigResource", "CaptainAiPolicy",
+    "CinematicCameraSection", "ColliderSection", "CollisionCooldown", "CommandDelay",
+    "CommandLog", "CommsResponseAiCadence", "CommsResponseAiPolicy", "CommsTargetSelector",
+    "CountdownTimer", "DockingMotionIntent", "EntityShipArcHull", "EntitySystemHull",
+    "EntityTagsSection", "EntityTarget", "FactionComponent", "FactionRegistryResource",
+    "GameStateCache", "HelmBoostAiPolicyState", "HelmConsoleSection", "HelmEnginesAiPolicy",
+    "HelmEnginesAiPolicyState", "HelmLateralAiPolicy", "HelmMotionPlan", "HelmPassSurface",
+    "HelmPhysicsFrame", "HelmPhysicsWriteGuard", "HelmRecoveryHistory", "HelmSteeringAiPolicy",
+    "HelmSteeringAiPolicyState", "HelmVerticalAiPolicy", "HelmWaypointClearance",
+    "ImpulseConfigResource", "LastShipAttacker", "LastSystemTiers", "LastVisibleRepairBlackboard",
+    "LobbyOutbox", "LocalShip", "LodTransitionTimer", "LogFilterConfig", "MeshSection",
+    "NavClearanceIssueState", "NavigationTargetSelector", "NpcFrequencyMatchStates",
+    "ObjectiveCursors", "ObjectiveManagerRes", "OnScreenMessage", "PendingCommands",
+    "PendingScenarioLoad", "PendingShieldsThreatBearing", "PendingShipConfig",
+    "PendingTacticalFrequencyHint", "PhaserBankAiPolicies", "PhaserCombatConfigResource",
+    "PhaserRenderConfig", "PowerAiCadence", "PowerAiPolicy", "PowerBrownoutState",
+    "PowerConfigResource", "PowerMultiplierResource", "RadarAppearanceSection",
+    "RegionEffectsSection", "RegionMembership", "RegionShapeSection", "RepairHumanAlerted",
+    "RepairRequestQueue", "RepairTargetSelector", "RunTelemetry", "ScenariosBeingUnloaded",
+    "SelectedShipResource", "SensorsAiConfigResource", "SensorsFrequencyState",
+    "SensorsTargetSelector", "SensorsThreatState", "Sessions", "ShakeState",
+    "ShieldsAiConfigResource", "ShieldsCoordinationState", "ShieldsFocusAiPolicy", "Ship",
+    "ShipAttackedThisTick", "ShipAudioSection", "ShipClientConfigResource", "ShipConfigComponent",
+    "ShipFrequencyHintState", "ShipManualResource", "ShipPhaserFrequency",
+    "ShipPhysicsConfigResource", "ShipPowerSystem", "ShipRepairTeams", "ShipShields",
+    "ShipStations", "ShipSystemBlackboards", "ShipSystemControlSources", "ShipViewMode",
+    "TacticalTargetSelector", "TorpedoMagazineAiPolicy", "TorpedoSystemResource",
+    "TorpedoTargetSnapshot", "TorpedoTubeAiPolicies", "TrackedEntities", "VerticalThrustInput",
+    "WeaponFiredThisTick", "WeaponsArcRequestState", "WeaponsConsoleSection",
+    "WeaponsUpdateFirstTick", "WorldContentRuntime", "WorldSetupBroadcast",
+];
+
+fn build_and_run() -> App {
+    let args = HeadlessArgs {
+        world_path: WORLD.into(),
+        max_ticks: TICKS,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    app
+}
+
+/// The crate's own module-path prefix, matching `Cargo.toml`'s package name.
+/// Filters out every Bevy-internal and third-party type — `Time<Fixed>`,
+/// `Transform`, `RapierContext`, and friends — none of which this issue's
+/// boundary is about; only what THIS crate defines and the sim app actually
+/// registers is in scope.
+const CRATE_PREFIX: &str = "project_phoenix::";
+
+/// The short type name Bevy's `type_name::<T>()`-derived `DebugName` reports
+/// (e.g. `project_phoenix::ship::state::ShipRedAlert`), stripped to its last
+/// path segment and truncated before any generic parameter list so
+/// `Foo<Bar>` and `Foo` are the same lookup key.
+fn short_name(full: &str) -> String {
+    // Strip the OUTER generic parameter list FIRST, by truncating at the
+    // first '<' in the whole path — not the last "::" segment. A naive
+    // rsplit("::").next() on a generic like
+    // `project_phoenix::core::broadcast::broadcaster::BroadcastRegistry<project_phoenix::core::broadcast::sim::Sim>`
+    // splits on every "::" INSIDE the generic parameter too, yielding the
+    // nonsense fragment `Sim>` instead of `BroadcastRegistry`.
+    let without_generics = match full.find('<') {
+        Some(idx) => &full[..idx],
+        None => full,
+    };
+    without_generics
+        .rsplit("::")
+        .next()
+        .unwrap_or(without_generics)
+        .to_string()
+}
+
+/// Every crate-local component/resource name Bevy actually registered,
+/// short-named and de-duplicated, sorted for a stable diff.
+fn registered_crate_local_type_names(app: &App) -> Vec<String> {
+    let mut names: Vec<String> = app
+        .world()
+        .components()
+        .iter_registered()
+        .map(|info| info.name().to_string())
+        .filter(|full| full.starts_with(CRATE_PREFIX))
+        .map(|full| short_name(&full))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Issue #894's enumeration AC, made concrete: every registered crate-local
+/// type maps to exactly one of the fold set, an explicit reasoned exclusion,
+/// or the committed unclassified baseline — never to nothing.
+#[test]
+fn every_registered_type_maps_to_the_digest_record() {
+    let app = build_and_run();
+    let registered = registered_crate_local_type_names(&app);
+    assert!(
+        !registered.is_empty(),
+        "precondition: the sim app registered no crate-local component or \
+         resource at all — CRATE_PREFIX or the registry lookup is wrong"
+    );
+
+    let authoritative: std::collections::BTreeSet<&str> =
+        AUTHORITATIVE_SYMBOLS.iter().copied().collect();
+    let excluded: std::collections::BTreeSet<&str> =
+        EXCLUSIONS.iter().map(|(name, _)| *name).collect();
+    let baseline: std::collections::BTreeSet<&str> =
+        UNCLASSIFIED_BASELINE.iter().copied().collect();
+
+    let mut newly_unclassified: Vec<&str> = registered
+        .iter()
+        .map(String::as_str)
+        .filter(|name| {
+            !authoritative.contains(name) && !excluded.contains(name) && !baseline.contains(name)
+        })
+        .collect();
+    newly_unclassified.sort();
+    newly_unclassified.dedup();
+
+    assert!(
+        newly_unclassified.is_empty(),
+        "{} crate-local type(s) registered by the sim app are UNCLASSIFIED by \
+         the #894 digest-boundary record: {newly_unclassified:?}\n\
+         Classify each one in tests/authoritative_state_enumeration.rs:\n\
+         \x20 - if it is authoritative simulation state, add it to a PASM \
+         `classification: authoritative` state entity's `implementation.symbols` \
+         under pasm/spec/architecture/*.yaml, then add its name to \
+         AUTHORITATIVE_SYMBOLS here;\n\
+         \x20 - otherwise add it to EXCLUSIONS here with a reason class \
+         (presentation/cache/timer/derived/cleared-at-fold/test-infra), and if \
+         the reason is new, record it in \
+         pasm/spec/architecture/deterministic-simulation.yaml's \
+         digest-exclusion-classes entity too.\n\
+         See pasm/spec/architecture/deterministic-simulation.yaml for the fold \
+         policy this guard enforces.",
+        newly_unclassified.len()
+    );
+}
+
+/// The ratchet direction: the committed baseline may only ever describe types
+/// the sim app actually still registers unclassified. A stale entry (the type
+/// was renamed, removed, or got classified some OTHER way without this file
+/// being updated) means the baseline is over-claiming coverage it no longer
+/// has — the opposite failure from the guard above, and just as silent if
+/// unchecked.
+#[test]
+fn the_committed_baseline_names_only_types_still_registered_and_unclassified() {
+    let app = build_and_run();
+    let registered: std::collections::BTreeSet<String> = registered_crate_local_type_names(&app)
+        .into_iter()
+        .collect();
+    let authoritative: std::collections::BTreeSet<&str> =
+        AUTHORITATIVE_SYMBOLS.iter().copied().collect();
+    let excluded: std::collections::BTreeSet<&str> =
+        EXCLUSIONS.iter().map(|(name, _)| *name).collect();
+
+    let mut stale: Vec<&str> = UNCLASSIFIED_BASELINE
+        .iter()
+        .copied()
+        .filter(|name| {
+            !registered.contains(*name) || authoritative.contains(name) || excluded.contains(name)
+        })
+        .collect();
+    stale.sort();
+
+    assert!(
+        stale.is_empty(),
+        "UNCLASSIFIED_BASELINE names type(s) that are no longer registered, or \
+         are now classified elsewhere in this file, and should be removed: \
+         {stale:?}. Trim UNCLASSIFIED_BASELINE — this is the shrink half of \
+         the ratchet, and it is always safe."
+    );
+}
+
+/// AC5's own reviewer test, executable rather than only readable: every
+/// settled in/out call from the #894 HITL thread, checked against the record
+/// this file enforces.
+#[test]
+fn ac5_reviewer_answers_match_the_pasm_record() {
+    let authoritative: std::collections::BTreeSet<&str> =
+        AUTHORITATIVE_SYMBOLS.iter().copied().collect();
+    for must_be_in in [
+        "SimRng",
+        "GamePhase",
+        "GameOverReason",
+        "WorldResource",
+        "CaptainPriorityBoost",
+        "ShipPhysics",
+    ] {
+        assert!(
+            authoritative.contains(must_be_in),
+            "{must_be_in} must be in AUTHORITATIVE_SYMBOLS — the #894 HITL \
+             thread settled this as an explicit IN call, quoted verbatim in \
+             pasm/spec/architecture/deterministic-simulation.yaml \
+             (digest-boundary-reviewer-answers)."
+        );
+    }
+    // RenderInterp OUT: it must never be added to AUTHORITATIVE_SYMBOLS. It
+    // is not registered as a type today (see the EXCLUSIONS doc comment
+    // above), so the only check possible ahead of it being built is this
+    // negative one.
+    assert!(
+        !authoritative.contains("RenderInterp"),
+        "RenderInterp is the #894 HITL thread's explicit OUT call — it folds \
+         frame-time-interpolated presentation data and must never enter \
+         AUTHORITATIVE_SYMBOLS. See digest-render-interp-fold-point in \
+         pasm/spec/architecture/deterministic-simulation.yaml."
+    );
+    // EntitySnapshot rejected as a shortcut: it must never be treated as the
+    // digest boundary.
+    assert!(
+        !authoritative.contains("EntitySnapshot"),
+        "EntitySnapshot (src/core/messages.rs) is the #894 HITL thread's \
+         rejected shortcut — it carries authored presentation fields \
+         (radar_icon, region_colour, colour, radar_size) and must never stand \
+         in for the digest boundary. See digest-boundary-reviewer-answers in \
+         pasm/spec/architecture/deterministic-simulation.yaml."
+    );
+}

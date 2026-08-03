@@ -158,6 +158,12 @@ entities:
       status: confirmed
       paths:
         - src/entities/config_cache.rs
+      # No struct owns this: UPLOADED_PACK_TOML / MOD_MANIFEST_TOML are raw
+      # `thread_local!` statics (a HashMap<String, String> and an
+      # Option<String>), installed by set_mod_pack_overlay and read by
+      # mod_pack_overlay_get. Residual granularity honestly recorded — there
+      # is no typed carrier to name here.
+      symbols: [set_mod_pack_overlay, clear_mod_pack_overlay, mod_pack_overlay_get]
       tests: [cargo test]
 
   - component: mod-content-overlay-resolver
@@ -204,6 +210,10 @@ entities:
       status: confirmed
       paths:
         - src/entities/config_cache.rs
+      # Also no dedicated storage type: the composed view is produced on
+      # every read by mod_pack_overlay_get layering the session overlay over
+      # the normal fetch path, never materialised as its own struct.
+      symbols: [mod_pack_overlay_get]
       tests: [cargo test]
 
   - component: mod-aware-scenario-catalog

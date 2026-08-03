@@ -28,7 +28,8 @@ entities:
       writers: [objective-directive-contract]
     implementation:
       status: declared
-      paths: [src/objectives.rs]
+      paths: [src/objectives.rs, src/core/messages.rs]
+      symbols: [AiDirective, ScoredObjective]
 
   - component: objective-doctrine-score-policy
     core:

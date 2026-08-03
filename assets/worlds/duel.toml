@@ -88,8 +88,8 @@ warhawk_patrol_a = [ 55.0, 0.0,  30.0]   # = side_b_2
 warhawk_patrol_b = [ 55.0, 0.0, -30.0]   # = side_b_3
 # `ship_harrow_patrol.toml`'s escort route (issue #915) — same treatment as the
 # warhawk above: the patrol cruiser paces the side-B line. Its Destroy at 80
-# outscores the patrol at 20, so the route never wins; declaring it is what
-# lets the hull load here at all.
+# outscores the patrol at 30 (45 while not attacked), so the route never wins;
+# declaring it is what lets the hull load here at all.
 ironveil_patrol_a = [ 55.0, 0.0,  30.0]  # = side_b_2
 ironveil_patrol_b = [ 55.0, 0.0, -30.0]  # = side_b_3
 

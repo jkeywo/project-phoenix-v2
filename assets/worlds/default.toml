@@ -141,6 +141,12 @@ transform = { anchor = "starbase_alpha" }
 #                        this is the only place in shipped content where a
 #                        Retreat directive resolves at all. Losing it would
 #                        leave issue #702's whole mechanism unexercised.
+#
+# Neither override touches `base_priority`, so the #892 picket rebase applies
+# here unmodified: this hull now holds its route until fired upon (Patrol 45 >
+# Destroy 38 undisturbed; attacked flips it to 63 > 30), superseding the old
+# engage-on-sight reading. Flagged for review if engage-on-sight is actually
+# wanted for this raider.
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "world.entity.raider_alpha.name"

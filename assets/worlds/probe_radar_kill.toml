@@ -1,0 +1,98 @@
+# Probe world for issue #893 — headless evidence that destroying a ship's
+# tactical radar clears its standing target lock and STOPS it firing, rather
+# than leaving it shooting the target it remembers.
+#
+# Battleship vs battleship — the exact matchup #887's balance A/B observed
+# (`both battleships have tactical-radar Destroyed at 19.9s and 20.9s`), not
+# `probe_duel.toml`'s cruiser-vs-destroyer pairing: that pairing is lopsided
+# enough that the weaker side's return fire never bleeds through the
+# stronger side's shields to touch its hull at all (checked empirically —
+# `EntitySystemHull.total_current` never moves off its max for the world-
+# spawned hull across 30 seeds / 90 s each, on `probe_duel.toml` itself as
+# well as here, before this world had its own hull override). Two evenly
+# matched battleships trade real hull damage from both directions instead,
+# which is what actually lets an organic hit land on the hostile's radar.
+#
+# Same shape as `probe_duel.toml` (issue #838) otherwise: a player Alliance
+# battleship (AI-backfilled in a headless run) a short distance from a
+# world-spawned Alliance battleship re-flagged to the Harrow faction with a
+# standing combat doctrine. Both start well inside AI sensor range, so the
+# NPC engages immediately and trades fire with the player.
+#
+# The one difference from a plain re-flag: since #893 removed hit points
+# from every shipped hull's `tactical-radar` (and `sensor-radar`) — a shipped
+# hull no longer authors a damageable radar, so an organic duel can no longer
+# destroy one — this world's `spawn_entity` override RESTATES the
+# battleship's complete pre-#893 `[[hull.system_hull]]` list verbatim,
+# tactical-radar and sensor-radar hit points included. `hull.system_hull`
+# replaces wholesale (it is not a keyed array — see
+# `entity_override::COMPOSE_KEYED_ARRAYS`'s doc), so every entry has to be
+# restated, not just the two being added back; the values below are copied
+# unchanged from `assets/entities/alliance_battleship.toml` as it stood
+# immediately before #893's edit.
+#
+# This is deliberately test-only content (AGENTS.md: shipped hulls do not
+# author this any more) — the mirror of how `probe_duel.toml` already
+# overrides `faction` and `behaviour.doctrine` to make a shipped hull behave
+# like a hostile for the duration of one probe.
+
+[global]
+seed = 1
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_battleship.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Make Harrow and Federation mutually hostile before the hostile spawns.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+# Spawn the hostile Alliance battleship close to the player at t=0, with a
+# deliberately damageable tactical/sensor radar (see header).
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_battleship.toml"
+  name          = "probe_hostile"
+  position      = [50.0, 0.0, 0.0]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.8, maintain_range = 38.0 },
+  ] }, hull = { system_hull = [
+    { system_id = "power-reactor", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.15 },
+    { system_id = "power-battery", max_hp = 14.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.15 },
+    { system_id = "core", max_hp = 28.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.10 },
+    { system_id = "helm-engine-port", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "helm-engine-starboard", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "helm-radar", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "tactical-radar", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "sensor-radar", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "phaser-fore", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "blaster-heavy-fore", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "phaser-aft", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "torpedo-tube-fore-port", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "torpedo-tube-fore-starboard", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "torpedo-tube-fore-centre", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "torpedo-tube-aft-port", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+    { system_id = "torpedo-tube-aft-starboard", max_hp = 21.0, damaged_threshold_pct = 0.75, disabled_threshold_pct = 0.25, debuff_magnitude = 0.20 },
+  ] } }

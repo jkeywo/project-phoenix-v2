@@ -72,116 +72,123 @@ text          = "entity.alliance_destroyer.behaviour.doctrine.hold_station.text"
 base_priority = 20.0
 target_speed  = 0.0
 
+# ── Durability ladder (#915 tuning pass) ─────────────────────────────────────
+# The whole fleet was re-pegged in one pass, because these numbers only mean
+# anything relative to each other. Dynasty hulls carry a monolithic
+# `[hull] hull_integrity`; Alliance hulls have none, and their equivalent pool
+# is the SUM of the per-system `max_hp` below. Shields sit on top of both.
+#
+#   Dynasty   destroyer 200 | patrol/cruiser 300 | warhawk 400 | lancer 800
+#   Alliance  courier 200 | destroyer 300 | cruiser 500 | battleship 800
+#
+# The Alliance figures were reached by scaling each hull's authored system HP
+# proportionally, so the relative weighting between systems is unchanged.
+#
+# RADAR SYSTEMS CARRY NO HULL. `helm-radar`, `tactical-radar` and `sensor-radar`
+# have no `[[hull.system_hull]]` entry on any Alliance hull, so they cannot be
+# damaged, disabled or repaired — their points were redistributed across the
+# surviving systems and the totals above are unchanged. The code that reacts to
+# a downed radar (weapons-console arc gating, the helm radar overlay, the
+# captain's repair targeting) is untouched and still fires for any hull that
+# authors those entries; these four simply never trigger it.
+# ── System damage degradation (#915 tuning pass) ─────────────────────────────
+# Every system below runs 0.5 / 0.15 rather than the 0.75 / 0.25 default: this
+# hull stays Operational down to half HP and keeps limping until 15%.
+#
+# This is a FEEL change, not a balance one, and the measurement says so — over
+# 25 seeded patrol duels it moved the win rate not at all (56% either way) and
+# the TTK median not at all (36.1 s), buying about 11% of damage margin. The
+# destroyer's output is pinned at ~361 in every win regardless, because it is
+# gated by volley cooldowns and firing arcs, not by system health; extra uptime
+# buys no extra offence. What it DOES buy is roughly three seconds before the
+# first knockout, which a human crew feels at the repair console even though two
+# AI backfills fighting each other do not.
 [[hull.system_hull]]
 system_id = "power-reactor"
 display_name = "entity.alliance_destroyer.hull.system_hull.power_reactor.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 29
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "power-battery"
 display_name = "entity.alliance_destroyer.hull.system_hull.power_battery.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 29
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "core"
 display_name = "entity.alliance_destroyer.hull.system_hull.core.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.10
 
 [[hull.system_hull]]
 system_id = "helm-engine-port"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_engine_port.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_engine_starboard.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-radar"
-display_name = "entity.alliance_destroyer.hull.system_hull.helm_radar.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "helm-lateral-thrust"
 display_name = "entity.alliance_destroyer.hull.system_hull.helm_lateral_thrust.display_name"
-max_hp = 10
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "tactical-radar"
-display_name = "entity.alliance_destroyer.hull.system_hull.tactical_radar.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "sensor-radar"
-display_name = "entity.alliance_destroyer.hull.system_hull.sensor_radar.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 18
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "phaser-omni"
 display_name = "entity.alliance_destroyer.hull.system_hull.phaser_omni.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-port"
 display_name = "entity.alliance_destroyer.hull.system_hull.blaster_port.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-starboard"
 display_name = "entity.alliance_destroyer.hull.system_hull.blaster_starboard.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore"
 display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_fore.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft"
 display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_aft.display_name"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
+max_hp = 28
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
 [repair]
@@ -243,7 +250,26 @@ cooldown_secs = 5
 projectile_speed = 50
 collision_radius = 0.8
 visual_scale = 0.5
-damage = 20
+# Blaster damage (#915 tuning pass). Was 20. The two forward banks are the
+# destroyer's whole offence — 2 x 3 x 20 every 5 s is ~24 dps, which folded the
+# Harrow patrol in a single approach, before the fight became one.
+#
+# This number is a STEP FUNCTION, not a dial, because it decides how many volley
+# cycles a kill costs. Measured over 25 seeds against the patrol (the 5-seed demo
+# config cannot resolve this matchup at all — see the note in
+# scripts/balance-runs.demo.toml):
+#
+#   14  cruiser matchup collapses to 1/5
+#   15  patrol 56% win, +69 margin, 36.1 s median
+#   16  patrol 56% win, +73 margin, 36.1 s median   <- here
+#   17  patrol 100% win, +109 margin, 31.1 s median
+#   20  patrol 100% win, +184 margin, 21.1 s median
+#
+# 16 is the top of the near-even band: the patrol duel is a genuine coin flip
+# rather than a fight the destroyer is scripted to win. Anything from 17 up is a
+# guaranteed sweep. Moving between those two bands is a DESIGN choice about the
+# demo, not a tuning nudge — there is nothing in between.
+damage = 16
 shield_pierce = 0.1
 range = 35
 
@@ -278,7 +304,26 @@ cooldown_secs = 5
 projectile_speed = 50
 collision_radius = 0.8
 visual_scale = 0.5
-damage = 20
+# Blaster damage (#915 tuning pass). Was 20. The two forward banks are the
+# destroyer's whole offence — 2 x 3 x 20 every 5 s is ~24 dps, which folded the
+# Harrow patrol in a single approach, before the fight became one.
+#
+# This number is a STEP FUNCTION, not a dial, because it decides how many volley
+# cycles a kill costs. Measured over 25 seeds against the patrol (the 5-seed demo
+# config cannot resolve this matchup at all — see the note in
+# scripts/balance-runs.demo.toml):
+#
+#   14  cruiser matchup collapses to 1/5
+#   15  patrol 56% win, +69 margin, 36.1 s median
+#   16  patrol 56% win, +73 margin, 36.1 s median   <- here
+#   17  patrol 100% win, +109 margin, 31.1 s median
+#   20  patrol 100% win, +184 margin, 21.1 s median
+#
+# 16 is the top of the near-even band: the patrol duel is a genuine coin flip
+# rather than a fight the destroyer is scripted to win. Anything from 17 up is a
+# guaranteed sweep. Moving between those two bands is a DESIGN choice about the
+# demo, not a tuning nudge — there is nothing in between.
+damage = 16
 shield_pierce = 0.1
 range = 35
 
@@ -404,6 +449,10 @@ max_reverse_speed = 6
 acceleration = 6
 deceleration = 15
 max_yaw_rate = 0.6
+# Same light-hull agility trade as the courier (x1.5 at rest, x1 at flank).
+# This is the lever that breaks the mirror-match circling deadlock: the
+# destroyer that cuts throttle wins the turn fight.
+low_speed_turn_boost = 0.5
 max_bank_deg = 10
 impulse_charge_duration = 2.5
 impulse_speed_multiplier = 12
@@ -1094,3 +1143,24 @@ safe_range_margin = 45.0
 
 [helm_console.boost_ai.param]
 commit_range = 120.0
+
+# ── AI sensing horizon ───────────────────────────────────────────────────────
+#
+# Authored, not defaulted. `AiProfile.sensor_range` is what `ai::lod::evaluate_lod`
+# measures an NPC copy of this hull against: a ship further than
+# `sensor_range * 1.2` from the player for `LOD_DWELL_SECS` loses
+# `AiHighFidelity`, and with it every helm/captain/weapons decider it carries.
+# `simulate_low_lod_ships` then dead-reckons it on its LAST heading and speed
+# for ever — a hull demoted mid-manoeuvre at speed simply leaves the scenario
+# and never comes back.
+#
+# Every Harrow hull has always authored this (`ship_harrow_destroyer.toml`
+# 400, `ship_harrow_cruiser.toml` 350). No Alliance hull did, so an Alliance
+# hull spawned as an NPC fell to the 100.0 Rust fallback in
+# `entities::spawner` — INSIDE its own authored doctrine envelope, whose
+# `commit_range`/`safe_range_margin` legs work out past 120 units. The value
+# below is sized to the doctrine this hull flies, so the ship stays decided-for
+# across its own manoeuvre.
+[ai_profile]
+aggression = 1.0
+sensor_range = 400.0

@@ -89,8 +89,8 @@ transform = { anchor = "ironveil_patrol_a" }
 # The Ashrender lurks; it does not patrol.
 #
 # The hull template's `patrol-warhawk` entry routes between `warhawk_patrol_a`
-# and `warhawk_patrol_b`, two anchors only `combat_test.toml` declares. Here the
-# pair resolved to nothing, so the battleship held station at `ashrender_start`
+# and `warhawk_patrol_b`, two anchors now only `duel.toml` declares (:87-88).
+# Here the pair resolved to nothing, so the battleship held station at `ashrender_start`
 # by accident rather than by instruction — and a hull demoted from high fidelity
 # carrying real speed would have drifted out of the scenario instead (issue
 # #888).

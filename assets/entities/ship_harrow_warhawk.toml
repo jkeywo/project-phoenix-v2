@@ -184,8 +184,10 @@ tags = ["ship"]
 threat_level = "high"
 description = "entity.ship_harrow_warhawk.target.description"
 
+# 280 -> 400 (#915 tuning pass). The heaviest Dynasty hull was outweighed by
+# both the cruiser and the destroyer; it now tops the ladder as intended.
 [hull]
-hull_integrity = 280.0
+hull_integrity = 400.0
 
 # Single omni shield arc (issue #514). NPCs have no `[shields]` station so
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
@@ -232,6 +234,9 @@ max_reverse_speed = 4.5
 acceleration = 3.0
 deceleration = 9.0
 max_yaw_rate = 0.20
+# Capital hull: no low-speed turn trade. Authored explicitly so the zero
+# reads as a decision.
+low_speed_turn_boost = 0.0
 max_bank_deg = 5.0
 
 [helm_console.engine_pfx]

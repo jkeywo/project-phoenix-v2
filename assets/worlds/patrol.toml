@@ -58,6 +58,12 @@ spawn_on = "game_start"
 # Ironveil's `ironveil_patrol_*` circuit is retargeted onto the triangle
 # declared above, and the `retreat-when-hurt` Retreat to `pirate_haven` is
 # appended. See the fuller note in `default.toml`.
+#
+# Neither override touches `base_priority`, so the #892 picket rebase applies
+# here unmodified: this hull now holds its route until fired upon (Patrol 45 >
+# Destroy 38 undisturbed; attacked flips it to 63 > 30), superseding the old
+# engage-on-sight reading. Flagged for review if engage-on-sight is actually
+# wanted for this raider.
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "world.entity.raider_alpha.name"

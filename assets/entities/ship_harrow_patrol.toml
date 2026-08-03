@@ -45,8 +45,12 @@ tags = ["ship"]
 threat_level = "medium"
 description = "entity.ship_harrow_patrol.target.description"
 
+# 120 -> 300 (#915 tuning pass), joining the cruiser on the ladder's middle
+# rung. This roughly doubles the patrol's staying power and is the opposite
+# direction to the blaster nerf that softened the same duel — the two are
+# deliberate and the batch measures the net.
 [hull]
-hull_integrity = 120.0
+hull_integrity = 300.0
 
 # Single omni shield arc (issue #514). NPCs have no `[shields]` station so
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
@@ -80,6 +84,8 @@ max_reverse_speed = 6.25
 acceleration = 4.1665
 deceleration = 12.5
 max_yaw_rate = 0.196
+# Mid-weight Harrow: the smallest non-zero trade (x1.1 at rest).
+low_speed_turn_boost = 0.1
 max_bank_deg = 10.0
 
 [helm_console.engine_pfx]
@@ -167,8 +173,41 @@ sensor_range = 110.0
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
 # (#572) Doctrine-based behaviour (FSM dissolved). Destroy outscores Patrol so
-# the cruiser immediately engages any hostile; falls back to patrol waypoints
-# when no target is visible.
+# the cruiser engages any hostile it can see; falls back to its route when no
+# target is visible.
+#
+# (#892) THE ROUTE IS A PICKET, NOT A SWEEP. This is the hull the Harrow fields
+# as a standing presence — the one that is already there when a scenario starts,
+# as against the destroyer and the cruiser, which arrive on a schedule. Three
+# authored changes carry that:
+#
+#   * The Patrol entry paces its two stations at a third of maximum rather than
+#     half, and scores 30 rather than 20 with a further +15 while nothing has
+#     shot at it. A picket that is not being shot at is worth more on station
+#     than a roving patrol ever was.
+#   * The Destroy entry fights at 60 units rather than 45 and closes at 0.6
+#     rather than 0.9. A picket does not tail-chase: it comes off station
+#     grudgingly, holds a standoff, and is back on its line quickly.
+#   * The Destroy entry gains +25 while `attacked`. Shot at, the picket stops
+#     being a picket and commits — 63 against the Patrol entry's 30.
+#
+# The ordering that results is the whole point, and is worth reading twice:
+# undisturbed, the picket HOLDS (45 > 38) even with a hostile on its scope;
+# shot at, it fights (63 > 30). That is the inversion of the old numbers, and it
+# is what makes a picket a picket — the raid comes to it, not the other way
+# round. The hull's own `[ai_profile] sensor_range = 110` bounds the radius it
+# can see into at all, so the line it holds is a real one.
+#
+# Blast radius: `default.toml`, `patrol.toml`, `reinforcements.toml` and
+# `before_the_fire.toml` all field this hull as the ambient patrol the player
+# goes looking for, which is exactly the posture above. `duel.toml` and the
+# probe worlds field it as a combatant, and are unaffected for a different
+# reason: `duel.toml` injects its own `{ id = "kill", base_priority = 80 }`
+# Destroy entry into the slot override, and the by-id doctrine merge
+# (`entity_override.rs:46-55`) reconciles it against this hull's `destroy-hostiles`
+# entry by that shared id rather than appending a second Destroy — so the
+# injected 80 dominates in every state, attacked or not, and this hull's own
+# 30/38/63 ordering never gets a turn to matter there.
 
 [behaviour]
 
@@ -178,16 +217,18 @@ text          = "entity.ship_harrow_patrol.behaviour.doctrine.patrol_ironveil.te
 directive_kind    = "Patrol"
 directive_anchors = ["ironveil_patrol_a", "ironveil_patrol_b"]
 directive_loop    = true
-base_priority     = 20.0
-target_speed      = 0.5
+base_priority     = 30.0
+target_speed      = 0.3
+modifiers         = [{ condition = "not_attacked", weight = 15.0 }]
 
 [[behaviour.doctrine]]
 id            = "destroy-hostiles"
 text          = "entity.ship_harrow_patrol.behaviour.doctrine.destroy_hostiles.text"
 directive_kind = "Destroy"
-base_priority  = 35.0
-target_speed   = 0.9
-maintain_range = 45.0
+base_priority  = 38.0
+target_speed   = 0.6
+maintain_range = 60.0
+modifiers      = [{ condition = "attacked", weight = 25.0 }]
 
 # ── Stations ──────────────────────────────────────────────────────────────────
 #

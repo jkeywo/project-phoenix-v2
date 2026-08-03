@@ -76,10 +76,29 @@ target_speed  = 0.0
 
 # ── System hull HP — Cruiser baseline × 1.4 (rounded) ───────────────────────
 
+# ── Durability ladder (#915 tuning pass) ─────────────────────────────────────
+# The whole fleet was re-pegged in one pass, because these numbers only mean
+# anything relative to each other. Dynasty hulls carry a monolithic
+# `[hull] hull_integrity`; Alliance hulls have none, and their equivalent pool
+# is the SUM of the per-system `max_hp` below. Shields sit on top of both.
+#
+#   Dynasty   destroyer 200 | patrol/cruiser 300 | warhawk 400 | lancer 800
+#   Alliance  courier 200 | destroyer 300 | cruiser 500 | battleship 800
+#
+# The Alliance figures were reached by scaling each hull's authored system HP
+# proportionally, so the relative weighting between systems is unchanged.
+#
+# RADAR SYSTEMS CARRY NO HULL. `helm-radar`, `tactical-radar` and `sensor-radar`
+# have no `[[hull.system_hull]]` entry on any Alliance hull, so they cannot be
+# damaged, disabled or repaired — their points were redistributed across the
+# surviving systems and the totals above are unchanged. The code that reacts to
+# a downed radar (weapons-console arc gating, the helm radar overlay, the
+# captain's repair targeting) is untouched and still fires for any hull that
+# authors those entries; these four simply never trigger it.
 [[hull.system_hull]]
 system_id = "power-reactor"
 display_name = "entity.alliance_battleship.hull.system_hull.power_reactor.display_name"
-max_hp = 21
+max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -87,7 +106,7 @@ debuff_magnitude = 0.15
 [[hull.system_hull]]
 system_id = "power-battery"
 display_name = "entity.alliance_battleship.hull.system_hull.power_battery.display_name"
-max_hp = 14
+max_hp = 41
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -95,7 +114,7 @@ debuff_magnitude = 0.15
 [[hull.system_hull]]
 system_id = "core"
 display_name = "entity.alliance_battleship.hull.system_hull.core.display_name"
-max_hp = 28
+max_hp = 82
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.10
@@ -103,7 +122,7 @@ debuff_magnitude = 0.10
 [[hull.system_hull]]
 system_id = "helm-engine-port"
 display_name = "entity.alliance_battleship.hull.system_hull.helm_engine_port.display_name"
-max_hp = 21
+max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -111,31 +130,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "entity.alliance_battleship.hull.system_hull.helm_engine_starboard.display_name"
-max_hp = 21
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-radar"
-display_name = "entity.alliance_battleship.hull.system_hull.helm_radar.display_name"
-max_hp = 21
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "tactical-radar"
-display_name = "entity.alliance_battleship.hull.system_hull.tactical_radar.display_name"
-max_hp = 21
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "sensor-radar"
-display_name = "entity.alliance_battleship.hull.system_hull.sensor_radar.display_name"
-max_hp = 21
+max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -143,7 +138,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "phaser-fore"
 display_name = "entity.alliance_battleship.hull.system_hull.phaser_fore.display_name"
-max_hp = 21
+max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -151,7 +146,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "blaster-heavy-fore"
 display_name = "entity.alliance_battleship.hull.system_hull.blaster_heavy_fore.display_name"
-max_hp = 21
+max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -159,7 +154,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "phaser-aft"
 display_name = "entity.alliance_battleship.hull.system_hull.phaser_aft.display_name"
-max_hp = 21
+max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -167,7 +162,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-port"
 display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_port.display_name"
-max_hp = 21
+max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -175,7 +170,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-starboard"
 display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_starboard.display_name"
-max_hp = 21
+max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -183,7 +178,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-centre"
 display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_centre.display_name"
-max_hp = 21
+max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -191,7 +186,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft-port"
 display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_port.display_name"
-max_hp = 21
+max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -199,7 +194,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft-starboard"
 display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_starboard.display_name"
-max_hp = 21
+max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -581,6 +576,9 @@ max_reverse_speed = 2.7
 acceleration = 2.7
 deceleration = 6.7
 max_yaw_rate = 0.27
+# Capital hulls do not get the low-speed turn trade. Authored explicitly
+# rather than omitted: 0 here is a balance decision, not an oversight.
+low_speed_turn_boost = 0.0
 max_bank_deg = 8
 impulse_charge_duration = 3
 impulse_speed_multiplier = 8
@@ -1197,3 +1195,24 @@ artillery_hold_range = 45.0
 [helm_console.steering_ai.param]
 max_artillery_range = 50.0
 artillery_hold_range = 45.0
+
+# ── AI sensing horizon ───────────────────────────────────────────────────────
+#
+# Authored, not defaulted. `AiProfile.sensor_range` is what `ai::lod::evaluate_lod`
+# measures an NPC copy of this hull against: a ship further than
+# `sensor_range * 1.2` from the player for `LOD_DWELL_SECS` loses
+# `AiHighFidelity`, and with it every helm/captain/weapons decider it carries.
+# `simulate_low_lod_ships` then dead-reckons it on its LAST heading and speed
+# for ever — a hull demoted mid-manoeuvre at speed simply leaves the scenario
+# and never comes back.
+#
+# Every Harrow hull has always authored this (`ship_harrow_destroyer.toml`
+# 400, `ship_harrow_cruiser.toml` 350). No Alliance hull did, so an Alliance
+# hull spawned as an NPC fell to the 100.0 Rust fallback in
+# `entities::spawner` — INSIDE its own authored doctrine envelope, whose
+# `commit_range`/`safe_range_margin` legs work out past 120 units. The value
+# below is sized to the doctrine this hull flies, so the ship stays decided-for
+# across its own manoeuvre.
+[ai_profile]
+aggression = 0.7
+sensor_range = 400.0

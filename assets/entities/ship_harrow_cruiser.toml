@@ -185,8 +185,10 @@ description = "entity.ship_harrow_cruiser.target.description"
 # Heavier than the patrol cruiser it replaces in the combat-test waves: a ship
 # that commits to circling inside its own weapon envelope is a ship that expects
 # to be shot at for the whole engagement.
+# 420 -> 300 (#915 tuning pass), sharing the patrol's rung: the two Ironveil
+# hulls are the same weight class and were 3.5x apart.
 [hull]
-hull_integrity = 420.0
+hull_integrity = 300.0
 
 # Single omni arc, as on every other NPC hull: NPCs have no `[shields]` station,
 # so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
@@ -225,6 +227,8 @@ max_reverse_speed = 6.0
 acceleration = 5.0
 deceleration = 10.0
 max_yaw_rate = 0.30
+# Mid-weight Harrow: the smallest non-zero trade (x1.1 at rest).
+low_speed_turn_boost = 0.1
 max_bank_deg = 14.0
 
 [helm_console.engine_pfx]

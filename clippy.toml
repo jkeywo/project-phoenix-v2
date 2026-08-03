@@ -14,8 +14,29 @@
 #
 # `sqrt`, `powi`, `to_radians`, `to_degrees`, `abs`, `rem_euclid` and plain
 # arithmetic are IEEE-exact on every target and stay on std.
-
+#
+# Issue #903 — RNG entropy boundary. Every seeded sim draw already goes
+# through `crate::sim_rng::with_stream` (issue #897); the entries below ban
+# the OS-entropy *entry points* `rand` exposes elsewhere, so a new draw
+# reaching one of them from a sim module fails the build instead of silently
+# desyncing lockstep. `rand::random`/`rand::rng` are the two live entry
+# points; `SeedableRng::from_os_rng` is banned pre-emptively even though
+# nothing calls it today, so a future contributor reaching for
+# "just seed it from the OS" hits the same wall. Deterministic seeding
+# (`seed_from_u64`, `from_seed`, `Pcg32::seeded`) is NOT banned — it is pure
+# and several sanctioned call sites use it (asteroids' local seeded scheme,
+# constraint 8; #899's registration shuffle). Sanctioned exceptions:
+# `src/sim_rng.rs` scopes a per-fn allow at `SimRng::random` (the one
+# documented OS-entropy call in the sim), the `with_stream` fallback arm for
+# bare-`App` fixtures, and `unseeded_test_rng`; `src/server/pfx.rs` and
+# `src/server/renderer.rs` already carry a module-level allow for the f32
+# entries above and it covers these too; `src/server/viewscreen_border.rs`
+# scopes a per-fn allow at `apply_camera_shake` (screen-shake jitter, no sim
+# effect). New sim-feeding code must not be added to any of those scopes.
 disallowed-methods = [
+    { path = "rand::random", reason = "sim code: use crate::sim_rng::with_stream (issue #903/#897) — cosmetic code: scope #[allow(clippy::disallowed_methods)] with a reason" },
+    { path = "rand::rng", reason = "sim code: use crate::sim_rng::with_stream (issue #903/#897) — cosmetic code: scope #[allow(clippy::disallowed_methods)] with a reason" },
+    { path = "rand::SeedableRng::from_os_rng", reason = "sim code: use crate::sim_rng::with_stream, not OS entropy (issue #903/#897)" },
     # f32 — the sim's float width. Everything below is a platform-libm call.
     { path = "f32::sin", reason = "use crate::simmath::sin — see src/simmath.rs (issue #908)" },
     { path = "f32::cos", reason = "use crate::simmath::cos — see src/simmath.rs (issue #908)" },

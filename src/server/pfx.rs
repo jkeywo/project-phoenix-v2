@@ -1,5 +1,7 @@
 // Presentation-only particle/render effects: never feeds simulation state, so
-// platform-varying std transcendentals are fine here (issue #908, simmath.rs).
+// platform-varying std transcendentals are fine here (issue #908, simmath.rs),
+// and so is the OS-entropy `rand::rng()` this module draws from for particle
+// variation (issue #903) — nothing here is read back into sim state.
 #![allow(clippy::disallowed_methods)]
 
 use bevy::asset::RenderAssetUsages;

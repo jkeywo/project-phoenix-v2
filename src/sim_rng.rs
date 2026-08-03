@@ -187,6 +187,12 @@ impl SimRng {
     /// report so the run can be replayed with `--seed`. `rand` is the entropy
     /// source because `vellum-rng` has none by design — it seeds from numbers
     /// you hand it, and where those come from is the caller's business.
+    ///
+    /// Issue #903: `rand::random` is banned crate-wide in `clippy.toml` so a
+    /// new draw elsewhere in the sim fails the build; this is the one site
+    /// the ban is scoped away from, since it IS the sanctioned OS-entropy call
+    /// the module doc above claims.
+    #[allow(clippy::disallowed_methods)]
     pub fn random() -> Self {
         Self::new(rand::random::<u64>(), SeedSource::Random)
     }
@@ -298,6 +304,11 @@ impl SimRng {
 /// `Res`, for the same reason they take `Option<Res<LogFilterConfig>>`: a bare
 /// `Res` fails Bevy parameter validation in every bare-`App` unit test in this
 /// crate. Determinism plumbing must not break test fixtures.
+///
+/// Issue #903: the `None` arm draws OS entropy, which is why the fn carries
+/// the `disallowed_methods` allow — a bare-`App` fixture that never inserted
+/// `SimRng` has no run to reproduce, so this is sanctioned, not a hole.
+#[allow(clippy::disallowed_methods)]
 pub fn with_stream<R>(
     sim_rng: Option<&SimRng>,
     stream: SimStream,
@@ -322,6 +333,7 @@ pub fn with_stream<R>(
 /// exactly the hole that closes. A fixture that *does* care about the sequence
 /// should build a `SimRng` with a literal seed instead of calling this.
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 pub fn unseeded_test_rng() -> Pcg32 {
     Pcg32::seeded(rand::random::<u64>(), 0)
 }

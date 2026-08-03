@@ -343,6 +343,11 @@ fn process_hull_shake(
 /// camera position is already set).
 ///
 /// When no damage has been taken recently the offset is reset to zero.
+///
+/// Issue #903: draws OS entropy via `rand::rng()` for the shake jitter, which
+/// is why the fn carries the `disallowed_methods` allow — purely cosmetic
+/// (screen-space camera offset), never read back into simulation state.
+#[allow(clippy::disallowed_methods)]
 fn apply_camera_shake(
     time: Res<Time>,
     mut shake: ResMut<ShakeState>,

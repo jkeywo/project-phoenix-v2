@@ -66,8 +66,12 @@
 //! **Folded (collision attribution):** every collision the run applied, as
 //! `(victim uuid, damage, shield absorbed, hull damage)` in the order the
 //! balance tracer saw them — the record's own AC5 line, and #896's fingerprint
-//! design. This is read from `RunTelemetry`, which is why this module lives
-//! under `headless` rather than in the shared simulation.
+//! design. This is read from `RunTelemetry`, which used to be why this module
+//! lived under `headless`; issue #904 moved that resource to
+//! `crate::core::telemetry` and this module out to the crate root, because a
+//! digest that only exists on native cannot make a native↔wasm claim. Nothing
+//! about the fold changed in the move. `crate::headless::digest` is an alias
+//! for this module, so every existing path still resolves.
 //!
 //! **DEFERRED, and the digest may grow to cover it.** `WorldResource` folds as
 //! a *projection*, not wholesale: `scenario_title`, `scenario_description`, and
@@ -132,9 +136,9 @@ use bevy::prelude::*;
 use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 
 use crate::balance::BalanceEvent;
+use crate::core::telemetry::RunTelemetry;
 use crate::damage::SystemHull;
 use crate::entity_spawner::{EntitySystemHull, EntityUuid};
-use crate::headless::report::RunTelemetry;
 use crate::lobby::WorldResource;
 use crate::messages::GamePhase;
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
@@ -250,8 +254,10 @@ pub fn fold_serde<T: serde::Serialize>(acc: u64, value: &T) -> u64 {
 /// Compute the canonical authoritative-state digest for `app`'s current state.
 ///
 /// Call this only between `App::update()` calls — the `RenderInterp` bracket
-/// (see the module docs). Requires `RunTelemetry`, so it is a headless-app
-/// helper, like [`crate::headless::fingerprint`].
+/// (see the module docs). An app with no `RunTelemetry` folds that resource's
+/// "absent" marker rather than failing — which is what lets the cross-target
+/// probe (`crate::cross_target_probe`, issue #904) fold through the very same
+/// function a headless run does, on a target where `headless` does not exist.
 pub fn state_digest(app: &App) -> u64 {
     world_digest(app.world())
 }

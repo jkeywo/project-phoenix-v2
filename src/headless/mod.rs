@@ -10,7 +10,13 @@
 
 pub mod app;
 pub mod args;
-pub mod digest;
+/// The canonical authoritative-state digest (issue #901).
+///
+/// An alias rather than a module of its own: the implementation moved out to
+/// `crate::sim_digest` (issue #904) so the wasm build — which has no
+/// `headless` module at all — folds through the identical code a native run
+/// does. Every existing `headless::digest::…` path still resolves.
+pub use crate::sim_digest as digest;
 pub mod duel;
 pub mod fingerprint;
 pub mod replay;

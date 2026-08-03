@@ -86,9 +86,17 @@ pub mod bounded_history;
 /// domain-neutral.
 pub mod composite_rng;
 pub mod console_bridge;
+/// The seeded cross-target determinism probe (issue #904): one minimal sim
+/// world both a native test and the browser drive, under deliberately
+/// different frame pacing, folding the canonical digest at shared ticks.
+pub mod cross_target_probe;
 pub mod radar;
 pub mod radar_config;
 pub mod ship_plugin;
+/// The canonical authoritative-state digest (issue #901). At the crate root
+/// rather than under `headless` since issue #904: a digest that only compiles
+/// on native cannot make a native↔wasm claim. `headless::digest` aliases it.
+pub mod sim_digest;
 pub mod sim_rng;
 pub mod sim_sets;
 pub mod sim_tick;

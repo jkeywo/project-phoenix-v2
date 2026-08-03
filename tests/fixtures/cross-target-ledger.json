@@ -1,0 +1,93 @@
+{
+  "seed": 904849,
+  "ticks": 240,
+  "interval": 12,
+  "pacing": "even",
+  "checkpoints": [
+    {
+      "tick": 0,
+      "digest": "2e77dce78a014bcb"
+    },
+    {
+      "tick": 12,
+      "digest": "107046c7a053c430"
+    },
+    {
+      "tick": 24,
+      "digest": "bb198e99d973531f"
+    },
+    {
+      "tick": 36,
+      "digest": "d26b357761241c27"
+    },
+    {
+      "tick": 48,
+      "digest": "fb8c19cfc718e884"
+    },
+    {
+      "tick": 60,
+      "digest": "ef8c1828a338dae3"
+    },
+    {
+      "tick": 72,
+      "digest": "1ed9fe5f251d3149"
+    },
+    {
+      "tick": 84,
+      "digest": "cc5ae3dc7cd44ae4"
+    },
+    {
+      "tick": 96,
+      "digest": "de3e8b2982699bfb"
+    },
+    {
+      "tick": 108,
+      "digest": "1ac3cc7c4b63e4ed"
+    },
+    {
+      "tick": 120,
+      "digest": "70556dfd34206234"
+    },
+    {
+      "tick": 132,
+      "digest": "0e3f447d6e57c676"
+    },
+    {
+      "tick": 144,
+      "digest": "528a055b23b90ec5"
+    },
+    {
+      "tick": 156,
+      "digest": "7ca558e823dd1e4c"
+    },
+    {
+      "tick": 168,
+      "digest": "3606db08f61066b2"
+    },
+    {
+      "tick": 180,
+      "digest": "612aa00d2d1dfada"
+    },
+    {
+      "tick": 192,
+      "digest": "39e4d26f18fb14b0"
+    },
+    {
+      "tick": 204,
+      "digest": "7101c45b1b0b31d5"
+    },
+    {
+      "tick": 216,
+      "digest": "ab7470eee9ce8436"
+    },
+    {
+      "tick": 228,
+      "digest": "5a3641261319bee4"
+    },
+    {
+      "tick": 240,
+      "digest": "914d5539990a69ae"
+    }
+  ],
+  "final_digest": "914d5539990a69ae"
+}

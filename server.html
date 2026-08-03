@@ -2641,6 +2641,14 @@ function finishInit() {
   // fixed inputs — touches no simulation state; tests/smoke/simmath-vectors.spec.ts
   // calls it and compares the digest against the pinned native one.
   window.wasm_simmath_battery = wasmBindings.wasm_simmath_battery;
+  // Cross-target determinism probe (issue #904). Builds its OWN minimal seeded
+  // Bevy world, drives it for a fixed number of ticks under a deliberately
+  // bursty frame pacing, and returns the canonical #901 digest ledger. It
+  // never touches the world this page is running — a separate `App`, no
+  // renderer, no assets. tests/smoke/cross-target-determinism.spec.ts calls it
+  // and compares the ledger against the native pin in
+  // tests/fixtures/cross-target-ledger.json.
+  window.wasm_cross_target_probe = wasmBindings.wasm_cross_target_probe;
   window.wasm_set_log_spec = wasmBindings.wasm_set_log_spec;
   window.wasm_set_log_entity = wasmBindings.wasm_set_log_entity;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;

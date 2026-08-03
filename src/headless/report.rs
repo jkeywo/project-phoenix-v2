@@ -23,39 +23,16 @@ use crate::sim_rng::SeedSource;
 
 use super::args::{HeadlessArgs, ReportFormat};
 
-/// Accumulates everything the exit summary needs, tick by tick.
+/// The telemetry accumulator, re-exported from its portable home.
 ///
-/// No longer keeps its own tick counter (issue #895 re-review): a headless
-/// run's `--hz` frame rate and the world's `[global] sim_tick_hz` are
-/// independent, so a per-`update()` counter folds however many logical sim
-/// ticks a frame ran (2 at `--hz 30` against the shipped `sim_tick_hz = 60`)
-/// into one stamp. `Res<SimTick>` (`crate::sim_tick`) is the real counter
-/// every other tick-keyed artifact already keys on — read it directly at the
-/// call sites below instead.
-#[derive(Resource, Default)]
-pub struct RunTelemetry {
-    /// Count of each `ServerMessage` variant seen, keyed by variant name.
-    /// `BTreeMap` so the report is byte-identical across runs.
-    pub message_counts: BTreeMap<String, u64>,
-    /// One JSON line per outbound message. Only populated for
-    /// [`ReportFormat::Ndjson`] — at 10 Hz a minute of play is a lot of lines.
-    pub stream: Vec<String>,
-    pub capture_stream: bool,
-    /// Every balance event the run produced, stamped at collection time.
-    /// Always captured — unlike `stream` this is bounded by combat, not by
-    /// broadcast rate, and the per-ship ledgers are built from it.
-    pub balance_events: Vec<StampedBalanceEvent>,
-    /// uuid → raw `EntityName`, snapshotted as events arrive. Recorded here
-    /// rather than looked up at report time because a destroyed NPC is gone
-    /// from the world long before the summary is built. Stored verbatim — for
-    /// TOML entities that is a strings.csv key, not display text.
-    pub entity_names: BTreeMap<String, String>,
-    /// uuid → faction uuid (as a string), snapshotted the same way and for the
-    /// same reason as `entity_names` (#843): a ship that died mid-run is gone
-    /// from the ECS, but the exit report still needs its side to bucket its
-    /// damage ledger. Absent for factionless ships.
-    pub entity_factions: BTreeMap<String, String>,
-}
+/// The type moved to `crate::core::telemetry` (issue #904) so that
+/// `crate::sim_digest` — which folds this resource's collision attribution —
+/// can compile for `wasm32`, where the `headless` module does not exist. The
+/// collector systems below and the report builder that reads them stay here;
+/// only the plain-field struct moved. Every existing
+/// `headless::report::RunTelemetry` path still resolves through this
+/// re-export.
+pub use crate::core::telemetry::RunTelemetry;
 
 /// `ServerMessage`'s variant name, for counting.
 ///

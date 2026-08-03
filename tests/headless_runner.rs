@@ -418,6 +418,72 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
     );
 }
 
+/// The engagement must SURVIVE the whole run — a duel that goes quiet after one
+/// clash is a bug even when nobody has died yet.
+///
+/// # The failure this pins
+///
+/// `AiProfile.sensor_range` is what `ai::lod::evaluate_lod` measures an NPC
+/// against: past `sensor_range * 1.2` for `LOD_DWELL_SECS`, a ship loses
+/// `AiHighFidelity` and every decider that travels with it, and
+/// `ai::server::simulate_low_lod_ships` dead-reckons it on its LAST heading and
+/// speed for ever. No Alliance hull authored an `[ai_profile]`, so an Alliance
+/// hull spawned as an NPC took the 100.0 fallback in `entities::spawner` — a
+/// 120-unit demote ring INSIDE its own authored doctrine envelope. The
+/// destroyer's attack-pass `escape` leg commits outward under boost (x3 of
+/// `max_speed = 15`) and crossed that ring about a second before the 6 s
+/// `escape_duration_secs` dwell would have turned it back around, so the
+/// aggressor demoted mid-manoeuvre and coasted out of the scenario at its
+/// frozen boosted speed, never to return. The player's captain then stood the
+/// alert down on the honest reading — its hostile really was 500+ units away —
+/// and both hulls sat inert for the rest of the run.
+///
+/// Asserting on TOTAL damage rather than on the kill is deliberate: the kill is
+/// a balance outcome the fleet's durability ladder moves around, while "the two
+/// hulls are still shooting at t = 60 s" is the invariant this world exists to
+/// demonstrate. Under the freeze the pair traded 124 points in 60 s and then
+/// nothing; sustained, they trade upwards of 700.
+#[test]
+fn the_duel_keeps_fighting_for_the_whole_run() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    let total_dealt: f32 = report.damage_by_ship.values().map(|l| l.damage_dealt).sum();
+    assert!(
+        total_dealt > 400.0,
+        "the duel went quiet: only {total_dealt} damage across 60 s. A hull that \
+         demotes out of high fidelity mid-manoeuvre never comes back — check that \
+         every shipped hull authors an [ai_profile] sensor_range wide enough for \
+         the movement doctrine it flies. Ledger: {:?}",
+        report.damage_by_ship
+    );
+
+    // The aggressor's attack pass must CLOSE. `escape` is a bounded commitment
+    // (`escape_duration_secs = 6`), so a hull that spends most of the run in it
+    // is a hull whose state machine stopped being evaluated — the demotion
+    // signature, caught here even if the shooting looked healthy early on.
+    let longest_escape = report
+        .damage_by_ship
+        .values()
+        .filter_map(|l| l.phase_seconds.get("escape").copied())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        longest_escape < 30.0,
+        "a hull sat in the attack pass's `escape` leg for {longest_escape} s of a \
+         60 s run; that leg's authored dwell is 6 s, so its doctrine machine \
+         stopped being evaluated"
+    );
+}
+
 /// **Issue #893's headless evidence.** A tactical radar reaching Destroyed
 /// must make the ship STOP FIRING — not keep shooting the target it already
 /// locked, which was the bug #887's A/B surfaced (both battleships in that
@@ -3050,17 +3116,40 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
 /// doctrine's withdrawn first attempt held a plausible radius while Channel 3
 /// flew it.
 ///
-/// The `requested` count is the control condition, and it is asserted on the
-/// DUEL alone. Nothing here raises a request by hand — the cruiser's own Weapons
-/// AI does, because its three tubes are 90-degree fore/aft and a settled ring
-/// puts the target on the beam — and without it this test would go green while
-/// measuring an engagement in which nothing was ever declined. It is not
-/// asserted on the aggressor probe because there it is legitimately near zero:
-/// that hull spends the run in the torpedo leg, whose whole purpose is to
-/// SATISFY the request rather than decline it (#876). Measured across the duel's
-/// 45 s: 1336 ring ticks with the leg yielding, 41 of them flown at a yaw the
-/// doctrine did not solve (worst 2.0 — a full-scale reversal); with the leg
-/// declining, 1307 ring ticks and none.
+/// ## The control was re-measured after issue #896's freeze fix (this batch)
+///
+/// The doc comment this replaces asserted `requested > 0` on the duel probe —
+/// a standing arc-bearing request against the ring — pinned to a pre-#896
+/// count (367 of 1351 ticks under seed 3) that the world header had flagged
+/// as un-remeasured. Re-measured on the fixed tree (the `[ai_profile]` blocks
+/// that stop an Alliance hull losing AI fidelity mid-manoeuvre): 346 ring
+/// ticks, `requested == 0`, `overwritten == 0`, worst error `0.0`, in BOTH
+/// probes. That is not the control rotting into a false pass; it is a real
+/// change to this doctrine's own geometry:
+///
+///   * The two phaser banks' `auto_arc_deg = 180` abut exactly on the ring's
+///     beam line, so at least one bank is always `Ready` there — the phaser
+///     family can never qualify for a request while the hull holds the ring
+///     (see the "not changed" note on `alliance_cruiser.toml`).
+///   * The three torpedo tubes (fore/aft, `fire_arc_deg = 90`) genuinely
+///     cannot bear on the ring — but this hull authors its OWN
+///     `hold_torpedo_bearing` leg (`movement_broadside_orbit.toml`), which now
+///     reliably claims a loaded, ready tube and breaks the ring to fire it
+///     BEFORE Channel 3 ever observes a loaded-but-out-of-arc emitter. Under
+///     the freeze fix combat sustains long enough for that leg to actually
+///     fire (`TorpedoLaunched: 4` in this run) — pre-fix the hull could lose
+///     AI fidelity mid-ring and never complete the leg, which is one way a
+///     stale loaded tube could have stood in front of Channel 3 instead.
+///
+/// So a standing arc-bearing request is no longer an expected phenomenon for
+/// THIS composed doctrine at all — the doctrine now resolves its own bearing
+/// needs before Channel 3 is asked. The control this test needs is not "a
+/// request stood at some point" but "this was a live, contested duel and not
+/// an idle scenario with nothing to decline" — otherwise `overwritten == 0`
+/// would be trivially true of a hull with no target. That control is now
+/// asserted directly off the same run's report: nonzero damage dealt and at
+/// least one torpedo launch, which only happen if both hulls were actively
+/// fighting across the window.
 #[test]
 fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
     use project_phoenix::ai::decode_steering_from_facing;
@@ -3073,6 +3162,8 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
         overwritten: usize,
         requested: usize,
         worst: f32,
+        dealt: f32,
+        torpedoes_launched: u64,
     }
 
     let sample = |world: &str, secs: f64| -> Ring {
@@ -3090,6 +3181,8 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
             overwritten: 0,
             requested: 0,
             worst: 0.0,
+            dealt: 0.0,
+            torpedoes_launched: 0,
         };
         for _ in 0..args.max_ticks {
             run(&mut app, 1);
@@ -3127,20 +3220,48 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
                 r.overwritten += 1;
             }
         }
+        // Full-run report, taken from this same app/seed after every tick has
+        // played out — the liveness control below reads off it.
+        let report = build_report(&mut app, &args, 0.0);
+        r.dealt = report.damage_by_ship.values().map(|l| l.damage_dealt).sum();
+        r.torpedoes_launched = report
+            .message_counts
+            .get("TorpedoLaunched")
+            .copied()
+            .unwrap_or(0);
         r
     };
 
     let duel = sample("assets/worlds/probe_duel.toml", 45.0);
     let aggressor = sample("assets/worlds/probe_aggressor.toml", 30.0);
 
-    // The control: in the world where the ring IS the engagement, the hull
-    // genuinely spent ring ticks with a request standing against it.
+    // The control: the duel probe is a genuinely live, contested engagement —
+    // both damage exchanged and a torpedo actually launched — so `overwritten
+    // == 0` below is proof the ring held under real combat pressure, not a
+    // vacuous read of an idle scenario with nothing to decline.
     assert!(
-        duel.requested > 0,
-        "the cruiser's Weapons never had a standing arc-bearing request across {} \
-         ring ticks of a live duel. Nothing was declined, so this probe proves \
-         nothing — the control condition has rotted",
+        duel.dealt > 0.0 && duel.torpedoes_launched > 0,
+        "the duel probe did not read as live combat (dealt={}, torpedoes_launched={}) \
+         across {} ring ticks — this probe proves nothing about the ring holding \
+         under contested fire, because there was no contested fire to hold under",
+        duel.dealt,
+        duel.torpedoes_launched,
         duel.ticks
+    );
+
+    // The request itself is now expected to be absent on this composed
+    // doctrine: the phasers' abutting 180-degree arcs mean a bank is always
+    // ready on the ring, and the hull's own torpedo-bearing leg now reliably
+    // claims a loaded tube before Channel 3 ever sees it out of arc. A
+    // standing request here would mean one of those two guarantees broke.
+    assert_eq!(
+        duel.requested, 0,
+        "the cruiser's Weapons had a standing arc-bearing request on {} of {} ring \
+         ticks — either a phaser bank went unready with the other out of arc, or \
+         the hull's own torpedo-bearing leg stopped claiming a loaded tube before \
+         Channel 3 saw it. Both are regressions from the composed doctrine this \
+         probe pins",
+        duel.requested, duel.ticks
     );
 
     for (name, ring, min_ticks) in [("duel", &duel, 300), ("aggressor", &aggressor, 50)] {

@@ -1140,3 +1140,24 @@ torpedo_run_range = 25.0
 combat_orbit_range = 22.0
 combat_orbit_speed = 0.7
 torpedo_run_range = 25.0
+
+# ── AI sensing horizon ───────────────────────────────────────────────────────
+#
+# Authored, not defaulted. `AiProfile.sensor_range` is what `ai::lod::evaluate_lod`
+# measures an NPC copy of this hull against: a ship further than
+# `sensor_range * 1.2` from the player for `LOD_DWELL_SECS` loses
+# `AiHighFidelity`, and with it every helm/captain/weapons decider it carries.
+# `simulate_low_lod_ships` then dead-reckons it on its LAST heading and speed
+# for ever — a hull demoted mid-manoeuvre at speed simply leaves the scenario
+# and never comes back.
+#
+# Every Harrow hull has always authored this (`ship_harrow_destroyer.toml`
+# 400, `ship_harrow_cruiser.toml` 350). No Alliance hull did, so an Alliance
+# hull spawned as an NPC fell to the 100.0 Rust fallback in
+# `entities::spawner` — INSIDE its own authored doctrine envelope, whose
+# `commit_range`/`safe_range_margin` legs work out past 120 units. The value
+# below is sized to the doctrine this hull flies, so the ship stays decided-for
+# across its own manoeuvre.
+[ai_profile]
+aggression = 0.8
+sensor_range = 350.0

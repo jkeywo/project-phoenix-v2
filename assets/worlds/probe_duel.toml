@@ -77,13 +77,34 @@
 #
 # **The default stays 3, and it is no longer chosen for resolving.** Every
 # other probe on this world — the ring probes, the doctrine probes, the power
-# reserve probe — is measured against seed 3 and passes unchanged on it,
-# including `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`,
-# which still asserts against a standing arc-bearing request on this seed. The
-# 367-vs-4 count from the pre-#896 sweep above is NOT re-measured here and is
-# not the current justification — what is currently evidenced is only that
-# the probe passes on seed 3, under the physics ordering #896 put in place.
-# The two tests that need the duel to actually END now pin `seed: Some(34)`
+# reserve probe — is measured against seed 3 and passes unchanged on it.
+#
+# RE-MEASURED again after the combat-freeze fix (the `[ai_profile]` blocks
+# that give every Alliance hull an authored `sensor_range`, so a hull no
+# longer loses AI fidelity — and freezes dead-reckoning — mid-manoeuvre).
+# `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`
+# no longer finds a standing arc-bearing request on this seed at all: 346 ring
+# ticks over the 45 s window, `requested == 0`, `overwritten == 0`. That is
+# not the 367-vs-4 count above going stale into a false pass — it is a real
+# change to this doctrine's own geometry, now that combat reliably sustains
+# long enough to observe it in full:
+#
+#   * The phasers' `auto_arc_deg = 180` banks abut exactly on the ring's beam
+#     line, so one bank is always `Ready` there and the phaser family can
+#     never qualify for a request while the hull holds the ring.
+#   * The torpedo tubes still cannot bear on the ring (90-degree fore/aft
+#     arcs), but this hull's own `hold_torpedo_bearing` leg now reliably
+#     claims a loaded, ready tube and breaks the ring to fire it BEFORE
+#     Channel 3 ever observes a loaded-but-out-of-arc emitter — under the
+#     freeze fix the leg actually completes (this run: `TorpedoLaunched: 4`,
+#     450 damage dealt) instead of the hull losing fidelity mid-leg.
+#
+# A standing arc-bearing request is therefore no longer an expected reading
+# for THIS composed doctrine on this seed; the test's control is now that the
+# run is genuinely live combat (damage dealt and a torpedo launch), not that a
+# request stood. The 367-vs-4 pre-#896 count above is kept only as history of
+# where the control used to come from. The two tests that need the duel to
+# actually END now pin `seed: Some(34)`
 # themselves (`world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
 # and `balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves`
 # in tests/headless_runner.rs), which is the same discipline

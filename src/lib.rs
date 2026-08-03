@@ -99,6 +99,9 @@ pub mod simmath;
 /// on every `simmath` function (issue #909).
 pub mod simmath_vectors;
 pub mod world;
+/// Deterministic tick-scoped world-id minting (issue #907) — the single
+/// chokepoint every simulation entity, message and projectile id comes from.
+pub mod world_id;
 pub use modifiers::repair_teams;
 pub mod comms;
 

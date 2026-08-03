@@ -390,6 +390,11 @@ pub struct SimRngAndLog<'w> {
     pub rng: Option<Res<'w, crate::sim_rng::SimRng>>,
     pub log: Option<Res<'w, crate::logging::LogFilterConfig>>,
     pub god_mode: Option<Res<'w, GodMode>>,
+    /// The tick-scoped id mint (issue #907). Rides in this bundle because the
+    /// two weapon systems that mint projectile ids are the same two that were
+    /// already at Bevy's parameter ceiling, and a projectile id is minted in
+    /// the same breath as the damage draw beside it.
+    pub id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
 }
 
 impl SimRngAndLog<'_> {
@@ -2701,7 +2706,7 @@ fn setup_world(
     mut commands: Commands,
     mut world: ResMut<WorldResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     let Some(world_config) = world_config else {
         return;
@@ -2742,7 +2747,8 @@ fn setup_world(
             }
         };
 
-        let uuid = crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
+        let uuid =
+            crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &world_config.anchors,
@@ -2822,7 +2828,7 @@ fn spawn_game_start_entities(
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     if *has_spawned {
         return;
@@ -2882,7 +2888,8 @@ fn spawn_game_start_entities(
             config
         };
 
-        let uuid = crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
+        let uuid =
+            crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &mc.anchors,

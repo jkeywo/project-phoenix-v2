@@ -398,6 +398,8 @@ pub(crate) fn tick_pending_follow_ups(
     region_membership: Option<Res<crate::regions::server::RegionMembership>>,
     ship_query: Query<Entity, With<crate::simulation::LocalShip>>,
     entity_uuid_q: Query<&EntityUuid>,
+    // Message ids are command-addressing surface (issue #907 AC2).
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     if comms.pending_follow_ups.is_empty() {
         return;
@@ -462,7 +464,10 @@ pub(crate) fn tick_pending_follow_ups(
         }
 
         // Inject the real message.
-        let new_msg_id = uuid::Uuid::new_v4().to_string();
+        let new_msg_id = crate::world_id::mint_id_with(
+            id_mint.as_deref(),
+            crate::world_id::IdNamespace::Message,
+        );
         let available = current_sender_in_range(&comms, &pfu.sender_uuid);
         let responses = crate::comms::content::response_views(&pfu.node.responses, available);
         let new_msg = CommsMessage {
@@ -751,6 +756,8 @@ pub(crate) fn inject_comms_templates(
     mut comms: ResMut<CommsRuntime>,
     buffer: Res<WorldEventBuffer>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
+    // Message ids are command-addressing surface (issue #907 AC2).
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     if buffer.0.is_empty() {
         return;
@@ -769,10 +776,9 @@ pub(crate) fn inject_comms_templates(
         &world.name_to_uuid,
     );
     for fc in fired_comms {
-        let thread_id = fc
-            .thread_id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let thread_id = fc.thread_id.clone().unwrap_or_else(|| {
+            crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Message)
+        });
         // `_self` is the reserved synthetic internal-sender name; render it as
         // "Internal Report" in the comms UI so the crew sees a ship-generated
         // intelligence summary rather than a literal "_self" sender label.
@@ -801,7 +807,10 @@ pub(crate) fn inject_comms_templates(
 
         // Root templates inject immediately when their template-level
         // `trigger` fires. Per-node triggers are reserved for follow-ups.
-        let msg_id = uuid::Uuid::new_v4().to_string();
+        let msg_id = crate::world_id::mint_id_with(
+            id_mint.as_deref(),
+            crate::world_id::IdNamespace::Message,
+        );
         let available = current_sender_in_range(comms, &sender_uuid);
         let responses = crate::comms::content::response_views(&fc.node.responses, available);
         let msg = crate::messages::CommsMessage {

@@ -471,7 +471,7 @@ fn spawn_world_entities(
     mut commands: Commands,
     world_config: Option<ResMut<crate::world::config::WorldConfig>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     let Some(mut world_config) = world_config else {
         return; // No unified WorldConfig (native tests, hardcoded fallback).
@@ -484,7 +484,7 @@ fn spawn_world_entities(
     // template resolution so it works even when the config cache is empty
     // (e.g. in unit tests).
     let new_names = crate::world::config::assign_named_entity_uuids(&world_config.entities, || {
-        crate::sim_rng::assign_uuid_with(sim_rng.as_deref())
+        crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
     });
     for (name, uuid) in &new_names {
         world_config.name_to_uuid.insert(name.clone(), uuid.clone());
@@ -506,7 +506,7 @@ fn spawn_world_entities(
         &world_snapshot,
         &config_cache,
         flags,
-        sim_rng.as_deref(),
+        id_mint.as_deref(),
     );
 }
 
@@ -530,7 +530,7 @@ pub fn spawn_immediate_entities_internal(
     world_config: &crate::world::config::WorldConfig,
     config_cache: &crate::config_cache::ConfigCache,
     flags: Option<&crate::world::flags::FlagStore>,
-    sim_rng: Option<&crate::sim_rng::SimRng>,
+    id_mint: Option<&crate::world_id::WorldIdMint>,
 ) -> Vec<Entity> {
     // Atomic-activation guard (issue #750): if this world's entity identity is
     // invalid (e.g. duplicate reference names), spawn NOTHING. A composition
@@ -626,7 +626,7 @@ pub fn spawn_immediate_entities_internal(
                 }
             }
         }
-        let uuid = crate::sim_rng::assign_uuid_with(sim_rng);
+        let uuid = crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Entity);
         let pos = match resolve_position(entity_inst, &world_config.anchors, &named_positions) {
             Ok(p) => p,
             Err(e) => {
@@ -933,13 +933,14 @@ pub(crate) fn tick_trigger_pipeline(
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     // Seeded UUID source for `SpawnEntity` dispatch. Bound once per system run
     // because `DispatchContext::uuid_source` is a `&dyn Fn`.
-    let uuid_source = || crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
+    let uuid_source =
+        || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
     // Template source for `SpawnEntity` dispatch (issue #715), built once per
     // system run. `WasmTemplateLoader` unconditionally: it serves the
     // preloaded config cache first and, on native, falls back to the
@@ -1677,7 +1678,7 @@ fn tick_delayed_actions(
         ),
         With<BehaviourSection>,
     >,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let Some(elapsed) = time.as_ref().and_then(|t| {
@@ -1701,7 +1702,8 @@ fn tick_delayed_actions(
     // Same template source as `tick_trigger_pipeline` (issue #715): one
     // `WasmTemplateLoader` per system run, both targets.
     let template_loader = crate::entity_loader::WasmTemplateLoader;
-    let uuid_source = || crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
+    let uuid_source =
+        || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
 
     // Ready/still-pending is a pure decision (`world::delayed`); only the
     // elapsed-clock read above and the dispatch below touch Bevy.
@@ -2033,7 +2035,7 @@ fn apply_world_layer_changes(
     mut layer_map: ResMut<WorldLayerMap>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     // Layer-owned objective cleanup on unload (issue #751). `Option` so bare
     // `App` fixtures without an `ObjectiveManagerRes` still run the loader.
     mut objectives: Option<ResMut<ObjectiveManagerRes>>,
@@ -2066,7 +2068,10 @@ fn apply_world_layer_changes(
                 };
                 let result =
                     evaluate_layer_load(&path, already_loaded, toml_str.as_deref(), || {
-                        crate::sim_rng::assign_uuid_with(sim_rng.as_deref())
+                        crate::world_id::mint_id_with(
+                            id_mint.as_deref(),
+                            crate::world_id::IdNamespace::Entity,
+                        )
                     });
                 for warning in &result.warnings {
                     bevy::log::error!("apply_world_layer_changes: {warning}");
@@ -2109,7 +2114,7 @@ fn apply_world_layer_changes(
                             &scenario_config,
                             &config_cache,
                             Some(&runtime.flags),
-                            sim_rng.as_deref(),
+                            id_mint.as_deref(),
                         );
                         // Stamp each entity's origin layer (issue #891 review
                         // finding 1) so `entity_flag_chain` can read it in

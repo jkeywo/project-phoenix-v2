@@ -33,7 +33,44 @@
 # entries above and it covers these too; `src/server/viewscreen_border.rs`
 # scopes a per-fn allow at `apply_camera_shake` (screen-shake jitter, no sim
 # effect). New sim-feeding code must not be added to any of those scopes.
+#
+# Issue #907 — world-identity boundary, the same treatment for the same class
+# of hazard. `Uuid::new_v4()` draws from the OS, so two instances spawning the
+# same NPC gave it two different ids; #894's digest folds in stable-world-id
+# order, so that broke the fold twice over (different contents AND a different
+# order, since the order is a sort over those ids). Every simulation id is now
+# minted at one chokepoint, `crate::world_id::mint_id_with`, from a
+# `(namespace, tick, seq)` counter. The ban below is what stops a new spawn
+# site quietly reaching for `new_v4` again.
+#
+# Sanctioned exceptions. The `#[cfg(test)]` modules listed below carry a
+# module-scoped allow, because a fixture wanting "some distinct id" is not
+# simulation code and has no run to reproduce. Two things to know about that
+# allow. First, it is deliberately placed on the `mod tests` item rather than
+# the file, so production code in the same file is still covered. Second, it
+# is coarse — `disallowed_methods` is one lint — so it also lifts the f32 bans
+# above *inside those test modules*. That is accepted rather than overlooked:
+# the f32 entries exist for native-vs-wasm agreement (#908), and the test
+# modules do not run on wasm. Production code must never be moved inside one
+# of those scopes.
+#
+# These are NOT the only exceptions, and not all of them are test scopes: the
+# four #908/#903 file-level production allows named above —
+# `src/gui/radar.rs`, `src/server/pfx.rs`, `src/server/renderer.rs` and
+# `src/viewer/camera.rs` (`#![allow(clippy::disallowed_methods)]` for
+# the f32 bans) — are coarse in the same way and so also exempt `new_v4` in
+# those four *production* modules, not merely in tests. That is a recorded
+# gate gap, not a sanctioned exception: none of those four modules currently
+# calls `Uuid::new_v4()` (`server/pfx.rs`'s torpedo/blaster projectile ids mint
+# through `crate::world_id::mint_id_with`, same as everywhere else), and new
+# code in them must not start.
+#
+# NOT banned: `Uuid::parse_str`, `Uuid::from_u128` and
+# `uuid::Builder::from_random_bytes`. The last is how
+# `asteroids::lifecycle::deterministic_cell_uuid` renders a cell-derived id,
+# which is pure, cross-instance identical, and constraint 8's design.
 disallowed-methods = [
+    { path = "uuid::Uuid::new_v4", reason = "sim identity: mint via crate::world_id::mint_id_with (issue #907) — test fixtures scope #[allow(clippy::disallowed_methods)] on the test module" },
     { path = "rand::random", reason = "sim code: use crate::sim_rng::with_stream (issue #903/#897) — cosmetic code: scope #[allow(clippy::disallowed_methods)] with a reason" },
     { path = "rand::rng", reason = "sim code: use crate::sim_rng::with_stream (issue #903/#897) — cosmetic code: scope #[allow(clippy::disallowed_methods)] with a reason" },
     { path = "rand::SeedableRng::from_os_rng", reason = "sim code: use crate::sim_rng::with_stream, not OS entropy (issue #903/#897)" },

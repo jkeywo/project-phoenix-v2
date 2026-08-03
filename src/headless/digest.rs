@@ -7,18 +7,23 @@
 //! * **Fold order is `(namespace, tick, seq)`, compared as a tuple of numbers,
 //!   never as a rendered string.** [`FoldKey`] is that tuple. Its `Ord` is the
 //!   derived field order, so `namespace` groups first and the numeric pair
-//!   orders within a namespace. Today phoenix's world ids are still uuid
-//!   *strings* (issue #907 is what turns them into tick-scoped counters), so
-//!   [`FoldKey::from_world_id`] parses a `tick-seq` id when it can and falls
-//!   back to `(0, 0)` plus the raw string as a final tiebreak. That fallback is
-//!   the one place this module is knowingly ahead of the runtime: the sort key
-//!   is already the structured tuple the record demands, so when #907 lands the
-//!   ids simply start populating the numeric fields and no call site moves.
+//!   orders within a namespace. [`FoldKey::from_world_id`] parses a minted id
+//!   (issue #907) into that pair and falls back to `(0, 0)` plus the raw string
+//!   for anything unminted — which, since #907, is asteroids and nothing else.
+//!   The parse is `world_id::WorldId::parse`, the same definition the renderer
+//!   uses, so the format has one owner. A mint renders as a **version-8 uuid
+//!   whose bits are the tuple**, not as a readable `tick-seq` string: a world
+//!   id's uuid shape turned out to be load-bearing (`ai::AiWorldEntity::uuid`
+//!   is a real `Uuid`, and comms uses "parses as a uuid?" to tell an entity
+//!   from a synthetic sender), and `world_id`'s module docs carry that finding
+//!   in full. The version nibble is what distinguishes a mint from a v4 rock.
 //! * **Namespaces fold in a fixed declared sequence and are never merged.**
-//!   [`Namespace`]'s discriminants *are* that sequence: `EntityUuid` then
-//!   `AsteroidUuid`. A third namespace appends a variant; it must never be
-//!   inserted in the middle, because that reorders every id that sorts near it
-//!   and invalidates every digest ever recorded.
+//!   [`Namespace`] is `world_id::IdNamespace` — the mint's own enum, not a copy
+//!   — and its discriminants *are* that sequence: `Entity` then `Asteroid`. A
+//!   further namespace appends a variant; it must never be inserted in the
+//!   middle, because that reorders every id that sorts near it and invalidates
+//!   every digest ever recorded. The mint already declares two the fold does
+//!   not walk (`Message`, `Projectile`), which is the append rule working.
 //! * **Never ECS entity handle.** Nothing here iterates a Bevy query straight
 //!   into the fold. Every walk collects, sorts by [`FoldKey`], and folds the
 //!   sorted run. `Entity::index()` appears only as a same-id tiebreak, exactly
@@ -41,7 +46,10 @@
 //! **Folded (the run-scope preamble):** `SimTick`; the whole `SimRngState`
 //! (master seed, its provenance, and every `SimStream`'s exact `Pcg32`
 //! position) through `digest_postcard`, so a divergent *draw count* is caught
-//! the tick it happens; `GamePhase`; `GameOverReason` (both the reason string
+//! the tick it happens; `WorldIdMint`'s tick and per-namespace counters (issue
+//! #907), the identity analogue of the same thing, so a divergent *spawn
+//! count* is caught the tick it happens rather than on the tick the next id is
+//! minted; `GamePhase`; `GameOverReason` (both the reason string
 //! and the `Outcome`); `CaptainPriorityBoost`'s every `(scope, objective)` pair
 //! in sorted key order; and the `WorldResource` projection described below.
 //!
@@ -87,13 +95,29 @@
 //! the difference between "the record says no" and "this slice has not got to
 //! it". Adding one is a re-blessing event under AC4.
 //!
-//! # Cross-instance comparability (issue #907)
+//! # Cross-instance comparability (issue #907 — closed)
 //!
-//! Every claim this module and its tests make is a same-seed, same-instance
-//! claim: production world ids are still `Uuid::new_v4()` strings, so the fold
-//! is stable within one seeded run but not yet meaningfully comparable across
-//! two separate instances until issue #907 turns those ids into the tick-scoped
-//! counters [`FoldKey`] is already shaped for.
+//! This module's claims used to be same-seed, *same-instance* claims only:
+//! production world ids were `Uuid::new_v4()` strings, so the fold was stable
+//! within one run and meaningless across two. Issue #907 closed that. Every
+//! minted id is now `(namespace, tick, seq)` from `crate::world_id` — a
+//! function of the logical tick and of the spawn order within it, both of which
+//! #895 and #896 already pin — so two instances reaching tick T on the same
+//! admitted inputs give the same entity the same id, and [`FoldKey`]'s numeric
+//! fields are populated rather than defaulted.
+//!
+//! Two honest caveats remain, and neither is an instance-dependence:
+//!
+//! * **Asteroids key as `(0, 0)`.** `deterministic_cell_uuid` derives a rock's
+//!   id from its cell coordinates, which is constraint 8's design and has to
+//!   stay that way (a rock respawning must come back with the id it had). Those
+//!   ids are cross-instance identical — they are a pure function of position —
+//!   they are simply not *numeric*, so they sort on the string tiebreak. The
+//!   `AsteroidUuid` namespace fold is therefore stable, just not tick-ordered.
+//! * **The fold is only as comparable as its inputs.** Identical ids make the
+//!   fold *contents and order* agree; two instances still have to have admitted
+//!   the same commands and run the same schedule to agree on everything else.
+//!   That is #895/#896/#899's ground, not this module's.
 //!
 //! # Type-shape pinning
 //!
@@ -122,26 +146,26 @@ use crate::sim_tick::SimTick;
 ///
 /// Namespace membership is part of the minted id itself, so no id can collide
 /// across namespaces and the sort key and the fold grouping come from the same
-/// value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(u16)]
-pub enum Namespace {
-    /// `EntityUuid` (`src/entities/spawner.rs`) — all spawner identity.
-    Entity = 0,
-    /// `AsteroidUuid` (`src/server_app.rs`) — streamed lifecycle identity,
-    /// deliberately a different namespace from the above.
-    Asteroid = 1,
-}
+/// value. Since issue #907 that is literally true rather than aspirational:
+/// this *is* `world_id::IdNamespace`, the enum the mint stamps into the id, not
+/// a parallel copy of it that could drift out of agreement with it.
+///
+/// The mint declares two namespaces this module never folds (`Message`,
+/// `Projectile`). That is the append rule working as intended: a namespace
+/// nothing folds simply never appears in a fold.
+pub use crate::world_id::IdNamespace as Namespace;
 
 /// The fold's sort key: `(namespace, tick, seq)` compared as a tuple of
 /// numbers, with the raw id as a final tiebreak.
 ///
 /// `Ord` is the derived field order, which *is* the policy. The `id` tail is
 /// not part of the declared key — it is the deterministic tiebreak that keeps
-/// the sort total while phoenix's ids are still uuid strings (issue #907), and
-/// it is a string comparison only because there is nothing numeric to compare
-/// yet. Once ids are tick-scoped counters, `tick`/`seq` decide every
-/// comparison before `id` is ever reached.
+/// the sort total for ids that are *not* tick-scoped counters. Since issue #907
+/// that is one population and one only: asteroids, whose ids come from
+/// `deterministic_cell_uuid` and are a pure function of the rock's cell
+/// coordinates, so they are cross-instance identical without being numeric (see
+/// `world_id`'s module docs for why they must stay coordinate-derived). For
+/// every minted id, `tick`/`seq` decide the comparison before `id` is reached.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FoldKey {
     pub namespace: Namespace,
@@ -153,34 +177,31 @@ pub struct FoldKey {
 impl FoldKey {
     /// Build a key from a world id string.
     ///
-    /// A `<tick>-<seq>` id (issue #907's shape) parses into the numeric pair.
-    /// Anything else — today, every id, because they are all uuids — keys as
-    /// `(0, 0)` and sorts on the raw string. Note what this deliberately does
-    /// NOT do: render `tick`/`seq` back into a string to sort on. The record is
-    /// explicit that a naive `"{tick}-{seq}"` render sorts `"10-1"` before
-    /// `"2-1"`, silently making fold order a function of elapsed ticks.
+    /// A minted id (issue #907) parses into the numeric pair via
+    /// `world_id::WorldId::parse`, which is the single definition of the format
+    /// — this module does not carry a second parser that could disagree with
+    /// the renderer. Anything else keys as `(0, 0)` and sorts on the raw
+    /// string: a v4 asteroid uuid, an authored literal, a test fixture.
+    ///
+    /// Note what this deliberately does NOT do: render `tick`/`seq` back into a
+    /// string to sort on. The record is explicit that a naive `"{tick}-{seq}"`
+    /// render sorts `"10-1"` before `"2-1"`, silently making fold order a
+    /// function of elapsed ticks.
+    ///
+    /// The `namespace` argument stays, rather than being taken from the parsed
+    /// id, because it is the *caller's* declaration of which walk this key
+    /// belongs to — an unminted id (an asteroid, an authored literal) has no
+    /// namespace of its own to read, and a minted id landing in the wrong walk
+    /// must group where the walk says, not where the string says.
     pub fn from_world_id(namespace: Namespace, id: &str) -> Self {
-        let (tick, seq) = parse_tick_scoped(id).unwrap_or((0, 0));
+        let parsed = crate::world_id::WorldId::parse(id);
         Self {
             namespace,
-            tick,
-            seq,
+            tick: parsed.map(|w| w.tick).unwrap_or(0),
+            seq: parsed.map(|w| w.seq).unwrap_or(0),
             id: id.to_string(),
         }
     }
-}
-
-/// Parse a `<tick>-<seq>` id into its numeric pair, if it is one.
-///
-/// Both halves must be entirely digits: a uuid's first group is hex, so
-/// `"a1b2c3d4-..."` correctly fails to parse rather than half-succeeding into a
-/// number that would order entities by an accident of their hex digits.
-fn parse_tick_scoped(id: &str) -> Option<(u64, u64)> {
-    let (tick, seq) = id.split_once('-')?;
-    if tick.is_empty() || seq.is_empty() {
-        return None;
-    }
-    Some((tick.parse().ok()?, seq.parse().ok()?))
 }
 
 /// The payload every NaN folds as.
@@ -267,6 +288,26 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     acc = match world.get_resource::<SimRng>() {
         Some(rng) => fold_serde(acc, &rng.state()),
         None => fold_str(acc, "sim-rng:absent"),
+    };
+
+    // WorldIdMint (issue #907): the identity analogue of the `SimRng` fold
+    // above, and folded for the identical reason. `SimRng`'s stream positions
+    // are in so a divergent DRAW COUNT is caught the tick it happens; the
+    // mint's per-namespace counters are in so a divergent SPAWN COUNT is too.
+    // Without it, two instances that spawned a different number of things on
+    // one tick agree until the *next* id is minted, and the divergence gets
+    // reported a tick late — on a run of anything, a tick late is a different
+    // window and a different suspect. The tick it is scoped to is folded
+    // separately (`SimTick`, above), so this contributes the counters.
+    acc = match world.get_resource::<crate::world_id::WorldIdMint>() {
+        Some(mint) => {
+            acc = fold_u64(acc, mint.tick());
+            for namespace in crate::world_id::IdNamespace::ALL {
+                acc = fold_u64(acc, mint.minted_so_far(namespace));
+            }
+            acc
+        }
+        None => fold_str(acc, "world-id-mint:absent"),
     };
 
     acc = match world.get_resource::<State<GamePhase>>() {
@@ -727,32 +768,54 @@ mod tests {
     /// the whole of the fold-order policy, asserted rather than assumed.
     #[test]
     fn fold_keys_group_by_namespace_then_order_numerically() {
+        let id = |tick, seq| crate::world_id::WorldId::new(Namespace::Entity, tick, seq).render();
+        let (t2, t10, t10s2) = (id(2, 1), id(10, 1), id(10, 2));
         let mut keys = [
-            FoldKey::from_world_id(Namespace::Asteroid, "2-1"),
-            FoldKey::from_world_id(Namespace::Entity, "10-1"),
-            FoldKey::from_world_id(Namespace::Entity, "2-1"),
-            FoldKey::from_world_id(Namespace::Asteroid, "10-1"),
+            FoldKey::from_world_id(Namespace::Asteroid, &t2),
+            FoldKey::from_world_id(Namespace::Entity, &t10),
+            FoldKey::from_world_id(Namespace::Entity, &t10s2),
+            FoldKey::from_world_id(Namespace::Entity, &t2),
+            FoldKey::from_world_id(Namespace::Asteroid, &t10),
         ];
         keys.sort();
-        let rendered: Vec<_> = keys.iter().map(|k| (k.namespace, k.id.as_str())).collect();
+        let rendered: Vec<_> = keys.iter().map(|k| (k.namespace, k.tick, k.seq)).collect();
         assert_eq!(
             rendered,
             vec![
-                (Namespace::Entity, "2-1"),
-                (Namespace::Entity, "10-1"),
-                (Namespace::Asteroid, "2-1"),
-                (Namespace::Asteroid, "10-1"),
+                (Namespace::Entity, 2, 1),
+                (Namespace::Entity, 10, 1),
+                (Namespace::Entity, 10, 2),
+                (Namespace::Asteroid, 2, 1),
+                (Namespace::Asteroid, 10, 1),
             ],
-            "the string rendering would have put 10-1 before 2-1; the key is a \
-             tuple of numbers precisely so it does not"
+            "namespaces group first, then the numeric pair orders within one"
         );
     }
 
-    /// A uuid's first group is hex, so it must NOT half-parse into a number.
+    /// The failure the structured key exists to prevent, stated as its own
+    /// assertion: an *unpadded* `tick-seq` rendering sorts 10 before 2, so a
+    /// fold that sorted strings would reorder itself as the run got longer.
+    /// `WorldId::render` is fixed-width hex, and the key compares numbers
+    /// regardless of what the rendering does.
     #[test]
-    fn a_uuid_keys_as_zero_and_sorts_on_its_string() {
+    fn the_naive_string_rendering_would_have_sorted_wrongly() {
+        assert!("10-1" < "2-1");
+        let a = crate::world_id::WorldId::new(Namespace::Entity, 2, 1);
+        let b = crate::world_id::WorldId::new(Namespace::Entity, 10, 1);
+        assert!(a < b, "the structured tuple orders numerically");
+        assert!(a.render() < b.render(), "and so does the padded rendering");
+    }
+
+    /// A **v4** uuid must NOT be read as a mint. This is asteroids' live case,
+    /// not a hypothetical: `deterministic_cell_uuid` ids stay v4-shaped by
+    /// design (constraint 8), and since a mint is now uuid-shaped too, the
+    /// version nibble is the entire difference between "fold this at tick 0 on
+    /// its string" and "invent a tick and a sequence for a rock".
+    #[test]
+    fn a_v4_uuid_keys_as_zero_and_sorts_on_its_string() {
         let key = FoldKey::from_world_id(Namespace::Entity, "a1b2c3d4-0000-4000-8000-000000000001");
         assert_eq!((key.tick, key.seq), (0, 0));
+        assert_eq!(key.id, "a1b2c3d4-0000-4000-8000-000000000001");
     }
 
     /// Register every component the fold walks, so `World::try_query` can see

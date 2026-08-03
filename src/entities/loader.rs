@@ -67,10 +67,10 @@ pub fn apply_overrides(
     EntityConfig::from_toml(&merged_str).map_err(|e| format!("merged parse error: {e:?}"))
 }
 
-/// Generate a new UUID string for a spawned entity.
-pub fn assign_uuid() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
+// `assign_uuid()` lived here and returned `Uuid::new_v4().to_string()`. It is
+// gone (issue #907): a spawned entity's id is now minted from the tick-scoped
+// counter in `crate::world_id`, which is the crate's single chokepoint for
+// simulation identity. `Uuid::new_v4` is banned in sim code by clippy.toml.
 
 // ── Template resolution ──────────────────────────────────────────────────────
 
@@ -338,21 +338,10 @@ base_priority = 80.0
         );
     }
 
-    #[test]
-    fn assign_uuid_returns_valid_uuid() {
-        let id = assign_uuid();
-        assert!(
-            uuid::Uuid::parse_str(&id).is_ok(),
-            "assign_uuid should return a valid UUID v4"
-        );
-    }
-
-    #[test]
-    fn assign_uuid_returns_unique_values() {
-        let a = assign_uuid();
-        let b = assign_uuid();
-        assert_ne!(a, b);
-    }
+    // `assign_uuid_returns_valid_uuid` / `assign_uuid_returns_unique_values`
+    // were here. Both are gone with the function (issue #907); the properties
+    // they asserted are now `world_id`'s, where "valid uuid" is replaced by
+    // "parses back into its (namespace, tick, seq) tuple".
 
     // ── TemplateLoader ───────────────────────────────────────────────────────
 

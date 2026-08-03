@@ -417,9 +417,10 @@ pub(crate) fn handle_fire_torpedo(
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
-    // Torpedo ids come off the seeded stream, same reason as the blaster's
-    // projectile ids: `Uuid::new_v4` made two `--seed` runs diverge.
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    // Torpedo ids are minted from the tick-scoped counter (issue #907), same
+    // reason as the blaster's projectile ids: an id that is a function of
+    // draw order made two instances diverge even on the same seed.
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     for (
         control_sources,
@@ -494,7 +495,10 @@ pub(crate) fn handle_fire_torpedo(
                 }
             }
 
-            let uuid = crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
+            let uuid = crate::world_id::mint_id_with(
+                id_mint.as_deref(),
+                crate::world_id::IdNamespace::Projectile,
+            );
             let tube_facing_rad = torpedo_sys
                 .tube(tube_id.as_str())
                 .map(|t| t.facing_deg.to_radians())
@@ -958,6 +962,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     ambient: crate::server_app::SimRngAndLog,
 ) {
     let sim_rng = &ambient.rng;
+    let id_mint = ambient.id_mint.as_deref();
     let log = &ambient.log;
     let dt = time.delta_secs();
     // Alias so the `world.0.entities` read sites below read naturally.
@@ -1004,7 +1009,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     for mut torpedo_sys in torpedo_sys_q.iter_mut() {
         any_ship_component = true;
         let result = torpedo_sys.0.tick(dt, target_positions, &mut || {
-            crate::sim_rng::assign_uuid_with(sim_rng.as_deref())
+            crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
         });
         for expired_uuid in result.expired {
             outbox.0.push((
@@ -1051,7 +1056,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     // `TorpedoSystemResource` (no Ship entity carrying it) still work.
     if !any_ship_component {
         let result = torpedo_sys_res.0.tick(dt, target_positions, &mut || {
-            crate::sim_rng::assign_uuid_with(sim_rng.as_deref())
+            crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
         });
         for expired_uuid in result.expired {
             outbox.0.push((

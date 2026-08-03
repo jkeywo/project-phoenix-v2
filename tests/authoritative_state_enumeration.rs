@@ -122,6 +122,12 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "ViewscreenArbiter", "ViewscreenResolution", "WaypointMode", "WorldConfig", "WorldEntity",
     "WorldEventBuffer", "WorldFinding", "WorldLayerChange", "WorldLayerMap", "WorldRuntime",
     "WorldSnapshot", "WorldSource", "WorldView",
+    // Issue #907's tick-scoped id mint. Authoritative, and FOLDED: its
+    // per-namespace counters are in the digest's run-scope preamble for the
+    // same reason `SimRng`'s stream positions are, so a divergent spawn count
+    // is caught on the tick it happens. Backed by the `world-id-mint-state`
+    // entity in deterministic-simulation.yaml.
+    "WorldIdMint", "WorldId", "IdNamespace",
     // Function/accessor names transcribed for traceability even though they
     // never match a registered component/resource (see the doc comment
     // above) — harmless in a superset check.

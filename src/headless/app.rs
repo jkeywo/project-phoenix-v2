@@ -529,7 +529,10 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         std::time::Duration::from_secs_f64(args.dt),
     ));
 
-    app.add_systems(PreUpdate, headless_auto_start);
+    app.add_systems(
+        FixedUpdate,
+        headless_auto_start.before(crate::sim_sets::SimSet::Input),
+    );
 
     // Telemetry. `collect_outbound` and `collect_balance_events` run in
     // `Last` and stamp each record with `Res<SimTick>` (issue #895
@@ -572,6 +575,18 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
 /// makes the player ship AI-driven: `spawn_game_start_entities` assigns
 /// `BACKFILL_RATING` to every station not in the manned set, and with no
 /// sessions that set is empty.
+///
+/// **Registered in `FixedUpdate`, not `PreUpdate` (issue #907 review).**
+/// `NextState<GamePhase>` writers that ran from `PreUpdate` applied at the
+/// FRAME-level `StateTransition` (right after `PreUpdate`, before that
+/// frame's fixed steps run), so `OnEnter(GamePhase::InProgress)` — and the
+/// player-ship mint inside it, `spawn_game_start_entities` — fired at a point
+/// in the schedule whose relationship to `SimTick` depended on frame pacing,
+/// not on the tick that (would) apply the transition. `FixedUpdate` puts this
+/// write on the same tick-scoped `StateTransition` site every other phase
+/// writer uses (`register_fixed_state_transition` in `sim_tick.rs`,
+/// `tick_countdown` in `lobby/server.rs`), so the mint inside `OnEnter` now
+/// stamps a deterministic tick regardless of `--hz`/`dt`.
 fn headless_auto_start(
     state: Res<State<GamePhase>>,
     mut next_state: ResMut<NextState<GamePhase>>,

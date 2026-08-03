@@ -4743,6 +4743,10 @@ pub(crate) fn ai_helm_boost(
 }
 
 #[cfg(test)]
+// Fixture ids only (issue #907): a test that needs "some distinct id" has no
+// run to reproduce. Production identity is minted by `crate::world_id`, and
+// clippy.toml bans `Uuid::new_v4` outside scopes like this one.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::control_source::{ControlSource, ControlSourceResolver};

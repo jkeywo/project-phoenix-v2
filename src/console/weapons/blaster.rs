@@ -461,11 +461,12 @@ pub(crate) fn tick_blaster_system(
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
-    // Projectile ids come off the seeded stream (issue: seeded runs were not
-    // reproducible). `Option<Res<_>>` for the same reason as every other
-    // `SimRng` call site — a bare `Res` fails parameter validation in the
-    // bare-`App` weapons fixtures.
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    // Projectile ids are minted from the tick-scoped counter (issue #907): an
+    // id that is a function of RNG draw order is stable within one seeded
+    // instance but not across two. `Option<Res<_>>` for the same reason as
+    // every other determinism resource — a bare `Res` fails parameter
+    // validation in the bare-`App` weapons fixtures.
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
@@ -551,10 +552,16 @@ pub(crate) fn tick_blaster_system(
                 target_vx,
                 target_vz,
                 &source_uuid,
-                // Was `Uuid::new_v4()`, i.e. OS randomness — which made every
-                // projectile id differ between two `--seed` runs of the same
-                // binary, and those ids key the in-flight/hit bookkeeping.
-                &mut || crate::sim_rng::assign_uuid_with(sim_rng.as_deref()),
+                // Was OS randomness, then a draw off the seeded RNG stream —
+                // both of which gave two instances different ids for the same
+                // shot, and those ids key the in-flight/hit bookkeeping. Now a
+                // tick-scoped mint (issue #907).
+                &mut || {
+                    crate::world_id::mint_id_with(
+                        id_mint.as_deref(),
+                        crate::world_id::IdNamespace::Projectile,
+                    )
+                },
             );
             for ev in &events {
                 // ── Recoil impulse (issue #638) ─────────────────────────────

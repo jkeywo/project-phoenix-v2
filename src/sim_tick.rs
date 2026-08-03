@@ -179,6 +179,13 @@ pub fn register_sim_tick(app: &mut App) {
     register_fixed_state_transition(app);
     app.init_resource::<SimTick>()
         .add_systems(FixedLast, advance_sim_tick);
+    // Issue #907: the id mint is scoped to this counter, so it is registered
+    // here rather than beside the other resources — the tick and the thing
+    // that is tick-scoped cannot get out of step if they are wired together.
+    // `FixedFirst`, so every sim system in the step mints against the index of
+    // the step it is running in (see `world_id::sync_world_id_mint`).
+    app.init_resource::<crate::world_id::WorldIdMint>()
+        .add_systems(FixedFirst, crate::world_id::sync_world_id_mint);
 }
 
 #[cfg(test)]
@@ -348,6 +355,89 @@ mod tests {
              logical tick as a one-step frame — a difference means the \
              transition is still frame-timed and the steps after the writer \
              ran under the stale phase"
+        );
+    }
+
+    /// Sibling to the phase-transition test above, for the actual hazard
+    /// issue #907's review found: production's `NextState<GamePhase>` writers
+    /// for game-start (`headless_auto_start` in `headless/app.rs`,
+    /// `apply_force_start` in `server/bridge.rs`) used to write from
+    /// `PreUpdate`, so `OnEnter(GamePhase::InProgress)` — and the player-ship
+    /// `WorldId` minted inside it by `spawn_game_start_entities` — landed at
+    /// the FRAME-level `StateTransition`, whose relationship to `SimTick` is a
+    /// function of frame pacing rather than of a tick. Moving those writers
+    /// into `FixedUpdate` (this test's `auto_start`, shaped exactly like
+    /// `headless_auto_start`) puts them on the SAME fixed-schedule
+    /// `StateTransition` `register_fixed_state_transition` installs above, so
+    /// the mint inside `OnEnter` now stamps a tick that does not move when the
+    /// frame rate does — asserted here directly on the minted [`WorldId`]
+    /// rather than only on the tick number, since two instances agreeing on
+    /// the tick but minting in a different order would still disagree on
+    /// identity.
+    #[test]
+    fn game_start_mint_is_frame_pacing_invariant() {
+        use crate::messages::GamePhase;
+        use crate::world_id::{IdNamespace, WorldId, WorldIdMint};
+
+        #[derive(Resource, Default, Debug, PartialEq, Eq)]
+        struct Minted(Option<WorldId>);
+
+        /// Shaped exactly like `headless::app::headless_auto_start`: a
+        /// `Local<bool>` latch that fires exactly once, the first time it
+        /// observes `Lobby`.
+        fn auto_start(
+            state: Res<State<GamePhase>>,
+            mut next: ResMut<NextState<GamePhase>>,
+            mut started: Local<bool>,
+        ) {
+            if *started || state.get() != &GamePhase::Lobby {
+                return;
+            }
+            next.set(GamePhase::InProgress);
+            *started = true;
+        }
+
+        /// Shaped exactly like `server_app::spawn_game_start_entities`
+        /// minting the player ship's `WorldId` from `OnEnter`.
+        fn mint_player_ship(mint: Res<WorldIdMint>, mut minted: ResMut<Minted>) {
+            minted.0 = Some(mint.mint(IdNamespace::Entity));
+        }
+
+        fn run(ticks_per_frame: u32) -> WorldId {
+            let period = std::time::Duration::from_millis(10);
+            let mut app = App::new();
+            app.add_plugins(bevy::time::TimePlugin)
+                .add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<GamePhase>()
+                .init_resource::<Minted>();
+            register_sim_tick(&mut app);
+            app.world_mut()
+                .resource_mut::<Time<Fixed>>()
+                .set_timestep(period);
+            app.add_systems(FixedUpdate, auto_start)
+                .add_systems(OnEnter(GamePhase::InProgress), mint_player_ship);
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                period * ticks_per_frame,
+            ));
+            // The first update carries a zero delta and runs no step.
+            app.update();
+            // A handful more frames is plenty for either pacing to have
+            // crossed into InProgress and minted.
+            for _ in 0..4 {
+                app.update();
+            }
+            app.world()
+                .resource::<Minted>()
+                .0
+                .expect("OnEnter(InProgress) must have minted by now")
+        }
+
+        assert_eq!(
+            run(1),
+            run(4),
+            "the game-start mint must land on, and mint against, the SAME \
+             tick whatever the frame pacing — a difference here is exactly \
+             issue #907's off-tick player-ship-mint hazard"
         );
     }
 }

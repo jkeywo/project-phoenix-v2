@@ -48,9 +48,19 @@
 //!    `rand` traits so nothing can substitute itself for it silently.
 //!
 //! `Pcg32` has no `next_u64` and no `fill_bytes` — the crate offers one
-//! 32-bit draw and bounded helpers over it. Where wider values were being
-//! taken, this module now composes them from `next_u32` explicitly and says
-//! how (see [`SimRng::next_uuid`]); that composition is a contract too.
+//! 32-bit draw and bounded helpers over it. Where wider values are taken, this
+//! module composes them from `next_u32` explicitly and says how; that
+//! composition is a contract too.
+//!
+//! # What this module is no longer for (issue #907)
+//!
+//! It used to mint entity uuids, from a dedicated stream. It does not any
+//! more. Identity is not a random variable: an id drawn from a generator is a
+//! function of *draw order*, so it is reproducible within one seeded instance
+//! and meaningless across two. `crate::world_id` mints ids from
+//! `(namespace, tick, seq)` instead. [`SimStream::EntityUuid`] survives as a
+//! declared-but-unused stream — see its own docs for why retiring it would
+//! cost more than it saves.
 
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
@@ -73,9 +83,25 @@ pub enum SimStream {
     TorpedoDamage,
     /// `console::weapons::blaster` — blaster impact hull distribution.
     BlasterDamage,
-    /// Entity UUID allocation (`assign_uuid_with`). Keyed separately from the
-    /// damage streams so a scenario that spawns more entities does not shift
-    /// which console the next hit lands on.
+    /// **Retired, but deliberately still declared (issue #907).**
+    ///
+    /// This stream used to allocate entity UUIDs. Nothing draws from it any
+    /// more: ids are minted from the tick-scoped counter in `crate::world_id`,
+    /// because a uuid derived from a *draw* is a function of RNG draw order,
+    /// so two instances that interleave draws differently mint different ids
+    /// for the same spawn — which is exactly the cross-instance hazard #894's
+    /// stable-world-id-order fold could not survive.
+    ///
+    /// It stays in the enum rather than being deleted because retiring it is
+    /// not free and buys nothing. [`SimStream::ALL`] is six long and
+    /// [`SimRngState`] serialises one generator per entry, with
+    /// [`SimRng::from_state`] *rejecting* a snapshot whose length disagrees;
+    /// dropping the variant would invalidate every recorded snapshot and shift
+    /// the fingerprint's `rng_positions`, for the sake of one unused mutex. An
+    /// unused stream costs a lock nobody takes and a position that never
+    /// moves — and a position that never moves is itself a useful assertion:
+    /// the digest folds every stream position, so a draw appearing here again
+    /// would be caught the tick it happened.
     EntityUuid,
 }
 
@@ -217,35 +243,14 @@ impl SimRng {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// A fresh v4-formatted UUID drawn from [`SimStream::EntityUuid`].
-    ///
-    /// Byte-identical reports depend on this: `damage_by_ship` and
-    /// `entity_names` are both keyed by entity uuid, so random uuids alone
-    /// would defeat every other RNG site being seeded.
-    ///
-    /// # How sixteen bytes come out of a 32-bit generator
-    ///
-    /// `Pcg32` has no `fill_bytes` — the fleet crate offers one 32-bit draw
-    /// and nothing wider — so the uuid is four consecutive draws, each written
-    /// little-endian into the next four bytes in ascending index order. Both
-    /// halves of that are contract, not taste: the draw order fixes which word
-    /// lands where, and the byte order fixes the digits within a word. Changing
-    /// either re-rolls every uuid a recorded seed ever produced.
-    ///
-    /// `uuid::Builder::from_random_bytes` then overwrites the version nibble
-    /// and the two variant bits, exactly as it did when this filled the buffer
-    /// from `rand` — so six of the 128 bits are not random here and never were.
-    pub fn next_uuid(&self) -> String {
-        let mut stream = self.stream(SimStream::EntityUuid);
-        let mut bytes = [0u8; 16];
-        for word in bytes.chunks_exact_mut(4) {
-            word.copy_from_slice(&stream.next_u32().to_le_bytes());
-        }
-        drop(stream);
-        uuid::Builder::from_random_bytes(bytes)
-            .into_uuid()
-            .to_string()
-    }
+    // `next_uuid()` composed a v4 uuid from four `next_u32` draws off
+    // `SimStream::EntityUuid`. It is gone (issue #907), and with it the whole
+    // idea of deriving identity from the RNG: a draw-derived id is stable
+    // within one seeded instance but is a function of *draw order*, so adding
+    // any unrelated draw upstream reshuffles every subsequent entity id, and
+    // two instances that interleave draws differently disagree about which
+    // ship is which. `crate::world_id` mints ids from `(namespace, tick, seq)`
+    // instead. The stream itself stays declared — see `SimStream::EntityUuid`.
 
     /// Capture the seed, its provenance, and every stream's exact position.
     ///
@@ -338,14 +343,11 @@ pub fn unseeded_test_rng() -> Pcg32 {
     Pcg32::seeded(rand::random::<u64>(), 0)
 }
 
-/// A fresh entity UUID from the seeded stream, or a random one when the
-/// resource is absent. The seeded twin of `entity_loader::assign_uuid`.
-pub fn assign_uuid_with(sim_rng: Option<&SimRng>) -> String {
-    match sim_rng {
-        Some(sim) => sim.next_uuid(),
-        None => crate::entity_loader::assign_uuid(),
-    }
-}
+// `assign_uuid_with(Option<&SimRng>)` was the call sites' entry point to
+// `next_uuid`. Its replacement is `crate::world_id::mint_id_with`, which has
+// the same `Option<Res<_>>`-friendly shape for the same bare-`App` reason and
+// takes an `IdNamespace` instead of nothing — because namespace membership has
+// to come from the same value as the fold's sort key (issue #907).
 
 /// The generator for one named stream of `master`.
 ///
@@ -468,19 +470,42 @@ mod tests {
         );
     }
 
+    /// `uuids_are_seeded_valid_and_unique` used to live here and drove
+    /// `next_uuid`. Identity left this module in issue #907; what replaced that
+    /// test is `world_id`'s own suite plus
+    /// `tests/entity_id_minting.rs::two_instances_mint_identical_entity_ids`,
+    /// which asserts the stronger property the old test could not: two
+    /// *separate* instances agree, not just two calls on one master seed.
+    ///
+    /// What this module still owes the retired stream is that it stays
+    /// untouched. The digest folds every stream position, so a draw reappearing
+    /// on `EntityUuid` would show up as a divergence; this asserts it locally
+    /// too, where the failure names the cause instead of a tick number.
     #[test]
-    fn uuids_are_seeded_valid_and_unique() {
-        let a = SimRng::new(4242, SeedSource::Cli);
-        let b = SimRng::new(4242, SeedSource::World);
-        let first: Vec<String> = (0..4).map(|_| a.next_uuid()).collect();
-        let second: Vec<String> = (0..4).map(|_| b.next_uuid()).collect();
-        assert_eq!(first, second, "uuid stream must follow the master seed");
-        assert_ne!(
-            first[0], first[1],
-            "uuids must still be unique within a run"
+    fn the_retired_entity_uuid_stream_is_never_drawn_from() {
+        let rng = SimRng::new(4242, SeedSource::Cli);
+        let before = rng.state();
+        // Exercise the streams that ARE live; the retired one must not move.
+        for stream in [
+            SimStream::CollisionDamage,
+            SimStream::RegionDamage,
+            SimStream::BeamDamage,
+            SimStream::TorpedoDamage,
+            SimStream::BlasterDamage,
+        ] {
+            with_stream(Some(&rng), stream, |g| g.next_u32());
+        }
+        let after = rng.state();
+        let idx = SimStream::EntityUuid as usize;
+        assert_eq!(
+            before.streams[idx], after.streams[idx],
+            "SimStream::EntityUuid is retired (issue #907) — nothing may draw from it"
         );
-        let parsed = uuid::Uuid::parse_str(&first[0]).expect("valid uuid");
-        assert_eq!(parsed.get_version_num(), 4, "v4 formatting is preserved");
+        assert_ne!(
+            before.streams[SimStream::BeamDamage as usize],
+            after.streams[SimStream::BeamDamage as usize],
+            "the live streams must actually have moved, or this proves nothing"
+        );
     }
 
     /// The property `SmallRng` could not offer and #862 is waiting on: the six

@@ -1184,8 +1184,10 @@ fn phaser_texture_material(
 /// Renders every ship's in-flight torpedoes each frame.
 ///
 /// Iterates `Query<..., With<Ship>>` so NPC torpedoes render alongside the
-/// player's. Torpedo UUIDs are globally unique (uuid::Uuid::new_v4), so
-/// merging in-flight lists across ships never collides on tracker keys.
+/// player's. Torpedo UUIDs are globally unique (minted via
+/// `crate::world_id::mint_id_with`, issue #907 — a `(namespace, tick, seq)`
+/// counter, not `Uuid::new_v4()`), so merging in-flight lists across ships
+/// never collides on tracker keys.
 ///
 /// Each torpedo is a hard core + soft shell billboard pair plus a
 /// velocity-aligned directional flare (crossed ribbon, reusing the blaster

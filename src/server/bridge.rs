@@ -209,8 +209,10 @@ thread_local! {
     static ENTITY_INSPECTOR_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
     /// Pending force-start request from `wasm_force_start()`. Drained by
-    /// `drain_force_start` each `PreUpdate` frame to transition directly to
-    /// `InProgress` without any connected players (fully AI-crewed ship).
+    /// `drain_force_start_input` each `PreUpdate` frame into the
+    /// `PendingForceStart` resource; `apply_force_start` (in `FixedUpdate`,
+    /// issue #907) is what actually transitions to `InProgress` without any
+    /// connected players (fully AI-crewed ship).
     static PENDING_FORCE_START: RefCell<bool> = const { RefCell::new(false) };
 
     /// Pending host teleport-to-waypoint request from
@@ -654,17 +656,25 @@ pub fn wasm_init() {
         focused_mode: bevy::winit::UpdateMode::Continuous,
         unfocused_mode: bevy::winit::UpdateMode::Continuous,
     })
+    .init_resource::<PendingForceStart>()
     .add_systems(
         PreUpdate,
         (
             drain_inbound,
             drain_disconnects,
             drain_debug_toggles,
-            drain_force_start,
+            drain_force_start_input,
             drain_teleport_to_waypoint,
             drain_god_mode_toggle,
             publish_waypoint_existence,
         ),
+    )
+    // `apply_force_start` writes `NextState<GamePhase>`, so it lives in
+    // `FixedUpdate` rather than alongside its own input drain above — see the
+    // #907 review note on `apply_force_start` for why.
+    .add_systems(
+        FixedUpdate,
+        apply_force_start.before(crate::sim_sets::SimSet::Input),
     )
     // The JS ingress/egress seams stay frame-driven (issue #895): `PreUpdate`
     // runs before the fixed loop and `PostUpdate` after it, so a frame drains
@@ -981,8 +991,10 @@ pub fn set_entity_inspector_string(text: String) {
 /// human players — all stations run under AI/backfill control.
 ///
 /// Only takes effect when the game is currently in the `Lobby` phase. The
-/// actual phase transition is applied by `drain_force_start` on the next
-/// `PreUpdate` frame so it runs safely inside the Bevy schedule.
+/// flag is drained into a Bevy resource by `drain_force_start_input` on the
+/// next `PreUpdate` frame; the actual phase transition is applied by
+/// `apply_force_start` on the next `FixedUpdate` step (issue #907 — see that
+/// function's doc for why the transition itself needs to be tick-scoped).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_force_start() {
@@ -1477,22 +1489,61 @@ fn drain_disconnects(mut writer: MessageWriter<PlayerDisconnected>) {
     }
 }
 
-/// Drains the force-start flag each frame. When set, transitions the game
-/// directly to `InProgress` (or `Loading` if the asset preload isn't done)
-/// without requiring any connected players — used for fully AI-crewed runs.
+/// Bevy-side latch for a pending `wasm_force_start()` request, bridging
+/// `drain_force_start_input` (the `PreUpdate` JS-input drain) to
+/// `apply_force_start` (the `FixedUpdate` state writer) — see the #907 review
+/// note on the latter for why the one function that used to do both is now
+/// two, in two different schedules.
 #[cfg(target_arch = "wasm32")]
-fn drain_force_start(
-    state: Res<State<messages::GamePhase>>,
-    mut next_state: ResMut<NextState<messages::GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
-    preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
-) {
-    let pending = PENDING_FORCE_START.with(|v| {
+#[derive(Resource, Default)]
+struct PendingForceStart(bool);
+
+/// Drains the force-start thread-local each frame into [`PendingForceStart`].
+/// The actual phase transition is [`apply_force_start`]'s job — this system
+/// only moves the JS-set flag into a Bevy resource so `apply_force_start` can
+/// run in `FixedUpdate` without touching a thread-local from inside the fixed
+/// schedule.
+#[cfg(target_arch = "wasm32")]
+fn drain_force_start_input(mut pending: ResMut<PendingForceStart>) {
+    let was = PENDING_FORCE_START.with(|v| {
         let was = *v.borrow();
         *v.borrow_mut() = false;
         was
     });
-    if !pending || state.get() != &messages::GamePhase::Lobby {
+    if was {
+        pending.0 = true;
+    }
+}
+
+/// Applies a pending force-start request. When set, transitions the game
+/// directly to `InProgress` (or `Loading` if the asset preload isn't done)
+/// without requiring any connected players — used for fully AI-crewed runs.
+///
+/// **`FixedUpdate`, not `PreUpdate` (issue #907 review).** This used to drain
+/// the JS thread-local and write `NextState` in one `PreUpdate` system, same
+/// as `headless_auto_start`'s pre-fix shape. A `NextState<GamePhase>` write
+/// from `PreUpdate` applies at the FRAME-level `StateTransition` — before
+/// that frame's fixed steps run — so `OnEnter(GamePhase::InProgress)` (and
+/// the player-ship mint inside it, `spawn_game_start_entities`) landed at a
+/// point in the schedule whose relationship to `SimTick` was a function of
+/// frame pacing, not of a tick. Moving the write here puts it on the same
+/// tick-scoped `StateTransition` site every other phase writer already uses
+/// (`register_fixed_state_transition` in `sim_tick.rs`, `tick_countdown` in
+/// `lobby/server.rs`), so the mint now stamps a deterministic tick regardless
+/// of frame rate. The JS-facing drain stays in `PreUpdate` —
+/// [`drain_force_start_input`] above — because reading a thread-local from
+/// inside the fixed schedule would run it zero or several times per frame
+/// instead of once.
+#[cfg(target_arch = "wasm32")]
+fn apply_force_start(
+    state: Res<State<messages::GamePhase>>,
+    mut next_state: ResMut<NextState<messages::GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
+    mut pending: ResMut<PendingForceStart>,
+) {
+    let pending_flag = std::mem::take(&mut pending.0);
+    if !pending_flag || state.get() != &messages::GamePhase::Lobby {
         return;
     }
     let preload_complete = if crate::debug_overlay::is_playwright_automation() {

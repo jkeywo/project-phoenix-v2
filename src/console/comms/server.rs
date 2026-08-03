@@ -202,6 +202,11 @@ pub(crate) fn handle_hail(
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
+    // Message ids are command-addressing surface (issue #907 AC2): a recorded
+    // `RespondToMessage { message_id, .. }` resolves against
+    // `comms.active_dialogues`, so a peer that minted the id differently
+    // cannot replay the command at all.
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
@@ -253,10 +258,12 @@ pub(crate) fn handle_hail(
 
         for f in fired {
             // Build a CommsMessage and inject it.
-            let thread_id = f
-                .thread_id
-                .clone()
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let thread_id = f.thread_id.clone().unwrap_or_else(|| {
+                crate::world_id::mint_id_with(
+                    id_mint.as_deref(),
+                    crate::world_id::IdNamespace::Message,
+                )
+            });
             let sender_uuid = target_uuid.clone();
             // Resolve channel display name from contacts (best effort), then
             // let the dialogue node override the visible speaker.
@@ -272,7 +279,10 @@ pub(crate) fn handle_hail(
             // template fires. Per-node triggers are an authoring concept
             // for follow-ups, not roots — the template-level `trigger`
             // already controls when the root arrives.
-            let msg_id = uuid::Uuid::new_v4().to_string();
+            let msg_id = crate::world_id::mint_id_with(
+                id_mint.as_deref(),
+                crate::world_id::IdNamespace::Message,
+            );
             let available = current_sender_in_range(&comms, &sender_uuid);
             let responses = crate::comms::content::response_views(&f.node.responses, available);
             let msg = CommsMessage {
@@ -327,14 +337,18 @@ pub(crate) fn handle_hail(
 
 /// Auxiliary params for [`handle_respond_to_message`], bundled into one
 /// `SystemParam` so the system stays within Bevy's 16-argument limit
-/// (issue #761 added the rejection-feedback seam). Carries the seeded RNG and
-/// balance-event ledger the shared dispatch pass needs, plus `Sessions` +
+/// (issue #761 added the rejection-feedback seam). Carries the tick-scoped id
+/// mint and balance-event ledger the shared dispatch pass needs, plus `Sessions` +
 /// `SimOutbox` for routing `CommsResponseRejected` to the submitting holder.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CommsRespondAux<'w> {
     sessions: Res<'w, crate::lobby::Sessions>,
     outbox: ResMut<'w, crate::simulation::SimOutbox>,
-    sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+    /// The tick-scoped id mint (issue #907): spawned-entity ids for the shared
+    /// dispatch pass, and the follow-up message ids minted below it. Replaces
+    /// the seeded `SimRng` this bundle used to carry — nothing in this system
+    /// draws a random number any more, it only mints identities.
+    id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
     balance_events: Option<ResMut<'w, bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 }
 
@@ -486,7 +500,12 @@ pub(crate) fn handle_respond_to_message(
         let template_loader = crate::entity_loader::WasmTemplateLoader;
         // Seeded, for the same reason the trigger pipeline is: a spawned
         // entity's UUID keys the balance ledgers in the headless report.
-        let uuid_source = || crate::sim_rng::assign_uuid_with(aux.sim_rng.as_deref());
+        let uuid_source = || {
+            crate::world_id::mint_id_with(
+                aux.id_mint.as_deref(),
+                crate::world_id::IdNamespace::Entity,
+            )
+        };
 
         for action in &response.actions {
             let layers =
@@ -556,7 +575,10 @@ pub(crate) fn handle_respond_to_message(
                 // trigger condition is met (or fires on the next tick if
                 // the condition is already true — see
                 // `tick_pending_follow_ups`).
-                let placeholder_id = uuid::Uuid::new_v4().to_string();
+                let placeholder_id = crate::world_id::mint_id_with(
+                    aux.id_mint.as_deref(),
+                    crate::world_id::IdNamespace::Message,
+                );
                 let placeholder = CommsMessage {
                     id: placeholder_id.clone(),
                     sender_uuid: sender_uuid.clone(),
@@ -585,7 +607,10 @@ pub(crate) fn handle_respond_to_message(
                 });
             } else {
                 // No trigger — inject immediately (same tick).
-                let new_msg_id = uuid::Uuid::new_v4().to_string();
+                let new_msg_id = crate::world_id::mint_id_with(
+                    aux.id_mint.as_deref(),
+                    crate::world_id::IdNamespace::Message,
+                );
                 let available = current_sender_in_range(&comms, &sender_uuid);
                 let new_responses =
                     crate::comms::content::response_views(&follow_up.responses, available);

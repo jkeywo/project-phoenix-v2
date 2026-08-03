@@ -102,7 +102,7 @@ The editor mirrors this catalogue in `editor/action-schema.js`'s `ACTION_SCHEMA`
 
 `add_objective` can carry AI-facing directive fields as well as the human-facing text: `directive_kind = "Patrol"` with `directive_anchors` / `directive_loop`, `directive_kind = "Destroy"` with `target`, or `directive_kind = "Reach"` with `directive_anchor`. `ObjectiveManager` scores active objectives into the viewscreen blackboard; player Backfill Helm and Tactical now read that shared pool as a bridge until the per-entity blackboard model from issue #581 lands.
 
-`assets/worlds/combat_test.toml` uses this path: `obj-defend` is a low-priority Patrol loop around Starbase Alpha, and each spawned `wave_N` immediately adds a higher-priority Destroy objective targeting the runtime `name_to_uuid` entry for that wave. Matching `on_destroyed wave_N` triggers complete those objectives so the AI falls back to the starbase patrol.
+`assets/worlds/combat_test.toml` uses this path: `obj-defend` is a low-priority Patrol loop around Starbase Alpha, and each spawned `wave_N` immediately adds a higher-priority Destroy objective targeting the runtime `name_to_uuid` entry for that wave. Matching `on_all_destroyed group = "wave_N"` triggers complete those objectives so the AI falls back to the starbase patrol (wave 8 completes via its own standalone `on_all_destroyed group = "wave_8"` trigger on the chain's last link).
 
 ### Factions
 

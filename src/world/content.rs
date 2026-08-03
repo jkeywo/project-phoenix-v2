@@ -1775,4 +1775,261 @@ mod tests {
         assert_eq!(resolve_layer_prefix("parent:armed", &chain), None);
         assert_eq!(resolve_layer_prefix("parent:parent:armed", &chain), None);
     }
+
+    // ── combat_test's authored wave chain (#892) ───────────────────────────
+    //
+    // The eight-wave schedule is death-gated content, not code: wave N+1 hangs
+    // off `on_all_destroyed` over wave N's group, and victory is one
+    // `on_all_destroyed` over `hostiles` guarded by `counter(waves_spawned) >=
+    // 8`. That composition is only as good as the trigger pipeline's actual
+    // semantics, and nothing else tests it end to end — `tests/headless_runner`
+    // boots the real sim but flies the player on AI backfill, which does not
+    // survive wave 1 at any seed sampled for #892, so a run there never reaches
+    // the second link of the chain.
+    //
+    // This drives the REAL parsed triggers through the REAL evaluator with a
+    // scripted perfect player, and models exactly the two runtime behaviours
+    // the authoring leans on: group membership accumulates on spawn and is
+    // never removed, and an action with `delay_secs` dispatches later than the
+    // trigger that queued it.
+
+    /// Outcome of one scripted run of `combat_test.toml`'s trigger set.
+    struct ChainRun {
+        /// Wave-group spawn order, as `(group, elapsed_secs)`.
+        spawns: Vec<(String, f32)>,
+        /// Elapsed seconds at which the victory `game_over` was dispatched.
+        victory_at: Option<f32>,
+        /// `waves_spawned` at the moment victory dispatched.
+        waves_at_victory: i64,
+    }
+
+    /// Run `combat_test.toml`'s triggers against a perfect player at the given
+    /// `ship_power` tier: everything that spawns is destroyed on the next step,
+    /// the standing pickets first and the waves one at a time after.
+    fn run_combat_test_chain(ship_power: i64) -> ChainRun {
+        let toml = include_str!("../../assets/worlds/combat_test.toml");
+        let cfg = crate::world::config::parse_world(toml).expect("combat_test.toml must parse");
+
+        let mut states: Vec<TriggerState> = cfg
+            .triggers
+            .iter()
+            .map(|t| TriggerState {
+                trigger: t.clone(),
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            })
+            .collect();
+
+        let mut flags = crate::world::flags::FlagStore::new();
+        flags.set_flag_value("ship_power", ship_power);
+
+        let mut name_to_uuid: HashMap<String, String> = HashMap::new();
+        let mut entity_groups: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut alive: HashSet<String> = HashSet::new();
+        let mut pending: Vec<(f32, TriggerAction)> = Vec::new();
+        let mut run = ChainRun {
+            spawns: Vec::new(),
+            victory_at: None,
+            waves_at_victory: 0,
+        };
+
+        const STEP: f32 = 0.5;
+        let mut elapsed = 0.0f32;
+        for _ in 0..4000 {
+            // 1. Dispatch delayed actions whose time has come.
+            let (due, rest): (Vec<_>, Vec<_>) =
+                pending.into_iter().partition(|(at, _)| *at <= elapsed);
+            pending = rest;
+            for (_, action) in due {
+                apply_action(
+                    &action,
+                    elapsed,
+                    &mut name_to_uuid,
+                    &mut entity_groups,
+                    &mut alive,
+                    &mut flags,
+                    &mut run,
+                );
+            }
+
+            // 2. The scripted player: destroy every alive hostile each step,
+            //    which in practice clears the picket line first (it is already
+            //    standing there at elapsed 0.0) and then meets each wave in turn.
+            // The dangerous order, not the convenient one: the pickets are
+            // standing targets, so a player clears them FIRST and then meets
+            // the waves one at a time. That is what opens the window between a
+            // cleared wave and the next one — every registered hostile dead,
+            // more still to come — which the victory guard has to close.
+            let mut targets: Vec<String> = alive.iter().cloned().collect();
+            targets.sort();
+            let mut events: Vec<WorldEvent> = targets
+                .iter()
+                .map(|n| WorldEvent::Destroyed {
+                    uuid: name_to_uuid[n].clone(),
+                })
+                .collect();
+            // The clock the pipeline feeds in every tick, plus the one-shot
+            // load event the picket spawns and the faction flip hang off.
+            events.push(WorldEvent::TimerElapsed {
+                elapsed_secs: elapsed,
+            });
+            if elapsed == 0.0 {
+                events.push(WorldEvent::WorldLoaded);
+            }
+            for n in &targets {
+                alive.remove(n);
+            }
+
+            // 3. Evaluate, chaining within the step exactly as the runtime's
+            //    per-tick chaining loop does.
+            let mut round = events;
+            for _ in 0..8 {
+                let flag_chain = [&flags];
+                let fired = evaluate_triggers_with_flags(
+                    &mut states,
+                    &round,
+                    &name_to_uuid,
+                    &flag_chain,
+                    &entity_groups,
+                    elapsed,
+                );
+                if fired.is_empty() {
+                    break;
+                }
+                round = Vec::new();
+                for ft in fired {
+                    for (i, action) in ft.actions.iter().enumerate() {
+                        let delay = ft.action_delays.get(i).copied().unwrap_or(0.0);
+                        if delay > 0.0 {
+                            pending.push((elapsed + delay, action.clone()));
+                        } else {
+                            apply_action(
+                                action,
+                                elapsed,
+                                &mut name_to_uuid,
+                                &mut entity_groups,
+                                &mut alive,
+                                &mut flags,
+                                &mut run,
+                            );
+                        }
+                    }
+                }
+            }
+
+            if run.victory_at.is_some() {
+                break;
+            }
+            elapsed += STEP;
+        }
+        run
+    }
+
+    /// Apply one dispatched action to the scripted world.
+    fn apply_action(
+        action: &TriggerAction,
+        elapsed: f32,
+        name_to_uuid: &mut HashMap<String, String>,
+        entity_groups: &mut HashMap<String, HashSet<String>>,
+        alive: &mut HashSet<String>,
+        flags: &mut crate::world::flags::FlagStore,
+        run: &mut ChainRun,
+    ) {
+        match action {
+            TriggerAction::SpawnEntity { name, groups, .. } => {
+                name_to_uuid.insert(name.clone(), format!("uuid-{name}"));
+                alive.insert(name.clone());
+                for g in groups {
+                    // Membership accumulates and is NEVER removed on death —
+                    // the property the whole chain rests on.
+                    entity_groups
+                        .entry(g.clone())
+                        .or_default()
+                        .insert(name.clone());
+                    if g.starts_with("wave_") && !run.spawns.iter().any(|(s, _)| s == g) {
+                        run.spawns.push((g.clone(), elapsed));
+                    }
+                }
+            }
+            TriggerAction::IncrementWorldFlag { name, by } => {
+                flags.increment_flag(name, *by);
+            }
+            TriggerAction::GameOver {
+                outcome: Some(crate::balance::Outcome::Victory),
+                ..
+            } if run.victory_at.is_none() => {
+                run.victory_at = Some(elapsed);
+                run.waves_at_victory = flags.counter("waves_spawned");
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn combat_test_wave_chain_releases_eight_waves_in_order_then_victory() {
+        // Destroyer tier (power_rating 70) — the DEMO loadout, below both bonus
+        // gates, so this is exactly the eight-wave table the issue specifies.
+        let run = run_combat_test_chain(70);
+
+        let order: Vec<&str> = run.spawns.iter().map(|(g, _)| g.as_str()).collect();
+        assert_eq!(
+            order,
+            (1..=8).map(|n| format!("wave_{n}")).collect::<Vec<_>>(),
+            "all eight waves must be released, in order, by clearing the one before"
+        );
+
+        // Each link cost the authored breather, so the run is paced rather than
+        // instantaneous — wave 8 cannot arrive at t=0.
+        for pair in run.spawns.windows(2) {
+            let (a, ta) = &pair[0];
+            let (b, tb) = &pair[1];
+            assert!(
+                tb - ta >= 10.0,
+                "{b} must arrive at least a breather after {a}, got {}s",
+                tb - ta
+            );
+        }
+
+        assert!(
+            run.victory_at.is_some(),
+            "clearing every wave and both pickets must reach victory"
+        );
+        assert_eq!(
+            run.waves_at_victory, 8,
+            "victory must not be reachable before all eight waves have been released — \
+             the counter guard is what closes the window between a cleared wave and the next"
+        );
+        let last_spawn = run.spawns.last().expect("wave 8 spawned").1;
+        assert!(
+            run.victory_at.unwrap() > last_spawn,
+            "victory must land after wave 8, not in a gap before it"
+        );
+    }
+
+    #[test]
+    fn combat_test_wave_chain_waits_for_the_power_tier_bonus_ships_too() {
+        // Battleship tier: every wave carries a bonus hull in its own group, so
+        // the chain has strictly more to kill per link. It must still complete —
+        // and it must not complete FASTER, which is what would happen if the
+        // bonus ships were spawning outside the wave groups.
+        let demo = run_combat_test_chain(70);
+        let full = run_combat_test_chain(120);
+
+        let order: Vec<&str> = full.spawns.iter().map(|(g, _)| g.as_str()).collect();
+        assert_eq!(
+            order,
+            (1..=8).map(|n| format!("wave_{n}")).collect::<Vec<_>>(),
+            "the top tier runs the same eight-wave chain"
+        );
+        assert!(
+            full.victory_at.is_some(),
+            "the top tier must be winnable too — the old per-tier name lists were not"
+        );
+        assert!(
+            full.victory_at.unwrap() >= demo.victory_at.unwrap(),
+            "a tier with bonus ships riding the wave groups cannot finish sooner"
+        );
+    }
 }

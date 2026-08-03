@@ -1259,6 +1259,22 @@ fn requiem_courier_reaches_its_destination_anchor() {
 /// #897 and were not re-verified — this re-measurement covers only seed 9,
 /// which is all the test pins.
 ///
+/// RE-MEASURED AGAIN for #892's death-gated wave chain. Seed 9 now resolves at
+/// 184.9 s (tick 11091) as a defeat, with `damage_dealt` 64.0, `damage_taken`
+/// 705.6, and 1 kill in the ledger — the kill being wave 1's, on the player.
+/// The 400 s budget still clears that with room, so it is left alone.
+///
+/// WHAT THIS TEST DOES NOT PIN. The CRUISER never clears wave 1 — a sweep of
+/// seeds 1–10 on the new schedule ends in defeat inside wave 1 every time — so
+/// no run *here* reaches wave 2. That matches the pre-existing #892 finding
+/// (the cruiser tier killed 0 of ~7 engaged enemies across five seeds before
+/// this change either), and it is a statement about the AI-backfilled cruiser,
+/// not about the chain. The chain is pinned twice over elsewhere:
+/// `combat_test_chains_its_waves_in_a_real_run` below flies the demo destroyer
+/// and reaches wave 3 or better, and `world::content::tests::
+/// combat_test_wave_chain_releases_eight_waves_in_order_then_victory` drives
+/// all eight links through the real evaluator with a scripted perfect player.
+///
 /// The old note also claimed `combat_test` is *not* bit-reproducible at this
 /// seed (11 runs landing anywhere in 246–275 sim-seconds, blamed on
 /// per-process `HashMap` seeding). That does not reproduce here either: 12
@@ -1334,6 +1350,92 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
         "a resolved combat_test run must classify as victory or defeat, got {:?}",
         report.outcome_report.outcome
     );
+
+    // #892: the schedule's two halves both reach the ECS in a real run. Wave 1
+    // is the one timed spawn; the pickets come off `on_world_loaded` and stand
+    // outside the schedule entirely. Both appear in the ledger under their
+    // authored `spawn_entity` names, so a mis-authored group or a dropped
+    // `on_world_loaded` action shows up here as a missing row.
+    let ledger_names: Vec<&str> = report
+        .damage_by_ship
+        .values()
+        .filter_map(|l| l.name_id.as_deref())
+        .collect();
+    for expected in ["wave_1", "picket_north", "picket_south"] {
+        assert!(
+            ledger_names.contains(&expected),
+            "{expected} never engaged in a real run — got {ledger_names:?}"
+        );
+    }
+}
+
+/// Issue #892: the death-gated wave chain actually chains in a REAL run.
+///
+/// `combat_test.toml`'s waves 2..8 hang off `on_all_destroyed` over the
+/// previous wave's group, with the next wave's spawn actions carrying
+/// `delay_secs = 10.0`. That composition leans on three separate runtime
+/// behaviours at once — group membership registering from a `spawn_entity`
+/// action's authored `groups`, membership surviving the death of its members,
+/// and a delayed action dispatching from `tick_delayed_actions` — and the pure
+/// content test (`world::content::tests::
+/// combat_test_wave_chain_releases_eight_waves_in_order_then_victory`) models
+/// all three rather than exercising them. This is the run that exercises them.
+///
+/// The DESTROYER, not the cruiser `test_args` defaults to: it is the demo hull
+/// (`assets/scenarios.demo.toml`), it sits below both `ship_power` bonus gates
+/// so the run is exactly the authored eight-wave table, and — measured, not
+/// assumed — it is the tier that actually gets through wave 1 on AI backfill.
+/// Sweep of seeds 1–5 at `--hz 30 --sim-seconds 600 --deterministic`, waves
+/// reached: seed 1 → wave_3, seed 2 → wave_5, seed 3 → wave_1, seed 4 →
+/// wave_1, seed 5 → wave_2. Seed 2 is the pick: it is the deepest run of the
+/// five, ending in defeat at 463.2 s having engaged wave_1 through wave_5 plus
+/// both pickets, with 4 kills to the player. The 600 s budget is the sweep's,
+/// and clears that with room.
+///
+/// The assertion is deliberately `wave_3`, two links below what seed 2 actually
+/// reaches: the point is that the chain LINKS, and pinning the exact depth
+/// would turn every balance change into a failure here.
+#[test]
+fn combat_test_chains_its_waves_in_a_real_run() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/combat_test.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(600.0, dt),
+        seed: Some(2),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    let ledger_names: Vec<&str> = report
+        .damage_by_ship
+        .values()
+        .filter_map(|l| l.name_id.as_deref())
+        .collect();
+
+    // Wave 2 can only exist if wave 1's group went empty and released it;
+    // wave 3 can only exist if that happened twice. Nothing else in the world
+    // spawns these names.
+    for expected in ["wave_1", "wave_2", "wave_3"] {
+        assert!(
+            ledger_names.contains(&expected),
+            "{expected} never arrived — the death-gated chain did not link. \
+             Engaged: {ledger_names:?}"
+        );
+    }
+
+    // The pickets stand outside the schedule and must not be what released the
+    // waves: they are present in the same run, and the chain ran anyway.
+    for picket in ["picket_north", "picket_south"] {
+        assert!(
+            ledger_names.contains(&picket),
+            "{picket} never took station — got {ledger_names:?}"
+        );
+    }
 }
 
 /// Production-schedule guard: an AI-crewed ship actually LAUNCHES a torpedo in
@@ -1507,7 +1609,8 @@ fn the_harrow_battleship_fires_its_artillery_in_a_real_run() {
 /// `probe_artillery_standoff.toml` is built for exactly this: the battleship
 /// starts 300 units out, so it flies a real run-in from beyond its own envelope,
 /// and its doctrine is replaced wholesale by the scenario without a `use_impulse`
-/// — the shape `duel.toml` and `combat_test.toml`'s wave 8 both use, and the one
+/// — the shape `duel.toml` and `combat_test.toml`'s `assault-starbase` waves
+/// both use (since #892 that is most of the wave list, not just wave 8), and the one
 /// that makes a doctrine-level fix worthless. The stopping distance is the
 /// assertion because it is where the defect is a NUMBER: ~180 when the doctrine
 /// is flown, ~40 when the drive is flying the hull.

@@ -4347,48 +4347,223 @@ entity    = "raider"
     }
 
     #[test]
-    fn parse_world_combat_test_toml_parses_and_carries_8_waves() {
-        // (#475) The combat-test scenario must parse and contain:
-        //   - 17 on_timer wave-spawn triggers (8 base + 8 conditional ship_power
-        //     extras + the #883 Harrow Destroyer fly-through wave, which is
-        //     unconditional because the doctrine it demonstrates should be seen
-        //     at every ship power)
-        //   - 1 on_all_destroyed victory trigger
-        //   - 1 on_destroyed starbase defeat trigger
-        //   - 8 on_destroyed wave objective-completion triggers
+    fn parse_world_combat_test_toml_parses_and_carries_8_chained_waves() {
+        // (#475, rewritten for #892) The combat-test scenario is a DEATH-GATED
+        // eight-wave defence, not a timetable. This test pins the structure:
+        //
+        //   - exactly ONE on_timer trigger (wave 1 at t=0); every later wave
+        //     hangs off `on_all_destroyed` over the previous wave's group
+        //   - the corrected eight-wave table: singles alternating
+        //     cruiser/destroyer through wave 4, pairs through wave 7, closing
+        //     on a single patrol cruiser
+        //   - every hostile spawn registers into `hostiles` (victory) and into
+        //     its own `wave_N` group (the chain), tier bonuses included
+        //   - two standing pickets, in `hostiles` + `pickets`, gating nothing
+        //   - ONE victory trigger over the dynamic `hostiles` group, guarded by
+        //     `counter(waves_spawned) >= 8` rather than by a clock
+        //   - 1 on_destroyed Starbase Alpha defeat trigger
+        //   - 8 wave objectives, completed on their own group being cleared
         //   - 1 on_world_loaded patrol objective trigger
-        //   - 9 comms templates (1 intro + 8 wave announcements)
+        //   - 9 comms templates (1 intro + 1 timed + 7 chained)
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
 
-        // Count timer triggers (waves): 8 base + 8 conditional ship_power extras
-        // + the #883 destroyer wave.
-        let timer_count = cfg
+        // Only wave 1 is on a clock.
+        let timer_triggers: Vec<_> = cfg
             .triggers
             .iter()
             .filter(|t| matches!(t.condition, TriggerCondition::OnTimer { .. }))
-            .count();
+            .collect();
         assert_eq!(
-            timer_count, 17,
-            "combat_test must have 17 wave-spawn timers (8 base + 8 conditional + the #883 destroyer pass)"
+            timer_triggers.len(),
+            1,
+            "only wave 1 may be timed — every later wave is death-gated"
+        );
+        assert_eq!(
+            timer_triggers[0].condition,
+            TriggerCondition::OnTimer { after_secs: 0.0 },
+            "wave 1 fires at t=0"
         );
 
-        // OnAllDestroyed victory trigger present with all 8 wave names.
-        let victory = cfg
+        // Collect every spawn in the world, keyed by spawned entity name.
+        let spawns: HashMap<&str, (&str, &Vec<String>)> = cfg
             .triggers
             .iter()
-            .find(|t| matches!(t.condition, TriggerCondition::OnAllDestroyed { .. }))
-            .expect("combat_test must have an on_all_destroyed victory trigger");
-        if let TriggerCondition::OnAllDestroyed { group, after_secs } = &victory.condition {
-            assert_eq!(
-                *group, "waves",
-                "victory trigger must reference 'waves' group"
-            );
+            .flat_map(|t| t.actions.iter())
+            .filter_map(|a| match a {
+                TriggerAction::SpawnEntity {
+                    name,
+                    template_path,
+                    groups,
+                    ..
+                } => Some((name.as_str(), (template_path.as_str(), groups))),
+                _ => None,
+            })
+            .collect();
+
+        const CRUISER: &str = "assets/entities/ship_harrow_cruiser.toml";
+        const DESTROYER: &str = "assets/entities/ship_harrow_destroyer.toml";
+        const PATROL: &str = "assets/entities/ship_harrow_patrol.toml";
+
+        // The corrected eight-wave table (#892, 2026-08-03).
+        let table: &[(&str, &str)] = &[
+            ("wave_1", CRUISER),
+            ("wave_2", DESTROYER),
+            ("wave_3", CRUISER),
+            ("wave_4", DESTROYER),
+            ("wave_5", CRUISER),
+            ("wave_5_second", CRUISER),
+            ("wave_6", DESTROYER),
+            ("wave_6_second", DESTROYER),
+            ("wave_7", CRUISER),
+            ("wave_7_second", DESTROYER),
+            ("wave_8", PATROL),
+        ];
+        for (name, template) in table {
+            let (path, groups) = spawns
+                .get(name)
+                .unwrap_or_else(|| panic!("combat_test must spawn {name}"));
+            assert_eq!(path, template, "{name} must fly {template}");
+            let wave_group = name.trim_end_matches("_second");
             assert!(
-                *after_secs >= 300.0,
-                "victory trigger after_secs should be >= 300 to allow final wave to spawn"
+                groups.contains(&"hostiles".to_string())
+                    && groups.contains(&wave_group.to_string()),
+                "{name} must join both 'hostiles' and '{wave_group}', got {groups:?}"
             );
         }
+        // Waves 1-4 and 8 are singles; only 5, 6 and 7 field a second ship.
+        for wave in [1, 2, 3, 4, 8] {
+            assert!(
+                !spawns.contains_key(format!("wave_{wave}_second").as_str()),
+                "wave {wave} is a single ship in the corrected table"
+            );
+        }
+
+        // Tier bonuses ride the wave groups rather than parallel triggers, so
+        // the chain waits for them too.
+        for wave in 1..=8 {
+            let name = format!("wave_{wave}_bonus");
+            let (path, groups) = spawns
+                .get(name.as_str())
+                .unwrap_or_else(|| panic!("combat_test must author {name}"));
+            let expected = if wave % 2 == 1 { DESTROYER } else { CRUISER };
+            assert_eq!(
+                *path, expected,
+                "{name} is the odd/even tier bonus and must fly {expected}"
+            );
+            assert!(
+                groups.contains(&"hostiles".to_string())
+                    && groups.contains(&format!("wave_{wave}")),
+                "{name} must gate both victory and the chain, got {groups:?}"
+            );
+        }
+        // Each bonus is gated by an ACTION predicate on its wave's own trigger.
+        let bonus_gates = cfg
+            .triggers
+            .iter()
+            .flat_map(|t| t.actions.iter().zip(t.action_predicates.iter()))
+            .filter(|(a, _)| {
+                matches!(a, TriggerAction::SpawnEntity { name, .. } if name.ends_with("_bonus"))
+            })
+            .filter(|(_, p)| p.is_some())
+            .count();
+        assert_eq!(
+            bonus_gates, 8,
+            "all eight tier bonuses must carry a ship_power action predicate"
+        );
+
+        // Standing pickets: in `hostiles` and `pickets`, in no wave group.
+        for picket in ["picket_north", "picket_south"] {
+            let (path, groups) = spawns
+                .get(picket)
+                .unwrap_or_else(|| panic!("combat_test must spawn {picket}"));
+            assert_eq!(*path, PATROL, "pickets fly the patrol hull");
+            assert!(
+                groups.contains(&"hostiles".to_string()) && groups.contains(&"pickets".to_string()),
+                "{picket} must join 'hostiles' and 'pickets', got {groups:?}"
+            );
+            assert!(
+                !groups.iter().any(|g| g.starts_with("wave_")),
+                "{picket} stands outside the wave schedule, got {groups:?}"
+            );
+        }
+
+        // The chain itself: wave N+1 hangs off wave N's group.
+        for wave in 1..=7 {
+            let group = format!("wave_{wave}");
+            let chains = cfg.triggers.iter().any(|t| {
+                matches!(&t.condition,
+                    TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)
+                    && t.actions.iter().any(|a| {
+                        matches!(a, TriggerAction::SpawnEntity { name, .. }
+                            if name.starts_with(&format!("wave_{}", wave + 1)))
+                    })
+            });
+            assert!(
+                chains,
+                "wave {} must be released by clearing {group}",
+                wave + 1
+            );
+        }
+        // And every chained spawn carries the authored breather.
+        let breathers: Vec<f32> = cfg
+            .triggers
+            .iter()
+            .filter(|t| matches!(t.condition, TriggerCondition::OnAllDestroyed { .. }))
+            .flat_map(|t| t.actions.iter().zip(t.action_delays.iter()))
+            .filter(|(a, _)| matches!(a, TriggerAction::SpawnEntity { .. }))
+            .map(|(_, d)| *d)
+            .collect();
+        assert!(
+            !breathers.is_empty() && breathers.iter().all(|d| *d > 0.0),
+            "every death-gated spawn needs a breather delay, got {breathers:?}"
+        );
+
+        // Victory: ONE trigger over the dynamic `hostiles` group, guarded by the
+        // wave counter. The three per-tier name-list variants are gone — an
+        // unregistered name in such a list permanently blocks victory, which is
+        // how this world shipped unwinnable.
+        let victories: Vec<_> = cfg
+            .triggers
+            .iter()
+            .filter(|t| {
+                t.actions.iter().any(|a| {
+                    matches!(a, TriggerAction::GameOver { outcome, .. }
+                        if *outcome == Some(crate::balance::Outcome::Victory))
+                })
+            })
+            .collect();
+        assert_eq!(
+            victories.len(),
+            1,
+            "combat_test must have ONE victory trigger"
+        );
+        match &victories[0].condition {
+            TriggerCondition::OnAllDestroyed { group, .. } => {
+                assert_eq!(group, "hostiles", "victory covers every hostile spawned");
+            }
+            other => panic!("victory must be on_all_destroyed, got {other:?}"),
+        }
+        assert!(
+            victories[0].when.is_some(),
+            "victory must be guarded by the waves_spawned counter, not a clock"
+        );
+        // The guard has to be satisfiable: eight increments are authored.
+        let increments: i64 = cfg
+            .triggers
+            .iter()
+            .flat_map(|t| t.actions.iter())
+            .filter_map(|a| match a {
+                TriggerAction::IncrementWorldFlag { name, by } if name == "waves_spawned" => {
+                    Some(*by)
+                }
+                _ => None,
+            })
+            .sum();
+        assert_eq!(
+            increments, 8,
+            "waves_spawned must be able to reach the victory guard's threshold"
+        );
 
         // Starbase-destroyed defeat trigger.
         let defeat = cfg.triggers.iter().any(|t| {
@@ -4413,25 +4588,29 @@ entity    = "raider"
                 "combat_test must define patrol anchor {anchor}"
             );
         }
+        // The picket stations `ship_harrow_patrol.toml` names must resolve here,
+        // or the world fails to load.
+        for anchor in ["ironveil_patrol_a", "ironveil_patrol_b"] {
+            assert!(
+                cfg.anchors.contains_key(anchor),
+                "combat_test must define picket station {anchor}"
+            );
+        }
 
-        let wave_completion_count = cfg
-            .triggers
-            .iter()
-            .filter(|t| {
-                matches!(
-                    &t.condition,
-                    TriggerCondition::OnDestroyed { entity_name }
-                        if entity_name.starts_with("wave_")
-                ) && t.actions.iter().any(|a| {
-                    matches!(a, TriggerAction::CompleteObjective { id }
-                        if id.starts_with("obj-destroy-wave-"))
-                })
-            })
-            .count();
-        assert_eq!(
-            wave_completion_count, 8,
-            "combat_test must complete all 8 wave destroy objectives"
-        );
+        // Wave objectives complete on their own group being cleared, which is
+        // what makes a two-ship wave's objective honest.
+        for wave in 1..=8 {
+            let group = format!("wave_{wave}");
+            let id = format!("obj-destroy-wave-{wave}");
+            let completed = cfg.triggers.iter().any(|t| {
+                matches!(&t.condition,
+                    TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)
+                    && t.actions.iter().any(
+                        |a| matches!(a, TriggerAction::CompleteObjective { id: cid } if *cid == id),
+                    )
+            });
+            assert!(completed, "{id} must complete when {group} is cleared");
+        }
 
         let defend = cfg
             .triggers
@@ -4497,26 +4676,35 @@ entity    = "raider"
                     target: target.clone(),
                 }
             );
-            assert_eq!(targets, &&vec![target]);
+            // Two-ship waves list both hulls; the directive still names one.
+            assert!(
+                targets.contains(&target),
+                "{id} must list {target} among its targets, got {targets:?}"
+            );
             assert_eq!(*base_priority, 80.0);
         }
 
-        // Comms: 1 on_world_loaded urgent intro + 8 on_timer wave
-        // announcements = 9 total.
+        // Comms: 1 on_world_loaded urgent intro + wave 1's timed call + 7
+        // chained calls, one per cleared wave = 9 total.
         assert_eq!(
             cfg.comms.len(),
             9,
             "combat_test must have 9 comms templates"
         );
-
-        // Eight wave-announce comms use `on_timer` triggers; the urgent
-        // intro fires on `on_world_loaded`.
-        let timer_count = cfg
+        let timed = cfg
             .comms
             .iter()
             .filter(|c| matches!(c.trigger, TriggerCondition::OnTimer { .. }))
             .count();
-        assert_eq!(timer_count, 8, "8 on_timer wave-announce comms expected");
+        assert_eq!(timed, 1, "only wave 1's call is on a clock");
+        for wave in 1..=7 {
+            let group = format!("wave_{wave}");
+            assert!(
+                cfg.comms.iter().any(|c| matches!(&c.trigger,
+                    TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)),
+                "Command must call the next wave when {group} is cleared"
+            );
+        }
     }
 
     #[test]
@@ -4791,10 +4979,12 @@ message = "."
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
         let paths = entity_template_paths(&cfg, &[]);
         for required in &[
-            // (#892) `pirate_raider.toml` was retired; the Harrow Destroyer
-            // below now fills the waves it used to.
+            // (#892) `pirate_raider.toml` was retired, and the corrected
+            // eight-wave table closes on a patrol cruiser rather than a
+            // Warhawk — so `ship_harrow_warhawk.toml` left this list with the
+            // hull that read it. Three hulls fly here now: the patrol cruiser
+            // (two standing pickets plus wave 8), the destroyer, the cruiser.
             "assets/entities/ship_harrow_patrol.toml",
-            "assets/entities/ship_harrow_warhawk.toml",
             "assets/entities/ship_harrow_destroyer.toml",
             "assets/entities/ship_harrow_cruiser.toml",
         ] {

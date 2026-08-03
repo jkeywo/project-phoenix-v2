@@ -4,8 +4,11 @@
 //   - World loads with all 8 spawn anchors registered
 //   - Starbase Alpha is spawned and named (defeat condition)
 //   - Player ship spawns at the documented position on game start
-//   - At least the first wave (t=0 destroyer) is spawned shortly after
-//     game start
+//   - At least the first wave (t=0 Harrow cruiser) is spawned shortly after
+//     game start. Since issue #892 wave 1 is the ONLY timed wave — every later
+//     wave hangs off `on_all_destroyed` over the previous one's group — so this
+//     is still the right (and now the only) wave a fast smoke run can see.
+//     The two standing pickets spawn on `on_world_loaded`, earlier still.
 //   - The on_world_loaded objective ("Defend Starbase Alpha") is added
 //
 // Combat balance / wave timing / victory conditions are NOT tested
@@ -92,9 +95,10 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
     `Expected obj-defend objective after game start. Got: ${JSON.stringify(objectives)}`,
   ).toBe(true);
 
-  // Wave 1 spawn (on_timer at_secs = 0) should fire promptly. Wait a few
+  // Wave 1 spawn (on_timer after_secs = 0) should fire promptly. Wait a few
   // ticks for the spawn to register and the EntitySpawned message to
-  // broadcast.
+  // broadcast. `obj-destroy-wave-1` is added by the same trigger, undelayed —
+  // only waves 2..8 carry the ten-second breather.
   await captain.waitForMessage('EntitySpawned', 5_000);
   await captain.page.waitForFunction(
     () => (window as any).__messages?.some(

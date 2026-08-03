@@ -73,7 +73,7 @@ test('Engineering player receives SystemHullUpdate after game start', async ({ c
   await engineer.close();
 });
 
-test('Engineering hull detail starts at 65 in first SystemHullUpdate', async ({ context }) => {
+test('Engineering hull detail starts at 189 in first SystemHullUpdate', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
   const msg = await engineer.waitForMessage('SystemHullUpdate', 2_000) as any;
@@ -95,12 +95,23 @@ test('Engineering hull detail starts at 65 in first SystemHullUpdate', async ({ 
   // now host-internal, and each token receives only the rows its role entitles
   // it to (src/console/repair/visibility.rs). Engineering's entitlement is the
   // ownerless "Core" bucket plus the systems its own station owns, plus any
-  // system a repair team is on site at — none at game start. So:
+  // system a repair team is on site at — none at game start. At the time #737
+  // shipped this was:
   //   Core (no [[system]] declares them): science 20 + core 20 = 40
   //   engineering-owned: power-reactor 15 + power-battery 10 = 25
-  // 216 -> 65 for this viewer. The ship-wide figure survives as
-  // `aggregate_fraction`, which is computed over all 216 and so is 1.0 here.
-  expect(total).toBe(65);
+  // for a total of 65.
+  //
+  // The balance pass in c1af00c0 ("one durability ladder for the fleet") and
+  // f94c356e ("radar systems carry no hull, and the Lancer goes back up")
+  // re-pegged alliance_cruiser.toml's whole durability ladder (cruiser pool
+  // 216 -> 500, see the `[[hull.system_hull]]` header comment there), moving
+  // Engineering's authored entitlement to:
+  //   Core: science 58 + core 58 = 116
+  //   engineering-owned: power-reactor 44 + power-battery 29 = 73
+  // 189 for this viewer. The ship-wide figure survives as `aggregate_fraction`,
+  // which is computed over the whole (now larger) pool and so is still 1.0
+  // here.
+  expect(total).toBe(189);
   expect(msg.data.aggregate_fraction).toBe(1);
 
   await captain.close();

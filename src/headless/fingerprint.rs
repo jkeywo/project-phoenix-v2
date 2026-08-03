@@ -11,10 +11,10 @@ use bevy::prelude::*;
 use crate::balance::BalanceEvent;
 use crate::entity_spawner::EntitySystemHull;
 use crate::headless::report::RunTelemetry;
+use crate::ship::state::ShipPhysics;
 use crate::sim_rng::{SimRng, SimStream};
 use crate::sim_tick::SimTick;
 use crate::simulation::Ship;
-use crate::ship::state::ShipPhysics;
 
 /// Deliberately not just the player ship: a slice narrow enough to miss a
 /// divergence is worse than no assertion at all. It folds the logical tick

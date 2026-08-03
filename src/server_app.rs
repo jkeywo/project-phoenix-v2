@@ -625,74 +625,74 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     register_sim_set_plugins(app, opts);
 
     app.add_message::<AsteroidDestroyedVfx>()
-    // Balance telemetry. Registered here (not behind `headless`) so the
-    // chokepoints can emit unconditionally — only the *collection* is
-    // headless-only.
-    .add_message::<crate::balance::BalanceEvent>()
-    .init_resource::<CaptainPriorityBoost>()
-    // The sim's one source of randomness. `init_resource` draws an OS seed, so
-    // an unconfigured app (browser host, unit tests) behaves as it always did;
-    // headless overrides it with a configured one via `insert_resource`.
-    .init_resource::<crate::sim_rng::SimRng>()
-    .insert_resource(crate::config_cache::FactionRegistryResource(
-        crate::config_cache::get_faction_registry(),
-    ))
-    .init_resource::<WorldResource>()
-    .init_resource::<WorldSetupBroadcast>()
-    .init_resource::<TrackedEntities>()
-    .init_resource::<SimOutbox>()
-    .init_resource::<LastBroadcastEntityPositions>()
-    .init_resource::<LastBroadcastEntityHealth>()
-    .init_resource::<LastBroadcastHull>()
-    .init_resource::<LastBroadcastShields>()
-    .init_resource::<LastBroadcastBlackboards>()
-    .init_resource::<crate::messages::InterSystemQueue>()
-    // `handle_collisions` (registered below, in SimSet::Damage) writes this,
-    // so the simulation owns it. `DebugOverlayPlugin` also init_resource's it
-    // — idempotent — but that plugin is absent headless, and the sim must not
-    // depend on the debug overlay being present.
-    .init_resource::<crate::debug_overlay::DamageLog>()
-    .insert_resource(SimBroadcastTimer(Timer::from_seconds(
-        0.1,
-        TimerMode::Repeating,
-    )))
-    .add_systems(
-        Startup,
-        setup_world.after(crate::world::server::insert_world_config_resource),
-    )
-    .add_systems(
-        OnEnter(GamePhase::InProgress),
-        (
-            // The run boundary for the command log (issue #898). First in the
-            // chain because it is the *start* of a run's input record: every
-            // command the systems after it cause to be admitted belongs to the
-            // round that is beginning, and a second round reached through
-            // `ReturnToLobby` must not inherit the first round's log. Sits
-            // beside `reset_broadcast_caches_on_start` because it is the same
-            // kind of thing — per-run state that a multi-game session has to
-            // hand back.
-            crate::command_admission::reset_command_log,
-            reset_broadcast_caches_on_start,
-            crate::world::server::seed_ship_power_counter,
-            spawn_game_start_entities,
-            dump_tracked_entities,
+        // Balance telemetry. Registered here (not behind `headless`) so the
+        // chokepoints can emit unconditionally — only the *collection* is
+        // headless-only.
+        .add_message::<crate::balance::BalanceEvent>()
+        .init_resource::<CaptainPriorityBoost>()
+        // The sim's one source of randomness. `init_resource` draws an OS seed, so
+        // an unconfigured app (browser host, unit tests) behaves as it always did;
+        // headless overrides it with a configured one via `insert_resource`.
+        .init_resource::<crate::sim_rng::SimRng>()
+        .insert_resource(crate::config_cache::FactionRegistryResource(
+            crate::config_cache::get_faction_registry(),
+        ))
+        .init_resource::<WorldResource>()
+        .init_resource::<WorldSetupBroadcast>()
+        .init_resource::<TrackedEntities>()
+        .init_resource::<SimOutbox>()
+        .init_resource::<LastBroadcastEntityPositions>()
+        .init_resource::<LastBroadcastEntityHealth>()
+        .init_resource::<LastBroadcastHull>()
+        .init_resource::<LastBroadcastShields>()
+        .init_resource::<LastBroadcastBlackboards>()
+        .init_resource::<crate::messages::InterSystemQueue>()
+        // `handle_collisions` (registered below, in SimSet::Damage) writes this,
+        // so the simulation owns it. `DebugOverlayPlugin` also init_resource's it
+        // — idempotent — but that plugin is absent headless, and the sim must not
+        // depend on the debug overlay being present.
+        .init_resource::<crate::debug_overlay::DamageLog>()
+        .insert_resource(SimBroadcastTimer(Timer::from_seconds(
+            0.1,
+            TimerMode::Repeating,
+        )))
+        .add_systems(
+            Startup,
+            setup_world.after(crate::world::server::insert_world_config_resource),
         )
-            .chain(),
-    )
-    .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
-    // Balance tracer for game-phase transitions. One global reader, one emit
-    // per transition — inherently unconditional, no per-`next_state.set` taps.
-    // In the fixed schedule so its events land in tick order with the rest of
-    // the balance stream.
-    .add_systems(FixedUpdate, emit_phase_change_balance_events)
-    .insert_resource(GameOverReason(None, None))
-    .add_systems(
-        FixedUpdate,
-        (reconcile_runtime_entities, broadcast_world_setup_on_start)
-            .chain()
-            .after(crate::lobby::LobbySystemSet)
-            .before(crate::sim_sets::SimSet::Input),
-    );
+        .add_systems(
+            OnEnter(GamePhase::InProgress),
+            (
+                // The run boundary for the command log (issue #898). First in the
+                // chain because it is the *start* of a run's input record: every
+                // command the systems after it cause to be admitted belongs to the
+                // round that is beginning, and a second round reached through
+                // `ReturnToLobby` must not inherit the first round's log. Sits
+                // beside `reset_broadcast_caches_on_start` because it is the same
+                // kind of thing — per-run state that a multi-game session has to
+                // hand back.
+                crate::command_admission::reset_command_log,
+                reset_broadcast_caches_on_start,
+                crate::world::server::seed_ship_power_counter,
+                spawn_game_start_entities,
+                dump_tracked_entities,
+            )
+                .chain(),
+        )
+        .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
+        // Balance tracer for game-phase transitions. One global reader, one emit
+        // per transition — inherently unconditional, no per-`next_state.set` taps.
+        // In the fixed schedule so its events land in tick order with the rest of
+        // the balance stream.
+        .add_systems(FixedUpdate, emit_phase_change_balance_events)
+        .insert_resource(GameOverReason(None, None))
+        .add_systems(
+            FixedUpdate,
+            (reconcile_runtime_entities, broadcast_world_setup_on_start)
+                .chain()
+                .after(crate::lobby::LobbySystemSet)
+                .before(crate::sim_sets::SimSet::Input),
+        );
 
     // The command admission seam (issue #898): the tick-stamped command log,
     // the future-tick queue it drains, `CommandDelay`, and

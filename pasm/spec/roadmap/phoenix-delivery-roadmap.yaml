@@ -4,11 +4,12 @@ entities:
       status: accepted
       confidence: confirmed
       title: Phoenix Demo and Post-Demo Delivery
-      summary: "The demo critical path front-loads deterministic simulation (#849), completed composable entity templates (#869), and Backfill combat symmetry (#870) before Combat Test doctrine closure (#774), measured readiness (#868 and #850), the snapshot tracer (#848/#862), Falling Skyway (#851/#852), and limited release (#853). After public play, finish snapshot adapters (#848), Cloudflare/native delivery (#855), P2P (#854), mod-pack acceptance (#856), and Thin Margin missions 2–5 (#858-#861)."
+      summary: "The demo critical path front-loads deterministic simulation (#849), completed composable entity templates (#869), and Backfill combat symmetry (#870) before Combat Test doctrine closure (#774), measured readiness (#868 and #850), the snapshot tracer (#848/#862), and the deliberately narrow limited release (#853/#931): Combat Test only, Alliance Destroyer only. Everything else is post-demo and runs as the five release bands A-E — Falling Skyway with native/cloud delivery and mod packs (#851/#852/#855/#856), Borrowed Sun with P2P (#858/#854), Narrow Season with the GM console MVP (#859/#930), The Broken Tithe with GM facilitation (#860), and The Silent Corridor with the GM console complete (#861) — widening the catalogue by one playable hull per band (#922) and carrying a visual/UX polish pass each time."
       rationale:
         - Completed work already supplies the balance harness (#835), baseline player Backfill doctrine (#842), scenario catalogue and QR flow (#754-#756), legacy save/load tracer bullets (#431-#435), native scenario hosting (#420), and mod-pack export/overlay plumbing (#759-#760).
         - Determinism, authored composition, and player/NPC Backfill symmetry are foundational game contracts; settling them before Combat Test balance avoids tuning a model that will immediately change.
         - Snapshot and performance contracts start before the demo so later scenario work does not create incompatible state or unmeasured release risk, but their complete product surfaces do not block the first public release.
+        - "Falling Skyway moved after the demo by the 2026-07-31 scope decision recorded on #853: the first public build is Combat Test and one hull, so the scenario is release A's content rather than a release gate."
     architecture:
       kind: roadmap-sequence
       authority: non-authoritative
@@ -20,17 +21,21 @@ entities:
         - roadmap-current-combat-doctrine
         - roadmap-demo-readiness
         - roadmap-snapshot-contract-tracer
+        - roadmap-demo-release
+        - post-demo-release-bands
         - roadmap-falling-skyway-foundation
         - roadmap-falling-skyway-content
-        - roadmap-demo-release
-        - roadmap-authoritative-snapshots
         - roadmap-native-and-cloud-delivery
-        - roadmap-p2p-multiship-delivery
         - roadmap-mod-content-packs
+        - roadmap-authoritative-snapshots
+        - roadmap-post-demo-readiness
+        - roadmap-p2p-multiship-delivery
         - roadmap-borrowed-sun-content
+        - roadmap-gm-console
         - roadmap-narrow-season-content
         - roadmap-broken-tithe-content
         - roadmap-silent-corridor-content
+        - roadmap-release-polish
 
   - component: roadmap-completed-demo-baseline
     core:
@@ -82,7 +87,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Snapshot Contract and Demo Tracer Bullet
-      summary: "Before Falling Skyway content grows persistent state, define the versioned authoritative snapshot boundary and deliver the bounded Combat Test capture/restore tracer (#848/#862). Full consequence, scenario, slot, export, and campaign adapters remain post-demo."
+      summary: "Pre-demo. Define the versioned authoritative snapshot boundary and deliver the bounded Combat Test capture/restore tracer (#848/#862) while the demo is still one scenario. The consequence, scenario, slot, export, and campaign adapters follow in release bands A-C, before any of them carries campaign content."
       rationale:
         - The snapshot contract now builds on #849's logical tick and command log, informing scenario data and later P2P without making save UX a first-demo release gate.
         - Stable content IDs and an authoritative-only boundary prevent browser, renderer, and session state leaking into future persistence.
@@ -93,15 +98,33 @@ entities:
       produces: [world-snapshot-artifact]
       runs_in: [host-browser-runtime, headless-runtime]
 
+  - component: post-demo-release-bands
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Post-Demo Release Bands A-E
+      summary: "Post-demo work ships as five public builds. A: Falling Skyway (#851/#852) with native and Cloudflare delivery (#855), the consequence and scripted-progression resume adapters (#863/#864), mod content packs (#856) with template-aware editing (#910), and the destroyer readiness slice. B: Borrowed Sun (#858) with P2P multi-ship (#854), slot UX and portable export (#865/#866), and the cruiser. C: Narrow Season (#859) with the GM console MVP (#930 M1-M3), campaign-continuity projection (#867), and the courier (#877). D: The Broken Tithe (#860) with GM facilitation and safety (M4-M5) and the battleship. E: The Silent Corridor (#861) with the GM console complete (M6-M8) and #922's full-matrix balance closure."
+      rationale:
+        - Each band is a shippable public build, not a paper milestone, so every band pairs one campaign mission with one platform capability, one more playable hull, and one visual/UX polish pass.
+        - "The hull rollout is deliberately one at a time — destroyer, cruiser, courier, battleship — so tutorials, doctrine, and balance evidence land together per hull instead of as a single catalogue-wide push."
+        - "The #848 adapters split across A, B, and C by what needs them: Falling Skyway needs consequence and scripted-progression resume, P2P join and recovery ride on the portable record, and campaign continuity only becomes real once three missions exist."
+        - Defects are fixed as they arise outside these bands and are deliberately not scheduled into them.
+    architecture:
+      kind: roadmap-release-bands
+      authority: non-authoritative
+      reads: [world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
   - component: roadmap-falling-skyway-foundation
     core:
       status: accepted
       confidence: confirmed
       title: Falling Skyway Scenario Foundation
-      summary: "Add the smallest reusable crisis-world toolkit needed by Falling Skyway: schedules, civilian routes/orders, external operations, infrastructure condition, basic commitments, and player-known Comms dossiers (#851)."
+      summary: "Release A. Add the smallest reusable crisis-world toolkit needed by Falling Skyway: schedules, civilian routes/orders, external operations, infrastructure condition, basic commitments, and player-known Comms dossiers (#851)."
       rationale:
         - The scenario must use reusable world capabilities and existing ship systems, not bespoke station minigames.
-        - Falling Skyway deliberately introduces only the campaign's early simulation layers; later evidence, network, authority, and cascade systems stay post-demo.
+        - Falling Skyway deliberately introduces only the campaign's early simulation layers; later evidence, network, authority, and cascade systems arrive with missions 2-5.
+        - "This runs after the demo, not before it: #863 and #864 land first so the toolkit's persistent state is authored against adapters that already exist."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -113,10 +136,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Falling Skyway — First Thin Margin Scenario
-      summary: "Author the first 30–60 minute Thin Margin mission: damaged skyhook and fuel depots, worker strike, corporate security, radiation storm, civilian traffic, constrained transfer window, altered-record evidence, and a consequential safe-passage decision (#852)."
+      summary: "Release A. Author the first 30–60 minute Thin Margin mission: damaged skyhook and fuel depots, worker strike, corporate security, radiation storm, civilian traffic, constrained transfer window, altered-record evidence, and a consequential safe-passage decision (#852)."
       rationale:
-        - This is the demo narrative scenario. It is not #398, Before the Fire.
-        - Its outcomes are self-contained for the demo while remaining compatible with later campaign continuity.
+        - This is release A's narrative scenario, the first content the public build gains after the Combat Test demo. It is not #398, Before the Fire.
+        - Its outcomes are self-contained while remaining compatible with the campaign continuity projected in release C.
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -129,9 +152,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Limited Browser Demo Release
-      summary: "Publish Combat Test and Falling Skyway only, through the existing browser deployment, with curated selection, production-build and smoke gates, performance evidence, and documented multi-device/multi-role playtests (#853)."
+      summary: "Publish Combat Test only, with the Alliance Destroyer as the only playable hull, through a manual Cloudflare Pages deploy of the curated catalogue (#931), with production-build and smoke gates, performance evidence, and documented multi-device/multi-role playtests (#853)."
       rationale:
-        - The demo validates the core bridge experience before Cloudflare, native distribution, P2P, and campaign breadth broaden the support surface.
+        - The demo validates the core bridge experience before Cloudflare caching, native distribution, P2P, and campaign breadth broaden the support surface.
+        - "Scope narrowed on 2026-07-31 and recorded on #853: Falling Skyway and the other three hulls move to the post-demo release bands so the first public build ships on one proven scenario."
     architecture:
       kind: roadmap-milestone
       authority: non-authoritative
@@ -143,9 +167,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Full Authoritative Snapshots and Persistence
-      summary: "After the tracer, complete the #848 snapshot adapters: dynamic combat consequences (#863), scripted progression (#864), save-slot UX (#865), portable import/export (#866), and campaign-continuity projection (#867)."
+      summary: "After the tracer, complete the #848 snapshot adapters, split across the first three release bands: dynamic combat consequences (#863) and scripted progression (#864) in A because Falling Skyway's persistent state depends on them, save-slot UX (#865) and portable import/export (#866) in B because P2P join and recovery ride on the portable record, and campaign-continuity projection (#867) in C once three missions make cross-mission facts real."
       rationale:
         - One portable snapshot must serve persistence, campaign continuity, native hosting, and P2P transfer rather than each surface serialising its own world.
+        - "The adapters are split by their consumer rather than shipped as one block: each half-PRD lands in the band whose feature would otherwise be built on a missing adapter."
         - "Phoenix is the fleet's world-snapshot consumer for vellum-save: slot storage is that crate's Store under its browser backend, portable export (#866) is the same record through its file backend, and compatibility reporting renders its version gate. Only the campaign-continuity projection (#867) is phoenix-owned, because cross-mission facts are game vocabulary."
     architecture:
       kind: roadmap-milestone
@@ -177,9 +202,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Native Host and Cloud Delivery Expansion
-      summary: "Extend the delivered native scenario host (#420) into #855's compatible native host/client serving and Cloudflare-cached curated deployment. Worker-thread adoption remains a benchmarked option, not an assumed requirement."
+      summary: "Release A. Extend the delivered native scenario host (#420) into #855's compatible native host/client serving and Cloudflare-cached curated deployment, superseding the demo's manual Pages deploy (#931). Worker-thread adoption remains a benchmarked option, not an assumed requirement."
       rationale:
         - Public demo feedback and #868 measurements should determine caching and worker-thread investment.
+        - Release A is where the deploy path stops being manual, because it is the first band that adds a scenario to the public catalogue.
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -191,9 +217,11 @@ entities:
       status: accepted
       confidence: confirmed
       title: P2P Multi-Ship Multiplayer Delivery
-      summary: "Complete #854's PeerJS host mesh, delayed lockstep exchange, leader handling, snapshot join/recovery, hash diagnostics, and distributed NPC ownership on top of the completed snapshot and determinism foundations."
+      summary: "Release B. Complete #854's PeerJS host mesh, delayed lockstep exchange, leader handling, snapshot join/recovery, hash diagnostics, and distributed NPC ownership on top of the completed snapshot and determinism foundations."
       rationale:
         - P2P is a new product surface, not a prerequisite for the browser demo.
+        - "It runs after #865/#866 within the band: join and recovery are the portable snapshot record with a transport around it, so the record ships first."
+        - It also gates the GM console, which is a host-class peer on this mesh and cannot start until the mesh exists.
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -235,9 +263,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Mod Content Packs Baseline
-      summary: "Validated TOML pack export and host overlay resolution are delivered (#759/#760). Close #856 only after confirming its acceptance criteria against the now-stable entity-template, model-sidecar, and snapshot manifest contracts."
+      summary: "Release A. Validated TOML pack export and host overlay resolution are delivered (#759/#760). Close #856, together with template-aware editing (#910), only after confirming its acceptance criteria against the now-stable entity-template, model-sidecar, and snapshot manifest contracts."
       rationale:
         - Mod-pack work should be verified and integrated with post-demo authoring foundations, not reimplemented as a second system.
+        - "Release A is the earliest honest slot: the entity-template, sidecar, and manifest contracts it must be checked against are all freshly stable at that point, and Falling Skyway is the first real content to author through them."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -249,7 +278,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Borrowed Sun — Thin Margin Mission 2
-      summary: "Add evidence confidence/provenance, networked infrastructure capacity and priority, and dynamic debris hazards around failing orbital mirrors (#858)."
+      summary: "Release B. Add evidence confidence/provenance, networked infrastructure capacity and priority, and dynamic debris hazards around failing orbital mirrors (#858)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -261,7 +290,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Narrow Season — Thin Margin Mission 3
-      summary: "Add civilian response profiles, emergency authority, traffic priority orders, and cascading congestion, panic, and coercion incidents (#859)."
+      summary: "Release C. Add civilian response profiles, emergency authority, traffic priority orders, and cascading congestion, panic, and coercion incidents (#859)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -273,7 +302,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: The Broken Tithe — Thin Margin Mission 4
-      summary: "Add hazardous cargo containment, graduated intervention, and longer-duration ship operational allocation under contested authority (#860)."
+      summary: "Release D. Add hazardous cargo containment, graduated intervention, and longer-duration ship operational allocation under contested authority (#860)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -285,11 +314,62 @@ entities:
       status: accepted
       confidence: confirmed
       title: The Silent Corridor — Thin Margin Mission 5
-      summary: "Combine schedules, traffic, evidence, infrastructure, cascades, commitments, and campaign consequences into the regional-crisis finale (#861)."
+      summary: "Release E. Combine schedules, traffic, evidence, infrastructure, cascades, commitments, and campaign consequences into the regional-crisis finale (#861)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-post-demo-readiness
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Post-Demo Catalogue Readiness
+      summary: "Generalise the demo's readiness mechanisms across the full catalogue (#922) one hull at a time: destroyer in release A, cruiser in B, courier in C behind its doctrine (#877), battleship in D, then full-matrix and mixed-fleet balance closure plus the generalised curation manifest in E. Each hull slice is its contextual station tutorials, its sidecar-owned model LODs, and its seeded matchup evidence together."
+      rationale:
+        - "#922 is content and coverage on modules the demo already built — the tutorial overlay framework, the sidecar LOD pipeline, the seeded balance harness, and the curation manifest — so it never needs a new framework, only per-hull authoring."
+        - "The one-hull-per-band rollout means every release adds a hull that is actually finished, rather than four half-onboarded hulls appearing at once."
+        - Cruiser and battleship Backfill doctrine is already authored (#876); only the courier's (#877) still gates its slice.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [entity-template-state, world-content-pack-state]
+      coordinates: [roadmap-composable-entity-templates, roadmap-backfill-combat-symmetry]
+      runs_in: [host-browser-runtime, headless-runtime, node-tooling-runtime]
+
+  - component: roadmap-gm-console
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Game Master Console
+      summary: "Deliver #930's host-class GM peer across three bands, per the milestone ladder in gm-console-milestones.yaml. Release C: MVP — M1 peer tracer (GM lobby role, gm: command tier, headless GM page, omniscient map, activity feed, pause), M2 directing (trigger-action dispatch bridge, new action kinds, mission panel, dossier), M3 performing (comms studio, knowledge views, role presets). Release D: M4 facilitation assistance and M5 operations and safety, whose log/undo/checkpoint reuses the #862 capture and restore. Release E: M6 information control through the radar-projection seam, M7 in-sim presentation, M8 campaign persistence and pacing heuristics."
+      rationale:
+        - "The GM is a host-class mesh peer running the full simulation with no ship, so it cannot start before the mesh exists: #854 in release B is a hard gate."
+        - "World and mission mutation goes through the trigger-action dispatch pipeline and station puppeting through a gm: admission tier, so the GM adds no authority path that authored content cannot also use."
+        - "M4-M5 and M6-M8 each get their own PRD when their band is due; only M1-M3 are broken into issues, and only once release B nears completion."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact, world-configuration-state, spawned-entity-state]
+      coordinates: [roadmap-p2p-multiship-delivery, roadmap-authoritative-snapshots]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-release-polish
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Per-Release Visual and UX Polish
+      summary: "Every release band A-E carries its own visual/UX polish PRD, written just before that band starts and scoped by the previous band's playtest feedback. Each is anchored to four things: the release's new surfaces, the console and station visual system for that band's hull, viewscreen and effects, and onboarding and session flow."
+      rationale:
+        - Polish is written per release rather than as one standing backlog so each pass can answer real feedback from the build that just shipped.
+        - "Scope is visual and UX only: defects are fixed as they arise and never occupy a polish slot."
+        - "The console visual system is worked hull by hull in the same order as the catalogue rollout, so a hull's look lands with its tutorials and balance rather than later."
+    architecture:
+      kind: roadmap-milestone
+      authority: non-authoritative
+      reads: [world-content-pack-state]
+      coordinates: [post-demo-release-bands]
       runs_in: [host-browser-runtime]
 
   - state: world-snapshot-artifact
@@ -302,4 +382,4 @@ entities:
       classification: authoritative
       owner: roadmap-authoritative-snapshots
       writers: [roadmap-snapshot-contract-tracer, roadmap-authoritative-snapshots]
-      readers: [roadmap-falling-skyway-foundation, roadmap-deterministic-simulation-foundation, roadmap-p2p-multiship-delivery, roadmap-native-and-cloud-delivery, roadmap-borrowed-sun-content, roadmap-narrow-season-content, roadmap-broken-tithe-content, roadmap-silent-corridor-content]
+      readers: [roadmap-falling-skyway-foundation, roadmap-deterministic-simulation-foundation, roadmap-p2p-multiship-delivery, roadmap-native-and-cloud-delivery, roadmap-gm-console, roadmap-borrowed-sun-content, roadmap-narrow-season-content, roadmap-broken-tithe-content, roadmap-silent-corridor-content]

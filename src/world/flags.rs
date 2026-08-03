@@ -57,6 +57,7 @@
 // offending token and a position hint; no panics.
 
 use crate::bounded_history::BoundedHistory;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ── Flag store ────────────────────────────────────────────────────────────
@@ -66,7 +67,9 @@ use std::collections::HashMap;
 /// Booleans and counters share the same key: `flag(name)` reads `true` iff the
 /// stored counter is non-zero. `set_flag` writes `1`, `clear_flag` writes
 /// `0`.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// serde for the #862 snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlagStore {
     values: HashMap<String, i64>,
 }
@@ -210,7 +213,9 @@ impl CmpOp {
 /// been in combat) makes every comparison against it evaluate `false`, so an
 /// author writing `fact(secs_since_combat) < param(window)` gets the intuitive
 /// "not recently in combat" answer when there is no combat history at all.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// serde for the #862 snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AiFacts {
     values: HashMap<String, f64>,
 }
@@ -254,7 +259,9 @@ pub enum FactContext {
 /// scored, and `target_facts` the currently-retained selection. Any set may be
 /// empty; an absent fact in any context evaluates a comparison `false` (never a
 /// panic), the same absent-fact contract [`AiFacts`] already carries.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// serde for the #862 snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AiFactSet {
     pub self_facts: AiFacts,
     pub candidate_facts: AiFacts,
@@ -306,7 +313,9 @@ impl AiFacts {
 /// thing that was removed with the thing #882 introduced. They are not the same
 /// idea — the deleted one was ship-wide and mutated by coarse AI, this one is
 /// owned by exactly one fine system's policy runtime.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// serde for the #862 snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AiPolicyMemory {
     values: HashMap<String, f64>,
     state_time_secs: f64,
@@ -520,7 +529,11 @@ impl HistoryReducer {
 /// the SAME reading with independent authored lengths (a level question and a
 /// trend question, tuned for different things), and keying on the fact alone
 /// would have silently coupled them.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+///
+/// Serialisable because it is the `BTreeMap` key in [`AiHistory`], which is
+/// itself a field of [`AiPolicyMemory`] — serde for the #862 snapshot payload;
+/// the payload boundary is the #894 record.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct HistorySpec {
     pub fact: String,
     pub ticks: usize,
@@ -585,7 +598,10 @@ impl HistoryRef {
 /// window retains at most its authored capacity. Memory is therefore constant
 /// for the life of a run, however long the scenario lasts, and "recently" keeps
 /// meaning the same span from the first tick to the last.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// Serialisable because it is a field of [`AiPolicyMemory`] — serde for the
+/// #862 snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AiHistory {
     windows: std::collections::BTreeMap<HistorySpec, BoundedHistory>,
 }
@@ -2574,5 +2590,95 @@ mod tests {
         // And an expression with no window reports none.
         let plain = parse_predicate("fact(x) > 0").unwrap();
         assert!(plain.history_atom().is_none());
+    }
+
+    // --- serde round-trips (issue #862) -------------------------------------
+    //
+    // Round-tripped through RON specifically, because that is the text format
+    // `vellum-save`'s browser backend stores strings as — a value that only
+    // round-trips through `serde_json` or in-memory would prove nothing about
+    // the snapshot path these types actually travel.
+
+    #[test]
+    fn flag_store_round_trips_through_ron() {
+        let mut store = FlagStore::new();
+        store.set_flag("alpha");
+        store.set_flag_value("beta", -7);
+        store.increment_flag("gamma", 42);
+
+        let text = ron::to_string(&store).expect("FlagStore should serialise");
+        let restored: FlagStore = ron::from_str(&text).expect("FlagStore should parse");
+
+        assert_eq!(restored, store);
+        assert!(restored.flag("alpha"));
+        assert_eq!(restored.counter("beta"), -7);
+        assert_eq!(restored.counter("gamma"), 42);
+    }
+
+    #[test]
+    fn ai_facts_round_trip_through_ron() {
+        let mut facts = AiFacts::new();
+        facts.set("secs_since_combat", 12.5);
+        facts.set("power_rating", 0.75);
+
+        let text = ron::to_string(&facts).expect("AiFacts should serialise");
+        let restored: AiFacts = ron::from_str(&text).expect("AiFacts should parse");
+
+        assert_eq!(restored, facts);
+        assert_eq!(restored.get("secs_since_combat"), Some(12.5));
+        assert_eq!(restored.get("power_rating"), Some(0.75));
+    }
+
+    #[test]
+    fn ai_fact_set_round_trips_through_ron() {
+        let mut set = AiFactSet::default();
+        set.self_facts.set("hull_pct", 0.4);
+        set.candidate_facts.set("range", 1200.0);
+        set.target_facts.set("shield_pct", 0.9);
+
+        let text = ron::to_string(&set).expect("AiFactSet should serialise");
+        let restored: AiFactSet = ron::from_str(&text).expect("AiFactSet should parse");
+
+        assert_eq!(restored, set);
+        assert_eq!(restored.self_facts.get("hull_pct"), Some(0.4));
+        assert_eq!(restored.candidate_facts.get("range"), Some(1200.0));
+        assert_eq!(restored.target_facts.get("shield_pct"), Some(0.9));
+    }
+
+    /// Exercises every field, including the nested [`AiHistory`] /
+    /// [`BoundedHistory`] windows the memory bag carries (issue #890), since
+    /// those are the transitive serde dependency that makes `AiPolicyMemory`
+    /// derivable at all.
+    #[test]
+    fn ai_policy_memory_round_trips_through_ron_including_history_windows() {
+        let mut memory = AiPolicyMemory::new();
+        memory.set("threat_level", 3.0);
+        memory.set_state_time_secs(9.5);
+        let specs = vec![HistorySpec {
+            fact: "range_to_target".to_string(),
+            ticks: 4,
+        }];
+        let mut facts = AiFacts::new();
+        for reading in [500.0, 480.0, 460.0, 440.0] {
+            facts.set("range_to_target", reading);
+            memory.fold_history(&specs, &facts);
+        }
+
+        let text = ron::to_string(&memory).expect("AiPolicyMemory should serialise");
+        let restored: AiPolicyMemory = ron::from_str(&text).expect("AiPolicyMemory should parse");
+
+        assert_eq!(restored, memory);
+        assert_eq!(restored.get("threat_level"), Some(3.0));
+        assert_eq!(restored.state_time_secs(), 9.5);
+        assert_eq!(
+            restored.history().reduce(&specs[0], HistoryReducer::Min),
+            Some(440.0)
+        );
+        assert_eq!(
+            restored
+                .history()
+                .reduce(&specs[0], HistoryReducer::NetChange),
+            Some(-60.0)
+        );
     }
 }

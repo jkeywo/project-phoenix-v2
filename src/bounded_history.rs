@@ -26,6 +26,7 @@
 //! expected to gate on `is_full()`; [`BoundedHistory::all_at_least`] does that
 //! for them.
 
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 /// A ring of at most `capacity` recent `f64` samples, oldest evicted first.
@@ -34,7 +35,11 @@ use std::collections::VecDeque;
 /// window is never full, so every window predicate answers `false`. That is the
 /// safe reading of "the designer authored a zero-length window" — it disables
 /// the decision rather than making it trivially true.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// Serialisable because it is a field of `world::flags::AiHistory`, which is
+/// itself a field of `world::flags::AiPolicyMemory` — serde for the #862
+/// snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BoundedHistory {
     capacity: usize,
     samples: VecDeque<f64>,

@@ -103,6 +103,7 @@
 //!   replayed and not sim-authoritative.
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 /// The declared namespace sequence. **Append only.**
@@ -121,7 +122,10 @@ use std::sync::Mutex;
 /// message ids are command-addressing surface (a recorded
 /// `RespondToMessage { message_id, .. }` has to resolve on the peer that
 /// replays it), and projectile ids key the in-flight/hit bookkeeping.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Serialisable because it is a field of [`WorldId`] — serde for the #862
+/// snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum IdNamespace {
     /// `EntityUuid` (`src/entities/spawner.rs`) — all spawner identity.
@@ -191,7 +195,9 @@ const PAYLOAD_DIGITS: usize = 30;
 /// A minted world id: the structured `(namespace, tick, seq)` tuple.
 ///
 /// `Ord` is the derived field order, which *is* the fold policy #894 records.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// serde for the #862 snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct WorldId {
     pub namespace: IdNamespace,
     pub tick: u64,
@@ -312,6 +318,24 @@ struct MintState {
     next_seq: [u64; IdNamespace::ALL.len()],
 }
 
+/// Everything about a [`WorldIdMint`] that can leave the process: the tick it
+/// is currently minting for and every namespace's next sequence number.
+///
+/// This is the shape a world snapshot stores (#862), mirroring
+/// [`crate::sim_rng::SimRngState`]'s role for `SimRng` — the mint's own state
+/// is behind a private `Mutex<MintState>`, so [`WorldIdMint::state`] /
+/// [`WorldIdMint::from_state`] are the accessor pair that lets a snapshot
+/// resume minting from where a run got to, rather than restarting every
+/// namespace's counter from zero at tick 0.
+///
+/// serde for the #862 snapshot payload; the payload boundary is the #894 record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldIdMintState {
+    pub tick: u64,
+    /// Indexed by [`IdNamespace::code`], in [`IdNamespace::ALL`] order.
+    pub next_seq: [u64; IdNamespace::ALL.len()],
+}
+
 impl Default for WorldIdMint {
     fn default() -> Self {
         Self {
@@ -376,6 +400,39 @@ impl WorldIdMint {
         self.inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Capture the mint's exact state: the tick it is minting for and every
+    /// namespace's next sequence number.
+    ///
+    /// The lock is held for the single read of `tick` and `next_seq` together,
+    /// the same coherent-snapshot discipline `SimRng::state` documents (#897):
+    /// there is only one guard here (unlike `SimRng`'s six per-stream guards),
+    /// but the principle is the same — the tick and every sequence must come
+    /// from one instant, not from separate locks that a concurrent `mint` could
+    /// interleave between.
+    pub fn state(&self) -> WorldIdMintState {
+        let state = self.lock();
+        WorldIdMintState {
+            tick: state.tick,
+            next_seq: state.next_seq,
+        }
+    }
+
+    /// Rebuild a mint from a captured [`WorldIdMintState`], resuming the tick
+    /// and every namespace's sequence exactly where they were.
+    ///
+    /// Unlike [`crate::sim_rng::SimRng::from_state`] this takes no length
+    /// check: `next_seq`'s size is fixed by the [`IdNamespace::ALL`] array type
+    /// itself, so a state whose shape disagrees with the current build fails to
+    /// deserialise rather than needing a runtime rejection here.
+    pub fn from_state(state: WorldIdMintState) -> Self {
+        Self {
+            inner: Mutex::new(MintState {
+                tick: state.tick,
+                next_seq: state.next_seq,
+            }),
+        }
     }
 }
 
@@ -616,6 +673,69 @@ mod tests {
         assert_ne!(a, b);
         assert!(WorldId::parse(&a).is_some());
         assert!(uuid::Uuid::parse_str(&b).is_ok());
+    }
+
+    // --- serde round-trips (issue #862) -------------------------------------
+    //
+    // Round-tripped through RON specifically, because that is the text format
+    // `vellum-save`'s browser backend stores strings as — a value that only
+    // round-trips through `serde_json` or in-memory would prove nothing about
+    // the snapshot path these types actually travel.
+
+    #[test]
+    fn world_id_round_trips_through_ron() {
+        let id = WorldId::new(IdNamespace::Projectile, 12_345, 7);
+        let text = ron::to_string(&id).expect("WorldId should serialise");
+        let restored: WorldId = ron::from_str(&text).expect("WorldId should parse");
+        assert_eq!(restored, id);
+    }
+
+    /// The property #862 is waiting on: a mint's tick and every namespace's
+    /// sequence counter survive a trip out of the process and back, restored
+    /// exactly rather than reset to zero. Each namespace is minted a
+    /// *different* number of times first, so a restore that merely re-synced
+    /// the tick (without carrying the per-namespace counters) cannot pass by
+    /// accident.
+    #[test]
+    fn mint_state_round_trips_through_ron_and_restores_counters_exactly() {
+        let live = WorldIdMint::default();
+        live.begin_tick(9);
+        for (i, ns) in IdNamespace::ALL.iter().enumerate() {
+            for _ in 0..=i {
+                live.mint(*ns);
+            }
+        }
+        // Snapshot the per-namespace counts BEFORE the reference draws below,
+        // so `expected_counts` is what a restore should report and
+        // `expected_next` is what the live mint goes on to produce *from
+        // those captured counters*.
+        let expected_counts: Vec<u64> = IdNamespace::ALL
+            .iter()
+            .map(|ns| live.minted_so_far(*ns))
+            .collect();
+        let text = ron::to_string(&live.state()).expect("WorldIdMintState should serialise");
+        let expected_next: Vec<WorldId> =
+            IdNamespace::ALL.iter().map(|ns| live.mint(*ns)).collect();
+
+        let restored =
+            WorldIdMint::from_state(ron::from_str(&text).expect("WorldIdMintState should parse"));
+
+        assert_eq!(restored.tick(), 9, "the tick round-trips");
+        for (ns, expected_count) in IdNamespace::ALL.iter().zip(expected_counts.iter()) {
+            assert_eq!(
+                restored.minted_so_far(*ns),
+                *expected_count,
+                "restored counters must match the live mint at capture time for {ns:?}"
+            );
+        }
+
+        // And the restored mint continues each namespace's sequence from
+        // exactly where the live one was captured, not from zero.
+        let resumed: Vec<WorldId> = IdNamespace::ALL
+            .iter()
+            .map(|ns| restored.mint(*ns))
+            .collect();
+        assert_eq!(resumed, expected_next);
     }
 
     /// The Bevy wiring: `FixedFirst` sync means a system in the step sees the

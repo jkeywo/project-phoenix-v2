@@ -125,6 +125,22 @@ jobs:
           workingDirectory: worker
           command: deploy --config wrangler.demo.toml
 
+      # First-run bootstrap: the deploy fails with "Project not found"
+      # (code 8000007) until the Pages project exists. Creating it is
+      # idempotent-by-guard here, so the workflow needs no owner-side setup.
+      - name: Create the Pages project if missing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if ! npx wrangler@3 pages project list | grep -q "project-phoenix-demo"; then
+            npx wrangler@3 pages project create project-phoenix-demo --production-branch=main
+            echo "created Pages project project-phoenix-demo"
+          else
+            echo "Pages project already exists"
+          fi
+
       - name: Deploy demo Pages site
         uses: cloudflare/wrangler-action@v3
         with:

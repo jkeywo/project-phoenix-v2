@@ -80,11 +80,18 @@ jobs:
         run: |
           set -euo pipefail
           echo "patching ${DEV_TURN_URL} -> ${DEMO_TURN_URL}"
-          for f in dist/index.html dist/client/gui/connection-manager.js; do
-            if [ ! -f "$f" ]; then
-              echo "expected built file missing: $f" >&2
-              exit 1
-            fi
+          # Sweep every built copy rather than naming files: trunk bundles
+          # gui/ for the host page too (dist/gui/), and build-client.mjs
+          # copies it again for the client (dist/client/gui/), so the dev
+          # URL appears in three-plus places. The guard step below still
+          # backstops any miss.
+          mapfile -t hits < <(grep -rlF "${DEV_TURN_URL}" dist/)
+          if [ "${#hits[@]}" -eq 0 ]; then
+            echo "no occurrences of the dev worker URL found in dist/ — build layout changed?" >&2
+            exit 1
+          fi
+          for f in "${hits[@]}"; do
+            echo "  patching $f"
             sed -i "s|${DEV_TURN_URL}|${DEMO_TURN_URL}|g" "$f"
           done
 

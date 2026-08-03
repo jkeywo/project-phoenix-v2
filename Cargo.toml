@@ -189,6 +189,24 @@ vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baad
 # command applies on is phoenix's contract with its lockstep peers (#854), not
 # vellum's.
 vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9" }
+# The digest primitives behind `crate::headless::digest` (issue #901): `fnv1a`,
+# `fold_digest`/`FOLD_SEED` and `digest_postcard`. Same vellum rev as the three
+# above — one vellum rev in the repo, not two.
+#
+# Named as *the* primitive by issue #894's boundary record
+# (`vellum-digest-primitive-reference`), which deliberately did not wire it:
+# that issue decided the boundary, this one computes a digest against it.
+#
+# Its published check vectors (FNV-1a's and CRC-32's) are asserted upstream in
+# the crate's own tests and are deliberately NOT re-tested here — a second copy
+# of a published vector proves nothing this repository owns.
+#
+# Dependencies are serde, postcard and base64: all pure, all already wasm-clean,
+# so this is a non-event for the browser build exactly as `vellum-rng` and
+# `vellum-replay` were. Default features only — `ron-digest` stays off, because
+# phoenix's fold is defined over postcard bytes and the two never produce the
+# same number for the same value.
+vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9" }
 
 [dev-dependencies]
 # The contract checks (`vellum_replay::contract`), which the crate gates behind

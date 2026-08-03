@@ -138,6 +138,35 @@ DETERMINISM
                           Floating-point differences across CPUs or compiler
                           versions can still diverge.
 
+REPLAY (issue #901)
+    --record <PATH>       Write a replay artifact here: the seed, the world,
+                          hull, length and pacing, the command log the run
+                          accepted, and the digests it passed through. Requires
+                          --seed — an artifact with an OS-drawn seed names a run
+                          nothing can re-derive.
+    --replay <PATH>       Replay an artifact and report whether the second run
+                          reproduced the first. Everything the run needs comes
+                          from the ARTIFACT, so --world, --ship, --side-a,
+                          --side-b, --seed, --ticks, --sim-seconds, --dt and
+                          --hz are rejected alongside it rather than accepted
+                          and quietly ignored. Exit code 4 when the replay
+                          diverges, and the message names the tick window it
+                          first disagreed in rather than merely that it
+                          disagreed.
+                          --log/--log-entity and --report/--report-format are
+                          NOT rejected, but they are inert here: a replay
+                          prints a verdict, not the ordinary run report or
+                          per-tick log output those flags shape, so giving them
+                          changes nothing about what --replay does.
+    --digest-every <N>    Sample an authoritative-state digest every N LOGICAL
+                          ticks [default: 0 = off, and off costs nothing: no
+                          digest is computed at all]. The samples are what turn
+                          'these two runs differ' into 'they agreed at tick 240
+                          and disagreed by tick 250'. A --replay run samples at
+                          the interval its artifact recorded, so it compares
+                          like with like; this flag chooses the interval a
+                          --record run writes down.
+
     -h, --help            Show this help
 ";
 
@@ -211,6 +240,20 @@ pub struct HeadlessArgs {
     /// (`SimPluginOptions::extra_registration_probes`, issue #899). `None` in
     /// every real run.
     pub extra_registration_probes: Option<RegistrationProbes>,
+    /// Where to write the replay artifact from `--record` (issue #901).
+    /// `None` leaves the recording path off entirely, so an ordinary run is
+    /// byte-for-byte the run it always was. Requires `--seed`: an artifact
+    /// whose seed came from the OS names a run nothing can re-derive.
+    pub record_path: Option<String>,
+    /// Replay artifact to consume from `--replay` (issue #901). When set, the
+    /// run's world, hull, length, pacing and seed all come from the ARTIFACT,
+    /// not from this argument list — which is why the flags that would set
+    /// them are rejected alongside it.
+    pub replay_path: Option<String>,
+    /// Sample an authoritative-state digest every N logical ticks
+    /// (`--digest-every`, issue #901). `0` — the default — is off, and costs
+    /// nothing: no digest is computed at all.
+    pub digest_every: u64,
 }
 
 impl Default for HeadlessArgs {
@@ -234,6 +277,9 @@ impl Default for HeadlessArgs {
             physics_last: false,
             registration_order: RegistrationOrder::Canonical,
             extra_registration_probes: None,
+            record_path: None,
+            replay_path: None,
+            digest_every: 0,
         }
     }
 }
@@ -333,6 +379,14 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                 }
                 out.perf_scenario = v;
             }
+            "--record" => out.record_path = Some(value()?),
+            "--replay" => out.replay_path = Some(value()?),
+            "--digest-every" => {
+                let v = value()?;
+                out.digest_every = v.parse().map_err(|_| {
+                    format!("--digest-every expects a whole number of ticks, got {v:?}")
+                })?;
+            }
             "--deterministic" => out.deterministic = true,
             "--seed" => {
                 let v = value()?;
@@ -398,6 +452,65 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     // implies the other; `--deterministic` alone remains meaningful.
     if out.seed.is_some() {
         out.deterministic = true;
+    }
+
+    // Replay/record validation (issue #901). Derived after the loop for the
+    // same reason every other cross-flag rule here is: the flags stay
+    // order-independent.
+    if out.record_path.is_some() && out.replay_path.is_some() {
+        return Err(
+            "--record writes an artifact and --replay consumes one; give one or the other".into(),
+        );
+    }
+    // A recording without a seed produces a file that LOOKS replayable and is
+    // not — the second run would re-draw every stream from the OS. Rejected at
+    // argument time rather than at write time, so the failure costs a
+    // millisecond instead of a whole run.
+    if out.record_path.is_some() && out.seed.is_none() {
+        return Err(
+            "--record needs --seed: without one the recorded run cannot be reproduced".into(),
+        );
+    }
+    // A recording run is driven through `PhoenixSim`, which the harness-loop
+    // perf collector does not bracket. Rejected rather than accepted and
+    // silently unmeasured — a capture file that quietly never appears is worse
+    // than a flag that says no.
+    if out.record_path.is_some() && out.perf_capture_path.is_some() {
+        return Err(
+            "--record and --perf-capture cannot be given together: a recording run is driven \
+             through the replay simulation, which the harness-loop sampler does not measure"
+                .into(),
+        );
+    }
+    // A replay takes its whole setup from the artifact. Accepting a flag that
+    // would set the same thing and then ignoring it is how a replay silently
+    // runs a different scenario from the one it is verifying.
+    //
+    // `--ticks`/`--sim-seconds`/`--dt`/`--hz` belong on this list for exactly
+    // the same reason `--world`/`--ship`/`--seed`/`--side-a`/`--side-b` do:
+    // `ReplayArtifact::replay_args` sources `max_ticks` and `dt` from the
+    // artifact alone (see that function), so any of these four silently did
+    // nothing under `--replay` rather than erroring — a run that pacing looked
+    // like it had asked for a different length or rate and had not.
+    if out.replay_path.is_some() {
+        for (flag, given) in [
+            ("--world", world_given),
+            ("--ship", ship_given),
+            ("--seed", out.seed.is_some()),
+            ("--side-a", !out.side_a.is_empty()),
+            ("--side-b", !out.side_b.is_empty()),
+            ("--ticks", ticks.is_some()),
+            ("--sim-seconds", sim_seconds.is_some()),
+            ("--dt", dt.is_some()),
+            ("--hz", hz.is_some()),
+        ] {
+            if given {
+                return Err(format!(
+                    "{flag} cannot be given with --replay: a replay runs the world, hull, \
+                     length, pacing and seed the artifact recorded"
+                ));
+            }
+        }
     }
 
     // Applied after `--log` so the two flags are order-independent: setting the
@@ -702,5 +815,91 @@ mod tests {
             .world_path,
             "assets/worlds/combat_test.toml"
         );
+    }
+
+    // ── Replay flags (issue #901) ────────────────────────────────────────────
+
+    #[test]
+    fn replay_flags_default_to_off() {
+        let a = parse(&[]);
+        assert_eq!(a.record_path, None);
+        assert_eq!(a.replay_path, None);
+        assert_eq!(
+            a.digest_every, 0,
+            "periodic hashing must be off unless asked for, so a run that did not ask for it pays nothing"
+        );
+    }
+
+    #[test]
+    fn record_and_digest_every_parse() {
+        let a = parse(&[
+            "--record",
+            "run.ron",
+            "--seed",
+            "7",
+            "--digest-every",
+            "120",
+        ]);
+        assert_eq!(a.record_path.as_deref(), Some("run.ron"));
+        assert_eq!(a.digest_every, 120);
+        assert_eq!(a.seed, Some(7));
+    }
+
+    /// An artifact whose seed came from the OS names a run nothing can
+    /// re-derive, so it must fail at argument time rather than after the run.
+    #[test]
+    fn recording_without_a_seed_is_refused() {
+        assert!(err(&["--record", "run.ron"]).contains("--seed"));
+    }
+
+    #[test]
+    fn recording_and_replaying_at_once_is_refused() {
+        assert!(
+            err(&["--record", "a.ron", "--replay", "b.ron", "--seed", "1"])
+                .contains("one or the other")
+        );
+    }
+
+    /// A replay takes its whole setup from the artifact. A flag that would set
+    /// the same thing is rejected rather than accepted and quietly ignored.
+    #[test]
+    fn a_replay_refuses_the_flags_the_artifact_already_decides() {
+        for extra in [
+            vec!["--world", "assets/worlds/patrol.toml"],
+            vec!["--ship", "assets/entities/alliance_cruiser.toml"],
+            vec!["--seed", "3"],
+            vec!["--side-a", "cruiser"],
+            vec!["--side-b", "destroyer"],
+            vec!["--ticks", "100"],
+            vec!["--sim-seconds", "10"],
+            vec!["--dt", "0.02"],
+            vec!["--hz", "30"],
+        ] {
+            let mut argv = vec!["--replay", "run.ron"];
+            argv.extend(extra.iter());
+            let message = err(&argv);
+            assert!(
+                message.contains("--replay"),
+                "{extra:?} should be refused alongside --replay; got {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn recording_and_perf_capture_together_are_refused() {
+        assert!(err(&[
+            "--record",
+            "run.ron",
+            "--seed",
+            "1",
+            "--perf-capture",
+            "cap.json"
+        ])
+        .contains("--perf-capture"));
+    }
+
+    #[test]
+    fn digest_every_rejects_a_non_number() {
+        assert!(err(&["--digest-every", "often"]).contains("--digest-every"));
     }
 }

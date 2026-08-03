@@ -216,6 +216,24 @@ impl CaptainPriorityBoost {
     pub fn contains_objective(&self, id: &str) -> bool {
         self.boosts.values().any(|v| v == id)
     }
+
+    /// Every `(scope, boosted objective)` pair, sorted by scope.
+    ///
+    /// Sorted, not raw, because the backing store is a `HashMap` whose
+    /// iteration order follows `RandomState`'s per-process seed — fine for a
+    /// lookup, useless to anything that has to produce the same answer twice.
+    /// Added by issue #901 so the authoritative-state digest can fold this
+    /// resource (issue #894's record puts it in the fold) without reaching into
+    /// a private field or inheriting hash order.
+    pub fn boosts_sorted(&self) -> Vec<(&str, &str)> {
+        let mut pairs: Vec<(&str, &str)> = self
+            .boosts
+            .iter()
+            .map(|(scope, objective)| (scope.as_str(), objective.as_str()))
+            .collect();
+        pairs.sort();
+        pairs
+    }
 }
 
 /// Applies admitted `ToggleGodMode` commands from the LocalShip's own

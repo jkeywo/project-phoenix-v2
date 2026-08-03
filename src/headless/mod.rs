@@ -10,12 +10,18 @@
 
 pub mod app;
 pub mod args;
+pub mod digest;
 pub mod duel;
 pub mod fingerprint;
+pub mod replay;
 pub mod report;
 
 pub use app::{build_headless_app, run, run_sampled, BuildError};
 pub use args::{parse_args, HeadlessArgs, ParseOutcome, ReportFormat, HELP};
+pub use digest::{state_digest, world_digest, DigestLedger, Divergence, FoldKey, Namespace};
 pub use duel::{apply_duel_sides, resolve_template, DuelError};
 pub use fingerprint::{fingerprint, RunFingerprint};
+pub use replay::{
+    replay_artifact, verify_artifact, ArtifactError, PhoenixSim, ReplayArtifact, ReplayError,
+};
 pub use report::{build_report, RunReport};

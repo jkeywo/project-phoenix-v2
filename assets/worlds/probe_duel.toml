@@ -15,13 +15,23 @@
 # `src/console/weapons/mod.rs::ai_target_selection`.
 
 [global]
-# RE-MEASURED after issue #897 swapped the simulation generator (`rand`'s
-# SmallRng -> `vellum_rng::Pcg32`). Nothing about this world's dynamics
-# changed this time; what changed is the numbers each seed names. Every hull
-# roll in `SystemHull::apply_damage` now comes out of a different sequence, so
-# which system each hit lands on — and with it which duels close and which
-# settle into a standoff — is re-rolled wholesale. The #923 re-bless this
-# replaces measured 10 as the fastest resolver; on this generator 10 stalls.
+# HISTORICAL (2026-08-02, issue #897) — superseded by the issue #896 re-sweep
+# below. This table was measured after #897 swapped the simulation generator
+# (`rand`'s SmallRng -> `vellum_rng::Pcg32`) but BEFORE #896 moved rapier's
+# `PhysicsSet` chain onto the logical tick, which the next block explains
+# re-rolled which duels close. In particular, seed 3's "GameOver at 18.5 s"
+# below and the reasoning built on it (3 as "the pick" for resolving fastest)
+# no longer hold: under the #896 re-sweep seed 3 is `InProgress`, not the
+# resolving seed. Kept for the generator-swap context (still accurate) and as
+# the record of where the 367-vs-4 arc-bearing count two paragraphs down
+# originally came from; do not read the outcome table below as current.
+#
+# Nothing about this world's dynamics changed under #897; what changed is the
+# numbers each seed names. Every hull roll in `SystemHull::apply_damage` now
+# comes out of a different sequence, so which system each hit lands on — and
+# with it which duels close and which settle into a standoff — is re-rolled
+# wholesale. The #923 re-bless this replaces measured 10 as the fastest
+# resolver; on this generator 10 stalls.
 #
 # Swept over a 60 sim-second window — built
 # `phoenix-headless --world assets/worlds/probe_duel.toml --seed N --hz 30
@@ -32,7 +42,7 @@
 # doctrine probes sample, counted the way those probes count it:
 #
 #   seed  60 s outcome           dealt      45 s ring ticks (of 1351)
-#   3     GameOver at 18.5 s     332 v 34   1332   <- this seed
+#   3     GameOver at 18.5 s     332 v 34   1332   <- this seed, pre-#896
 #   34    GameOver at 28.0 s     332 v 42   1334
 #   1     InProgress             182 v 14    321
 #   5     InProgress             182 v 14    297
@@ -40,13 +50,45 @@
 #   2, 6, 7, 10, 13   InProgress            87-99
 #   4, 8, 9, 21       InProgress               87
 #
-# 3 and 34 are the only two of the fourteen that resolve. 3 is the pick, for
-# the larger margin under the 60 s budget and because it is much the stronger
-# control condition for the ring probes: across the 45 s window the cruiser
-# holds a standing arc-bearing request on 367 of its ring ticks under seed 3
-# against only 4 under seed 34, and
-# `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`
-# asserts on exactly that count to prove anything was ever declined.
+# 3 and 34 were the only two of the fourteen that resolved under this
+# pre-#896 sweep. 3 was picked here for the larger margin under the 60 s
+# budget and because it was much the stronger control condition for the ring
+# probes: across the 45 s window the cruiser held a standing arc-bearing
+# request on 367 of its ring ticks under seed 3 against only 4 under seed 34,
+# and `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`
+# asserted on exactly that count to prove anything was ever declined. That
+# specific count is pre-#896 and is not re-measured below; see the ring-probe
+# note further down for what is currently evidenced instead.
+#
+# RE-SWEPT after issue #896 moved rapier onto the logical tick. This world has
+# no asteroids, so the only thing physics does in it is the beam
+# line-of-sight raycast — and that is now cast against colliders synchronised
+# in the same tick rather than against last frame's, which is a real change to
+# what the two hulls can see of each other and, in a scenario the header above
+# already calls chaotically seed-sensitive, enough to re-roll which duels
+# close. Same command line as the sweep above:
+#
+#   seed  60 s outcome            dealt (hostile v player)
+#   34    GameOver at 27.6 s      342 v 61   <- the resolving seed
+#   3     InProgress              264 v 34   (this world's default)
+#   2, 6, 7, 8, 9, 10, 13         232 v 30
+#   4, 21, 838                    182 v 27
+#   1, 5                          182 v 12
+#
+# **The default stays 3, and it is no longer chosen for resolving.** Every
+# other probe on this world — the ring probes, the doctrine probes, the power
+# reserve probe — is measured against seed 3 and passes unchanged on it,
+# including `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`,
+# which still asserts against a standing arc-bearing request on this seed. The
+# 367-vs-4 count from the pre-#896 sweep above is NOT re-measured here and is
+# not the current justification — what is currently evidenced is only that
+# the probe passes on seed 3, under the physics ordering #896 put in place.
+# The two tests that need the duel to actually END now pin `seed: Some(34)`
+# themselves (`world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
+# and `balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves`
+# in tests/headless_runner.rs), which is the same discipline
+# `ai_crewed_ships_actually_launch_torpedoes_in_a_real_run` already applies with
+# its own pin of 10.
 #
 # `ai_crewed_ships_actually_launch_torpedoes_in_a_real_run`
 # (tests/headless_runner.rs) still pins 10 explicitly under its own

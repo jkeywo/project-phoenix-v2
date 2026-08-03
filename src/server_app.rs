@@ -146,6 +146,18 @@ pub struct ShipAttackedThisTick(pub bool);
 /// Applied as a score bonus in `publish_viewscreen_blackboard` /
 /// `publish_captain_blackboard` so the AI and the captain panel immediately see
 /// the updated priority ordering for that ship.
+/// Whether the LocalShip currently takes no damage (issue #900).
+///
+/// Replaces the former `bridge::GOD_MODE` thread-local: state that changes
+/// damage outcomes has to live in the authoritative simulation (so it is part
+/// of the digest, per #894) rather than out-of-band host memory. Flipped only
+/// by [`apply_god_mode_toggle`] consuming an admitted `ToggleGodMode` command
+/// on [`crate::system_registry::GOD_MODE_SYSTEM_ID`] — never written directly
+/// from `bridge`'s wasm exports — so the toggle carries a tick, lands in the
+/// command log, and a replay reproduces it exactly.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GodMode(pub bool);
+
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CaptainPriorityBoost {
     /// scope key (the captain's ship identity) -> currently boosted objective id.
@@ -203,6 +215,37 @@ impl CaptainPriorityBoost {
     /// True when any scope currently boosts `id`.
     pub fn contains_objective(&self, id: &str) -> bool {
         self.boosts.values().any(|v| v == id)
+    }
+}
+
+/// Applies admitted `ToggleGodMode` commands from the LocalShip's own
+/// `AdmittedCommands` to the [`GodMode`] resource (issue #900).
+///
+/// Runs in `SimSet::Input`, alongside the other admitted-command appliers
+/// (e.g. `console::captain::server::handle_set_red_alert`), so the flip lands
+/// before `SimSet::Damage` reads it and on the exact tick the command was
+/// admitted for — the same "apply the tick you were admitted" contract every
+/// other command gets from `command_admission` (AGENTS.md constraint 7).
+///
+/// Only the `LocalShip` is queried: `admit_system_commands` routes anything
+/// that isn't an `ai:`-prefixed token (including `LOCAL_CONSOLE_TOKEN`, the
+/// only token `is_command_authorized` admits for this target) to the
+/// `LocalShip`'s own `AdmittedCommands`, so an NPC's `AdmittedCommands` never
+/// carries this command.
+fn apply_god_mode_toggle(
+    ship_query: Query<&crate::messages::AdmittedCommands, With<LocalShip>>,
+    mut god_mode: ResMut<GodMode>,
+) {
+    let Some(admitted) = ship_query.iter().next() else {
+        return;
+    };
+    for cmd in admitted.for_target(crate::system_registry::GOD_MODE_SYSTEM_ID) {
+        if matches!(
+            cmd.payload,
+            crate::messages::SystemControlPayload::ToggleGodMode
+        ) {
+            god_mode.0 = !god_mode.0;
+        }
     }
 }
 
@@ -313,20 +356,31 @@ pub struct PlayerDeathLatch<'w> {
     pub reason: Option<ResMut<'w, GameOverReason>>,
 }
 
-/// The two ambient resources every damage chokepoint reads: the seeded RNG it
-/// draws hull distribution from, and the log filter its `plog!` lines are
-/// gated on.
+/// The ambient resources every damage chokepoint reads: the seeded RNG it
+/// draws hull distribution from, the log filter its `plog!` lines are gated
+/// on, and (issue #900) the God Mode flag that zeroes damage to the local
+/// ship.
 ///
 /// Bundled for the same reason as [`WorldAndTracked`] — the blaster and
 /// torpedo damage systems are at Bevy's 16-parameter ceiling, and adding the
 /// damage log sites (`--log damage=info` printed nothing for a blaster or
-/// torpedo kill) pushed both over it. Both fields are `Option` because a bare
-/// `App` unit-test fixture inserts neither, and a bare `Res` would fail
+/// torpedo kill) pushed both over it. Every field is `Option` because a bare
+/// `App` unit-test fixture inserts none of them, and a bare `Res` would fail
 /// parameter validation there.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SimRngAndLog<'w> {
     pub rng: Option<Res<'w, crate::sim_rng::SimRng>>,
     pub log: Option<Res<'w, crate::logging::LogFilterConfig>>,
+    pub god_mode: Option<Res<'w, GodMode>>,
+}
+
+impl SimRngAndLog<'_> {
+    /// True while the local ship's God Mode is on (issue #900). `false` when
+    /// the resource is absent (a bare-`App` fixture that never registered
+    /// it) — the same "missing means off" default the old thread-local gave.
+    pub fn god_mode_active(&self) -> bool {
+        self.god_mode.as_ref().is_some_and(|g| g.0)
+    }
 }
 
 /// Per-entity component holding a ship's system blackboards. Each
@@ -717,6 +771,23 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     crate::command_admission::register_admission_seam(
         app,
         crate::command_admission::AdmissionGate::InProgressOnly,
+    );
+
+    // God Mode (issue #900): the resource `apply_god_mode_toggle` flips, and
+    // the consumer registration so the unrouted-command lint below doesn't
+    // warn about `god-mode` — the applier registered right after this is its
+    // one consumer. Registered here (not via a console plugin) because no
+    // console owns it: it is a host-only debug toggle, not a station system.
+    app.init_resource::<GodMode>();
+    {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::GOD_MODE_SYSTEM_ID,
+        ));
+    }
+    app.add_systems(
+        FixedUpdate,
+        apply_god_mode_toggle.in_set(crate::sim_sets::SimSet::Input),
     );
 
     // Unrouted-command lint (issue #833). Production wires the admission seam
@@ -1567,17 +1638,18 @@ fn handle_collisions(
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
     mut damage_log: ResMut<DamageLog>,
-    log: Option<Res<crate::logging::LogFilterConfig>>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     mut world: ResMut<WorldResource>,
     mut commands: Commands,
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
     // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
     // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
     mut tracked: Option<ResMut<TrackedEntities>>,
+    // Seeded RNG + log filter + God Mode (issue #900), bundled: separately
+    // they put this system one over Bevy's 16-parameter ceiling.
+    ambient: SimRngAndLog,
 ) {
     let dt = time.delta_secs();
 
@@ -1753,7 +1825,7 @@ fn handle_collisions(
         // overlay; this is the channel that survives a headless run and can be
         // narrowed to one ship with `--log-entity`.
         crate::pdebug!(
-            log,
+            ambient.log,
             crate::logging::LogCat::Damage,
             entity = ship_entity,
             "collision: source={} amount={:.1} arc={:?} pierced={:.1} absorbed={:.1}",
@@ -1780,7 +1852,7 @@ fn handle_collisions(
         let shield_absorbed_for_balance = shield_amount;
 
         // God mode: local ship takes no damage.
-        if is_local && crate::bridge::is_god_mode() {
+        if is_local && ambient.god_mode_active() {
             total_hull = 0.0;
             shield_amount = 0.0;
         }
@@ -1788,7 +1860,7 @@ fn handle_collisions(
         let mut ship_destroyed = false;
         let hull_applied = if total_hull > 0.0 {
             crate::sim_rng::with_stream(
-                sim_rng.as_deref(),
+                ambient.rng.as_deref(),
                 crate::sim_rng::SimStream::CollisionDamage,
                 |rng| {
                     let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
@@ -1813,7 +1885,7 @@ fn handle_collisions(
         // torpedo, and region kill sites.
         if ship_destroyed {
             crate::pinfo!(
-                log,
+                ambient.log,
                 crate::logging::LogCat::Damage,
                 entity = ship_entity,
                 "destroyed by {}",
@@ -9244,6 +9316,79 @@ station = "pilot"
             third.iter().any(|s| s.uuid == "recovering-1"),
             "crossing a whole-second bucket boundary (5.4s -> 4.9s) must \
              re-trigger the delta gate"
+        );
+    }
+
+    // ── God Mode applier (issue #900) ───────────────────────────────────────
+
+    fn god_mode_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<GodMode>()
+            .add_systems(Update, apply_god_mode_toggle);
+        let ship = app
+            .world_mut()
+            .spawn((LocalShip, AdmittedCommands::default()))
+            .id();
+        (app, ship)
+    }
+
+    /// Sets `ship`'s `AdmittedCommands` to exactly one command (clearing
+    /// whatever was there), mirroring what `admit_system_commands` does at the
+    /// top of every real tick (AGENTS.md constraint 7: "`AdmittedCommands` is
+    /// cleared and refilled at admission each tick"). This minimal fixture has
+    /// no admission system to do that itself, so the test stands in for it —
+    /// otherwise a second call would leave the first tick's command in place
+    /// and every following tick would apply the toggle twice.
+    fn admit(app: &mut App, ship: Entity, payload: SystemControlPayload) {
+        let mut admitted = app.world_mut().get_mut::<AdmittedCommands>(ship).unwrap();
+        admitted.0.clear();
+        admitted.0.push(AdmittedCommand {
+            target: SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            payload,
+            response_token: None,
+        });
+    }
+
+    /// The baseline: an admitted `ToggleGodMode` command flips `GodMode` from
+    /// its default `false`.
+    #[test]
+    fn an_admitted_toggle_flips_god_mode_on() {
+        let (mut app, ship) = god_mode_app();
+        assert!(!app.world().resource::<GodMode>().0, "precondition: off");
+        admit(&mut app, ship, SystemControlPayload::ToggleGodMode);
+        app.update();
+        assert!(
+            app.world().resource::<GodMode>().0,
+            "an admitted ToggleGodMode command must flip GodMode on"
+        );
+    }
+
+    /// A second admitted toggle (a second tick, a second command) flips it
+    /// back off — proving this is a flip, not a one-way latch.
+    #[test]
+    fn a_second_admitted_toggle_flips_god_mode_back_off() {
+        let (mut app, ship) = god_mode_app();
+        admit(&mut app, ship, SystemControlPayload::ToggleGodMode);
+        app.update();
+        assert!(app.world().resource::<GodMode>().0, "precondition: now on");
+
+        admit(&mut app, ship, SystemControlPayload::ToggleGodMode);
+        app.update();
+        assert!(
+            !app.world().resource::<GodMode>().0,
+            "a second admitted toggle must flip it back off"
+        );
+    }
+
+    /// With nothing admitted, a tick must not touch `GodMode` — the applier
+    /// only acts on what it finds in `AdmittedCommands`, never on its own.
+    #[test]
+    fn no_admitted_command_leaves_god_mode_untouched() {
+        let (mut app, _ship) = god_mode_app();
+        app.update();
+        assert!(
+            !app.world().resource::<GodMode>().0,
+            "with nothing admitted, GodMode must stay at its default"
         );
     }
 }

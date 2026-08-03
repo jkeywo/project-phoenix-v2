@@ -1493,6 +1493,18 @@ pub enum SystemControlPayload {
         team_idx: u8,
         priority: u8,
     },
+    /// Flip the God Mode debug cheat (local ship takes no damage), issue #900.
+    /// Targets `god-mode` (`system_registry::GOD_MODE_SYSTEM_ID`), an ownerless
+    /// capability no ship TOML declares. Admission's `LOCAL_CONSOLE_TOKEN`
+    /// branch is the only path that reaches it — see that constant's doc and
+    /// `command_admission::policy::is_command_authorized`. Routed through the
+    /// normal command log (like every other command) rather than a
+    /// `bridge`-local thread-local, so a replay that toggled it reproduces the
+    /// same damage outcomes and two instances that disagree on it diverge in
+    /// their digest instead of silently forking. A toggle rather than an
+    /// explicit `active` flag: the host page has exactly one button and no
+    /// retry path, so there is no idempotency hazard to design against.
+    ToggleGodMode,
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a

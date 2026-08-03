@@ -245,4 +245,63 @@ station = "repair"
             &config(),
         ));
     }
+
+    // ── God Mode authority (issue #900) ─────────────────────────────────────
+    //
+    // `god-mode` (`GOD_MODE_SYSTEM_ID`) is deliberately declared by no ship
+    // TOML — `config()` above has no `[[system]] id = "god-mode"` block — so
+    // these tests exercise the exact three authority branches
+    // `is_command_authorized` offers, with no god-mode-specific code added to
+    // reach them (AGENTS.md constraint 6: no origin branch beyond ordinary
+    // token authority).
+
+    fn toggle_god_mode() -> SystemControlPayload {
+        SystemControlPayload::ToggleGodMode
+    }
+
+    /// The host console is the only token this is ever admitted for: the
+    /// `LOCAL_CONSOLE_TOKEN` branch checks `policy.accept_human_input`
+    /// only, never station tenure, and `ControlSourceResolver::policy_for`
+    /// defaults an unregistered `SystemId` to `ControlSource::Human`
+    /// (`accept_human_input: true`).
+    #[test]
+    fn toggle_god_mode_is_admitted_for_the_local_console_token() {
+        assert!(is_command_authorized(
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &toggle_god_mode(),
+            &sources(ControlSource::Human, false),
+            &sessions_with_repair_holder("t1"),
+            &config(),
+        ));
+    }
+
+    /// A connected player's session token is denied: `station_for_system`
+    /// returns `None` for `god-mode` (no ship TOML declares it), which is the
+    /// "unknown system" deny path every remote human token hits.
+    #[test]
+    fn toggle_god_mode_is_rejected_for_a_remote_human_token() {
+        assert!(!is_command_authorized(
+            "t1",
+            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &toggle_god_mode(),
+            &sources(ControlSource::Human, false),
+            &sessions_with_repair_holder("t1"),
+            &config(),
+        ));
+    }
+
+    /// An `ai:`-prefixed token is denied without any god-mode-specific check:
+    /// the default (unregistered) policy has `operate_ai: false`.
+    #[test]
+    fn toggle_god_mode_is_rejected_for_an_ai_token() {
+        assert!(!is_command_authorized(
+            "ai:backfill",
+            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &toggle_god_mode(),
+            &sources(ControlSource::Human, false),
+            &sessions_with_repair_holder("t1"),
+            &config(),
+        ));
+    }
 }

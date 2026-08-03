@@ -13020,3 +13020,111 @@ fn every_live_broadside_bank_draws_its_own_power() {
         "two burning banks must draw two battery drains, not one"
     );
 }
+
+/// God Mode (issue #900): the local ship takes no damage from a blaster hit
+/// while `GodMode(true)` is the authoritative resource.
+///
+/// This replaces the old `bridge::GOD_MODE` thread-local, which `cargo test`
+/// could never exercise in the first place: native builds hard-coded
+/// `bridge::is_god_mode()` to `false` unconditionally (see the
+/// `#[cfg(not(target_arch = "wasm32"))]` arm removed from `bridge.rs`), so
+/// this damage-chokepoint behaviour had zero native test coverage before the
+/// resource replaced it. There is no prior thread-local test to "migrate" —
+/// this is the first one.
+#[test]
+fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
+    use crate::entity_spawner::EntityUuid;
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    app.insert_resource(crate::server_app::GodMode(true));
+
+    let local_ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("test_app spawns exactly one LocalShip");
+    app.world_mut()
+        .entity_mut(local_ship)
+        .insert(Transform::from_xyz(0.0, 0.0, -20.0));
+
+    let mut bank = crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
+        id: "fore".into(),
+        facing_deg: 0.0,
+        fire_arc_deg: 360.0,
+        volley_count: 1,
+        volley_interval_secs: 0.1,
+        cooldown_secs: 3.0,
+        charge_time_secs: 0.0,
+        projectile_speed: 40.0,
+        collision_radius: 5.0,
+        visual_scale: 1.0,
+        damage: 50,
+        shield_pierce: 0.0,
+        recoil_impulse: 0.0,
+        screenshake_magnitude: 0.0,
+        marker: None,
+        barrels: Vec::new(),
+        pattern: Vec::new(),
+        range: 35.0,
+    });
+    // Sitting exactly on the target and never advanced by `tick_blaster_system`
+    // (this test calls `handle_blaster_hits` directly, so the projectile's
+    // flight-and-intercept logic never runs) — the point here is the god-mode
+    // clamp inside the hit handler, not projectile physics.
+    bank.in_flight.push(crate::blaster::BlasterProjectile {
+        id: "proj-god-mode".into(),
+        x: 0.0,
+        z: -20.0,
+        heading: 0.0,
+        speed: 40.0,
+        lifespan_remaining: 5.0,
+        collision_radius: 5.0,
+        damage: 50,
+        shield_pierce: 0.0,
+        source_uuid: "attacker-uuid".into(),
+    });
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        EntityUuid("attacker-uuid".into()),
+        BlasterSystemResource(vec![bank]),
+        Transform::default(),
+    ));
+
+    let hull_before = app
+        .world()
+        .entity(local_ship)
+        .get::<EntitySystemHull>()
+        .expect("local ship has a hull")
+        .0
+        .total_current();
+
+    app.world_mut()
+        .run_system_once(handle_blaster_hits)
+        .expect("handle_blaster_hits should run");
+    let out: Vec<ServerMessage> =
+        std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0)
+            .into_iter()
+            .map(|(_, msg)| msg)
+            .collect();
+
+    let hull_after = app
+        .world()
+        .entity(local_ship)
+        .get::<EntitySystemHull>()
+        .expect("local ship has a hull")
+        .0
+        .total_current();
+    assert_eq!(
+        hull_before, hull_after,
+        "God Mode must leave the local ship's hull untouched by a blaster hit"
+    );
+    assert!(
+        out.iter().any(|msg| matches!(
+            msg,
+            ServerMessage::DamageTaken { hull, shield } if *hull == 0.0 && *shield == 0.0
+        )),
+        "God Mode still reports the (zeroed) DamageTaken message; got {out:?}"
+    );
+}

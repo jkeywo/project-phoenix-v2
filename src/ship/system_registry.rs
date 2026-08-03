@@ -59,6 +59,22 @@ pub const RED_ALERT_KIND: &str = "red_alert";
 pub const VIEWSCREEN_SYSTEM_ID: &str = "viewscreen";
 pub const VIEWSCREEN_KIND: &str = "viewscreen";
 
+/// Wire `SystemId` for the God Mode debug toggle (issue #900).
+///
+/// Ownerless capability, but unlike `RED_ALERT_SYSTEM_ID`/`VIEWSCREEN_SYSTEM_ID`
+/// deliberately NOT declared by any `[[system]]` block in ship TOML: no station
+/// owns it, and `command_admission::policy::station_for_system` returning
+/// `None` for it is what denies a remote human token (the "unknown system"
+/// fallback). A local-console token is still admitted because
+/// `ControlSourceResolver::policy_for` defaults an unregistered `SystemId` to
+/// `ControlSource::Human` (`accept_human_input: true`), and
+/// `is_command_authorized`'s `LOCAL_CONSOLE_TOKEN` branch checks only that
+/// policy — never station tenure. The same default policy has `operate_ai:
+/// false`, so an `ai:`-prefixed token is denied without any special-casing:
+/// this system id has no registered `[[system]]` kind, so it never appears
+/// in the kind registry either.
+pub const GOD_MODE_SYSTEM_ID: &str = "god-mode";
+
 // ── Station ids (console namespace, issue #801) ──────────────────────────────
 //
 // These are NOT system ids. `"helm"` and `"tactical"` name crew stations

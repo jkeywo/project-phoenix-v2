@@ -190,6 +190,9 @@ fn apply_damage_zone_damage(
     // `Option<Res<_>>` so bare-`App` fixtures with no `LogFilterConfig`
     // inserted still pass parameter validation (see logging macro docs).
     log_cfg: Option<Res<crate::logging::LogFilterConfig>>,
+    // God Mode (issue #900): `Option<Res<_>>` for the same reason as
+    // `log_cfg` — bare-`App` region fixtures never insert it.
+    god_mode: Option<Res<crate::server_app::GodMode>>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -237,7 +240,7 @@ fn apply_damage_zone_damage(
                 }
 
                 // God mode: local ship takes no damage.
-                if is_local && crate::bridge::is_god_mode() {
+                if is_local && god_mode.as_ref().is_some_and(|g| g.0) {
                     hull_amount = 0.0;
                 }
 

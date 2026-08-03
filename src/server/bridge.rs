@@ -265,11 +265,23 @@ thread_local! {
     static SELECTED_SHIP_TEMPLATE_PATH: RefCell<Option<String>> =
         const { RefCell::new(None) };
 
-    /// God mode: local ship takes no damage.
-    static GOD_MODE: RefCell<bool> = const { RefCell::new(false) };
-
     /// Instagib: local ship deals 100× damage.
     static INSTAGIB: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Pending God Mode toggle requests from `wasm_toggle_god_mode()` (issue
+    /// #900). Drained by `drain_god_mode_toggle` each `PreUpdate` frame, which
+    /// turns each one into a `ToggleGodMode` `InboundMessage` under
+    /// `LOCAL_CONSOLE_TOKEN` — the same command-admission boundary every other
+    /// host command crosses — rather than writing a bool directly. A count
+    /// (not a single bool) so two clicks in one frame toggle twice, matching
+    /// what two separate admitted commands on two different ticks would do.
+    static PENDING_GOD_MODE_TOGGLES: RefCell<u32> = const { RefCell::new(0) };
+
+    /// Mirrors the authoritative `GodMode` resource each frame so
+    /// `wasm_get_god_mode()` can read it back without touching the Bevy World
+    /// from outside a system (issue #900). Written by `publish_god_mode`. Same
+    /// pattern as `SIM_TICK_COUNT`/`HAS_NAVIGATION_WAYPOINT`.
+    static GOD_MODE_MIRROR: RefCell<bool> = const { RefCell::new(false) };
 }
 
 // ── Host Channels (issue #818) ─────────────────────────────────────────────
@@ -318,18 +330,10 @@ pub mod host_channels {
     ];
 }
 
-// ── God mode / Instagib helpers ────────────────────────────────────────────
-
-pub fn is_god_mode() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        GOD_MODE.with(|v| *v.borrow())
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        false
-    }
-}
+// ── Instagib helper ─────────────────────────────────────────────────────────
+//
+// Unlike God Mode (issue #900), Instagib is not yet routed through command
+// admission — it stays a direct thread-local toggle, out of scope for #900.
 
 pub fn is_instagib() -> bool {
     #[cfg(target_arch = "wasm32")]
@@ -342,19 +346,27 @@ pub fn is_instagib() -> bool {
     }
 }
 
+/// Called by JS (host Debug panel God Mode button) to request a God Mode
+/// flip (issue #900). Unlike the old thread-local this does NOT flip
+/// anything itself: it queues a request that `drain_god_mode_toggle` turns
+/// into a `ToggleGodMode` command crossing the normal admission boundary on
+/// the next `PreUpdate` frame, so the flip carries a tick, lands in the
+/// command log, and replays. The JS binding's signature is unchanged.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_god_mode() {
-    GOD_MODE.with(|v| {
-        let current = *v.borrow();
-        *v.borrow_mut() = !current;
-    });
+    PENDING_GOD_MODE_TOGGLES.with(|v| *v.borrow_mut() += 1);
 }
 
+/// Called by JS to read the LocalShip's current God Mode state (issue #900),
+/// e.g. to reflect it on the Debug panel button. Reads the mirror maintained
+/// by `publish_god_mode`, since the authoritative value now lives in the
+/// `GodMode` Bevy resource rather than a thread-local this function can touch
+/// directly.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_god_mode() -> bool {
-    GOD_MODE.with(|v| *v.borrow())
+    GOD_MODE_MIRROR.with(|v| *v.borrow())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -650,6 +662,7 @@ pub fn wasm_init() {
             drain_debug_toggles,
             drain_force_start,
             drain_teleport_to_waypoint,
+            drain_god_mode_toggle,
             publish_waypoint_existence,
         ),
     )
@@ -661,7 +674,12 @@ pub fn wasm_init() {
     // fixed steps loses nothing.
     .add_systems(
         PostUpdate,
-        (flush_outbound, flush_host_channels, publish_sim_tick),
+        (
+            flush_outbound,
+            flush_host_channels,
+            publish_sim_tick,
+            publish_god_mode,
+        ),
     );
 
     // Insert the validated ShipStations resource if it was pre-validated.
@@ -1530,6 +1548,47 @@ fn drain_teleport_to_waypoint(
 #[cfg(target_arch = "wasm32")]
 fn publish_sim_tick(tick: Res<crate::sim_tick::SimTick>) {
     SIM_TICK_COUNT.with(|v| *v.borrow_mut() = tick.0);
+}
+
+/// Drains pending God Mode toggle requests each frame (issue #900), turning
+/// each into a `ToggleGodMode` `InboundMessage` under `LOCAL_CONSOLE_TOKEN` —
+/// the same host-console authority every other host-only command uses (see
+/// [`crate::console_bridge::LOCAL_CONSOLE_TOKEN`]).
+///
+/// Unlike [`drain_teleport_to_waypoint`] this does NOT mutate simulation
+/// state directly: it crosses the normal `InboundMessage` boundary so
+/// `command_admission::admit_system_commands` validates, stamps, and logs it
+/// exactly like a networked command, and its applier
+/// (`server_app::apply_god_mode_toggle`) flips the `GodMode` resource on the
+/// tick it was admitted for. That is the whole point of #900: God Mode used
+/// to be a thread-local this function would have flipped directly.
+#[cfg(target_arch = "wasm32")]
+fn drain_god_mode_toggle(mut writer: MessageWriter<InboundMessage>) {
+    let pending = PENDING_GOD_MODE_TOGGLES.with(|v| {
+        let n = *v.borrow();
+        *v.borrow_mut() = 0;
+        n
+    });
+    for _ in 0..pending {
+        writer.write(InboundMessage {
+            token: crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
+            msg: messages::ClientMessage::ControlSystem {
+                target: messages::SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.to_string()),
+                payload: messages::SystemControlPayload::ToggleGodMode,
+            },
+        });
+    }
+}
+
+/// Mirrors the authoritative `GodMode` resource into a thread-local each frame
+/// so `wasm_get_god_mode()` can read it back (issue #900). Pure read; no
+/// gameplay effect. `Option<Res<_>>` because the resource is inserted by
+/// `add_simulation_plugins_with` and this system is registered unconditionally
+/// in `wasm_init` — same defensive shape as `publish_waypoint_existence`.
+#[cfg(target_arch = "wasm32")]
+fn publish_god_mode(god_mode: Option<Res<crate::server_app::GodMode>>) {
+    let active = god_mode.map(|g| g.0).unwrap_or(false);
+    GOD_MODE_MIRROR.with(|v| *v.borrow_mut() = active);
 }
 
 /// Mirrors the LocalShip's Navigation-waypoint existence into a thread-local

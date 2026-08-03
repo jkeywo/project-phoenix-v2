@@ -34,6 +34,25 @@ use std::collections::VecDeque;
 /// One command to push across the boundary, and the tick to push it on.
 type Injection = (u64, SystemId, SystemControlPayload);
 
+/// The credential to inject a script command under.
+///
+/// Every command in this harness's script needs SOME token authorized to
+/// send it, and the log itself never carries one to recover (deliberately —
+/// see `command_admission::log`): both the recording run's synthetic
+/// injections and the replay's re-injections have to pick a token from the
+/// target alone. `god-mode` (issue #900) is authorized only for the host
+/// console (`LOCAL_CONSOLE_TOKEN`), never for `AI_BACKFILL_TOKEN` — see
+/// `command_admission::policy`'s god-mode tests. Every other target in this
+/// script is driven by the player ship's Backfill AI, which answers to
+/// `AI_BACKFILL_TOKEN`.
+fn token_for(target: &SystemId) -> &'static str {
+    if target.0 == project_phoenix::system_registry::GOD_MODE_SYSTEM_ID {
+        project_phoenix::console_bridge::LOCAL_CONSOLE_TOKEN
+    } else {
+        AI_BACKFILL_TOKEN
+    }
+}
+
 /// What one run leaves behind.
 struct Run {
     json: String,
@@ -90,7 +109,7 @@ fn drive(mut queue: VecDeque<Injection>) -> Run {
             app.world_mut()
                 .resource_mut::<Messages<InboundMessage>>()
                 .write(InboundMessage {
-                    token: AI_BACKFILL_TOKEN.into(),
+                    token: token_for(&target).into(),
                     msg: ClientMessage::ControlSystem { target, payload },
                 });
         }
@@ -175,6 +194,15 @@ fn a_seed_and_its_command_log_reproduce_the_run() {
             215,
             helm_thrust.clone(),
             SystemControlPayload::SetThrust { value: -0.5 },
+        ),
+        // Issue #900: God Mode toggles through the same command log as
+        // everything else in this script, under its own authorized token
+        // (`token_for`) — proving the replay reproduces it exactly, not just
+        // the helm/red-alert commands the log already carried before #900.
+        (
+            230,
+            SystemId(project_phoenix::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            SystemControlPayload::ToggleGodMode,
         ),
     ]);
 

@@ -1473,6 +1473,10 @@ pub(crate) fn tick_beams_apply_damage(
     // `Option<Res<_>>`, never bare — bare-`App` weapons fixtures never insert
     // `LogFilterConfig` (see logging macro docs).
     log: Option<Res<crate::logging::LogFilterConfig>>,
+    // God Mode (issue #900): `Option<Res<_>>` for the same reason as `log` —
+    // bare-`App` weapons fixtures never insert it, and a bare `Res` would fail
+    // parameter validation there rather than defaulting to "off".
+    god_mode: Option<Res<crate::server_app::GodMode>>,
 ) {
     // Uuids whose destruction has already been reported this tick (issue #790).
     //
@@ -1579,7 +1583,7 @@ pub(crate) fn tick_beams_apply_damage(
             let is_asteroid = ast_uuid.is_some();
 
             // God mode: local ship takes no damage.
-            if target_is_local && crate::bridge::is_god_mode() {
+            if target_is_local && god_mode.as_ref().is_some_and(|g| g.0) {
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((
                         Target::All,

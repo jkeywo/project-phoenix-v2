@@ -2962,6 +2962,12 @@ window.addEventListener('TrunkApplicationStarted', () => {
       var tabs = document.querySelectorAll('.debug-tab');
       var actions = document.querySelectorAll('.debug-action');
       var teleportBtn = document.querySelector('.debug-action[data-action="teleport-waypoint"]');
+      // Issue #900: God Mode now flips via a logged command applied on its
+      // own admitted tick rather than a thread-local flipped synchronously by
+      // wasm_toggle_god_mode(), so the button's active class is synced from
+      // rafLoop each frame (like the teleport button's disabled state) rather
+      // than read back immediately after the click.
+      var godModeBtn = document.querySelector('.debug-action[data-action="godmode"]');
       var panelOpen = false;
       var activeTab = 0;
       // Track resource ON/OFF state (all 4 are toggled together)
@@ -3043,11 +3049,11 @@ window.addEventListener('TrunkApplicationStarted', () => {
               if (typeof wasm_toggle_debug_regions === 'function') wasm_toggle_debug_regions();
               break;
             case 'godmode':
+              // Fire-and-forget (like teleport-waypoint): the toggle now
+              // crosses command admission and applies on its own admitted
+              // tick, so the button's active class is synced from rafLoop
+              // rather than read back synchronously here.
               if (typeof wasm_toggle_god_mode === 'function') wasm_toggle_god_mode();
-              // Read state after toggle and update visual
-              if (typeof wasm_get_god_mode === 'function') {
-                btn.classList.toggle('active', wasm_get_god_mode());
-              }
               break;
             case 'instagib':
               if (typeof wasm_toggle_instagib === 'function') wasm_toggle_instagib();
@@ -3094,6 +3100,12 @@ window.addEventListener('TrunkApplicationStarted', () => {
           var hasWaypoint = wasm_has_navigation_waypoint();
           teleportBtn.disabled = !hasWaypoint;
           teleportBtn.classList.toggle('disabled', !hasWaypoint);
+        }
+        // God Mode active-class sync (issue #900): reads back the mirror of
+        // the authoritative `GodMode` resource each frame rather than once,
+        // synchronously, right after the toggle request is queued.
+        if (godModeBtn && typeof wasm_get_god_mode === 'function') {
+          godModeBtn.classList.toggle('active', wasm_get_god_mode());
         }
         requestAnimationFrame(rafLoop);
       }

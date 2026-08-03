@@ -1436,6 +1436,28 @@ mod tests {
         );
     }
 
+    /// ToggleGodMode command round-trip (issue #900). Sent from
+    /// `bridge::drain_god_mode_toggle` (not JS directly — the wasm export
+    /// keeps its old zero-argument signature) under `LOCAL_CONSOLE_TOKEN`, but
+    /// the wire shape it produces is pinned here the same way every other
+    /// `ControlSystem` payload is.
+    #[test]
+    fn toggle_god_mode_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            payload: SystemControlPayload::ToggleGodMode,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"god-mode","payload":{"type":"ToggleGodMode"}}}"#,
+            "ToggleGodMode wire shape must stay pinned"
+        );
+    }
+
     /// `TorpedoTubeState` with non-default volley fields round-trips (issue #632).
     #[test]
     fn torpedo_tube_state_volley_fields_round_trip() {

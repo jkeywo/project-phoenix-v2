@@ -655,12 +655,13 @@ pub(crate) fn handle_blaster_hits(
     // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
     // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
     mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
-    // Seeded RNG + log filter, bundled: separately they put this system one
-    // over Bevy's 16-parameter ceiling.
+    // Seeded RNG + log filter + God Mode (issue #900), bundled: separately
+    // they put this system one over Bevy's 16-parameter ceiling.
     ambient: crate::server_app::SimRngAndLog,
 ) {
     let sim_rng = &ambient.rng;
     let log = &ambient.log;
+    let god_mode = ambient.god_mode_active();
     // Build target list from live ECS transforms.
     let mut targets: Vec<(String, f32, f32, f32)> = Vec::new();
     for (ast_uuid, transform) in asteroid_q.iter() {
@@ -734,7 +735,7 @@ pub(crate) fn handle_blaster_hits(
             }
 
             // God mode: local ship takes no damage.
-            if is_local && crate::bridge::is_god_mode() {
+            if is_local && god_mode {
                 outbox.0.push((
                     Target::All,
                     ServerMessage::DamageTaken {

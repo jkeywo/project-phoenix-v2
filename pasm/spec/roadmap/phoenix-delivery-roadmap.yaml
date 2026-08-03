@@ -23,6 +23,7 @@ entities:
         - roadmap-snapshot-contract-tracer
         - roadmap-demo-release
         - post-demo-release-bands
+        - roadmap-scenario-scripting
         - roadmap-falling-skyway-foundation
         - roadmap-falling-skyway-content
         - roadmap-native-and-cloud-delivery
@@ -103,7 +104,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Post-Demo Release Bands A-E
-      summary: "Post-demo work ships as five public builds. A: Falling Skyway (#851/#852) with native and Cloudflare delivery (#855), the consequence and scripted-progression resume adapters (#863/#864), mod content packs (#856) with template-aware editing (#910), and the destroyer readiness slice. B: Borrowed Sun (#858) with P2P multi-ship (#854), slot UX and portable export (#865/#866), and the cruiser. C: Narrow Season (#859) with the GM console MVP (#930 M1-M3), campaign-continuity projection (#867), and the courier (#877). D: The Broken Tithe (#860) with GM facilitation and safety (M4-M5) and the battleship. E: The Silent Corridor (#861) with the GM console complete (M6-M8) and #922's full-matrix balance closure."
+      summary: "Post-demo work ships as five public builds. A: Rhai scenario scripting ahead of the mission content, Falling Skyway (#851/#852) with native and Cloudflare delivery (#855), the consequence and scripted-progression resume adapters (#863/#864), mod content packs (#856) with template-aware editing (#910), and the destroyer readiness slice. B: Borrowed Sun (#858) with P2P multi-ship (#854), slot UX and portable export (#865/#866), and the cruiser. C: Narrow Season (#859) with the GM console MVP (#930 M1-M3), campaign-continuity projection (#867), and the courier (#877). D: The Broken Tithe (#860) with GM facilitation and safety (M4-M5) and the battleship. E: The Silent Corridor (#861) with the GM console complete (M6-M8) and #922's full-matrix balance closure."
       rationale:
         - Each band is a shippable public build, not a paper milestone, so every band pairs one campaign mission with one platform capability, one more playable hull, and one visual/UX polish pass.
         - "The hull rollout is deliberately one at a time — destroyer, cruiser, courier, battleship — so tutorials, doctrine, and balance evidence land together per hull instead of as a single catalogue-wide push."
@@ -114,6 +115,26 @@ entities:
       authority: non-authoritative
       reads: [world-content-pack-state]
       runs_in: [host-browser-runtime]
+
+  - component: roadmap-scenario-scripting
+    core:
+      status: accepted
+      confidence: provisional
+      title: Rhai Scenario Scripting
+      summary: "Release A, ahead of Falling Skyway. Embed the fleet's deterministic Rhai sandbox (vellum-script) so scenario logic is authored as script while TOML keeps the declarative spine: registered host functions push onto a per-call effect buffer that drains into the existing ActionCmd boundary, FlagStore stays the only mutable state behind a sugared `flags` type, script registrations build the same Trigger structs the TOML front-end builds, and comms dialogue trees become named functions instead of nested tables. Surviving worlds convert; test-infrastructure worlds convert last as a control group, after which the declarative trigger evaluator is deleted."
+      rationale:
+        - "Authoring has outgrown the format: a 35-field stringly-typed RawActionEntry, three hand-maintained dispatch surfaces (world/dispatch.rs, the parallel match in console/comms/server.rs, and editor/action-schema.js), triplicated triggers because there is no elif, and comms nesting that reaches eight-segment table paths and localization keys."
+        - "It runs early in release A because Falling Skyway is the first real content authored post-demo: landing scripting after it would author mission 1 in a departing format and pay the conversion twice, setting the crisis-world toolkit's authoring patterns on the wrong base."
+        - "It also precedes mod content packs (#856), which would carry executable script — vellum-script's deny-by-default profile (no eval, no imports, no module resolver, no wall clock, bounded operations) becomes the pack trust boundary, and defining the pack format once with it included beats widening it afterwards."
+        - "The split follows vellum's charter: the sandbox and call seam come from vellum-script unchanged, and the vocabulary — host functions, effect buffer, loader, span mapping, cross-reference validation — stays in phoenix. The one contribution back is a wasm32 build job in vellum's CI, which proves the sandbox on phoenix's target without widening its API."
+        - "Determinism constraints are inherited, not negotiated: integer-only arithmetic (no_float), operation limits rather than timeouts, fixed per-call and per-tick budgets so every peer fails on the same tick, and deferred work represented as serializable (tick, fn_name) pairs rather than live closures."
+        - "The editor becomes a script editor and action-schema.js is deleted; sequencing against template-aware editing (#910) is deliberate, since both touch the editor shell in the same band. If release A gets tight, the content conversion and evaluator teardown slip to band B — the host seam, trigger front-end, scheduling, and comms work do not, because Falling Skyway depends on them."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, world-content-pack-state]
+      coordinates: [roadmap-falling-skyway-foundation, roadmap-mod-content-packs]
+      runs_in: [host-browser-runtime, headless-runtime]
 
   - component: roadmap-falling-skyway-foundation
     core:

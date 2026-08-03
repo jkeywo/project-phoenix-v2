@@ -149,6 +149,60 @@ fn the_real_simulation_keeps_the_replay_contract() {
     );
 }
 
+/// Issue #902 AC3, made literally true rather than argued from the digest:
+/// a refused command must not move a single [`SimRng`] stream, checked
+/// against the raw [`SimRngState`] itself rather than through the folded
+/// digest that already includes it (see `headless::digest`'s module docs —
+/// `SimRngState` folds via `digest_postcard` as part of the run-scope
+/// preamble). The digest equality `rejection_is_pure` already asserts is
+/// sufficient to catch a stray draw, but this test pins the SPECIFIC claim
+/// the issue names — RNG stream positions, not merely "some hash of
+/// everything" — so a reviewer does not have to trust the fold to believe it.
+#[test]
+fn a_refused_command_leaves_every_rng_stream_position_untouched() {
+    use project_phoenix::sim_rng::SimRng;
+    use vellum_replay::Simulation;
+
+    let args = args();
+    let script = script();
+    let mut sim = PhoenixSim::new_tailless(&args, script.len()).expect("the fixture should build");
+    vellum_replay::replay_into(&mut sim, &script).expect("the setup script should apply");
+
+    let before = sim
+        .app_mut()
+        .world()
+        .get_resource::<SimRng>()
+        .expect("a seeded run carries SimRng")
+        .state();
+
+    // The sole rejection PhoenixSim has: a tick the clock has already left
+    // behind, decided before anything steps, submits, or draws.
+    let rejected = command(
+        1,
+        SystemId("red-alert".into()),
+        SystemControlPayload::SetRedAlert { active: true },
+    );
+    let outcome = sim.apply(&rejected);
+    assert!(
+        outcome.is_err(),
+        "the command given as `rejected` was accepted, so this check proves \
+         nothing"
+    );
+
+    let after = sim
+        .app_mut()
+        .world()
+        .get_resource::<SimRng>()
+        .expect("SimRng must still be present after a refusal")
+        .state();
+
+    assert_eq!(
+        before, after,
+        "a refused command moved at least one SimStream's position — a draw \
+         happened on a path that was not allowed to happen at all"
+    );
+}
+
 /// AC5 + AC7's happy half: a run writes an artifact, a second run consumes it,
 /// and every checkpoint plus the final digest agree.
 ///

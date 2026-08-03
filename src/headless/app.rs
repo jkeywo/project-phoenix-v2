@@ -500,6 +500,8 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         SimPluginOptions {
             render: false,
             physics_last: args.physics_last,
+            registration_order: args.registration_order,
+            extra_registration_probes: args.extra_registration_probes,
         },
     );
     // After the plugins, so it overrides their OS-seeded `init_resource`.

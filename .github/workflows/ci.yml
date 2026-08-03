@@ -100,6 +100,17 @@ jobs:
       - name: Run RNG determinism tests
         run: cargo test --features headless --test rng_determinism
 
+      # The registration-order determinism guard (issue #899, ordering half of
+      # the parent's #849 ask). `tests/registration_order_determinism.rs` is
+      # `#![cfg(all(feature = "headless", ...))]`, same as the two suites
+      # above, and needs the same own-process isolation for the same reason:
+      # `--deterministic` only pins Bevy's task pool to one thread if nothing
+      # else has already claimed the process-global pool first. Same seed, the
+      # 13 SimSet-chain plugins registered in a deterministic shuffle instead
+      # of their canonical order, byte-identical digest required either way.
+      - name: Run registration-order determinism tests
+        run: cargo test --features headless --test registration_order_determinism
+
   # ── WASM build ────────────────────────────────────────────────────────────────
   build:
     needs: test

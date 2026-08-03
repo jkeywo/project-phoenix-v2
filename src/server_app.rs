@@ -378,14 +378,131 @@ pub struct SimPluginOptions {
     /// `configure_sets` edges below, and not by the accident of which
     /// `add_plugins` call happened to come first.
     pub physics_last: bool,
+    /// Which order to register the `SimSet`-chain plugins in (issue #899).
+    ///
+    /// `Canonical` reproduces the order below, unchanged. `Shuffled(seed)`
+    /// deterministically permutes it — same seed, same permutation, every
+    /// time — while leaving the `configure_sets` edges on `SimSet` itself,
+    /// and every plugin's own internal `.after`/`.before` wiring, untouched.
+    /// Those edges are exactly what SHOULD pin behaviour; this knob exists to
+    /// prove that they do, and that nothing is quietly leaning on registration
+    /// order instead. Not reachable from any command line, like `physics_last`
+    /// above — the sole callers are `tests/registration_order_determinism.rs`.
+    pub registration_order: RegistrationOrder,
+    /// Two extra, mutually-unordered systems to fold into the same shuffled
+    /// group, for the mutation-proof half of issue #899's guard only. `None`
+    /// in every real call site and in every other test. See
+    /// `tests/registration_order_determinism.rs` for what they prove.
+    pub extra_registration_probes: Option<RegistrationProbes>,
 }
+
+/// A pair of `fn(&mut App)` registrars — see
+/// [`SimPluginOptions::extra_registration_probes`]. Its own alias purely to
+/// keep that field (and its `HeadlessArgs` twin) under clippy's
+/// `type_complexity` threshold.
+pub type RegistrationProbes = (fn(&mut App), fn(&mut App));
 
 impl Default for SimPluginOptions {
     fn default() -> Self {
         Self {
             render: true,
             physics_last: false,
+            registration_order: RegistrationOrder::Canonical,
+            extra_registration_probes: None,
         }
+    }
+}
+
+/// See [`SimPluginOptions::registration_order`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RegistrationOrder {
+    /// The order the plugins are listed in `add_simulation_plugins_with`.
+    #[default]
+    Canonical,
+    /// A deterministic permutation of that order, keyed by `seed`. Two calls
+    /// with the same seed always produce the same permutation; different
+    /// seeds are not guaranteed to differ from each other or from
+    /// `Canonical`, so a test wanting a *changed* order should not assume a
+    /// single seed proves anything — it should compare against `Canonical`.
+    Shuffled(u64),
+}
+
+/// The `SimSet`-chain plugins, in their canonical registration order.
+///
+/// Each entry is a non-capturing closure — coerced to a plain `fn(&mut App)`
+/// pointer — so the array is `Copy` and cheap to clone into a `Vec` for
+/// shuffling. Extracted to its own array (rather than a chain of
+/// `.add_plugins` calls) precisely so [`register_sim_set_plugins`] has
+/// something it can reorder; the systems and edges each plugin registers are
+/// unchanged either way.
+const SIM_SET_PLUGIN_REGISTRARS: [fn(&mut App); 13] = [
+    |app| {
+        app.add_plugins(crate::region_plugin::RegionPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::console_ai_plugin::ConsoleAiPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::ai_plugin::AiPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::captain_plugin::CaptainPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::helm_plugin::HelmPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::ship_plugin::ShipPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::weapons_plugin::WeaponsPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::repair_plugin::RepairPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::power_plugin::ShipPowerPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::shields_plugin::ShipShieldsPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::sensors_plugin::ShipSensorsPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::navigation_plugin::NavigationPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::comms_plugin::CommsConsolePlugin);
+    },
+];
+
+/// Register the `SimSet`-chain plugins listed in [`SIM_SET_PLUGIN_REGISTRARS`],
+/// in either their canonical order or a deterministic shuffle of it (issue
+/// #899), plus the mutation-proof probes when a test supplies them.
+///
+/// This is the coarsest granularity that satisfies the guard's acceptance
+/// criteria: each plugin's internal systems keep whatever order the plugin
+/// itself wires, and the `SimSet` chain's own `configure_sets` edges
+/// (registered by the caller before this runs) are untouched. Only the
+/// relative order these 13 (or 15, with probes) top-level registrations run
+/// in is permuted — which is exactly the ambiguity `SimSet` leaves open for
+/// Bevy to resolve, and exactly what a newly-added, un-gated system without
+/// an explicit edge would otherwise be at the mercy of.
+fn register_sim_set_plugins(app: &mut App, opts: SimPluginOptions) {
+    let mut registrars: Vec<fn(&mut App)> = SIM_SET_PLUGIN_REGISTRARS.to_vec();
+    if let Some((probe_a, probe_b)) = opts.extra_registration_probes {
+        registrars.push(probe_a);
+        registrars.push(probe_b);
+    }
+    if let RegistrationOrder::Shuffled(seed) = opts.registration_order {
+        use rand::seq::SliceRandom;
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        registrars.shuffle(&mut rng);
+    }
+    for register in registrars {
+        register(app);
     }
 }
 
@@ -500,21 +617,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .chain()
             .run_if(in_state(GamePhase::InProgress))
             .after(crate::lobby::LobbySystemSet),
-    )
-    .add_plugins(crate::region_plugin::RegionPlugin)
-    .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
-    .add_plugins(crate::ai_plugin::AiPlugin)
-    .add_plugins(crate::captain_plugin::CaptainPlugin)
-    .add_plugins(crate::helm_plugin::HelmPlugin)
-    .add_plugins(crate::ship_plugin::ShipPlugin)
-    .add_plugins(crate::weapons_plugin::WeaponsPlugin)
-    .add_plugins(crate::repair_plugin::RepairPlugin)
-    .add_plugins(crate::power_plugin::ShipPowerPlugin)
-    .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
-    .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
-    .add_plugins(crate::navigation_plugin::NavigationPlugin)
-    .add_plugins(crate::comms_plugin::CommsConsolePlugin)
-    .add_message::<AsteroidDestroyedVfx>()
+    );
+
+    // The SimSet-chain plugins (issue #899's shuffle knob). Broken out of the
+    // `.add_plugins` chain above into their own function so a test can permute
+    // the order they register in — see `register_sim_set_plugins`.
+    register_sim_set_plugins(app, opts);
+
+    app.add_message::<AsteroidDestroyedVfx>()
     // Balance telemetry. Registered here (not behind `headless`) so the
     // chokepoints can emit unconditionally — only the *collection* is
     // headless-only.

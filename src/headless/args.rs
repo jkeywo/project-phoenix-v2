@@ -9,6 +9,7 @@
 
 use crate::headless::duel::MAX_SIDE;
 use crate::logging::{parse_log_entities, parse_log_spec, LogFilterConfig};
+use crate::server_app::{RegistrationOrder, RegistrationProbes};
 
 /// Default frame rate the harness drives the app at. Matches the 60 Hz rAF
 /// rate of the browser host AND the default `[global] sim_tick_hz`, so by
@@ -201,6 +202,15 @@ pub struct HeadlessArgs {
     /// colliding scenario with the contributing systems registered in either
     /// order and require the two to reach the same state.
     pub physics_last: bool,
+    /// Which order to register the `SimSet`-chain plugins in
+    /// (`SimPluginOptions::registration_order`, issue #899). **Not a
+    /// command-line flag**, like `physics_last` above — the sole caller is
+    /// `tests/registration_order_determinism.rs`.
+    pub registration_order: RegistrationOrder,
+    /// Extra mutation-proof probes to fold into the shuffled group
+    /// (`SimPluginOptions::extra_registration_probes`, issue #899). `None` in
+    /// every real run.
+    pub extra_registration_probes: Option<RegistrationProbes>,
 }
 
 impl Default for HeadlessArgs {
@@ -222,6 +232,8 @@ impl Default for HeadlessArgs {
             perf_capture_path: None,
             perf_scenario: DEFAULT_PERF_SCENARIO.to_string(),
             physics_last: false,
+            registration_order: RegistrationOrder::Canonical,
+            extra_registration_probes: None,
         }
     }
 }

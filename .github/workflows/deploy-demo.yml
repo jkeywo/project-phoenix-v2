@@ -117,6 +117,47 @@ jobs:
           fi
           echo "ok: demo scenario manifest is in place"
 
+      # Cloudflare Pages refuses any file over 25 MiB, and the release WASM
+      # is ~38 MiB even after the -Oz pass (run 30847968215). Models are all
+      # under the cap — the binary is the only offender — so it ships
+      # gzipped (~11-13 MiB) and the host page decompresses it in the
+      # browser via DecompressionStream before instantiation. Pages serves
+      # a .gz asset verbatim (Content-Type: application/gzip, no
+      # Content-Encoding), so the stream reaching the page really is gzip.
+      # Deploy-only: the dev build on GitHub Pages (100 MiB cap) is untouched.
+      - name: Compress the WASM under the Pages file cap
+        run: |
+          set -euo pipefail
+          WASM=$(ls dist/*_bg.wasm)
+          BASE=$(basename "$WASM")
+          gzip -9 "$WASM"
+          echo "compressed ${BASE}: $(stat -c%s "${WASM}.gz") bytes"
+
+          # The loader: init() accepts a Promise<Response>, and wasm-bindgen
+          # falls through to instantiateStreaming on it, so the swap is one
+          # expression around the original URL.
+          LOADER="fetch('./${BASE}.gz').then((r) => new Response(r.body.pipeThrough(new DecompressionStream('gzip')), { headers: { 'Content-Type': 'application/wasm' } }))"
+          grep -qF "module_or_path: './${BASE}'" dist/index.html
+          sed -i "s|module_or_path: './${BASE}'|module_or_path: ${LOADER//&/\\&}|" dist/index.html
+
+          # The preload link: repoint at the .gz with a recomputed integrity
+          # hash so the browser's early fetch is the same bytes the loader
+          # asks for.
+          INTEGRITY="sha384-$(openssl dgst -sha384 -binary "${WASM}.gz" | base64 -w0)"
+          sed -i "s|href=\"./${BASE}\" crossorigin=\"anonymous\" integrity=\"sha384-[A-Za-z0-9+/=]*\" as=\"fetch\" type=\"application/wasm\"|href=\"./${BASE}.gz\" crossorigin=\"anonymous\" integrity=\"${INTEGRITY}\" as=\"fetch\" type=\"application/gzip\"|" dist/index.html
+
+          # Nothing may still reference the uncompressed name, and nothing
+          # in dist may exceed the Pages cap.
+          if grep -rF "${BASE}'" dist/index.html | grep -v "${BASE}.gz"; then
+            echo "index.html still references the uncompressed wasm" >&2
+            exit 1
+          fi
+          if find dist -type f -size +25M | grep .; then
+            echo "files over the 25 MiB Pages cap remain in dist/" >&2
+            exit 1
+          fi
+          echo "ok: no file in dist/ exceeds 25 MiB"
+
       - name: Deploy demo TURN worker
         uses: cloudflare/wrangler-action@v3
         with:

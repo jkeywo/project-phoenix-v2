@@ -753,13 +753,26 @@ pub(crate) fn helm_ai_decision(
 /// That geometry check reads `pending.arcs` — the emitting family's usable
 /// arc set AS OF THE TICK THE REQUEST WAS RAISED — and nothing here re-derives
 /// it. If the family that raised the request goes unusable afterwards (a
-/// torpedo tube drains its load, a bank is knocked offline) the request is
-/// never WITHDRAWN for that reason; it only ever clears on the geometry above.
-/// That hole predates #918 and this change does not close it — a declining
-/// leg only widens the window it is visible in, because the request now
-/// stands for as long as the leg keeps declining instead of being satisfied
-/// by an early turn onto it. Left as future work; withdrawal is deliberately
-/// not implemented here.
+/// torpedo tube drains its load, a bank is knocked offline), this function
+/// still does not notice on its own: `pending.arcs` is a snapshot, not a live
+/// read of the family. That hole predates #918, which only widened the window
+/// it was visible in — a declining leg let a stale request stand for as long
+/// as the leg kept declining, instead of being satisfied by an early turn
+/// onto it.
+///
+/// **Issue #932 closes the hole, but not here.** `tick_weapons_arc_request`
+/// (`src/console/weapons/mod.rs`) already recomputes family usability every
+/// tick to decide whether to keep asking; it is the one place that can notice
+/// the family it last asked FOR has gone unusable, and now does: when the
+/// family named by its own debounce state (`WeaponsArcRequestState`) drops out
+/// of the qualifying set, it enqueues a channel-3 `ArcBearingWithdraw` for
+/// that family over the same bus the original request travelled.
+/// `process_coordination_lag` consumes it unconditionally — clearing
+/// `PendingArcBearingRequest` is expiry, not a steering decision, so
+/// `leg_yields_to_arc_requests` plays no part in it, exactly as satisfaction
+/// and the geometry clears above are never gated on it either. A withdrawn
+/// request cannot be honoured by a later leg that yields, because there is
+/// nothing left in `pending.target` for that leg to read.
 ///
 /// A decline is not a refusal to the *requester*, and nothing about a decline
 /// makes the emitter re-raise the request either — `tick_weapons_arc_request`
@@ -769,7 +782,8 @@ pub(crate) fn helm_ai_decision(
 /// on a decline clears `PendingArcBearingRequest`: the request the last
 /// debounced emission set simply stands, unconsumed, until the hull enters a
 /// leg that yields — which then honours it on the very first tick it is
-/// current.
+/// current, PROVIDED the emitting family is still usable; #932's withdrawal is
+/// what keeps that proviso true.
 fn apply_arc_bearing_request(
     steering: &mut f32,
     pending: Option<&mut PendingArcBearingRequest>,
@@ -11579,6 +11593,178 @@ verb = "engage_boost"
             get_steering_input(&mut app) > 0.05,
             "a helm on a travelling leg must still turn to bring a family that cannot \
              bear onto its target — the whole point of #673-#684 — got {}",
+            get_steering_input(&mut app)
+        );
+    }
+
+    // ── #932: a standing request is WITHDRAWN when its family goes unusable ──
+
+    /// Withdraw the standing arc-bearing request through the REAL channel-3
+    /// wire — `handle_coordination_enqueue` then `process_coordination_lag`,
+    /// both part of `ShipPlugin` and already running in this fixture — rather
+    /// than poking `PendingArcBearingRequest` directly the way
+    /// `stand_up_fore_arc_request` stands one up.
+    ///
+    /// `stand_up_fore_arc_request` pokes state because no real Weapons system
+    /// runs in this bare-App fixture to raise a request in the first place;
+    /// withdrawing it the same way would prove nothing about the wire issue
+    /// #932 actually changed. `tick_weapons_arc_request` — the real emitter,
+    /// exercised on its own terms in `console::weapons::server_tests` — raises
+    /// exactly this `ArcBearingWithdraw` when the family it last asked for
+    /// drains to empty; this helper drives the SAME payload down the SAME bus
+    /// `process_coordination_lag` consumes, so what's under test here is
+    /// entirely the consuming half.
+    ///
+    /// Zeroes `coordination_lag_secs` first so the withdrawal is due the same
+    /// tick it's enqueued (production ships lag it; see the `coord_test_app`
+    /// pattern in `coordination_systems.rs`'s own tests for the precedent).
+    /// `process_coordination_lag` runs in `SimSet::Modifiers`, AFTER
+    /// `ai_helm_steering` in `SimSet::Physics`, so the clear lands too late to
+    /// affect the tick it's consumed in — callers tick once more to observe a
+    /// cleared `PendingArcBearingRequest` reflected in steering.
+    fn withdraw_fore_arc_request(app: &mut App, family: crate::messages::WeaponFamily) {
+        let ship = find_ship_entity(app);
+        {
+            let mut cfg = app
+                .world_mut()
+                .get_mut::<ShipConfigComponent>(ship)
+                .expect("ship carries ShipConfigComponent");
+            cfg.0.coordination_lag_secs = 0.0;
+        }
+        app.world_mut()
+            .resource_mut::<Messages<crate::ship_plugin::CoordinationEnqueue>>()
+            .write(crate::ship_plugin::CoordinationEnqueue {
+                source_entity: ship,
+                sender_origin: ControlSource::Ai,
+                target: crate::system_registry::helm_station_key(),
+                payload: crate::messages::CoordinationPayload::ArcBearingWithdraw { family },
+                sender_label: "Weapons".to_string(),
+            });
+        tick(app);
+    }
+
+    /// **Issue #932, the hole #918 documented and left open: a standing
+    /// request whose emitting family goes unusable is WITHDRAWN, so a later
+    /// yielding leg has nothing left to honour.**
+    ///
+    /// Same fixture and same standing request as
+    /// `a_travelling_leg_still_turns_to_bear_under_the_same_request` — a
+    /// travelling ("inbound") leg, dead-ahead pursuit target, and a beam
+    /// contact the fore arc cannot cover — with one thing added: before the
+    /// leg gets to react to it, the family that raised the request (Torpedoes,
+    /// standing in for "every tube just emptied") is withdrawn. The leg still
+    /// yields — nothing about #918's consent changes — but there is no
+    /// bearing left in `PendingArcBearingRequest` for it to yield TO.
+    #[test]
+    fn a_withdrawn_arc_request_does_not_turn_a_yielding_leg() {
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "inbound",
+            "the fixture must be on a TRAVELLING (yielding) leg for this to mean anything"
+        );
+
+        // Dead ahead pursuit target, so the doctrine's own solution needs no
+        // turn at all: any yaw at all is attributable to the request.
+        let bearing = uuid::Uuid::new_v4();
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid,
+                    name: Some(BOGEY.into()),
+                    position: [0.0, 0.0, -200.0],
+                    yaw: Some(0.0),
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: bearing,
+                    name: Some("beam contact".into()),
+                    position: [200.0, 0.0, -1.0],
+                    yaw: Some(0.0),
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+            ],
+        });
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        stand_up_fore_arc_request(&mut app, bearing);
+
+        // The torpedo tubes that raised this request just ran dry: withdraw
+        // it, exactly as `tick_weapons_arc_request` now does on its own.
+        withdraw_fore_arc_request(&mut app, crate::messages::WeaponFamily::Torpedoes);
+        assert!(
+            !arc_request_stands(&mut app),
+            "the withdrawal must clear PendingArcBearingRequest"
+        );
+
+        // One more tick: `ai_helm_steering` now reads the CLEARED request.
+        // Nothing in this bare-App fixture re-raises it — there is no real
+        // Weapons system running here to do so.
+        tick(&mut app);
+
+        assert!(
+            get_steering_input(&mut app).abs() < 0.05,
+            "a WITHDRAWN request must not turn a yielding leg — the family that \
+             raised it has nothing left to bring to bear; got steering {}",
+            get_steering_input(&mut app)
+        );
+    }
+
+    /// The positive control for the test above: the SAME fixture, the SAME
+    /// standing request, but never withdrawn — a yielding leg still turns to
+    /// bring a still-usable family to bear. Pins that #932's withdrawal is the
+    /// only thing that changed; a yielding leg's consent (#918) did not.
+    #[test]
+    fn an_unwithdrawn_arc_request_still_turns_a_yielding_leg() {
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "inbound");
+
+        let bearing = uuid::Uuid::new_v4();
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid,
+                    name: Some(BOGEY.into()),
+                    position: [0.0, 0.0, -200.0],
+                    yaw: Some(0.0),
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: bearing,
+                    name: Some("beam contact".into()),
+                    position: [200.0, 0.0, -1.0],
+                    yaw: Some(0.0),
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+            ],
+        });
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        stand_up_fore_arc_request(&mut app, bearing);
+        tick(&mut app);
+
+        assert!(
+            get_steering_input(&mut app) > 0.05,
+            "an un-withdrawn standing request from a still-usable family must still \
+             turn a yielding leg to bear — got {}",
             get_steering_input(&mut app)
         );
     }

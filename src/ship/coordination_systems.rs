@@ -118,6 +118,17 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
             };
             format!("Come about, bring {weapons} to bear on {label}")
         }
+        CoordinationPayload::ArcBearingWithdraw { family } => {
+            // Issue #932: the standing request above this one is being pulled
+            // because its family went unusable, not because anyone changed
+            // their mind about the bearing.
+            let weapons = match family {
+                crate::messages::WeaponFamily::Phasers => "phasers",
+                crate::messages::WeaponFamily::Blasters => "blasters",
+                crate::messages::WeaponFamily::Torpedoes => "torpedoes",
+            };
+            format!("Belay that — {weapons} no longer able to bear")
+        }
         CoordinationPayload::PowerBrownout {
             label,
             allocated_level,
@@ -452,6 +463,18 @@ pub fn process_coordination_lag(
                                 // self-clears against — that family's geometry.
                                 pending.target = uuid::Uuid::parse_str(uuid).ok();
                                 pending.arcs = arcs.clone();
+                            }
+                        }
+                        // Issue #932: withdraw a standing request whose
+                        // emitting family has gone unusable. This is expiry,
+                        // not a steering decision — cleared unconditionally,
+                        // never gated on `leg_yields_to_arc_requests` (#918),
+                        // which only ever gates the steering WRITE a live
+                        // request can bias.
+                        if let CoordinationPayload::ArcBearingWithdraw { .. } = &msg.payload {
+                            if let Some(pending) = pending_bearing.as_deref_mut() {
+                                pending.target = None;
+                                pending.arcs.clear();
                             }
                         }
                         // Channel-3 Navigation-to-Helm handoff (issues #681,

@@ -5324,6 +5324,147 @@ fn tick_weapons_arc_request_clears_when_target_enters_arc() {
     );
 }
 
+// ── #932: withdraw a standing request whose family goes unusable ───────────
+
+/// A standing Torpedoes request whose only tube then drains to empty must be
+/// WITHDRAWN, not merely left un-re-emitted: `evaluate_family_arc_request`
+/// returns `None` once the tube is unusable, and before #932 that just cleared
+/// `WeaponsArcRequestState` on the emitter's own side — Helm's copy of the
+/// request, delivered on the earlier tick, was never told.
+#[test]
+fn tick_weapons_arc_request_withdraws_when_the_standing_family_drains_to_empty() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000007";
+
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            ShipSystemControlSources::default(),
+            ShipPhysics::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            WeaponsArcRequestState::default(),
+            loaded_torpedo_res(0.0, 30.0),
+        ))
+        .id();
+    // To starboard: in homing reach but 90° off the 30° fore tube's arc, so
+    // the standing request comes from Torpedoes and nothing else.
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(20.0, 0.0, 0.0),
+    ));
+
+    app.update();
+    assert!(
+        matches!(
+            find_arc_request(&app),
+            Some(CoordinationPayload::ArcBearingRequest {
+                family: WeaponFamily::Torpedoes,
+                ..
+            })
+        ),
+        "precondition: the loaded tube raises a standing Torpedoes request"
+    );
+
+    // Drain the tube mid-engagement — geometry is unchanged, only usability
+    // is. `evaluate_family_arc_request` now excludes Torpedoes entirely, and
+    // no other family qualifies, so `selected` goes from `Some` to `None`.
+    app.world_mut()
+        .get_mut::<TorpedoSystemResource>(ship)
+        .unwrap()
+        .0
+        .tubes[0]
+        .loaded_count = 0;
+    app.update();
+
+    let payload = app
+        .world()
+        .resource::<ArcRequestLog>()
+        .0
+        .iter()
+        .find_map(|e| match &e.payload {
+            w @ CoordinationPayload::ArcBearingWithdraw { .. } => Some(w.clone()),
+            _ => None,
+        })
+        .expect("the emptied family must be WITHDRAWN, not silently dropped");
+    assert!(
+        matches!(
+            payload,
+            CoordinationPayload::ArcBearingWithdraw {
+                family: WeaponFamily::Torpedoes
+            }
+        ),
+        "expected an ArcBearingWithdraw naming the family that went unusable, got {payload:?}"
+    );
+
+    let state = app.world().get::<WeaponsArcRequestState>(ship).unwrap();
+    assert!(
+        state.last.is_none(),
+        "withdrawal must also clear the emitter's own debounce state"
+    );
+}
+
+/// The withdrawal must fire exactly once — a family that stays unusable tick
+/// after tick must not re-enqueue the same withdrawal every tick, the same
+/// debounce discipline `tick_weapons_arc_request` already gives requests.
+#[test]
+fn tick_weapons_arc_request_withdrawal_is_not_repeated_every_tick() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000008";
+
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            ShipSystemControlSources::default(),
+            ShipPhysics::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            WeaponsArcRequestState::default(),
+            loaded_torpedo_res(0.0, 30.0),
+        ))
+        .id();
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(20.0, 0.0, 0.0),
+    ));
+
+    app.update();
+    app.world_mut()
+        .get_mut::<TorpedoSystemResource>(ship)
+        .unwrap()
+        .0
+        .tubes[0]
+        .loaded_count = 0;
+    app.update();
+    app.update();
+    app.update();
+
+    let log = app.world().resource::<ArcRequestLog>();
+    let withdrawals = log
+        .0
+        .iter()
+        .filter(|e| matches!(&e.payload, CoordinationPayload::ArcBearingWithdraw { .. }))
+        .count();
+    assert_eq!(
+        withdrawals, 1,
+        "a family that stays unusable must be withdrawn once, not every tick"
+    );
+}
+
 /// Regression test for the unified `handle_fire_phaser`.
 ///
 /// Before unification, `handle_npc_beam_fire` always used the first entry

@@ -1621,6 +1621,21 @@ pub enum CoordinationPayload {
         family: WeaponFamily,
         arcs: Vec<WeaponEmitterArc>,
     },
+    /// Weapons withdraws a standing `ArcBearingRequest` because the emitting
+    /// family it raised the request for has stopped being usable — a torpedo
+    /// tube drained its last round, a bank was knocked offline — while the
+    /// request was still standing (issue #932).
+    ///
+    /// `tick_weapons_arc_request` re-derives family usability every tick, so
+    /// it is the one system that can notice this happen; before #932 it only
+    /// stopped RE-EMITTING, and the last debounced request simply stood,
+    /// unconsumed, until a yielding leg honoured a family with nothing left to
+    /// bring to bear. Consumed unconditionally by AI Helm — clearing
+    /// `PendingArcBearingRequest` is expiry, not a steering decision, so
+    /// `AiPolicy::leg_yields_to_arc_requests` (issue #918) plays no part in
+    /// it; only the steering WRITE that a live request can bias is gated by
+    /// the leg's consent.
+    ArcBearingWithdraw { family: WeaponFamily },
     /// Power system reports a brownout (demand exceeds supply) for a group
     /// that is actively drawing power it cannot get (issue #678).
     /// Fire-once-debounced; only fires when the affected system has level > 1

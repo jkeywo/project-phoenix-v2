@@ -1158,6 +1158,31 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
     }
 
+    /// `CoordinationPayload::ArcBearingWithdraw` round-trip (issue #932):
+    /// Weapons withdraws a standing request once its emitting family goes
+    /// unusable.
+    #[test]
+    fn arc_bearing_withdraw_coordination_payload_round_trips() {
+        let send_msg = ClientMessage::SendCoordination {
+            target: crate::system_registry::helm_station_key(),
+            payload: CoordinationPayload::ArcBearingWithdraw {
+                family: crate::messages::WeaponFamily::Torpedoes,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, send_msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+
+        let popup_msg = ServerMessage::CoordinationPopup {
+            target: crate::system_registry::helm_station_key(),
+            payload: CoordinationPayload::ArcBearingWithdraw {
+                family: crate::messages::WeaponFamily::Blasters,
+            },
+            sender_label: "Weapons".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, popup_msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    }
+
     /// `CoordinationPayload::PowerBrownout` round-trip, embedded in both
     /// directions of the channel-3 bus (issue #678).
     #[test]

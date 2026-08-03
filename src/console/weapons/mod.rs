@@ -644,7 +644,58 @@ fn tick_weapons_arc_request(
         });
 
         let Some((family, arcs)) = selected else {
-            state.last = None;
+            // Issue #932: no family qualifies any more. `state.last` is
+            // ALWAYS cleared here (pre-#932 behaviour, unconditionally) so a
+            // family that requalifies later — even the same family, same
+            // target, same arcs — is a genuinely new occurrence rather than
+            // a debounce hit. But whether Helm is actively told to withdraw a
+            // STANDING request is narrower than "no family qualifies": most
+            // of the ways `selected` goes `None` are already Helm's own job
+            // to notice — the family is already satisfied (some emitter is
+            // `Ready`) or the target left the range of every carried arc —
+            // and `apply_arc_bearing_request`'s geometry clear (`helm_ai.rs`)
+            // already handles both against the SNAPSHOT of arcs the request
+            // carried. Re-deriving usability from THAT snapshot and firing a
+            // withdrawal on every such transition would fight that existing
+            // seam instead of extending it — and did, in practice: an early
+            // version of this fix withdrew on every transient satisfied/
+            // out-of-range tick, not only genuine incapacitation, and it
+            // measurably changed shipped combat behaviour (the death-gated
+            // wave chain in `combat_test_chains_its_waves_in_a_real_run`
+            // stopped linking).
+            //
+            // So: withdraw ONLY when the family `state.last` names has
+            // become genuinely UNUSABLE — no ONLINE, USABLE emitter left at
+            // all (every tube drained, every bank knocked offline) — which
+            // is the one condition `apply_arc_bearing_request` cannot notice
+            // on its own, because it only ever re-reads the arc snapshot
+            // taken when the request was raised, never the family's current
+            // usability.
+            if let Some((withdrawn_family, ..)) = state.last.take() {
+                let still_usable = match withdrawn_family {
+                    WeaponFamily::Phasers => phaser_emitters.iter().any(|e| e.online && e.usable),
+                    WeaponFamily::Blasters => blaster_emitters.iter().any(|e| e.online && e.usable),
+                    WeaponFamily::Torpedoes => {
+                        torpedo_emitters.iter().any(|e| e.online && e.usable)
+                    }
+                };
+                if !still_usable {
+                    let sender_origin = control_sources.0.source_for(&arc_request_sender_system(
+                        withdrawn_family,
+                        blaster_opt,
+                        torpedo_opt,
+                    ));
+                    writer.write(CoordinationEnqueue {
+                        source_entity: ship_entity,
+                        sender_origin,
+                        target: crate::system_registry::helm_station_key(),
+                        payload: CoordinationPayload::ArcBearingWithdraw {
+                            family: withdrawn_family,
+                        },
+                        sender_label: "Weapons".to_string(),
+                    });
+                }
+            }
             continue;
         };
 
@@ -661,21 +712,11 @@ fn tick_weapons_arc_request(
             .find_map(|(u, n)| (u.0 == target_uuid).then(|| n.0.clone()))
             .unwrap_or_else(|| target_uuid.clone());
 
-        // Representative sender for control-source resolution: the emitting
-        // family's canonical fine system (a blaster/torpedo-only ship has no
-        // phaser-fore), falling back to phaser-fore.
-        let sender_system = match family {
-            WeaponFamily::Phasers => crate::system_registry::phaser_fore_system_id(),
-            WeaponFamily::Blasters => blaster_opt
-                .and_then(|res| res.0.first())
-                .and_then(|bs| crate::system_registry::blaster_bank_system_id(&bs.config.id))
-                .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
-            WeaponFamily::Torpedoes => torpedo_opt
-                .and_then(|res| res.0.tubes.first())
-                .and_then(|t| crate::system_registry::torpedo_tube_system_id(&t.id))
-                .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
-        };
-        let sender_origin = control_sources.0.source_for(&sender_system);
+        let sender_origin = control_sources.0.source_for(&arc_request_sender_system(
+            family,
+            blaster_opt,
+            torpedo_opt,
+        ));
 
         writer.write(CoordinationEnqueue {
             source_entity: ship_entity,
@@ -689,6 +730,29 @@ fn tick_weapons_arc_request(
             },
             sender_label: "Weapons".to_string(),
         });
+    }
+}
+
+/// The representative sender system for control-source resolution when
+/// Weapons addresses Helm over channel-3: the emitting family's canonical
+/// fine system (a blaster/torpedo-only ship has no phaser-fore), falling back
+/// to phaser-fore. Shared by the request and its issue #932 withdrawal so
+/// both name the same sender for the same family.
+fn arc_request_sender_system(
+    family: WeaponFamily,
+    blaster_opt: Option<&blaster::BlasterSystemResource>,
+    torpedo_opt: Option<&torpedo::TorpedoSystemResource>,
+) -> crate::messages::SystemId {
+    match family {
+        WeaponFamily::Phasers => crate::system_registry::phaser_fore_system_id(),
+        WeaponFamily::Blasters => blaster_opt
+            .and_then(|res| res.0.first())
+            .and_then(|bs| crate::system_registry::blaster_bank_system_id(&bs.config.id))
+            .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
+        WeaponFamily::Torpedoes => torpedo_opt
+            .and_then(|res| res.0.tubes.first())
+            .and_then(|t| crate::system_registry::torpedo_tube_system_id(&t.id))
+            .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
     }
 }
 

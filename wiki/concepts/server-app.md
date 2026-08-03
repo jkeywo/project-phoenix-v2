@@ -22,7 +22,7 @@ Called from `wasm_init()` in `src/server/bridge.rs` instead of the old `.add_plu
 
 | Plugin | File | Responsibility |
 |---|---|---|
-| `RapierPhysicsPlugin` | bevy_rapier3d | 3-D rigid-body physics |
+| `RapierPhysicsPlugin` | bevy_rapier3d | Contacts + raycasts. Registered by `register_physics` in `FixedUpdate` on the logical tick, ordered between `SimSet::Physics` and `SimSet::Damage` (#896) |
 | `RegionPlugin` | `src/regions/server.rs` | Region entry/exit, effect membership |
 | `ConsoleAiPlugin` | `src/console_ai/server.rs` | Server-side AI for hidden consoles (Low complexity) |
 | `AiPlugin` | `src/ai/server.rs` | NPC entity state machines (PRD #142) |

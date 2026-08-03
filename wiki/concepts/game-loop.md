@@ -58,8 +58,13 @@ agree on everything downstream of it (PRD #849's lockstep foundation).
    snapshot tick every `ai_tick_hz / ai_snapshot_hz`-th of those; both ratios
    are validated as integers at world load. No wall clock anywhere.
 
-Rapier still steps once per rendered frame (issue #896 moves it onto the
-tick).
+Rapier steps on the logical tick too (issue #896). Its `PhysicsSet` chain is
+registered in `FixedUpdate` with `TimestepMode::Fixed` at the authored
+`sim_tick_hz`, and is ordered explicitly against the chain above:
+`PhysicsSet::SyncBackend` after `SimSet::Physics` (so it reads the transforms
+`sync_ship_position` just wrote) and `PhysicsSet::Writeback` before
+`SimSet::Damage` (so `handle_collisions` reads this tick's contacts). See
+`server_app::register_physics`.
 
 ## 10 Hz channels
 

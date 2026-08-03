@@ -368,12 +368,91 @@ pub struct SimPluginOptions {
     /// Register the render-coupled plugins and systems. `true` for the browser
     /// host; `false` for headless runs with no camera and no GPU.
     pub render: bool,
+    /// Register [`RapierPhysicsPlugin`] **after** every simulation system
+    /// instead of before them (issue #896's acceptance hook).
+    ///
+    /// Not a gameplay option and not reachable from any command line: the sole
+    /// caller that sets it is the test that drives one colliding run each way
+    /// and requires the two to agree bit for bit. That equality is the evidence
+    /// that physics is ordered against the `SimSet` chain by the explicit
+    /// `configure_sets` edges below, and not by the accident of which
+    /// `add_plugins` call happened to come first.
+    pub physics_last: bool,
 }
 
 impl Default for SimPluginOptions {
     fn default() -> Self {
-        Self { render: true }
+        Self {
+            render: true,
+            physics_last: false,
+        }
     }
+}
+
+/// Register Rapier on the logical tick, ordered explicitly against the
+/// `SimSet` chain (issue #896).
+///
+/// # The clock
+/// Rapier used to run its `PhysicsSet` chain in `PostUpdate`, i.e. once per
+/// rendered FRAME, stepping by whatever the host's frame period happened to be.
+/// Two instances agreeing on the logical tick could still disagree on how many
+/// times physics had stepped, so every collision the simulation consumed was a
+/// function of frame pacing. `in_fixed_schedule()` moves the whole chain into
+/// `FixedUpdate` alongside the simulation, and `TimestepMode::Fixed` with a
+/// period derived from `[global] sim_tick_hz` makes each of those runs advance
+/// physics by exactly one logical tick: N ticks step rapier N times, whatever
+/// the frame rate. The resource is inserted BEFORE the plugin so the plugin's
+/// own "you are in `FixedUpdate` without a fixed timestep" warning never fires,
+/// and `sim_tick::reconcile_fixed_timestep` keeps it following a `WorldConfig`
+/// swapped in at runtime, exactly as it does for `Time<Fixed>`.
+///
+/// `substeps: 1` because a substep is a solver subdivision, not a tick: the
+/// simulation's own integration lives in the pure `ship::physics` module and
+/// rapier is here for contacts and raycasts, so extra substeps would buy
+/// nothing but float noise and time.
+///
+/// # The order within the tick
+/// Physics has to sit between the two halves of the simulation that talk to it:
+///
+/// - `sync_ship_position` (`SimSet::Physics`) writes each ship's `Transform`
+///   from the `ShipPhysics` this tick just integrated. `PhysicsSet::SyncBackend`
+///   is what copies those transforms into rapier's bodies, so it must run
+///   after — otherwise rapier steps last tick's positions.
+/// - `handle_collisions` (`SimSet::Damage`) reads the contact pairs the step
+///   produced, so `PhysicsSet::Writeback` — the end of rapier's chain — must
+///   run before it.
+///
+/// Both edges are declared, rather than left to the schedule's defaults: with
+/// the sets merely coexisting in `FixedUpdate` the graph would be free to
+/// interleave them either way round, which is precisely the ambiguity this
+/// issue exists to remove. Note the semantic shift this makes explicit — with
+/// physics in `PostUpdate` a tick's collisions were resolved from the transforms
+/// of the *previous* frame; now every tick sees its own.
+fn register_physics(app: &mut App) {
+    // `dt` comes from `sim_tick::sim_tick_period(hz).as_secs_f32()` rather
+    // than a second, independent `1.0 / hz` division, so this and `Time<Fixed>`
+    // (`reconcile_fixed_timestep`, `sim_tick.rs`) both derive rapier's step
+    // from the identical nanosecond-quantized `Duration` — the one conversion
+    // `sim_tick_period`'s own doc comment requires every driver to share. The
+    // one remaining step, `Duration::as_secs_f32`, is a lossy f64→f32 cast
+    // rapier's own `f32` dt forces; it is not claimed to be bit-identical to
+    // `Time<Fixed>`'s f64-precision accumulator, only to agree with the other
+    // rapier dt call site in `reconcile_fixed_timestep`.
+    app.insert_resource(TimestepMode::Fixed {
+        dt: crate::sim_tick::sim_tick_period(
+            crate::entity_config::GlobalConfig::default().sim_tick_hz,
+        )
+        .as_secs_f32(),
+        substeps: 1,
+    })
+    .add_plugins(RapierPhysicsPlugin::<()>::default().in_fixed_schedule())
+    .configure_sets(
+        FixedUpdate,
+        (
+            PhysicsSet::SyncBackend.after(crate::sim_sets::SimSet::Physics),
+            PhysicsSet::Writeback.before(crate::sim_sets::SimSet::Damage),
+        ),
+    );
 }
 
 /// Compose all per-table simulation plugins onto `app`, including the
@@ -400,6 +479,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     crate::sim_tick::register_sim_tick(app);
     app.add_systems(First, crate::sim_tick::reconcile_fixed_timestep);
 
+    // Physics first, unless the caller asked for it last — see
+    // `SimPluginOptions::physics_last`. Which of the two it is must not matter,
+    // and that is asserted rather than assumed.
+    if !opts.physics_last {
+        register_physics(app);
+    }
+
     app.configure_sets(
         FixedUpdate,
         (
@@ -415,7 +501,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .run_if(in_state(GamePhase::InProgress))
             .after(crate::lobby::LobbySystemSet),
     )
-    .add_plugins(RapierPhysicsPlugin::<()>::default())
     .add_plugins(crate::region_plugin::RegionPlugin)
     .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
     .add_plugins(crate::ai_plugin::AiPlugin)
@@ -624,6 +709,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                     .run_if(in_state(GamePhase::Loading))
                     .after(poll_asset_preload),
             );
+    }
+
+    // The reversed half of the registration-order pair. Everything physics
+    // needs to be ordered against is already in the graph by now, so if the
+    // `configure_sets` edges in `register_physics` are doing the work, this
+    // app and the default one are the same simulation.
+    if opts.physics_last {
+        register_physics(app);
     }
 }
 
@@ -1297,6 +1390,45 @@ fn emit_phase_change_balance_events(
     }
 }
 
+/// Everything `handle_collisions` needs to know about the other body in a
+/// contact: where it is, how big it is, and — since issue #896 — what it is
+/// called.
+type CollisionBodyQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Transform,
+        Option<&'static ColliderSection>,
+        Option<&'static EntityUuid>,
+        Option<&'static AsteroidUuid>,
+    ),
+>;
+
+/// The sort key that puts collision handling in a stable world-ID order
+/// (issue #896).
+///
+/// Authored uuid first — that is the identity two instances of the simulation
+/// share, and the one the AC asks for — with the entity index behind it as the
+/// tiebreak for anything the world file never named (bare test spawns, and
+/// bodies carrying no uuid at all). Deliberately NOT the entity index alone:
+/// two hosts agree on it only for as long as they agree on spawn order, which
+/// is a weaker promise than the uuid already makes.
+fn collision_order_key(
+    entity: Entity,
+    bodies: &CollisionBodyQuery,
+) -> (String, bevy::ecs::entity::EntityIndex) {
+    let uuid = bodies
+        .get(entity)
+        .ok()
+        .and_then(|(_, _, entity_uuid, asteroid_uuid)| {
+            entity_uuid
+                .map(|u| u.0.clone())
+                .or_else(|| asteroid_uuid.map(|u| u.0.clone()))
+        })
+        .unwrap_or_default();
+    (uuid, entity.index())
+}
+
 fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
@@ -1320,7 +1452,7 @@ fn handle_collisions(
         ),
         With<Ship>,
     >,
-    body_query: Query<(&Transform, Option<&ColliderSection>)>,
+    body_query: CollisionBodyQuery,
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
@@ -1341,23 +1473,58 @@ fn handle_collisions(
 
     let Ok(ctx) = context.single() else { return };
 
-    // Iterate every ship (player + NPCs) uniformly. Per-entity CollisionCooldown,
+    // Stable iteration order (issue #896). `ship_query.iter_mut()` walks the
+    // archetypes, which is an artefact of how entities were spawned, moved and
+    // despawned rather than anything the simulation authored — and the order
+    // is load-bearing: a collision can destroy a ship, and which of two ships
+    // in a mutual impact is resolved (and so which one dies) first decides the
+    // outcome. Sorted by world id, every instance resolves them in the same
+    // order.
+    let mut ship_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = ship_query
+        .iter()
+        // Position 6 of the tuple below is the ship's `Option<&EntityUuid>` —
+        // read straight off this query rather than looked up again.
+        .map(|(entity, _, _, _, _, _, uuid, ..)| {
+            (
+                (
+                    uuid.map(|u| u.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    ship_order.sort();
+
+    // Handle every ship (player + NPCs) uniformly. Per-entity CollisionCooldown,
     // ShipModifiers, ShipShields, EntitySystemHull, ShipImpulse. Player-only side
     // effects (damage messages, GameOver, debug log) are gated on `is_local`.
-    for (
-        ship_entity,
-        mut physics,
-        mut cooldown,
-        mut hull_comp,
-        shields_opt,
-        modifiers_comp,
-        ship_uuid,
-        ship_collider,
-        is_local,
-        mut impulse_opt,
-        mut arc_hull_opt,
-    ) in ship_query.iter_mut()
-    {
+    for (_, ship_entity) in ship_order {
+        let Ok((
+            ship_entity,
+            mut physics,
+            mut cooldown,
+            mut hull_comp,
+            shields_opt,
+            modifiers_comp,
+            ship_uuid,
+            ship_collider,
+            is_local,
+            mut impulse_opt,
+            mut arc_hull_opt,
+        )) = ship_query.get_mut(ship_entity)
+        else {
+            // NOT reachable via an earlier iteration of this same loop
+            // despawning `ship_entity`: despawns in this system go through
+            // `Commands`, which are deferred until the next `ApplyDeferred`
+            // sync point, so an entity queued for despawn earlier in this
+            // very call is still present and still queryable here. This arm
+            // exists only because `Query::get_mut` returns a `Result` by
+            // API — any entity in `ship_order` genuinely missing from
+            // `ship_query` (a stale id from a prior tick, a test fixture
+            // gap) falls back to skipping it rather than panicking.
+            continue;
+        };
         cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
 
         let default_modifiers;
@@ -1369,13 +1536,33 @@ fn handle_collisions(
             }
         };
 
-        let contact = ctx.contact_pairs_with(ship_entity).next().and_then(|pair| {
-            if pair.collider1() == Some(ship_entity) {
-                pair.collider2()
-            } else {
-                pair.collider1()
-            }
-        });
+        // One collision per ship per tick, and *which* one must not be
+        // rapier's business (issue #896). `contact_pairs_with(..).next()` took
+        // whatever the narrow phase happened to hand back first — an order
+        // that follows the broadphase's internal bookkeeping, and one a
+        // parallel broadphase would not even produce consistently between
+        // builds. The choice is the lowest world id instead: with a ship
+        // wedged between two rocks, every instance of the simulation picks the
+        // same rock, and so deals the same damage from the same bearing into
+        // the same shield arc.
+        let contact = ctx
+            .contact_pairs_with(ship_entity)
+            // `contact_pairs_with` yields every pair whose *bounding volumes*
+            // overlap, not just the ones actually touching (see the method's
+            // own doc pointer to `has_any_active_contact`). Filtering to real
+            // contacts before the deterministic pick matters because two rocks
+            // can have overlapping AABBs without their shapes touching, and a
+            // lower-uuid rock merely near the ship must not out-rank a rock the
+            // ship is actually embedded in.
+            .filter(|pair| pair.has_any_active_contact())
+            .filter_map(|pair| {
+                if pair.collider1() == Some(ship_entity) {
+                    pair.collider2()
+                } else {
+                    pair.collider1()
+                }
+            })
+            .min_by_key(|other| collision_order_key(*other, &body_query));
 
         let Some(attacker_entity) = contact else {
             continue;
@@ -1395,8 +1582,8 @@ fn handle_collisions(
         separate_ship_from_collision(
             &mut physics,
             collider_radius(ship_collider),
-            attacker_body.map(|(transform, _)| transform),
-            collider_radius(attacker_body.and_then(|(_, collider)| collider)),
+            attacker_body.map(|(transform, ..)| transform),
+            collider_radius(attacker_body.and_then(|(_, collider, ..)| collider)),
         );
         let damage = collision_damage(speed_at_impact) as f32
             * modifiers.get(&ModifierSlot::HullDamageTaken);
@@ -7068,6 +7255,266 @@ station = "pilot"
         assert!(
             dist >= 10.0 + COLLISION_SEPARATION_SLOP - 1e-5,
             "NPC should be separated outside the two collider radii, distance={dist}"
+        );
+    }
+
+    /// Issue #896, AC-3: which of several simultaneous contacts a ship is
+    /// resolved against is decided by world id, not by whichever pair rapier
+    /// hands back first.
+    ///
+    /// A ship wedged between two rocks used to take
+    /// `contact_pairs_with(..).next()` — an order that comes out of the
+    /// broadphase's internal bookkeeping, is not something the simulation
+    /// chose, and is not even the same between a parallel and a serial build.
+    /// It decides real outcomes: which direction the ship is pushed, what
+    /// bearing the impact comes from and so which shield arc absorbs it, and
+    /// whose `shield_pierce` applies.
+    ///
+    /// The two rocks here sit on opposite sides of the ship, so the direction
+    /// it ends up separated in says which one was picked — and the answer must
+    /// be the same for both spawn orders, because the pick is `ast-aaa`'s to
+    /// win on its uuid either way.
+    #[test]
+    fn a_ship_between_two_asteroids_is_resolved_against_the_lower_world_id() {
+        use crate::damage::SystemHull;
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy_rapier3d::prelude::*;
+
+        /// Where the ship ends up after being separated out of the overlap,
+        /// with the two rocks spawned in `order`.
+        fn separated_x(order: [(&str, f32); 2]) -> f32 {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_millis(50),
+                ))
+                .add_plugins(bevy::transform::TransformPlugin)
+                .add_plugins(bevy::asset::AssetPlugin::default())
+                .init_asset::<bevy::mesh::Mesh>()
+                .init_resource::<bevy::scene::SceneSpawner>()
+                .add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<GamePhase>()
+                .add_plugins(RapierPhysicsPlugin::<()>::default())
+                .init_resource::<SimOutbox>()
+                .init_resource::<WorldResource>()
+                .insert_resource(GameOverReason(None, None))
+                .init_resource::<DamageLog>()
+                .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+                .add_systems(Update, handle_collisions);
+            app.world_mut()
+                .resource_mut::<NextState<GamePhase>>()
+                .set(GamePhase::InProgress);
+            app.update();
+
+            let ship = app
+                .world_mut()
+                .spawn((
+                    Ship,
+                    EntityUuid("ship-under-test".into()),
+                    Transform::from_xyz(0.0, 0.0, 0.0),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    ShipPhysicsComponent {
+                        forward_speed: 100.0,
+                        ..Default::default()
+                    },
+                    CollisionCooldown::default(),
+                    EntitySystemHull(SystemHull::from_config(&[(
+                        SystemId("captain".into()),
+                        100.0,
+                    )])),
+                    ShipModifiers::new(),
+                    ShipImpulse::default(),
+                    ColliderSection(ColliderConfig {
+                        shape: ColliderShape::Ball,
+                        radius: 5.0,
+                        length: 0.0,
+                    }),
+                    Collider::ball(5.0),
+                    RigidBody::KinematicPositionBased,
+                    ActiveCollisionTypes::KINEMATIC_KINEMATIC
+                        | ActiveCollisionTypes::KINEMATIC_STATIC,
+                ))
+                .id();
+
+            for (uuid, x) in order {
+                app.world_mut().spawn((
+                    Asteroid,
+                    AsteroidUuid(uuid.to_string()),
+                    Transform::from_xyz(x, 0.0, 0.0),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    ColliderSection(ColliderConfig {
+                        shape: ColliderShape::Ball,
+                        radius: 5.0,
+                        length: 0.0,
+                    }),
+                    Collider::ball(5.0),
+                    RigidBody::Fixed,
+                    ActiveCollisionTypes::KINEMATIC_STATIC,
+                ));
+            }
+
+            // Let the broad phase see both overlaps before the collision is
+            // consumed, as in the sibling tests above.
+            for _ in 0..3 {
+                app.update();
+            }
+            app.world().get::<ShipPhysicsComponent>(ship).unwrap().x
+        }
+
+        // `ast-aaa` sits at +X, so the ship is pushed to −X when it is the one
+        // chosen — whichever rock was spawned first.
+        let aaa_first = separated_x([("ast-aaa", 3.0), ("ast-zzz", -3.0)]);
+        let zzz_first = separated_x([("ast-zzz", -3.0), ("ast-aaa", 3.0)]);
+
+        assert!(
+            aaa_first < 0.0,
+            "the ship should have been separated away from `ast-aaa` at +X, \
+             but ended up at x={aaa_first}"
+        );
+        assert_eq!(
+            aaa_first, zzz_first,
+            "the same two rocks resolved differently depending on which was \
+             spawned first — the contact pair is still being taken in rapier's \
+             order rather than by world id"
+        );
+    }
+
+    /// Issue #896 review finding: `contact_pairs_with` yields every pair whose
+    /// *bounding volumes* overlap, not just the ones whose shapes actually
+    /// touch. A third rock positioned so its AABB clips the ship's AABB but
+    /// whose sphere never reaches the ship's must not be eligible for the
+    /// deterministic pick — even when its uuid would sort lowest of all three
+    /// and so would win the `min_by_key` outright if it were merely filtered
+    /// on `Option::is_some()` upstream instead of on real contact.
+    #[test]
+    fn a_lower_uuid_rock_with_only_an_aabb_overlap_is_never_selected() {
+        use crate::damage::SystemHull;
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy_rapier3d::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(50),
+            ))
+            .add_plugins(bevy::transform::TransformPlugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<bevy::mesh::Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>()
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_plugins(RapierPhysicsPlugin::<()>::default())
+            .init_resource::<SimOutbox>()
+            .init_resource::<WorldResource>()
+            .insert_resource(GameOverReason(None, None))
+            .init_resource::<DamageLog>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_systems(Update, handle_collisions);
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                EntityUuid("ship-under-test".into()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+                ShipPhysicsComponent {
+                    forward_speed: 100.0,
+                    ..Default::default()
+                },
+                CollisionCooldown::default(),
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    100.0,
+                )])),
+                ShipModifiers::new(),
+                ShipImpulse::default(),
+                ColliderSection(ColliderConfig {
+                    shape: ColliderShape::Ball,
+                    radius: 5.0,
+                    length: 0.0,
+                }),
+                Collider::ball(5.0),
+                RigidBody::KinematicPositionBased,
+                ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
+            ))
+            .id();
+
+        // The genuine contact: `ast-aaa` at +X, sphere-overlapping the ship
+        // exactly as in the sibling test above.
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("ast-aaa".to_string()),
+            Transform::from_xyz(3.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            ColliderSection(ColliderConfig {
+                shape: ColliderShape::Ball,
+                radius: 5.0,
+                length: 0.0,
+            }),
+            Collider::ball(5.0),
+            RigidBody::Fixed,
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+
+        // The decoy: `ast-000` sorts below `ast-aaa` on uuid alone, so it
+        // would win `min_by_key` if the filter above it did not exclude
+        // AABB-only overlaps. Both rocks have radius 5 and the ship has radius
+        // 5, so two spheres need center distance < 10 to actually touch. This
+        // one sits at (8, 8, 0): 3D center distance is sqrt(8²+8²) ≈ 11.3 — no
+        // shape contact — but its AABB (x:[3,13], y:[3,13], z:[-5,5]) clips
+        // the ship's AABB (x:[-5,5], y:[-5,5], z:[-5,5]) in both x and y, so
+        // the broad phase still reports the pair.
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("ast-000".to_string()),
+            Transform::from_xyz(8.0, 8.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            ColliderSection(ColliderConfig {
+                shape: ColliderShape::Ball,
+                radius: 5.0,
+                length: 0.0,
+            }),
+            Collider::ball(5.0),
+            RigidBody::Fixed,
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+
+        // Let the broad phase see both overlaps before the collision is
+        // consumed, as in the sibling test above.
+        for _ in 0..3 {
+            app.update();
+        }
+
+        let physics = app.world().get::<ShipPhysicsComponent>(ship).unwrap();
+        // If the decoy had been selected, `separate_ship_from_collision` would
+        // have pushed the ship away from (8, 8, 0) — a nonzero z displacement,
+        // since the decoy's z sits at 0 same as the ship's own z it would at
+        // minimum not reproduce the pure -X push below. The genuine pick
+        // (`ast-aaa` at +X) only ever moves the ship along x, leaving z at 0.
+        assert!(
+            physics.x < 0.0,
+            "the ship should still have been separated away from `ast-aaa` \
+             at +X, but ended up at x={}",
+            physics.x
+        );
+        assert_eq!(
+            physics.z, 0.0,
+            "the ship moved in z, implying the AABB-only decoy at (8, 8, 0) \
+             was selected instead of the genuine `ast-aaa` contact"
         );
     }
 

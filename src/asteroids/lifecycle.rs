@@ -857,9 +857,23 @@ impl Plugin for AsteroidLifecyclePlugin {
             // `FixedUpdate` (issue #895): the window tracks the ship the sim
             // moves, spawns/despawns are sim state, and destroyed-asteroid
             // respawn bookkeeping must count in ticks, not frames.
+            //
+            // `.before(PhysicsSet::SyncBackend)` (issue #896 follow-up): both
+            // systems spawn asteroid colliders via `Commands`, and now that
+            // rapier's `PhysicsSet` chain shares `FixedUpdate` with the rest of
+            // the sim (see `server_app::register_physics`), those two sets are
+            // otherwise free to interleave in either order. Left unordered, a
+            // collider spawned here lands before rapier's `SyncBackend` copies
+            // it in — or a tick late — depending on how the multithreaded
+            // executor happens to schedule `ApplyDeferred` that run. Ordering
+            // before `SyncBackend` removes that ambiguity the same way
+            // `register_physics` orders `sync_ship_position` before it: a
+            // spawned rock is visible to rapier the same tick it appears.
             .add_systems(
                 FixedUpdate,
-                (check_destroyed_asteroids, update_asteroid_window).chain(),
+                (check_destroyed_asteroids, update_asteroid_window)
+                    .chain()
+                    .before(bevy_rapier3d::plugin::PhysicsSet::SyncBackend),
             );
     }
 }

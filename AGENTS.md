@@ -291,8 +291,10 @@ server = []   # host build → server.html (bridge.rs compiled in)
 # The client page (client.html) is pure JS (gui/*.js) — there is no
 # `client` cargo feature and no client-side WASM (removed in #463).
 
-# WASM: no parallel physics, needs getrandom wasm_js backend.
-# Native: parallel physics enabled. (See [target.'cfg(...)'] sections.)
+# WASM: needs the getrandom wasm_js backend.
+# Physics is SERIAL on both targets (issue #896): the native `parallel` feature
+# is off, because a parallel broadphase orders contacts differently from the
+# serial one the browser is stuck with. (See [target.'cfg(...)'] sections.)
 ```
 
 ---

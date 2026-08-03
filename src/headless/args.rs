@@ -68,8 +68,8 @@ TIME
                           so this flag chooses how much virtual time each
                           update() advances, not how often the sim thinks —
                           any --hz covers the same logical ticks per
-                          sim-second. (Rapier still steps once per frame at
-                          this rate until #896 moves it onto the tick.)
+                          sim-second — and since issue #896 that includes
+                          rapier, which steps once per logical tick too.
     --dt <SECONDS>        Frame period; mutually exclusive with --hz
     --ticks <N>           Stop after N frames. Named before issue #895, when a
                           frame and a sim tick were the same thing; it counts
@@ -193,6 +193,14 @@ pub struct HeadlessArgs {
     /// compared against. Measurement is only meaningful between runs of the
     /// *same* scenario, so this names the setup rather than the run.
     pub perf_scenario: String,
+    /// Register the physics plugin last instead of first
+    /// (`SimPluginOptions::physics_last`, issue #896).
+    ///
+    /// **Not a command-line flag** and never parsed from one — no run a user
+    /// can ask for changes this. It exists so a test can build the same
+    /// colliding scenario with the contributing systems registered in either
+    /// order and require the two to reach the same state.
+    pub physics_last: bool,
 }
 
 impl Default for HeadlessArgs {
@@ -213,6 +221,7 @@ impl Default for HeadlessArgs {
             side_b: Vec::new(),
             perf_capture_path: None,
             perf_scenario: DEFAULT_PERF_SCENARIO.to_string(),
+            physics_last: false,
         }
     }
 }

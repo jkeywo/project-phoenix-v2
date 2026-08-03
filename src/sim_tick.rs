@@ -75,9 +75,23 @@ pub fn sim_tick_period(hz: f32) -> std::time::Duration {
 ///
 /// Deliberately a no-op without a `WorldConfig`: bare-`App` fixtures configure
 /// `Time<Fixed>` themselves and must not be fought back to the default.
+///
+/// # Rapier rides the same clock (issue #896)
+/// Since #896 rapier's `PhysicsSet` chain runs inside `FixedUpdate` and advances
+/// by a fixed `dt` of its own. One authored rate, two clocks that have to agree:
+/// if a `WorldConfig` retuned `Time<Fixed>` and left rapier's `dt` alone,
+/// physics would keep integrating at the shipped 60 Hz while the simulation
+/// around it stepped at the authored rate, so a collision's speed — and the
+/// damage it deals — would come out of a world moving at the wrong speed. Both
+/// clocks are therefore set here, from the one `sim_tick_period`.
+///
+/// `Option<ResMut<TimestepMode>>` because bare-`App` fixtures never add
+/// `RapierPhysicsPlugin`, and this system must not fail Bevy's parameter
+/// validation in an app that has no physics at all.
 pub fn reconcile_fixed_timestep(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut fixed: ResMut<Time<Fixed>>,
+    mut physics: Option<ResMut<bevy_rapier3d::prelude::TimestepMode>>,
 ) {
     let Some(wc) = world_config else {
         return;
@@ -89,6 +103,25 @@ pub fn reconcile_fixed_timestep(
     let configured = sim_tick_period(hz);
     if fixed.timestep() != configured {
         fixed.set_timestep(configured);
+    }
+
+    // Rapier takes seconds as `f32`, so `dt` comes from the same `configured`
+    // `Duration` set on `Time<Fixed>` two lines up (`.as_secs_f32()`), not a
+    // second, independent `1.0 / hz` division. `register_physics`
+    // (`server_app.rs`) derives its own rapier `dt` the identical way, from
+    // the same `sim_tick_period` call, so both clocks agree to the same
+    // rounding rather than merely to the same formula. `as_secs_f32` is still
+    // a lossy f64→f32 cast — rapier's own `f32` dt forces that — so this is
+    // not bit-identical to `Time<Fixed>`'s f64 accumulator, only reciprocal
+    // with `register_physics`'s rapier dt.
+    if let Some(mode) = physics.as_mut() {
+        let wanted = bevy_rapier3d::prelude::TimestepMode::Fixed {
+            dt: configured.as_secs_f32(),
+            substeps: 1,
+        };
+        if **mode != wanted {
+            **mode = wanted;
+        }
     }
 }
 

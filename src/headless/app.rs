@@ -18,7 +18,6 @@ use bevy::shader::{Shader, ShaderLoader};
 use bevy::state::app::StatesPlugin;
 use bevy::time::{TimePlugin, TimeUpdateStrategy};
 use bevy::transform::TransformPlugin;
-use bevy_rapier3d::plugin::TimestepMode;
 
 use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
 use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
@@ -496,7 +495,13 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         .add_plugins(LobbyPlugin)
         .add_plugins(crate::lobby::lobby_outbox_broadcaster());
 
-    add_simulation_plugins_with(&mut app, SimPluginOptions { render: false });
+    add_simulation_plugins_with(
+        &mut app,
+        SimPluginOptions {
+            render: false,
+            physics_last: args.physics_last,
+        },
+    );
     // After the plugins, so it overrides their OS-seeded `init_resource`.
     app.insert_resource(sim_rng);
     app.add_plugins(WorldPlugin);
@@ -509,16 +514,18 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // `update()` here steps it zero or more whole logical ticks so that sim
     // time tracks the `dt`-per-frame virtual clock. At the default
     // `--hz 60` against the default `sim_tick_hz = 60` that is exactly one
-    // tick per frame. Rapier still needs telling separately — its default
-    // `TimestepMode::Variable` would re-couple it to the frame — and stays
-    // frame-driven at `dt` until its own slice (#896) moves it onto the tick.
+    // tick per frame.
+    //
+    // Rapier no longer needs telling anything here (issue #896). It used to be
+    // handed `TimestepMode::Fixed { dt: args.dt }` from this very line — the
+    // FRAME period, a different clock from the one the simulation runs on, and
+    // wrong the moment `--hz` and `sim_tick_hz` disagreed. Since #896 physics
+    // runs inside `FixedUpdate` at the authored `sim_tick_hz`, set once in
+    // `server_app::register_physics` and kept in step by
+    // `sim_tick::reconcile_fixed_timestep` like every other tick-rate consumer.
     app.insert_resource(TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_secs_f64(args.dt),
     ));
-    app.insert_resource(TimestepMode::Fixed {
-        dt: args.dt as f32,
-        substeps: 1,
-    });
 
     app.add_systems(PreUpdate, headless_auto_start);
 

@@ -1387,6 +1387,19 @@ pub(crate) fn tick_beams_prepare(
             });
         }
     }
+
+    // Stable consumption order for the LOS results (issue #896). The loop above
+    // walks `ship_q` in archetype order, and phase 2 applies damage in the
+    // order it finds here — so on a tick where two shooters are both about to
+    // finish the same target, archetype order decides which one is credited
+    // with the kill, whether the second beam ends early, and which shooter's
+    // `AiEntityDestroyed` the AI reacts to. Sorted by shooter uuid (entity
+    // index behind it for the minimal test spawns that carry no uuid), that is
+    // a property of the world file rather than of the spawn history.
+    beam_context.0.sort_by(|a, b| {
+        (&a.shooter_uuid, a.shooter_entity.index())
+            .cmp(&(&b.shooter_uuid, b.shooter_entity.index()))
+    });
 }
 
 /// Phase 2 of the beam tick (issue #723): apply damage to targets.

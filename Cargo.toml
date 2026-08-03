@@ -196,9 +196,24 @@ vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07b
 # with the dependency above for test builds only.
 vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9", features = ["testkit"] }
 
-# Native: parallel physics enabled
+# Native: SERIAL physics, deliberately matching wasm (issue #896).
+#
+# This stanza used to carry `features = ["parallel"]`, and the wasm stanza below
+# never could (the browser build is single-threaded). A parallel broadphase does
+# not hand contacts to the narrow phase in the same order a serial one does, so
+# the two targets could disagree on contact order while any two NATIVE instances
+# agreed perfectly — a divergence invisible to native-only testing that would
+# first surface in real P2P between a browser and anything else. The feature is
+# off here so both targets run the identical solver; the cost is native physics
+# throughput, which the non-gating perf baselines will register and which is the
+# right trade for a simulation that claims determinism.
+#
+# If a build ever wants the parallel solver back, that has to be an explicit,
+# recorded choice for a build that does NOT claim determinism —
+# `the_deterministic_build_runs_rapier_serially` in tests/headless_runner.rs is
+# the guard that makes silently re-adding it fail.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy_rapier3d = { version = "0.33", features = ["parallel"] }
+bevy_rapier3d = { version = "0.33" }
 # Baselines are authored RON read by the headless harness, which is native-only
 # (`src/headless` is cfg'd off under wasm). Keeping the reader here means the
 # browser build carries no parser it cannot reach.

@@ -344,6 +344,14 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
         dt,
         max_ticks: ticks_for_sim_seconds(60.0, dt),
         deterministic: true,
+        // Re-blessed for issue #896 (see the sweep in `probe_duel.toml`). With
+        // rapier moved onto the logical tick, beam line-of-sight is resolved
+        // against colliders synced this tick instead of last frame's, and the
+        // duel this world's default seed used to close in 18 s now settles into
+        // a standoff. 34 is the seed that resolves on the new physics, pinned
+        // here rather than made the world default because every other probe on
+        // this world is measured against seed 3 as its control condition.
+        seed: Some(34),
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("app should build");
@@ -917,6 +925,12 @@ fn balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves() {
         dt,
         max_ticks: ticks_for_sim_seconds(60.0, dt),
         deterministic: true,
+        // Re-blessed for issue #896, same pin and same reason as
+        // `world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
+        // above: the "destroyed by" site this test needs reached only fires in
+        // a duel that resolves, and on the new physics clock seed 34 is the one
+        // that does inside the 60 s budget.
+        seed: Some(34),
         ..test_args()
     };
     // The four categories the balancer reaches for, each enabled — exactly what
@@ -3383,6 +3397,17 @@ struct RunFingerprint {
     /// comparison, so a run that spawned a different number of entities, or
     /// spawned them in a different order, fails here too.
     ships: Vec<(bevy::ecs::entity::EntityIndex, f32, f32, f32, f32, f32, f32)>,
+    /// Every collision the run applied, as `(victim uuid, damage, shield
+    /// absorbed, hull damage)` in the order the balance tracer saw them.
+    ///
+    /// Added by issue #896, and the part of the fingerprint that is actually
+    /// about physics. The `ships` slice above records where a collision *left*
+    /// a hull, but two runs can land on the same hull total having hit
+    /// different rocks in a different order; this records the attribution
+    /// itself, which is what the issue's damage-attribution AC is about. Order
+    /// is preserved rather than sorted, on purpose — the sequence is exactly
+    /// what the stable-order fixes in `handle_collisions` pin down.
+    collisions: Vec<(String, f32, f32, f32)>,
 }
 
 /// Issue #895's headline acceptance: the SAME end state at two very different
@@ -3396,80 +3421,25 @@ struct RunFingerprint {
 /// end states are asserted BIT-equal: with the whole simulation on the fixed
 /// tick there is nothing frame-coupled left to diverge.
 ///
-/// # Why `patrol.toml`, and what that excludes
-/// Rapier is still driven once per rendered FRAME (`TimestepMode::Fixed { dt }`
-/// in `headless::app`, where `dt` is the frame period) — moving it onto the
-/// logical tick is issue #896's slice, not this one. So anything whose state
-/// depends on the physics pipeline — collisions, and therefore collision hull
-/// damage and the `SimStream::CollisionDamage` draws it makes — would still
-/// diverge between these two drives, and this test would fail for a reason
-/// #895 cannot fix. `patrol.toml` is chosen because its backfilled player flies
-/// a deterministic non-contact course: no collision ever fires, so rapier
-/// feeds nothing back into ship state and what remains under test is exactly
-/// the schedule. **A collision-bearing world (`combat_test`, `duel`) cannot be
-/// added here until #896 lands** — when it does, this test should gain a
-/// second world that does collide.
+/// # The two worlds, and why it took two issues to get here
+/// `patrol.toml` flies a deterministic non-contact course: no collision ever
+/// fires, so rapier feeds nothing back into ship state and what is under test
+/// is exactly the schedule. That was all #895 could assert, because rapier was
+/// still driven once per rendered FRAME — anything downstream of the physics
+/// pipeline diverged between these two drives for a reason #895 could not fix,
+/// and this test's own docs said so and named the follow-up.
+///
+/// #896 moved rapier onto the logical tick, so the second world is now here:
+/// `rng_coverage.toml` puts the player inside an asteroid belt and makes it fly,
+/// which means real contacts, real collision damage, and real draws on
+/// `SimStream::CollisionDamage`. That is the case that fails without #896 and
+/// passes with it, and [`RunFingerprint::collisions`] plus the precondition
+/// below are what stop it quietly degrading into a second copy of the
+/// no-contact run.
 #[test]
 fn the_simulation_reaches_the_same_state_at_wildly_different_frame_rates() {
-    use project_phoenix::entity_spawner::EntitySystemHull;
-    use project_phoenix::sim_rng::{SimRng, SimStream};
-    use project_phoenix::sim_tick::SimTick;
-    use project_phoenix::simulation::Ship;
-
-    /// Drive `frames` frames of `ticks_per_frame` logical ticks each and
-    /// fingerprint the world it leaves behind.
-    fn end_state(frames: u64, ticks_per_frame: u32) -> RunFingerprint {
-        let dt = 1.0 / 60.0;
-        let args = HeadlessArgs {
-            world_path: "assets/worlds/patrol.toml".into(),
-            dt,
-            max_ticks: 0, // driven by hand below
-            seed: Some(42),
-            deterministic: true,
-            ..test_args()
-        };
-        let mut app = build_headless_app(&args).expect("app should build");
-        app.finish();
-        app.cleanup();
-        // Establish the time baseline (zero delta, no steps)…
-        app.update();
-        // …then re-pace off the app's own timestep, exactly.
-        let period = app.world().resource::<Time<Fixed>>().timestep();
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            period * ticks_per_frame,
-        ));
-        for _ in 0..frames {
-            app.update();
-        }
-
-        let mut ships: Vec<_> = app
-            .world_mut()
-            .query_filtered::<(Entity, &ShipPhysics, Option<&EntitySystemHull>), With<Ship>>()
-            .iter(app.world())
-            .map(|(e, p, hull)| {
-                let (current, max) =
-                    hull.map_or((0.0, 0.0), |h| (h.0.total_current(), h.0.total_max()));
-                (e.index(), p.x, p.z, p.yaw, p.forward_speed, current, max)
-            })
-            .collect();
-        ships.sort_by_key(|s| s.0);
-
-        let rng = app.world().resource::<SimRng>();
-        let rng_positions = SimStream::ALL
-            .iter()
-            .map(|s| rng.stream(*s).next_u32())
-            .collect();
-
-        RunFingerprint {
-            tick: app.world().resource::<SimTick>().0,
-            seed: rng.seed(),
-            rng_positions,
-            ships,
-        }
-    }
-
-    let per_tick = end_state(240, 1);
-    let per_four = end_state(60, 4);
+    let per_tick = frame_pacing_end_state("assets/worlds/patrol.toml", 240, 1);
+    let per_four = frame_pacing_end_state("assets/worlds/patrol.toml", 60, 4);
     assert_eq!(
         per_tick.tick, 240,
         "precondition: one frame per tick for 240 frames is 240 ticks"
@@ -3489,6 +3459,343 @@ fn the_simulation_reaches_the_same_state_at_wildly_different_frame_rates() {
          BIT-identical state whatever the frame rate — a difference means \
          something in the sim still advances per frame"
     );
+}
+
+/// Frames the collision-bearing pacing runs cover, at one logical tick each.
+///
+/// Long enough that the backfilled player is up to speed and well into the belt
+/// `rng_coverage.toml` wraps around the spawn point — the precondition below
+/// fails loudly if it ever stops being long enough, rather than passing on an
+/// empty collision list.
+const COLLIDING_INVARIANCE_TICKS: u64 = 900;
+
+/// Issue #896's headline acceptance, and the case #895 had to leave open: the
+/// same claim as the test above, in a world where **ships actually collide**.
+///
+/// With rapier stepping in `PostUpdate` off the frame clock, these two drives
+/// were not running the same physics at all — the 4-ticks-per-frame run stepped
+/// the solver a quarter as often, over four times the distance each step, so it
+/// hit different rocks at different speeds and this test failed on the collision
+/// list, the hull totals and the `CollisionDamage` stream position together.
+/// With physics on the logical tick and its results consumed in world-id order,
+/// the two runs are the same simulation and agree bit for bit.
+#[test]
+fn a_colliding_world_reaches_the_same_state_at_wildly_different_frame_rates() {
+    let world = "assets/worlds/rng_coverage.toml";
+    let per_tick = frame_pacing_end_state(world, COLLIDING_INVARIANCE_TICKS, 1);
+    let per_four = frame_pacing_end_state(world, COLLIDING_INVARIANCE_TICKS / 4, 4);
+
+    assert_eq!(
+        (per_tick.tick, per_four.tick),
+        (COLLIDING_INVARIANCE_TICKS, COLLIDING_INVARIANCE_TICKS),
+        "precondition: both drives must cover the same number of logical ticks"
+    );
+    assert!(
+        !per_tick.collisions.is_empty(),
+        "precondition: no collision was applied in {COLLIDING_INVARIANCE_TICKS} \
+         ticks of {world}, so this is a second no-contact run and proves \
+         nothing about physics. Ships: {:?}",
+        per_tick.ships
+    );
+    assert_eq!(
+        per_tick, per_four,
+        "a colliding world must reach the BIT-identical state whatever the \
+         frame rate — a difference means physics is still following the frame \
+         clock, or its contacts are still being consumed in an order the \
+         simulation does not choose"
+    );
+}
+
+/// Drive `frames` frames of `ticks_per_frame` logical ticks each through
+/// `world`, and fingerprint the world it leaves behind.
+fn frame_pacing_end_state(world: &str, frames: u64, ticks_per_frame: u32) -> RunFingerprint {
+    frame_pacing_end_state_with(world, frames, ticks_per_frame, false)
+}
+
+/// [`frame_pacing_end_state`], with `physics_last` — the registration-order
+/// knob issue #896's digest AC turns on. See `SimPluginOptions::physics_last`.
+fn frame_pacing_end_state_with(
+    world: &str,
+    frames: u64,
+    ticks_per_frame: u32,
+    physics_last: bool,
+) -> RunFingerprint {
+    use project_phoenix::balance::BalanceEvent;
+    use project_phoenix::entity_spawner::EntitySystemHull;
+    use project_phoenix::headless::report::RunTelemetry;
+    use project_phoenix::sim_rng::{SimRng, SimStream};
+    use project_phoenix::sim_tick::SimTick;
+    use project_phoenix::simulation::Ship;
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: world.into(),
+        dt,
+        max_ticks: 0, // driven by hand below
+        seed: Some(42),
+        deterministic: true,
+        physics_last,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    app.finish();
+    app.cleanup();
+    // Establish the time baseline (zero delta, no steps)…
+    app.update();
+    // …then re-pace off the app's own timestep, exactly.
+    let period = app.world().resource::<Time<Fixed>>().timestep();
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        period * ticks_per_frame,
+    ));
+    for _ in 0..frames {
+        app.update();
+    }
+
+    let mut ships: Vec<_> = app
+        .world_mut()
+        .query_filtered::<(Entity, &ShipPhysics, Option<&EntitySystemHull>), With<Ship>>()
+        .iter(app.world())
+        .map(|(e, p, hull)| {
+            let (current, max) =
+                hull.map_or((0.0, 0.0), |h| (h.0.total_current(), h.0.total_max()));
+            (e.index(), p.x, p.z, p.yaw, p.forward_speed, current, max)
+        })
+        .collect();
+    ships.sort_by_key(|s| s.0);
+
+    let collisions = app
+        .world()
+        .resource::<RunTelemetry>()
+        .balance_events
+        .iter()
+        .filter_map(|stamped| match &stamped.event {
+            BalanceEvent::DamageApplied {
+                weapon,
+                victim,
+                amount,
+                shield_absorbed,
+                hull_damage,
+                ..
+            } if weapon == project_phoenix::balance::WEAPON_KIND_COLLISION => {
+                Some((victim.clone(), *amount, *shield_absorbed, *hull_damage))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let rng = app.world().resource::<SimRng>();
+    let rng_positions = SimStream::ALL
+        .iter()
+        .map(|s| rng.stream(*s).next_u32())
+        .collect();
+
+    RunFingerprint {
+        tick: app.world().resource::<SimTick>().0,
+        seed: rng.seed(),
+        rng_positions,
+        ships,
+        collisions,
+    }
+}
+
+/// Issue #896, AC-4: the same colliding run, with the physics plugin registered
+/// **after** every simulation system instead of before them, reaches the same
+/// state.
+///
+/// Registration order is the thing a schedule falls back on when nothing else
+/// decides: two sets that merely coexist in `FixedUpdate` can be interleaved
+/// either way round, and which way you get is a function of the order the
+/// `add_plugins` calls happened to appear in `add_simulation_plugins_with`.
+/// That is not a property anyone would notice changing, and it would silently
+/// change what a collision resolves against — physics stepping *before* this
+/// tick's `sync_ship_position` reads last tick's positions.
+///
+/// `register_physics` therefore declares both edges it needs
+/// (`SyncBackend.after(SimSet::Physics)`, `Writeback.before(SimSet::Damage)`),
+/// and this is the assertion that they, and not the call order, are what holds
+/// the tick together. It runs on the collision-bearing world for the same
+/// reason as the test above: in a world with no contacts, physics could be
+/// scheduled anywhere at all and nothing downstream would notice.
+#[test]
+fn a_colliding_run_is_the_same_with_physics_registered_last() {
+    let world = "assets/worlds/rng_coverage.toml";
+    let physics_first = frame_pacing_end_state_with(world, COLLIDING_INVARIANCE_TICKS, 1, false);
+    let physics_last = frame_pacing_end_state_with(world, COLLIDING_INVARIANCE_TICKS, 1, true);
+
+    assert!(
+        !physics_first.collisions.is_empty(),
+        "precondition: the run applied no collisions, so registration order \
+         could not have mattered either way"
+    );
+    assert_eq!(
+        physics_first, physics_last,
+        "the same run diverged when the physics plugin was registered last — \
+         the tick's physics ordering is coming from the order the plugins were \
+         added, not from the explicit set edges in `register_physics`"
+    );
+}
+
+/// Issue #896, AC-1: rapier steps once per LOGICAL tick, whatever the frame
+/// pacing — the property the whole slice rests on.
+///
+/// Measured rather than inferred, and measured out of rapier itself. A
+/// kinematic probe body is dropped into the world with a known velocity and no
+/// collider, so the only thing that moves it is the solver integrating it: the
+/// distance it has travelled after the run divided by its speed IS the time
+/// rapier simulated. At the 60 Hz tick, 240 ticks must integrate exactly four
+/// seconds of it, from a host running one tick per frame and from a host
+/// running four.
+///
+/// With physics in `PostUpdate` on `TimestepMode::Fixed { dt }`, that number
+/// was the FRAME count times `dt` — four seconds against one for the two drives
+/// below. That is the gap the colliding invariance test then sees the
+/// consequences of: the same 240 logical ticks, with physics having advanced
+/// the world by four times as much in one of them.
+#[test]
+fn rapier_steps_once_per_logical_tick_at_any_frame_rate() {
+    use bevy_rapier3d::prelude::{RigidBody, Velocity};
+    use project_phoenix::sim_tick::SimTick;
+
+    /// The probe's speed along +X, in units per simulated second. Chosen for
+    /// exactness in binary rather than realism — nothing else touches it.
+    const PROBE_SPEED: f32 = 8.0;
+
+    #[derive(Component)]
+    struct StepProbe;
+
+    /// `(logical ticks, seconds of physics rapier integrated)` after `frames`
+    /// frames of `ticks_per_frame` logical ticks each.
+    fn drive(frames: u64, ticks_per_frame: u32) -> (u64, f32) {
+        let args = HeadlessArgs {
+            world_path: "assets/worlds/patrol.toml".into(),
+            dt: 1.0 / 60.0,
+            max_ticks: 0,
+            seed: Some(42),
+            deterministic: true,
+            ..test_args()
+        };
+        let mut app = build_headless_app(&args).expect("app should build");
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        // Well clear of the scenario, with no collider, so nothing but the
+        // integrator can affect where it ends up.
+        app.world_mut().spawn((
+            StepProbe,
+            Transform::from_xyz(0.0, 5_000.0, 0.0),
+            RigidBody::KinematicVelocityBased,
+            Velocity::linear(Vec3::X * PROBE_SPEED),
+        ));
+
+        let period = app.world().resource::<Time<Fixed>>().timestep();
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            period * ticks_per_frame,
+        ));
+        for _ in 0..frames {
+            app.update();
+        }
+
+        let travelled = app
+            .world_mut()
+            .query_filtered::<&Transform, With<StepProbe>>()
+            .single(app.world())
+            .expect("the probe body should still be there")
+            .translation
+            .x;
+        (app.world().resource::<SimTick>().0, travelled / PROBE_SPEED)
+    }
+
+    let (ticks_a, seconds_a) = drive(240, 1);
+    let (ticks_b, seconds_b) = drive(60, 4);
+
+    assert_eq!(
+        (ticks_a, ticks_b),
+        (240, 240),
+        "precondition: both drives must cover 240 logical ticks"
+    );
+    assert!(
+        (seconds_a - 4.0).abs() < 1e-3,
+        "240 logical ticks at 60 Hz is four seconds of simulation, but rapier \
+         integrated {seconds_a}s of it"
+    );
+    assert_eq!(
+        seconds_a, seconds_b,
+        "the same 240 logical ticks must step physics by the same amount \
+         whatever the frame pacing — a difference means rapier is back on the \
+         frame clock"
+    );
+}
+
+/// Issue #896, AC-2: the build that claims determinism runs rapier's broadphase
+/// serially, on every target.
+///
+/// A parallel broadphase does not hand contacts to the narrow phase in the same
+/// order a serial one does. The wasm build cannot have one (the browser runtime
+/// is single-threaded), so a native build with `features = ["parallel"]` and a
+/// wasm build without it are running measurably different physics — and the
+/// difference is invisible to native-only testing, because any two native
+/// instances agree with each other perfectly. It would first surface in real
+/// P2P, between a browser and anything else.
+///
+/// This reads the manifest rather than the running solver because that is where
+/// the decision lives and where it would be undone: `parallel` is a cargo
+/// feature, so no assertion inside a native test process can observe its
+/// absence. The AC allows the feature back for a build that does *not* claim
+/// determinism; what it does not allow is the two targets drifting apart
+/// without anyone recording the choice, and re-adding the feature has to walk
+/// past this test to do it.
+///
+/// The manifest is parsed as TOML (the `toml` crate is already a regular
+/// dependency, so it is on the classpath for tests too) rather than scanned
+/// line by line, because a per-line `starts_with("bevy_rapier3d")` only
+/// catches the inline-table form (`bevy_rapier3d = { ... }`). The full
+/// `[dependencies.bevy_rapier3d]` table form, and a `features = [...]` array
+/// spread across several lines, both start their `bevy_rapier3d` line with
+/// whitespace or a bracket instead, and a plain substring scan would walk
+/// straight past them. Parsing means every one of those shapes lands in the
+/// same `toml::Value::Table`, and the check below finds `bevy_rapier3d`'s
+/// `features` list under any of them.
+#[test]
+fn the_deterministic_build_runs_rapier_serially() {
+    let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+        .expect("the crate manifest should be readable");
+    let doc: toml::Value =
+        toml::from_str(&manifest).expect("the crate manifest should be valid TOML");
+
+    /// Recursively walk every table in the document looking for a
+    /// `bevy_rapier3d` dependency entry (inline table or full
+    /// `[dependencies.bevy_rapier3d]` table — both parse to the same
+    /// `toml::Value::Table` shape) and assert its `features` list, if any,
+    /// does not contain `"parallel"`.
+    fn check(value: &toml::Value, path: &str) {
+        let Some(table) = value.as_table() else {
+            return;
+        };
+        for (key, entry) in table {
+            let sub_path = format!("{path}.{key}");
+            if key == "bevy_rapier3d" {
+                let enables_parallel = entry
+                    .get("features")
+                    .and_then(|f| f.as_array())
+                    .is_some_and(|features| {
+                        features.iter().any(|f| f.as_str() == Some("parallel"))
+                    });
+                assert!(
+                    !enables_parallel,
+                    "a bevy_rapier3d dependency at `{sub_path}` enables the \
+                     `parallel` feature:\n  {entry}\nA parallel broadphase \
+                     orders contacts differently from the serial one wasm is \
+                     stuck with, so the two targets would no longer be \
+                     running the same simulation. If this is deliberate, it \
+                     belongs in a build that does not claim determinism."
+                );
+            } else {
+                check(entry, &sub_path);
+            }
+        }
+    }
+    check(&doc, "");
 }
 
 // ── Command log (issue #898) ──────────────────────────────────────────────────

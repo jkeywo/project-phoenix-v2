@@ -52,10 +52,17 @@ bevy_rapier3d = { version = "0.33", features = ["dim3"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy_rapier3d = { version = "0.33", features = ["parallel"] }
+bevy_rapier3d = { version = "0.33" }
 ```
 
-`parallel` is fine on native (where `cargo test` runs); WASM has no threads.
+Native carried `features = ["parallel"]` until issue #896. WASM has no threads
+and so never could, and a parallel broadphase does not order contacts the way a
+serial one does — so the two targets were running measurably different physics,
+invisibly to native-only testing and first visible in real P2P between a browser
+and anything else. Both targets now run the serial solver, at a cost in native
+physics throughput that the (non-gating) perf baselines register.
+`the_deterministic_build_runs_rapier_serially` in `tests/headless_runner.rs`
+fails if the feature comes back.
 
 ### Bevy debug feature (#598)
 

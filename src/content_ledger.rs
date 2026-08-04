@@ -58,7 +58,7 @@ use std::collections::BTreeMap;
 thread_local! {
     /// Canonical path -> `fnv1a` digest of the text last recorded for it.
     /// Grows as the loader consumes files; never shrinks except via [`reset`].
-    static LEDGER: RefCell<BTreeMap<String, u64>> = RefCell::new(BTreeMap::new());
+    static LEDGER: RefCell<BTreeMap<String, u64>> = const { RefCell::new(BTreeMap::new()) };
 
     /// The ledger's state at the moment [`freeze`] was last called, or `None`
     /// before the first freeze (and after [`reset`]).

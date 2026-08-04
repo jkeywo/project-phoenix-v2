@@ -2527,12 +2527,13 @@ fn power_guard_truth_table() {
             &p,
             "helm",
             &facts(&[
+                ("red_alert", 1.0),
                 ("thrust", thrust_threshold + 0.2),
                 ("battery_pct", helm_reserve + 30.0)
             ])
         ),
         elevated(hi),
-        "sustained thrust AND battery above the helm reserve ⇒ elevate."
+        "red alert, sustained thrust AND battery above the helm reserve ⇒ elevate."
     );
     assert_eq!(
         resolve(
@@ -2540,25 +2541,43 @@ fn power_guard_truth_table() {
             "helm",
             &facts(&[
                 ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_reserve - 20.0)
+                ("battery_pct", helm_reserve + 30.0)
             ])
         ),
         elevated(lo),
-        "same thrust, battery BELOW the reserve ⇒ the elevate guard reads false and \
-         helm holds baseline. This is the brownout guard, and it is the reserve param \
-         that enforces it — not a global emergency branch."
+        "same thrust and battery, but away from red alert ⇒ baseline. \
+         `plan_helm_travel` commands near-max thrust for ordinary transit, not just \
+         combat manoeuvring, so without this guard a cruising ship held the elevated \
+         allocation for its whole transit and browned out with no combat involved."
     );
     assert_eq!(
         resolve(
             &p,
             "helm",
             &facts(&[
+                ("red_alert", 1.0),
+                ("thrust", thrust_threshold + 0.2),
+                ("battery_pct", helm_reserve - 20.0)
+            ])
+        ),
+        elevated(lo),
+        "red alert and thrust, battery BELOW the reserve ⇒ the elevate guard reads \
+         false and helm holds baseline. This is the brownout guard, and it is the \
+         reserve param that enforces it — not a global emergency branch."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "helm",
+            &facts(&[
+                ("red_alert", 1.0),
                 ("thrust", thrust_threshold - 0.5),
                 ("battery_pct", helm_reserve + 30.0)
             ])
         ),
         elevated(lo),
-        "thrust below the threshold ⇒ baseline, however full the battery."
+        "thrust below the threshold ⇒ baseline, however full the battery, even at \
+         red alert."
     );
 
     // ── weapons ─────────────────────────────────────────────────────────────

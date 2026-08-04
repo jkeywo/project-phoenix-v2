@@ -743,23 +743,21 @@ shape = "sphere"
         let bounds: Vec<Option<f32>> = rig.lod.iter().map(|l| l.max_distance).collect();
         assert_eq!(
             bounds,
-            vec![Some(50.0), Some(100.0), Some(150.0), None],
-            "switch distances must survive the move verbatim"
+            vec![Some(25.0), Some(150.0), Some(300.0), None],
+            "bands ported from asteroid_common_4's tuned ladder so all four \
+             common asteroids share one visual LOD profile"
         );
 
-        // Switching behaviour is unchanged by the move: the same pure selector
-        // the renderer calls, over the migrated chain, at the authored
-        // distances. These are the numbers the pre-#914 `[[mesh.lod]]` blocks
-        // produced, asserted rather than eyeballed.
+        // Switching behaviour over the ported chain, at the authored distances.
         use crate::entity_config::select_lod;
         for (distance, expected) in [
             (0.0, 0),
-            (49.9, 0),
-            (50.0, 1),
-            (99.9, 1),
-            (100.0, 2),
-            (149.9, 2),
-            (150.0, 3),
+            (24.9, 0),
+            (25.0, 1),
+            (149.9, 1),
+            (150.0, 2),
+            (299.9, 2),
+            (300.0, 3),
             (10_000.0, 3),
         ] {
             assert_eq!(
@@ -769,8 +767,8 @@ shape = "sphere"
             );
         }
         // …and hysteresis still holds each band across its boundary.
-        assert_eq!(select_lod(&rig.lod, 52.0, Some(0)), 0);
-        assert_eq!(select_lod(&rig.lod, 48.0, Some(1)), 1);
+        assert_eq!(select_lod(&rig.lod, 27.0, Some(0)), 0);
+        assert_eq!(select_lod(&rig.lod, 23.0, Some(1)), 1);
 
         // Every GLB level names a file that exists, at the entity's variant.
         for level in rig.lod.iter().filter(|l| l.model.is_some()) {

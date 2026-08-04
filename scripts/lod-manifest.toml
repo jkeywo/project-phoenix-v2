@@ -11,56 +11,68 @@ version = 1
 
 [[output]]
 path = "assets/models/asteroid_common_1_lod1.glb"
-source = "assets/models/asteroid_common_1.glb"
-source_sha256 = "a9a295e1541d20fd1a34cabbec90c83768b24b9a85080aac9cf5af433c04bac2"
-params = { ratio = 0.25, error = 0.01, texture_size = 512 }
-output_sha256 = "9a19a8157302f73aa5f026d062be5f95cdf57c16b892660e101445fcaff1cd0c"
-output_bytes = 1138264
+source = "assets/models/asteroid_common_1.remesh.glb"
+source_sha256 = "005f0d18173cce5e919cdf47b363554b76f893929b1a93e5ce6419470b2f75ad"
+origin = "assets/models/asteroid_common_1.glb"
+origin_sha256 = "a9a295e1541d20fd1a34cabbec90c83768b24b9a85080aac9cf5af433c04bac2"
+params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
+output_sha256 = "219edc940d3ef8601dc819fcad8572d8f1894e9f2014414fd974fb3a0d585e6a"
+output_bytes = 1150972
 declared_by = ["assets/models/asteroid_common_1.cosmetic.toml", "assets/models/asteroid_common_1.large.toml", "assets/models/asteroid_common_1.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_1_lod2.glb"
-source = "assets/models/asteroid_common_1.glb"
-source_sha256 = "a9a295e1541d20fd1a34cabbec90c83768b24b9a85080aac9cf5af433c04bac2"
-params = { ratio = 0.05, error = 0.1, texture_size = 256 }
-output_sha256 = "118b91c6fe940c546d93ba3d1485258ac66bf528129245b23be150c654464402"
-output_bytes = 272052
+source = "assets/models/asteroid_common_1.remesh.glb"
+source_sha256 = "005f0d18173cce5e919cdf47b363554b76f893929b1a93e5ce6419470b2f75ad"
+origin = "assets/models/asteroid_common_1.glb"
+origin_sha256 = "a9a295e1541d20fd1a34cabbec90c83768b24b9a85080aac9cf5af433c04bac2"
+params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
+output_sha256 = "ef2c86f5ac6c0eecc51727230d523c5347ecc3a23c6c7678068a81dd5ce9ce92"
+output_bytes = 326000
 declared_by = ["assets/models/asteroid_common_1.cosmetic.toml", "assets/models/asteroid_common_1.large.toml", "assets/models/asteroid_common_1.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_2_lod1.glb"
-source = "assets/models/asteroid_common_2.glb"
-source_sha256 = "5759e6e78314e4fb0aba3ea25708689a93577a7a02b634144e940564a23b081b"
-params = { ratio = 0.25, error = 0.01, texture_size = 512 }
-output_sha256 = "2583522cbdf685dd32acb7d6c25bf956b8f3045ec090c68d3bbcd13d415bcc20"
-output_bytes = 3487956
+source = "assets/models/asteroid_common_2.remesh.glb"
+source_sha256 = "1aeb47efd814c1d769201d5d6d8c3a8de4c93002f04afe6b1732b8d58e2a6989"
+origin = "assets/models/asteroid_common_2.glb"
+origin_sha256 = "5759e6e78314e4fb0aba3ea25708689a93577a7a02b634144e940564a23b081b"
+params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
+output_sha256 = "a5ee4960b8efb94eb4be5b6e4afaed6a94c1e18457aa912ed4ee9a73e44d58d7"
+output_bytes = 1208164
 declared_by = ["assets/models/asteroid_common_2.cosmetic.toml", "assets/models/asteroid_common_2.large.toml", "assets/models/asteroid_common_2.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_2_lod2.glb"
-source = "assets/models/asteroid_common_2.glb"
-source_sha256 = "5759e6e78314e4fb0aba3ea25708689a93577a7a02b634144e940564a23b081b"
-params = { ratio = 0.05, error = 0.1, texture_size = 256 }
-output_sha256 = "0dc70a0335c0f324b3e87b2e1136ddc032d6ddfa992b9cefcc9d7313ffa810bf"
-output_bytes = 2732152
+source = "assets/models/asteroid_common_2.remesh.glb"
+source_sha256 = "1aeb47efd814c1d769201d5d6d8c3a8de4c93002f04afe6b1732b8d58e2a6989"
+origin = "assets/models/asteroid_common_2.glb"
+origin_sha256 = "5759e6e78314e4fb0aba3ea25708689a93577a7a02b634144e940564a23b081b"
+params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
+output_sha256 = "c32a3c84ef619ec9588b942f4c8fddc5174f10457ba99a4fdbe9e387879ef9a7"
+output_bytes = 338296
 declared_by = ["assets/models/asteroid_common_2.cosmetic.toml", "assets/models/asteroid_common_2.large.toml", "assets/models/asteroid_common_2.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_3_lod1.glb"
-source = "assets/models/asteroid_common_3.glb"
-source_sha256 = "27ea54525d6ee373b42eb4e4ebe9789bcc374448dc498d8189ba213c3db833ed"
-params = { ratio = 0.25, error = 0.01, texture_size = 512 }
-output_sha256 = "36ac68cff772ce1360a674002596342da242edb4bc10ec62039635095e6c6d73"
-output_bytes = 3681364
+source = "assets/models/asteroid_common_3.remesh.glb"
+source_sha256 = "26a8f88837959750ebd4a9ff0b98783a1785ad7f3d0a8da74edd47a2473d935c"
+origin = "assets/models/asteroid_common_3.glb"
+origin_sha256 = "27ea54525d6ee373b42eb4e4ebe9789bcc374448dc498d8189ba213c3db833ed"
+params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
+output_sha256 = "ba23eb7b90ceeeff10e9fa7827bf2317c8111ae7e6b46b41e0290be9e04b2e09"
+output_bytes = 1257328
 declared_by = ["assets/models/asteroid_common_3.cosmetic.toml", "assets/models/asteroid_common_3.large.toml", "assets/models/asteroid_common_3.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_3_lod2.glb"
-source = "assets/models/asteroid_common_3.glb"
-source_sha256 = "27ea54525d6ee373b42eb4e4ebe9789bcc374448dc498d8189ba213c3db833ed"
-params = { ratio = 0.05, error = 0.1, texture_size = 256 }
-output_sha256 = "b2adf4ade0801e43247588eb071d891c884c7d01fcfcfbd6798b546a6fb4f9f9"
-output_bytes = 2908480
+source = "assets/models/asteroid_common_3.remesh.glb"
+source_sha256 = "26a8f88837959750ebd4a9ff0b98783a1785ad7f3d0a8da74edd47a2473d935c"
+origin = "assets/models/asteroid_common_3.glb"
+origin_sha256 = "27ea54525d6ee373b42eb4e4ebe9789bcc374448dc498d8189ba213c3db833ed"
+params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
+output_sha256 = "a1206fa81785a699f64e174237acf8b01d97da6f5014f53fd5cde126a84b362f"
+output_bytes = 350664
 declared_by = ["assets/models/asteroid_common_3.cosmetic.toml", "assets/models/asteroid_common_3.large.toml", "assets/models/asteroid_common_3.small.toml"]
 
 [[output]]

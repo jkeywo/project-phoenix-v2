@@ -57,6 +57,10 @@ impl Plugin for CaptainPlugin {
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(handle_set_red_alert)
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
+                backfill_captain_prefers_cinematic_view
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .before(handle_set_view)
+                    .run_if(crate::ai::cadence::ai_snapshot_ready),
                 handle_set_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
@@ -174,6 +178,67 @@ pub(crate) fn handle_set_view(
         if let Some((source, mode)) = view_request_from_admitted(cmd) {
             vm.request_view_mode_from(source, mode);
         }
+    }
+}
+
+/// When an AI captain takes over the ship the player is watching — a
+/// "backfilled" captain, i.e. the Captain seat's own Control Source has gone
+/// AI — it prefers the Cinematic camera over whatever view mode the ship
+/// happened to be showing at the moment of takeover.
+///
+/// Nothing in the AI Captain doctrine emitted a `SetView` before this: the
+/// authored `[captain_console.ai]` policy only ever declares the `red_alert`
+/// channel (see `fragments/ai/captain_alliance.toml`), so a backfilled hull
+/// simply kept the human's last view mode forever, cinematic or not. This is
+/// a direct emission rather than a policy channel because the decision has no
+/// tuning surface — "backfilled ⇒ cinematic" is the whole rule.
+///
+/// Scoped to `LocalShip`: view mode is a spectator concern, and no NPC's
+/// `ShipViewMode` is read by anything (`handle_set_view` above carries the
+/// same `With<LocalShip>` filter).
+fn backfill_captain_prefers_cinematic_view(
+    sessions: Res<crate::lobby::Sessions>,
+    mut ship_query: Query<
+        (
+            &mut AdmittedCommands,
+            &ShipSystemControlSources,
+            &crate::ship_state::ShipViewMode,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+) {
+    for (mut admitted, control_sources, view_mode, entity_uuid, ship_config) in
+        ship_query.iter_mut()
+    {
+        // Both `Camera` and `Cinematic` `SetView` authorize off the CAPTAIN
+        // system, not the viewscreen (`source_system_for_view_mode`,
+        // `is_command_authorized`'s `effective_target` remap) — the viewscreen
+        // itself has no seat to be human- or AI-operated, the Captain does.
+        let policy = control_sources
+            .0
+            .policy_for(&crate::system_registry::captain_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        if view_mode.view_mode == ViewMode::Cinematic {
+            // Already there — an explicit human `SetView` back to Cinematic,
+            // or a previous tick of this same system. Either way, no-op so
+            // admission is not spammed every tick.
+            continue;
+        }
+        emit_ai_command(
+            entity_uuid,
+            crate::system_registry::viewscreen_system_id(),
+            SystemControlPayload::SetView {
+                mode: ViewMode::Cinematic,
+            },
+            control_sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
+        );
     }
 }
 
@@ -1614,6 +1679,73 @@ mod tests {
         assert!(
             !get_red_alert(&mut app),
             "AI must only operate red alert when the red-alert system is automated"
+        );
+    }
+
+    // ── backfill_captain_prefers_cinematic_view ───────────────────────────────
+
+    #[test]
+    fn backfilled_captain_switches_to_cinematic_view() {
+        let mut app = test_app();
+        start_game(&mut app);
+        assert_ne!(
+            get_view_mode(&mut app),
+            ViewMode::Cinematic,
+            "fixture starts on the default camera view"
+        );
+
+        set_control_source(
+            &mut app,
+            crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            get_view_mode(&mut app),
+            ViewMode::Cinematic,
+            "an AI-operated Captain seat (a backfilled captain) must switch to Cinematic"
+        );
+    }
+
+    #[test]
+    fn human_operated_captain_keeps_its_view_mode() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        tick(&mut app);
+
+        assert_ne!(
+            get_view_mode(&mut app),
+            ViewMode::Cinematic,
+            "with the Captain seat still human-operated, nothing should switch the view"
+        );
+    }
+
+    #[test]
+    fn cinematic_view_is_not_re_requested_once_reached() {
+        // Regression guard against admission spam: once a backfilled ship is
+        // showing Cinematic, further ticks must not keep emitting `SetView`.
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
+        tick(&mut app);
+        assert_eq!(get_view_mode(&mut app), ViewMode::Cinematic);
+
+        tick(&mut app);
+        let admitted_len = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&AdmittedCommands, With<LocalShip>>();
+            q.single(app.world()).unwrap().0.len()
+        };
+        assert_eq!(
+            admitted_len, 0,
+            "already-Cinematic must not keep re-admitting SetView every tick"
         );
     }
 

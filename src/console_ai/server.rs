@@ -2708,9 +2708,41 @@ station = "sensors"
 
     #[test]
     fn baseline_default_reallocates_toward_helm_on_sustained_thrust() {
-        // Baseline preservation: sustained high thrust + healthy battery raises
-        // helm power to its elevated level 3 (reproducing the retired
-        // movement→helm behaviour, now absolute + stateless).
+        // Baseline preservation: sustained high thrust + healthy battery, AT RED
+        // ALERT, raises helm power to its elevated level 3 (reproducing the
+        // retired movement→helm behaviour, now absolute + stateless). The
+        // red-alert guard was added to fix ships browning out on ordinary
+        // (non-combat) transit — `plan_helm_travel` commands near-max thrust for
+        // any far-off waypoint, so without the guard this elevation held for the
+        // whole cruise, not just combat.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .unwrap()
+            .thrust = 0.9;
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        power_tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            3,
+            "sustained high thrust at red alert must elevate helm power (default baseline)"
+        );
+    }
+
+    #[test]
+    fn sustained_thrust_without_red_alert_does_not_elevate_helm() {
+        // Regression guard for the brownout-outside-combat fix: ordinary cruise
+        // thrust (no red alert) must hold helm at the baseline 2, not the
+        // combat-burst 3 — the whole point of the `red_alert` guard on the
+        // elevate rule.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
         app.world_mut()
@@ -2723,18 +2755,19 @@ station = "sensors"
 
         assert_eq!(
             power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
-            3,
-            "sustained high thrust must elevate helm power (default baseline)"
+            2,
+            "sustained thrust away from red alert must NOT elevate helm \
+             (that used to brown out ships on ordinary transit)"
         );
     }
 
     #[test]
     fn reserve_gate_blocks_elevation_below_the_authored_floor() {
         // AC2 + AC5: with the battery drained below the helm 50% reserve, the
-        // elevate guard cannot fire even under full thrust, so the baseline
-        // fallback holds helm at level 2 — allocation never rises when the
-        // battery can't sustain it (no avoidable brownout). Above the reserve it
-        // elevates.
+        // elevate guard cannot fire even under full thrust at red alert, so the
+        // baseline fallback holds helm at level 2 — allocation never rises when
+        // the battery can't sustain it (no avoidable brownout). Above the
+        // reserve it elevates.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
         app.world_mut()
@@ -2742,6 +2775,11 @@ station = "sensors"
             .get_mut::<crate::ship_plugin::LastHelmInput>()
             .unwrap()
             .thrust = 0.9;
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
 
         // 40% battery is below the 50% helm reserve → held at baseline 2.
         set_battery(&mut app, e, 40.0);
@@ -2775,6 +2813,11 @@ station = "sensors"
             .get_mut::<crate::ship_plugin::LastHelmInput>()
             .unwrap()
             .thrust = 0.9;
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
 
         set_battery(&mut app, e, 80.0);
         power_tick_with_dt(&mut app, 0.1);

@@ -45,7 +45,15 @@ length = 1.5
 # Engage priority stays LOW (40) so scenario `spawn_entity` overrides (Destroy at
 # 80) merge by id and dominate (#842 AC3). No Retreat authored. `maintain_range =
 # 22` keeps the courier inside its single 35-unit fore blaster's range.
+#
+# `imminent_collision_facing_threshold = 0.6` (issue #780 AC4): see the fuller
+# note on `alliance_cruiser.toml`. Every shipped hull left this at its 1.0
+# (effectively off) default, so avoidance only ever bent travel and never
+# actually turned the ship's facing away from a closing obstacle — the fix for
+# the "AI flies through asteroid fields" report against the backfilled player
+# hull.
 [behaviour]
+imminent_collision_facing_threshold = 0.6
 
 [[behaviour.doctrine]]
 id             = "destroy-hostiles"
@@ -358,11 +366,16 @@ min_reserve_helm = 50.0
 min_reserve_sensors = 10.0
 min_reserve_baseline = 0.0
 
-# helm: elevate to 3 under sustained thrust with a healthy battery, else hold 2.
+# helm: elevate to 3 under sustained thrust with a healthy battery, AT RED
+# ALERT, else hold 2. The `red_alert` guard keeps ordinary transit (which also
+# commands near-max thrust) off the elevated allocation — see the identical
+# rule's comment in `fragments/ai/fleet_baseline.toml` for the brownout this
+# fixes. Must stay byte-identical to that fragment's `helm` rule: this hull
+# composes no fragment and owns its own copy (see the header above).
 [[power.ai_policy.rule]]
 priority = 10
 channel = "helm"
-when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
 verb = "set_power_group_allocation"
 level = 3
 

@@ -1261,6 +1261,10 @@ fn simulate_low_lod_ships(
             .map(|h| h.0.max_speed)
             .filter(|&s| s > 0.0)
             .unwrap_or(20.0);
+        let max_yaw_rate = helm_section
+            .map(|h| h.0.max_yaw_rate)
+            .filter(|&r| r > 0.0)
+            .unwrap_or(LOW_LOD_DEFAULT_MAX_YAW_RATE);
         let route = blackboards.and_then(active_waypoint_route);
 
         // Steer along the route only when we have a Patrol/Reach objective AND
@@ -1300,6 +1304,14 @@ fn simulate_low_lod_ships(
                     physics.forward_speed =
                         (physics.forward_speed + LOW_LOD_ACCEL_PER_SEC * dt).min(target_speed);
                 }
+                physics.yaw = low_lod_avoid_yaw(
+                    physics.yaw,
+                    [physics.x, 0.0, physics.z],
+                    physics.forward_speed,
+                    max_yaw_rate,
+                    dt,
+                    world_snapshot.as_deref(),
+                );
                 physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
                 physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
                 continue;
@@ -1311,6 +1323,14 @@ fn simulate_low_lod_ships(
             if crate::ai::patrol_cursor::route_completed(index, &waypoints, loop_path) {
                 physics.forward_speed =
                     (physics.forward_speed - LOW_LOD_ACCEL_PER_SEC * dt).max(0.0);
+                physics.yaw = low_lod_avoid_yaw(
+                    physics.yaw,
+                    [physics.x, 0.0, physics.z],
+                    physics.forward_speed,
+                    max_yaw_rate,
+                    dt,
+                    world_snapshot.as_deref(),
+                );
                 physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
                 physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
                 continue;
@@ -1398,9 +1418,76 @@ fn simulate_low_lod_ships(
             }
         }
 
+        physics.yaw = low_lod_avoid_yaw(
+            physics.yaw,
+            [physics.x, 0.0, physics.z],
+            physics.forward_speed,
+            max_yaw_rate,
+            dt,
+            world_snapshot.as_deref(),
+        );
         physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
         physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
     }
+}
+
+/// Bend a low-LOD ship's yaw away from imminent collisions using the same
+/// hazard model the high-fidelity Helm AI runs (`crate::ai::assess_hazards`).
+///
+/// Dead-reckoned ships (demoted out of `AiHighFidelity`) have no helm intent
+/// components, so `helm_motion_planner` never runs for them and they used to
+/// fly straight through everything in `WorldSnapshot` — including field
+/// asteroids, which the snapshot has carried since the fix for "AI collision
+/// avoidance flew straight through asteroid fields" (see `build_world_snapshot`).
+/// That fix only reached ships still on the full Helm AI path; a ship a
+/// player is not currently looking at is exactly the case most likely to be
+/// demoted, so most of the asteroid-field traffic was never covered. This is
+/// a direct yaw nudge rather than a steering command because there is no
+/// per-axis actuator to route one through at this fidelity.
+///
+/// A ship's own entry in `WorldSnapshot` never registers against itself:
+/// `assess_hazards` requires a projected separation `> 0.01`, and a ship at
+/// its own position has separation `0.0`.
+fn low_lod_avoid_yaw(
+    yaw: f32,
+    pos: [f32; 3],
+    forward_speed: f32,
+    max_yaw_rate: f32,
+    dt: f32,
+    snapshot: Option<&WorldSnapshot>,
+) -> f32 {
+    let Some(snapshot) = snapshot else {
+        return yaw;
+    };
+    let world_view = crate::ai::WorldView {
+        entity_pos: pos,
+        entity_yaw: yaw,
+        entities: snapshot.entities.clone(),
+        ..crate::ai::WorldView::default()
+    };
+    let hazard = crate::ai::assess_hazards(
+        &world_view,
+        forward_speed,
+        crate::ai::AVOIDANCE_BUFFER,
+        crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+        crate::ai::HAZARD_IGNORE_SIZE_RATIO,
+    );
+    if hazard.urgency <= 0.0 {
+        return yaw;
+    }
+    // Ship-local escape (x = starboard, z = aft) rotated into a world bearing,
+    // using the same forward/starboard convention as the route-bearing code
+    // above (forward = (sin(yaw), -cos(yaw)), starboard = (cos(yaw), sin(yaw))).
+    let escape_x = hazard.forces_local[0];
+    let escape_z = hazard.forces_local[2];
+    if escape_x * escape_x + escape_z * escape_z < f32::EPSILON {
+        return yaw;
+    }
+    let world_dx = escape_x * simmath::cos(yaw) - escape_z * simmath::sin(yaw);
+    let world_dz = escape_x * simmath::sin(yaw) + escape_z * simmath::cos(yaw);
+    let desired_yaw = simmath::atan2(world_dx, -world_dz);
+    let max_step = max_yaw_rate * dt * hazard.urgency.clamp(0.0, 1.0);
+    crate::ai::lod::step_yaw_toward(yaw, desired_yaw, max_step)
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────────

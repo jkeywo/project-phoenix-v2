@@ -139,7 +139,19 @@ length = 4
 # default (#842 AC3). No Retreat is authored: this is a defending warship — it
 # fights rather than flees. `maintain_range = 30` keeps the cruiser inside its
 # 40-unit phaser range while giving its torpedoes room.
+#
+# `imminent_collision_facing_threshold` (issue #780 AC4, and the "AI ships fly
+# through asteroid fields" report against the backfilled player hull): every
+# shipped hull left this at its parse-time default of 1.0 — effectively OFF,
+# since urgency is clamped to [0, 1] and can't exceed it — so ordinary
+# avoidance only ever BENT this hull's travel a little and never actually
+# turned its facing away from a closing rock. 0.6 authors the override for
+# real: once a hazard's projected threat crosses 60%, the desired facing
+# snaps to the escape heading (self-clearing the moment urgency drops back
+# under it) instead of relying on a mild bend to out-turn the obstacle in
+# time.
 [behaviour]
+imminent_collision_facing_threshold = 0.6
 
 [[behaviour.doctrine]]
 id             = "destroy-hostiles"

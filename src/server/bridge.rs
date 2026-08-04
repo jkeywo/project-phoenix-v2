@@ -1020,6 +1020,22 @@ fn drain_snapshot_save(world: &mut World) {
         );
         return;
     };
+    // A save of `Lobby` or `Loading` is meaningless — there is no run in
+    // progress to resume, and `Loading` in particular is a one-shot asset
+    // preload wait a restore would land back inside of. Refusing here (issue
+    // #934) rather than in `snapshot::capture` keeps `capture` a pure "walk
+    // whatever the world holds" reader — this is a policy about *when* a save
+    // button should work, and it belongs beside the button, not the walk.
+    let phase = world
+        .get_resource::<bevy::prelude::State<messages::GamePhase>>()
+        .map(|s| s.get().clone());
+    if !matches!(
+        phase,
+        Some(messages::GamePhase::InProgress) | Some(messages::GamePhase::GameOver)
+    ) {
+        set_snapshot_status(false, SNAPSHOT_SAVE, "there is no run in progress to save");
+        return;
+    }
     let payload = crate::snapshot::capture(world);
     let digest = crate::sim_digest::world_digest(world);
     let seed = world

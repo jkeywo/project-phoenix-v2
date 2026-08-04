@@ -1505,11 +1505,25 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
         world.insert_resource(WorldIdMint::from_state(state));
     }
 
+    let mut restored_phase_entry: Option<GamePhase> = None;
     if let Some(phase) = snapshot.phase.clone() {
         // `State::new` rather than `NextState`: a queued transition applies on
         // the next `StateTransition`, which is a step this restore has not run
         // yet and must not depend on. The captured phase is where the world
         // already *is*.
+        //
+        // But `State::new` also skips `OnEnter`/`OnExit` entirely (issue #934),
+        // and for a phase actually changing under this restore that silently
+        // drops whatever that phase's entry effects do. Note the transition
+        // here — before the direct write below — and let
+        // `run_restored_phase_entry_effects` decide, once the rest of this
+        // function has finished writing the resources those effects read.
+        let previous = world
+            .get_resource::<State<GamePhase>>()
+            .map(|s| s.get().clone());
+        if previous.as_ref() != Some(&phase) {
+            restored_phase_entry = Some(phase.clone());
+        }
         world.insert_resource(State::new(phase));
     }
 
@@ -1556,6 +1570,45 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     }
 
     restore_collisions(world, snapshot);
+
+    // Last, now that every resource an entry effect might read (`GameOverReason`
+    // above included) carries the restored value.
+    if let Some(phase) = restored_phase_entry {
+        run_restored_phase_entry_effects(world, phase);
+    }
+}
+
+/// Re-run the observable entry effects of a restored phase transition that the
+/// direct `State::new` write above skips (issue #934).
+///
+/// Not a blanket "run every restored phase's `OnEnter`" — that is wrong for
+/// `InProgress` specifically. `ready_to_restore` (below) gates every restore on
+/// the fresh app's own roster already existing, which only happens after that
+/// app ran its *own* `OnEnter(InProgress)` for its own game start — the mint,
+/// the spawns, the command-log reset. Re-running that schedule here would
+/// re-spawn and re-reset exactly what the entity/asteroid restore above just
+/// wrote. So `InProgress` gets nothing, on purpose. `Lobby` has no `OnEnter`
+/// registered at all. `Loading` does (`broadcast_loading_start`), but it is a
+/// transient phase a resumed run has no business landing in — capture refuses
+/// to record it (see the guard where `capture` is called) — so there is
+/// nothing to re-enter here either.
+///
+/// `GameOver` is the case the issue was filed for: a fresh app still
+/// `InProgress` restoring a captured `GameOver` needs `on_game_over_enter`
+/// (`server_app.rs`) and `push_game_over_hud_state`
+/// (`server/viewscreen_border.rs`) to run, or the host never emits the
+/// `GameOver` message and the HUD never leaves its live state. Both are
+/// audited safe to re-run: they only *read* `GameOverReason` (restored above,
+/// before this call) and *write* an outbox message / HUD resource — neither
+/// spawns, despawns, or resets anything the rest of this restore depends on.
+/// Run via `OnEnter(GameOver)` itself rather than by naming the two systems,
+/// so a future addition to that schedule is covered by construction — but that
+/// also means a system landing in `OnEnter(GameOver)` later needs this same
+/// audit before it can be trusted here.
+fn run_restored_phase_entry_effects(world: &mut World, phase: GamePhase) {
+    if phase == GamePhase::GameOver {
+        let _ = world.try_run_schedule(OnEnter(GamePhase::GameOver));
+    }
 }
 
 fn restore_collisions(world: &mut World, snapshot: &PhoenixSnapshot) {

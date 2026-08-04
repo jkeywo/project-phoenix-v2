@@ -27,7 +27,10 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+use bevy::prelude::{NextState, State};
 use project_phoenix::headless::{build_headless_app, HeadlessArgs};
+use project_phoenix::messages::{GamePhase, ServerMessage};
+use project_phoenix::server_app::{GameOverReason, SimOutbox};
 use project_phoenix::sim_digest::world_digest;
 use project_phoenix::snapshot::{
     capture, load_from, ready_to_restore, restore, run_for, save_to, versions, LoadRefusal,
@@ -613,5 +616,146 @@ fn a_slot_with_nothing_in_it_is_not_an_error() {
     assert_eq!(
         load_from(&store, "autosave", &current_versions(DUEL)),
         Err(LoadRefusal::Empty)
+    );
+}
+
+/// Force the live world into `GameOver` through the same seam production code
+/// uses — write `GameOverReason` then `NextState<GamePhase>`, and let the
+/// fixed-schedule `StateTransition` (issue #895) carry it through
+/// `OnEnter(GameOver)` on the very next `app.update()`. Deliberately *not*
+/// `snapshot::restore`'s direct `State::new` write — that write is exactly the
+/// path issue #934 is about, and this helper exists to produce a capture of a
+/// world that went through the real thing.
+fn force_game_over(
+    app: &mut bevy::prelude::App,
+    reason: &str,
+    outcome: project_phoenix::balance::Outcome,
+) {
+    {
+        let world = app.world_mut();
+        let mut game_over = world.resource_mut::<GameOverReason>();
+        game_over.0 = Some(reason.to_string());
+        game_over.1 = Some(outcome);
+        world
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::GameOver);
+    }
+    app.update();
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver,
+        "the forced transition should have landed before capture"
+    );
+}
+
+/// Issue #934's pin: restoring a captured `GameOver` re-runs the phase's entry
+/// effects, not just its phase label.
+///
+/// `restore_run_scope`'s `State::new(phase)` write (the fix this test is
+/// against) bypasses Bevy's `OnEnter`/`OnExit` schedules entirely, so a
+/// restored `GameOver` used to come back with the *label* `GameOver` but none
+/// of what a live transition into it does — no `ServerMessage::GameOver` for
+/// clients, no HUD flip. The fresh app this test restores into is proof the
+/// gap was real: `boot_to_restore_point` only waits for the roster
+/// (`ready_to_restore`), so it is still sitting in its own `InProgress` — it
+/// never made this transition on its own, and nothing but the restore itself
+/// can produce the entry effect.
+///
+/// The reason string is asserted as `""`, not the string this test forces —
+/// and that is a finding, not a shortcut. `on_game_over_enter` (`server_app.rs`)
+/// reads `GameOverReason` with `.take()`, so the live transition this test
+/// forces already consumes the reason into its own one-shot broadcast; by the
+/// time `capture` runs (even on the very next line), the resource it reads
+/// holds `None`, and every restore downstream inherits that. That consuming
+/// design predates #934 and this issue's scope is "the effects never ran at
+/// all", not "the reason resource is a `.take()`" — so the assertion below
+/// pins what a restore actually reproduces (the broadcast fires) rather than a
+/// string this codebase cannot hand it. The outcome half of the same resource
+/// is not `.take()`n by anything, and the assertion on it below is what proves
+/// the restored `GameOverReason` — not just the phase label — came back.
+#[test]
+fn a_restored_game_over_reruns_its_entry_effects() {
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    force_game_over(
+        &mut live,
+        "hull breach",
+        project_phoenix::balance::Outcome::Defeat,
+    );
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload.phase,
+        Some(GamePhase::GameOver),
+        "the capture should have recorded the forced GameOver phase"
+    );
+    assert_eq!(
+        payload
+            .game_over
+            .as_ref()
+            .map(|(_, outcome)| outcome.clone()),
+        Some(Some("defeat".to_string())),
+        "the outcome half of GameOverReason is never `.take()`n, so the \
+         capture should still carry it even though the reason half is gone"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    assert_eq!(
+        resumed.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "the fresh app should still be mid-run, not GameOver, at the restore point"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        resumed.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver,
+        "the restored phase label should be GameOver"
+    );
+    assert_eq!(
+        resumed.world().resource::<GameOverReason>().1,
+        Some(project_phoenix::balance::Outcome::Defeat),
+        "the restored GameOverReason's outcome should have survived — \
+         on_game_over_enter only takes the reason half"
+    );
+
+    let outbox = &resumed.world().resource::<SimOutbox>().0;
+    let reasons: Vec<&str> = outbox
+        .iter()
+        .filter_map(|(_, msg)| match msg {
+            ServerMessage::GameOver { reason } => Some(reason.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reasons,
+        vec![""],
+        "restoring a captured GameOver should have re-run on_game_over_enter \
+         and pushed the ServerMessage::GameOver the fresh app's own game \
+         start never emitted (found {} other outbox entries)",
+        outbox.len() - reasons.len()
+    );
+}
+
+/// The other half of #934's fix: a save button is a no-op outside a run, and
+/// says so, rather than recording a `Lobby`/`Loading` phase a restore would
+/// have nothing meaningful to re-enter.
+///
+/// This pins `capture`'s own behaviour, not the wasm-only status surface in
+/// `server/bridge.rs` that gates the save button on it — that surface is
+/// `#[cfg(target_arch = "wasm32")]` and outside this binary's reach, so what
+/// is testable from here is the phase `capture` itself records: a `Lobby`
+/// world's capture should carry a phase a caller can refuse on.
+#[test]
+fn a_lobby_capture_is_distinguishable_from_a_run_in_progress() {
+    let live = boot(&args(DUEL, ("cruiser", "destroyer")));
+    let payload = capture(live.world());
+    assert_eq!(
+        payload.phase,
+        Some(GamePhase::Lobby),
+        "a fresh app's capture should record Lobby, the phase the save-button \
+         guard (server/bridge.rs) refuses to write a save from"
     );
 }

@@ -56,7 +56,15 @@ length = 3
 # 80) merge by id and dominate (#842 AC3). No Retreat — a fast attack hull fights.
 # `maintain_range = 24` keeps the destroyer inside its 30-unit omni phaser and
 # 35-unit blaster range.
+#
+# `imminent_collision_facing_threshold = 0.6` (issue #780 AC4): see the fuller
+# note on `alliance_cruiser.toml`. Every shipped hull left this at its 1.0
+# (effectively off) default, so avoidance only ever bent travel and never
+# actually turned the ship's facing away from a closing obstacle — the fix for
+# the "AI flies through asteroid fields" report against the backfilled player
+# hull.
 [behaviour]
+imminent_collision_facing_threshold = 0.6
 
 [[behaviour.doctrine]]
 id             = "destroy-hostiles"

@@ -308,13 +308,27 @@ min_reserve_helm = 50.0
 min_reserve_sensors = 10.0
 min_reserve_baseline = 0.0
 
-# helm: elevate to 3 under sustained thrust with a healthy battery, else hold 2.
-# UNCHANGED by #923 — the sensor point is bought from weapons, not from the
-# drive, and the note above records what happened when it was bought from here.
+# helm: elevate to 3 under sustained thrust with a healthy battery, AT RED
+# ALERT, else hold 2. UNCHANGED by #923 — the sensor point is bought from
+# weapons, not from the drive, and the note above records what happened when
+# it was bought from here.
+#
+# The `red_alert` guard is load-bearing, not decoration. `plan_helm_travel`
+# commands near-max throttle for any ordinary transit — Patrol travel and a
+# Destroy directive's `target_speed` (default 0.8) both clear
+# `thrust_threshold` — so without this guard a cruising, non-combat ship holds
+# helm at 3 essentially the whole time it is under way, resting the ship-wide
+# total at 7 rather than the sustainable 6 the budget note above assumes.
+# Three of the four Alliance reactors' `rates` are negative at total 7 (see
+# each hull's own `[power] rates`), so that reads as the battery browning out
+# continuously while the ship is simply flying somewhere, with no combat
+# involved at all. Gating on red alert confines the elevation to the "combat
+# stations" burst the budget note actually measured (`probe_duel` runs fight
+# with the alert up), leaving ordinary cruise at the sustainable resting total.
 [[power.ai_policy.rule]]
 priority = 10
 channel = "helm"
-when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
 verb = "set_power_group_allocation"
 level = 3
 

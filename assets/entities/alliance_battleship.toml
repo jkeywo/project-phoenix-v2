@@ -58,7 +58,17 @@ length = 4
 # the line. `maintain_range = 38` is the widest of the four hulls: the battleship
 # is slow (max_speed 6.7) and stands off, keeping the enemy inside its 40-unit
 # phasers and 50-unit heavy blaster rather than closing to knife-fight range.
+#
+# `imminent_collision_facing_threshold = 0.6` (issue #780 AC4): see the fuller
+# note on `alliance_cruiser.toml`. Every shipped hull left this at its 1.0
+# (effectively off) default, so avoidance only ever bent travel and never
+# actually turned the ship's facing away from a closing obstacle — the fix for
+# the "AI flies through asteroid fields" report against the backfilled player
+# hull. Worth watching on the battleship specifically: it is the slowest hull
+# (max_speed 6.7), so an override that fires only just in time has the least
+# room here to actually out-turn what it is dodging.
 [behaviour]
+imminent_collision_facing_threshold = 0.6
 
 [[behaviour.doctrine]]
 id             = "destroy-hostiles"

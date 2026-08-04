@@ -4291,8 +4291,7 @@ fn update_mesh_lod(
                 .and_then(|level| level.model.as_deref())
             {
                 let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-                let _: Handle<bevy::scene::Scene> =
-                    asset_server.load(format!("{rel}#Scene0"));
+                let _: Handle<bevy::scene::Scene> = asset_server.load(format!("{rel}#Scene0"));
             }
         }
 

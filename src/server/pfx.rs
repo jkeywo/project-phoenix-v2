@@ -538,8 +538,8 @@ fn pulse_beam_contact_glow(
     for (pulse, mat_handle, mut transform) in &mut q {
         let wave = 0.5 + 0.5 * (t * CONTACT_PULSE_HZ * std::f32::consts::TAU + pulse.phase).sin();
 
-        let scale = CONTACT_PULSE_SCALE_MIN
-            + (CONTACT_PULSE_SCALE_MAX - CONTACT_PULSE_SCALE_MIN) * wave;
+        let scale =
+            CONTACT_PULSE_SCALE_MIN + (CONTACT_PULSE_SCALE_MAX - CONTACT_PULSE_SCALE_MIN) * wave;
         transform.scale = Vec3::splat(CONTACT_GLOW_SIZE * scale);
 
         let emissive_mul = CONTACT_PULSE_EMISSIVE_MIN

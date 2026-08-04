@@ -317,13 +317,11 @@ fn discover_world_assets(
         // resolves (an unresolvable anchor/relative_to is not fatal here —
         // `walk_entity` below still discovers its assets, just without a
         // distance to narrow the LOD ladder by).
-        if let Some(pos) = crate::world::config::resolve_entity_position_with(
+        if let Ok(pos) = crate::world::config::resolve_entity_position_with(
             entity_inst,
             &world.anchors,
             &named_positions,
-        )
-        .ok()
-        {
+        ) {
             if let Some(config) = config_cache.get(&entity_inst.template_path) {
                 if let Some(ref mesh) = config.mesh {
                     if let Some(ref model_path) = mesh.model {
@@ -1403,7 +1401,12 @@ model = "assets/models/rock_lod2.glb"
 shape = "sphere"
 "#;
         let mut manifest = AssetManifest::default();
-        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", None, &mut manifest);
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/rock.large.toml",
+            None,
+            &mut manifest,
+        );
 
         assert_eq!(
             manifest.glb_models,
@@ -1514,7 +1517,12 @@ shape = "sphere"
     fn a_level_may_override_the_variant_it_inherits() {
         let sidecar = "[[lod]]\nmodel = \"assets/models/rock_lod1.glb\"\nvariant = \"weathered\"\n";
         let mut manifest = AssetManifest::default();
-        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", None, &mut manifest);
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/rock.large.toml",
+            None,
+            &mut manifest,
+        );
         assert_eq!(
             manifest.sidecars,
             vec!["assets/models/rock_lod1.weathered.toml"]
@@ -1539,7 +1547,12 @@ shape = "sphere"
     fn a_sidecar_with_markers_but_no_ladder_contributes_nothing() {
         let sidecar = "[markers.fore]\nposition = [0.0, 0.0, -1.0]\ndirection = [0.0, 0.0, -1.0]\n";
         let mut manifest = AssetManifest::default();
-        discover_sidecar_lod_assets(sidecar, "assets/models/ship.model.toml", None, &mut manifest);
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/ship.model.toml",
+            None,
+            &mut manifest,
+        );
         assert!(manifest.glb_models.is_empty());
         assert!(manifest.sidecars.is_empty());
     }

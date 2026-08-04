@@ -130,7 +130,7 @@ git diff perf/baselines
 # `test`; `smoke` needs `build`; `perf` needs `test` and `smoke`; `balance`
 # needs `test`; `deploy` runs on main and needs none of `perf`/`balance`.
 #
-#   pasm         uv run pytest -q tests/pasm ; uv run pasm validate
+#   pasm         uv run pasm validate ; uv run pasm scan (fleet-standard step)
 #   test         cargo fmt --check ; cargo clippy --all-targets --all-features
 #                -D warnings ; cargo test
 #   editor-test  npx vitest run ; node scripts/check-strings.mjs --strict ;

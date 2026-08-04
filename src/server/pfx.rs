@@ -32,9 +32,27 @@ const BEAM_Y_OFFSET: f32 = 0.0;
 // "radius" values fed into `segment_transform`, matching the old cylinder
 // convention (final half-width = radius, since the unit ribbon mesh spans
 // -1..1 in local X).
-const BEAM_GLOW_WIDTH: f32 = 0.28;
-const BEAM_CORE_WIDTH: f32 = 0.08;
+//
+// Narrowed glow / tightened + brightened core (issue phaser-pfx-core-beam):
+// the pre-existing core layer was wide enough and dim enough relative to the
+// glow around it that the beam read as one soft diffused streak rather than
+// a hot core inside a haze. The glow is now the halo, not the body.
+const BEAM_GLOW_WIDTH: f32 = 0.22;
+const BEAM_CORE_WIDTH: f32 = 0.045;
 const CONTACT_GLOW_SIZE: f32 = 0.5;
+
+// Contact-glow pulse at the target (issue phaser-pfx-core-beam): a static
+// glow at the impact point reads as inert; a rhythmic brightness/size pulse
+// sells continuous energy transfer into the target instead. Phase is
+// randomized per beam at spawn (see `upsert_beam`) so simultaneous hits don't
+// pulse in lockstep — presentation-only, so the OS-entropy `rand::rng()` this
+// file already draws from (issue #903) is fine here too.
+const CONTACT_PULSE_HZ: f32 = 3.4;
+const CONTACT_PULSE_SCALE_MIN: f32 = 0.7;
+const CONTACT_PULSE_SCALE_MAX: f32 = 1.45;
+const CONTACT_PULSE_EMISSIVE_MIN: f32 = 0.6;
+const CONTACT_PULSE_EMISSIVE_MAX: f32 = 1.6;
+const CONTACT_GLOW_EMISSIVE_STRENGTH: f32 = 6.0;
 
 const MUZZLE_FLASH_LIFETIME_SECS: f32 = 0.12;
 const MUZZLE_FLASH_START_SIZE: f32 = 0.15;
@@ -276,6 +294,9 @@ impl Plugin for PfxPlugin {
                 Update,
                 (
                     sync_phaser_beams.run_if(in_state(GamePhase::InProgress)),
+                    pulse_beam_contact_glow
+                        .after(sync_phaser_beams)
+                        .run_if(in_state(GamePhase::InProgress)),
                     sync_torpedo_pfx.run_if(in_state(GamePhase::InProgress)),
                     sync_blaster_pfx.run_if(in_state(GamePhase::InProgress)),
                     spawn_ship_explosions.run_if(in_state(GamePhase::InProgress)),
@@ -301,13 +322,16 @@ impl Plugin for PfxPlugin {
                 // before `Update`, so the old `.after(SimSet::Physics)` edge
                 // is provided by schedule order and no longer declared here.
             )
-            // Runs after tick_bursts/sync_phaser_beams so its camera-facing
-            // rotation always wins for the frame (those systems write
-            // Transform too, on the same textured-billboard entities).
+            // Runs after tick_bursts/sync_phaser_beams/pulse_beam_contact_glow
+            // so its camera-facing rotation always wins for the frame (those
+            // systems write Transform too, on the same textured-billboard
+            // entities — pulse_beam_contact_glow only ever touches `scale`,
+            // but Bevy's conflict detection is per-component, not per-field).
             .add_systems(
                 Update,
                 billboard_face_camera
                     .after(sync_phaser_beams)
+                    .after(pulse_beam_contact_glow)
                     .after(tick_bursts)
                     .run_if(in_state(GamePhase::InProgress)),
             )
@@ -489,6 +513,48 @@ fn billboard_face_camera(
     }
 }
 
+/// Pulses each live beam's target-contact glow in size and brightness (issue
+/// phaser-pfx-core-beam). `sync_phaser_beams` only ever writes this entity's
+/// `translation` once it exists (see the comment in `upsert_beam`'s "existing"
+/// branch) — this system owns `scale` and the material's `emissive` for the
+/// whole lifetime of the glow, so the two never fight over the same field.
+///
+/// Every beam's contact glow gets its own `StandardMaterial` instance (built
+/// fresh per beam in `upsert_beam`), so mutating it here never bleeds into
+/// another beam's glow.
+fn pulse_beam_contact_glow(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut q: Query<
+        (
+            &BeamContactPulse,
+            &MeshMaterial3d<StandardMaterial>,
+            &mut Transform,
+        ),
+        With<BeamContactGlow>,
+    >,
+) {
+    let t = time.elapsed_secs();
+    for (pulse, mat_handle, mut transform) in &mut q {
+        let wave = 0.5 + 0.5 * (t * CONTACT_PULSE_HZ * std::f32::consts::TAU + pulse.phase).sin();
+
+        let scale = CONTACT_PULSE_SCALE_MIN
+            + (CONTACT_PULSE_SCALE_MAX - CONTACT_PULSE_SCALE_MIN) * wave;
+        transform.scale = Vec3::splat(CONTACT_GLOW_SIZE * scale);
+
+        let emissive_mul = CONTACT_PULSE_EMISSIVE_MIN
+            + (CONTACT_PULSE_EMISSIVE_MAX - CONTACT_PULSE_EMISSIVE_MIN) * wave;
+        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+            mat.emissive = LinearRgba::new(
+                pulse.base_emissive.red * emissive_mul,
+                pulse.base_emissive.green * emissive_mul,
+                pulse.base_emissive.blue * emissive_mul,
+                pulse.base_emissive.alpha,
+            );
+        }
+    }
+}
+
 #[derive(Component)]
 struct PfxEntity;
 
@@ -497,6 +563,17 @@ struct BeamBody;
 
 #[derive(Component)]
 struct BeamContactGlow;
+
+/// Drives `pulse_beam_contact_glow`'s rhythmic brightness/size pulse for one
+/// beam's target-contact glow. `base_emissive` is the material's emissive at
+/// spawn (`t=0`, pulse factor 1.0); the pulse system always sets an ABSOLUTE
+/// value scaled off it rather than multiplying the current value, so per-frame
+/// factors never compound into drift.
+#[derive(Component)]
+struct BeamContactPulse {
+    phase: f32,
+    base_emissive: LinearRgba,
+}
 
 #[derive(Component)]
 struct TorpedoBody;
@@ -898,8 +975,12 @@ fn upsert_beam(
                 ..core_t
             };
         }
+        // Translation only — `pulse_beam_contact_glow` owns this entity's
+        // scale (and its material's emissive) every frame, `.after` this
+        // system. Resetting scale here would fight that pulse back to a
+        // constant size on every beam-position update.
         if let Ok(mut t) = glow_q.get_mut(existing.contact) {
-            *t = Transform::from_translation(end).with_scale(Vec3::splat(CONTACT_GLOW_SIZE));
+            t.translation = end;
         }
         return;
     }
@@ -912,20 +993,30 @@ fn upsert_beam(
     let ribbon_mesh = meshes.add(unit_ribbon_quad_mesh());
     let billboard_mesh = meshes.add(unit_billboard_mesh());
 
-    let glow_color = [color[0], color[1], color[2], color[3] * 0.85];
+    // Glow is the halo, not the body (issue phaser-pfx-core-beam): lower
+    // alpha and emissive than before so it reads as a soft haze around the
+    // core rather than competing with it. Core pushed further toward
+    // white-hot (was 0.4/0.6, now 0.2/0.8) and its emissive raised so the
+    // narrowed `BEAM_CORE_WIDTH` above still reads as unmistakably brighter
+    // than the glow around it, not just thinner.
+    let glow_color = [color[0], color[1], color[2], color[3] * 0.55];
     let core_color = [
-        color[0] * 0.4 + 0.6,
-        color[1] * 0.4 + 0.6,
-        color[2] * 0.4 + 0.6,
+        color[0] * 0.2 + 0.8,
+        color[1] * 0.2 + 0.8,
+        color[2] * 0.2 + 0.8,
         color[3],
     ];
 
     let glow_mat =
-        phaser_texture_material(materials, pfx_assets.beam_glow.clone(), glow_color, 4.0);
+        phaser_texture_material(materials, pfx_assets.beam_glow.clone(), glow_color, 3.0);
     let core_mat =
-        phaser_texture_material(materials, pfx_assets.beam_core.clone(), core_color, 7.0);
-    let contact_mat =
-        phaser_texture_material(materials, pfx_assets.radial_glow.clone(), core_color, 6.0);
+        phaser_texture_material(materials, pfx_assets.beam_core.clone(), core_color, 11.0);
+    let contact_mat = phaser_texture_material(
+        materials,
+        pfx_assets.radial_glow.clone(),
+        core_color,
+        CONTACT_GLOW_EMISSIVE_STRENGTH,
+    );
 
     let glow_t = segment_transform(start, end, BEAM_GLOW_WIDTH);
     let core_t = segment_transform(start, end, BEAM_CORE_WIDTH);
@@ -980,6 +1071,15 @@ fn upsert_beam(
             Mesh3d(billboard_mesh.clone()),
             MeshMaterial3d(contact_mat),
             Transform::from_translation(end).with_scale(Vec3::splat(CONTACT_GLOW_SIZE)),
+            BeamContactPulse {
+                phase: rand::rng().random_range(0.0..std::f32::consts::TAU),
+                base_emissive: LinearRgba::new(
+                    core_color[0] * CONTACT_GLOW_EMISSIVE_STRENGTH,
+                    core_color[1] * CONTACT_GLOW_EMISSIVE_STRENGTH,
+                    core_color[2] * CONTACT_GLOW_EMISSIVE_STRENGTH,
+                    core_color[3],
+                ),
+            },
         ))
         .id();
 

@@ -54,8 +54,9 @@ async function main() {
     );
   }
 
-  // logo.png at the client root.
+  // logo.png / favicon.ico at the client root.
   await copyFile(path.join(root, 'assets', 'logo.png'), path.join(out, 'logo.png'));
+  await copyFile(path.join(root, 'assets', 'favicon.ico'), path.join(out, 'favicon.ico'));
 
   console.log('client page built → dist/client/ (pure JS, no WASM)');
 }

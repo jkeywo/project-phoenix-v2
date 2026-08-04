@@ -10,6 +10,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
 
   <!-- CDN deps loaded before our script so they're in scope synchronously -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -2004,7 +2005,23 @@
         const retryable = new Set(['network', 'server-error', 'socket-error', 'socket-closed']);
         if (retryable.has(err.type)) {
           console.warn(`[PeerJS] retryable error — re-initializing in 3 s…`);
-          setTimeout(initPeerJS, 3000);
+          setTimeout(() => {
+            // Destroy THIS peer — releasing its signaling-server registration
+            // of hostPeerId — before spinning up a replacement. Re-creating
+            // with the same id while the old registration is still live
+            // turns a transient 'network' error into a permanent
+            // 'unavailable-id' loop: the new Peer() is refused the id, and
+            // since 'unavailable-id' isn't retryable that failed peer just
+            // sits there (while the old one may ALSO still be mid-reconnect
+            // from its own 'disconnected' handler below), so every future
+            // attempt collides with one or the other forever.
+            try {
+              peer.destroy();
+            } catch (_) {
+              /* already gone */
+            }
+            initPeerJS();
+          }, 3000);
         }
       });
     }

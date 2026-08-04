@@ -4272,6 +4272,30 @@ fn update_mesh_lod(
         // entity ever needs LOD, this must switch to a propagated world position.
         let distance = transform.translation.distance(cam_pos);
         let target = select_lod(&lods.levels, distance, lods.current);
+
+        // Issue lod-preload-by-distance, part 3: always try to have the next
+        // MORE detailed level (one index closer than `target`) warm in the
+        // asset server's cache, so an approaching ship never triggers a
+        // fresh async load the frame it actually crosses into that band —
+        // it's already sitting in cache from here. Runs every frame
+        // regardless of whether `target` just changed (a ship can sit near a
+        // boundary for a while before crossing it), and never touches
+        // `lods.current` or the displayed visual — only the block below does
+        // that. `asset_server.load()` is idempotent: a path already
+        // loading/loaded just returns the existing handle, so this is cheap
+        // once warm.
+        if target > 0 {
+            if let Some(model_path) = lods
+                .levels
+                .get(target - 1)
+                .and_then(|level| level.model.as_deref())
+            {
+                let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
+                let _: Handle<bevy::scene::Scene> =
+                    asset_server.load(format!("{rel}#Scene0"));
+            }
+        }
+
         if lods.current == Some(target) {
             continue;
         }

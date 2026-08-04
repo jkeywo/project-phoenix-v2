@@ -170,6 +170,24 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
 /// the poll loop rather than the initial walk — the same incremental shape
 /// sub-worlds already use.
 ///
+/// `distance`, when known, is this sidecar's CLOSEST placed `[[entity]]`
+/// instance's distance from the player's starting position (issue
+/// lod-preload-by-distance): only the ladder level [`select_lod`] would pick
+/// for that distance is preloaded, rather than every GLB the ladder declares.
+/// A scenario with many far-off, high-ladder-count models used to gate game
+/// start on every one of their unseen levels; now it gates on only the level
+/// actually shown at spawn. The rest of the ladder is warmed in the
+/// background once the game is running — see `prefetch_next_lod_level` in
+/// `server_app.rs`, which always tries to have the next-more-detailed level
+/// ready before an approaching ship actually needs it.
+///
+/// `distance` is `None` for anything without a statically known placement —
+/// procedurally-spawned asteroid-field members chief among them, since their
+/// position isn't decided until the field's runtime grid streams them in.
+/// Those preload their WHOLE ladder, same as before this feature: with no
+/// distance to reason from, guessing which single level is "close enough" is
+/// worse than just loading all of them up front.
+///
 /// `path` is the sidecar's own path: a level that omits `variant` inherits the
 /// variant of the sidecar it was declared in, which is by construction the
 /// variant the entity used to reach it, and therefore agrees with the
@@ -181,7 +199,12 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
 /// present-but-malformed case `resolve_sidecar_rig` logs at ERROR (a typo
 /// silently losing a whole LOD chain is not a warning), so this logs at the
 /// same level rather than a quieter one for the same file.
-pub fn discover_sidecar_lod_assets(sidecar_toml: &str, path: &str, manifest: &mut AssetManifest) {
+pub fn discover_sidecar_lod_assets(
+    sidecar_toml: &str,
+    path: &str,
+    distance: Option<f32>,
+    manifest: &mut AssetManifest,
+) {
     if sidecar_toml.trim().is_empty() {
         return;
     }
@@ -195,8 +218,24 @@ pub fn discover_sidecar_lod_assets(sidecar_toml: &str, path: &str, manifest: &mu
             return;
         }
     };
+    if rig.lod.is_empty() {
+        return;
+    }
     let own_variant = crate::model_rig::sidecar_variant(path);
-    for level in &rig.lod {
+
+    // Known distance -> just the level `select_lod` would pick for it: the
+    // rest of the ladder warms in the background once the game is running
+    // (see the doc comment above). Unknown distance -> the whole ladder, same
+    // as before this feature.
+    let wanted: Vec<usize> = match distance {
+        Some(d) => vec![crate::entity_config::select_lod(&rig.lod, d, None)],
+        None => (0..rig.lod.len()).collect(),
+    };
+
+    for i in wanted {
+        let Some(level) = rig.lod.get(i) else {
+            continue;
+        };
         let Some(ref lod_model) = level.model else {
             continue;
         };
@@ -246,6 +285,17 @@ fn walk_entity(
 /// `world_key` uniquely identifies this world (e.g. `"(base)"` for the
 /// base world, or the TOML path for sub-worlds) and is used to detect
 /// duplicate processing.
+///
+/// `player_start` and `sidecar_distance` are the distance-based LOD preload
+/// feature's inputs/output (issue lod-preload-by-distance): every `[[entity]]`
+/// instance in `world` has a statically resolvable position (sub-worlds share
+/// the base world's coordinate space, so one `player_start` covers all of
+/// them), so its distance from `player_start` is computed here and merged
+/// into `sidecar_distance` — keyed by the sidecar path the instance's model
+/// resolves to, keeping the SMALLEST distance across every instance that
+/// shares one template. `discover_sidecar_lod_assets` reads it back once that
+/// sidecar's own TOML is delivered.
+#[allow(clippy::too_many_arguments)]
 fn discover_world_assets(
     world: &WorldConfig,
     config_cache: &HashMap<String, EntityConfig>,
@@ -253,9 +303,48 @@ fn discover_world_assets(
     manifest: &mut AssetManifest,
     extra_worlds_out: &mut Vec<String>,
     _world_key: &str,
+    player_start: [f32; 3],
+    sidecar_distance: &mut HashMap<String, f32>,
 ) {
+    // `relative_to` needs every named, non-relative_to instance's position
+    // resolved first — the same map `spawn_game_start_entities` builds before
+    // spawning, computed here ahead of anything actually spawning.
+    let named_positions = crate::world::config::build_named_entity_positions(world);
+
     // Walk every [[entity]] in the world
     for entity_inst in &world.entities {
+        // Distance from the player's start, when this instance's position
+        // resolves (an unresolvable anchor/relative_to is not fatal here —
+        // `walk_entity` below still discovers its assets, just without a
+        // distance to narrow the LOD ladder by).
+        if let Some(pos) = crate::world::config::resolve_entity_position_with(
+            entity_inst,
+            &world.anchors,
+            &named_positions,
+        )
+        .ok()
+        {
+            if let Some(config) = config_cache.get(&entity_inst.template_path) {
+                if let Some(ref mesh) = config.mesh {
+                    if let Some(ref model_path) = mesh.model {
+                        let sc = sidecar_path(model_path, mesh.variant.as_deref());
+                        let dx = pos[0] - player_start[0];
+                        let dy = pos[1] - player_start[1];
+                        let dz = pos[2] - player_start[2];
+                        let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+                        sidecar_distance
+                            .entry(sc)
+                            .and_modify(|d| {
+                                if distance < *d {
+                                    *d = distance;
+                                }
+                            })
+                            .or_insert(distance);
+                    }
+                }
+            }
+        }
+
         walk_entity(
             &entity_inst.template_path,
             config_cache,
@@ -316,20 +405,79 @@ fn discover_world_assets(
     }
 }
 
+/// Resolve the player's starting position for distance-based LOD preload
+/// selection (issue lod-preload-by-distance): `[player_spawn]`'s own
+/// position/anchor when authored, else wherever the player ship's own
+/// `[[entity]]` instance resolves to — the same precedence
+/// `spawn_game_start_entities` applies when it actually places the ship,
+/// computed here ahead of anything spawning. Falls back to the origin when
+/// neither is determinable (no ship in the world at all, or an unresolvable
+/// anchor) — the origin is also a safe "unknown" default: every distance
+/// computed from it is still A distance, just not necessarily a tight one, so
+/// the LOD it picks errs toward more detail rather than none.
+fn resolve_player_start(
+    world: &WorldConfig,
+    config_cache: &HashMap<String, EntityConfig>,
+) -> [f32; 3] {
+    if let Some(ref spawn) = world.player_spawn {
+        if let Some(pos) = spawn.position {
+            return pos;
+        }
+        if let Some(ref anchor) = spawn.anchor {
+            if let Some(pos) = world.anchors.get(anchor) {
+                return *pos;
+            }
+        }
+    }
+
+    let named_positions = crate::world::config::build_named_entity_positions(world);
+    for entity_inst in &world.entities {
+        if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
+            continue;
+        }
+        let is_ship = config_cache
+            .get(&entity_inst.template_path)
+            .is_some_and(|c| c.tags.iter().any(|t| t == "ship"));
+        if !is_ship {
+            continue;
+        }
+        if let Ok(pos) = crate::world::config::resolve_entity_position_with(
+            entity_inst,
+            &world.anchors,
+            &named_positions,
+        ) {
+            return pos;
+        }
+    }
+
+    [0.0, 0.0, 0.0]
+}
+
 /// Build the initial `AssetManifest` from the base world + config cache.
 /// Returns a list of sub-world TOML paths that need to be fetched and
 /// recursively processed.
-/// Returns `(manifest, pending_world_paths, seen_entity_paths)`.
+/// Returns `(manifest, pending_world_paths, seen_entity_paths, sidecar_distance)`.
 /// The caller should store `seen_entity_paths` in `AssetPreloadResource` so
 /// that incremental sub-world processing shares the same dedup set and does
-/// not push duplicate sidecar paths into `pending_sidecars`.
+/// not push duplicate sidecar paths into `pending_sidecars`; `sidecar_distance`
+/// likewise belongs in `AssetPreloadResource` so a later-delivered sidecar
+/// (including from a sub-world processed after this call) can look its
+/// distance back up.
 pub fn discover_base_assets(
     world: &WorldConfig,
     config_cache: &HashMap<String, EntityConfig>,
-) -> (AssetManifest, Vec<String>, HashSet<String>) {
+) -> (
+    AssetManifest,
+    Vec<String>,
+    HashSet<String>,
+    HashMap<String, f32>,
+    [f32; 3],
+) {
     let mut seen_entities = HashSet::new();
     let mut manifest = AssetManifest::default();
     let mut pending_worlds = Vec::new();
+    let mut sidecar_distance = HashMap::new();
+    let player_start = resolve_player_start(world, config_cache);
 
     discover_world_assets(
         world,
@@ -338,6 +486,8 @@ pub fn discover_base_assets(
         &mut manifest,
         &mut pending_worlds,
         "(base)",
+        player_start,
+        &mut sidecar_distance,
     );
 
     // The player-ship radar icon is injected onto the selected hull at player
@@ -349,17 +499,33 @@ pub fn discover_base_assets(
         manifest.radar_icons.push(player_icon);
     }
 
-    (manifest, pending_worlds, seen_entities)
+    (
+        manifest,
+        pending_worlds,
+        seen_entities,
+        sidecar_distance,
+        player_start,
+    )
 }
 
 /// Process a sub-world TOML string that was fetched from disk/network.
 /// Returns the paths of any further sub-worlds discovered.
+///
+/// `player_start` is the SAME point `discover_base_assets` resolved for the
+/// base world — sub-worlds share the base world's coordinate space, so a
+/// sub-world's own entities are distanced from the one player start the whole
+/// scenario has, not re-resolved per sub-world. `sidecar_distance` is the
+/// same running map `discover_base_assets` began; a sub-world entity sharing
+/// a template with a closer base-world instance leaves that entry unchanged
+/// (the merge keeps the minimum), never widens it.
 pub fn process_sub_world_toml(
     toml_str: &str,
     config_cache: &HashMap<String, EntityConfig>,
     seen_entities: &mut HashSet<String>,
     manifest: &mut AssetManifest,
     path: &str,
+    player_start: [f32; 3],
+    sidecar_distance: &mut HashMap<String, f32>,
 ) -> Result<Vec<String>, String> {
     let world = parse_world(toml_str)?;
     let mut pending_worlds = Vec::new();
@@ -371,6 +537,8 @@ pub fn process_sub_world_toml(
         manifest,
         &mut pending_worlds,
         path,
+        player_start,
+        sidecar_distance,
     );
 
     Ok(pending_worlds)
@@ -412,6 +580,21 @@ pub struct AssetPreloadResource {
     #[cfg(target_arch = "wasm32")]
     seen_entities: HashSet<String>,
 
+    // Distance-based LOD preload (issue lod-preload-by-distance). `player_start`
+    // is resolved once in `begin_asset_preload` and reused for every sub-world
+    // discovered afterward (they share the base world's coordinate space).
+    // Only read back on WASM (`poll_asset_preload`'s incremental sub-world
+    // loop) — native discovers sub-worlds synchronously in `begin_asset_preload`
+    // and passes the same value straight through as a local instead.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    player_start: [f32; 3],
+    /// Maps a model rig sidecar path to the closest placed `[[entity]]`
+    /// instance's distance from `player_start`; consulted the frame that
+    /// sidecar's TOML is delivered so only the ladder level it actually needs
+    /// preloads. A sidecar with no entry (no statically-placed instance — e.g.
+    /// a procedurally-spawned asteroid) preloads its whole ladder.
+    sidecar_distance: HashMap<String, f32>,
+
     // Timer for throttling progress broadcasts
     progress_timer: Timer,
     /// True once `broadcast_loading_progress` has sent at least one update.
@@ -440,6 +623,8 @@ impl Default for AssetPreloadResource {
             seen_worlds: HashSet::new(),
             #[cfg(target_arch = "wasm32")]
             seen_entities: HashSet::new(),
+            player_start: [0.0, 0.0, 0.0],
+            sidecar_distance: HashMap::new(),
             progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
             progress_sent: false,
         }
@@ -500,10 +685,12 @@ pub fn begin_asset_preload(
     }
 
     // Initial discovery from base world
-    let (manifest, pending_worlds, base_seen_entities) =
+    let (manifest, pending_worlds, base_seen_entities, sidecar_distance, player_start) =
         discover_base_assets(&world_config, &config_cache);
     #[cfg(not(target_arch = "wasm32"))]
     let mut manifest = manifest;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut sidecar_distance = sidecar_distance;
 
     // Start loading GLB models
     let mut glb_handles = Vec::new();
@@ -553,6 +740,8 @@ pub fn begin_asset_preload(
                     &mut seen_entities,
                     &mut manifest_mut,
                     world_path,
+                    player_start,
+                    &mut sidecar_distance,
                 );
                 // Load any newly discovered GLBs/icons/sidecars
                 for glb_path in &manifest_mut.glb_models {
@@ -621,6 +810,8 @@ pub fn begin_asset_preload(
         seen_worlds,
         #[cfg(target_arch = "wasm32")]
         seen_entities: base_seen_entities,
+        player_start,
+        sidecar_distance,
         progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
         progress_sent: false,
     };
@@ -681,7 +872,8 @@ pub fn poll_asset_preload(
             continue;
         };
         let mut ladder = AssetManifest::default();
-        discover_sidecar_lod_assets(&toml_str, &path, &mut ladder);
+        let distance = preload.sidecar_distance.get(&path).copied();
+        discover_sidecar_lod_assets(&toml_str, &path, distance, &mut ladder);
         for glb_path in &ladder.glb_models {
             if preload.glb_handles.iter().any(|(p, _)| p == glb_path) {
                 continue;
@@ -720,12 +912,20 @@ pub fn poll_asset_preload(
                     String,
                     crate::entity_config::EntityConfig,
                 > = &*cache;
+                let player_start = preload.player_start;
+                // A single reborrow so the two field-level `&mut`s below split
+                // off ONE `&mut AssetPreloadResource` rather than each going
+                // through `preload`'s own `DerefMut` separately — the borrow
+                // checker only proves disjoint field access for the former.
+                let preload = &mut *preload;
                 match process_sub_world_toml(
                     &toml_str,
                     cache_ref,
                     &mut preload.seen_entities,
                     &mut manifest,
                     world_path,
+                    player_start,
+                    &mut preload.sidecar_distance,
                 ) {
                     Ok(more_worlds) => {
                         new_glbs.extend(manifest.glb_models);
@@ -1004,7 +1204,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        let (manifest, _, _, _, _) = discover_base_assets(&world, &HashMap::new());
         assert!(
             !manifest.pfx_textures.is_empty(),
             "built-in dust layers must contribute textures"
@@ -1023,7 +1223,7 @@ mod tests {
     #[test]
     fn discover_base_assets_always_preloads_player_ship_icon() {
         let world = WorldConfig::default();
-        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        let (manifest, _, _, _, _) = discover_base_assets(&world, &HashMap::new());
         let expected = icon_asset_path(PLAYER_SHIP_RADAR_ICON);
         assert!(
             manifest.radar_icons.contains(&expected),
@@ -1041,7 +1241,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        let (manifest, _, _, _, _) = discover_base_assets(&world, &HashMap::new());
         assert!(manifest.pfx_textures.is_empty());
     }
 
@@ -1057,7 +1257,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        let (manifest, _, _, _, _) = discover_base_assets(&world, &HashMap::new());
         assert!(
             manifest
                 .pfx_textures
@@ -1203,7 +1403,7 @@ model = "assets/models/rock_lod2.glb"
 shape = "sphere"
 "#;
         let mut manifest = AssetManifest::default();
-        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", &mut manifest);
+        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", None, &mut manifest);
 
         assert_eq!(
             manifest.glb_models,
@@ -1221,11 +1421,100 @@ shape = "sphere"
         );
     }
 
+    /// Issue lod-preload-by-distance: a known distance preloads ONLY the
+    /// level `select_lod` would pick for it, not the whole ladder.
+    #[test]
+    fn a_known_distance_preloads_only_the_needed_level() {
+        let sidecar = r#"
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/rock_lod1.glb"
+
+[[lod]]
+max_distance = 300.0
+model = "assets/models/rock_lod2.glb"
+
+[[lod]]
+shape = "sphere"
+"#;
+        // 200 world units falls in the third band (150..300) -> index 2.
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/rock.large.toml",
+            Some(200.0),
+            &mut manifest,
+        );
+        assert_eq!(
+            manifest.glb_models,
+            vec!["models/rock_lod2.glb"],
+            "only the level covering 200 units must preload"
+        );
+        assert_eq!(
+            manifest.sidecars,
+            vec!["assets/models/rock_lod2.large.toml"]
+        );
+    }
+
+    /// The nearest band (distance 0) selects level 0 — the entity's own named
+    /// model, not a decimated step.
+    #[test]
+    fn a_known_distance_at_the_near_band_preloads_the_base_level() {
+        let sidecar = r#"
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/rock_lod1.glb"
+
+[[lod]]
+shape = "sphere"
+"#;
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/rock.large.toml",
+            Some(5.0),
+            &mut manifest,
+        );
+        assert_eq!(manifest.glb_models, vec!["models/rock.glb"]);
+    }
+
+    /// The final, unbounded level (usually the procedural-sphere fallback)
+    /// names no GLB — a distance that lands there must not error, just yield
+    /// an empty manifest.
+    #[test]
+    fn a_known_distance_past_every_glb_level_yields_no_glb() {
+        let sidecar = r#"
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+
+[[lod]]
+shape = "sphere"
+"#;
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/rock.large.toml",
+            Some(10_000.0),
+            &mut manifest,
+        );
+        assert!(manifest.glb_models.is_empty());
+        assert!(manifest.sidecars.is_empty());
+    }
+
     #[test]
     fn a_level_may_override_the_variant_it_inherits() {
         let sidecar = "[[lod]]\nmodel = \"assets/models/rock_lod1.glb\"\nvariant = \"weathered\"\n";
         let mut manifest = AssetManifest::default();
-        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", &mut manifest);
+        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", None, &mut manifest);
         assert_eq!(
             manifest.sidecars,
             vec!["assets/models/rock_lod1.weathered.toml"]
@@ -1238,7 +1527,7 @@ shape = "sphere"
     fn an_absent_or_malformed_sidecar_contributes_no_ladder() {
         for body in ["", "   \n", "[[lod]\nbroken", "lods = 3\n"] {
             let mut manifest = AssetManifest::default();
-            discover_sidecar_lod_assets(body, "assets/models/rock.large.toml", &mut manifest);
+            discover_sidecar_lod_assets(body, "assets/models/rock.large.toml", None, &mut manifest);
             assert!(manifest.glb_models.is_empty(), "body: {body:?}");
             assert!(manifest.sidecars.is_empty(), "body: {body:?}");
         }
@@ -1250,9 +1539,190 @@ shape = "sphere"
     fn a_sidecar_with_markers_but_no_ladder_contributes_nothing() {
         let sidecar = "[markers.fore]\nposition = [0.0, 0.0, -1.0]\ndirection = [0.0, 0.0, -1.0]\n";
         let mut manifest = AssetManifest::default();
-        discover_sidecar_lod_assets(sidecar, "assets/models/ship.model.toml", &mut manifest);
+        discover_sidecar_lod_assets(sidecar, "assets/models/ship.model.toml", None, &mut manifest);
         assert!(manifest.glb_models.is_empty());
         assert!(manifest.sidecars.is_empty());
+    }
+
+    // ── resolve_player_start (issue lod-preload-by-distance) ─────────────────
+
+    #[test]
+    fn resolve_player_start_prefers_explicit_position() {
+        let world = WorldConfig {
+            player_spawn: Some(crate::world::config::PlayerSpawnEntry {
+                anchor: None,
+                position: Some([10.0, 0.0, 20.0]),
+                rotation: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_player_start(&world, &HashMap::new()),
+            [10.0, 0.0, 20.0]
+        );
+    }
+
+    #[test]
+    fn resolve_player_start_falls_back_to_player_spawn_anchor() {
+        let mut anchors = HashMap::new();
+        anchors.insert("dock".to_string(), [5.0, 0.0, 5.0]);
+        let world = WorldConfig {
+            anchors,
+            player_spawn: Some(crate::world::config::PlayerSpawnEntry {
+                anchor: Some("dock".to_string()),
+                position: None,
+                rotation: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_player_start(&world, &HashMap::new()),
+            [5.0, 0.0, 5.0]
+        );
+    }
+
+    /// No `[player_spawn]` at all: falls back to wherever the player ship's
+    /// own `[[entity]]` instance resolves to — same precedence
+    /// `spawn_game_start_entities` applies when it actually places the ship.
+    #[test]
+    fn resolve_player_start_falls_back_to_the_player_ship_entity() {
+        let world = WorldConfig {
+            entities: vec![crate::world::config::WorldEntity {
+                template_path: "assets/entities/alliance_cruiser.toml".to_string(),
+                spawn_on: crate::world::config::WorldEntitySpawnOn::GameStart,
+                transform: Some(crate::world::config::TransformConfig {
+                    position: Some([30.0, 0.0, 40.0]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut config_cache = HashMap::new();
+        config_cache.insert(
+            "assets/entities/alliance_cruiser.toml".to_string(),
+            EntityConfig {
+                tags: vec!["ship".to_string()],
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            resolve_player_start(&world, &config_cache),
+            [30.0, 0.0, 40.0]
+        );
+    }
+
+    #[test]
+    fn resolve_player_start_defaults_to_origin_when_nothing_resolves() {
+        let world = WorldConfig::default();
+        assert_eq!(
+            resolve_player_start(&world, &HashMap::new()),
+            [0.0, 0.0, 0.0]
+        );
+    }
+
+    // ── distance-based LOD preload: discover_world_assets/discover_base_assets
+
+    /// A placed `[[entity]]` instance's distance from the player start is
+    /// tracked per the sidecar its model resolves to (issue
+    /// lod-preload-by-distance) — `discover_sidecar_lod_assets` reads it back
+    /// once that sidecar's TOML is delivered.
+    #[test]
+    fn discover_base_assets_tracks_the_closest_instance_distance_per_sidecar() {
+        let world = WorldConfig {
+            player_spawn: Some(crate::world::config::PlayerSpawnEntry {
+                anchor: None,
+                position: Some([0.0, 0.0, 0.0]),
+                rotation: None,
+            }),
+            entities: vec![crate::world::config::WorldEntity {
+                template_path: "assets/entities/outpost.toml".to_string(),
+                transform: Some(crate::world::config::TransformConfig {
+                    position: Some([30.0, 0.0, 40.0]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut config_cache = HashMap::new();
+        config_cache.insert(
+            "assets/entities/outpost.toml".to_string(),
+            EntityConfig {
+                mesh: Some(crate::entity_config::MeshConfig {
+                    model: Some("assets/models/outpost.glb".into()),
+                    variant: None,
+                    shape: crate::entity_config::MeshShape::Sphere,
+                    colour: vec![],
+                    radius: 1.0,
+                    size: None,
+                    minor_radius: 0.0,
+                    emissive: None,
+                    scale: 1.0,
+                    rotation: [0.0, 0.0, 0.0],
+                }),
+                ..Default::default()
+            },
+        );
+
+        let (_manifest, _pending, _seen, sidecar_distance, player_start) =
+            discover_base_assets(&world, &config_cache);
+
+        assert_eq!(player_start, [0.0, 0.0, 0.0]);
+        // 30-40-0 from the origin is a 3-4-5 triangle scaled by 10 -> 50.
+        let sc = sidecar_path("assets/models/outpost.glb", None);
+        assert_eq!(sidecar_distance.get(&sc).copied(), Some(50.0));
+    }
+
+    /// Two instances of the same template at different distances: the
+    /// tracked distance is the CLOSEST one — that is the instance whose LOD
+    /// actually needs the detail preloaded.
+    #[test]
+    fn discover_base_assets_keeps_the_minimum_distance_across_instances() {
+        fn entity_at(pos: [f32; 3]) -> crate::world::config::WorldEntity {
+            crate::world::config::WorldEntity {
+                template_path: "assets/entities/outpost.toml".to_string(),
+                transform: Some(crate::world::config::TransformConfig {
+                    position: Some(pos),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+        let world = WorldConfig {
+            player_spawn: Some(crate::world::config::PlayerSpawnEntry {
+                anchor: None,
+                position: Some([0.0, 0.0, 0.0]),
+                rotation: None,
+            }),
+            entities: vec![entity_at([100.0, 0.0, 0.0]), entity_at([10.0, 0.0, 0.0])],
+            ..Default::default()
+        };
+        let mut config_cache = HashMap::new();
+        config_cache.insert(
+            "assets/entities/outpost.toml".to_string(),
+            EntityConfig {
+                mesh: Some(crate::entity_config::MeshConfig {
+                    model: Some("assets/models/outpost.glb".into()),
+                    variant: None,
+                    shape: crate::entity_config::MeshShape::Sphere,
+                    colour: vec![],
+                    radius: 1.0,
+                    size: None,
+                    minor_radius: 0.0,
+                    emissive: None,
+                    scale: 1.0,
+                    rotation: [0.0, 0.0, 0.0],
+                }),
+                ..Default::default()
+            },
+        );
+
+        let (_manifest, _pending, _seen, sidecar_distance, _player_start) =
+            discover_base_assets(&world, &config_cache);
+
+        let sc = sidecar_path("assets/models/outpost.glb", None);
+        assert_eq!(sidecar_distance.get(&sc).copied(), Some(10.0));
     }
 
     /// Regression: two triggers referencing the same load_world path (e.g.
@@ -1297,7 +1767,7 @@ entity = "Outpost"
 
         let world = parse_world(toml).expect("parse must succeed");
         let config_cache = HashMap::new();
-        let (_manifest, pending_worlds, _) = discover_base_assets(&world, &config_cache);
+        let (_manifest, pending_worlds, _, _, _) = discover_base_assets(&world, &config_cache);
 
         // branch_a.toml must appear exactly once despite two triggers referencing it
         let branch_a_count = pending_worlds

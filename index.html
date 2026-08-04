@@ -792,6 +792,33 @@
     }
     .debug-action:hover { background: #223; border-color: #558; }
     .debug-action.active { background: #224; border-color: #66c; color: #ccf; }
+    /* Save/resume outcome on the button itself (issue #862). A save is a
+       fire-and-forget click whose result arrives a frame or two later from a
+       Bevy system, so the button that was clicked is where the answer belongs. */
+    .debug-action.ok { border-color: #4c8; color: #8fc; }
+    .debug-action.failed { border-color: #c55; color: #f99; }
+    /* ...and the sentence itself, which is the half that matters when the
+       reason is `Moved` naming which version dimension moved, or the browser
+       naming QuotaExceededError. Anchored to the viewport rather than the debug
+       panel: a refused RESUME is reported before the panel has ever been
+       opened. */
+    #snapshot-status {
+      position: fixed;
+      right: 60px; bottom: 16px;
+      max-width: min(46ch, 70vw);
+      z-index: 60;
+      display: none;
+      padding: 8px 11px;
+      background: rgba(4, 8, 13, 0.94);
+      border: 1px solid #558;
+      border-left-width: 3px;
+      color: #cde;
+      font-family: monospace; font-size: 12px; line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    #snapshot-status.shown { display: block; }
+    #snapshot-status.ok { border-left-color: #4c8; }
+    #snapshot-status.failed { border-left-color: #c55; color: #fbb; }
     /* Disabled host override (e.g. teleport with no shared waypoint). */
     .debug-action:disabled, .debug-action.disabled {
       opacity: 0.35; cursor: not-allowed;
@@ -854,13 +881,73 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-51b600576bdb1f06.js" crossorigin="anonymous" integrity="sha384-BWioUGhsGMHo4tbvsbiLqE9cHmaTQ00Kj5qp0/+YvJYTSZDFNHDseWcEDKCY5w7h"><link rel="preload" href="./project-phoenix-51b600576bdb1f06_bg.wasm" crossorigin="anonymous" integrity="sha384-UuZ6qe96rMfc8iyoqjj4xODAOLr9HHr3RmQpYvQad8EHBaDKTDPKBcTTobDH7qrb" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-542a827d0f4c8216.js" crossorigin="anonymous" integrity="sha384-mmrAOk76UP6YPMFMHJC3Khp215yTkDZcp804vf2JCRm/ifodlIE6sLnj/Hfwa81H"><link rel="preload" href="./project-phoenix-542a827d0f4c8216_bg.wasm" crossorigin="anonymous" integrity="sha384-t5+noXyLsmCdLVy7ZTaMtgVpf019reowRwlt7U4eTpSXAMpaU0LZ26DmfLyUpY2X" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
     // Session token for actions from the host page's own consoles. Must match
     // console_bridge::LOCAL_CONSOLE_TOKEN in Rust (src/console_bridge.rs).
     var LOCAL_CONSOLE_TOKEN = '__local_console__';
+
+    // The one save slot the host page uses. Must satisfy `vellum_save::is_slot`
+    // (lowercase, digits, `_`, `-`), which the storage backend checks rather
+    // than trusts — a slot name reaches a storage key.
+    var PHOENIX_SAVE_SLOT = 'autosave';
+
+    // ── The save/resume result surface (issue #862, AC4) ───────────────────
+    //
+    // A save is fire-and-forget from JS: the click queues a slot and a Bevy
+    // system takes the capture a frame or two later, at a tick boundary. A
+    // resume is even further away — it happens on the NEXT page load, after the
+    // version gate. Neither can return its answer to the caller, so both post
+    // it and the host page collects it here.
+    //
+    // The one rule that matters: the message is Rust's, rendered verbatim. For
+    // a refused resume it is `vellum_save::Moved`'s own sentence, which names
+    // WHICH version dimension moved; for a failed save it is the browser's own
+    // exception text, which is how a host learns the word QuotaExceededError.
+    // Paraphrasing either here would throw away the only part worth reading —
+    // which is also why these strings are not string-table ids: they are
+    // composed in Rust at the moment of failure, not chosen from a list.
+    var _snapshotStatusTimer = null;
+    function showSnapshotStatus(ok, message) {
+      var el = document.getElementById('snapshot-status');
+      if (!el || !message) return;
+      el.textContent = message;
+      el.className = 'shown ' + (ok ? 'ok' : 'failed');
+      if (_snapshotStatusTimer) clearTimeout(_snapshotStatusTimer);
+      // A failure is worth reading twice; a success is an acknowledgement.
+      _snapshotStatusTimer = setTimeout(function () {
+        el.className = '';
+      }, ok ? 4000 : 12000);
+    }
+
+    // Mark the button that was clicked, so the answer is attached to the
+    // action even when the sentence has already faded.
+    function flagSnapshotButton(action, ok) {
+      var btn = document.querySelector('.debug-action[data-action="' + action + '"]');
+      if (!btn) return;
+      btn.classList.remove('ok', 'failed');
+      btn.classList.add(ok ? 'ok' : 'failed');
+      setTimeout(function () { btn.classList.remove('ok', 'failed'); }, 4000);
+    }
+
+    // Poll the drained status. Rust hands back "" (nothing to report) or
+    // "<ok|error>\t<save|resume>\t<sentence>"; taking it on read is what makes
+    // a poll safe — each outcome is delivered exactly once.
+    function pollSnapshotStatus() {
+      if (typeof wasm_snapshot_status !== 'function') return;
+      var raw;
+      try { raw = wasm_snapshot_status(); } catch (_) { return; }
+      if (!raw) return;
+      var parts = raw.split('\t');
+      if (parts.length < 3) return;
+      var ok = parts[0] === 'ok';
+      // Only the message may contain a tab, so everything past the second one
+      // is rejoined rather than dropped.
+      showSnapshotStatus(ok, parts.slice(2).join('\t'));
+      flagSnapshotButton(parts[1] === 'save' ? 'save-snapshot' : 'resume-snapshot', ok);
+    }
 
     // send(type, data?) for the local-console path: wraps the ClientMessage
     // envelope and injects it under the local-console token, exactly like a
@@ -1124,6 +1211,8 @@
             <button class="debug-action" data-action="godmode" title="God mode (no damage)">🛡</button>
             <button class="debug-action" data-action="instagib" title="Instagib (100x damage)">⚡</button>
             <button class="debug-action" data-action="teleport-waypoint" title="Teleport ship to Navigation waypoint" disabled>📍</button>
+            <button class="debug-action" data-action="save-snapshot" title="Save this session (issue #862)">💾</button>
+            <button class="debug-action" data-action="resume-snapshot" title="Reload and resume the saved session">↺</button>
           </div>
           <div id="debug-tabs">
             <button class="debug-tab active" data-tab="0">Mod</button>
@@ -1135,6 +1224,11 @@
         <pre id="debug-content">(panel closed)</pre>
       </div>
     </aside>
+
+    <!-- Save/resume outcome (issue #862, AC4). Deliberately outside the debug
+         panel: a resume that the version gate refused has to be readable on a
+         page the host has only just loaded. -->
+    <div id="snapshot-status" role="status" aria-live="polite"></div>
   </div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
@@ -1147,8 +1241,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-51b600576bdb1f06.js';
-const wasm = await init({ module_or_path: './project-phoenix-51b600576bdb1f06_bg.wasm' });
+import init, * as bindings from './project-phoenix-542a827d0f4c8216.js';
+const wasm = await init({ module_or_path: './project-phoenix-542a827d0f4c8216_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2662,6 +2756,13 @@ function finishInit() {
   window.wasm_cross_target_probe = wasmBindings.wasm_cross_target_probe;
   window.wasm_set_log_spec = wasmBindings.wasm_set_log_spec;
   window.wasm_set_log_entity = wasmBindings.wasm_set_log_entity;
+  // The snapshot seam (issue #862). `wasm_prepare_resume` is bound with the
+  // rest even though it is called far earlier, on the boot path below — the
+  // binding site is one list, deliberately.
+  window.wasm_save_snapshot = wasmBindings.wasm_save_snapshot;
+  window.wasm_snapshot_status = wasmBindings.wasm_snapshot_status;
+  window.wasm_prepare_resume = wasmBindings.wasm_prepare_resume;
+  window.wasm_resume_pending = wasmBindings.wasm_resume_pending;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
   window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
   window.wasm_toggle_debug_pause = wasmBindings.wasm_toggle_debug_pause;
@@ -2950,7 +3051,43 @@ function startServer() {
   window.__phoenixReady = true;
   window.dispatchEvent(new CustomEvent('PhoenixReady'));
 
+  // The resume half of the snapshot seam (issue #862), and it must happen
+  // HERE — after the world is loaded (the content digest is computed over its
+  // TOML) and before wasm_init, so a save this build cannot honour is refused
+  // while nothing has been activated. A refusal is reported and the page then
+  // boots a normal new session; it does not half-adopt a world it is about to
+  // reject.
+  try {
+    var resumeSlot = new URLSearchParams(window.location.search).get('resume');
+    if (resumeSlot && typeof wasm_prepare_resume === 'function') {
+      var refusal = wasm_prepare_resume(resumeSlot);
+      if (refusal) {
+        // `vellum_save::Moved`'s own sentence, verbatim — it names which
+        // version dimension moved, which no phoenix-invented status would.
+        // Shown, not logged: the host is about to play a session they think
+        // they resumed, and a console.warn tells nobody who is not looking at
+        // DevTools (issue #862 AC4).
+        showSnapshotStatus(false, refusal);
+        console.warn('[Phoenix] the saved session was refused: ' + refusal);
+      }
+      // Strip the parameter either way. It has been consumed — a refused
+      // resume must not be re-attempted on every subsequent reload, and an
+      // accepted one must not be re-staged if the host reloads mid-session.
+      var cleaned = new URL(window.location.href);
+      cleaned.searchParams.delete('resume');
+      window.history.replaceState(null, '', cleaned.toString());
+    }
+  } catch (e) {
+    console.error('[Phoenix] resume preparation failed:', e);
+    showSnapshotStatus(false, 'the saved session could not be prepared: ' + e);
+  }
+
   try { wasm_init(); } catch (_) {}
+
+  // From here on, saves and the pending resume report themselves. Half a
+  // second is well under the time it takes to read a sentence and far longer
+  // than the frame a `PostUpdate` system posts one on.
+  setInterval(pollSnapshotStatus, 500);
 }
 
 // ── WASM startup ───────────────────────────────────────────────────────
@@ -3080,6 +3217,26 @@ window.addEventListener('TrunkApplicationStarted', () => {
                 btn.classList.toggle('active', wasm_get_instagib());
               }
               break;
+            case 'save-snapshot':
+              // Fire-and-forget: the capture itself is taken by a Bevy system
+              // on the next PostUpdate, because a save has to stand on a tick
+              // boundary and a click can land anywhere.
+              if (typeof wasm_save_snapshot === 'function') {
+                wasm_save_snapshot(PHOENIX_SAVE_SLOT);
+              } else {
+                showSnapshotStatus(false, 'the simulation is not running yet, so there is nothing to save');
+              }
+              break;
+            case 'resume-snapshot': {
+              // A resume is a page load. "Restore into a fresh app" has one
+              // honest meaning in a browser, and this is it: hand the slot to
+              // the next boot through the URL and reload. Nothing is restored
+              // here, because there is no fresh app here to restore into.
+              var resumeUrl = new URL(window.location.href);
+              resumeUrl.searchParams.set('resume', PHOENIX_SAVE_SLOT);
+              window.location.href = resumeUrl.toString();
+              break;
+            }
             case 'teleport-waypoint':
               // Host-only sim override: fire-and-forget (like pause/wireframes).
               // Guarded by the disabled state, but re-check to be safe.

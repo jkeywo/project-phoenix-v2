@@ -528,6 +528,130 @@ fn splitmix64(x: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+// ── One rock, built in exactly one place ────────────────────────────────
+//
+// The streamer is no longer the only thing that spawns a gameplay rock: a
+// snapshot restore (issue #862) has to put back the belt the capture was taken
+// against, because the fresh app it restores into streamed a *different* one on
+// its way to the restore point. Two spawn sites building the same entity by
+// hand is how a restored rock ends up subtly unlike a streamed one — a missing
+// `ColliderSection` here reads as radius 0.0 to collision avoidance, and the
+// bug is invisible until a ship flies through a rock it could see.
+//
+// So the authored half is read once ([`RockConfig`]) and the component set is
+// written once ([`rock_bundle`]); `try_spawn_cell` and `snapshot::restore` are
+// both callers.
+
+/// The authored facts a streamed rock's entity is built from.
+///
+/// Read from the config cache rather than stored in a save: this is TOML, and a
+/// scenario whose TOML moved is one the content-version gate refuses outright.
+#[derive(Clone, Debug)]
+pub struct RockConfig {
+    pub collider: crate::entity_config::ColliderConfig,
+    pub max_hp: f32,
+    pub tags: Vec<String>,
+    pub mesh: Option<crate::entity_config::MeshConfig>,
+    pub radar_icon: Option<String>,
+    pub radar_colour: Option<[f32; 3]>,
+    pub radar_size: Option<f32>,
+}
+
+/// Resolve one rock config path against the config cache, with the same
+/// fallbacks the streamer has always used.
+pub fn rock_config(config_path: &str) -> RockConfig {
+    let config_cache = crate::config_cache::get_config_cache();
+    let entity_config = config_cache.get(config_path);
+    let collider_radius = entity_config
+        .and_then(|c| c.collider.as_ref())
+        .map(|c| c.radius)
+        .unwrap_or(2.0);
+    // Radar appearance comes straight from the rock's own TOML, exactly like
+    // collider/hull/tags. Cosmetic variants have no [radar_appearance] section
+    // at all, so these stay None and the rock never appears on radar.
+    let radar_appearance = entity_config.and_then(|c| c.radar_appearance.as_ref());
+    RockConfig {
+        collider: entity_config.and_then(|c| c.collider.clone()).unwrap_or(
+            crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius: collider_radius,
+                length: 0.0,
+            },
+        ),
+        max_hp: entity_config
+            .and_then(|c| c.hull.as_ref())
+            .map(|h| {
+                if h.hull_integrity > 0.0 {
+                    h.hull_integrity
+                } else {
+                    30.0
+                }
+            })
+            .unwrap_or(30.0),
+        tags: entity_config
+            .map(|c| c.tags.clone())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| vec!["asteroid".into()]),
+        mesh: entity_config.and_then(|c| c.mesh.clone()),
+        radar_icon: radar_appearance.and_then(|r| r.icon.clone()),
+        radar_colour: radar_appearance.and_then(|r| {
+            r.colour
+                .as_ref()
+                .filter(|c| c.len() >= 3)
+                .map(|c| [c[0], c[1], c[2]])
+        }),
+        radar_size: radar_appearance.and_then(|r| r.size),
+    }
+}
+
+/// The component set that makes a gameplay rock a rock.
+///
+/// `ColliderSection` rides alongside the Rapier collider because two consumers
+/// read the radius off the *component* rather than the physics body and got 0.0
+/// from a rock that only had the latter: `handle_collisions`, whose de-overlap
+/// then left the ship sitting inside the asteroid, and the AI `WorldSnapshot`,
+/// which is how collision *avoidance* learns an obstacle's size. Field
+/// asteroids bypass `spawn_entity` (which inserts this for every other entity),
+/// so it has to be added here.
+pub type RockBundle = (
+    Asteroid,
+    AsteroidUuid,
+    AsteroidShieldPierce,
+    EntitySystemHull,
+    crate::entity_spawner::ColliderSection,
+    Transform,
+    Visibility,
+    bevy_rapier3d::prelude::Collider,
+    bevy_rapier3d::prelude::RigidBody,
+);
+
+/// Build the component set for one rock at `current_hp` of `config.max_hp`.
+pub fn rock_bundle(
+    uuid: &str,
+    config: &RockConfig,
+    translation: Vec3,
+    rotation: Quat,
+    shield_pierce: f32,
+    current_hp: f32,
+) -> RockBundle {
+    let mut hull = crate::damage::SystemHull::from_config(&[(
+        crate::messages::SystemId("captain".into()),
+        config.max_hp,
+    )]);
+    hull.set_hp(&crate::messages::SystemId("captain".into()), current_hp);
+    (
+        Asteroid,
+        AsteroidUuid(uuid.to_string()),
+        AsteroidShieldPierce(shield_pierce),
+        EntitySystemHull(hull),
+        crate::entity_spawner::ColliderSection(config.collider.clone()),
+        Transform::from_translation(translation).with_rotation(rotation),
+        Visibility::default(),
+        bevy_rapier3d::prelude::Collider::ball(config.collider.radius),
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+    )
+}
+
 /// Evaluate a single cell of the composed density field for gameplay
 /// asteroid spawning. If the cell passes the weighted density check, spawn
 /// a gameplay asteroid entity and populate the window slot. The selected
@@ -563,39 +687,15 @@ fn try_spawn_cell(
     let selected = &contributions[sel_idx];
 
     // Look up the entity config from the cache so the collider radius,
-    // visual mesh, HP, and tags come from the TOML rather than hard-coded values.
-    let config_cache = crate::config_cache::get_config_cache();
-    let entity_config = config_cache.get(&spawn.config_path);
-    let collider_radius = entity_config
-        .and_then(|c| c.collider.as_ref())
-        .map(|c| c.radius)
-        .unwrap_or(2.0);
-    let max_hp = entity_config
-        .and_then(|c| c.hull.as_ref())
-        .map(|h| {
-            if h.hull_integrity > 0.0 {
-                h.hull_integrity
-            } else {
-                30.0
-            }
-        })
-        .unwrap_or(30.0);
-    let snapshot_tags = entity_config
-        .map(|c| c.tags.clone())
-        .filter(|t| !t.is_empty())
-        .unwrap_or_else(|| vec!["asteroid".into()]);
-    // Radar appearance comes straight from the rock's own TOML, exactly like
-    // collider/hull/tags above. Cosmetic variants have no [radar_appearance]
-    // section at all, so these stay None and the rock never appears on radar.
-    let radar_appearance = entity_config.and_then(|c| c.radar_appearance.as_ref());
-    let radar_icon = radar_appearance.and_then(|r| r.icon.clone());
-    let radar_colour = radar_appearance.and_then(|r| {
-        r.colour
-            .as_ref()
-            .filter(|c| c.len() >= 3)
-            .map(|c| [c[0], c[1], c[2]])
-    });
-    let radar_size = radar_appearance.and_then(|r| r.size);
+    // visual mesh, HP, and tags come from the TOML rather than hard-coded
+    // values — through the same reader a snapshot restore uses.
+    let rock = rock_config(&spawn.config_path);
+    let collider_radius = rock.collider.radius;
+    let max_hp = rock.max_hp;
+    let snapshot_tags = rock.tags.clone();
+    let radar_icon = rock.radar_icon.clone();
+    let radar_colour = rock.radar_colour;
+    let radar_size = rock.radar_size;
 
     // Derived from the cell, not drawn at random. Everything else about a
     // streamed rock — whether it exists, where it sits, how it is rotated — is
@@ -639,45 +739,18 @@ fn try_spawn_cell(
         bevy::math::Quat::IDENTITY
     };
 
-    let asteroid_hull = EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-        crate::messages::SystemId("captain".into()),
+    let mut entity_cmd = commands.spawn(rock_bundle(
+        &uuid,
+        &rock,
+        Vec3::new(world_x, spawn.y, world_z),
+        rotation,
+        selected.shield_pierce,
         max_hp,
-    )]));
-
-    // `ColliderSection` alongside the Rapier collider, because two consumers
-    // read the radius off the *component* rather than the physics body and got
-    // 0.0 from a rock that only had the latter: `handle_collisions`, whose
-    // de-overlap then left the ship sitting inside the asteroid, and the AI
-    // `WorldSnapshot`, which is how collision *avoidance* learns an obstacle's
-    // size. Field asteroids bypass `spawn_entity` (which inserts this for every
-    // other entity), so it has to be added by hand here.
-    let collider_section = crate::entity_spawner::ColliderSection(
-        entity_config.and_then(|c| c.collider.clone()).unwrap_or(
-            crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
-                radius: collider_radius,
-                length: 0.0,
-            },
-        ),
-    );
-
-    let mut entity_cmd = commands.spawn((
-        Asteroid,
-        AsteroidUuid(uuid.clone()),
-        AsteroidShieldPierce(selected.shield_pierce),
-        asteroid_hull,
-        collider_section,
-        Transform::from_xyz(world_x, spawn.y, world_z).with_rotation(rotation),
-        Visibility::default(),
-        bevy_rapier3d::prelude::Collider::ball(collider_radius),
-        bevy_rapier3d::prelude::RigidBody::Fixed,
     ));
 
     // Attach MeshSection so render_spawned_entities can add a 3-D visual mesh.
-    if let Some(entity_config) = entity_config {
-        if let Some(mesh) = &entity_config.mesh {
-            entity_cmd.insert(MeshSection(mesh.clone()));
-        }
+    if let Some(mesh) = &rock.mesh {
+        entity_cmd.insert(MeshSection(mesh.clone()));
     }
 
     let entity = entity_cmd.id();

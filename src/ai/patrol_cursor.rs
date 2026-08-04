@@ -31,6 +31,20 @@ impl PatrolCursor {
         }
     }
 
+    /// A cursor put back exactly where a snapshot found it (issue #862).
+    ///
+    /// Separate from [`Self::new`] because `new` is a *fresh* cursor by
+    /// definition, and a restore that had to go through it would put every
+    /// patrolling ship back at waypoint 0 — steering for the start of a route
+    /// it was halfway around.
+    pub fn restored(objective_id: impl Into<String>, index: usize, settled: bool) -> Self {
+        Self {
+            objective_id: objective_id.into(),
+            index,
+            settled,
+        }
+    }
+
     /// The waypoint index this cursor is steering toward.
     pub fn index(&self) -> usize {
         self.index

@@ -215,7 +215,7 @@ docs/           — Draft design notes (numbered).
 
 ## Key Constraints & Rules
 
-1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules. (Planned exception: `save.rs`, PRD #116.)
+1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules. (Planned exception: PRD #116's own save path, which does not exist yet. The module issue #862 actually created is **`src/snapshot.rs`**, and it is deliberately *not* that exception: a world snapshot is written as RON inside `vellum-save`'s envelope, so it imports no `serde_json` at all. If #116 ever lands a JSON save, it needs its own line here rather than inheriting this one.)
 2. **Server = authority.** Bevy runs the simulation and decides everything; clients are stateless spokes that never talk to each other. Session tokens (UUIDv4 in `localStorage`) are the identity system — peer IDs are ephemeral.
 3. **Client is pure JS.** No client-side Rust/WASM, no new Rust glue for the client. Client state is built by pure `gui/*.js` modules (Vitest-tested); console UIs are per-console HTML iframes.
 4. **Captain authority.** Only the player at `CaptainChair` can set Red Alert (`SetRedAlert { active }`). Game start is collective `SetReady` auto-start, not a captain-only command.

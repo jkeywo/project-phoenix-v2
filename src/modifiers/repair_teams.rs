@@ -64,6 +64,19 @@ impl RepairTeams {
         &self.slots
     }
 
+    /// Replace every team's slot wholesale (issue #862's snapshot restore).
+    ///
+    /// The team *count* is not restored with it: how many teams a ship has is
+    /// authored config the fresh world already rebuilt from TOML, and a save
+    /// that disagreed about it is one the content-version gate refuses. Only as
+    /// many slots as this ship actually has are written, so a longer stored
+    /// list cannot grow a crew.
+    pub fn restore_slots(&mut self, slots: &[TeamSlot]) {
+        for (slot, stored) in self.slots.iter_mut().zip(slots) {
+            *slot = stored.clone();
+        }
+    }
+
     /// System ids where a repair team is currently **on site** — i.e. physically
     /// present and working, not en route and not heading home.
     ///

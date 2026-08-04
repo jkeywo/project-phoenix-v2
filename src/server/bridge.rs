@@ -188,6 +188,43 @@ thread_local! {
     /// `RefCell<bool>` thread-locals into one enum-keyed set (issue #609).
     static PENDING_TOGGLES: RefCell<HashSet<DebugToggleKind>> = RefCell::new(HashSet::new());
 
+    /// The world this session loaded: `(path, TOML text)`, recorded by
+    /// `wasm_load_world`. The snapshot boundary (issue #862) needs both — the
+    /// path is `Run::scenario`, and the text is what `snapshot::content_digest`
+    /// hashes to produce the content version. Kept here rather than reached for
+    /// through `config_cache` so the save path has one obvious source.
+    static SNAPSHOT_WORLD: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+
+    /// Slot name queued by `wasm_save_snapshot`, taken by `drain_snapshot_save`
+    /// on the next `PostUpdate`.
+    ///
+    /// `PostUpdate` rather than the export itself, because a save has to be
+    /// taken between fixed steps: `SimRng::state`'s own docs say why — mid-tick,
+    /// some systems for the step have drawn and others have not, so "all six
+    /// streams right now" is not a point any system agrees on. A JS click can
+    /// land anywhere; a Bevy system in `PostUpdate` cannot.
+    static PENDING_SAVE: RefCell<Option<String>> = const { RefCell::new(None) };
+
+    /// Host-visible outcome of the last save or resume, `(succeeded, message)`,
+    /// **drained** by `wasm_snapshot_status()`.
+    ///
+    /// Drained rather than latched because the host page polls it: a status
+    /// that stayed set would be re-shown every poll, and one that was cleared
+    /// on a timer could be missed entirely. Taking it means each outcome is
+    /// reported exactly once, whoever asks first.
+    static SNAPSHOT_STATUS: RefCell<Option<(bool, String, String)>> =
+        const { RefCell::new(None) };
+
+    /// A save that passed the version gate and is waiting for the world to
+    /// finish bootstrapping. Applied by `drain_snapshot_restore`.
+    static PENDING_RESTORE: RefCell<Option<crate::snapshot::StoredRun>> =
+        const { RefCell::new(None) };
+
+    /// Frames `drain_snapshot_restore` has been waiting for `ready_to_restore`.
+    /// Reset when a save is staged; compared against
+    /// [`RESTORE_DEADLINE_FRAMES`].
+    static RESTORE_WAITED: RefCell<u32> = const { RefCell::new(0) };
+
     /// Pre-formatted modifier debug text written by `write_debug_state` each
     /// `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_debug_state()` from JS.
@@ -689,6 +726,12 @@ pub fn wasm_init() {
             flush_host_channels,
             publish_sim_tick,
             publish_god_mode,
+            // The snapshot seam (issue #862). `PostUpdate` for the same reason
+            // the rest of this list is there — it runs *after* the frame's
+            // fixed steps, which is the tick boundary a capture and a restore
+            // both have to stand on.
+            drain_snapshot_save,
+            drain_snapshot_restore,
         ),
     );
 
@@ -853,6 +896,261 @@ fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
         config.entity_filter = crate::logging::parse_log_entities(&names);
     }
     (config, spec)
+}
+
+// ── The snapshot seam (issue #862) ─────────────────────────────────────────
+//
+// Four exports and two systems, and the shape of them is dictated by what a
+// browser resume actually is.
+//
+// **Saving** is easy: queue a slot, and let a `PostUpdate` system take the
+// capture at a tick boundary and hand the RON to `vellum_save::Store`.
+//
+// **Resuming is a page load.** "Restore into a fresh app" has exactly one
+// honest meaning in a browser: a fresh `App`, and the only way this page gets
+// one is to reload. So the host page's resume button does not restore anything
+// — it sets `?resume=<slot>` and reloads. On the way back up, JS calls
+// `wasm_prepare_resume` BEFORE `wasm_init`, which reads the slot and puts it
+// through the version gate; if the gate refuses, the page is told so and boots
+// normally, having activated nothing. If it passes, the save waits in a
+// thread-local until the scenario has bootstrapped its roster, and
+// `drain_snapshot_restore` writes it over the top.
+//
+// The gate running before `wasm_init` rather than after is the whole point: a
+// host must never be half-way into a world it is about to be told it cannot
+// have.
+
+/// Queue a save of the running session into `slot`.
+///
+/// Returns immediately; the capture happens on the next `PostUpdate`, and the
+/// outcome is read back through [`wasm_snapshot_status`].
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_save_snapshot(slot: String) {
+    PENDING_SAVE.with(|s| *s.borrow_mut() = Some(slot));
+}
+
+/// Which button an outcome answers. Carried so the host page can put the
+/// answer back on the control that was pressed rather than guessing from the
+/// wording of a sentence it is not allowed to paraphrase.
+#[cfg(target_arch = "wasm32")]
+const SNAPSHOT_SAVE: &str = "save";
+#[cfg(target_arch = "wasm32")]
+const SNAPSHOT_RESUME: &str = "resume";
+
+/// Record a host-visible outcome for the next [`wasm_snapshot_status`] poll.
+#[cfg(target_arch = "wasm32")]
+fn set_snapshot_status(ok: bool, source: &str, message: impl Into<String>) {
+    SNAPSHOT_STATUS.with(|s| *s.borrow_mut() = Some((ok, source.to_string(), message.into())));
+}
+
+/// The host-visible outcome of the last save or resume, **taken** — each
+/// outcome is reported exactly once.
+///
+/// Returns `""` when there is nothing to report, else
+/// `"<ok|error>\t<save|resume>\t<message>"`. Tab-separated rather than a status
+/// *object* because this crosses a `wasm_bindgen` boundary into a
+/// classic-script host page, and one string is the cheapest thing that crosses
+/// it; the host page splits on the first two tabs. No field but the message can
+/// contain one.
+///
+/// For a refused resume the message is `vellum_save::Moved`'s own sentence,
+/// verbatim — phoenix has no status vocabulary of its own to render it in.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_snapshot_status() -> String {
+    SNAPSHOT_STATUS.with(|s| {
+        s.borrow_mut()
+            .take()
+            .map_or_else(String::new, |(ok, source, message)| {
+                format!("{}\t{source}\t{message}", if ok { "ok" } else { "error" })
+            })
+    })
+}
+
+/// Read `slot`, put it through the version gate, and hold it for the boot that
+/// is about to happen. Call BEFORE `wasm_init`.
+///
+/// Returns `""` when the save was accepted and is now pending, or the refusal
+/// to show the host. A refusal leaves nothing staged, so the page boots into a
+/// normal new session.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_prepare_resume(slot: String) -> String {
+    let Some((_, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
+        // No world means no content digest, so there is nothing to check the
+        // save against. Refusing beats guessing.
+        return "the scenario has not been loaded yet".to_string();
+    };
+    let store = vellum_save::LocalStorage::new(crate::snapshot::STORAGE_NAMESPACE);
+    match crate::snapshot::load_from(&store, &slot, &crate::snapshot::versions(&toml)) {
+        Ok(run) => {
+            PENDING_RESTORE.with(|p| *p.borrow_mut() = Some(run));
+            RESTORE_WAITED.with(|w| *w.borrow_mut() = 0);
+            SNAPSHOT_STATUS.with(|s| *s.borrow_mut() = None);
+            String::new()
+        }
+        Err(refusal) => {
+            // Returned rather than queued: this call is synchronous and the
+            // host page has the string in hand, so queuing it too would show
+            // the same refusal twice.
+            refusal.to_string()
+        }
+    }
+}
+
+/// Whether a save is staged and waiting for the world to finish bootstrapping.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_resume_pending() -> bool {
+    PENDING_RESTORE.with(|p| p.borrow().is_some())
+}
+
+/// Take a queued save, if there is one.
+#[cfg(target_arch = "wasm32")]
+fn drain_snapshot_save(world: &mut World) {
+    let Some(slot) = PENDING_SAVE.with(|s| s.borrow_mut().take()) else {
+        return;
+    };
+    let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
+        set_snapshot_status(
+            false,
+            SNAPSHOT_SAVE,
+            "no scenario is loaded, so there is nothing to save",
+        );
+        return;
+    };
+    let payload = crate::snapshot::capture(world);
+    let digest = crate::sim_digest::world_digest(world);
+    let seed = world
+        .get_resource::<crate::sim_rng::SimRng>()
+        .map_or(0, |rng| rng.seed());
+    let run = crate::snapshot::run_for(
+        payload,
+        digest,
+        seed,
+        path,
+        crate::snapshot::versions(&toml),
+    );
+    let store = vellum_save::LocalStorage::new(crate::snapshot::STORAGE_NAMESPACE);
+    // The failure worth naming is `QuotaExceededError`: a save is one RON
+    // string in `localStorage`, and a long bounded run is a big one. The store
+    // hands the browser's own exception text back, and it is reported as-is —
+    // "the save could not be written: QuotaExceededError" says more to whoever
+    // has to clear space than any phoenix paraphrase of it would.
+    match crate::snapshot::save_to(&store, &slot, &run) {
+        Ok(()) => set_snapshot_status(
+            true,
+            SNAPSHOT_SAVE,
+            format!("saved at tick {}", run.ledger.final_tick),
+        ),
+        Err(why) => set_snapshot_status(
+            false,
+            SNAPSHOT_SAVE,
+            format!("the save could not be written: {why}"),
+        ),
+    }
+}
+
+/// How long a staged save waits for the world to bootstrap before the restore
+/// is abandoned and the host is told.
+///
+/// Frames rather than ticks, because this is a *wall-clock* patience budget for
+/// something that has not started ticking yet, and a world that never
+/// bootstraps never advances the tick this would otherwise be counted in. At
+/// 60fps this is thirty seconds — an order of magnitude past the second or two
+/// a normal auto-start takes, and short enough that a host does not sit
+/// wondering.
+#[cfg(target_arch = "wasm32")]
+const RESTORE_DEADLINE_FRAMES: u32 = 1_800;
+
+/// Apply a staged save once the scenario's roster exists.
+///
+/// Runs every frame while something is staged and does nothing until
+/// `ready_to_restore` says the world is far enough along — a fresh app has no
+/// ships at tick 0, and restoring into that window writes a ship's state onto
+/// components it has not been given yet.
+///
+/// # The wait is bounded, and the expiry is loud
+///
+/// `ready_to_restore` can be false forever, and the way it happens is ordinary:
+/// a stale `?resume=` outlives its session, the host picks a different roster
+/// at boot, and the save then names ships this world will never spawn. Waiting
+/// silently for that is the worst available outcome — the page plays a
+/// perfectly good *fresh* session while the host believes they resumed, and
+/// nothing ever says otherwise. So the wait has a deadline, and reaching it
+/// clears the staged save and reports a failure through the same status the
+/// save button uses.
+#[cfg(target_arch = "wasm32")]
+fn drain_snapshot_restore(world: &mut World) {
+    let staged = PENDING_RESTORE.with(|p| p.borrow().clone());
+    let Some(run) = staged else {
+        return;
+    };
+    let Some(snapshot) = run.snapshot.as_ref() else {
+        PENDING_RESTORE.with(|p| *p.borrow_mut() = None);
+        set_snapshot_status(
+            false,
+            SNAPSHOT_RESUME,
+            "that save carries no captured state to resume from",
+        );
+        return;
+    };
+    if !crate::snapshot::ready_to_restore(world, &snapshot.state) {
+        let waited = RESTORE_WAITED.with(|w| {
+            let mut w = w.borrow_mut();
+            *w += 1;
+            *w
+        });
+        if waited >= RESTORE_DEADLINE_FRAMES {
+            PENDING_RESTORE.with(|p| *p.borrow_mut() = None);
+            set_snapshot_status(
+                false,
+                SNAPSHOT_RESUME,
+                format!(
+                    "this session never built the world that save was taken in, \
+                     so the resume was abandoned and you are playing a fresh \
+                     session from tick 0 (the save wanted {} ship(s) at tick {})",
+                    snapshot.state.entities.len(),
+                    snapshot.tick
+                ),
+            );
+        }
+        return;
+    }
+    let report = crate::snapshot::restore(world, &snapshot.state);
+    PENDING_RESTORE.with(|p| *p.borrow_mut() = None);
+
+    let restored = crate::sim_digest::world_digest(world);
+    if restored != snapshot.digest {
+        // The corruption check, and it is vellum's rather than a hash of the
+        // text: a snapshot's digest is recomputed BY the restored simulation,
+        // so tampered or truncated state cannot restore to the recorded number.
+        set_snapshot_status(
+            false,
+            SNAPSHOT_RESUME,
+            format!(
+                "the save did not restore cleanly (recorded {:016x}, restored {restored:016x})",
+                snapshot.digest
+            ),
+        );
+    } else if report.is_complete() {
+        set_snapshot_status(
+            true,
+            SNAPSHOT_RESUME,
+            format!("resumed at tick {}", snapshot.tick),
+        );
+    } else {
+        set_snapshot_status(
+            false,
+            SNAPSHOT_RESUME,
+            format!(
+                "resumed at tick {} with {} missing entities",
+                snapshot.tick,
+                report.gaps.len()
+            ),
+        );
+    }
 }
 
 /// Called by JS (e.g. F4 keydown) to toggle region wireframes at runtime.
@@ -1091,6 +1389,13 @@ pub fn wasm_load_world(
     toml_str: String,
     curated_ships: Vec<String>,
 ) -> Result<JsValue, JsValue> {
+    // The snapshot boundary's two version inputs, taken on the way past: the
+    // path names the scenario a save is *of*, and the text is what the content
+    // digest is computed over, so a designer editing this file invalidates
+    // saves recorded against it without anyone remembering to bump a number.
+    SNAPSHOT_WORLD.with(|slot| {
+        *slot.borrow_mut() = Some((path.clone(), toml_str.clone()));
+    });
     crate::config_cache::wasm_load_world(path, toml_str, curated_ships)
 }
 

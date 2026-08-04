@@ -30,7 +30,7 @@ jobs:
       # the dev bundle is — the only differences are the dist/ mutations
       # after this point.
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@efdb2d034e07baadd93e3cbf257ba8b3a3a571a9
+        uses: jkeywo/vellum/actions/setup-fleet-rust@582a61206d39c13d051d2e73bf463bb5d167d484
         with:
           targets: wasm32-unknown-unknown
 

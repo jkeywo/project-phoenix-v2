@@ -106,6 +106,10 @@ pub mod simmath;
 /// Cross-target vector battery proving native and wasm agree, bit for bit,
 /// on every `simmath` function (issue #909).
 pub mod simmath_vectors;
+/// The authoritative world snapshot (issue #862): phoenix's save *payload*,
+/// stored inside `vellum-save`'s envelope. Compiles on both targets — a browser
+/// host is the thing that saves.
+pub mod snapshot;
 pub mod world;
 /// Deterministic tick-scoped world-id minting (issue #907) — the single
 /// chokepoint every simulation entity, message and projectile id comes from.

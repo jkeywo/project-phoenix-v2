@@ -230,6 +230,22 @@ impl ActiveBeam {
     pub fn bank_slot_mut(&mut self, bank: &str) -> Option<&mut ActiveBeamSlot> {
         self.per_bank.get_mut(bank)
     }
+
+    /// Replace every live beam wholesale (issue #862's snapshot restore).
+    ///
+    /// Deliberately not expressible as a sequence of [`Self::start`] calls:
+    /// `start` zeroes `damage_accumulator`, which is the fractional damage
+    /// carried between ticks, so a restore built out of `start` would put every
+    /// live beam back mid-burn but with its sub-tick debt forgiven — a small,
+    /// silent, per-beam divergence one tick after a restore whose digest
+    /// matched. Restoring is not firing, and it does not go through the firing
+    /// door.
+    pub fn restore_live_banks(
+        &mut self,
+        banks: impl IntoIterator<Item = (PhaserBank, ActiveBeamSlot)>,
+    ) {
+        self.per_bank = banks.into_iter().collect();
+    }
 }
 
 /// Post-beam cooldown, tracked independently per phaser bank.
@@ -264,6 +280,27 @@ impl PhaserCooldown {
         for v in self.per_bank.values_mut() {
             *v = (*v - dt).max(0.0);
         }
+    }
+
+    /// Every bank with time still on it, in bank-id order.
+    ///
+    /// Sorted rather than raw `HashMap` order because the one reader is issue
+    /// #862's snapshot capture, and a payload must no more inherit a map's
+    /// iteration order than the digest may.
+    pub fn active_banks_sorted(&self) -> Vec<(String, f32)> {
+        let mut rows: Vec<(String, f32)> = self
+            .per_bank
+            .iter()
+            .filter(|(_, secs)| **secs > 0.0)
+            .map(|(bank, secs)| (bank.clone(), *secs))
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        rows
+    }
+
+    /// Replace every bank's remaining cooldown wholesale (snapshot restore).
+    pub fn restore_banks(&mut self, banks: impl IntoIterator<Item = (String, f32)>) {
+        self.per_bank = banks.into_iter().collect();
     }
 }
 

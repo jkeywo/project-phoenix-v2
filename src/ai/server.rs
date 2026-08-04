@@ -369,7 +369,7 @@ pub struct WorldSnapshot {
 /// not a tuning problem, the rocks simply were not in the world it steers from.
 /// Keying off `AsteroidUuid` rather than back-filling `EntityUuid` keeps them
 /// out of the radar, networking, and targeting paths that key on the latter.
-fn build_world_snapshot(
+pub(crate) fn build_world_snapshot(
     mut snapshot: ResMut<WorldSnapshot>,
     query: Query<(
         &crate::entity_spawner::EntityUuid,

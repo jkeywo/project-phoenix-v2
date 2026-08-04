@@ -10,6 +10,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
 
   <!-- CDN deps loaded before our script so they're in scope synchronously -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -881,7 +882,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-8a34b8ea6df994b0.js" crossorigin="anonymous" integrity="sha384-CQYP1+rFMIonfs8k1sh0X+NxUI7T8xCbuBr0Ub3sVSK+CyZQSoI7cczqJtTphiPj"><link rel="preload" href="./project-phoenix-8a34b8ea6df994b0_bg.wasm" crossorigin="anonymous" integrity="sha384-FSA1BBlW+IyY5kwLFsSAv+w/pC5zC8siQPIaQone79B7IpvTO2lOlTkj49Xuj0JN" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-706a39bc68036d12.js" crossorigin="anonymous" integrity="sha384-BFZVslHPdgtL4ypxDq30+pfzE1F7jniDsTfr9fh2AO2i4DmfoQkjUNEVnpUkyxBd"><link rel="preload" href="./project-phoenix-706a39bc68036d12_bg.wasm" crossorigin="anonymous" integrity="sha384-4PTjIhJ368BjLDU99I4rWdIZ/k8k+mgsfKetn+cF3+ckwfxJqHIUEu0o10Xynv8C" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1241,8 +1242,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-8a34b8ea6df994b0.js';
-const wasm = await init({ module_or_path: './project-phoenix-8a34b8ea6df994b0_bg.wasm' });
+import init, * as bindings from './project-phoenix-706a39bc68036d12.js';
+const wasm = await init({ module_or_path: './project-phoenix-706a39bc68036d12_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2015,7 +2016,23 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         const retryable = new Set(['network', 'server-error', 'socket-error', 'socket-closed']);
         if (retryable.has(err.type)) {
           console.warn(`[PeerJS] retryable error — re-initializing in 3 s…`);
-          setTimeout(initPeerJS, 3000);
+          setTimeout(() => {
+            // Destroy THIS peer — releasing its signaling-server registration
+            // of hostPeerId — before spinning up a replacement. Re-creating
+            // with the same id while the old registration is still live
+            // turns a transient 'network' error into a permanent
+            // 'unavailable-id' loop: the new Peer() is refused the id, and
+            // since 'unavailable-id' isn't retryable that failed peer just
+            // sits there (while the old one may ALSO still be mid-reconnect
+            // from its own 'disconnected' handler below), so every future
+            // attempt collides with one or the other forever.
+            try {
+              peer.destroy();
+            } catch (_) {
+              /* already gone */
+            }
+            initPeerJS();
+          }, 3000);
         }
       });
     }

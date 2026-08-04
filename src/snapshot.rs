@@ -180,25 +180,25 @@ pub const SIMULATION_RULES: &str = "0.1";
 
 /// The authored data, computed rather than remembered.
 ///
-/// Phoenix has no repo-wide assets digest today (searched for: the perf module
-/// inventories asset *sizes*, not contents, and nothing else hashes authored
-/// data), so the scenario's own TOML text is what stands in. That is the
-/// narrowest honest choice available: a save is of one scenario, and a scenario
-/// whose text has changed is a scenario this save's ticks did not happen in.
+/// Issue #935: this used to hash the scenario TOML text alone, which left
+/// entity templates, fragments, and sidecars free to drift under a save. It
+/// now folds a [`crate::content_ledger::ContentLedger`] — every authored file
+/// the world/entity loader actually consumed for this load, scenario TOML
+/// included, keyed by canonical path. Taking the ledger rather than a lone
+/// string is deliberate: the digest can only be honest about what the caller
+/// hands it, and a bare `&str` parameter invited exactly the narrow read that
+/// caused this issue.
 ///
-/// `fnv1a` rather than a phoenix-local hash, because `vellum-digest` is already
-/// the fleet's digest primitive and a second one would be a second answer.
-pub fn content_digest(scenario_toml: &str) -> u64 {
-    vellum_digest::fnv1a(scenario_toml.as_bytes())
+/// `fnv1a`/`fold_digest` rather than a phoenix-local hash, because
+/// `vellum-digest` is already the fleet's digest primitive and a second one
+/// would be a second answer.
+pub fn content_digest(ledger: &crate::content_ledger::ContentLedger) -> u64 {
+    ledger.fold()
 }
 
 /// The three dimensions this build writes and reads saves against.
-pub fn versions(scenario_toml: &str) -> Versions {
-    Versions::new(
-        SNAPSHOT_FORMAT,
-        SIMULATION_RULES,
-        content_digest(scenario_toml),
-    )
+pub fn versions(ledger: &crate::content_ledger::ContentLedger) -> Versions {
+    Versions::new(SNAPSHOT_FORMAT, SIMULATION_RULES, content_digest(ledger))
 }
 
 /// The stored artifact's full type: `vellum-save`'s envelope, phoenix's payload.

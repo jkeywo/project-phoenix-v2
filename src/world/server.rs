@@ -2230,6 +2230,19 @@ fn apply_world_layer_changes(
 /// - **WASM**: checks the pending world TOML queue populated by JS via
 ///   `wasm_push_world_toml`; returns `None` if the fetch is not yet complete.
 fn load_scenario_toml(path: &str) -> Option<String> {
+    // Issue #935: layer worlds loaded through this function (extra worlds,
+    // additive layers) are authored content too — a designer editing one
+    // moves nothing in the content digest unless it is recorded. This does
+    // NOT reset the ledger: a layer load is additive to the same run, not a
+    // new scenario/world load (see `content_ledger`'s reset-semantics docs).
+    let text = load_scenario_toml_text(path);
+    if let Some(text) = &text {
+        crate::content_ledger::record(path, text);
+    }
+    text
+}
+
+fn load_scenario_toml_text(path: &str) -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::fs::read_to_string(path).ok()

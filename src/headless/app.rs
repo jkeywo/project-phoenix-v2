@@ -23,6 +23,7 @@ use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
 use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
 use crate::entities::ai_declaration_manifest;
 use crate::entity_config::EntityConfig;
+use crate::entity_loader::TemplateLoader;
 use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
 use crate::logging::LoggingPlugin;
 use crate::marker_validate::MarkerFinding;
@@ -360,10 +361,17 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     app.insert_resource(args.log.clone())
         .add_plugins(LoggingPlugin);
 
+    // Issue #935: a new headless build is a new scenario/world load — reset
+    // the content ledger here, before anything is recorded into it, so a
+    // second `build_headless_app` in the same test process never inherits the
+    // previous run's files (see `content_ledger`'s reset-semantics docs).
+    crate::content_ledger::reset();
+
     // World config. `insert_world_config_resource` (a `Startup` system in
     // `WorldPlugin`) sources this from the JS bridge, which has no native
     // equivalent — it no-ops off-browser. Inserting it here pre-empts that.
     let world_toml = read_toml(&args.world_path, "world")?;
+    crate::content_ledger::record(&args.world_path, &world_toml);
     let mut world_config = crate::world::config::parse_world(&world_toml)
         .map_err(|e| BuildError(format!("world {:?} failed to parse: {e}", args.world_path)))?;
 
@@ -465,6 +473,21 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
                 errors.join("; ")
             )));
         }
+
+        // Issue #935: extra-world TOML text, and the whole world's declared
+        // entity-template set (root + extra worlds), recorded into the
+        // content ledger. This is native's answer to the browser's JS-driven
+        // preload — an EAGER walk from the parsed config, not a lazy record
+        // as things spawn, because a streamed world's declared set would
+        // otherwise not be fully known until streaming finished. See
+        // `content_ledger::eager_record_world_entities`'s docs.
+        for (path, toml, _cfg) in &child_owned {
+            crate::content_ledger::record(path, toml);
+        }
+        crate::content_ledger::eager_record_world_entities(&world_config);
+        for (_, _, cfg) in &child_owned {
+            crate::content_ledger::eager_record_world_entities(cfg);
+        }
     }
 
     app.insert_resource(world_config);
@@ -481,11 +504,23 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     let _ = read_toml(&ship_path, "ship")?;
     let ship_entity_config = crate::entity_includes::load_entity_config(&ship_path)
         .map_err(|e| BuildError(format!("ship {ship_path:?} failed to parse: {e}")))?;
+    // Issue #935: the player's own hull is authored content too, and it is
+    // not necessarily among `world_config.entities` (a duel side is chosen
+    // by `--ship`/`--side-a`, not authored into the world). `FsTemplateLoader`
+    // records as a side effect of resolving it — see its doc comment.
+    let _ = crate::entity_loader::FsTemplateLoader.load_template(&ship_path);
     let ship_config = ship_entity_config
         .ship_config
         .ok_or_else(|| BuildError(format!("ship {ship_path:?} has no [[station]] blocks")))?;
     app.insert_resource(PendingShipConfig(ship_config));
     app.insert_resource(SelectedShipResource(ship_path.clone()));
+
+    // Issue #935: the world's declared file set — scenario/extra-world TOML,
+    // every referenced entity template and its fragments, the player's hull —
+    // is now fully known. Freeze the content ledger here, before anything
+    // spawns, so the digest a save is checked against does not drift as the
+    // world streams in afterward (see `content_ledger`'s module docs).
+    crate::content_ledger::freeze();
 
     // `ConfigCachePlugin` is wasm-only; its two jobs are the template cache
     // (done above) and the faction registry, which `add_simulation_plugins`

@@ -28,6 +28,7 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::prelude::{NextState, State};
+use project_phoenix::content_ledger;
 use project_phoenix::headless::{build_headless_app, HeadlessArgs};
 use project_phoenix::messages::{GamePhase, ServerMessage};
 use project_phoenix::server_app::{GameOverReason, SimOutbox};
@@ -155,8 +156,19 @@ fn combat_test_args() -> HeadlessArgs {
     }
 }
 
-fn current_versions(world: &str) -> Versions {
-    versions(&std::fs::read_to_string(world).expect("the world file is readable"))
+/// The content version this process's most recent `build_headless_app` call
+/// froze (issue #935). `build_headless_app` resets the ledger and re-records
+/// the whole declared file set on every call, so this always reads the load
+/// that is currently active on this test's thread — see
+/// `content_ledger`'s module docs for why a *frozen* read, not a live fold,
+/// is the one that stays stable while the world goes on to stream.
+///
+/// `world` is unused now that the digest is the ledger's, not the scenario
+/// text's, but is kept so call sites still read as "the versions for THIS
+/// world" and a caller comparing two different worlds' calls stays honest
+/// about which one it means.
+fn current_versions(_world: &str) -> Versions {
+    versions(&content_ledger::frozen_or_live())
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -601,11 +613,142 @@ fn a_save_whose_authored_data_changed_is_refused_on_content() {
     let store = FileStore::new(scratch("content"));
     save_to(&store, "autosave", &run).expect("the save is written");
 
-    let edited = versions("# a designer touched the world file\n");
+    // Simulate a designer editing the world file: same ledger shape a real
+    // load would build (the world path recorded), one file's text moved.
+    content_ledger::reset();
+    content_ledger::record(DUEL, "# a designer touched the world file\n");
+    content_ledger::freeze();
+    let edited = versions(&content_ledger::frozen_or_live());
     let refusal = load_from(&store, "autosave", &edited).expect_err("this build refuses it");
     assert!(
         matches!(refusal, LoadRefusal::Moved(Moved::Content { .. })),
         "got {refusal}"
+    );
+    content_ledger::reset();
+}
+
+/// Issue #935's own acceptance: a save is refused on content when an ENTITY
+/// TEMPLATE's authored text changes, not only when the scenario/world TOML
+/// does. This is exactly the case the old `content_digest` (scenario text
+/// only) missed — an edit to `assets/entities/*.toml`, a hull config, or a
+/// fragment file moved nothing, so `apply_hull` on restore would have trusted
+/// the fresh world's authored maxima over the capture's.
+///
+/// The edit is simulated through the ledger/loader seam rather than editing a
+/// real asset on disk: `duel()` already recorded the duel's real declared
+/// file set (every hull it spawns, via `content_ledger::
+/// eager_record_world_entities`), so re-recording one of those exact paths
+/// with different text is what a designer's edit would have produced, without
+/// mutating a shipped asset out from under the rest of the suite.
+#[test]
+fn a_save_whose_entity_template_changed_is_refused_on_content() {
+    let mut live = duel();
+    step(&mut live, 60);
+    let baseline = current_versions(DUEL);
+    let run = run_for(
+        capture(live.world()),
+        world_digest(live.world()),
+        SEED,
+        DUEL,
+        baseline.clone(),
+    );
+
+    let store = FileStore::new(scratch("content_entity"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    // The duel's own roster (see `args`, which resolves "cruiser" through
+    // `headless::duel::resolve_template`) spawns `assets/entities/
+    // alliance_cruiser.toml`; the real load above recorded it. Re-record it
+    // with different text, the way a designer's edit would move the ledger's
+    // fold, and reconstruct the ledger's frozen state around that one change.
+    let live_ledger = content_ledger::frozen_or_live();
+    assert!(
+        live_ledger.len() > 1,
+        "the duel's real load must have recorded more than the world file \
+         itself, or this test proves nothing: {}",
+        live_ledger.len()
+    );
+
+    content_ledger::reset();
+    content_ledger::record(
+        DUEL,
+        &std::fs::read_to_string(DUEL).expect("world readable"),
+    );
+    content_ledger::record(
+        "assets/entities/alliance_cruiser.toml",
+        "# a designer touched the hull\n",
+    );
+    content_ledger::freeze();
+    let edited = versions(&content_ledger::frozen_or_live());
+    assert_ne!(
+        edited.content, baseline.content,
+        "an edited entity template must move the content digest"
+    );
+
+    let refusal = load_from(&store, "autosave", &edited).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Content { .. })),
+        "got {refusal}"
+    );
+    content_ledger::reset();
+}
+
+/// The digest must not depend on the ORDER the loader happened to record
+/// files in — same file set, same text, recorded in the opposite order, must
+/// fold to the same number on either target.
+#[test]
+fn content_digest_does_not_depend_on_record_order() {
+    content_ledger::reset();
+    content_ledger::record("assets/entities/a.toml", "a");
+    content_ledger::record("assets/entities/b.toml", "b");
+    content_ledger::freeze();
+    let forward = versions(&content_ledger::frozen_or_live());
+
+    content_ledger::reset();
+    content_ledger::record("assets/entities/b.toml", "b");
+    content_ledger::record("assets/entities/a.toml", "a");
+    content_ledger::freeze();
+    let backward = versions(&content_ledger::frozen_or_live());
+
+    assert_eq!(
+        forward.content, backward.content,
+        "the same file set recorded in a different order must fold to the same digest"
+    );
+    content_ledger::reset();
+}
+
+/// The ledger must reset between loads rather than accumulate — a fresh
+/// `build_headless_app` call must not carry the previous world's files into
+/// the new one's digest.
+#[test]
+fn the_content_ledger_resets_between_loads() {
+    content_ledger::reset();
+    content_ledger::record("assets/entities/a.toml", "a");
+    content_ledger::freeze();
+    assert!(!content_ledger::frozen_or_live().is_empty());
+
+    // A real second load: `duel()` runs `build_headless_app`, which resets
+    // the ledger before recording anything of its own.
+    let _second_load = duel();
+    let after_second_load = content_ledger::frozen_or_live();
+    assert!(
+        !after_second_load.is_empty(),
+        "the second load must have recorded its own files"
+    );
+
+    // The stale entry from the first "load" must be gone, not folded
+    // alongside the real one — proven indirectly: a ledger that still held
+    // both would already be caught by the two assertions above having
+    // different content than a ledger built from `duel()` alone. Assert that
+    // directly too, since content_ledger's fields are private:
+    content_ledger::reset();
+    content_ledger::record("assets/entities/a.toml", "a");
+    let _third_load = duel();
+    let via_stale_then_reload = content_ledger::frozen_or_live();
+    assert_eq!(
+        after_second_load, via_stale_then_reload,
+        "a stale entry recorded before a real load must not survive into that \
+         load's frozen digest"
     );
 }
 

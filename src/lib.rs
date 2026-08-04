@@ -86,6 +86,13 @@ pub mod bounded_history;
 /// domain-neutral.
 pub mod composite_rng;
 pub mod console_bridge;
+/// The loaded-content ledger (issue #935): every authored file the world/entity
+/// loader actually reads, folded into `snapshot::content_digest` so an edit to
+/// a hull, fragment, or sidecar moves a save's content version exactly as
+/// reliably as an edit to the scenario TOML does. Compiles on both targets —
+/// native and wasm converge on the same recording shape so the digest is
+/// target-independent for identical bytes.
+pub mod content_ledger;
 /// The seeded cross-target determinism probe (issue #904): one minimal sim
 /// world both a native test and the browser drive, under deliberately
 /// different frame pacing, folding the canonical digest at shared ticks.

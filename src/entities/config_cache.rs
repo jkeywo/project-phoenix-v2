@@ -386,6 +386,12 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
             break;
         }
         for (requested, resolved) in progress.ready {
+            // Issue #935: record the byte-stable composed document under its
+            // canonical path — the same shape `entity_loader::
+            // FsTemplateLoader::load_template` records on native — so an
+            // edit to this template OR any fragment it includes moves the
+            // content digest identically on both targets.
+            crate::content_ledger::record(&resolved.path, &resolved.toml);
             match resolved.parse() {
                 Ok(config) => {
                     let nested = nested_template_paths(&config);

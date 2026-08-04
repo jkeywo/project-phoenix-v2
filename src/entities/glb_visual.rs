@@ -27,6 +27,16 @@ pub struct PendingSceneHandle(pub Handle<bevy::scene::Scene>);
 /// it from the renderer). Callers that only need readiness should still prefer
 /// [`crate::config_cache::is_pending_sidecar_delivered`].
 fn load_sidecar_toml(path: &str) -> Option<String> {
+    let text = load_sidecar_toml_text(path);
+    // Issue #935: a rig sidecar is authored content too — record it into the
+    // ledger the same way the world/entity loaders do.
+    if let Some(text) = &text {
+        crate::content_ledger::record(path, text);
+    }
+    text
+}
+
+fn load_sidecar_toml_text(path: &str) -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::fs::read_to_string(path).ok()

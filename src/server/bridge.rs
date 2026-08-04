@@ -527,6 +527,14 @@ pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsV
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
+    // Issue #935: the preload sequence (`wasm_load_world` -> N x
+    // `wasm_load_config`) is finished by the time JS calls this — that is the
+    // whole point of the "preload complete" handshake `config_cache` runs.
+    // Freezing the content ledger here, before anything spawns, is what keeps
+    // the content digest independent of how far the world streams afterward:
+    // see `content_ledger`'s module docs.
+    crate::content_ledger::freeze();
+
     // Route Rust panics through console.error with a useful message + location.
     // Without this, a panic in any Bevy system traps the wasm instance and
     // every subsequent JS→WASM call surfaces as a bare "RuntimeError: memory
@@ -977,13 +985,14 @@ pub fn wasm_snapshot_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_resume(slot: String) -> String {
-    let Some((_, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
+    let Some((_, _toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
         // No world means no content digest, so there is nothing to check the
         // save against. Refusing beats guessing.
         return "the scenario has not been loaded yet".to_string();
     };
     let store = vellum_save::LocalStorage::new(crate::snapshot::STORAGE_NAMESPACE);
-    match crate::snapshot::load_from(&store, &slot, &crate::snapshot::versions(&toml)) {
+    let versions = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
+    match crate::snapshot::load_from(&store, &slot, &versions) {
         Ok(run) => {
             PENDING_RESTORE.with(|p| *p.borrow_mut() = Some(run));
             RESTORE_WAITED.with(|w| *w.borrow_mut() = 0);
@@ -1012,7 +1021,7 @@ fn drain_snapshot_save(world: &mut World) {
     let Some(slot) = PENDING_SAVE.with(|s| s.borrow_mut().take()) else {
         return;
     };
-    let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
+    let Some((path, _toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
         set_snapshot_status(
             false,
             SNAPSHOT_SAVE,
@@ -1046,7 +1055,7 @@ fn drain_snapshot_save(world: &mut World) {
         digest,
         seed,
         path,
-        crate::snapshot::versions(&toml),
+        crate::snapshot::versions(&crate::content_ledger::frozen_or_live()),
     );
     let store = vellum_save::LocalStorage::new(crate::snapshot::STORAGE_NAMESPACE);
     // The failure worth naming is `QuotaExceededError`: a save is one RON
@@ -1406,9 +1415,15 @@ pub fn wasm_load_world(
     curated_ships: Vec<String>,
 ) -> Result<JsValue, JsValue> {
     // The snapshot boundary's two version inputs, taken on the way past: the
-    // path names the scenario a save is *of*, and the text is what the content
-    // digest is computed over, so a designer editing this file invalidates
+    // path names the scenario a save is *of*, and the text is folded into the
+    // content ledger (issue #935) so a designer editing this file invalidates
     // saves recorded against it without anyone remembering to bump a number.
+    //
+    // `reset` here, not at `wasm_init`: this is the one call JS makes exactly
+    // once per world selection, so it is the natural "a new load is starting"
+    // boundary — see `content_ledger`'s reset-semantics docs.
+    crate::content_ledger::reset();
+    crate::content_ledger::record(&path, &toml_str);
     SNAPSHOT_WORLD.with(|slot| {
         *slot.borrow_mut() = Some((path.clone(), toml_str.clone()));
     });

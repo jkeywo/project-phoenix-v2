@@ -112,7 +112,18 @@ pub struct FsTemplateLoader;
 #[cfg(not(target_arch = "wasm32"))]
 impl TemplateLoader for FsTemplateLoader {
     fn load_template(&self, path: &str) -> Option<EntityConfig> {
-        crate::entity_includes::load_entity_config(path).ok()
+        let resolved = crate::entity_includes::resolve_from_disk(path).ok()?;
+        // Issue #935: record the byte-stable composed document — the same
+        // shape `config_cache::wasm_load_config` records on wasm — so an edit
+        // to this template OR any fragment it includes moves the content
+        // digest. Recorded here, at the loader that resolves what a spawn
+        // actually consumes, rather than in `resolve_template`/`visit`
+        // itself: that shared resolver is also what the headless diagnostic
+        // preload (`headless::app::preload_entity_templates`) walks over
+        // EVERY file in a directory, and recording there would turn the
+        // digest into a repo-wide hash instead of "what this scenario used".
+        crate::content_ledger::record(&resolved.path, &resolved.toml);
+        resolved.parse().ok()
     }
 }
 

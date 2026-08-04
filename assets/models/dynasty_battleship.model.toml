@@ -24,3 +24,24 @@ direction = [ 0, 0, 1 ]
 [markers.engine_starboard]
 position = [ 1.05, 0.0, 1.85 ]
 direction = [ 0, 0, 1 ]
+
+[[lod]]
+max_distance = 5.0
+model = "assets/models/dynasty_battleship.glb"
+
+[[lod]]
+max_distance = 300.0
+model = "assets/models/dynasty_battleship_lod1.glb"
+scale = [ 0.75, 0.75, 0.75 ]
+
+[lod.generate]
+source = "assets/models/dynasty_battleship.glb"
+ratio = 0.25
+error = 0.01
+texture_size = 512
+remesh_voxel_size = 0.03
+
+[[lod]]
+shape = "cuboid"
+colour = [ 0.3765, 0.302, 0.302 ]
+scale = [ 0.75, 0.75, 0.75 ]

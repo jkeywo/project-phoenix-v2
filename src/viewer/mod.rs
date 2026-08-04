@@ -263,6 +263,15 @@ fn apply_commands(
             ViewerCommand::SetLodMode(mode) => *lod_mode = mode,
             ViewerCommand::SetCameraDistance(distance) => {
                 for mut orbit in &mut cameras {
+                    // Recentre on the subject, or this does not mean what it
+                    // says. The camera sits at `focus + rotation * radius`, and
+                    // the distance every other part of the tool talks about —
+                    // the readout, and the `select_lod` band — is measured from
+                    // the SUBJECT at the origin. Right-drag panning moves
+                    // `focus`, so setting the radius alone put the camera that
+                    // far from wherever you had panned to: "range 5" landed
+                    // inside the model or half a map away depending on history.
+                    orbit.focus = Vec3::ZERO;
                     orbit.radius = distance.max(MIN_CAMERA_DISTANCE);
                     // Distance came from the panel, so framing must not
                     // overwrite it when the next level's extents arrive.

@@ -14,9 +14,13 @@
 # — `node scripts/generate-lods.mjs` (and CI) never invoke it.
 #
 # Caveats, because a voxel remesh is a destructive rebuild:
-#   - UVs and materials do not survive it. Re-texture the intermediate (or use
-#     it only where the far LOD's shading is carried by vertex colour / a flat
-#     material) before wiring it into a ladder.
+#   - The remesh itself keeps no UVs — it builds a new surface with no relation
+#     to the old parameterisation — so `transfer_uvs` below projects them back
+#     off the pre-remesh mesh and the material samples as it did. That projection
+#     is approximate where the remesh moved the surface, and it smears across UV
+#     seams, so look at a remeshed level before shipping it. It is affordable
+#     here and nowhere else: this runs for a FAR level, seen beyond the distance
+#     its detail is legible at.
 #   - Voxel size is in the model's own units — the geometry as it sits in the
 #     GLB, NOT the world-space size the rig sidecar's `[extents]` reports after
 #     `[base] scale`. The shipped asteroids are ~1.9 units across in their own

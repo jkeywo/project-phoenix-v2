@@ -274,6 +274,16 @@ mod tests {
     /// rather than through the wasm fetch queue — which is what makes the
     /// engine's own view of a ladder assertable at all.
     fn run_schedule(model: &str, variant: Option<&str>, mode: LodMode) -> (usize, Showing) {
+        run_schedule_at(model, variant, mode, 30.0)
+    }
+
+    /// As above, with the camera placed at a chosen distance from the subject.
+    fn run_schedule_at(
+        model: &str,
+        variant: Option<&str>,
+        mode: LodMode,
+        distance: f32,
+    ) -> (usize, Showing) {
         let mut app = App::new();
         app.insert_resource(ViewerArgs {
             model: Some(model.to_string()),
@@ -286,7 +296,7 @@ mod tests {
         .init_resource::<SubjectState>()
         .add_systems(Update, (refresh_ladder, apply_lod_mode).chain());
         app.world_mut()
-            .spawn((ViewerCamera, Transform::from_xyz(0.0, 0.0, 30.0)));
+            .spawn((ViewerCamera, Transform::from_xyz(0.0, 0.0, distance)));
         app.update();
 
         let levels = app.world().resource::<LadderState>().levels.len();
@@ -342,21 +352,41 @@ mod tests {
         );
     }
 
+    /// Auto mode picks the band the camera is standing in.
+    ///
+    /// The distance is derived from the ladder's own first bound rather than
+    /// written here: these are switch distances a designer retunes, and a test
+    /// that pins one goes red the day someone does their job. What must hold is
+    /// the relationship — inside band 0, you get level 0.
     #[test]
-    fn auto_mode_at_close_range_shows_the_near_level() {
-        let (_, showing) = run_schedule(
-            "assets/models/asteroid_common_1.glb",
-            Some("large"),
-            LodMode::Auto,
-        );
+    fn auto_mode_shows_the_level_whose_band_the_camera_is_in() {
+        let model = "assets/models/asteroid_common_1.glb";
+        let mut app = App::new();
+        app.insert_resource(ViewerArgs {
+            model: Some(model.to_string()),
+            variant: Some("large".to_string()),
+            entity: None,
+            gizmos: false,
+        })
+        .insert_resource(LodMode::Base)
+        .init_resource::<LadderState>()
+        .init_resource::<SubjectState>()
+        .add_systems(Update, refresh_ladder);
+        app.update();
+        let levels = app.world().resource::<LadderState>().levels.clone();
+        let first_bound = levels[0]
+            .max_distance
+            .expect("the near level is a bounded band");
+
+        let (_, near) = run_schedule_at(model, Some("large"), LodMode::Auto, first_bound * 0.5);
         assert_eq!(
-            showing,
+            near,
             Showing::Glb {
-                path: "assets/models/asteroid_common_1.glb".into(),
+                path: model.into(),
                 variant: Some("large".into()),
                 scale: Vec3::ONE,
             },
-            "30 units out is inside the first band",
+            "half of {first_bound} is inside the first band",
         );
     }
 

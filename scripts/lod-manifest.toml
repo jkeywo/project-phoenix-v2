@@ -96,3 +96,14 @@ params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.0
 output_sha256 = "46d02983a106add482211e250ac286c44f989567924705fbdb6c125787dd4070"
 output_bytes = 368944
 declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]
+
+[[output]]
+path = "assets/models/dynasty_battleship_lod1.glb"
+source = "assets/models/dynasty_battleship.remesh.glb"
+source_sha256 = "ff4d9318b7dc5688d1c7f91284bc11e43a94be3414d0776e80e92b51453ef669"
+origin = "assets/models/dynasty_battleship.glb"
+origin_sha256 = "ea151b15143689dcde1bb45e89f539d4288ffa6289253f09c8ec9cccd7ee648b"
+params = { ratio = 0.25, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
+output_sha256 = "f0de233bf89cfd87721f65324ab2354cd0a3d6375ea2cb06d16cb39fa0155d9a"
+output_bytes = 1523020
+declared_by = ["assets/models/dynasty_battleship.model.toml"]

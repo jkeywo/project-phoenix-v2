@@ -368,16 +368,23 @@
     try {
       const index = await fetch('assets/models/index.json').then((r) => r.json());
       models = index.models;
-      for (const model of models) {
+      const current = params.get('model') ?? session.model ?? 'assets/models/alliance_cruiser.glb';
+      // A `_lod<n>.glb` or a `.remesh.glb` is something this repo produced from
+      // a model, not a model to choose — the ladder's own Level dropdown is how
+      // you look at those, and listing them here doubles the list with entries
+      // that are all the same handful of ships. One exception: whatever was
+      // explicitly asked for stays selectable, so a `?model=…_lod1.glb` link
+      // still resolves rather than silently landing on some other ship.
+      const listed = models.filter((m) => !m.generated || m.path === current);
+      for (const model of listed) {
         const option = document.createElement('option');
         option.value = model.path;
         option.textContent = model.name;
         modelSelect.append(option);
       }
-      const current = params.get('model') ?? session.model ?? 'assets/models/alliance_cruiser.glb';
-      modelSelect.value = models.some((m) => m.path === current)
+      modelSelect.value = listed.some((m) => m.path === current)
         ? current
-        : models[0]?.path ?? '';
+        : listed[0]?.path ?? '';
       populateVariants(models.find((m) => m.path === modelSelect.value));
     } catch (err) {
       setStatus('Could not read assets/models/index.json — run the build once', true);
@@ -427,10 +434,71 @@
     const addButton = document.getElementById('addLevel');
     const levelPick = document.getElementById('levelPick');
 
+    /** The procedural primitives a level may be. Mirrors `MeshShape`. */
+    const SHAPES = ['sphere', 'cuboid', 'torus'];
+
+    /**
+     * Where a level's `.glb` lives, from the model and the level index.
+     *
+     * LOD 0 is the model itself; every level below it is the optimiser's
+     * output, named with its level number. That is how every ladder in this
+     * repo is already named, so deriving it removes a field nobody should be
+     * typing — and keeps the name right when a level is inserted or removed.
+     */
+    function derivedModelPath(index) {
+      const stem = ladder.state?.stem;
+      if (!stem) return '';
+      return index === 0
+        ? `assets/models/${stem}.glb`
+        : `assets/models/${stem}_lod${index}.glb`;
+    }
+
+    /**
+     * Make a level a model level or a shape level, and drop what the other kind
+     * owned — a level that carried both would be rejected on save, and a stale
+     * `colour` on a GLB level is a value the renderer silently ignores.
+     */
+    function setLevelKind(level, index, kind) {
+      if (kind === 'shape') {
+        delete level.model;
+        delete level.generate;
+        level.shape = level.shape ?? SHAPES[0];
+      } else {
+        delete level.shape;
+        delete level.colour;
+        delete level.rotation;
+        level.model = derivedModelPath(index);
+        applyGenerated(level, index);
+      }
+    }
+
+    /**
+     * LOD 0 is authored, everything below it is generated. Applied on every
+     * structural change so an inserted or removed level cannot leave a ladder
+     * whose base claims to be decimated from itself.
+     */
+    function applyGenerated(level, index) {
+      if (level.shape) return;
+      if (index === 0) delete level.generate;
+      else level.generate = { source: derivedModelPath(0), ...(level.generate ?? {}) };
+    }
+
+    /** Re-derive every model level's path and generated-ness from its index. */
+    function renumberLevels() {
+      ladder.levels.forEach((level, index) => {
+        if (level.shape) return;
+        level.model = derivedModelPath(index);
+        applyGenerated(level, index);
+      });
+    }
+
     /** The working copy the panel edits, and what the sidecars currently say. */
     const ladder = { levels: [], saved: [], state: null, dirty: false, selected: 0 };
     let lodMode = session.lodMode ?? 'base';
     let lodIndex = session.lodIndex ?? 0;
+
+    /** Which model+variant an unsaved draft belongs to. */
+    const draftKey = () => `${modelSelect.value}|${variantSelect.value}`;
 
     const setNote = (element, text, kind = '') => {
       element.textContent = text;
@@ -463,9 +531,21 @@
         ladder.saved = ladder.state.levels;
         ladder.levels = structuredClone(ladder.saved);
         ladder.dirty = false;
-        ladder.selected = Math.min(ladder.selected, Math.max(ladder.levels.length - 1, 0));
+        // Unsaved edits from before a reload, for this model and variant only.
+        const restored = session.draftKey === draftKey() && session.draft;
+        if (restored && JSON.stringify(session.draft) !== JSON.stringify(ladder.saved)) {
+          ladder.levels = structuredClone(session.draft);
+          ladder.dirty = true;
+        }
+        ladder.selected = Math.min(
+          session.selected ?? ladder.selected,
+          Math.max(ladder.levels.length - 1, 0),
+        );
         sizeDistanceSlider();
         renderLadder();
+        if (ladder.dirty) {
+          setNote(ladderNote, 'Unsaved ladder edits, carried across a reload.', 'warn');
+        }
       } catch (err) {
         setNote(ladderNote, err.message, 'bad');
       }
@@ -519,6 +599,12 @@
 
     function markDirty() {
       ladder.dirty = true;
+      // A reload is not always this panel's choice — Trunk rebuilds and reloads
+      // whenever `src/` or a shader changes, which in a shared checkout can be
+      // another session's keystroke. Unsaved ladder edits are real work, so
+      // they ride in sessionStorage (per model+variant, and only until the tab
+      // closes) rather than being lost to someone else's build.
+      remember({ draftKey: draftKey(), draft: ladder.levels });
       saveButton.disabled = false;
       revertButton.disabled = false;
       setNote(ladderNote, 'Unsaved ladder edits.', 'warn');
@@ -555,34 +641,43 @@
     }
 
     /**
-     * A comma-separated `[x, y, z]` field.
+     * Three boxes for one `[x, y, z]` value.
      *
-     * Kept as text rather than three number inputs: it is one value, it is
-     * usually typed in one go, and "1, 1, 1" (or an empty box) means "no scale
-     * of its own" — which has to delete the key rather than write three ones,
-     * or every level in the tree would grow a redundant `scale`.
+     * Writing the key only when it differs from `empty` matters: an omitted
+     * `scale` or `rotation` means "inherit", and filling every level in the
+     * tree with a redundant `[1, 1, 1]` would turn a no-op into an authored
+     * decision on every model the panel ever opened.
      */
-    function triple(parent, { label, value, key, target, placeholder, empty = [1, 1, 1] }) {
+    function vector3(parent, { label, value, key, target, empty }) {
       const wrap = document.createElement('div');
       wrap.className = 'wide';
       const labelEl = document.createElement('label');
       labelEl.textContent = label;
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.placeholder = placeholder;
-      input.value = Array.isArray(value) ? value.join(', ') : '';
-      input.addEventListener('input', () => {
-        const parts = input.value.split(',').map((p) => Number(p.trim()));
-        const usable = parts.length === 3 && parts.every((n) => Number.isFinite(n));
-        if (!usable || parts.every((n, i) => n === empty[i])) delete target[key];
-        else target[key] = parts;
-        markDirty();
-        pushLadder();
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const current = Array.isArray(value) ? [...value] : [...empty];
+      const inputs = current.map((axis, i) => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = 'any';
+        input.value = String(axis);
+        input.addEventListener('input', () => {
+          const parts = inputs.map((box) => Number(box.value));
+          const usable = parts.every((n) => Number.isFinite(n));
+          if (!usable || parts.every((n, j) => n === empty[j])) delete target[key];
+          else target[key] = parts;
+          markDirty();
+          pushLadder();
+        });
+        row.append(input);
+        return input;
       });
-      labelEl.append(input);
+
+      labelEl.append(row);
       wrap.append(labelEl);
       parent.append(wrap);
-      return input;
+      return inputs;
     }
 
     /**
@@ -707,47 +802,87 @@
         label: 'max distance', key: 'max_distance', target: level,
         value: level.max_distance, step: 'any', placeholder: '∞',
       });
-      field(grid, {
-        label: 'shape', key: 'shape', target: level, type: 'text',
-        value: level.shape, placeholder: 'sphere',
-      });
-      field(grid, {
-        label: 'model', key: 'model', target: level, type: 'text', wide: true,
-        value: level.model, placeholder: 'assets/models/…_lod1.glb',
-      });
-      // `scale` is three numbers in one box: a sphere standing in for a hull
-      // wants to be hull-shaped, and typing "3, 1, 0.5" beats three inputs.
-      triple(grid, {
-        label: 'scale x, y, z', key: 'scale', target: level,
-        value: level.scale, placeholder: '1, 1, 1',
-      });
-      // Shape-only, because that is where they mean anything: a GLB level
-      // takes its colour from its own material and its orientation from its
-      // rig sidecar's `[base] rotation`.
-      if (level.shape) {
-        triple(grid, {
-          label: 'rotation x, y, z (rad)', key: 'rotation', target: level,
-          value: level.rotation, placeholder: '0, 0, 0', empty: [0, 0, 0],
-        });
-        colourField(grid, level);
-      }
-      card.append(grid);
 
-      // The `[lod.generate]` half: present only on a level this repo makes.
-      const generated = document.createElement('label');
-      generated.className = 'check';
-      const toggle = document.createElement('input');
-      toggle.type = 'checkbox';
-      toggle.checked = !!level.generate;
-      toggle.addEventListener('change', () => {
-        if (toggle.checked) level.generate = { source: ladder.state?.source?.model };
-        else delete level.generate;
+      // Model or shape, and nothing in between: a level is one or the other,
+      // and which fields mean anything follows from which.
+      const kindWrap = document.createElement('div');
+      const kindLabel = document.createElement('label');
+      kindLabel.textContent = 'kind';
+      const kind = document.createElement('select');
+      for (const [value, text] of [['model', 'Model'], ['shape', 'Shape']]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        kind.append(option);
+      }
+      kind.value = level.shape ? 'shape' : 'model';
+      kind.addEventListener('change', () => {
+        setLevelKind(level, index, kind.value);
         markDirty();
         renderLadder();
       });
-      generated.append(toggle, document.createTextNode(' generated by the optimiser'));
-      card.append(generated);
+      kindLabel.append(kind);
+      kindWrap.append(kindLabel);
+      grid.append(kindWrap);
 
+      if (level.shape) {
+        const shapeWrap = document.createElement('div');
+        const shapeLabel = document.createElement('label');
+        shapeLabel.textContent = 'type';
+        const shape = document.createElement('select');
+        for (const name of SHAPES) {
+          const option = document.createElement('option');
+          option.value = name;
+          option.textContent = name;
+          shape.append(option);
+        }
+        shape.value = level.shape;
+        shape.addEventListener('change', () => {
+          level.shape = shape.value;
+          markDirty();
+          pushLadder();
+        });
+        shapeLabel.append(shape);
+        shapeWrap.append(shapeLabel);
+        grid.append(shapeWrap);
+      } else {
+        // The path is derived from the model and the level index, so it is
+        // shown rather than typed. Every ladder in this repo names its levels
+        // that way, and a typo here is a level that silently renders nothing.
+        const pathWrap = document.createElement('div');
+        pathWrap.className = 'wide';
+        const pathLabel = document.createElement('label');
+        pathLabel.textContent = index === 0 ? 'model (the base)' : 'model (generated)';
+        const path = document.createElement('input');
+        path.type = 'text';
+        path.readOnly = true;
+        path.value = level.model ?? '';
+        pathLabel.append(path);
+        pathWrap.append(pathLabel);
+        grid.append(pathWrap);
+      }
+      card.append(grid);
+
+      if (level.shape) {
+        // Scale, rotation and colour are a shape's whole vocabulary: it wants
+        // to be the proportions of the thing it stands in for, point the way
+        // that thing points, and be its colour.
+        const shapeGrid = document.createElement('div');
+        shapeGrid.className = 'grid';
+        vector3(shapeGrid, {
+          label: 'scale x, y, z', key: 'scale', target: level,
+          value: level.scale, empty: [1, 1, 1],
+        });
+        vector3(shapeGrid, {
+          label: 'rotation x, y, z (rad)', key: 'rotation', target: level,
+          value: level.rotation, empty: [0, 0, 0],
+        });
+        colourField(shapeGrid, level);
+        card.append(shapeGrid);
+      }
+
+      // LOD 0 is the model as authored; every GLB level below it is made by the
+      // optimiser, so `[lod.generate]` is implied rather than opted into.
       if (level.generate) {
         const gen = document.createElement('div');
         gen.className = 'grid';
@@ -817,14 +952,15 @@
         card.append(sub);
 
         if (level.generate.remesh_voxel_size) {
-          // The pre-pass rebuilds the surface from voxels and keeps no UVs, so
-          // a level made this way renders untextured however big texture_size
-          // is. Stated here because the symptom (a grey LOD 2) looks like a
-          // decimation bug rather than a documented consequence.
+          // The remesh keeps no UVs of its own; the pre-pass projects them back
+          // off the pre-remesh mesh, so the level IS textured. What it cannot
+          // promise is where those coordinates land once the surface has moved,
+          // which is a thing to look at rather than a thing to warn about.
           const warn = document.createElement('p');
-          warn.className = 'note warn';
+          warn.className = 'note';
           warn.textContent =
-            'A voxel remesh discards UVs and materials — this level will render untextured.';
+            'The pre-pass re-projects UVs onto the rebuilt surface — approximate across ' +
+            'seams, so give this level a look.';
           card.append(warn);
         }
       }
@@ -842,6 +978,9 @@
       remove.addEventListener('click', () => {
         ladder.levels.splice(index, 1);
         ladder.selected = Math.max(0, Math.min(index, ladder.levels.length - 1));
+        // The levels below it just moved up a number, and their file names
+        // move with them.
+        renumberLevels();
         markDirty();
         renderLadder();
       });
@@ -862,6 +1001,7 @@
 
     levelPick.addEventListener('change', () => {
       ladder.selected = Number(levelPick.value) || 0;
+      remember({ selected: ladder.selected });
       renderLadder();
       // Picking a level in Hold mode is the same gesture as pressing `view`.
       if (lodMode === 'fixed') setLodMode('fixed', ladder.selected);
@@ -869,7 +1009,7 @@
 
     addButton.addEventListener('click', () => {
       const last = ladder.levels[ladder.levels.length - 1];
-      const level = { max_distance: undefined, model: '' };
+      const level = { max_distance: undefined };
       // A ladder ends with an unbounded fallback level. Inserting before it
       // keeps that property, so the new level is a real band rather than dead
       // code after the catch-all.
@@ -882,6 +1022,7 @@
         ladder.levels.push(level);
         ladder.selected = ladder.levels.length - 1;
       }
+      renumberLevels();
       markDirty();
       renderLadder();
     });
@@ -889,6 +1030,7 @@
     revertButton.addEventListener('click', () => {
       ladder.levels = structuredClone(ladder.saved);
       ladder.dirty = false;
+      remember({ draftKey: null, draft: null });
       renderLadder();
     });
 
@@ -903,6 +1045,7 @@
         ladder.saved = result.state.levels;
         ladder.levels = structuredClone(ladder.saved);
         ladder.dirty = false;
+        remember({ draftKey: null, draft: null });
         renderLadder();
         setNote(
           ladderNote,
@@ -929,6 +1072,7 @@
         );
         ladder.levels = result.levels;
         ladder.selected = 0;
+        renumberLevels();
         markDirty();
         renderLadder();
         setNote(
@@ -1072,6 +1216,7 @@
     distanceInput.addEventListener('input', () => {
       distanceOut.textContent = distanceInput.value;
       wasm.viewer_set_camera_distance(Number(distanceInput.value));
+      remember({ distance: Number(distanceInput.value) });
     });
     // ── LOD mode ───────────────────────────────────────────────────────────
     const lodModeButtons = [...document.querySelectorAll('#lodModes button')];
@@ -1216,6 +1361,9 @@
     // of the URL, so tell it explicitly, then bring the ladder up.
     loadCurrent();
     setLodMode(lodMode, lodIndex);
+    // Back to where the camera was, so a rebuild does not send you to the
+    // default framing every time.
+    if (session.distance) setDistance(session.distance);
   </script>
 </body>
 </html>

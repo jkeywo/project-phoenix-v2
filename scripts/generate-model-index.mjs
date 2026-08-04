@@ -8,6 +8,16 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { REMESH_SUFFIX } from './generate-lods.mjs';
+
+// A `.glb` this repo PRODUCES rather than one an artist delivered: a decimated
+// level, named `<stem>_lod<n>.glb` by the ladder that generates it, or the
+// `.remesh.glb` intermediate the Blender pre-pass writes. They are listed —
+// this file is the inventory of what is on disk — but flagged, because they
+// have no business in a "pick a model" dropdown: they are outputs of a ladder,
+// and the ladder is how you look at them.
+const GENERATED_LEVEL = /_lod\d+$/;
+
 const MODELS_DIR = path.join(process.cwd(), 'assets', 'models');
 const OUT = path.join(MODELS_DIR, 'index.json');
 
@@ -37,6 +47,7 @@ const models = files
       path: `assets/models/${file}`,
       name: stem,
       variants: (variantsByStem.get(stem) ?? []).sort(),
+      generated: GENERATED_LEVEL.test(stem) || file.endsWith(REMESH_SUFFIX),
     };
   });
 

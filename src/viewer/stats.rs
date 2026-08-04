@@ -125,7 +125,12 @@ pub fn publish_stats(
     mode: Res<LodMode>,
     subject: Res<SubjectState>,
 ) {
-    let json = render_stats(&stats, &ladder, *mode, subject.settled);
+    // The subject's largest world extent. Distance is in absolute world units —
+    // the same units `select_lod` compares — so 5 is a close-up of a courier and
+    // the inside of a starbase. Reporting the size next to it is what makes the
+    // distance readable rather than arbitrary.
+    let extent = subject.extents.map(|e| e.max_element()).unwrap_or(0.0);
+    let json = render_stats(&stats, &ladder, *mode, subject.settled, extent);
     STATS_JSON.with(|cell| *cell.borrow_mut() = json);
 }
 
@@ -139,6 +144,7 @@ pub fn render_stats(
     ladder: &LadderState,
     mode: LodMode,
     settled: bool,
+    extent: f32,
 ) -> String {
     let level = match ladder.current {
         Some(i) => i.to_string(),
@@ -147,7 +153,7 @@ pub fn render_stats(
     format!(
         concat!(
             r#"{{"triangles":{},"meshes":{},"textures":{},"measuredTextures":{},"#,
-            r#""texturePixels":{},"largestTexture":{},"distance":{:.2},"#,
+            r#""texturePixels":{},"largestTexture":{},"distance":{:.2},"extent":{:.2},"#,
             r#""mode":"{}","level":{},"levels":{},"settled":{}}}"#
         ),
         stats.triangles,
@@ -157,6 +163,7 @@ pub fn render_stats(
         stats.texture_pixels,
         stats.largest_texture,
         ladder.distance,
+        extent,
         mode.name(),
         level,
         ladder.levels.len(),
@@ -195,13 +202,14 @@ mod tests {
             levels: vec![Default::default(), Default::default()],
             ..Default::default()
         };
-        let json = render_stats(&stats, &ladder, LodMode::Auto, true);
+        let json = render_stats(&stats, &ladder, LodMode::Auto, true, 8.0);
         assert!(json.contains(r#""triangles":138790"#), "{json}");
         assert!(json.contains(r#""distance":87.50"#), "{json}");
         assert!(json.contains(r#""mode":"auto""#), "{json}");
         assert!(json.contains(r#""level":1"#), "{json}");
         assert!(json.contains(r#""levels":2"#), "{json}");
         assert!(json.contains(r#""settled":true"#), "{json}");
+        assert!(json.contains(r#""extent":8.00"#), "{json}");
     }
 
     /// The base model is "no level", and JSON has a word for that.
@@ -212,6 +220,7 @@ mod tests {
             &LadderState::default(),
             LodMode::Base,
             false,
+            0.0,
         );
         assert!(json.contains(r#""level":null"#), "{json}");
     }

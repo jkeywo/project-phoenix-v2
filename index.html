@@ -854,7 +854,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-8c31e42b80ab1dd8.js" crossorigin="anonymous" integrity="sha384-s4VhwnnIHKJNDD9nmS/rMc2HWPYBVxOhssmIQMkr6LSG5yXlPySfVXX8mHlBhek6"><link rel="preload" href="./project-phoenix-8c31e42b80ab1dd8_bg.wasm" crossorigin="anonymous" integrity="sha384-TZzX8hJW3qwSIKC9srHNu4uFrozvGeF+Jsby13/y2+FOy2P0G64EwbbTO9gdpQQB" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-51b600576bdb1f06.js" crossorigin="anonymous" integrity="sha384-BWioUGhsGMHo4tbvsbiLqE9cHmaTQ00Kj5qp0/+YvJYTSZDFNHDseWcEDKCY5w7h"><link rel="preload" href="./project-phoenix-51b600576bdb1f06_bg.wasm" crossorigin="anonymous" integrity="sha384-UuZ6qe96rMfc8iyoqjj4xODAOLr9HHr3RmQpYvQad8EHBaDKTDPKBcTTobDH7qrb" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1147,8 +1147,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-8c31e42b80ab1dd8.js';
-const wasm = await init({ module_or_path: './project-phoenix-8c31e42b80ab1dd8_bg.wasm' });
+import init, * as bindings from './project-phoenix-51b600576bdb1f06.js';
+const wasm = await init({ module_or_path: './project-phoenix-51b600576bdb1f06_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2652,6 +2652,14 @@ function finishInit() {
   // fixed inputs — touches no simulation state; tests/smoke/simmath-vectors.spec.ts
   // calls it and compares the digest against the pinned native one.
   window.wasm_simmath_battery = wasmBindings.wasm_simmath_battery;
+  // Cross-target determinism probe (issue #904). Builds its OWN minimal seeded
+  // Bevy world, drives it for a fixed number of ticks under a deliberately
+  // bursty frame pacing, and returns the canonical #901 digest ledger. It
+  // never touches the world this page is running — a separate `App`, no
+  // renderer, no assets. tests/smoke/cross-target-determinism.spec.ts calls it
+  // and compares the ledger against the native pin in
+  // tests/fixtures/cross-target-ledger.json.
+  window.wasm_cross_target_probe = wasmBindings.wasm_cross_target_probe;
   window.wasm_set_log_spec = wasmBindings.wasm_set_log_spec;
   window.wasm_set_log_entity = wasmBindings.wasm_set_log_entity;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;

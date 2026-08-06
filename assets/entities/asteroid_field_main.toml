@@ -23,6 +23,13 @@ asteroid_type_paths = [
     { path = "assets/entities/asteroid_common_3_large.toml", weight = 1.0 },
     { path = "assets/entities/asteroid_common_4_small.toml", weight = 1.0 },
     { path = "assets/entities/asteroid_common_4_large.toml", weight = 1.0 },
+    # common, huge — 0.1x the class weight (issue #947).
+    # A rock this big is a landmark, not terrain: about 1 gameplay rock
+    # in 23 is one. At the class weight it would be nearly a third of them.
+    { path = "assets/entities/asteroid_common_1_huge.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_common_2_huge.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_common_3_huge.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_common_4_huge.toml", weight = 0.1 },
     # uncommon — rarity weight 0.1 ≈ 1:10 against a common
     { path = "assets/entities/asteroid_uncommon_1_small.toml", weight = 0.1 },
     { path = "assets/entities/asteroid_uncommon_1_large.toml", weight = 0.1 },

@@ -46,21 +46,94 @@ const root = process.cwd();
  * and an entry at 1:100 in a layer nobody shoots at is a model that ships and
  * is never seen. Rarity is a gameplay-legibility feature, so the rare and
  * uncommon classes are gameplay-only.
+ *
+ * `sizes` is the class's gameplay size ladder, in the order its entries are
+ * written into the field configs. It is per class and not one global list for
+ * the same reason `cosmetic` is: the `huge` size (issue #947) is a landmark
+ * rock, and a landmark whose whole job is to be recognisable at range should be
+ * the SAME four silhouettes every time. Scaling the uncommon and rare scans up
+ * as well would ship eight more models that a player meets once an hour and
+ * would make "that rock is enormous" and "that rock is unusual" the same
+ * signal.
+ *
+ * `remeshVoxelSize` is the Blender voxel pre-pass the class's generated LOD
+ * levels are made through (`scripts/blender-voxel-remesh.py`), or `null` for a
+ * class that decimates cleanly without one. It lives here rather than in the
+ * ladder because every size variant of one model shares one generated `.glb`,
+ * and `scripts/generate-lods.mjs` refuses outright when two sidecars claim the
+ * same output with different parameters. The commons need it; the uncommon and
+ * rare scans arrived dense enough that the import's own collapse was enough.
  */
 const CLASSES = [
-  { name: "common", raw: "PPAsteroidCommon", count: 4, weight: 1.0, cosmetic: true },
-  { name: "uncommon", raw: "PPAsteroidUncommon", count: 4, weight: 0.1, cosmetic: false },
-  { name: "rare", raw: "PPAsteroidRare", count: 4, weight: 0.01, cosmetic: false },
+  {
+    name: "common",
+    raw: "PPAsteroidCommon",
+    count: 4,
+    weight: 1.0,
+    sizes: ["small", "large", "huge"],
+    cosmetic: true,
+    remeshVoxelSize: 0.03,
+  },
+  {
+    name: "uncommon",
+    raw: "PPAsteroidUncommon",
+    count: 4,
+    weight: 0.1,
+    sizes: ["small", "large"],
+    cosmetic: false,
+    remeshVoxelSize: null,
+  },
+  {
+    name: "rare",
+    raw: "PPAsteroidRare",
+    count: 4,
+    weight: 0.01,
+    sizes: ["small", "large"],
+    cosmetic: false,
+    remeshVoxelSize: null,
+  },
 ];
 
-/** Size variants. `hull` absent ⇒ a cosmetic rock: no `[hull]`, no `[target]`. */
+/**
+ * Size variants. `hull` absent ⇒ a cosmetic rock: no `[hull]`, no `[target]`.
+ *
+ * `rarity` multiplies the class weight for entries of this size, so a size can
+ * be rarer than its class without touching the class's rarity story. `lodScale`
+ * multiplies the ladder's switch distances: LOD bands are really an angular
+ * threshold, so a rock three times the radius reaches the same on-screen size
+ * three times further out, and a `huge` rock on the `large` bands would drop to
+ * its far sphere while still filling a fifth of the viewscreen.
+ */
 const VARIANTS = {
   small: { label: "Small", radius: 2, hull: 30, colour: [0.55, 0.5, 0.42] },
   large: { label: "Large", radius: 4, hull: 100, colour: [0.6, 0.55, 0.45] },
+  // Triple the large silhouette (issue #947), reusing the same four scans at a
+  // larger authored scale rather than adding geometry.
+  //
+  // hull 300 is 3x large's, linear in radius rather than in volume. The rule is
+  // "time to clear scales with how big the thing looks": a cruiser's two phaser
+  // banks put out 8 hull/sec, so a large rock is ~12 s of sustained fire and a
+  // huge one ~37 s — a commitment, but a clearable one. Cubing it to 2700 would
+  // be 5.6 minutes on one rock and would read as indestructible scenery that
+  // happens to have a health bar.
+  //
+  // rarity 0.1: at the class weight this size would be a third of every
+  // gameplay rock in the field. At 0.1 it is ~4%, roughly one rock in twenty
+  // three, which is what makes it read as a landmark instead of as the terrain.
+  huge: {
+    label: "Huge",
+    radius: 12,
+    hull: 300,
+    colour: [0.65, 0.6, 0.48],
+    rarity: 0.1,
+    lodScale: 3,
+  },
   cosmetic: { label: "Cosmetic", radius: 1, colour: [0.5, 0.45, 0.38] },
 };
 
-const GAMEPLAY_VARIANTS = ["small", "large"];
+/** A size's rarity multiplier / LOD-distance multiplier, defaulting to 1. */
+const sizeRarity = (variantKey) => VARIANTS[variantKey].rarity ?? 1;
+const lodScale = (variantKey) => VARIANTS[variantKey].lodScale ?? 1;
 
 /**
  * How a raw scan becomes the shipped near-LOD .glb.
@@ -86,6 +159,11 @@ const DECIMATE_SCRIPT = "scripts/blender-decimate.py";
  * `npm run lods` from the declarations this script writes into the sidecars —
  * this script never runs the decimation itself, so the manifest in
  * scripts/lod-manifest.toml only ever records files generate-lods.mjs made.
+ *
+ * These are the distances for a size whose `lodScale` is 1; a bigger size
+ * multiplies them (see `VARIANTS`). The RATIOS are never scaled: the generated
+ * `.glb` is shared by every size variant of the model, and two sidecars that
+ * disagreed about how it is made is an error `generate-lods.mjs` refuses.
  */
 const LADDER = {
   near_distance: 25.0,
@@ -253,7 +331,8 @@ size = [ ${size[0]}, ${size[1]}, ${size[2]} ]
 }
 
 /** The `[[lod]]` chain appended to a base sidecar. */
-function ladderBlock(model) {
+function ladderBlock(model, { remeshVoxelSize = null, scale = 1 } = {}) {
+  const band = (d) => num(d * scale);
   const lines = [
     "",
     "# Distance-based LOD (issue #914): full GLB up close, two decimated steps, then",
@@ -261,20 +340,47 @@ function ladderBlock(model) {
     "# `colour` so each rock inherits them from the entity's own flat `[mesh]`.",
     "# The two decimated steps declare how they are regenerated (issue #919):",
     `#   node scripts/generate-lods.mjs ${model}`,
-    "# Same bands and ratios as the four common asteroids, so every rock in a",
-    "# field switches level at the same distance. No `remesh_voxel_size` here:",
-    "# the import already brought this mesh down to the commons' density with a",
-    "# UV-preserving Blender collapse (scripts/blender-decimate.py), which is",
-    "# what the voxel pre-pass was standing in for on the stubborn commons.",
-    "[[lod]]",
-    `max_distance = ${num(LADDER.near_distance)}`,
-    `model = "assets/models/${model}.glb"`,
   ];
+  if (scale === 1) {
+    lines.push(
+      "# Same bands and ratios as the four common asteroids, so every rock in a",
+      "# field switches level at the same distance.",
+    );
+  } else {
+    lines.push(
+      `# The common asteroids' ratios, on bands ${scale}x further out (issue #947): a LOD`,
+      "# switch is really an angular threshold, and this size is that much bigger,",
+      "# so it reaches the same on-screen size that much further away. The ratios",
+      "# themselves must NOT move — every size variant of this model shares one",
+      "# generated .glb, and generate-lods.mjs refuses two sidecars that disagree",
+      "# about how it is made.",
+    );
+  }
+  if (remeshVoxelSize === null) {
+    lines.push(
+      "# No `remesh_voxel_size` here: the import already brought this mesh down to",
+      "# the commons' density with a UV-preserving Blender collapse",
+      "# (scripts/blender-decimate.py), which is what the voxel pre-pass was",
+      "# standing in for on the stubborn commons.",
+    );
+  } else {
+    lines.push(
+      "# `remesh_voxel_size` is this class's Blender voxel pre-pass: a plain",
+      "# regeneration at these ratios comes out LARGER than the source and the",
+      "# growth gate refuses it. See scripts/blender-voxel-remesh.py, and run",
+      "# `npm run lods -- --remesh` when regenerating.",
+    );
+  }
+  lines.push(
+    "[[lod]]",
+    `max_distance = ${band(LADDER.near_distance)}`,
+    `model = "assets/models/${model}.glb"`,
+  );
   for (const level of LADDER.generated) {
     lines.push(
       "",
       "[[lod]]",
-      `max_distance = ${num(level.max_distance)}`,
+      `max_distance = ${band(level.max_distance)}`,
       `model = "assets/models/${model}${level.suffix}.glb"`,
       "",
       "[lod.generate]",
@@ -283,6 +389,9 @@ function ladderBlock(model) {
       `error = ${num(level.error)}`,
       `texture_size = ${level.texture_size}`,
     );
+    if (remeshVoxelSize !== null) {
+      lines.push(`remesh_voxel_size = ${remeshVoxelSize}`);
+    }
   }
   lines.push(
     "",
@@ -347,7 +456,7 @@ function importClass(cls) {
     const bounds = readGlbBounds(shipped);
     const horiz = maxHorizontal(bounds);
 
-    const variants = [...GAMEPLAY_VARIANTS, ...(cls.cosmetic ? ["cosmetic"] : [])];
+    const variants = [...cls.sizes, ...(cls.cosmetic ? ["cosmetic"] : [])];
     for (const variantKey of variants) {
       const v = VARIANTS[variantKey];
       const scale = v.radius / horiz;
@@ -357,7 +466,11 @@ function importClass(cls) {
       // The base sidecar carries the ladder; each generated level needs its
       // own sidecar too (the preloader fetches `<model>.<variant>.toml` for
       // every level it may load), and those carry the rig alone.
-      write(`assets/models/${modelName}.${variantKey}.toml`, rig + ladderBlock(modelName));
+      const ladder = ladderBlock(modelName, {
+        remeshVoxelSize: cls.remeshVoxelSize,
+        scale: lodScale(variantKey),
+      });
+      write(`assets/models/${modelName}.${variantKey}.toml`, rig + ladder);
       for (const level of LADDER.generated) {
         write(`assets/models/${modelName}${level.suffix}.${variantKey}.toml`, rig);
       }
@@ -389,17 +502,48 @@ function updateStrings() {
     .map(([id, context, en]) => `${id},${context},${en}`);
   if (!missing.length) return;
 
+  let first = -1;
   let last = -1;
   lines.forEach((line, i) => {
-    if (idOf(line).startsWith("entity.asteroid_")) last = i;
+    if (!idOf(line).startsWith("entity.asteroid_")) return;
+    if (first < 0) first = i;
+    last = i;
   });
   if (last < 0) throw new Error(`${rel}: no entity.asteroid_* rows to insert beside`);
-  lines.splice(last + 1, 0, ...missing);
+  // Sorted INTO the block, not appended to the end of it: a new size lands
+  // between `entity.asteroid_common_1_cosmetic` and `..._large`, and appending
+  // would leave the block unsorted for every id that does not happen to sort
+  // last. Merged in one pass so the rows keep their relative order.
+  const block = lines.slice(first, last + 1);
+  const merged = [];
+  let m = 0;
+  for (const line of block) {
+    while (m < missing.length && idOf(missing[m]).localeCompare(idOf(line)) < 0) {
+      merged.push(missing[m++]);
+    }
+    merged.push(line);
+  }
+  merged.push(...missing.slice(m));
+  lines.splice(first, block.length, ...merged);
   fs.writeFileSync(file, lines.join("\n"));
   written.push(`${rel} (+${missing.length} rows)`);
 }
 
 // ── Field configs ──────────────────────────────────────────────────────────
+
+/**
+ * The sum of every gameplay entry's weight — the denominator the spawner's
+ * weighted pick divides by, so "1 in N" in a generated comment is the number a
+ * player would actually count.
+ */
+function totalGameplayWeight() {
+  return CLASSES.reduce(
+    (total, cls) =>
+      total +
+      cls.sizes.reduce((sub, s) => sub + cls.count * cls.weight * sizeRarity(s), 0),
+    0,
+  );
+}
 
 /**
  * Compose both type arrays from the class table and splice them into every
@@ -409,14 +553,35 @@ function updateStrings() {
 function fieldArrays() {
   const gameplay = ["asteroid_type_paths = ["];
   for (const cls of CLASSES) {
+    // Sizes at the class's own weight first, model-major, then any size that
+    // carries its own rarity multiplier as a labelled group of its own. Two
+    // groups rather than one interleaved list because they answer different
+    // questions — "how rare is this rock's material" and "how rare is a rock
+    // this big" — and a reader retuning one should not have to pick its lines
+    // out of the other.
+    const baseline = cls.sizes.filter((s) => sizeRarity(s) === 1);
+    const scaled = cls.sizes.filter((s) => sizeRarity(s) !== 1);
     gameplay.push(
       `    # ${cls.name} — rarity weight ${num(cls.weight)}` +
         (cls.weight === 1 ? " (the baseline the others are relative to)" : ` ≈ 1:${Math.round(1 / cls.weight)} against a common`),
     );
     for (let n = 1; n <= cls.count; n++) {
-      for (const variantKey of GAMEPLAY_VARIANTS) {
+      for (const variantKey of baseline) {
         gameplay.push(
           `    { path = "assets/entities/asteroid_${cls.name}_${n}_${variantKey}.toml", weight = ${num(cls.weight)} },`,
+        );
+      }
+    }
+    for (const variantKey of scaled) {
+      const weight = cls.weight * sizeRarity(variantKey);
+      gameplay.push(
+        `    # ${cls.name}, ${variantKey} — ${sizeRarity(variantKey)}x the class weight (issue #947).`,
+        `    # A rock this big is a landmark, not terrain: about 1 gameplay rock`,
+        `    # in ${Math.round(totalGameplayWeight() / (cls.count * weight))} is one. At the class weight it would be nearly a third of them.`,
+      );
+      for (let n = 1; n <= cls.count; n++) {
+        gameplay.push(
+          `    { path = "assets/entities/asteroid_${cls.name}_${n}_${variantKey}.toml", weight = ${num(weight)} },`,
         );
       }
     }

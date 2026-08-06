@@ -235,7 +235,7 @@ async function anyLadderState(stem) {
  * This is the precondition for a run, and it has to be collected the way
  * `generate-lods.mjs` collects it — across *all* the model's sidecars. Asking
  * one variant is what made the panel refuse to run over an asteroid ("declares
- * no [lod.generate] level") whose ladder lives in the small/large/cosmetic
+ * no [lod.generate] level") whose ladder lives in the small/large/huge/cosmetic
  * sidecars and not in a base one it has never had.
  */
 async function generatedOutputsForStem(stem) {

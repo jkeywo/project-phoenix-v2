@@ -20,7 +20,7 @@
 // ── Variants move together ──────────────────────────────────────────────────
 //
 // One model can have several rig sidecars (`<stem>.small.toml`,
-// `<stem>.large.toml`, `<stem>.cosmetic.toml`) and they share one generated
+// `<stem>.large.toml`, `<stem>.huge.toml`, `<stem>.cosmetic.toml`) and they share one generated
 // file per level. `collectTargets` in generate-lods.mjs rejects a tree where
 // two sidecars claim the same output with different parameters, so an edit
 // applies to *every* sidecar of the stem rather than to the one the viewer

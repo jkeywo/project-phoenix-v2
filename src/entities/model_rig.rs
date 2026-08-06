@@ -811,6 +811,110 @@ shape = "sphere"
         assert_eq!(last.colour, None);
     }
 
+    /// The huge size class's ladder (issue #947), which is the same four
+    /// models on bands three times further out.
+    ///
+    /// A LOD switch is an angular threshold wearing a distance's clothes: the
+    /// bands say "swap detail when this thing gets small on screen", and a rock
+    /// at three times the radius is that small three times further away. Left
+    /// on large's bands, a huge rock would drop to its procedural far sphere
+    /// while still filling a fifth of the viewscreen.
+    ///
+    /// The generated `.glb` files themselves are SHARED with the small and
+    /// large variants — no new geometry ships for this size — so the ratios
+    /// must be identical across the three sidecars. `generate-lods.mjs` refuses
+    /// two sidecars that disagree about one output, which is the check that
+    /// catches a retune here; asserted from the Rust side too, because that
+    /// script only runs in the Node job.
+    #[test]
+    fn the_huge_asteroid_variant_scales_its_bands_and_not_its_ratios() {
+        for n in 1..=4 {
+            let read = |variant: &str| {
+                let path = format!("assets/models/asteroid_common_{n}.{variant}.toml");
+                let text = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("{path} must exist: {e}"));
+                ModelRig::from_toml(&text).unwrap_or_else(|e| panic!("{path} must parse: {e}"))
+            };
+            let large = read("large");
+            let huge = read("huge");
+
+            let bounds = |rig: &ModelRig| -> Vec<Option<f32>> {
+                rig.lod.iter().map(|l| l.max_distance).collect()
+            };
+            assert_eq!(
+                bounds(&large),
+                vec![Some(25.0), Some(150.0), Some(300.0), None],
+                "the large bands this test is relative to"
+            );
+            assert_eq!(
+                bounds(&huge),
+                vec![Some(75.0), Some(450.0), Some(900.0), None],
+                "asteroid_common_{n}: the huge bands are large's, x3"
+            );
+
+            // Same models, same decimation, three times the authored scale.
+            let models = |rig: &ModelRig| -> Vec<Option<String>> {
+                rig.lod.iter().map(|l| l.model.clone()).collect()
+            };
+            assert_eq!(
+                models(&large),
+                models(&huge),
+                "no new geometry for this size"
+            );
+            for (l, h) in large.lod.iter().zip(huge.lod.iter()) {
+                let (Some(lg), Some(hg)) = (l.generate.as_ref(), h.generate.as_ref()) else {
+                    assert!(
+                        l.generate.is_none() && h.generate.is_none(),
+                        "asteroid_common_{n}: one variant generates a level the other does not"
+                    );
+                    continue;
+                };
+                assert_eq!(lg.source, hg.source);
+                assert_eq!(lg.ratio, hg.ratio);
+                assert_eq!(lg.error, hg.error);
+                assert_eq!(lg.texture_size, hg.texture_size);
+                assert_eq!(lg.remesh_voxel_size, hg.remesh_voxel_size);
+            }
+            // The rig scales the mesh so its widest horizontal half-extent is
+            // the entity's collider radius — 4 for large, 12 for huge. That,
+            // and not the raw scale factor, is the invariant: two of the four
+            // commons ship a `large` rig whose scale drifted about a twentieth
+            // of a percent (0.052% and 0.037%) from `4 / half-width` (their
+            // .glb was re-exported without the sidecar being re-derived), and
+            // this size class must not silently "fix" an existing size by
+            // inheriting from it.
+            let half_width = |rig: &ModelRig| -> f32 {
+                let e = rig.extents.as_ref().expect("the rig caches its extents");
+                [
+                    e.min[0].abs(),
+                    e.max[0].abs(),
+                    e.min[2].abs(),
+                    e.max[2].abs(),
+                ]
+                .into_iter()
+                .fold(0.0f32, f32::max)
+            };
+            assert!(
+                (half_width(&large) - 4.0).abs() < 1e-4,
+                "asteroid_common_{n}: large fills a collider of radius 4"
+            );
+            assert!(
+                (half_width(&huge) - 12.0).abs() < 1e-4,
+                "asteroid_common_{n}: huge fills a collider of radius 12 — the same mesh, \
+                 three times the authored scale"
+            );
+
+            // Every level the preloader may fetch has its own huge sidecar.
+            for level in huge.lod.iter().filter(|l| l.model.is_some()) {
+                let sidecar = sidecar_path(level.model.as_deref().unwrap(), Some("huge"));
+                assert!(
+                    std::path::Path::new(&sidecar).exists(),
+                    "LOD level sidecar {sidecar} must exist"
+                );
+            }
+        }
+    }
+
     /// Recursively collect every `.toml` file under `dir`, INCLUDING
     /// `assets/entities/fragments/`. Unlike a spawnable-template inventory,
     /// this check has no reason to stop at the top level: a fragment

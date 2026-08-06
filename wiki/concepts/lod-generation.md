@@ -55,7 +55,7 @@ the sidecar and shells out to this script, because a ladder that only the viewer
 could produce would be a ladder CI's drift check could not verify.
 
 It reads every sidecar under `assets/models`, de-duplicates by output path (the
-small/large/cosmetic variants of one rock share one generated `.glb`, and are
+small/large/huge/cosmetic variants of one rock share one generated `.glb`, and are
 required to agree about it), and runs `simplify` → `resize` through the pinned
 `@gltf-transform/cli`. The planning half is pure and unit-tested in
 `tests/client/generate-lods.test.js`; nothing there reads a file or spawns a

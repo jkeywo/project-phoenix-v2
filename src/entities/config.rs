@@ -6088,18 +6088,26 @@ surfase_colour = [1.0, 0.7, 0.1]
             .as_ref()
             .expect("must have [asteroid_field.grid]");
         // 4 common + 4 uncommon + 4 rare models, each in a small and a large
-        // size (issue #946). The cosmetic backdrop stays commons-only.
-        assert_eq!(field.asteroid_type_paths.len(), 24);
+        // size (issue #946), plus the four commons again at the huge size
+        // (issue #947). The cosmetic backdrop stays commons-only.
+        assert_eq!(field.asteroid_type_paths.len(), 28);
         assert_eq!(field.cosmetic_type_paths.len(), 4);
     }
 
-    /// The authored rarity tiers, pinned to the currently-shipped weights: an
+    /// The authored rarity groups, pinned to the currently-shipped weights.
+    ///
+    /// Two axes, deliberately kept apart. *Material* rarity is the class: an
     /// uncommon rock is drawn a tenth as often as a common and a rare a
-    /// hundredth (issue #946). The expected weights below are restated, not
-    /// read off the TOML, so a deliberate retune of any tier's weight must
-    /// update this test alongside the config; only tier *membership* (which
-    /// paths carry which tier) is read from the file. If someone drops the
-    /// weights and the entries fall back to bare paths, it fails too.
+    /// hundredth (issue #946). *Size* rarity multiplies it: the huge size
+    /// (issue #947) is authored at a tenth of its class weight, because a rock
+    /// that big is a landmark and at the class weight it would be a third of
+    /// every gameplay rock in the field.
+    ///
+    /// The expected weights below are restated, not read off the TOML, so a
+    /// deliberate retune of any group must update this test alongside the
+    /// config; only group *membership* (which paths carry which class and
+    /// size) is read from the file. If someone drops the weights and the
+    /// entries fall back to bare paths, it fails too.
     #[test]
     fn asteroid_field_main_declares_three_rarity_tiers() {
         let toml_str = include_str!("../../assets/entities/asteroid_field_main.toml");
@@ -6110,23 +6118,56 @@ surfase_colour = [1.0, 0.7, 0.1]
             .as_ref()
             .expect("must have [asteroid_field]");
 
-        let weight_of = |tier: &str| -> Vec<f32> {
+        let weights_of = |tier: &str, size: &str| -> Vec<f32> {
             field
                 .asteroid_type_paths
                 .iter()
-                .filter(|t| t.path().contains(&format!("asteroid_{tier}_")))
+                .filter(|t| {
+                    t.path().contains(&format!("asteroid_{tier}_"))
+                        && t.path().ends_with(&format!("_{size}.toml"))
+                })
                 .map(|t| t.weight())
                 .collect()
         };
-        for (tier, expected) in [("common", 1.0f32), ("uncommon", 0.1), ("rare", 0.01)] {
-            let weights = weight_of(tier);
-            assert_eq!(weights.len(), 8, "{tier}: 4 models x 2 sizes");
-            for w in weights {
+        let groups = [
+            ("common", "small", 1.0f32),
+            ("common", "large", 1.0),
+            // The size-rarity multiplier, not a class of its own: 1.0 x 0.1.
+            ("common", "huge", 0.1),
+            ("uncommon", "small", 0.1),
+            ("uncommon", "large", 0.1),
+            ("rare", "small", 0.01),
+            ("rare", "large", 0.01),
+        ];
+        let mut accounted = 0;
+        for (tier, size, expected) in groups {
+            let weights = weights_of(tier, size);
+            assert_eq!(weights.len(), 4, "{tier} {size}: one entry per model");
+            for w in &weights {
                 assert!(
                     (w - expected).abs() < 1e-6,
-                    "{tier} entries must be authored at weight {expected}, found {w}"
+                    "{tier} {size} entries must be authored at weight {expected}, found {w}"
                 );
             }
+            accounted += weights.len();
+        }
+        // Every entry belongs to a group named above, so a new class or size
+        // cannot land unweighted and unnoticed.
+        assert_eq!(
+            accounted,
+            field.asteroid_type_paths.len(),
+            "an entry matches no (class, size) group this test knows about"
+        );
+
+        // Only the commons are scaled up. A landmark's job is to be recognised
+        // at range, so it is the same four silhouettes every time; scaling the
+        // uncommon and rare scans as well would make "that rock is enormous"
+        // and "that rock is unusual" the same signal.
+        for tier in ["uncommon", "rare"] {
+            assert!(
+                weights_of(tier, "huge").is_empty(),
+                "the huge size is authored on the common class only"
+            );
         }
 
         // The cosmetic layers carry no rarity tiers, so their entries keep the
@@ -6134,6 +6175,101 @@ surfase_colour = [1.0, 0.7, 0.1]
         for entry in &field.cosmetic_type_paths {
             assert!(matches!(entry, AsteroidTypeRef::Path(_)));
             assert!((entry.weight() - 1.0).abs() < 1e-6);
+        }
+    }
+
+    /// The two shipped fields carry the same authored type lists, and are
+    /// rewritten together by `scripts/import-asteroids.mjs` from one class
+    /// table. Asserted rather than left to reviewer diligence: they were last
+    /// edited by a script that touches both, and a hand-edit to one is exactly
+    /// the change nobody would notice until a belt spawned a different mix of
+    /// rocks from a field.
+    #[test]
+    fn both_shipped_asteroid_fields_carry_the_same_type_lists() {
+        let field_of = |text: &str| {
+            EntityConfig::from_toml(text)
+                .expect("field template must parse")
+                .asteroid_field
+                .expect("must have [asteroid_field]")
+        };
+        let main = field_of(include_str!(
+            "../../assets/entities/asteroid_field_main.toml"
+        ));
+        let belt = field_of(include_str!(
+            "../../assets/entities/asteroid_belt_axiom.toml"
+        ));
+
+        let entries = |f: &AsteroidFieldConfig, gameplay: bool| -> Vec<(String, f32)> {
+            let list = if gameplay {
+                &f.asteroid_type_paths
+            } else {
+                &f.cosmetic_type_paths
+            };
+            list.iter()
+                .map(|t| (t.path().to_string(), t.weight()))
+                .collect()
+        };
+        assert_eq!(entries(&main, true), entries(&belt, true));
+        assert_eq!(entries(&main, false), entries(&belt, false));
+    }
+
+    /// The huge size class (issue #947): a triple-size rock, authored as its
+    /// own set of entity templates over the SAME four common models.
+    ///
+    /// `radius` is 12 against large's 4 — the "triple-size" the issue asks
+    /// for. `hull_integrity` is 300, three times large's 100 and so linear in
+    /// radius rather than in volume: the rule is that time-to-clear scales with
+    /// how big the thing looks, and a cruiser's two phaser banks put out 8 hull
+    /// a second, so a large rock is ~12 s of sustained fire and a huge one
+    /// ~37 s. Cubing it to 2700 would be 5.6 minutes on one rock and would
+    /// read as indestructible scenery that happens to have a health bar.
+    ///
+    /// It keeps `[target]` and `[hull]`: it spawns in the gameplay layer beside
+    /// its small and large siblings, and a rock there that could not be
+    /// targeted or destroyed would be the one exception the weapons and radar
+    /// paths have to learn about. Hull-less, target-less rocks are the cosmetic
+    /// backdrop, and the huge class is not that.
+    #[test]
+    fn the_huge_asteroid_size_is_a_targetable_triple_size_rock() {
+        for n in 1..=4 {
+            let path = format!("assets/entities/asteroid_common_{n}_huge.toml");
+            let cfg = crate::entity_includes::load_entity_config(&path)
+                .unwrap_or_else(|e| panic!("{path} must parse: {e}"));
+
+            assert_eq!(
+                cfg.name.as_deref(),
+                Some(&*format!("entity.asteroid_common_{n}_huge.name"))
+            );
+            let collider = cfg
+                .collider
+                .as_ref()
+                .unwrap_or_else(|| panic!("{path}: [collider]"));
+            assert_eq!(collider.radius, 12.0, "{path}: three times large's 4");
+            let hull = cfg
+                .hull
+                .as_ref()
+                .unwrap_or_else(|| panic!("{path}: [hull]"));
+            assert_eq!(
+                hull.hull_integrity, 300.0,
+                "{path}: three times large's 100"
+            );
+            assert!(
+                cfg.target.is_some(),
+                "{path}: a gameplay rock is targetable"
+            );
+
+            // Reuses the common model rather than shipping new geometry; the
+            // size lives in the `huge` rig variant's scale.
+            let mesh = cfg
+                .mesh
+                .as_ref()
+                .unwrap_or_else(|| panic!("{path}: [mesh]"));
+            assert_eq!(
+                mesh.model.as_deref(),
+                Some(&*format!("assets/models/asteroid_common_{n}.glb"))
+            );
+            assert_eq!(mesh.variant.as_deref(), Some("huge"));
+            assert_eq!(mesh.radius, 12.0);
         }
     }
 

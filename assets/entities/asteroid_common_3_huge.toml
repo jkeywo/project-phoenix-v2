@@ -1,0 +1,25 @@
+name = "entity.asteroid_common_3_huge.name"
+tags = ["asteroid", "gameplay", "huge"]
+
+[target]
+tags = ["asteroid"]
+threat_level = "none"
+
+[collider]
+shape = "Ball"
+radius = 12
+length = 0.0
+
+[hull]
+hull_integrity = 300
+
+[mesh]
+# The LOD ladder for this model lives in its rig sidecar (issue #914).
+model = "assets/models/asteroid_common_3.glb"
+variant = "huge"
+shape = "sphere"
+radius = 12
+colour = [0.65, 0.6, 0.48]
+
+[radar_appearance]
+icon = "asteroid"

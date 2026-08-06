@@ -31,6 +31,16 @@
 // which is the check that says the rest of this is content and not a collector
 // that started reading the tree differently.
 //
+// NOT re-recorded for issue #947, which added the huge asteroid size class —
+// and that is the point of it. The new size reuses the four common `.glb`
+// files at a larger authored scale, so it ships sixteen small TOMLs and not one
+// byte of geometry. Templates carrying a ladder went 31 → 35 (the sample count
+// behind `assets.lod.levels`, which this baseline gates on `max`, not on how
+// many templates were sampled), and all four gated numbers — 228,463,236
+// total, 17,298,572 largest, 9 without a ladder, ladder depth 4 — are unchanged
+// to the byte. A size class that moved the download total would be one that
+// added geometry; this gate staying green is the evidence it did not.
+//
 // These are a record, not a target. 228 MB of models is a great deal for a
 // browser game to fetch — considerably worse than the 156 MB the first record
 // already called a great deal — and the point of committing it is that the

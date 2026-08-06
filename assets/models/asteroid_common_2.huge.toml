@@ -1,0 +1,56 @@
+[base]
+offset = [ 0, -7.958898025791608, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 12.605752836279787, 12.605752836279787, 12.605752836279787 ]
+
+[extents]
+min = [ -11.899766132496701, -7.951739805543909, -10.910985774286397 ]
+max = [ 12, 7.958898025791608, 10.952599175167956 ]
+size = [ 23.8997661324967, 15.910637831335517, 21.863584949454353 ]
+
+[markers]
+
+# Distance-based LOD (issue #914): full GLB up close, two decimated steps, then
+# a shared procedural sphere far away. Levels omit `variant`, `radius` and
+# `colour` so each rock inherits them from the entity's own flat `[mesh]`.
+# The two decimated steps declare how they are regenerated (issue #919):
+#   node scripts/generate-lods.mjs asteroid_common_2
+# The common asteroids' ratios, on bands 3x further out (issue #947): a LOD
+# switch is really an angular threshold, and this size is that much bigger,
+# so it reaches the same on-screen size that much further away. The ratios
+# themselves must NOT move — every size variant of this model shares one
+# generated .glb, and generate-lods.mjs refuses two sidecars that disagree
+# about how it is made.
+# `remesh_voxel_size` is this class's Blender voxel pre-pass: a plain
+# regeneration at these ratios comes out LARGER than the source and the
+# growth gate refuses it. See scripts/blender-voxel-remesh.py, and run
+# `npm run lods -- --remesh` when regenerating.
+[[lod]]
+max_distance = 75.0
+model = "assets/models/asteroid_common_2.glb"
+
+[[lod]]
+max_distance = 450.0
+model = "assets/models/asteroid_common_2_lod1.glb"
+
+[lod.generate]
+source = "assets/models/asteroid_common_2.glb"
+ratio = 0.15
+error = 0.01
+texture_size = 512
+remesh_voxel_size = 0.03
+
+[[lod]]
+max_distance = 900.0
+model = "assets/models/asteroid_common_2_lod2.glb"
+
+[lod.generate]
+source = "assets/models/asteroid_common_2.glb"
+ratio = 0.1
+error = 0.1
+texture_size = 256
+remesh_voxel_size = 0.03
+
+[[lod]]
+shape = "sphere"
+scale = [ 1.0, 0.5, 1.0 ]

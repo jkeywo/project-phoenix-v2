@@ -18,7 +18,7 @@ origin_sha256 = "a9a295e1541d20fd1a34cabbec90c83768b24b9a85080aac9cf5af433c04bac
 params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
 output_sha256 = "219edc940d3ef8601dc819fcad8572d8f1894e9f2014414fd974fb3a0d585e6a"
 output_bytes = 1150972
-declared_by = ["assets/models/asteroid_common_1.cosmetic.toml", "assets/models/asteroid_common_1.large.toml", "assets/models/asteroid_common_1.small.toml"]
+declared_by = ["assets/models/asteroid_common_1.cosmetic.toml", "assets/models/asteroid_common_1.huge.toml", "assets/models/asteroid_common_1.large.toml", "assets/models/asteroid_common_1.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_1_lod2.glb"
@@ -29,7 +29,7 @@ origin_sha256 = "a9a295e1541d20fd1a34cabbec90c83768b24b9a85080aac9cf5af433c04bac
 params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
 output_sha256 = "ef2c86f5ac6c0eecc51727230d523c5347ecc3a23c6c7678068a81dd5ce9ce92"
 output_bytes = 326000
-declared_by = ["assets/models/asteroid_common_1.cosmetic.toml", "assets/models/asteroid_common_1.large.toml", "assets/models/asteroid_common_1.small.toml"]
+declared_by = ["assets/models/asteroid_common_1.cosmetic.toml", "assets/models/asteroid_common_1.huge.toml", "assets/models/asteroid_common_1.large.toml", "assets/models/asteroid_common_1.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_2_lod1.glb"
@@ -40,7 +40,7 @@ origin_sha256 = "5759e6e78314e4fb0aba3ea25708689a93577a7a02b634144e940564a23b081
 params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
 output_sha256 = "a5ee4960b8efb94eb4be5b6e4afaed6a94c1e18457aa912ed4ee9a73e44d58d7"
 output_bytes = 1208164
-declared_by = ["assets/models/asteroid_common_2.cosmetic.toml", "assets/models/asteroid_common_2.large.toml", "assets/models/asteroid_common_2.small.toml"]
+declared_by = ["assets/models/asteroid_common_2.cosmetic.toml", "assets/models/asteroid_common_2.huge.toml", "assets/models/asteroid_common_2.large.toml", "assets/models/asteroid_common_2.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_2_lod2.glb"
@@ -51,7 +51,7 @@ origin_sha256 = "5759e6e78314e4fb0aba3ea25708689a93577a7a02b634144e940564a23b081
 params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
 output_sha256 = "c32a3c84ef619ec9588b942f4c8fddc5174f10457ba99a4fdbe9e387879ef9a7"
 output_bytes = 338296
-declared_by = ["assets/models/asteroid_common_2.cosmetic.toml", "assets/models/asteroid_common_2.large.toml", "assets/models/asteroid_common_2.small.toml"]
+declared_by = ["assets/models/asteroid_common_2.cosmetic.toml", "assets/models/asteroid_common_2.huge.toml", "assets/models/asteroid_common_2.large.toml", "assets/models/asteroid_common_2.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_3_lod1.glb"
@@ -62,7 +62,7 @@ origin_sha256 = "27ea54525d6ee373b42eb4e4ebe9789bcc374448dc498d8189ba213c3db833e
 params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
 output_sha256 = "ba23eb7b90ceeeff10e9fa7827bf2317c8111ae7e6b46b41e0290be9e04b2e09"
 output_bytes = 1257328
-declared_by = ["assets/models/asteroid_common_3.cosmetic.toml", "assets/models/asteroid_common_3.large.toml", "assets/models/asteroid_common_3.small.toml"]
+declared_by = ["assets/models/asteroid_common_3.cosmetic.toml", "assets/models/asteroid_common_3.huge.toml", "assets/models/asteroid_common_3.large.toml", "assets/models/asteroid_common_3.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_3_lod2.glb"
@@ -73,7 +73,7 @@ origin_sha256 = "27ea54525d6ee373b42eb4e4ebe9789bcc374448dc498d8189ba213c3db833e
 params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
 output_sha256 = "a1206fa81785a699f64e174237acf8b01d97da6f5014f53fd5cde126a84b362f"
 output_bytes = 350664
-declared_by = ["assets/models/asteroid_common_3.cosmetic.toml", "assets/models/asteroid_common_3.large.toml", "assets/models/asteroid_common_3.small.toml"]
+declared_by = ["assets/models/asteroid_common_3.cosmetic.toml", "assets/models/asteroid_common_3.huge.toml", "assets/models/asteroid_common_3.large.toml", "assets/models/asteroid_common_3.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_4_lod1.glb"
@@ -84,7 +84,7 @@ origin_sha256 = "e11421c335284eb7bd17c6da9c0d4244f585c5e0f41872cffe06e2db8073f53
 params = { ratio = 0.15, error = 0.01, texture_size = 512, remesh_voxel_size = 0.03 }
 output_sha256 = "6d72f19787bc11d148c5ea840fa8bcf1e8618056a26e8b2c431dcfdbcf0f2e88"
 output_bytes = 1155700
-declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]
+declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.huge.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_common_4_lod2.glb"
@@ -95,7 +95,7 @@ origin_sha256 = "e11421c335284eb7bd17c6da9c0d4244f585c5e0f41872cffe06e2db8073f53
 params = { ratio = 0.1, error = 0.1, texture_size = 256, remesh_voxel_size = 0.03 }
 output_sha256 = "46d02983a106add482211e250ac286c44f989567924705fbdb6c125787dd4070"
 output_bytes = 368944
-declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]
+declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.huge.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_rare_1_lod1.glb"

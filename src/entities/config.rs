@@ -6100,8 +6100,85 @@ surfase_colour = [1.0, 0.7, 0.1]
             .grid
             .as_ref()
             .expect("must have [asteroid_field.grid]");
-        assert_eq!(field.asteroid_type_paths.len(), 8);
+        // 4 common + 4 uncommon + 4 rare models, each in a small and a large
+        // size (issue #946). The cosmetic backdrop stays commons-only.
+        assert_eq!(field.asteroid_type_paths.len(), 24);
         assert_eq!(field.cosmetic_type_paths.len(), 4);
+    }
+
+    /// The authored rarity tiers, pinned to the currently-shipped weights: an
+    /// uncommon rock is drawn a tenth as often as a common and a rare a
+    /// hundredth (issue #946). The expected weights below are restated, not
+    /// read off the TOML, so a deliberate retune of any tier's weight must
+    /// update this test alongside the config; only tier *membership* (which
+    /// paths carry which tier) is read from the file. If someone drops the
+    /// weights and the entries fall back to bare paths, it fails too.
+    #[test]
+    fn asteroid_field_main_declares_three_rarity_tiers() {
+        let toml_str = include_str!("../../assets/entities/asteroid_field_main.toml");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("asteroid_field_main.toml must parse");
+        let field = config
+            .asteroid_field
+            .as_ref()
+            .expect("must have [asteroid_field]");
+
+        let weight_of = |tier: &str| -> Vec<f32> {
+            field
+                .asteroid_type_paths
+                .iter()
+                .filter(|t| t.path().contains(&format!("asteroid_{tier}_")))
+                .map(|t| t.weight())
+                .collect()
+        };
+        for (tier, expected) in [("common", 1.0f32), ("uncommon", 0.1), ("rare", 0.01)] {
+            let weights = weight_of(tier);
+            assert_eq!(weights.len(), 8, "{tier}: 4 models x 2 sizes");
+            for w in weights {
+                assert!(
+                    (w - expected).abs() < 1e-6,
+                    "{tier} entries must be authored at weight {expected}, found {w}"
+                );
+            }
+        }
+
+        // The cosmetic layers carry no rarity tiers, so their entries keep the
+        // bare-string spelling — which must still read as weight 1.0.
+        for entry in &field.cosmetic_type_paths {
+            assert!(matches!(entry, AsteroidTypeRef::Path(_)));
+            assert!((entry.weight() - 1.0).abs() < 1e-6);
+        }
+    }
+
+    /// Back-compat: the pre-#946 spelling (a flat list of path strings) still
+    /// parses, and means weight 1.0. Every field TOML written before rarity
+    /// existed depends on this.
+    #[test]
+    fn asteroid_type_paths_accept_bare_strings_and_weighted_tables() {
+        let toml_str = r#"
+tags = ["field"]
+
+[asteroid_field]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+asteroid_type_paths = [
+    "assets/entities/plain.toml",
+    { path = "assets/entities/weighted.toml", weight = 0.25 },
+    { path = "assets/entities/defaulted.toml" },
+]
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let field = config.asteroid_field.expect("must have [asteroid_field]");
+        let types = &field.asteroid_type_paths;
+        assert_eq!(types.len(), 3);
+        assert_eq!(types[0].path(), "assets/entities/plain.toml");
+        assert!((types[0].weight() - 1.0).abs() < 1e-6);
+        assert_eq!(types[1].path(), "assets/entities/weighted.toml");
+        assert!((types[1].weight() - 0.25).abs() < 1e-6);
+        // A table that omits `weight` is the same as a bare string.
+        assert_eq!(types[2].path(), "assets/entities/defaulted.toml");
+        assert!((types[2].weight() - 1.0).abs() < 1e-6);
     }
 
     // ── Faction field tests ────────────────────────────────────────────────
@@ -13752,6 +13829,77 @@ pub enum AsteroidFieldShape {
     Torus,
 }
 
+/// One authored asteroid type in a field's type list, with its relative
+/// rarity weight (issue #946).
+///
+/// Two spellings, both valid TOML in the same array:
+///
+/// ```toml
+/// asteroid_type_paths = [
+///     "assets/entities/asteroid_common_1_small.toml",
+///     { path = "assets/entities/asteroid_rare_1_small.toml", weight = 0.01 },
+/// ]
+/// ```
+///
+/// The bare-string form is the pre-#946 schema and still parses — it means
+/// exactly `weight = 1.0` — so every field TOML written before rarity
+/// existed keeps working untouched.
+///
+/// Weights are **relative within one list**, not probabilities: an entry at
+/// `0.1` is drawn a tenth as often as an entry at `1.0` beside it. Nothing
+/// in Rust knows what "common", "uncommon" or "rare" mean; the rarity tiers
+/// are entirely a property of the numbers a designer authors here, so a new
+/// tier needs no code change. Non-positive weights clamp to zero, and a list
+/// whose weights are *all* zero falls back to a uniform draw rather than
+/// erasing the field (the same degenerate-authoring guard the field-level
+/// `weight` uses).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum AsteroidTypeRef {
+    /// `"assets/entities/foo.toml"` — an unweighted entry, i.e. weight 1.0.
+    Path(String),
+    /// `{ path = "assets/entities/foo.toml", weight = 0.1 }`.
+    Weighted {
+        path: String,
+        #[serde(default = "default_asteroid_type_weight")]
+        weight: f32,
+    },
+}
+
+impl AsteroidTypeRef {
+    /// The entity template this entry points at.
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Path(path) => path,
+            Self::Weighted { path, .. } => path,
+        }
+    }
+
+    /// The authored rarity weight; `1.0` for the bare-string form.
+    pub fn weight(&self) -> f32 {
+        match self {
+            Self::Path(_) => default_asteroid_type_weight(),
+            Self::Weighted { weight, .. } => *weight,
+        }
+    }
+}
+
+impl From<&str> for AsteroidTypeRef {
+    fn from(path: &str) -> Self {
+        Self::Path(path.to_string())
+    }
+}
+
+impl From<String> for AsteroidTypeRef {
+    fn from(path: String) -> Self {
+        Self::Path(path)
+    }
+}
+
+fn default_asteroid_type_weight() -> f32 {
+    1.0
+}
+
 /// Configuration for an asteroid field.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct AsteroidFieldConfig {
@@ -13775,10 +13923,13 @@ pub struct AsteroidFieldConfig {
     pub spawn_distance: f32,
     #[serde(default = "default_despawn_distance")]
     pub despawn_distance: f32,
+    /// Gameplay (targetable, hulled) asteroid types this field may spawn,
+    /// each with its relative rarity weight. See [`AsteroidTypeRef`].
     #[serde(default)]
-    pub asteroid_type_paths: Vec<String>,
+    pub asteroid_type_paths: Vec<AsteroidTypeRef>,
+    /// Backdrop asteroid types for the two cosmetic layers, same shape.
     #[serde(default)]
-    pub cosmetic_type_paths: Vec<String>,
+    pub cosmetic_type_paths: Vec<AsteroidTypeRef>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]

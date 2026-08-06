@@ -56,10 +56,10 @@ pub fn nested_template_paths(config: &crate::entity_config::EntityConfig) -> Vec
     let mut out = Vec::new();
     if let Some(field) = &config.asteroid_field {
         for p in &field.asteroid_type_paths {
-            out.push(p.clone());
+            out.push(p.path().to_string());
         }
         for p in &field.cosmetic_type_paths {
-            out.push(p.clone());
+            out.push(p.path().to_string());
         }
     }
     out

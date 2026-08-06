@@ -251,6 +251,99 @@ describe('renderEntityComponentCard', () => {
     expect(edits.find((e) => e.deleted)).toBeDefined();
   });
 
+  // ── Bare-scalar entries in an array-of-tables list (issue #946) ─────────
+  //
+  // `asteroid_type_paths` / `cosmetic_type_paths` accept two equivalent TOML
+  // spellings per entry: a table, or a bare path string meaning weight 1.0.
+  // The shipped cosmetic lists are authored bare on purpose (see
+  // scripts/import-asteroids.mjs), so the card has to render one and write it
+  // back without destroying it — a `{ ...entry }` over a *string* yields
+  // `{0:'a',1:'s',…}` and loses the path.
+
+  /** The outer field row for `label` (its own <label> is children[0]). */
+  function fieldRow(label) {
+    return host
+      .querySelectorAll('.entity-card-field')
+      .find((r) => r.children[0]?.textContent === label && r.querySelector('.entity-card-aot-field'));
+  }
+
+  /** The input for one sub-field of one entry inside an array-of-tables row. */
+  function entryInput(row, idx, subKey) {
+    const wrap = row.querySelector('.entity-card-aot-field');
+    const entry = wrap.children.filter((c) => c.classList.contains('entity-card-array-entry'))[idx];
+    const sub = entry.children.find(
+      (c) => c.classList.contains('entity-card-subfield') && c.children[0]?.textContent === subKey,
+    );
+    return sub.children[1];
+  }
+
+  function asteroidFieldCard(data) {
+    return new ComponentCard(
+      'asteroid_field',
+      { inner_radius: 0, outer_radius: 900, density: 0.005, ...data },
+      COMPONENT_SCHEMA.asteroid_field,
+    );
+  }
+
+  it('renders a bare-string cosmetic entry with its path filled in', () => {
+    const card = asteroidFieldCard({
+      cosmetic_type_paths: ['assets/entities/asteroid_common_1_cosmetic.toml'],
+    });
+    const { deps } = makeDeps();
+    renderEntityComponentCard(host, card, deps);
+
+    const inp = entryInput(fieldRow('cosmetic_type_paths'), 0, 'path');
+    expect(inp.value).toBe('assets/entities/asteroid_common_1_cosmetic.toml');
+  });
+
+  it('promotes a bare-string entry to a table when a weight is typed, keeping the path', () => {
+    const card = asteroidFieldCard({
+      cosmetic_type_paths: ['assets/entities/asteroid_common_1_cosmetic.toml'],
+    });
+    const { deps, edits } = makeDeps();
+    renderEntityComponentCard(host, card, deps);
+
+    fireInput(entryInput(fieldRow('cosmetic_type_paths'), 0, 'weight'), '0.5');
+    expect(edits[edits.length - 1].data.cosmetic_type_paths).toEqual([
+      { path: 'assets/entities/asteroid_common_1_cosmetic.toml', weight: 0.5 },
+    ]);
+  });
+
+  it('writes untouched bare-string entries back as bare strings', () => {
+    const card = asteroidFieldCard({ cosmetic_type_paths: ['a.toml', 'b.toml'] });
+    const { deps, edits } = makeDeps();
+    renderEntityComponentCard(host, card, deps);
+
+    fireInput(entryInput(fieldRow('cosmetic_type_paths'), 0, 'path'), 'a2.toml');
+    expect(edits[edits.length - 1].data.cosmetic_type_paths).toEqual(['a2.toml', 'b.toml']);
+  });
+
+  it('leaves explicitly weighted entries as tables', () => {
+    const card = asteroidFieldCard({
+      asteroid_type_paths: [
+        { path: 'common.toml', weight: 1.0 },
+        { path: 'rare.toml', weight: 0.01 },
+      ],
+    });
+    const { deps, edits } = makeDeps();
+    renderEntityComponentCard(host, card, deps);
+
+    fireInput(entryInput(fieldRow('asteroid_type_paths'), 1, 'path'), 'rarer.toml');
+    expect(edits[edits.length - 1].data.asteroid_type_paths).toEqual([
+      { path: 'common.toml', weight: 1.0 },
+      { path: 'rarer.toml', weight: 0.01 },
+    ]);
+  });
+
+  it('collapses an entry back to a bare string when its weight is cleared', () => {
+    const card = asteroidFieldCard({ cosmetic_type_paths: [{ path: 'a.toml', weight: 0.5 }] });
+    const { deps, edits } = makeDeps();
+    renderEntityComponentCard(host, card, deps);
+
+    fireInput(entryInput(fieldRow('cosmetic_type_paths'), 0, 'weight'), '');
+    expect(edits[edits.length - 1].data.cosmetic_type_paths).toEqual(['a.toml']);
+  });
+
   it('collapse toggle hides body', () => {
     const card = new ComponentCard('hull', { hull_integrity: 60 }, COMPONENT_SCHEMA.hull);
     const { deps } = makeDeps();

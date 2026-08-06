@@ -1581,7 +1581,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
                 weight: 1.0,
                 spawn_distance: 150.0,
                 despawn_distance: 250.0,
-                asteroid_type_paths: vec!["small.toml".to_string()],
+                asteroid_type_paths: vec!["small.toml".into()],
                 cosmetic_type_paths: vec![],
                 tags: vec![],
                 grid: None,

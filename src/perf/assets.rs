@@ -33,9 +33,9 @@
 //! **This scenario gates.** It is the first one to (issue #905): CI runs its
 //! report with `--gate`, so a fail exits 3 and turns the run red. It earned
 //! that by being machine-independent in fact and not only in principle — the
-//! runner's own capture of the recorded commit compares at +0.0% drift on
-//! every metric. The rule, and why the timing scenarios have not earned it,
-//! is in [the module documentation](super).
+//! runner's own capture of e87c871 compares at +0.0% drift on every metric.
+//! The rule, and why the timing scenarios have not earned it, is in
+//! [the module documentation](super).
 //!
 //! The LOD generator (issue #919, `scripts/generate-lods.mjs`) records the byte
 //! size of every file it produces in `scripts/lod-manifest.toml`. It does not

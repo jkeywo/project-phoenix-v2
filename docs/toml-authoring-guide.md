@@ -847,11 +847,37 @@ authored resolutions equal unless that is intended.
 | `shape` | string | none | `"torus"` selects explicit annulus eligibility (cells whose bounding box overlaps the ring). Omitted = legacy cell-centre distance test. |
 | `spawn_distance` | f32 | `150.0` | Distance from ship at which asteroids start spawning. |
 | `despawn_distance` | f32 | `250.0` | Must be ≥ `spawn_distance`. |
-| `asteroid_type_paths` | array of strings | `[]` | Template TOMLs picked for gameplay asteroids. |
-| `cosmetic_type_paths` | array of strings | `[]` | Template TOMLs picked for cosmetic-only asteroids. |
+| `asteroid_type_paths` | array of type entries | `[]` | Template TOMLs picked for gameplay asteroids. See *rarity weights* below. |
+| `cosmetic_type_paths` | array of type entries | `[]` | Template TOMLs picked for cosmetic-only asteroids. Same shape. |
 | `tags` | array of strings | `[]` | Tags inherited by spawned asteroids. |
 | `random_rotation` | `[f32, f32, f32]` | none | Max random rotation per axis in degrees: `[±pitch, ±roll, ±yaw]`. E.g. `[30, 30, 180]` gives mild tilt with full spin. Omit for no rotation. |
 | `[asteroid_field.grid]` | table | none | If present, overrides donut spawning with deterministic grid streaming. |
+
+#### Rarity weights in a type list
+
+A type entry is either a bare path string or an inline table carrying a
+relative rarity `weight` (default `1.0`). Both spellings may sit in the same
+array, and a bare string means exactly `weight = 1.0` — so a list written
+before rarity existed keeps its old meaning.
+
+```toml
+asteroid_type_paths = [
+    "assets/entities/asteroid_common_1_small.toml",                             # weight 1.0
+    { path = "assets/entities/asteroid_uncommon_1_small.toml", weight = 0.1 },  # ~1:10
+    { path = "assets/entities/asteroid_rare_1_small.toml", weight = 0.01 },     # ~1:100
+]
+```
+
+Weights are relative *within one list*, never probabilities: an entry at `0.1`
+is drawn a tenth as often as an entry at `1.0` beside it, and adding entries
+re-normalises the rest. Nothing in the engine knows what "common" or "rare"
+mean — a new rarity tier is a new number here, not a code change. Negative
+weights clamp to zero; a list whose weights are *all* zero falls back to a
+uniform draw rather than erasing the field.
+
+Re-weighting a list changes *which* rock a cell gets, never where it sits: the
+pick is resolved from a single draw in the slot the unweighted pick used, so a
+field's layout is stable across rarity retunes.
 
 #### `[asteroid_field.grid]`
 

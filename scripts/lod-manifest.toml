@@ -98,6 +98,150 @@ output_bytes = 368944
 declared_by = ["assets/models/asteroid_common_4.cosmetic.toml", "assets/models/asteroid_common_4.large.toml", "assets/models/asteroid_common_4.small.toml"]
 
 [[output]]
+path = "assets/models/asteroid_rare_1_lod1.glb"
+source = "assets/models/asteroid_rare_1.glb"
+source_sha256 = "52939c13341f4c3ef76c4acd088849a995620cd7dfca2af5c7ee4a4ef7d084eb"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "56cb2ba1624b1d2b19aa9cbaec4cd69f944220ba3dac9de4b91431bc42d2d0cf"
+output_bytes = 1367000
+declared_by = ["assets/models/asteroid_rare_1.large.toml", "assets/models/asteroid_rare_1.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_rare_1_lod2.glb"
+source = "assets/models/asteroid_rare_1.glb"
+source_sha256 = "52939c13341f4c3ef76c4acd088849a995620cd7dfca2af5c7ee4a4ef7d084eb"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "2b209529b5507def447803e3d7721596017d1a227394b8fed0ea0f490e816b39"
+output_bytes = 594548
+declared_by = ["assets/models/asteroid_rare_1.large.toml", "assets/models/asteroid_rare_1.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_rare_2_lod1.glb"
+source = "assets/models/asteroid_rare_2.glb"
+source_sha256 = "834ae9a27292d233d633e47ee47c451d7731bfbbbe9593edbb9aa0064f544711"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "c69f23809dc24efa9cc6b04d1b585fb38950d0d6a904d8289d0269dca78c4bba"
+output_bytes = 1209992
+declared_by = ["assets/models/asteroid_rare_2.large.toml", "assets/models/asteroid_rare_2.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_rare_2_lod2.glb"
+source = "assets/models/asteroid_rare_2.glb"
+source_sha256 = "834ae9a27292d233d633e47ee47c451d7731bfbbbe9593edbb9aa0064f544711"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "31f00fc2bf9bbb7f6afedc124f5b9762e58a76c5ed02787a85dd712ed43ff730"
+output_bytes = 599516
+declared_by = ["assets/models/asteroid_rare_2.large.toml", "assets/models/asteroid_rare_2.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_rare_3_lod1.glb"
+source = "assets/models/asteroid_rare_3.glb"
+source_sha256 = "c012d2bd5431f05eddb994d188244b90da84d25d7fe7c34f01c8185e25dd97d1"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "3b3069b455b1fe4aad07c5ecfe6afee267381980c3c05f3ac4d1be054133f3e6"
+output_bytes = 1192256
+declared_by = ["assets/models/asteroid_rare_3.large.toml", "assets/models/asteroid_rare_3.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_rare_3_lod2.glb"
+source = "assets/models/asteroid_rare_3.glb"
+source_sha256 = "c012d2bd5431f05eddb994d188244b90da84d25d7fe7c34f01c8185e25dd97d1"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "91689c2bf00a7e69ab9b4dc0783cbd0c256f905926588dcd4e82c97372c683e3"
+output_bytes = 484692
+declared_by = ["assets/models/asteroid_rare_3.large.toml", "assets/models/asteroid_rare_3.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_rare_4_lod1.glb"
+source = "assets/models/asteroid_rare_4.glb"
+source_sha256 = "ce1b2dd1e13e8b1a97cb62562c30c3da3e93cc2d5206b9f8bf2f2d6968005a3a"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "afd7904052e927eeb8af7ed22d99f601fb431ee4845100c6b3637bdbc1bc0061"
+output_bytes = 1492772
+declared_by = ["assets/models/asteroid_rare_4.large.toml", "assets/models/asteroid_rare_4.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_rare_4_lod2.glb"
+source = "assets/models/asteroid_rare_4.glb"
+source_sha256 = "ce1b2dd1e13e8b1a97cb62562c30c3da3e93cc2d5206b9f8bf2f2d6968005a3a"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "59fb813d8b8dc84ca8f2baf409e945d30f683796e87563917d9a898b4251c77e"
+output_bytes = 627196
+declared_by = ["assets/models/asteroid_rare_4.large.toml", "assets/models/asteroid_rare_4.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_1_lod1.glb"
+source = "assets/models/asteroid_uncommon_1.glb"
+source_sha256 = "f0240908896accecae93f305be10252cf246eeb6b291432ca09424a3c653655d"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "81565f06d062c7599b1f93c7a7c70dc6a6fc958fdddbf7a105e5f5af2f77d44d"
+output_bytes = 1406344
+declared_by = ["assets/models/asteroid_uncommon_1.large.toml", "assets/models/asteroid_uncommon_1.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_1_lod2.glb"
+source = "assets/models/asteroid_uncommon_1.glb"
+source_sha256 = "f0240908896accecae93f305be10252cf246eeb6b291432ca09424a3c653655d"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "7ee9e01b78f67a233a8ac243d99e92cea27baf0ed043a94ab3edd6a749bd937c"
+output_bytes = 598556
+declared_by = ["assets/models/asteroid_uncommon_1.large.toml", "assets/models/asteroid_uncommon_1.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_2_lod1.glb"
+source = "assets/models/asteroid_uncommon_2.glb"
+source_sha256 = "672eaac23f05f8ddb84fd74d90ff5e42c072b18326095fb595d53d63489fa3c5"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "4d1439841ed12a675bbd5e4afcb3adee7010fb5c5b49664c53218aa6effbd621"
+output_bytes = 1629336
+declared_by = ["assets/models/asteroid_uncommon_2.large.toml", "assets/models/asteroid_uncommon_2.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_2_lod2.glb"
+source = "assets/models/asteroid_uncommon_2.glb"
+source_sha256 = "672eaac23f05f8ddb84fd74d90ff5e42c072b18326095fb595d53d63489fa3c5"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "5acef647c7096415b34b52873315a98011c4d71eac025a0814ef648e110a7fb1"
+output_bytes = 721140
+declared_by = ["assets/models/asteroid_uncommon_2.large.toml", "assets/models/asteroid_uncommon_2.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_3_lod1.glb"
+source = "assets/models/asteroid_uncommon_3.glb"
+source_sha256 = "466a76639620c0bbff470bc738a0f00b659faa10734d644cb789f5ed506313cb"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "b39c48e49db833e7e607fb5e7d337290e14e03b9f9a29b1cfd897a71e7a062ab"
+output_bytes = 1303524
+declared_by = ["assets/models/asteroid_uncommon_3.large.toml", "assets/models/asteroid_uncommon_3.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_3_lod2.glb"
+source = "assets/models/asteroid_uncommon_3.glb"
+source_sha256 = "466a76639620c0bbff470bc738a0f00b659faa10734d644cb789f5ed506313cb"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "bce32338151c0a1a8088ed14ddf6710e2297eb5e45eb20a6985b88fa9bfbd432"
+output_bytes = 444216
+declared_by = ["assets/models/asteroid_uncommon_3.large.toml", "assets/models/asteroid_uncommon_3.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_4_lod1.glb"
+source = "assets/models/asteroid_uncommon_4.glb"
+source_sha256 = "3c22bee58307c8fd86beb8b211a8bb01e9a5a6aa857f97932096ad761d9e0a42"
+params = { ratio = 0.15, error = 0.01, texture_size = 512 }
+output_sha256 = "012c3dfad1862397b9b7e5fb97ab4e66328a2124148f3b7898953163420d3fd4"
+output_bytes = 1544104
+declared_by = ["assets/models/asteroid_uncommon_4.large.toml", "assets/models/asteroid_uncommon_4.small.toml"]
+
+[[output]]
+path = "assets/models/asteroid_uncommon_4_lod2.glb"
+source = "assets/models/asteroid_uncommon_4.glb"
+source_sha256 = "3c22bee58307c8fd86beb8b211a8bb01e9a5a6aa857f97932096ad761d9e0a42"
+params = { ratio = 0.1, error = 0.1, texture_size = 256 }
+output_sha256 = "0ee002e5a8c06e4d99c3ca63e467e2443e682886f7230fe6f6ce8d1fc0c833c8"
+output_bytes = 701388
+declared_by = ["assets/models/asteroid_uncommon_4.large.toml", "assets/models/asteroid_uncommon_4.small.toml"]
+
+[[output]]
 path = "assets/models/dynasty_battleship_lod1.glb"
 source = "assets/models/dynasty_battleship.remesh.glb"
 source_sha256 = "ff4d9318b7dc5688d1c7f91284bc11e43a94be3414d0776e80e92b51453ef669"

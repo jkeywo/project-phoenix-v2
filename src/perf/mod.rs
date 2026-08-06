@@ -62,7 +62,7 @@
 //!
 //! | scenario | gates | why |
 //! |---|---|---|
-//! | `assets` | **yes** | machine-independent by construction, and the runner's own capture of the recorded commit compares at +0.0% drift on every metric |
+//! | `assets` | **yes** | machine-independent by construction, and the runner's own capture of e87c871 compares at +0.0% drift on every metric |
 //! | `assets-mesh` | not yet | machine-independent in theory, but recorded on a developer desktop and never yet measured by a runner. It gates the moment one has recorded it — adopt the baseline the perf job uploads, then add `--gate` to its step |
 //! | `headless-default` | no | wall-clock on a shared runner |
 //! | `browser-automation` | no | wall-clock on a shared runner, and under WebDriver it is not even measuring the render path |

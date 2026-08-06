@@ -1059,7 +1059,7 @@ mod tests {
             weight: 1.0,
             spawn_distance: 150.0,
             despawn_distance: 250.0,
-            asteroid_type_paths: vec!["asteroid_small.toml".to_string()],
+            asteroid_type_paths: vec!["asteroid_small.toml".into()],
             cosmetic_type_paths: vec![],
             tags: vec![],
             grid: Some(grid(grid_resolution)),
@@ -1087,7 +1087,7 @@ mod tests {
             weight: 1.0,
             spawn_distance: 150.0,
             despawn_distance: 250.0,
-            asteroid_type_paths: vec!["asteroid_small.toml".to_string()],
+            asteroid_type_paths: vec!["asteroid_small.toml".into()],
             cosmetic_type_paths: vec![],
             tags: vec![],
             grid: Some(GridConfig {

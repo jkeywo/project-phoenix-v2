@@ -15,6 +15,11 @@
  *   subfields: field descriptors for type:'subobject' inline editing
  *   entryFields: field descriptors for type:'array-of-tables' per-entry editing
  *   entryDefaults: default object for new entries (for type:'array-of-tables')
+ *   entryScalar: for type:'array-of-tables' whose TOML also admits a bare
+ *     scalar per entry — names the entry field that scalar means. Entries are
+ *     widened to `{ [entryScalar]: value }` for editing and narrowed back
+ *     whenever no other entry field is set, so a file authored in the scalar
+ *     spelling survives a round trip through the editor unchanged.
  */
 
 /** Sub-field set reused for every RadarConfig sub-object. */
@@ -363,8 +368,45 @@ export const COMPONENT_SCHEMA = {
       { key: 'shape', type: 'string', enum: ['torus'], optional: true },
       { key: 'spawn_distance', type: 'number', default: 150.0 },
       { key: 'despawn_distance', type: 'number', default: 250.0 },
-      { key: 'asteroid_type_paths', type: 'array', items: 'string', default: [] },
-      { key: 'cosmetic_type_paths', type: 'array', items: 'string', default: [] },
+      // Type lists carry a per-entry rarity weight (issue #946), so they are
+      // entry tables rather than a flat string array — a `join(', ')` textarea
+      // would render a weighted entry as [object Object] and drop its weight
+      // on the first keystroke.
+      //
+      // A bare path string is the OTHER valid spelling of the same entry
+      // (`AsteroidTypeRef::Path` in src/entities/config.rs) and still means
+      // weight 1.0. The shipped cosmetic lists are authored that way on
+      // purpose — see scripts/import-asteroids.mjs — so `entryScalar` names
+      // the field a bare scalar collapses into: the renderer widens
+      // `"a.toml"` to `{ path: 'a.toml' }` on the way in, and narrows it back
+      // on the way out while nothing but `path` is set. Without that a string
+      // entry rendered an empty path box and the first keystroke spread the
+      // string into `{0:'a',1:'.',…}`, losing the path.
+      {
+        key: 'asteroid_type_paths',
+        type: 'array-of-tables',
+        default: [],
+        entryScalar: 'path',
+        entryFields: [
+          { key: 'path', type: 'string' },
+          { key: 'weight', type: 'number', default: 1.0, optional: true },
+        ],
+        entryDefaults: { path: '', weight: 1.0 },
+      },
+      {
+        key: 'cosmetic_type_paths',
+        type: 'array-of-tables',
+        default: [],
+        entryScalar: 'path',
+        entryFields: [
+          { key: 'path', type: 'string' },
+          { key: 'weight', type: 'number', default: 1.0, optional: true },
+        ],
+        // No weight in the defaults: the backdrop layers have no rarity tiers,
+        // so a new entry here is written in the bare-string spelling its
+        // neighbours use. Typing a weight promotes that one entry to a table.
+        entryDefaults: { path: '' },
+      },
       { key: 'tags', type: 'array', items: 'string', default: [] },
       { key: 'grid', type: 'object', optional: true },
     ],

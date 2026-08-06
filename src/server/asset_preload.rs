@@ -153,7 +153,7 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
     // Nested entity templates (asteroid subtypes)
     if let Some(ref field) = config.asteroid_field {
         for a_path in &field.asteroid_type_paths {
-            if !manifest.sub_worlds.contains(a_path) {
+            if !manifest.sub_worlds.iter().any(|w| w == a_path.path()) {
                 // Tracked via entity_paths concept; stored separately
                 // since they'll be looked up in the config cache.
             }
@@ -271,10 +271,10 @@ fn walk_entity(
     // Recurse into nested asteroid entity templates
     if let Some(ref field) = config.asteroid_field {
         for p in &field.asteroid_type_paths {
-            walk_entity(p, config_cache, seen_entities, manifest);
+            walk_entity(p.path(), config_cache, seen_entities, manifest);
         }
         for p in &field.cosmetic_type_paths {
-            walk_entity(p, config_cache, seen_entities, manifest);
+            walk_entity(p.path(), config_cache, seen_entities, manifest);
         }
     }
 }

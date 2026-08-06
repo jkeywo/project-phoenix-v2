@@ -1,7 +1,7 @@
 // Pure Rust module for generating asteroid positions in a donut-shaped field.
 // No Bevy, no physics engine — input → output design for isolated unit testing.
 
-use crate::entity_config::{AsteroidFieldShape, GridConfig};
+use crate::entity_config::{AsteroidFieldShape, AsteroidTypeRef, GridConfig};
 use crate::simmath;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -149,8 +149,10 @@ pub struct FieldContribution {
     /// world-anchored.
     pub anchor_offset: [f32; 3],
     pub grid: GridConfig,
-    pub gameplay_type_paths: Vec<String>,
-    pub cosmetic_type_paths: Vec<String>,
+    /// Gameplay types with their authored rarity weights (issue #946).
+    pub gameplay_types: Vec<AsteroidTypeRef>,
+    /// Cosmetic-layer types with their authored rarity weights.
+    pub cosmetic_types: Vec<AsteroidTypeRef>,
     /// Carried through so the Bevy spawn site can apply the selected
     /// contribution's collision tuning without a second config lookup.
     pub shield_pierce: f32,
@@ -170,21 +172,57 @@ impl FieldContribution {
             shape: cfg.shape,
             anchor_offset: cfg.anchor_offset,
             grid,
-            gameplay_type_paths: cfg.asteroid_type_paths.clone(),
-            cosmetic_type_paths: cfg.cosmetic_type_paths.clone(),
+            gameplay_types: cfg.asteroid_type_paths.clone(),
+            cosmetic_types: cfg.cosmetic_type_paths.clone(),
             shield_pierce: cfg.shield_pierce,
             random_rotation: cfg.random_rotation,
         })
     }
 
-    fn layer_paths(&self, layer: ComposedLayer) -> &[String] {
+    fn layer_types(&self, layer: ComposedLayer) -> &[AsteroidTypeRef] {
         match layer {
-            ComposedLayer::Gameplay => &self.gameplay_type_paths,
-            ComposedLayer::CosmeticUpper | ComposedLayer::CosmeticLower => {
-                &self.cosmetic_type_paths
-            }
+            ComposedLayer::Gameplay => &self.gameplay_types,
+            ComposedLayer::CosmeticUpper | ComposedLayer::CosmeticLower => &self.cosmetic_types,
         }
     }
+}
+
+/// Pick one asteroid type from a weighted list, consuming **exactly one**
+/// uniform draw (issue #946).
+///
+/// The pre-rarity code drew `rng.random_range(0..paths.len())` here. The
+/// weighted form deliberately keeps the draw *count* and its position in the
+/// per-cell sequence identical — one value out of the cell's `StdRng`,
+/// mapped onto the cumulative weights — rather than rejection-sampling or
+/// drawing per candidate. That is the same shape the field-selection walk in
+/// [`eval_covered_cell`] uses, and it is what keeps AGENTS.md rule 8 true:
+/// adding, removing or re-weighting entries in an authored type list changes
+/// *which* rock a cell gets, never how much entropy the cell consumes, so the
+/// draws that follow (gameplay Y) stay in step.
+///
+/// Degenerate authoring is handled the same way as the field-level weights:
+/// negative weights clamp to zero, and an all-zero list falls back to uniform
+/// so a designer cannot author a divide-by-zero. Callers guarantee a
+/// non-empty list (an empty type list excludes the field from the cell).
+fn pick_weighted_type<'a>(types: &'a [AsteroidTypeRef], rng: &mut StdRng) -> &'a str {
+    let mut total: f32 = types.iter().map(|t| t.weight().max(0.0)).sum();
+    let uniform = total <= 0.0;
+    if uniform {
+        total = types.len() as f32;
+    }
+    let weight_of = |t: &AsteroidTypeRef| if uniform { 1.0 } else { t.weight().max(0.0) };
+
+    let mut pick = rng.random::<f32>() * total;
+    let mut chosen = types.len() - 1;
+    for (i, t) in types.iter().enumerate() {
+        let w = weight_of(t);
+        if pick < w {
+            chosen = i;
+            break;
+        }
+        pick -= w;
+    }
+    types[chosen].path()
 }
 
 /// Which of the three asteroid layers a composed evaluation targets.
@@ -269,7 +307,7 @@ fn covering_for_cell(
         .iter()
         .enumerate()
         .filter_map(|(idx, f)| {
-            if f.layer_paths(layer).is_empty() {
+            if f.layer_types(layer).is_empty() {
                 return None;
             }
             let local_x = wx - f.anchor_offset[0];
@@ -435,10 +473,10 @@ fn eval_covered_cell(
     let x = cell_gx as f32 * lattice_resolution + jitter.0;
     let z = cell_gz as f32 * lattice_resolution + jitter.1;
 
-    let paths = f.layer_paths(layer);
+    let types = f.layer_types(layer);
     match layer {
         ComposedLayer::Gameplay => {
-            let config_path = paths[rng.random_range(0..paths.len())].clone();
+            let config_path = pick_weighted_type(types, &mut rng).to_string();
             let y = (rng.random::<f32>() * 2.0 - 1.0) * g.gameplay_y_variance;
             Some((
                 AsteroidSpawn {
@@ -455,7 +493,7 @@ fn eval_covered_cell(
         // the lower layer, as the legacy callers did.
         ComposedLayer::CosmeticUpper | ComposedLayer::CosmeticLower => {
             let y = g.cosmetic_y_offset * (0.5 + rng.random::<f32>() * 0.5);
-            let config_path = paths[rng.random_range(0..paths.len())].clone();
+            let config_path = pick_weighted_type(types, &mut rng).to_string();
             Some((
                 AsteroidSpawn {
                     x,
@@ -481,6 +519,11 @@ fn eval_covered_cell(
 /// single forced-coverage contribution, so the two paths cannot drift:
 /// `field_idx` becomes the seed salt and the annulus is used only for the
 /// jitter clamp (eligibility was always the caller's job here).
+///
+/// The type lists arrive here as bare paths, which is the *unweighted*
+/// spelling of [`AsteroidTypeRef`] — every type equally likely. Rarity
+/// weights reach the evaluator through [`FieldContribution`], which is what
+/// the streaming path builds from the authored TOML (issue #946).
 pub fn eval_cell(
     field_idx: u64,
     cell_gx: i32,
@@ -505,8 +548,16 @@ pub fn eval_cell(
         shape: None,
         anchor_offset: [0.0, 0.0, 0.0],
         grid: grid.clone(),
-        gameplay_type_paths: gameplay_type_paths.to_vec(),
-        cosmetic_type_paths: cosmetic_type_paths.to_vec(),
+        gameplay_types: gameplay_type_paths
+            .iter()
+            .cloned()
+            .map(AsteroidTypeRef::from)
+            .collect(),
+        cosmetic_types: cosmetic_type_paths
+            .iter()
+            .cloned()
+            .map(AsteroidTypeRef::from)
+            .collect(),
         shield_pierce: 0.0,
         random_rotation: None,
     };
@@ -831,7 +882,10 @@ fn generate_single_spawn(
     let x = radius * simmath::cos(angle);
     let z = radius * simmath::sin(angle);
 
-    // Select a random type path
+    // Select a random type path. The donut generator takes bare paths, which
+    // is the unweighted spelling of an authored type list, so the pick is
+    // uniform here by construction — rarity weights reach the evaluator
+    // through `FieldContribution` (issue #946).
     let config_path = if type_paths.is_empty() {
         String::new()
     } else {
@@ -1974,8 +2028,43 @@ mod tests {
             shape: None,
             anchor_offset: anchor,
             grid,
-            gameplay_type_paths: gameplay.iter().map(|s| s.to_string()).collect(),
-            cosmetic_type_paths: cosmetic.iter().map(|s| s.to_string()).collect(),
+            gameplay_types: gameplay
+                .iter()
+                .copied()
+                .map(AsteroidTypeRef::from)
+                .collect(),
+            cosmetic_types: cosmetic
+                .iter()
+                .copied()
+                .map(AsteroidTypeRef::from)
+                .collect(),
+            shield_pierce: 0.0,
+            random_rotation: None,
+        }
+    }
+
+    /// Same, but with an authored rarity weight per gameplay type (#946).
+    fn weighted_contribution(
+        inner: f32,
+        outer: f32,
+        grid: GridConfig,
+        gameplay: &[(&str, f32)],
+    ) -> FieldContribution {
+        FieldContribution {
+            weight: 1.0,
+            inner_radius: inner,
+            outer_radius: outer,
+            shape: None,
+            anchor_offset: [0.0, 0.0, 0.0],
+            grid,
+            gameplay_types: gameplay
+                .iter()
+                .map(|(path, weight)| AsteroidTypeRef::Weighted {
+                    path: (*path).to_string(),
+                    weight: *weight,
+                })
+                .collect(),
+            cosmetic_types: Vec::new(),
             shield_pierce: 0.0,
             random_rotation: None,
         }
@@ -2145,6 +2234,206 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Per-type rarity weights actually bias the draw (issue #946): with the
+    /// tiers the shipped fields author — 1.0 / 0.1 / 0.01 — commons must
+    /// dominate, uncommons must be clearly rarer, and rares rarer again while
+    /// still appearing at all. The counts are exact, not statistical: every
+    /// cell is a pure function of its coordinates, so this test either always
+    /// passes or always fails.
+    #[test]
+    fn weighted_types_bias_selection_by_rarity_tier() {
+        let fields = [weighted_contribution(
+            0.0,
+            900.0,
+            cgrid(15.0, 0.0, 0.0),
+            &[
+                ("common.toml", 1.0),
+                ("uncommon.toml", 0.1),
+                ("rare.toml", 0.01),
+            ],
+        )];
+        let (mut common, mut uncommon, mut rare) = (0, 0, 0);
+        for gx in -40..=40 {
+            for gz in -40..=40 {
+                if let Some((spawn, _)) =
+                    eval_cell_composed(&fields, 15.0, gx, gz, ComposedLayer::Gameplay)
+                {
+                    match spawn.config_path.as_str() {
+                        "common.toml" => common += 1,
+                        "uncommon.toml" => uncommon += 1,
+                        "rare.toml" => rare += 1,
+                        other => panic!("unexpected config path {other}"),
+                    }
+                }
+            }
+        }
+        assert!(
+            common + uncommon + rare > 5000,
+            "the sample needs to be big enough for a 1:100 tier to show: {common}/{uncommon}/{rare}"
+        );
+        assert!(rare > 0, "a 1:100 type must still appear at all");
+        assert!(
+            uncommon > rare * 3,
+            "rares must be visibly rarer than uncommons: uncommon={uncommon} rare={rare}"
+        );
+        assert!(
+            common > uncommon * 3,
+            "uncommons must be visibly rarer than commons: common={common} uncommon={uncommon}"
+        );
+    }
+
+    /// Weighting must not cost a draw (issue #946, AGENTS.md rule 8).
+    ///
+    /// The type pick is resolved from ONE uniform draw mapped onto the
+    /// cumulative weights, in the same slot in the per-cell sequence the old
+    /// `random_range` occupied. So for any cell, a weighted list and the bare
+    /// (unweighted) spelling of the same paths must agree on everything the
+    /// draws around the pick decide: the jittered position drawn before it,
+    /// and — the load-bearing one — the gameplay Y drawn *after* it. A pick
+    /// that consumed a different amount of entropy would shift Y.
+    #[test]
+    fn weighting_a_type_list_does_not_shift_the_draw_sequence() {
+        let mut grid = cgrid(15.0, 0.0, 20.0);
+        grid.gameplay_y_variance = 5.0;
+        let plain = [contribution(
+            1.0,
+            0.0,
+            900.0,
+            [0.0, 0.0, 0.0],
+            grid.clone(),
+            &["a.toml", "b.toml", "c.toml"],
+            &[],
+        )];
+        let weighted = [weighted_contribution(
+            0.0,
+            900.0,
+            grid,
+            &[("a.toml", 1.0), ("b.toml", 0.1), ("c.toml", 0.01)],
+        )];
+        let mut differed = 0;
+        for gx in -20..=20 {
+            for gz in -20..=20 {
+                let a = eval_cell_composed(&plain, 15.0, gx, gz, ComposedLayer::Gameplay);
+                let b = eval_cell_composed(&weighted, 15.0, gx, gz, ComposedLayer::Gameplay);
+                match (a, b) {
+                    (None, None) => {}
+                    (Some((a, _)), Some((b, _))) => {
+                        assert_eq!((a.x, a.z), (b.x, b.z), "position at ({gx}, {gz})");
+                        assert_eq!(a.y, b.y, "gameplay Y at ({gx}, {gz})");
+                        if a.config_path != b.config_path {
+                            differed += 1;
+                        }
+                    }
+                    (a, b) => panic!("weighting changed whether ({gx}, {gz}) spawns: {a:?} {b:?}"),
+                }
+            }
+        }
+        assert!(
+            differed > 0,
+            "the weights must still change WHICH type is picked, or this proves nothing"
+        );
+    }
+
+    /// The pick costs exactly the one draw `random_range` cost (issue #946,
+    /// AGENTS.md rule 8).
+    ///
+    /// `weighting_a_type_list_does_not_shift_the_draw_sequence` above compares
+    /// two authored *spellings* — bare paths and weighted entries — and both
+    /// run through [`pick_weighted_type`], so it pins that re-weighting an
+    /// authored list is free. It cannot pin what the doc comment on
+    /// [`pick_weighted_type`] actually claims: that the pick sits in the same
+    /// slot, at the same cost, as the pre-#946 `rng.random_range(0..len)`.
+    /// A rewrite to rejection sampling or a draw per candidate would keep that
+    /// test green and silently move every gameplay Y in every shipped field.
+    ///
+    /// So this reconstructs the pre-#946 consumption from a bare `StdRng` —
+    /// the cell seed, the density draw, the jitter magnitude, then
+    /// `random_range(0..len)` where the type pick goes — and asserts the Y that
+    /// falls out next is the Y the evaluator produced. Y is the load-bearing
+    /// one: it is drawn *after* the pick, so it moves the instant the pick's
+    /// entropy cost changes. (X and Z are drawn before it and cannot.)
+    #[test]
+    fn the_type_pick_costs_the_same_draw_the_old_random_range_did() {
+        let mut grid = cgrid(15.0, 0.0, 20.0);
+        grid.gameplay_y_variance = 5.0;
+        let y_variance = grid.gameplay_y_variance;
+        let types: &[(&str, f32)] = &[("a.toml", 1.0), ("b.toml", 0.1), ("c.toml", 0.01)];
+        let fields = [weighted_contribution(0.0, 900.0, grid, types)];
+
+        let mut checked = 0;
+        for gx in -20..=20 {
+            for gz in -20..=20 {
+                let Some((spawn, _)) =
+                    eval_cell_composed(&fields, 15.0, gx, gz, ComposedLayer::Gameplay)
+                else {
+                    continue;
+                };
+
+                // The cell seed, mixed exactly as `eval_covered_cell` does
+                // (the gameplay layer's salt is 0).
+                let seed = {
+                    let mut s = ComposedLayer::Gameplay.seed_salt();
+                    s = s.wrapping_mul(2654435761);
+                    s = s.wrapping_add(gx as u64);
+                    s = s.wrapping_mul(2654435761);
+                    s = s.wrapping_add(gz as u64);
+                    s
+                };
+                let mut rng = StdRng::seed_from_u64(seed);
+                // 1. density gate, 2. jitter magnitude — unchanged by #946.
+                let _density = rng.random::<f32>();
+                let _jitter_magnitude = rng.random::<f32>();
+                // 3. THE PRE-#946 TYPE PICK. A single covering field means no
+                //    field-selection draw sits between these.
+                let _type_index = rng.random_range(0..types.len());
+                // 4. gameplay Y.
+                let y = (rng.random::<f32>() * 2.0 - 1.0) * y_variance;
+
+                assert_eq!(
+                    spawn.y, y,
+                    "gameplay Y at ({gx}, {gz}) moved: the weighted pick no longer consumes the \
+                     single draw `random_range(0..len)` consumed before issue #946"
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 100,
+            "the sweep has to actually spawn rocks to pin anything: {checked} cells checked"
+        );
+    }
+
+    /// Degenerate authoring guard, matching the field-level one: a type list
+    /// whose weights are all zero falls back to a uniform draw rather than
+    /// dividing by zero or erasing the field.
+    #[test]
+    fn zero_weighted_type_list_falls_back_to_uniform() {
+        let fields = [weighted_contribution(
+            0.0,
+            900.0,
+            cgrid(15.0, 0.0, 0.0),
+            &[("a.toml", 0.0), ("b.toml", 0.0)],
+        )];
+        let mut seen: Vec<String> = Vec::new();
+        for gx in -20..=20 {
+            for gz in -20..=20 {
+                if let Some((spawn, _)) =
+                    eval_cell_composed(&fields, 15.0, gx, gz, ComposedLayer::Gameplay)
+                {
+                    if !seen.contains(&spawn.config_path) {
+                        seen.push(spawn.config_path.clone());
+                    }
+                }
+            }
+        }
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            vec!["a.toml".to_string(), "b.toml".to_string()],
+            "all-zero weights must draw both types uniformly, not erase the list"
+        );
     }
 
     /// Weight picks the contributing field: a weight-3 field should supply

@@ -244,6 +244,47 @@ function cloneEntryDefaults(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+/**
+ * Widen one array-of-tables entry for editing.
+ *
+ * Some entry lists admit two equivalent TOML spellings: a table, or a bare
+ * scalar that means "this table with only `scalarKey` set" — `entryScalar` in
+ * component-schema.js names that key. The per-entry inputs only understand
+ * objects, so a scalar is widened on the way in. Widening is what stops
+ * `{ ...entry }` from spreading a *string* into `{0:'a',1:'s',…}` and
+ * destroying the value on the first keystroke.
+ *
+ * Entries in lists with no `entryScalar`, and entries that are already tables,
+ * pass through untouched.
+ */
+function widenEntry(entry, scalarKey) {
+  if (!scalarKey) return entry;
+  if (entry === null || typeof entry === 'object') return entry;
+  return { [scalarKey]: entry };
+}
+
+/**
+ * Narrow an edited entry back to the spelling it should be written in.
+ *
+ * An entry collapses to a bare scalar exactly when nothing but `scalarKey` is
+ * set on it, so a list authored in the scalar spelling round-trips byte-clean
+ * and a list authored as tables (`{ path = "…", weight = 1.0 }`) keeps its
+ * tables. Setting any other field promotes that one entry to a table; clearing
+ * it again collapses it back.
+ *
+ * Deliberately structural rather than "weight equals its default": the shipped
+ * `asteroid_type_paths` author `weight = 1.0` explicitly on every common, and
+ * collapsing those would rewrite eight generated lines per field the first
+ * time anyone opened the card.
+ */
+function narrowEntry(entry, scalarKey) {
+  if (!scalarKey) return entry;
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  const keys = Object.keys(entry);
+  if (keys.length === 1 && keys[0] === scalarKey) return entry[scalarKey];
+  return entry;
+}
+
 function renderScalarSection(body, card, deps) {
   // Treat as a single-field section where the field key matches the section.
   const field = card.schema.fields[0];
@@ -434,9 +475,14 @@ function makeInputForField(field, value, deps, onChange) {
   if (field.type === 'array-of-tables') {
     const wrap = document.createElement('div');
     wrap.className = 'entity-card-aot-field';
-    const entries = Array.isArray(value) ? value : [];
     const entryFields = field.entryFields ?? [];
     const entryDefaults = field.entryDefaults ?? {};
+    // A list whose TOML also admits a bare scalar per entry (see `entryScalar`
+    // in component-schema.js) is edited as objects and emitted in whichever
+    // spelling each entry arrived in.
+    const scalarKey = field.entryScalar;
+    const entries = (Array.isArray(value) ? value : []).map((e) => widenEntry(e, scalarKey));
+    const emit = (list) => onChange(list.map((e) => narrowEntry(e, scalarKey)));
 
     const rebuild = (current) => {
       wrap.innerHTML = '';
@@ -456,7 +502,7 @@ function makeInputForField(field, value, deps, onChange) {
         rm.addEventListener('click', () => {
           const next = current.slice();
           next.splice(idx, 1);
-          onChange(next);
+          emit(next);
           rebuild(next);
         });
         hdr.appendChild(rm);
@@ -477,7 +523,7 @@ function makeInputForField(field, value, deps, onChange) {
             }
             const next = current.slice();
             next[idx] = nextEntry;
-            onChange(next);
+            emit(next);
           });
           row.appendChild(inp);
           entryDiv.appendChild(row);
@@ -491,8 +537,8 @@ function makeInputForField(field, value, deps, onChange) {
       addBtn.textContent = '+ entry';
       addBtn.addEventListener('click', () => {
         const next = current.slice();
-        next.push(structuredClone ? structuredClone(entryDefaults) : JSON.parse(JSON.stringify(entryDefaults)));
-        onChange(next);
+        next.push(cloneEntryDefaults(entryDefaults));
+        emit(next);
         rebuild(next);
       });
       wrap.appendChild(addBtn);

@@ -366,12 +366,33 @@ lifespan = 18
 load_time = 8
 detonation_radius = 5
 
+# Two launchers, ONE round of headroom between them (issue #942).
+#
+# The tube COUNT is unchanged — one fore, one aft, as the `torpedo-tube-fore` /
+# `torpedo-tube-aft` hull entries above have always said. What changed is how
+# many rounds a single opportunity may spend: fore 4 -> 2, aft 2 -> 1.
+#
+# The old pair parked six of the twelve-round magazine in the tubes and let one
+# bearing dump all six, so the first wave met the whole payload and every wave
+# after it met a hull with nothing left to launch. Halving the volleys makes a
+# launch a DECISION about which wave deserves it rather than a button that
+# empties the ship, and it keeps the two launchers meaningfully different: the
+# fore tube (120-degree cone, the arc the doctrine's attack pass actually
+# brings to bear) is the one that fires a pair, the aft tube spends its round
+# one at a time on whoever got behind.
+#
+# `ai_target_count` is not authored on either tube, so an AI backfill keeps each
+# at its own `volley_max` — 3 rounds parked across the hull instead of 6.
+#
+# Magazine SIZE is deliberately untouched here: `count = 12` still gates the
+# ship's whole payload, and conservation pacing against remaining mission
+# length is the sibling ticket (#943), not this one.
 [[torpedoes.tubes]]
 id = "fore"
 facing_deg = 0
 fire_arc_deg = 120
 load_time = 4
-volley_max = 4
+volley_max = 2
 marker = "torpedo_fore"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
@@ -407,7 +428,10 @@ id = "aft"
 facing_deg = 180
 fire_arc_deg = 90
 load_time = 4
-volley_max = 2
+# One round per opportunity (issue #942). The stern launcher answers the ship
+# that got behind this hull; a pair spent there is a pair the fore tube does
+# not have for the pass it is actually flying.
+volley_max = 1
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
   # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so

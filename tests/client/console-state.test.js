@@ -2580,13 +2580,11 @@ describe('torpSlotStates', () => {
     expect(slots[0].progress).toBe(0);
   });
 
-  it('Destroyer fore tube: volley_max=4, partially filled, partially queued', () => {
-    // 2 loaded, targeting 4 (all will fill), none queued-to-empty
-    const slots = torpSlotStates({ volley_max: 4, loaded_count: 2, target_count: 4, load_progress: 0 });
+  it('Destroyer fore tube: volley_max=2, partially filled, partially queued', () => {
+    // 1 loaded, targeting 2 (both will fill), none queued-to-empty
+    const slots = torpSlotStates({ volley_max: 2, loaded_count: 1, target_count: 2, load_progress: 0 });
     expect(slots[0].state).toBe('filled');
-    expect(slots[1].state).toBe('filled');
-    expect(slots[2].state).toBe('queued-to-fill');
-    expect(slots[3].state).toBe('queued-to-fill');
+    expect(slots[1].state).toBe('queued-to-fill');
   });
 
   it('Battleship tube: volley_max=3, all queued-to-empty when target_count=0', () => {

@@ -7994,6 +7994,87 @@ count = 99
         assert_eq!(rt.load_time, 10.0);
     }
 
+    /// Issue #942: the player destroyer's two launchers spend SMALL volleys.
+    ///
+    /// The tube COUNT was never the lever and is not what moved — this hull has
+    /// always carried exactly one fore and one aft launcher, matched by its
+    /// `torpedo-tube-fore` / `torpedo-tube-aft` hull entries. What moved is the
+    /// volley: fore 4 -> 2, aft 2 -> 1. At the old sizes six rounds of a
+    /// twelve-round magazine sat in the tubes and a single bearing could spend
+    /// all six, so wave one met the whole payload and every wave after it met a
+    /// hull with nothing to launch.
+    ///
+    /// This is authored content with no other guard on it: the sizes could drift
+    /// back up, or the two tubes could even out, and the hull would still parse,
+    /// still launch, and still pass every other test here. Hence the pin, and
+    /// hence it pins the ORDERING too — the fore tube is the one whose cone the
+    /// attack-pass doctrine actually brings to bear, so it is the tube that
+    /// fires a pair.
+    #[test]
+    fn the_player_destroyer_launchers_fire_small_volleys() {
+        let config = shipped_hull("alliance_destroyer");
+        let t = config
+            .torpedoes
+            .as_ref()
+            .expect("the player destroyer carries torpedo tubes");
+
+        let ids: Vec<&str> = t.tubes.iter().map(|tube| tube.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["fore", "aft"],
+            "one launcher on each end and no more: a third tube would restore the \
+             per-opportunity payload this hull just gave up"
+        );
+        let fore = &t.tubes[0];
+        let aft = &t.tubes[1];
+        assert_eq!(fore.facing_deg, 0.0, "'fore' is a bow launcher");
+        assert_eq!(aft.facing_deg, 180.0, "'aft' is a stern launcher");
+
+        assert_eq!(
+            fore.volley_max, 2,
+            "the bow launcher spends a PAIR per opportunity — the arc the attack \
+             pass brings to bear is the one worth two rounds"
+        );
+        assert_eq!(
+            aft.volley_max, 1,
+            "the stern launcher spends ONE: a pair spent on whoever got behind is \
+             a pair the bow tube does not have for the pass it is flying"
+        );
+        assert!(
+            aft.volley_max < fore.volley_max,
+            "the two launchers must stay asymmetric, or 'which tube is worth \
+             loading' stops being a decision"
+        );
+
+        // Neither tube authors `ai_target_count` and the hull authors no
+        // ship-wide `ai_volley_target`, so an AI backfill parks each tube at its
+        // own `volley_max`: 3 rounds of the 12-round magazine, not 6. A future
+        // `ai_target_count` above `volley_max` would clamp, but one BELOW it
+        // would quietly disarm the backfilled hull relative to the human crew,
+        // which #838's symmetry does not allow.
+        let parked: u32 = t
+            .tubes
+            .iter()
+            .map(|tube| {
+                tube.ai_target_count
+                    .or(t.ai_volley_target)
+                    .unwrap_or(tube.volley_max)
+                    .min(tube.volley_max)
+            })
+            .sum();
+        assert_eq!(
+            parked, 3,
+            "an AI crew must keep both tubes at their authored volleys ({parked} \
+             rounds parked); a human crew can ask for the same 3 and no more"
+        );
+        assert!(
+            parked * 3 <= t.count,
+            "a full load ({parked}) must stay a small fraction of the {}-round \
+             magazine — the magazine is what makes a launch a decision",
+            t.count
+        );
+    }
+
     // ── [repair] block tests ───────────────────────────────────────────────
 
     #[test]

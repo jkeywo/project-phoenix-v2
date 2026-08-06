@@ -247,6 +247,7 @@
       <dl class="cost">
         <dt>Showing</dt><dd id="costShowing">—</dd>
         <dt>Distance</dt><dd id="costDistance">—</dd>
+        <dt>Subject size</dt><dd id="costExtent">—</dd>
         <dt>Triangles</dt><dd id="costTriangles">—</dd>
         <dt>Meshes</dt><dd id="costMeshes">—</dd>
         <dt>Textures</dt><dd id="costTextures">—</dd>
@@ -1240,6 +1241,7 @@
     const cost = {
       showing: document.getElementById('costShowing'),
       distance: document.getElementById('costDistance'),
+      extent: document.getElementById('costExtent'),
       triangles: document.getElementById('costTriangles'),
       meshes: document.getElementById('costMeshes'),
       textures: document.getElementById('costTextures'),
@@ -1257,6 +1259,10 @@
         ? (stats.levels ? `base (${stats.levels} levels)` : 'base')
         : `LOD ${level} of ${stats.levels}`;
       cost.distance.textContent = `${stats.distance.toFixed(1)} u`;
+      // Distance is absolute world units — the units `select_lod` compares — so
+      // 5 is a close-up of a courier and the inside of a starbase. The subject's
+      // own size is what makes that number mean something.
+      cost.extent.textContent = stats.extent ? `${stats.extent.toFixed(1)} u` : '—';
       cost.triangles.textContent = stats.settled ? fmtInt(stats.triangles) : '…';
       cost.meshes.textContent = fmtInt(stats.meshes);
       // Bevy can release an image once it is uploaded, so say when the pixel

@@ -1055,6 +1055,10 @@
            in-progress rounds are unaffected (AC4). -->
       <div id="mod-pack-upload">
         <input id="mod-pack-file" type="file" accept=".zip" style="display:none;">
+        <!-- `world-btn` here is a STYLING hook only. This button is static
+             markup with a page-lifetime click handler, so it must never be
+             matched by renderScenarioLockState()'s rebuild — that owns only
+             `.scenario-entry` elements (SCENARIO_ENTRY_SELECTOR, issue #951). -->
         <button id="mod-pack-btn" class="world-btn" data-i18n="server.upload_mod_pack">Upload mod pack</button>
         <div id="mod-pack-status"></div>
       </div>
@@ -2193,6 +2197,35 @@
     }
 
     // ── Host-page selection UI (rendered from the catalog) ─────────────────
+    // Lifecycle class + selector for the elements renderScenarioLockState()
+    // OWNS and rebuilds on every call. Deliberately NOT `.world-btn`: that is a
+    // shared *styling* hook also worn by the static #mod-pack-btn, so cleaning
+    // up by it deleted the "Upload mod pack" button the instant the first
+    // scenario button rendered (issue #951). Styling hook and lifecycle hook
+    // are separate on purpose — anything added to #world-list that this
+    // function does not own must stay out of SCENARIO_ENTRY_SELECTOR.
+    // (#scenario-loading is matched by id by design: it is the placeholder this
+    // function replaces.)
+    const SCENARIO_ENTRY_CLASS = 'scenario-entry';
+    const SCENARIO_ENTRY_SELECTOR = '.scenario-entry, ph-ship-picker, #scenario-loading';
+
+    /** Remove every element this render owns, leaving static controls alone. */
+    function clearScenarioEntries(worldList) {
+      worldList.querySelectorAll(SCENARIO_ENTRY_SELECTOR).forEach(function (el) { el.remove(); });
+    }
+
+    /**
+     * Insert a rebuilt entry above the static footer controls so
+     * #mod-pack-upload keeps the bottom of the column its `margin-top: auto`
+     * asks for (plain appendChild would stack scenario buttons below the
+     * upload block's separator rule).
+     */
+    function appendScenarioEntry(worldList, el) {
+      const footer = worldList.querySelector('#mod-pack-upload');
+      if (footer) worldList.insertBefore(el, footer);
+      else worldList.appendChild(el);
+    }
+
     function renderScenarioLockState() {
       const worldList = document.getElementById('world-list');
       const label = document.getElementById('world-list-label');
@@ -2202,17 +2235,17 @@
       if (_preSelection.scenario_id == null) {
         // Scenario stage — one button per catalog scenario.
         if (label) label.textContent = t('server.select_world');
-        worldList.querySelectorAll('.world-btn, ph-ship-picker, #scenario-loading').forEach(function (el) { el.remove(); });
+        clearScenarioEntries(worldList);
         if (_scenarioCatalog.length === 0) {
           const empty = document.createElement('div');
           empty.id = 'scenario-loading';
           empty.textContent = t('server.no_scenarios');
-          worldList.appendChild(empty);
+          appendScenarioEntry(worldList, empty);
           return;
         }
         _scenarioCatalog.forEach(function (sc) {
           const btn = document.createElement('button');
-          btn.className = 'world-btn';
+          btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS;
           btn.dataset.path = sc.world;
           btn.dataset.scenarioId = sc.id;
           btn.textContent = sc.label || sc.id;
@@ -2223,7 +2256,7 @@
             // world without a page reload.
             window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.id }));
           });
-          worldList.appendChild(btn);
+          appendScenarioEntry(worldList, btn);
         });
       } else if (_preSelection.template_path == null) {
         // Ship stage — the locked scenario's offered ships via ph-ship-picker.
@@ -2238,19 +2271,21 @@
           return;
         }
         if (label) label.textContent = t('server.select_ship');
-        worldList.querySelectorAll('.world-btn, ph-ship-picker, #scenario-loading').forEach(function (el) { el.remove(); });
+        clearScenarioEntries(worldList);
         import('./gui/components/ph-ship-picker.js').then(function () {
           if (_preSelection.template_path != null) return; // won meanwhile
           const picker = document.createElement('ph-ship-picker');
-          worldList.appendChild(picker);
+          appendScenarioEntry(worldList, picker);
           picker.state = { ships: ships };
           picker.addEventListener('ship-selected', function (e) {
             window.__sendAction(JSON.stringify({ action: 'select_player_ship', template_path: e.detail.template_path }));
           });
         });
       } else {
-        // Both locked — world load is starting.
-        worldList.querySelectorAll('.world-btn, ph-ship-picker').forEach(function (el) { el.remove(); });
+        // Both locked — world load is starting. Only this render's own entries
+        // go; #mod-pack-upload stays put for the next round's scenario stage
+        // (Return to Lobby re-shows the panel without rebuilding it).
+        clearScenarioEntries(worldList);
       }
     }
 
@@ -2808,7 +2843,7 @@ function finishInit() {
     // Reset the first-valid-wins selection to its empty shape and clear the
     // world-load latch so renderScenarioLockState() rebuilds the scenario-stage
     // buttons. The finished round left _preSelection fully locked and the
-    // "both locked" branch removed every .world-btn. Round 2 now re-enters the
+    // "both locked" branch removed every scenario entry. Round 2 now re-enters the
     // SAME arbiter flow as round 1 — no legacy confirm bypass.
     _preSelection = { scenario_id: null, template_path: null };
     _worldLoadStarted = false;

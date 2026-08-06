@@ -9986,26 +9986,32 @@ fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
 }
 
 /// **AC1 over the WHOLE mission.** The shipped destroyer's twelve rounds are
-/// spread across combat_test's eight waves, and every one of them is spent by
-/// the end of it.
+/// spread across combat_test's eight waves, every one of them is spent by the
+/// end of it, and no single wave can latch the magazine shut on the way.
 ///
 /// Everything here is shipped content driving real code: the hull's authored
 /// `[torpedoes]` block through the real `TorpedoSystem` (its load timers, its
 /// volley caps, its magazine accounting), its authored `[torpedoes.ai]`
 /// doctrine through the real conservation resolve, and the threat count the
 /// world itself publishes. Only the SCHEDULE is scripted — one engagement per
-/// unit of published threat, each lasting as long as the hull is willing to
-/// keep shooting.
+/// published reading of `mission_threat_remaining`, each lasting as long as the
+/// hull is willing to keep shooting.
 ///
 /// That scripting is why this test exists beside the headless run.
 /// `combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat`
 /// flies the same doctrine for real, but the destroyer dies partway down the
-/// schedule, so a real run can never answer the question that matters most
-/// here: what does the LAST wave meet? A reserve of one round per remaining
-/// unit of threat comes to exactly one round at the last of them, which is what
-/// makes the payload spendable to the end instead of stranded — and measuring
-/// that reserve against the magazine counter instead of the rounds aboard
-/// strands the parked volley outright.
+/// schedule, so a real run can never answer what the LAST wave meets.
+///
+/// It is also why the first cut of this test missed the regression it was
+/// written to prevent. It walked ONE schedule — 8, 7, 6 … 1 — and that shape
+/// quietly assumes every wave dies on cue, so the denominator of
+/// `rounds_per_threat` shrinks each engagement and the gate re-opens by itself.
+/// The shipped guard has no such guarantee: it is a one-way latch. Under the
+/// 1.0 reserve this hull first shipped with, combat_test's destroyer held five
+/// rounds through a wave 2 it therefore could not kill, the death-gated chain
+/// stopped, and this test stayed green throughout. Assertion 3 is the repair —
+/// a wave that OUTLIVES its engagement, plus the latch stated directly on the
+/// doctrine across every magazine-and-threat position the mission can produce.
 #[test]
 fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission() {
     use crate::console::weapons::torpedo::{
@@ -10039,15 +10045,33 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
         .expect("the destroyer authors `[torpedoes.ai]`")
         .to_policy()
         .expect("the authored magazine policy decodes");
-    let mut sys =
-        crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
-    let payload = sys.rounds_aboard();
-    // The shipped per-tube doctrine is an unconditional `torpedo_load` rule, so
-    // an AI-crewed hull holds every tube at its volley target — the standing
-    // `SetTorpedoVolleyTarget` the tube host emits.
-    for t in &mut sys.tubes {
-        t.target_count = t.ai_target_count;
-    }
+    // A hull as an AI crew keeps it. The shipped per-tube doctrine is an
+    // unconditional `torpedo_load` rule, so every tube sits at its volley
+    // target — the standing `SetTorpedoVolleyTarget` the tube host emits.
+    let fresh = || {
+        let mut sys =
+            crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
+        for t in &mut sys.tubes {
+            t.target_count = t.ai_target_count;
+        }
+        sys
+    };
+    let payload = fresh().rounds_aboard();
+    // The fore tube's 2, against the stern launcher's 1 — the granularity the
+    // gate can only stop on. Read off the hull, not restated here.
+    let largest_volley = fresh()
+        .tubes
+        .iter()
+        .map(|t| t.ai_target_count)
+        .max()
+        .expect("the destroyer authors torpedo tubes");
+    // The authored reserve itself, so the floors below are DERIVED from the
+    // content rather than restated beside it: retune the TOML and the
+    // expectations move with it.
+    let reserve = policy
+        .params
+        .get("min_rounds_per_threat")
+        .expect("the shipped magazine doctrine authors a reserve");
 
     // The mission length is the world's, not this test's.
     let world =
@@ -10067,15 +10091,11 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
         })
         .expect("combat_test must publish its remaining-threat count");
 
-    let mut launch_id = 0usize;
-    // Rounds spent in each engagement, wave 1 first.
-    let mut spent_per_wave: Vec<u32> = Vec::new();
-    // Rounds still aboard when each engagement began.
-    let mut aboard_per_wave: Vec<u32> = Vec::new();
-    for threat in (1..=waves).rev() {
-        settle(&mut sys);
+    // ONE engagement, fought until the doctrine stops clearing rounds or the
+    // tubes run dry. Returns what it cost the magazine.
+    let engage = |sys: &mut crate::torpedo::TorpedoSystem, threat: i64, id: &mut usize| -> u32 {
+        settle(sys);
         let before = sys.rounds_aboard();
-        aboard_per_wave.push(before);
         loop {
             let facts = seed_torpedo_conservation_facts(sys.rounds_aboard(), threat, 0);
             if !torpedo_conservation_policy_fires(&policy, &facts, &[]) {
@@ -10089,74 +10109,172 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
             else {
                 break;
             };
-            launch_id += 1;
-            sys.launch(
-                &tube,
-                format!("round-{launch_id}"),
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                None,
-                None,
-            );
+            *id += 1;
+            sys.launch(&tube, format!("round-{id}"), 0.0, 0.0, 0.0, 0.0, None, None);
+            settle(sys);
+        }
+        before - sys.rounds_aboard()
+    };
+
+    // A whole mission as a sequence of published `mission_threat_remaining`
+    // readings, one per engagement — so a REPEATED value is a wave that
+    // outlived the engagement fought against it. Returns rounds spent per
+    // engagement, rounds aboard entering each, and what is left at the end.
+    let walk = |schedule: &[i64]| -> (Vec<u32>, Vec<u32>, u32) {
+        let mut sys = fresh();
+        let mut id = 0usize;
+        let mut spent: Vec<u32> = Vec::new();
+        let mut aboard: Vec<u32> = Vec::new();
+        for &threat in schedule {
             settle(&mut sys);
+            aboard.push(sys.rounds_aboard());
+            spent.push(engage(&mut sys, threat, &mut id));
         }
-        spent_per_wave.push(before - sys.rounds_aboard());
-    }
+        let left = sys.rounds_aboard();
+        (spent, aboard, left)
+    };
 
-    // Measured on the shipped content: 6 rounds spent on wave 1, then
-    // [0, 2, 0, 2, 0, 1, 1] — twelve rounds over eight waves, five of them met
-    // with torpedoes and none left over. The same walk with the reserve read
-    // off `torpedoes_remaining` at the pre-fix 0.75 gives
-    // [4, 0, 2, 0, 2, 0, 0, 2] and ENDS TWO ROUNDS ABOARD: the parked volley is
-    // never released, which is what assertion 2 exists to catch.
+    // How many rounds the doctrine CLEARS a hull that is carrying `carrying`
+    // to spend against a wave the world still counts as `threat`. The drain
+    // into that state is deliberately un-gated and one round at a time: the
+    // question is what the hull may do once it is there, not how it arrived.
+    let clearable = |carrying: u32, threat: i64| -> u32 {
+        let mut sys = fresh();
+        for t in &mut sys.tubes {
+            t.target_count = 1;
+        }
+        let mut id = 0usize;
+        while sys.rounds_aboard() > carrying {
+            settle(&mut sys);
+            let Some(tube) = sys
+                .tubes
+                .iter()
+                .find(|t| t.loaded_count > 0)
+                .map(|t| t.id.clone())
+            else {
+                break;
+            };
+            id += 1;
+            sys.launch(&tube, format!("pre-{id}"), 0.0, 0.0, 0.0, 0.0, None, None);
+        }
+        for t in &mut sys.tubes {
+            t.target_count = t.ai_target_count;
+        }
+        engage(&mut sys, threat, &mut id)
+    };
 
-    // 1. Wave 1 does not eat the payload — the defect as reported. Half is the
-    //    stated ceiling and the shipped hull sits exactly on it: the floor at
-    //    eight published waves is 8 rounds, and the fore tube's volley of 2
-    //    carries it one volley past. A retune that pushes the first engagement
-    //    over half the payload is meant to fail here.
+    // ── 1. The mission as the world schedules it: every wave dies, so the
+    //       published threat falls by one per engagement. ────────────────────
+    //
+    // Measured on the shipped content at `min_rounds_per_threat = 0.5`:
+    // 10 rounds into wave 1, then [0, 0, 0, 1, 0, 1, 0] — twelve rounds over
+    // eight waves and none left aboard. At the 1.0 this hull shipped with it
+    // was 6 then [0, 2, 0, 2, 0, 1, 1], also ending empty; the halved reserve
+    // buys its margin in the MIDDLE of the mission (assertion 3) and pays for
+    // it here, by letting a saturating first engagement take more.
+    let on_schedule: Vec<i64> = (1..=waves).rev().collect();
+    let (spent_per_wave, aboard_per_wave, left_on_schedule) = walk(&on_schedule);
+
+    // Wave 1 cannot empty the magazine — the defect #943 was filed about. The
+    // bound is the hull's OWN authored floor rather than a hand-picked fraction
+    // of the payload, because the fraction is what a retune changes and the
+    // floor is what the doctrine promises: whatever reserve is authored, a
+    // saturating first engagement must stop within one volley of it. What this
+    // catches is the guard being AUTHORED and not APPLIED — a broken resolve, a
+    // gate moved above admission, a fact stopped being seeded — because then
+    // the walk runs the magazine to 0 in wave 1 while `reserve` still reads 0.5
+    // and 0 + one volley is two rounds under the floor of four. (A hull that
+    // authors no reserve at all is a different case entirely and deliberately
+    // unconstrained: see
+    // `a_magazine_with_no_conservation_doctrine_is_unconstrained`.)
+    let floor_at_full_threat = (reserve * waves as f64).floor() as u32;
+    let after_wave_one = aboard_per_wave[0] - spent_per_wave[0];
     assert!(
-        spent_per_wave[0] <= payload / 2,
-        "the destroyer spent {} of its {payload} rounds on the FIRST wave of an \
-         eight-wave defence. Rounds per wave: {spent_per_wave:?}",
-        spent_per_wave[0]
+        after_wave_one + largest_volley >= floor_at_full_threat,
+        "the destroyer came out of the FIRST wave of an eight-wave defence with \
+         {after_wave_one} of its {payload} rounds — more than one volley of \
+         {largest_volley} under the {floor_at_full_threat} its authored reserve of \
+         {reserve} per remaining wave is supposed to hold back. The magazine's \
+         `torpedo_conservation` guard is not gating the first engagement at all. \
+         Rounds per wave: {spent_per_wave:?}, aboard entering each: {aboard_per_wave:?}"
     );
 
-    // 2. Nothing is stranded. The reserve is one round per remaining unit of
-    //    threat, so at the last of them it is one round and the hull can spend
-    //    whatever it still has. Measured against `torpedoes_remaining` instead,
-    //    the three rounds parked in the tubes are never spendable at all.
+    // 2. Nothing is stranded. At the last unit of threat the reserve is half a
+    //    round, so any round still aboard clears the gate and the hull can
+    //    spend what it has. Measured against `torpedoes_remaining` instead of
+    //    the rounds aboard, the three rounds parked in the tubes are never
+    //    spendable at all and this ends non-zero.
     assert_eq!(
-        sys.rounds_aboard(),
-        0,
-        "the mission ended with {} of {payload} rounds still aboard — the reserve \
-         never released them. Rounds per wave: {spent_per_wave:?}, aboard entering \
-         each wave: {aboard_per_wave:?}",
-        sys.rounds_aboard()
+        left_on_schedule, 0,
+        "the mission ended with {left_on_schedule} of {payload} rounds still aboard — \
+         the reserve never released them. Rounds per wave: {spent_per_wave:?}, aboard \
+         entering each wave: {aboard_per_wave:?}"
     );
 
-    // 3. And the payload is SPREAD, not front-loaded into a couple of waves and
-    //    then dry. Counted only while the hull still had something to fire: a
-    //    wave that meets an empty ship is out of rounds, not holding them.
-    let mut dry_streak = 0usize;
-    let mut worst_dry_streak = 0usize;
-    for (spent, aboard) in spent_per_wave.iter().zip(&aboard_per_wave) {
-        if *aboard > 0 && *spent == 0 {
-            dry_streak += 1;
-            worst_dry_streak = worst_dry_streak.max(dry_streak);
-        } else {
-            dry_streak = 0;
+    // ── 3. THE LATCH. A wave the hull cannot clear. ───────────────────────────
+    //
+    // The walk above cannot see the failure that actually shipped, and that is
+    // why it stayed green while combat_test broke: it assumes every wave dies
+    // on schedule, so the denominator of `rounds_per_threat` shrinks by one
+    // every engagement and the gate re-opens on its own. The real world does
+    // not owe anyone that. `rounds_aboard` only ever FALLS inside a mission and
+    // the threat count only falls when something DIES — so a hull that dips
+    // under its own reserve stops firing, stops killing the thing that would
+    // bring the count down, and never climbs back over the line. The guard is a
+    // one-way latch, and at `min_rounds_per_threat = 1.0` combat_test's
+    // destroyer fell through it: 7 rounds against 7 remaining waves cleared one
+    // volley, wave 2 survived it, and the death-gated chain stopped there for
+    // the rest of the run.
+    //
+    // So: the same schedule with wave 2 outliving three engagements instead of
+    // one. The payload must still be spent, and the hull must not be silenced
+    // for the rest of the mission by the wave it could not clear.
+    let mut stalled: Vec<i64> = vec![waves];
+    let stall_len = 3usize;
+    for _ in 0..stall_len {
+        stalled.push(waves - 1);
+    }
+    stalled.extend((1..=waves - 2).rev());
+    let (stall_spent, stall_aboard, stall_left) = walk(&stalled);
+    assert_eq!(
+        stall_left, 0,
+        "a wave that did not die on schedule stranded {stall_left} of {payload} rounds \
+         for the rest of the mission. Schedule: {stalled:?}, rounds per engagement: \
+         {stall_spent:?}, aboard entering each: {stall_aboard:?}"
+    );
+    let spent_after_the_stall: u32 = stall_spent[1 + stall_len..].iter().sum();
+    assert!(
+        spent_after_the_stall > 0,
+        "the destroyer never fired again after meeting a wave it could not clear — \
+         the conservation guard latched shut and stayed shut. Schedule: {stalled:?}, \
+         rounds per engagement: {stall_spent:?}, aboard entering each: {stall_aboard:?}"
+    );
+
+    // And the latch stated directly on the doctrine, over every position the
+    // mission can put this hull in while it is still carrying a working
+    // magazine: half its payload or more, against any wave the world still has
+    // to publish. In every one of them the reserve must clear MORE THAN ONE
+    // VOLLEY. One volley is precisely what the shipped 1.0 cleared at the point
+    // combat_test stalled — the hull put two rounds into wave 2 and then held
+    // five it would never fire — so "more than a single volley into a wave that
+    // has to die" is the smallest statement that rejects the tuning that broke,
+    // and it does not care how the reserve is spelled. Measured at 0.5 the
+    // thinnest cell of this grid clears 4 rounds, two full volleys.
+    for threat in 1..=waves {
+        for carrying in (payload / 2)..=payload {
+            let cleared = clearable(carrying, threat);
+            assert!(
+                cleared > largest_volley,
+                "carrying {carrying} of {payload} rounds against {threat} remaining \
+                 waves, the magazine doctrine clears only {cleared} — no more than the \
+                 single volley of {largest_volley} this hull fires at once. A wave that \
+                 survives one volley can never be cleared, and because the threat count \
+                 falls only when something dies, the guard never re-opens: the hull \
+                 holds {carrying} rounds for a mission that has stopped advancing. \
+                 Authored reserve: {reserve} rounds per remaining unit of threat."
+            );
         }
     }
-    assert!(
-        worst_dry_streak <= 2,
-        "the destroyer went {worst_dry_streak} consecutive waves without firing a \
-         torpedo it was still carrying. Conservation is meant to spread the payload \
-         over the mission, not lock the hull out of the middle of it. Rounds per \
-         wave: {spent_per_wave:?}, aboard entering each wave: {aboard_per_wave:?}"
-    );
 }
 
 /// A magazine that authors NO conservation rule is unconstrained — the channel

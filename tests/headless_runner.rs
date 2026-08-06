@@ -1556,9 +1556,10 @@ fn combat_test_chains_its_waves_in_a_real_run() {
 /// 2. The ship is FIGHTING. Rounds left because the hull never got a firing
 ///    solution would prove nothing, so the run must also have launched.
 /// 3. Wave 1 does not eat the payload. The fleet authors
-///    `min_rounds_per_threat = 1.0`, so with eight waves published the hull holds
-///    fire once it is down to eight rounds and the first engagement spends about
-///    a third of what it carries instead of all of it.
+///    `min_rounds_per_threat = 0.5`, so with eight waves published the hull is
+///    cleared down to a floor of four rounds (three once a volley overshoots
+///    it) and no further, and the first engagement spends a fraction of what it
+///    carries instead of all of it.
 /// 4. The back half is not dry. This is the failure the FIRST cut of #943
 ///    shipped: measured against `torpedoes_remaining` — the rounds left to
 ///    reload with — rather than against the rounds aboard, the reserve reads
@@ -1629,6 +1630,13 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
             .and_modify(|(_, low)| *low = (*low).min(aboard))
             .or_insert((aboard, aboard));
     }
+    // Printed unconditionally so a retune can be MEASURED rather than guessed at:
+    // libtest captures this unless the run asks for it, so
+    // `cargo test --features headless --test headless_runner
+    //  combat_test_paces -- --nocapture` is how you read the magazine's shape
+    // before and after touching `min_rounds_per_threat`. Not having this is how
+    // the reserve got retuned blind in the first place.
+    println!("magazine trace by remaining threat (entered, lowest): {trace:?}");
     let report = build_report(&mut app, &args, 0.0);
 
     let (entered_wave_one, lowest_in_wave_one) = *trace.get(&8).expect(
@@ -1650,18 +1658,26 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
     );
 
     // 1. Wave 1 does not eat the payload. Measured: the hull enters wave 1 with
-    //    all 12 authored rounds and bottoms out at 7, i.e. it spends 5 against a
-    //    floor of 8 (`min_rounds_per_threat = 1.0` × 8 waves published) and the
-    //    volley granularity carries it one round past. Stated as 6 — a round of
-    //    slack — so retuning the reserve or the tube volleys does not fail this,
-    //    but losing the gate does: un-gated, this same run bottoms out at 0.
+    //    all 12 authored rounds and bottoms out at 7 — the ENGAGEMENT ends
+    //    before the gate does, because at `min_rounds_per_threat = 0.5` × 8
+    //    waves published the floor is 4 rounds and the volley granularity would
+    //    carry it to 3.
+    //
+    //    Stated as 3 rather than as the measured 7, deliberately: 3 is what the
+    //    authored reserve GUARANTEES, and 7 is merely where this seed's first
+    //    engagement happens to stop. A bound pinned to the second number is a
+    //    bound with no margin, and a bound with no margin on this exact quantity
+    //    is what broke combat_test — the previous 1.0 tuning sat exactly on its
+    //    own floor, and #946 moving the engagement by one round was enough to
+    //    push it under and latch the magazine shut. Losing the gate still fails
+    //    here: un-gated this run bottoms out at 0.
     assert_eq!(
         entered_wave_one, 12,
         "precondition: the destroyer must start the run with its full authored \
          magazine aboard, or the low-water mark below is measuring something else"
     );
     assert!(
-        lowest_in_wave_one >= 6,
+        lowest_in_wave_one >= 3,
         "the destroyer was down to {lowest_in_wave_one} of its 12 rounds while wave 1 \
          was still alive. The whole point of #943 is that the first wave cannot eat \
          the payload: with seven more waves published as remaining threat, the \
@@ -1670,12 +1686,22 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
     );
 
     // 2. And the hull is still SPENDING rounds after wave 1 — the other way this
-    //    feature fails. A reserve measured against `torpedoes_remaining` rather
-    //    than the rounds aboard reads three rounds short on this hull (its two
-    //    tubes park `volley_max` 2 + 1 with the shipped "keep the tubes loaded"
-    //    doctrine), which locks the gate shut for waves 2-4 and strands the
-    //    parked volley for good: rounds survive wave 1, and then nothing is ever
-    //    fired again. Measured: 7 aboard entering wave 2, 5 by the end of it.
+    //    feature fails, and the one that actually shipped twice.
+    //
+    //    A reserve measured against `torpedoes_remaining` rather than the rounds
+    //    aboard reads three rounds short on this hull (its two tubes park
+    //    `volley_max` 2 + 1 with the shipped "keep the tubes loaded" doctrine),
+    //    which locks the gate shut after wave 1 and strands the parked volley
+    //    for good. A reserve authored too HIGH does the same thing by a
+    //    different route: the guard is a one-way latch — rounds aboard only
+    //    fall, and the published threat falls only when something dies — so a
+    //    hull that dips under its reserve stops firing at the very waves whose
+    //    deaths would let it fire again. At the original 1.0 this run read
+    //    {8: (12, 7), 7: (7, 5)} and stopped: 5 rounds against 7 remaining
+    //    waves is 0.71, wave 2 outlived it, and no further wave ever spawned.
+    //    Measured at 0.5: {8: (12, 7), 7: (7, 3), 6: (3, 1), 5: (1, 1)} — 7
+    //    aboard entering wave 2 and 3 by the end of it, and the chain runs on
+    //    through waves 3 and 4.
     let later_waves: Vec<_> = trace.iter().filter(|(threat, _)| **threat < 8).collect();
     assert!(
         !later_waves.is_empty(),

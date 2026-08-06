@@ -1195,30 +1195,57 @@ source             = "shield"
 # the ratio unbounded and this rule always fires, because pacing is something a
 # mission asks for and never something a hull decides for itself.
 #
-# `min_rounds_per_threat = 1.0` reads "keep one round for every thing still
-# coming". Two properties pick that value, and both are about the WHOLE run
-# rather than any one engagement:
+# `min_rounds_per_threat = 0.5` reads "keep one round for every TWO things still
+# coming". Before retuning it, understand what kind of gate it is: a ONE-WAY
+# LATCH. `rounds_aboard` only ever FALLS inside a mission, and the threat count
+# only falls when something DIES — so a hull that dips under its own reserve
+# stops firing, stops killing the thing that would bring the count down, and
+# never climbs back over the line. Whatever is authored here is not a soft
+# brake. It is a floor the ship must never be pushed below mid-mission.
 #
-#   * Nothing is stranded. At the last unit of threat the reserve is exactly one
-#     round, so whatever is still aboard can always be spent on the last fight.
-#     Any reserve above 1.0 leaves rounds unfired at the end of the mission —
-#     and one measured against the magazine COUNTER rather than the rounds
-#     aboard strands the parked volley on top of that, because the counter is
-#     debited the moment a tube starts loading.
-#   * The payload lasts the mission. In combat_test's eight-wave defence the
-#     destroyer's twelve rounds meet a floor of eight while wave 1 is alive, so
-#     the first engagement spends at most half of them instead of all of them,
-#     and every wave that dies frees another round for the wave behind it.
+# 0.5 is chosen for the margin it leaves, not for a tidy identity:
 #
-# Both are measured, not asserted by hand.
+#   * The middle of the mission stays open. Over every position combat_test can
+#     put this hull in while it still carries half its payload or more, the
+#     reserve clears at least 4 rounds — two full volleys — against the wave in
+#     front of it. A wave that survives one volley is a wave that never dies,
+#     and a wave that never dies freezes the threat count and the latch with it.
+#   * Nothing is stranded. At the last unit of threat the floor is half a round,
+#     so anything still aboard clears the gate and can be spent on the last
+#     fight. A reserve measured against the magazine COUNTER rather than the
+#     rounds aboard strands the parked volley whatever this number is, because
+#     the counter is debited the moment a tube starts loading.
+#
+# What it trades away is the front of the mission. The floor at eight published
+# waves is 4 rounds rather than 8, so an engagement lasting as long as the hull
+# is willing to keep shooting may now take 10 of the 12 rounds into wave 1 where
+# 1.0 capped it at 6. That ceiling is a licence rather than a forecast — flown
+# for real the destroyer spends 5 on wave 1 either way, because the engagement
+# ends before the gate does — but it is what 0.5 permits, and it is the price of
+# the margin above.
+#
+# The tidy identity is what 1.0 bought (issue #943): the reserve came to exactly
+# one round at the last unit of threat, so on paper nothing could ever be
+# stranded. It shipped with ZERO margin and it broke. Against the old asteroid
+# layout the destroyer bottomed out at exactly 7 rounds against 7 remaining
+# waves — a ratio of exactly 1.0, the last reading the gate still passes. #946
+# reshuffled which rock lands in which cell (same radii, same split), that moved
+# the engagement by one round, the ratio fell under, the latch shut, and
+# combat_test's wave chain stalled at wave 2 with the hull holding rounds it
+# would never fire.
+#
+# All of it is measured, not asserted by hand.
 # `the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission`
 # (`src/console/weapons/server_tests.rs`) walks this doctrine through the real
-# torpedo system over the world's whole authored schedule: 6 rounds on wave 1,
-# then 0, 2, 0, 2, 0, 1, 1 — five of the eight waves met with torpedoes and
-# nothing left aboard at the end.
+# torpedo system over the world's whole authored schedule, INCLUDING a wave that
+# outlives the engagement fought against it, and states the latch directly on
+# the doctrine.
 # `combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat`
-# (`tests/headless_runner.rs`) flies it for real: 5 rounds on wave 1, and the
-# hull still spending in the waves after it.
+# (`tests/headless_runner.rs`) flies it for real and prints the magazine's
+# shape bucketed by remaining threat: {8: (12, 7), 7: (7, 3),
+# 6: (3, 1), 5: (1, 1)} — 12 aboard entering wave 1 and 7 leaving it, 7 into
+# wave 2 and 3 leaving it, still spending through wave 3. At 1.0 the same run
+# reads {8: (12, 7), 7: (7, 5)} and stops there: wave 2 never dies.
 #
 # `sole_objective_count = 1` is the carve-out, and it counts NAMED Destroy
 # targets rather than doctrine entries. A world's `spawn_entity` override
@@ -1230,7 +1257,7 @@ source             = "shield"
 # freely. A hull whose brief names no target reads 0 and paces — which is the
 # player's destroyer, the ship #943 was filed about.
 [torpedoes.ai]
-param = { min_rounds_per_threat = 1.0, sole_objective_count = 1.0 }
+param = { min_rounds_per_threat = 0.5, sole_objective_count = 1.0 }
 
 [[torpedoes.ai.rule]]
 priority = 0

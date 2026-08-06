@@ -376,9 +376,19 @@ condition = "on_world_loaded"
   # stated the other way round: that one asks "have all eight been RELEASED",
   # this one says "how many are still to come". Each wave's death trigger
   # decrements it, so while the last wave is alive it reads 1 and the fleet's
-  # authored reserve of one round per remaining wave comes to exactly one round
-  # — a hull that has been holding rounds back can spend every one of them on
-  # the ships actually left. It reaches 0 as that wave dies.
+  # authored reserve of half a round per remaining wave comes to half a round —
+  # a hull that has been holding rounds back can spend every one of them on the
+  # ships actually left. It reaches 0 as that wave dies.
+  #
+  # Worth knowing before lengthening this schedule: this counter is the
+  # DENOMINATOR of a ONE-WAY LATCH. It falls only when a wave DIES, and a hull
+  # that has already dipped under its reserve is not shooting at the wave whose
+  # death would make it fall. Publishing more threat than the fleet's magazines
+  # can pace against therefore does not make the ships thriftier — it makes them
+  # silent, and the death-gated chain below stops advancing. That is exactly
+  # what this world did at the fleet's original reserve of one round per
+  # remaining wave: the destroyer met wave 2 holding five rounds it was never
+  # cleared to fire, and wave 3 never spawned.
   [[trigger.action]]
   type  = "set_flag_value"
   name  = "mission_threat_remaining"

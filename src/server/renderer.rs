@@ -329,55 +329,45 @@ fn toggle_cameras(
     }
 }
 
-/// Toggles the local ship model's visibility based on the current view mode.
-/// The model is visible only in `Cinematic` mode.
+/// Keeps the local ship model's visibility in step with the *current* view
+/// mode: visible only in `Cinematic`, hidden otherwise so the hull cannot
+/// occlude the viewscreen.
+///
+/// State-driven, deliberately **not** edge-triggered on
+/// `Changed<ShipViewMode>` (issue #944). `spawn_glb_visual` resolves the GLB
+/// asynchronously, so `decorate_local_ship_model` can insert the
+/// `Visibility::Hidden` + `LocalShipModel` child many frames *after* the view
+/// mode last changed — e.g. when `backfill_captain_prefers_cinematic_view`
+/// forces Cinematic at boot while a multi-megabyte hull is still loading. An
+/// edge-triggered gate misses that arrival and leaves the hull hidden forever,
+/// while the engine trails (independent top-level entities that never pass
+/// through `decorate_local_ship_model`) keep rendering — exactly the
+/// "trails but no ship" symptom reported. Reading the current mode every frame
+/// is order-independent and idempotent: it also re-reveals the hull after an
+/// LOD swap or hull change respawns the model as `Hidden`.
+///
+/// Per-frame cost: two single-entity, archetype-filtered queries and one enum
+/// comparison. The write goes through `set_if_neq`, so `Visibility` change
+/// detection (and everything downstream of it) only fires on an actual
+/// transition, not every tick.
 fn toggle_ship_model_visibility(
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, Changed<crate::ship_state::ShipViewMode>>,
-    local_ship_q: Query<Entity, With<crate::server_app::LocalShip>>,
-    children_q: Query<&Children>,
-    model_q: Query<&crate::server_app::LocalShipModel>,
-    mut visibility_q: Query<&mut Visibility>,
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    mut model_q: Query<&mut Visibility, With<crate::simulation::LocalShipModel>>,
 ) {
+    // `With<LocalShip>` matters: every ship (NPCs included) carries a
+    // `ShipViewMode`, so an unfiltered `single()` would fail outright.
     let Ok(view_mode) = view_mode_q.single() else {
         return;
     };
-    let is_cinematic = view_mode.view_mode == ViewMode::Cinematic;
-    let Ok(local) = local_ship_q.single() else {
-        return;
+    let wanted = if view_mode.view_mode == ViewMode::Cinematic {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
     };
-
-    // Walk the local ship's children to find the LocalShipModel child.
-    fn set_vis(
-        entity: Entity,
-        show: bool,
-        children_q: &Query<&Children>,
-        model_q: &Query<&crate::server_app::LocalShipModel>,
-        visibility_q: &mut Query<&mut Visibility>,
-    ) {
-        if model_q.get(entity).is_ok() {
-            if let Ok(mut vis) = visibility_q.get_mut(entity) {
-                *vis = if show {
-                    Visibility::Visible
-                } else {
-                    Visibility::Hidden
-                };
-            }
-            return;
-        }
-        if let Ok(children) = children_q.get(entity) {
-            for child in children.iter() {
-                set_vis(child, show, children_q, model_q, visibility_q);
-            }
-        }
+    // Normally one entity; an in-flight LOD swap can transiently hold two.
+    for mut vis in model_q.iter_mut() {
+        vis.set_if_neq(wanted);
     }
-
-    set_vis(
-        local,
-        is_cinematic,
-        &children_q,
-        &model_q,
-        &mut visibility_q,
-    );
 }
 
 fn update_view_screen_text(
@@ -1177,5 +1167,181 @@ mod tests {
         app.update();
 
         assert!(game_camera_active(&mut app));
+    }
+
+    // ── Local ship hull visibility (issue #944) ───────────────────────
+
+    use crate::simulation::LocalShipModel;
+
+    /// Headless app carrying just the local ship and the visibility system.
+    /// No model child yet — tests insert it when they want it to "finish
+    /// loading", which is the whole point of the race being reproduced.
+    fn hull_visibility_test_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_systems(Update, toggle_ship_model_visibility);
+        let ship = app
+            .world_mut()
+            .spawn((LocalShip, ShipViewMode::default()))
+            .id();
+        // A second ship with no `LocalShip` marker: every hull carries a
+        // `ShipViewMode`, so the system must filter rather than assume one.
+        app.world_mut().spawn(ShipViewMode::default());
+        (app, ship)
+    }
+
+    fn set_view_mode(app: &mut App, mode: ViewMode) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipViewMode, With<LocalShip>>();
+        q.single_mut(app.world_mut()).unwrap().view_mode = mode;
+    }
+
+    /// Mimics `server_app::decorate_local_ship_model`: the async GLB finally
+    /// resolves and its scene-root child is inserted, hidden by default.
+    fn spawn_hidden_model_child(app: &mut App, ship: Entity) -> Entity {
+        let child = app
+            .world_mut()
+            .spawn((LocalShipModel, Visibility::Hidden))
+            .id();
+        app.world_mut().entity_mut(ship).add_child(child);
+        child
+    }
+
+    fn hull_visibility(app: &mut App, child: Entity) -> Visibility {
+        *app.world().entity(child).get::<Visibility>().unwrap()
+    }
+
+    /// The issue #944 race: the view mode flips to Cinematic *before* the
+    /// multi-megabyte GLB finishes loading, so the model child arrives hidden
+    /// after the only `Changed<ShipViewMode>` event has already fired. Nothing
+    /// changes the view mode again, so an edge-triggered toggle leaves the hull
+    /// invisible forever while the engine trails keep rendering.
+    #[test]
+    fn hull_becomes_visible_when_model_loads_after_switch_to_cinematic() {
+        let (mut app, ship) = hull_visibility_test_app();
+        app.update();
+
+        set_view_mode(&mut app, ViewMode::Cinematic);
+        app.update(); // model still loading — nothing to reveal yet
+
+        let child = spawn_hidden_model_child(&mut app, ship);
+        app.update(); // no further view-mode change
+
+        assert_eq!(hull_visibility(&mut app, child), Visibility::Visible);
+    }
+
+    /// The ordinary ordering (model loaded first, then the switch) must keep
+    /// working too.
+    #[test]
+    fn hull_becomes_visible_when_cinematic_selected_after_model_loads() {
+        let (mut app, ship) = hull_visibility_test_app();
+        let child = spawn_hidden_model_child(&mut app, ship);
+        app.update();
+        assert_eq!(hull_visibility(&mut app, child), Visibility::Hidden);
+
+        set_view_mode(&mut app, ViewMode::Cinematic);
+        app.update();
+
+        assert_eq!(hull_visibility(&mut app, child), Visibility::Visible);
+    }
+
+    /// Original intent preserved: outside cinematic the hull stays hidden so it
+    /// cannot occlude the viewscreen, whichever order things arrive in.
+    #[test]
+    fn hull_stays_hidden_in_non_cinematic_view_modes() {
+        let (mut app, ship) = hull_visibility_test_app();
+        let child = spawn_hidden_model_child(&mut app, ship);
+        app.update();
+        assert_eq!(hull_visibility(&mut app, child), Visibility::Hidden);
+
+        for mode in [
+            ViewMode::Camera(CameraView::default()),
+            ViewMode::Radar,
+            ViewMode::SystemChart,
+            ViewMode::Comms,
+        ] {
+            set_view_mode(&mut app, mode);
+            app.update();
+            assert_eq!(hull_visibility(&mut app, child), Visibility::Hidden);
+        }
+    }
+
+    /// Leaving cinematic hides the hull again, and a model respawned afterwards
+    /// (LOD swap / hull change re-inserts `Visibility::Hidden`) is re-revealed
+    /// without needing another view-mode change.
+    #[test]
+    fn respawned_model_is_re_revealed_while_still_in_cinematic() {
+        let (mut app, ship) = hull_visibility_test_app();
+        let child = spawn_hidden_model_child(&mut app, ship);
+        set_view_mode(&mut app, ViewMode::Cinematic);
+        app.update();
+        assert_eq!(hull_visibility(&mut app, child), Visibility::Visible);
+
+        set_view_mode(&mut app, ViewMode::Camera(CameraView::default()));
+        app.update();
+        assert_eq!(hull_visibility(&mut app, child), Visibility::Hidden);
+
+        set_view_mode(&mut app, ViewMode::Cinematic);
+        app.update();
+        app.world_mut().entity_mut(child).despawn();
+        let respawned = spawn_hidden_model_child(&mut app, ship);
+        app.update();
+
+        assert_eq!(hull_visibility(&mut app, respawned), Visibility::Visible);
+    }
+
+    /// Tally of frames on which the hull's `Visibility` looked dirty to a
+    /// downstream consumer. Must be observed from *inside* the schedule: a
+    /// `Changed<Visibility>` query built from `&World` after `app.update()`
+    /// takes `last_run = world.last_change_tick()`, which `clear_trackers()`
+    /// has just advanced past every write the frame made — so it reports 0
+    /// unconditionally and would assert nothing.
+    #[derive(Resource, Default)]
+    struct HullVisibilityDirtied(usize);
+
+    /// Stand-in for any real `Changed<Visibility>` consumer. Registered after
+    /// `toggle_ship_model_visibility`, its `last_run` is its own previous run,
+    /// so it sees exactly what a downstream system would see.
+    fn count_dirtied_hulls(
+        mut dirtied: ResMut<HullVisibilityDirtied>,
+        hulls: Query<(), (With<LocalShipModel>, Changed<Visibility>)>,
+    ) {
+        dirtied.0 += hulls.iter().count();
+    }
+
+    /// The write is conditional: a steady view mode must not dirty `Visibility`
+    /// every frame, or downstream `Changed<Visibility>` consumers churn.
+    /// Replacing `set_if_neq` with `*vis = wanted` makes this fail.
+    #[test]
+    fn steady_view_mode_does_not_dirty_visibility_every_frame() {
+        let (mut app, ship) = hull_visibility_test_app();
+        app.init_resource::<HullVisibilityDirtied>();
+        app.add_systems(
+            Update,
+            count_dirtied_hulls.after(toggle_ship_model_visibility),
+        );
+        let child = spawn_hidden_model_child(&mut app, ship);
+        set_view_mode(&mut app, ViewMode::Cinematic);
+
+        app.update();
+        assert_eq!(hull_visibility(&mut app, child), Visibility::Visible);
+        // Sanity: the observer really does see the Hidden→Visible transition,
+        // so a later count of 1 means "no churn", not "query never matched".
+        assert_eq!(
+            app.world().resource::<HullVisibilityDirtied>().0,
+            1,
+            "the one real transition should register as dirty"
+        );
+
+        // Nothing changes from here on: same view mode, same hull.
+        app.update();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<HullVisibilityDirtied>().0,
+            1,
+            "steady state re-dirtied Visibility; the write is unconditional"
+        );
     }
 }

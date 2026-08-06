@@ -67,8 +67,11 @@ pub struct Ship;
 pub struct LocalShip;
 
 /// Marker component on the scene-root child entity of the local ship's GLB
-/// model. The child starts `Visibility::Hidden` and is toggled by the
-/// cinematic camera system.
+/// model. The child starts `Visibility::Hidden`; the renderer's
+/// `toggle_ship_model_visibility` then drives it from the current view mode
+/// every frame (visible only in `Cinematic`). That system is state-driven
+/// rather than edge-triggered precisely because this marker is inserted
+/// asynchronously — see issue #944.
 #[derive(Component)]
 pub struct LocalShipModel;
 

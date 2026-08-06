@@ -11,7 +11,7 @@
 // 1. RATE — over a window of real animation frames the tick advances at
 //    roughly the authored rate per WALL second, with deliberately wide bounds
 //    so a slow CI runner cannot fail the build on timing.
-// 2. DECOUPLING — the debug sim pause (F9 / `wasm_toggle_debug_pause`) pauses
+// 2. DECOUPLING — the sim pause (`wasm_toggle_pause`) pauses
 //    `Time<Virtual>`, which is what feeds the fixed accumulator. Frames keep
 //    rendering while the tick FREEZES, and resume advances it again. A
 //    frame-driven sim cannot pass this: its "tick" would follow the frames.
@@ -67,7 +67,7 @@ test('sim advances on the fixed logical tick, not the rendered frame', async ({ 
   expect(rate).toBeLessThan(180);
 
   // DECOUPLING. Pause the sim clock; frames keep coming, the tick must not.
-  await serverPage.evaluate(() => (window as any).wasm_toggle_debug_pause());
+  await serverPage.evaluate(() => (window as any).wasm_toggle_pause());
   // One frame for the PreUpdate drain to apply the toggle, then measure.
   await waitFrames(serverPage, 5);
   const pausedStart = await serverPage.evaluate(() => (window as any).wasm_sim_tick() as number);
@@ -80,7 +80,7 @@ test('sim advances on the fixed logical tick, not the rendered frame', async ({ 
   ).toBe(pausedStart);
 
   // Resume: the tick advances again.
-  await serverPage.evaluate(() => (window as any).wasm_toggle_debug_pause());
+  await serverPage.evaluate(() => (window as any).wasm_toggle_pause());
   await waitFrames(serverPage, 30);
   const resumed = await serverPage.evaluate(() => (window as any).wasm_sim_tick() as number);
   expect(resumed).toBeGreaterThan(pausedEnd);

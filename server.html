@@ -9,6 +9,15 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
+  <!-- Which build is this? (issue #939) `deploy-demo.yml` rewrites content to
+       "true" in dist/index.html; every other build leaves it "false". Read by
+       gui/build-flags.js, which hides the settings cog's Debug/Cheat tab on
+       the demo. It is a tag rather than only the compiled-in
+       `wasm_is_demo_build()` getter because that getter does not exist until
+       WASM finishes instantiating, and the tab must not be on offer during
+       that window (or at all, if WASM never boots). NOT the same flag as
+       TRUNK_BUILD_RELEASE, which the dev host also sets. -->
+  <meta name="phoenix-build-demo" content="false" />
   <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
 
@@ -103,6 +112,18 @@
 
 
   <style>
+    :root {
+      /* Corner reserved for the settings cog (issue #939).
+         The cog is `position: fixed` at top/left 10px and 34px square, so it
+         occupies x 10–44 / y 10–44 and takes NO layout space — nothing below
+         it can push it aside. Any panel that paints content into the top-left
+         corner has to reserve this much itself or the cog lands on top of it.
+         44px (10 inset + 34 size) + 12px gap, so the clearance below the cog
+         reads like the 10px inset above it. Stated in px, not rem, because
+         what it has to clear is a px-sized button: a rem value would stop
+         clearing it under a smaller root font-size. */
+      --settings-cog-keepout: 56px;
+    }
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
     body { font-family: monospace; }
     #server-shell {
@@ -160,7 +181,12 @@
     }
     #world-list {
       display: flex; flex-direction: column; gap: 0.5rem;
-      padding: 1.5rem 1rem;
+      /* Top padding is the cog keep-out, not a design choice: #world-list-label
+         is the first child and would otherwise sit at y 24, under the cog —
+         "SELECT A WORLD" rendered as "⚙ CT A WORLD" on the first screen the
+         host sees. The label's y is set by this padding alone, so the clash is
+         width-independent. */
+      padding: var(--settings-cog-keepout) 1rem 1.5rem;
       width: 14rem; min-width: 12rem; max-width: 18rem;
       overflow-y: auto;
       background: rgba(0,0,0,0.75);
@@ -207,6 +233,12 @@
       flex-direction: column;
       height: 100%;
       padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 4vw, 3rem);
+      /* #lobby-title is the first thing in the top-left corner here too. The
+         clamp already clears the cog above ~1100px viewport width (4vw ≥ 44px)
+         and stops clearing it below that, so floor the LEFT edge only — the
+         top and right stay on the clamp, which keeps the vertical space for
+         the station grid. */
+      padding-left: max(clamp(1rem, 4vw, 3rem), var(--settings-cog-keepout));
       box-sizing: border-box;
     }
     .lobby-grid-column {
@@ -717,85 +749,40 @@
       to   { opacity: 1; transform: translateY(0); }
     }
 
-    /* ── Debug panel ─────────────────────────────────────────── */
-    #debug-toggle-btn {
-      width: 100%;
-      height: 42px;
-      z-index: 2;
-      opacity: 1;
-      cursor: pointer;
-      background: #0f141b;
-      border: 0;
-      border-bottom: 1px solid #223246;
-      color: #8ca4c2;
-      font-family: "Chakra Petch", system-ui, sans-serif;
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      -webkit-tap-highlight-color: transparent;
-      transition: background 0.2s, color 0.2s;
-    }
-    #debug-toggle-btn:hover { background: #162131; color: #c9d8ea; }
+    /* ── Debug output panel (issue #939) ─────────────────────────
+       The dock is now output-only: its toolbar moved into the settings cog,
+       and it stays out of the layout entirely until a debug output is
+       selected there. */
     #debug-dock {
-      display: flex;
+      display: none;
       flex-direction: column;
-      flex: 0 0 52px;
-      width: 52px;
+      flex: 0 0 min(28vw, 420px);
+      width: min(28vw, 420px);
       height: 100%;
-      min-width: 52px;
       background: #05080d;
       border-left: 1px solid #1e2a39;
       overflow: hidden;
-      transition: flex-basis 0.2s ease, width 0.2s ease;
     }
-    #debug-dock.open {
-      flex-basis: min(28vw, 420px);
-      width: min(28vw, 420px);
-    }
+    #debug-dock.open { display: flex; }
     #debug-panel {
       position: relative;
       width: 100%;
-      height: calc(100% - 42px);
+      height: 100%;
       z-index: 1;
       background: rgba(0,0,0,0.88);
       border-left: 0;
-      display: none;
+      display: flex;
       flex-direction: column;
       font-family: monospace;
       color: #0f0;
       font-size: 11px;
       touch-action: pan-y;
     }
-    #debug-panel.open { display: flex; }
-    #debug-toolbar {
-      display: flex; flex-direction: row;
-      border-bottom: 1px solid #334;
-      flex-shrink: 0;
-    }
-    /* Action buttons (left column) */
-    #debug-actions {
-      display: flex; flex-direction: column;
-      gap: 1px; padding: 3px;
-      background: #111;
-      border-right: 1px solid #334;
-      flex-shrink: 0;
-    }
-    .debug-action {
-      width: 28px; height: 28px;
-      padding: 0; margin: 0;
-      background: #1a1a1a; border: 1px solid #333;
-      color: #666; cursor: pointer;
-      font-family: monospace; font-size: 14px;
-      line-height: 28px; text-align: center;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
-    }
-    .debug-action:hover { background: #223; border-color: #558; }
-    .debug-action.active { background: #224; border-color: #66c; color: #ccf; }
     /* Save/resume outcome on the button itself (issue #862). A save is a
        fire-and-forget click whose result arrives a frame or two later from a
-       Bevy system, so the button that was clicked is where the answer belongs. */
+       Bevy system, so the button that was clicked is where the answer belongs.
+       The buttons now live in the settings cog's Debug tab, which keeps the
+       `.debug-action[data-action]` pair `flagSnapshotButton()` finds them by. */
     .debug-action.ok { border-color: #4c8; color: #8fc; }
     .debug-action.failed { border-color: #c55; color: #f99; }
     /* ...and the sentence itself, which is the half that matters when the
@@ -820,31 +807,6 @@
     #snapshot-status.shown { display: block; }
     #snapshot-status.ok { border-left-color: #4c8; }
     #snapshot-status.failed { border-left-color: #c55; color: #fbb; }
-    /* Disabled host override (e.g. teleport with no shared waypoint). */
-    .debug-action:disabled, .debug-action.disabled {
-      opacity: 0.35; cursor: not-allowed;
-      background: #1a1a1a; border-color: #333; color: #555;
-    }
-    .debug-action:disabled:hover, .debug-action.disabled:hover {
-      background: #1a1a1a; border-color: #333;
-    }
-    /* Tab bar (right of actions) */
-    #debug-tabs {
-      display: flex; flex-direction: row;
-      gap: 2px; padding: 3px; flex: 1;
-      background: #111;
-    }
-    .debug-tab {
-      flex: 1; padding: 5px 2px;
-      background: #1a1a1a; border: 1px solid #333;
-      color: #666; cursor: pointer;
-      font-family: monospace; font-size: 10px;
-      text-align: center;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
-    }
-    .debug-tab:hover { background: #223; border-color: #558; }
-    .debug-tab.active { background: #224; border-color: #66c; color: #ccf; }
     #debug-content {
       flex: 1; overflow-y: auto;
       padding: 6px 10px;
@@ -853,7 +815,109 @@
       line-height: 1.35;
       color: #0f0;
     }
-    /* Portrait: keep the panel inline by docking it below the viewscreen. */
+
+    /* ── Settings cog (issue #939) ───────────────────────────────
+       Top-left, over the viewscreen. Fixed rather than docked: the shell is a
+       flex row whose first child is the viewscreen, and the cog must not
+       reserve layout width from it.
+       z-index 210/209: must clear #scenario-panel (200) and .lobby-panel
+       (180) too, not just #game-over-overlay (85) — the cog is reachable
+       throughout Lobby/pre-scenario, which is exactly when Audio's menu
+       music (server.html ~2572) is the only thing playing. */
+    #server-settings-btn {
+      position: fixed;
+      top: 10px; left: 10px;
+      z-index: 210;
+      width: 34px; height: 34px;
+      padding: 0;
+      background: rgba(6, 11, 18, 0.82);
+      border: 1px solid #223246;
+      border-radius: 4px;
+      color: #8ca4c2;
+      font-size: 18px; line-height: 32px; text-align: center;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.2s, color 0.2s;
+    }
+    #server-settings-btn:hover { background: #162131; color: #c9d8ea; }
+    #server-settings-btn[aria-expanded="true"] { background: #1b2940; color: #cfe0f5; }
+    #server-settings-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 209;
+      background: rgba(2, 5, 9, 0.55);
+    }
+    #server-settings-overlay[hidden] { display: none; }
+    .server-settings-popup {
+      position: absolute;
+      top: 52px; left: 10px;
+      width: min(360px, calc(100vw - 20px));
+      max-height: calc(100vh - 70px);
+      overflow-y: auto;
+      padding: 12px 14px 14px;
+      background: rgba(6, 11, 18, 0.97);
+      border: 1px solid #223246;
+      border-radius: 5px;
+      color: #c9d8ea;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+    }
+    .server-settings-title {
+      font-size: 12px; font-weight: 600;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: #8ca4c2;
+      margin-bottom: 10px;
+    }
+    .server-settings-tabs {
+      display: flex; flex-direction: row; gap: 3px;
+      margin-bottom: 12px;
+    }
+    .server-settings-tab {
+      flex: 1; padding: 6px 4px;
+      background: #10171f; border: 1px solid #223246;
+      color: #7f93ab; cursor: pointer;
+      font-family: inherit; font-size: 11px;
+      letter-spacing: 0.06em;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .server-settings-tab:hover { background: #182434; color: #c9d8ea; }
+    .server-settings-tab.active { background: #1d2c42; border-color: #3d577c; color: #dbe8f7; }
+    .server-settings-section { margin-bottom: 14px; }
+    .server-settings-section:last-child { margin-bottom: 0; }
+    .server-settings-heading {
+      font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+      color: #63788f;
+      margin-bottom: 6px;
+    }
+    .server-settings-hint {
+      font-size: 10px; color: #55697f; line-height: 1.4;
+      margin-bottom: 6px;
+    }
+    .server-settings-row {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+    }
+    .server-settings-control {
+      padding: 6px 9px;
+      background: #10171f; border: 1px solid #223246;
+      color: #8ca4c2; cursor: pointer;
+      font-family: inherit; font-size: 11px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .server-settings-control:hover { background: #182434; color: #c9d8ea; }
+    .server-settings-control.active { background: #1d2c42; border-color: #3d577c; color: #dbe8f7; }
+    /* The selected output is the one the panel is showing — distinct from the
+       other enabled overlays, which are on but not being read. */
+    .server-settings-control.viewing { box-shadow: inset 0 0 0 1px #5a86bd; }
+    .server-settings-control:disabled, .server-settings-control.disabled {
+      opacity: 0.35; cursor: not-allowed;
+      background: #10171f; border-color: #223246; color: #55697f;
+    }
+    .server-settings-slider { flex: 1; min-width: 140px; }
+    .server-settings-readout {
+      min-width: 4ch; text-align: right;
+      font-size: 11px; color: #8ca4c2;
+    }
+
+    /* Portrait: keep the output panel inline by docking it below the viewscreen. */
     @media (orientation: portrait) {
       #server-shell {
         flex-direction: column;
@@ -861,25 +925,18 @@
       #viewscreen-shell {
         min-height: 0;
       }
-      #debug-dock {
+      #debug-dock.open {
         width: 100%;
         min-width: 0;
-        height: 42px;
+        flex-basis: 28vh;
+        height: 28vh;
         border-left: none;
         border-top: 1px solid #1e2a39;
       }
-      #debug-dock.open {
-        width: 100%;
-        flex-basis: 28vh;
-        height: 28vh;
-      }
       #debug-panel {
         width: 100%;
-        height: calc(100% - 42px);
         border-bottom: 0;
       }
-      #debug-actions { flex-direction: row; }
-      .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
 </head>
@@ -889,6 +946,24 @@
     // Session token for actions from the host page's own consoles. Must match
     // console_bridge::LOCAL_CONSOLE_TOKEN in Rust (src/console_bridge.rs).
     var LOCAL_CONSOLE_TOKEN = '__local_console__';
+
+    // Token prefix reserved for AI operators. Must match the `ai:` prefix
+    // `command_admission` routes on (src/command_admission/ai_emit.rs).
+    var AI_TOKEN_PREFIX = 'ai:';
+
+    // True when a PEER may identify under `token`. A peer's token is
+    // self-declared, so the two host-runtime shapes above have to be refused
+    // here: both carry admission authority no phone is entitled to (god mode
+    // and the other simulation overrides via LOCAL_CONSOLE_TOKEN, NPC command
+    // routing via `ai:`). Defined in an earlier classic script, so it is a
+    // global before the PeerJS handlers are even parsed — no module load
+    // order can leave the check absent.
+    function isPeerTokenAllowed(token) {
+      if (typeof token !== 'string' || token.length === 0) return false;
+      if (token === LOCAL_CONSOLE_TOKEN) return false;
+      if (token.startsWith(AI_TOKEN_PREFIX)) return false;
+      return true;
+    }
 
     // The one save slot the host page uses. Must satisfy `vellum_save::is_slot`
     // (lowercase, digits, `_`, `-`), which the storage backend checks rather
@@ -1204,29 +1279,13 @@
       </div>
     </div>
 
-    <aside id="debug-dock">
-      <button id="debug-toggle-btn" title="Toggle debug panel">Debug</button>
-
-      <!-- Debug panel -->
+    <!-- Debug OUTPUT panel (issue #939). Hidden until a debug output is
+         selected in the settings cog, which also owns the actions and tabs
+         that used to live in a toolbar here. `gui/server-settings.js` adds and
+         removes the `open` class and writes #debug-content. -->
+    <aside id="debug-dock" aria-hidden="true">
       <div id="debug-panel">
-        <div id="debug-toolbar">
-          <div id="debug-actions">
-            <button class="debug-action" data-action="pause" title="Pause simulation">⏸</button>
-            <button class="debug-action" data-action="wireframes" title="Toggle region wireframes">🌐</button>
-            <button class="debug-action" data-action="godmode" title="God mode (no damage)">🛡</button>
-            <button class="debug-action" data-action="instagib" title="Instagib (100x damage)">⚡</button>
-            <button class="debug-action" data-action="teleport-waypoint" title="Teleport ship to Navigation waypoint" disabled>📍</button>
-            <button class="debug-action" data-action="save-snapshot" title="Save this session (issue #862)">💾</button>
-            <button class="debug-action" data-action="resume-snapshot" title="Reload and resume the saved session">↺</button>
-          </div>
-          <div id="debug-tabs">
-            <button class="debug-tab active" data-tab="0">Mod</button>
-            <button class="debug-tab" data-tab="1">Dmg</button>
-            <button class="debug-tab" data-tab="2">Ent</button>
-            <button class="debug-tab" data-tab="3">Insp</button>
-          </div>
-        </div>
-        <pre id="debug-content">(panel closed)</pre>
+        <pre id="debug-content"></pre>
       </div>
     </aside>
 
@@ -1353,12 +1412,14 @@
     // ── Engine volume from thrust (coefficients from the ship's TOML) ───────
     if (_els.engine && _audioCfg && _audioCfg.engine && typeof s.engine_thrust === 'number') {
       const e = _audioCfg.engine;
-      _els.engine.volume = clampVol(e.idle_volume + s.engine_thrust * e.volume_at_full_thrust);
+      // setChannelVolume, not a direct assignment: the ride is the authored
+      // level, and master scales whatever it lands on (issue #939).
+      setChannelVolume('engine', e.idle_volume + s.engine_thrust * e.volume_at_full_thrust);
     }
     // ── Phaser loop follows the change-detected firing flag ────────────────
     if (_els.phaser && _audioCfg && _audioCfg.phaser_loop) {
       if (s.phaser_firing && !_prevPhaser) {
-        _els.phaser.volume = clampVol(_audioCfg.phaser_loop.volume);
+        setChannelVolume('phaser', _audioCfg.phaser_loop.volume);
         _els.phaser.currentTime = 0;
         _els.phaser.play().catch(() => {});
       } else if (!s.phaser_firing && _prevPhaser) {
@@ -1927,7 +1988,30 @@
             try {
               const msg = JSON.parse(json);
               if (msg.type === 'Identify') {
-                token = msg.data.token;
+                const claimed = msg.data && msg.data.token;
+                // A peer's token is self-declared, and two token shapes are
+                // RESERVED for the host runtime: LOCAL_CONSOLE_TOKEN, which
+                // command admission grants a blanket bypass
+                // (`src/command_admission/policy.rs`) and which the settings
+                // cog's mid-mission exit-to-lobby is keyed on (issue #939), and
+                // the `ai:` prefix, which routes commands to an NPC's own
+                // entity (`admit_system_commands`). A phone that simply typed
+                // one of those into its Identify would inherit host authority,
+                // so refuse the connection outright rather than dispatch a
+                // single message under it. `handle_identify` refuses the same
+                // shapes server-side; this is the gate that matters, because
+                // every LATER message from this peer is dispatched under the
+                // token recorded here.
+                if (!isPeerTokenAllowed(claimed)) {
+                  console.warn(
+                    `[PeerJS] REJECTED ${shortId}… — Identify claimed the reserved ` +
+                    `token "${String(claimed).slice(0, 24)}", which only the host ` +
+                    `runtime may use. Closing the connection.`,
+                  );
+                  conn.close();
+                  return;
+                }
+                token = claimed;
                 // Duplicate-token detection. If another open connection already
                 // claims this token, update tokenConns to the new connection
                 // first (so the old close handler's guard prevents a spurious
@@ -2470,11 +2554,57 @@
       return Math.min(1, Math.max(0, n));
     }
 
+    // ── Master volume (issue #939) ─────────────────────────────────────────
+    //
+    // A SCALE FACTOR over the authored volumes, never a replacement for them.
+    // Every per-sound level on this page is designed data — ship [audio],
+    // world [audio.red_alert], the blaster spec, the engine's idle/full-thrust
+    // coefficients — and the host's slider must not overwrite the mix the
+    // designer authored, only turn the whole thing up or down. So each channel
+    // keeps its authored level in `_authoredVol` and what reaches the element
+    // is always `authored × master`. 1 is the identity (unattenuated), which
+    // is why it is the default rather than a tunable.
+    const MASTER_VOLUME_KEY = 'phoenix-server-master-volume';
+    const MASTER_VOLUME_DEFAULT = 1;
+    // The menu bed predates the audio config and has no TOML entry to read;
+    // named here so it composes with master like every other channel.
+    const MENU_MUSIC_VOLUME = 0.5;
+    const _authoredVol = {};   // channel key -> authored (pre-master) volume
+    let _masterVolume = MASTER_VOLUME_DEFAULT;
+    try {
+      const stored = window.localStorage.getItem(MASTER_VOLUME_KEY);
+      if (stored !== null && isFinite(Number(stored))) _masterVolume = clampVol(stored);
+    } catch (_) { /* private mode / storage disabled — stay at the default */ }
+
+    function applyMaster(authored) {
+      return clampVol(clampVol(authored) * _masterVolume);
+    }
+
+    /** Set an element's live volume from an authored level, remembering it. */
+    function setChannelVolume(key, authored) {
+      _authoredVol[key] = clampVol(authored);
+      if (_els[key]) _els[key].volume = applyMaster(authored);
+    }
+
+    window.__getMasterVolume = function() { return _masterVolume; };
+
+    // Live: re-derives every channel from its authored level, so dragging the
+    // slider is audible immediately rather than at the next config push.
+    window.__setMasterVolume = function(v) {
+      _masterVolume = clampVol(v);
+      try { window.localStorage.setItem(MASTER_VOLUME_KEY, String(_masterVolume)); }
+      catch (_) { /* not worth failing the drag over */ }
+      Object.keys(_els).forEach(function(k) {
+        if (k in _authoredVol) _els[k].volume = applyMaster(_authoredVol[k]);
+      });
+      if (_menuMusic) _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
+    };
+
     function startMenuMusic() {
       if (_menuMusic) return;
       _menuMusic = new Audio('assets/sounds/exploration.mp3');
       _menuMusic.loop = true;
-      _menuMusic.volume = 0.5;
+      _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
       _menuMusic.play().catch(function() {});
     }
 
@@ -2491,8 +2621,8 @@
       const el = new Audio(spec.file);
       el.loop = true;
       el.preload = 'auto';
-      el.volume = clampVol(volume);
       _els[key] = el;
+      setChannelVolume(key, volume);
     }
 
     window.__audioConfig = function(json) {
@@ -2513,14 +2643,14 @@
         const m = new Audio(c.red_alert.music_file);
         m.loop = true;
         m.preload = 'auto';
-        m.volume = clampVol(c.red_alert.music_volume);
         _els.music = m;
+        setChannelVolume('music', c.red_alert.music_volume);
       }
       if (c.red_alert && c.red_alert.siren_file) {
         const s = new Audio(c.red_alert.siren_file);
         s.preload = 'auto';
-        s.volume = clampVol(c.red_alert.siren_volume);
         _els.siren = s;
+        setChannelVolume('siren', c.red_alert.siren_volume);
       }
 
       initBlasterAudio(c.blaster);
@@ -2594,7 +2724,9 @@
           pan.setPosition(c.x, c.y, c.z); // older Safari
         }
         const g = _actx.createGain();
-        g.gain.value = clampVol(spec.volume);
+        // Web Audio, so this one is scaled at the cue rather than carried on
+        // an element — same authored × master composition.
+        g.gain.value = applyMaster(spec.volume);
         src.connect(pan).connect(g).connect(_actx.destination);
         src.start();
       } catch (e) {
@@ -2602,9 +2734,10 @@
       }
     };
 
-    // Forcefield SFX level, computed and clamped in Rust.
+    // Forcefield SFX level, computed and clamped in Rust. Rust's number is the
+    // authored level; master scales it like every other channel.
     window.__audioLevel = function(level) {
-      if (_els.forcefield) _els.forcefield.volume = clampVol(level);
+      if (_els.forcefield) setChannelVolume('forcefield', level);
     };
 
     // Smoke-test hook — lets Playwright assert on audio state without
@@ -2624,6 +2757,10 @@
         els: Object.keys(_els),
         started: _audioStarted,
         volumes: vols,
+        // Authored (pre-master) levels and the scale factor over them, so a
+        // test can assert the composition rather than just the product.
+        authoredVolumes: Object.assign({}, _authoredVol),
+        master: _masterVolume,
         paused: paused,
         musicPlaying: !!(_els.music && !_els.music.paused),
         phaserPlaying: !!(_els.phaser && !_els.phaser.paused),
@@ -2806,7 +2943,12 @@ function finishInit() {
   window.wasm_resume_pending = wasmBindings.wasm_resume_pending;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
   window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
-  window.wasm_toggle_debug_pause = wasmBindings.wasm_toggle_debug_pause;
+  // Pause is a GAMEPLAY control, not a debug one (issue #939): it sits on the
+  // settings cog's un-gated Gameplay tab, so it has to keep working in a
+  // demo build where the Debug/Cheat tab is gone. Hence the un-prefixed
+  // export name and the paired read-back the menu paints from.
+  window.wasm_toggle_pause = wasmBindings.wasm_toggle_pause;
+  window.wasm_is_paused = wasmBindings.wasm_is_paused;
   window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
   window.wasm_toggle_debug_damage = wasmBindings.wasm_toggle_debug_damage;
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
@@ -2832,9 +2974,38 @@ function finishInit() {
     qrOverlay.style.display = qrVisible ? 'block' : 'none';
   });
 
-  // ── Return to Lobby (GameOver overlay button) ─────────────────────────
-  document.getElementById('return-to-lobby-btn').addEventListener('click', function() {
+  // ── Return to Lobby ────────────────────────────────────────────────────
+  // Two callers, one behaviour: the GameOver overlay's button, and the
+  // settings cog's Gameplay → "Exit to Lobby" (issue #939), which aborts a
+  // mission that is still InProgress. Both send the same un-gated
+  // `ReturnToLobby` under LOCAL_CONSOLE_TOKEN; the phase gate is the server's
+  // (`lobby::handler::handle_return_to_lobby`), which honours GameOver from
+  // anyone and InProgress from the host token only — a phone must not be able
+  // to abandon a mission the rest of the crew is still flying.
+  function hostReturnToLobby() {
+    // Unpause first, or the return is never acted on. Since issue #895 lobby
+    // handling lives in `FixedUpdate`, and pausing stops `Time<Virtual>`, which
+    // starves the fixed accumulator entirely — so a `ReturnToLobby` sent while
+    // paused sits unread while this function has already torn the host screen
+    // back down to the scenario picker. "Pause, then Exit to Lobby" is the
+    // sequence the settings cog invites, both controls being one tab apart.
+    //
+    // Unpausing rather than disabling the exit while paused: the click is an
+    // unambiguous instruction to leave, a greyed-out exit reads as a bug rather
+    // than as an instruction to unpause first, and this funnel also serves the
+    // GameOver overlay's button — which is equally dead while paused and has no
+    // menu to grey out. One toggle, in one place, so the read-back mirror
+    // (`SIM_PAUSED`, updated a frame later) is never double-toggled.
+    try {
+      if (typeof window.wasm_is_paused === 'function' && window.wasm_is_paused()) {
+        window.wasm_toggle_pause();
+      }
+    } catch (_) {}
     window.__sendAction(JSON.stringify({ action: 'return_to_lobby' }));
+    // Mid-mission the GameOver overlay was never raised; hiding it is a no-op
+    // then and the tidy-up that matters when it was.
+    const goOverlay = document.getElementById('game-over-overlay');
+    if (goOverlay) goOverlay.style.display = 'none';
     // Return the server screen to the shared pre-scenario selection (issue
     // #756): show the scenario panel again; the lobby panel stays hidden until
     // the (re)selection completes and driveWorldLoad reuses the loaded world.
@@ -2859,7 +3030,9 @@ function finishInit() {
     // Re-lift the join QR above the freshly re-shown scenario panel (AC1).
     showJoinQrOverPanel();
     startMenuMusic();
-  });
+  }
+  window.__hostReturnToLobby = hostReturnToLobby;
+  document.getElementById('return-to-lobby-btn').addEventListener('click', hostReturnToLobby);
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
   // Expose the Host Channel registration. Inbound actions route through
@@ -3143,6 +3316,14 @@ function startPhoenix() {
 
 window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
+  // The demo-build flag (issue #939) is bound here rather than in
+  // finishInit()'s list: the settings cog can be opened long before a world is
+  // loaded. This is the SECOND of the two answers gui/build-flags.js consults —
+  // the `phoenix-build-demo` meta tag in <head> is what covers the window
+  // before this line runs, since a getter that does not exist yet must not be
+  // read as "dev build". `crate::build_flags` bakes PHOENIX_DEMO_BUILD in at
+  // compile time, which is what makes a locally-flagged build honest too.
+  try { window.wasm_is_demo_build = window.wasmBindings.wasm_is_demo_build; } catch (_) {}
   // ?scenario bypass (or an arbiter selection that completed before WASM was
   // ready) sets selectedScenario — start straight into world load. Otherwise
   // build the #754 catalog and render the QR-first scenario picker (issue #755).
@@ -3150,184 +3331,38 @@ window.addEventListener('TrunkApplicationStarted', () => {
   else buildScenarioCatalog();
 });
 
-    // ── Debug panel (replaces old F-key overlays) ──────────────────────────
-    (function() {
-      var dock = document.getElementById('debug-dock');
-      var panel = document.getElementById('debug-panel');
-      var toggleBtn = document.getElementById('debug-toggle-btn');
-      var content = document.getElementById('debug-content');
-      var tabs = document.querySelectorAll('.debug-tab');
-      var actions = document.querySelectorAll('.debug-action');
-      var teleportBtn = document.querySelector('.debug-action[data-action="teleport-waypoint"]');
-      // Issue #900: God Mode now flips via a logged command applied on its
-      // own admitted tick rather than a thread-local flipped synchronously by
-      // wasm_toggle_god_mode(), so the button's active class is synced from
-      // rafLoop each frame (like the teleport button's disabled state) rather
-      // than read back immediately after the click.
-      var godModeBtn = document.querySelector('.debug-action[data-action="godmode"]');
-      var panelOpen = false;
-      var activeTab = 0;
-      // Track resource ON/OFF state (all 4 are toggled together)
-      var debugResourcesOn = false;
-
-      // Tab data-getter functions (must be available on window)
-      var dataGetters = [
-        function() { return typeof wasm_get_debug_state === 'function' ? wasm_get_debug_state() : '(waiting for WASM)'; },
-        function() { return typeof wasm_get_damage_log === 'function' ? wasm_get_damage_log() : '(waiting for WASM)'; },
-        function() { return typeof wasm_get_entity_debug_state === 'function' ? wasm_get_entity_debug_state() : '(waiting for WASM)'; },
-        function() { return typeof wasm_get_entity_inspector === 'function' ? wasm_get_entity_inspector() : '(waiting for WASM)'; }
-      ];
-
-      function setActiveTab(index) {
-        activeTab = index;
-        tabs.forEach(function(t, i) { t.classList.toggle('active', i === index); });
-        // Force immediate content refresh
-        if (panelOpen) {
-          content.textContent = dataGetters[index]();
-        }
+    // ── Snapshot host shims (issue #939) ───────────────────────────────────
+    // The settings cog's Debug tab drives these by name; the slot id and the
+    // "a resume is a page load" reload are the host page's business, not the
+    // menu's.
+    window.__hostSaveSnapshot = function() {
+      // Fire-and-forget: the capture itself is taken by a Bevy system on the
+      // next PostUpdate, because a save has to stand on a tick boundary and a
+      // click can land anywhere.
+      if (typeof wasm_save_snapshot === 'function') {
+        wasm_save_snapshot(PHOENIX_SAVE_SLOT);
+      } else {
+        showSnapshotStatus(false, 'the simulation is not running yet, so there is nothing to save');
       }
+    };
+    window.__hostResumeSnapshot = function() {
+      // A resume is a page load. "Restore into a fresh app" has one honest
+      // meaning in a browser, and this is it: hand the slot to the next boot
+      // through the URL and reload. Nothing is restored here, because there is
+      // no fresh app here to restore into.
+      var resumeUrl = new URL(window.location.href);
+      resumeUrl.searchParams.set('resume', PHOENIX_SAVE_SLOT);
+      window.location.href = resumeUrl.toString();
+    };
+  </script>
 
-      function openPanel() {
-        panelOpen = true;
-        dock.classList.add('open');
-        panel.classList.add('open');
-        toggleBtn.textContent = 'Close';
-        toggleBtn.setAttribute('aria-expanded', 'true');
-        // Enable all 4 debug Bevy resources (each toggle flips once)
-        if (!debugResourcesOn) {
-          debugResourcesOn = true;
-          if (typeof wasm_toggle_debug_overlay === 'function') wasm_toggle_debug_overlay();
-          if (typeof wasm_toggle_debug_damage === 'function') wasm_toggle_debug_damage();
-          if (typeof wasm_toggle_debug_entities === 'function') wasm_toggle_debug_entities();
-          if (typeof wasm_toggle_entity_inspector === 'function') wasm_toggle_entity_inspector();
-        }
-        // Read active tab immediately
-        content.textContent = dataGetters[activeTab]();
-      }
-
-      function closePanel() {
-        panelOpen = false;
-        dock.classList.remove('open');
-        panel.classList.remove('open');
-        toggleBtn.textContent = 'Debug';
-        toggleBtn.setAttribute('aria-expanded', 'false');
-        // Disable all 4 debug Bevy resources
-        if (debugResourcesOn) {
-          debugResourcesOn = false;
-          if (typeof wasm_toggle_debug_overlay === 'function') wasm_toggle_debug_overlay();
-          if (typeof wasm_toggle_debug_damage === 'function') wasm_toggle_debug_damage();
-          if (typeof wasm_toggle_debug_entities === 'function') wasm_toggle_debug_entities();
-          if (typeof wasm_toggle_entity_inspector === 'function') wasm_toggle_entity_inspector();
-        }
-      }
-
-      // Toggle button
-      toggleBtn.addEventListener('click', function() {
-        if (panelOpen) closePanel(); else openPanel();
-      });
-
-      // Tab clicks
-      tabs.forEach(function(tab) {
-        tab.addEventListener('click', function() {
-          var idx = parseInt(tab.getAttribute('data-tab'), 10);
-          setActiveTab(idx);
-        });
-      });
-
-      // Action buttons
-      actions.forEach(function(btn) {
-        btn.addEventListener('click', function() {
-          var action = btn.getAttribute('data-action');
-          switch (action) {
-            case 'pause':
-              if (typeof wasm_toggle_debug_pause === 'function') wasm_toggle_debug_pause();
-              break;
-            case 'wireframes':
-              if (typeof wasm_toggle_debug_regions === 'function') wasm_toggle_debug_regions();
-              break;
-            case 'godmode':
-              // Fire-and-forget (like teleport-waypoint): the toggle now
-              // crosses command admission and applies on its own admitted
-              // tick, so the button's active class is synced from rafLoop
-              // rather than read back synchronously here.
-              if (typeof wasm_toggle_god_mode === 'function') wasm_toggle_god_mode();
-              break;
-            case 'instagib':
-              if (typeof wasm_toggle_instagib === 'function') wasm_toggle_instagib();
-              if (typeof wasm_get_instagib === 'function') {
-                btn.classList.toggle('active', wasm_get_instagib());
-              }
-              break;
-            case 'save-snapshot':
-              // Fire-and-forget: the capture itself is taken by a Bevy system
-              // on the next PostUpdate, because a save has to stand on a tick
-              // boundary and a click can land anywhere.
-              if (typeof wasm_save_snapshot === 'function') {
-                wasm_save_snapshot(PHOENIX_SAVE_SLOT);
-              } else {
-                showSnapshotStatus(false, 'the simulation is not running yet, so there is nothing to save');
-              }
-              break;
-            case 'resume-snapshot': {
-              // A resume is a page load. "Restore into a fresh app" has one
-              // honest meaning in a browser, and this is it: hand the slot to
-              // the next boot through the URL and reload. Nothing is restored
-              // here, because there is no fresh app here to restore into.
-              var resumeUrl = new URL(window.location.href);
-              resumeUrl.searchParams.set('resume', PHOENIX_SAVE_SLOT);
-              window.location.href = resumeUrl.toString();
-              break;
-            }
-            case 'teleport-waypoint':
-              // Host-only sim override: fire-and-forget (like pause/wireframes).
-              // Guarded by the disabled state, but re-check to be safe.
-              if (btn.disabled) break;
-              if (typeof wasm_teleport_to_waypoint === 'function') wasm_teleport_to_waypoint();
-              break;
-          }
-        });
-      });
-
-      // Touch swipe on the panel to switch tabs (mobile)
-      var touchStartX = null, touchStartY = null;
-      panel.addEventListener('touchstart', function(e) {
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
-      });
-      panel.addEventListener('touchend', function(e) {
-        if (touchStartX === null) return;
-        var dx = e.changedTouches[0].clientX - touchStartX;
-        var dy = e.changedTouches[0].clientY - touchStartY;
-        if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-          var next = dx > 0 ? activeTab - 1 : activeTab + 1;
-          if (next >= 0 && next < tabs.length) setActiveTab(next);
-        }
-        touchStartX = null;
-        touchStartY = null;
-      });
-
-      // Unified rAF loop: reads active tab data while panel is open
-      function rafLoop() {
-        if (panelOpen && typeof dataGetters[activeTab] === 'function') {
-          content.textContent = dataGetters[activeTab]();
-        }
-        // Host teleport override (issue #770, AC2): disabled while there is no
-        // shared Navigation waypoint to teleport to.
-        if (teleportBtn && typeof wasm_has_navigation_waypoint === 'function') {
-          var hasWaypoint = wasm_has_navigation_waypoint();
-          teleportBtn.disabled = !hasWaypoint;
-          teleportBtn.classList.toggle('disabled', !hasWaypoint);
-        }
-        // God Mode active-class sync (issue #900): reads back the mirror of
-        // the authoritative `GodMode` resource each frame rather than once,
-        // synchronously, right after the toggle request is queued.
-        if (godModeBtn && typeof wasm_get_god_mode === 'function') {
-          godModeBtn.classList.toggle('active', wasm_get_god_mode());
-        }
-        requestAnimationFrame(rafLoop);
-      }
-      requestAnimationFrame(rafLoop);
-    })();
+  <!-- Host settings cog (issue #939): three tabs — Debug/Cheat (absent in
+       the demo build), Audio, Gameplay. Mounted from a module so the panel
+       logic is unit-testable under vitest; everything it reaches for is a
+       window binding published by the classic scripts above. -->
+  <script type="module">
+    import { mountServerSettings } from './gui/server-settings.js';
+    mountServerSettings();
   </script>
 </body>
 </html>

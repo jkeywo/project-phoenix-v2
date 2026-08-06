@@ -155,9 +155,13 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [server.html, src/server/bridge.rs, src/server_app.rs]
-      symbols: [wasm_toggle_debug_pause, wasm_toggle_god_mode, wasm_toggle_instagib]
-      tests: [cargo test]
+      paths: [server.html, gui/server-settings.js, src/server/bridge.rs, src/server_app.rs]
+      # Since issue #939 these are driven from the host settings cog's
+      # Debug/Cheat tab, not a loose toolbar in the debug dock. Pause is the
+      # odd one out: it moved to the cog's Gameplay tab, which is NOT gated on
+      # PHOENIX_DEMO_BUILD, hence the un-prefixed `wasm_toggle_pause`.
+      symbols: [wasm_toggle_pause, wasm_toggle_god_mode, wasm_toggle_instagib]
+      tests: [cargo test, npx vitest run tests/client/server-settings.test.js]
 
   - state: host-debug-simulation-override-state
     core:
@@ -176,7 +180,12 @@ entities:
       # in src/server/bridge.rs, read by is_instagib(). Pause and god mode are
       # real Bevy resources; recorded together with an honest note on the
       # third.
-      symbols: [DebugPaused, GodMode, is_instagib]
+      #
+      # Pause is `SimulationPaused` (renamed from `DebugPaused` in issue #939):
+      # the host settings menu exposes it on the NOT-build-gated Gameplay tab,
+      # so it outlives the Debug/Cheat tab in the demo build and is no longer
+      # a debug-only concept.
+      symbols: [SimulationPaused, GodMode, is_instagib]
 
   - component: host-debug-waypoint-teleport
     core:

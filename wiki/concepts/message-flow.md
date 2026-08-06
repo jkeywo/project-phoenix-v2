@@ -147,16 +147,25 @@ See [Networking](./networking.md) for the DataChannel creation details.
 
 Six near-identical `RefCell<bool>` thread-locals (one per debug overlay) were replaced by one `DebugToggleKind` enum-keyed pending set plus `apply_pending_toggles` — a pure function (no Bevy/wasm dependency, unit-testable natively) that flips the corresponding `bool` flag for each variant present in the set. Adding a new debug overlay means: add a variant to `DebugToggleKind`, add its resource field to `apply_pending_toggles`, and add one `wasm_bindgen` export — no new thread-local, no new drain block. The six `wasm_bindgen` export names/signatures are unchanged so `server.html`'s hotkey wiring needed no changes.
 
-The server-page Debug panel is intentionally available in normal builds for now.
-Its overlay, damage, entity, and inspector views are host-local diagnostics, but
-pause, god mode, and instagib alter the authoritative simulation and are
-host-only powers rather than diagnostic-only controls. They are never sent to
-phone clients.
+Since issue #939 these toggles live on the **Debug/Cheat** tab of the server
+page's settings cog (`gui/server-settings.js`), which is omitted entirely from
+the public demo build (`PHOENIX_DEMO_BUILD=true`, read back via
+`wasm_is_demo_build()` and the `phoenix-build-demo` meta tag). That is
+deliberately NOT `TRUNK_BUILD_RELEASE`: the GitHub Pages dev host sets that one
+too, and it keeps its debug tooling. Its overlay, damage, entity, and inspector views are
+host-local diagnostics — selecting one enables just that resource and pops out
+the output panel — but god mode and instagib alter the authoritative simulation
+and are host-only powers rather than diagnostic-only controls. They are never
+sent to phone clients.
 
-The intended Debug panel also includes **Teleport to Waypoint**: it is enabled
-only while the shared authoritative Navigation waypoint exists, and immediately
-moves the local ship there. Like the other simulation overrides, it remains
-host-only and available in normal builds for now.
+The same tab carries **Teleport to Waypoint**: enabled only while the shared
+authoritative Navigation waypoint exists, and immediately moves the local ship
+there. Like the other simulation overrides, it is host-only and absent from the
+demo build.
+
+Pause is deliberately NOT on that tab. It is a gameplay control on the cog's
+**Gameplay** tab, alongside exit-to-lobby, so both survive into the demo build;
+`wasm_toggle_pause()` / `SimulationPaused` are named accordingly.
 
 ## Diagnosing WASM panics
 

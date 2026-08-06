@@ -58,10 +58,32 @@ pub fn derive_game_state(
     }
 }
 
+/// True when `token` is reserved for the host runtime and so must never be
+/// claimable by a network peer.
+///
+/// Two shapes carry authority no phone is entitled to:
+///
+///   - [`crate::console_bridge::LOCAL_CONSOLE_TOKEN`], which command admission
+///     grants a blanket bypass (`command_admission::policy`, and see
+///     `ship::system_registry` on god mode relying on it) and which
+///     [`return_to_lobby_authority`] reads as `Host`, and
+///   - the `ai:` prefix, which `admit_system_commands` routes to an NPC's own
+///     entity rather than the `LocalShip`.
+///
+/// The peer `Identify` path in `server.html` refuses these before a token is
+/// ever recorded for a connection — that is the gate that matters, since every
+/// later message is dispatched under the recorded token. This is the same
+/// refusal server-side, so a peer that reaches the handler by some other route
+/// still cannot register a session under a reserved name.
+pub(crate) fn is_reserved_token(token: &str) -> bool {
+    token == crate::console_bridge::LOCAL_CONSOLE_TOKEN || token.starts_with("ai:")
+}
+
 /// Handle `Identify`: (re)register the session, restore a held station on
 /// reconnect-yield, and emit `Welcome` / `PlayerJoined` (and, at capacity, an
 /// empty `StationAssigned`). `token` from the envelope is ignored — the session
-/// token comes from the message body.
+/// token comes from the message body. A reserved token
+/// ([`is_reserved_token`]) registers nothing and answers nothing.
 pub(crate) fn handle_identify(
     id_token: &str,
     name: &str,
@@ -78,6 +100,19 @@ pub(crate) fn handle_identify(
     // Clamp token to 64 chars and name to 32 chars (issue #602).
     let id_token = id_token.chars().take(64).collect::<String>();
     let name = name.chars().take(32).collect::<String>();
+
+    // Reserved host-runtime tokens are refused outright: registering one would
+    // put a peer's session behind a name that command admission and
+    // `return_to_lobby_authority` both read as host authority. Silent — there
+    // is no legitimate sender to explain this to.
+    if is_reserved_token(&id_token) {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound: Vec::new(),
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
     let is_reconnect = sessions.reconnect(&id_token).is_some();
     let joined = if is_reconnect {
         true
@@ -483,21 +518,63 @@ pub(crate) fn handle_set_ready(
     }
 }
 
-/// Handle `ReturnToLobby`: from `GameOver`, return every participant to shared
-/// pre-scenario selection for another round (issue #756). Clears each player's
-/// station claim and ready flag plus all pending ratings, broadcasts the
-/// cleared seats (`StationAssigned { station: None }`) and readies
-/// (`ReadyChanged { ready: false }`) per player, emits `ReturnedToLobby`, and
-/// transitions to `Lobby`. Player identity — token, name, connection, and
-/// `last_rating` — is preserved. No-op in any other phase.
+/// Who asked to return to the lobby, which decides which phases honour it.
+///
+/// The `ReturnToLobby` wire variant itself is deliberately un-gated — any
+/// connected participant may send it — so the authority distinction is made
+/// here, from the sender's token, rather than by adding a second message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReturnToLobbyAuthority {
+    /// A connected participant's Game Over overlay (phone or host page alike).
+    /// Honoured only during `GameOver` — a phone must not be able to abandon a
+    /// mission everyone else is still flying.
+    Participant,
+    /// The host page itself, under `LOCAL_CONSOLE_TOKEN`. Its settings menu
+    /// carries an "exit to lobby" that also aborts a mission still
+    /// `InProgress` (issue #939).
+    Host,
+}
+
+/// Classify a `ReturnToLobby` sender. The host page injects its own actions
+/// under `console_bridge::LOCAL_CONSOLE_TOKEN`; every other token is a peer.
+pub(crate) fn return_to_lobby_authority(token: &str) -> ReturnToLobbyAuthority {
+    if token == crate::console_bridge::LOCAL_CONSOLE_TOKEN {
+        ReturnToLobbyAuthority::Host
+    } else {
+        ReturnToLobbyAuthority::Participant
+    }
+}
+
+/// True when `authority` may return the session to the lobby from `phase`.
+fn may_return_to_lobby(phase: &GamePhase, authority: ReturnToLobbyAuthority) -> bool {
+    match authority {
+        ReturnToLobbyAuthority::Participant => *phase == GamePhase::GameOver,
+        // The host's abort is the only way out of a running mission that does
+        // not require losing it, so it covers `InProgress` as well.
+        ReturnToLobbyAuthority::Host => {
+            *phase == GamePhase::GameOver || *phase == GamePhase::InProgress
+        }
+    }
+}
+
+/// Handle `ReturnToLobby`: return every participant to shared pre-scenario
+/// selection for another round (issue #756). Clears each player's station claim
+/// and ready flag plus all pending ratings, broadcasts the cleared seats
+/// (`StationAssigned { station: None }`) and readies (`ReadyChanged { ready:
+/// false }`) per player, emits `ReturnedToLobby`, and transitions to `Lobby`.
+/// Player identity — token, name, connection, and `last_rating` — is preserved.
+///
+/// Honoured from `GameOver` for anyone, and additionally from `InProgress` for
+/// the host page's settings menu (issue #939). No-op otherwise.
 pub(crate) fn handle_return_to_lobby(
     sessions: &mut SessionManager,
     phase: GamePhase,
+    authority: ReturnToLobbyAuthority,
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut new_phase: Option<GamePhase> = None;
 
-    if phase == GamePhase::GameOver {
+    if may_return_to_lobby(&phase, authority) {
         // Capture the roster (token + whether it held a seat) before mutating,
         // so we broadcast a station-release only for players who actually held
         // a station this round.
@@ -761,7 +838,9 @@ mod tests {
                 preload_complete,
                 ship_stations,
             ),
-            ClientMessage::ReturnToLobby => handle_return_to_lobby(sessions, phase),
+            ClientMessage::ReturnToLobby => {
+                handle_return_to_lobby(sessions, phase, return_to_lobby_authority(token))
+            }
             ClientMessage::SetStationRating { rating_name } => {
                 handle_set_station_rating(token, rating_name, sessions, phase, ship_stations)
             }
@@ -1922,6 +2001,152 @@ max_level = 4
             sessions.players().iter().any(|p| p.ready),
             "ready flags must be untouched outside GameOver"
         );
+    }
+
+    /// A peer's token is self-declared, so `Identify` must refuse the two
+    /// host-runtime shapes. Registering one would put a network peer behind a
+    /// name that command admission bypasses (`LOCAL_CONSOLE_TOKEN`, god mode
+    /// and every other simulation override) or that routes commands to an
+    /// NPC's own entity (`ai:`), and — since issue #939 —
+    /// `return_to_lobby_authority` reads the first as host authority and would
+    /// let a phone abort a mission in progress.
+    #[test]
+    fn identify_refuses_reserved_host_runtime_tokens() {
+        for reserved in [
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+            crate::command_admission::ai_emit::AI_BACKFILL_TOKEN,
+            "ai:some-npc-uuid",
+        ] {
+            assert!(
+                is_reserved_token(reserved),
+                "{reserved} must be classified reserved"
+            );
+
+            let mut sessions = SessionManager::new();
+            let result = handle_identify(
+                reserved,
+                "Mallory",
+                &mut sessions,
+                GamePhase::Lobby,
+                None,
+                &default_stations(),
+                &default_ship_config(),
+                &HashMap::new(),
+            );
+
+            assert!(
+                sessions.players().is_empty(),
+                "{reserved} must not register a session"
+            );
+            assert!(
+                result.outbound.is_empty(),
+                "{reserved} must get no Welcome and must not be announced to anyone"
+            );
+            assert_eq!(
+                return_to_lobby_authority(reserved) == ReturnToLobbyAuthority::Host,
+                reserved == crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+                "only the local console reads as host authority"
+            );
+        }
+    }
+
+    /// A perfectly ordinary token is still accepted — the refusal above is
+    /// narrow, not a new class of rejected joins.
+    #[test]
+    fn identify_still_accepts_an_ordinary_peer_token() {
+        let mut sessions = SessionManager::new();
+        let result = handle_identify(
+            "t1",
+            "Alice",
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+            &default_stations(),
+            &default_ship_config(),
+            &HashMap::new(),
+        );
+        assert_eq!(sessions.players().len(), 1);
+        assert!(result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. })));
+    }
+
+    /// The host page's settings menu (issue #939) carries an "exit to lobby"
+    /// that has to work mid-mission, not only from the Game Over screen. It
+    /// arrives under `LOCAL_CONSOLE_TOKEN`, which is what opens `InProgress`.
+    #[test]
+    fn host_return_to_lobby_aborts_a_mission_in_progress() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_ready("t1", true);
+        sessions.set_station("t1", Some(StationId("captain".into())));
+
+        let result = pm(
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+        );
+
+        assert_eq!(result.new_phase, Some(GamePhase::Lobby));
+        assert_eq!(sessions.station_for_token("t1"), None, "seat must clear");
+        assert!(
+            !sessions.players().iter().any(|p| p.ready),
+            "ready flags must be cleared by the host's mid-mission abort"
+        );
+        assert!(
+            result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::ReturnedToLobby)),
+            "expected ReturnedToLobby broadcast"
+        );
+    }
+
+    /// The host's extra reach stops at `InProgress` — the menu is not a way to
+    /// bounce the roster out of a lobby they are still filling.
+    #[test]
+    fn host_return_to_lobby_from_lobby_is_noop() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_ready("t1", true);
+
+        let result = pm(
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+
+        assert!(result.new_phase.is_none());
+        assert!(result.outbound.is_empty());
+    }
+
+    /// The mid-mission reach is the HOST's, not every participant's: a phone
+    /// must not be able to abandon a mission the rest of the crew is flying.
+    /// (`return_to_lobby_outside_game_over_is_noop` covers the same token from
+    /// the other direction; this one names the reason.)
+    #[test]
+    fn participant_cannot_abort_a_mission_in_progress() {
+        let mut sessions = sessions_with("t1", "Alice");
+        assert_eq!(
+            return_to_lobby_authority("t1"),
+            ReturnToLobbyAuthority::Participant
+        );
+        assert_eq!(
+            return_to_lobby_authority(crate::console_bridge::LOCAL_CONSOLE_TOKEN),
+            ReturnToLobbyAuthority::Host
+        );
+
+        let result = pm(
+            "t1",
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+        );
+        assert!(result.new_phase.is_none());
     }
 
     /// The phone client's game-over overlay sends `ReturnToLobby`

@@ -93,22 +93,33 @@ inside the fixed loop, so any frame rate covers the same logical ticks per
 sim-second. The browser exposes the counter as `wasm_sim_tick()` for the
 smoke tests (`tests/smoke/sim-tick.spec.ts`).
 
-## Debug pause (F9)
+## Simulation pause (settings cog)
 
-`wasm_toggle_debug_pause()` (`drain_debug_toggles` in `src/server/bridge.rs`)
+`wasm_toggle_pause()` (`drain_debug_toggles` in `src/server/bridge.rs`)
 pauses `Time<Virtual>`, which starves the fixed accumulator — `FixedUpdate`
 stops running altogether while paused, not just the `SimSet` chain inside it.
 
+Not a debug-only control since issue #939: the host settings cog exposes it on
+its **Gameplay** tab, which is not gated on `PHOENIX_DEMO_BUILD`, so pause
+ships in the demo build where the Debug/Cheat tab is absent. The resource it
+flips is `SimulationPaused` (was `DebugPaused`) for the same reason. The cog is
+its only driver — there is no keyboard binding for it.
+
 Since issue #895 moved **lobby** (countdown, ready-check,
 `drain_lobby_outbox`) and **command admission** into `FixedUpdate` alongside
-the `SimSet` chain (see "Per-tick work" above), F9 now also freezes the lobby
-and stops admitting commands — pre-#895, when those ran frame-driven in
+the `SimSet` chain (see "Per-tick work" above), pausing now also freezes the
+lobby and stops admitting commands — pre-#895, when those ran frame-driven in
 `Update`, pausing only stopped the simulation itself. This is deliberate, not
 an oversight to fix: there is one virtual clock, and everything keyed to the
 fixed tick shares its pause state.
 
+One consequence worth knowing: `ReturnToLobby` is lobby handling, so it is not
+read while paused. `hostReturnToLobby()` in `server.html` — the single funnel
+for both the Game Over button and the cog's **Exit to Lobby** — therefore
+unpauses before it sends.
+
 `tests/smoke/sim-tick.spec.ts`'s DECOUPLING assertion depends on the pause
-being total: it toggles F9, drives real rendered frames, and asserts
+being total: it toggles pause, drives real rendered frames, and asserts
 `wasm_sim_tick()` (mirroring `SimTick`) does not advance at all while paused.
 Scoping the pause to only part of `FixedUpdate` in the future would need that
 test re-examined.

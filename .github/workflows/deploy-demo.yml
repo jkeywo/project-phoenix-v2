@@ -55,8 +55,14 @@ jobs:
       - name: Install Node dependencies
         run: npm install
 
+      # Two flags, two jobs. TRUNK_BUILD_RELEASE is the wasm-opt size switch
+      # (Trunk.toml -> scripts/wasm-opt-fixup.mjs) and ci.yml sets it too.
+      # PHOENIX_DEMO_BUILD is set ONLY here: `crate::build_flags` bakes it in
+      # with option_env! and the settings cog hides its Debug/Cheat tab when it
+      # is true (issue #939). Keeping them separate is what lets the GitHub
+      # Pages dev host stay size-optimised while keeping its debug tooling.
       - name: Build server page (WASM + JS)
-        run: TRUNK_BUILD_RELEASE=true trunk build --release
+        run: TRUNK_BUILD_RELEASE=true PHOENIX_DEMO_BUILD=true trunk build --release
 
       - name: Build client page (pure JS — copies client.html + gui/assets, no WASM)
         run: node scripts/build-client.mjs
@@ -66,6 +72,24 @@ jobs:
 
       - name: Swap in the curated demo scenario manifest
         run: cp assets/scenarios.demo.toml dist/assets/scenarios.toml
+
+      # The compiled-in PHOENIX_DEMO_BUILD above is only readable once WASM has
+      # instantiated, and the settings cog can be opened before then — so the
+      # answer also has to be in the HTML itself. server.html ships the tag with
+      # content="false"; flip it here. gui/build-flags.js treats EITHER source
+      # saying true as the demo build, so neither silence reads as "dev".
+      - name: Stamp the demo build flag into the served HTML
+        run: |
+          set -euo pipefail
+          # Tolerant of attribute order, in case trunk rewrites the tag on its
+          # way into dist/. The verify step below fails the run if neither form
+          # landed, so a layout change is loud rather than a silently un-gated
+          # demo.
+          for f in dist/index.html dist/client/index.html; do
+            [ -f "$f" ] || continue
+            sed -i -E -e 's|(<meta[^>]*name="phoenix-build-demo"[^>]*)content="false"|\1content="true"|' -e 's|(<meta[^>]*)content="false"([^>]*name="phoenix-build-demo")|\1content="true"\2|' "$f"
+            echo "  stamped $f"
+          done
 
       # The dev worker URL is a literal in two built files: the inline script
       # in server.html (trunk renames the build target to dist/index.html)
@@ -116,6 +140,13 @@ jobs:
             exit 1
           fi
           echo "ok: demo scenario manifest is in place"
+
+          if ! grep -qE '<meta[^>]*name="phoenix-build-demo"[^>]*content="true"|<meta[^>]*content="true"[^>]*name="phoenix-build-demo"' dist/index.html; then
+            echo "dist/index.html is not stamped as a demo build — the settings cog would offer its Debug/Cheat tab (issue #939)" >&2
+            grep -n 'phoenix-build-demo' dist/index.html >&2 || echo "  (the tag is not present at all)" >&2
+            exit 1
+          fi
+          echo "ok: the demo build flag is stamped into dist/index.html"
 
       # Cloudflare Pages refuses any file over 25 MiB, and the release WASM
       # is ~38 MiB even after the -Oz pass (run 30847968215). Models are all

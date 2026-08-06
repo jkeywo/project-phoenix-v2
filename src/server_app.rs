@@ -5757,6 +5757,74 @@ station = "pilot"
         );
     }
 
+    /// Read the live phase out of a running app.
+    fn phase_of(app: &App) -> GamePhase {
+        app.world().resource::<State<GamePhase>>().get().clone()
+    }
+
+    /// Issue #939's mid-mission "exit to lobby" has to work against the REAL
+    /// app, not just the pure handler: `handle_return_to_lobby_system` is
+    /// registered with a `run_if` phase gate of its own, so a handler that
+    /// happily honours `InProgress` is still dead if the system never runs
+    /// there. This drives the whole `LobbyPlugin` through `test_app`, which is
+    /// the only harness that observes that registration.
+    #[test]
+    fn host_return_to_lobby_aborts_a_mission_in_progress_in_the_real_app() {
+        let mut app = test_app();
+        start_game(&mut app);
+        assert_eq!(
+            phase_of(&app),
+            GamePhase::InProgress,
+            "precondition: start_game must leave the session mid-mission"
+        );
+
+        push(
+            &mut app,
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+            ClientMessage::ReturnToLobby,
+        );
+        tick(&mut app);
+        // `test_app` deliberately omits `LobbyOutboxPlugin`, so the lobby's
+        // broadcasts stay in `LobbyOutbox` instead of reaching the
+        // `OutboundMessage` bus — read them where they actually land.
+        let returned = app
+            .world()
+            .resource::<LobbyOutbox>()
+            .0
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::ReturnedToLobby));
+        tick(&mut app); // NextState::Set(Lobby) takes effect.
+
+        assert_eq!(
+            phase_of(&app),
+            GamePhase::Lobby,
+            "the host's exit-to-lobby must abort a mission that is still InProgress"
+        );
+        assert!(
+            returned,
+            "the abort must tell the phones to leave their consoles"
+        );
+    }
+
+    /// The reach added above is the host page's alone. A phone sending the
+    /// same un-gated `ReturnToLobby` mid-mission must be ignored by the real
+    /// app, or the settings-cog feature would hand every handset an abort.
+    #[test]
+    fn a_phone_cannot_abort_a_mission_in_progress_in_the_real_app() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        push(&mut app, "captain", ClientMessage::ReturnToLobby);
+        tick(&mut app);
+        tick(&mut app);
+
+        assert_eq!(
+            phase_of(&app),
+            GamePhase::InProgress,
+            "a participant token must not end a mission the rest of the crew is flying"
+        );
+    }
+
     #[test]
     fn hull_integrity_starts_at_100_and_appears_in_system_hull_update() {
         let mut app = test_app();

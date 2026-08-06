@@ -15,7 +15,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Use Host Debug Control
-      summary: The host operator may use the server-page debug panel to inspect diagnostics, pause simulation, toggle region wireframes, enable local-ship god mode, or enable instagib damage. Teleport to Waypoint remains a separate proposed action.
+      summary: The host operator may use the server-page settings menu's Debug/Cheat tab to select a diagnostic output, toggle region wireframes, enable local-ship god mode, or enable instagib damage. Pause moved to the same menu's Gameplay tab and is no longer a debug control. Teleport to Waypoint remains a separate proposed action.
     game_design:
       architecture_links: [debug-overlay-controller, host-debug-simulation-controls]
       owner_role: host-debug-operator
@@ -28,7 +28,7 @@ entities:
       status: proposed
       confidence: confirmed
       title: Host Debug Teleport to Waypoint
-      summary: The server-page Debug panel offers a Teleport to Waypoint action that immediately moves the local ship to the current authoritative shared Navigation waypoint. The action is unavailable when no waypoint exists.
+      summary: The server-page settings menu's Debug/Cheat tab offers a Teleport to Waypoint action that immediately moves the local ship to the current authoritative shared Navigation waypoint. The action is unavailable when no waypoint exists.
     game_design:
       architecture_links: [host-debug-waypoint-teleport, navigation-waypoint-controller]
       participating_roles: [host-debug-operator]
@@ -41,9 +41,21 @@ entities:
       status: accepted
       confidence: confirmed
       title: Host Debug Controls Available in Normal Builds
-      summary: For now, the complete host Debug panel remains accessible in normal builds. Simulation-affecting controls, including waypoint teleport, are intentional host powers rather than hidden development-only controls.
+      summary: The complete host Debug/Cheat tab remains accessible in every build except the public demo, including the deployed dev host. Simulation-affecting controls, including waypoint teleport, are intentional host powers rather than hidden development-only controls. Only a demo build (PHOENIX_DEMO_BUILD=true, deliberately a different flag from the TRUNK_BUILD_RELEASE size switch that the dev host also sets) omits the tab entirely; pause and exit-to-lobby survive on the Gameplay tab because they are gameplay controls, not debug ones.
     game_design:
       enforcement_links: [host-debug-simulation-controls]
       owner_role: host-debug-operator
       protected: true
-      must_not_be: [exposed to phone clients, silently treated as non-gameplay diagnostics]
+      must_not_be: [exposed to phone clients, silently treated as non-gameplay diagnostics, present in a demo build, stripped from the deployed dev host]
+
+  - decision: host-settings-menu-tabs
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Host Settings Menu Tabs
+      summary: The server page carries a single settings cog, top-left, with three tabs — Debug/Cheat (demo-gated), Audio, and Gameplay. Audio offers one master volume that scales the authored per-sound volumes rather than replacing them. Gameplay offers pause/unpause and exit-to-lobby, the latter honoured mid-mission for the host page only, so a phone cannot abandon a mission the rest of the crew is flying. "Host page only" is decided by the local-console token, which is therefore reserved - a network peer that identifies under it, or under the ai operator prefix, has its connection refused rather than being dispatched under host authority.
+    game_design:
+      enforcement_links: [host-debug-simulation-controls]
+      owner_role: host-debug-operator
+      protected: true
+      must_not_be: [a second place per-sound authored volumes are authored, a way for a phone client to end a mission in progress]

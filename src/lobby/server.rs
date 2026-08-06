@@ -203,14 +203,22 @@ impl Plugin for LobbyPlugin {
                     .before(tick_countdown)
                     .run_if(in_state(GamePhase::Lobby).or(in_state(GamePhase::Loading))),
             )
-            // ReturnToLobby gates on GameOver (the game-over screen's button).
+            // ReturnToLobby runs in GameOver (the game-over screen's button)
+            // AND in InProgress (the host settings cog's "exit to lobby",
+            // issue #939, which aborts a running mission). Both phases have to
+            // be registered here or the second is dead on arrival: the
+            // sender-authority gate inside
+            // `lobby_handler::handle_return_to_lobby` never gets a chance to
+            // run in a phase this `run_if` filters out. That gate is what keeps
+            // the mid-mission abort host-only — this registration is only about
+            // which phases the system is allowed to look at the message in.
             .add_systems(
                 FixedUpdate,
                 handle_return_to_lobby_system
                     .in_set(LobbySystemSet)
                     .after(handle_disconnect)
                     .before(tick_countdown)
-                    .run_if(in_state(GamePhase::GameOver)),
+                    .run_if(in_state(GamePhase::GameOver).or(in_state(GamePhase::InProgress))),
             );
     }
 }
@@ -872,9 +880,12 @@ pub fn handle_set_name_system(
 }
 
 /// Per-variant system for `ClientMessage::ReturnToLobby` (issue #734). Gated on
-/// GameOver — the game-over screen's "return to lobby" button. `apply_result`
-/// routes the phase transition back to `Lobby` plus the cleared-ready / returned
-/// broadcasts.
+/// GameOver for a connected participant — the game-over screen's "return to
+/// lobby" button — and additionally on `InProgress` for the host page's own
+/// settings menu, whose "exit to lobby" aborts a running mission (issue #939).
+/// The phase gate itself lives in `lobby_handler::handle_return_to_lobby`; this
+/// system only classifies the sender's token. `apply_result` routes the phase
+/// transition back to `Lobby` plus the cleared-ready / returned broadcasts.
 pub fn handle_return_to_lobby_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
@@ -897,8 +908,10 @@ pub fn handle_return_to_lobby_system(
         let ClientMessage::ReturnToLobby = &ev.msg else {
             continue;
         };
+        let authority = lobby_handler::return_to_lobby_authority(&ev.token);
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone());
+            let result =
+                lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
             apply_result(
                 result,
                 &mut outbox,
@@ -909,7 +922,8 @@ pub fn handle_return_to_lobby_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone());
+            let result =
+                lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,

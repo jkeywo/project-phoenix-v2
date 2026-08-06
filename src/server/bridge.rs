@@ -57,7 +57,11 @@ pub enum DebugToggleKind {
     Regions,
     /// F3 — modifier debug overlay (`DebugOverlayEnabled`).
     Overlay,
-    /// F9 — simulation pause (`DebugPaused`); also (un)pauses `Time<Virtual>`.
+    /// Simulation pause (`SimulationPaused`); also (un)pauses `Time<Virtual>`.
+    ///
+    /// Reached from the host settings menu's Gameplay tab, which is not
+    /// build-gated — so this variant, unlike its neighbours, has a caller that
+    /// survives into a demo build.
     Pause,
     /// F8 — damage debug log (`DebugDamageEnabled`).
     Damage,
@@ -171,6 +175,12 @@ thread_local! {
     /// Whether `?debug_regions=1` was specified in the URL. Set by JS via
     /// `wasm_set_debug_regions()` before `wasm_init()`.
     static DEBUG_REGIONS_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Mirror of the `SimulationPaused` resource, written by
+    /// `drain_debug_toggles` so `wasm_is_paused()` can answer without a Bevy
+    /// world handle. The host settings menu's Gameplay tab reads it each frame
+    /// to render its pause/resume affordance (issue #939).
+    static SIM_PAUSED: RefCell<bool> = const { RefCell::new(false) };
 
     /// `?log=` — a category/level spec such as `info,ai=debug,admit=trace`.
     /// Set by JS via `wasm_set_log_spec()` before `wasm_init()`. Parsed by
@@ -1202,16 +1212,45 @@ pub fn wasm_toggle_debug_overlay() {
     });
 }
 
-/// Called by JS (e.g. F9 keydown) to toggle the debug simulation pause at runtime.
+/// Called by JS to pause/unpause the simulation clock.
 ///
 /// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
 /// `PreUpdate` frame, which pauses or unpauses `Time<Virtual>`.
+///
+/// Named without `debug` (issue #939) because its only caller is the host
+/// settings menu's **Gameplay** tab, which ships in the demo build where the
+/// Debug/Cheat tab is gone. Nothing on this path is gated by
+/// `PHOENIX_DEMO_BUILD`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_toggle_debug_pause() {
+pub fn wasm_toggle_pause() {
     PENDING_TOGGLES.with(|set| {
         set.borrow_mut().insert(DebugToggleKind::Pause);
     });
+}
+
+/// Called by JS each frame to read back whether the simulation clock is
+/// paused, so the settings menu can render pause vs. resume.
+///
+/// Reads the `SIM_PAUSED` mirror rather than the resource: the toggle applies
+/// a frame later, in `PreUpdate`, so a synchronous read-back right after the
+/// click would report the stale value (same reasoning as `wasm_get_god_mode`).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_is_paused() -> bool {
+    SIM_PAUSED.with(|v| *v.borrow())
+}
+
+/// Called by JS to ask whether this page was built by the public demo deploy
+/// (`PHOENIX_DEMO_BUILD=true`).
+///
+/// The host settings menu hides its Debug/Cheat tab when this is true (issue
+/// #939). See `crate::build_flags` for why this is its own flag rather than
+/// `TRUNK_BUILD_RELEASE` (which the dev host also sets) or `debug_assertions`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_is_demo_build() -> bool {
+    crate::build_flags::is_demo_build()
 }
 
 /// Called by JS (e.g. F8 keydown) to toggle the damage debug overlay at runtime.
@@ -1760,8 +1799,9 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
 
 /// Drains the pending debug-toggle set each frame and updates the
 /// corresponding Bevy resources: `DebugRegionsEnabled` (F4),
-/// `DebugOverlayEnabled` (F3), `DebugPaused` (F9), `DebugDamageEnabled` (F8),
-/// `DebugEntitiesEnabled` (F7), and `DebugEntityInspectorEnabled` (F2).
+/// `DebugOverlayEnabled`, `SimulationPaused` (settings cog),
+/// `DebugDamageEnabled`, `DebugEntitiesEnabled`, and
+/// `DebugEntityInspectorEnabled`.
 ///
 /// The actual flag-flipping logic lives in [`apply_pending_toggles`], a pure
 /// function with no Bevy/wasm dependency so it's unit-testable on native.
@@ -1772,7 +1812,7 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
 fn drain_debug_toggles(
     mut regions_enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
     mut overlay_enabled: ResMut<crate::debug_overlay::DebugOverlayEnabled>,
-    mut paused: ResMut<crate::debug_overlay::DebugPaused>,
+    mut paused: ResMut<crate::debug_overlay::SimulationPaused>,
     mut damage_enabled: ResMut<crate::debug_overlay::DebugDamageEnabled>,
     mut entities_enabled: ResMut<crate::debug_overlay::DebugEntitiesEnabled>,
     mut entity_inspector_enabled: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
@@ -1797,6 +1837,8 @@ fn drain_debug_toggles(
     // Region-wireframe state also lives in a thread-local (read back by
     // `wasm_is_debug_regions_enabled()`), so mirror the resource into it.
     DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = regions_enabled.0);
+    // Same for the pause mirror `wasm_is_paused()` reads (issue #939).
+    SIM_PAUSED.with(|v| *v.borrow_mut() = paused.0);
 
     if pause_changed {
         if paused.0 {
@@ -1805,8 +1847,8 @@ fn drain_debug_toggles(
             // deliberately, this is what `sim-tick.spec.ts` DECOUPLING asserts
             // on. Since issue #895 this freezes more than the `SimSet` chain:
             // lobby (countdown, ready-check, `drain_lobby_outbox`) and command
-            // admission both moved into `FixedUpdate` too, so F9 now also
-            // pauses the lobby and stops admitting commands, which it did not
+            // admission both moved into `FixedUpdate` too, so pausing now also
+            // freezes the lobby and stops admitting commands, which it did not
             // pre-#895 when those ran frame-driven in `Update`. See
             // `wiki/concepts/game-loop.md` for the fuller writeup.
             virtual_time.pause();

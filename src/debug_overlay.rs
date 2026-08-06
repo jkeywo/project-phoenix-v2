@@ -13,9 +13,16 @@ pub struct DebugRegionsEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct DebugOverlayEnabled(pub bool);
 
-/// Resource indicating whether the simulation is debug-paused (F9).
+/// Resource indicating whether the simulation clock is paused.
+///
+/// Deliberately NOT a debug-only concept even though it is registered here
+/// alongside the overlays (issue #939): the host settings menu exposes pause
+/// on its **Gameplay** tab, which is not build-gated, so this resource and
+/// everything that drives it must survive into a demo build where the
+/// Debug/Cheat tab is absent. The settings menu is its only driver, through
+/// the `DebugToggleKind::Pause` pending toggle.
 #[derive(Resource, Default)]
-pub struct DebugPaused(pub bool);
+pub struct SimulationPaused(pub bool);
 
 /// Resource indicating whether the damage debug overlay (F8) is enabled.
 #[derive(Resource, Default)]
@@ -94,7 +101,7 @@ impl Plugin for DebugOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DebugRegionsEnabled(self.enabled));
         app.init_resource::<DebugOverlayEnabled>();
-        app.init_resource::<DebugPaused>();
+        app.init_resource::<SimulationPaused>();
         app.init_resource::<DebugDamageEnabled>();
         app.init_resource::<DamageLog>();
         app.init_resource::<DebugEntitiesEnabled>();

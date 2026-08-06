@@ -98,6 +98,11 @@ npm run dev:viewer                             # → http://localhost:8081
 TRUNK_BUILD_RELEASE=true trunk build --release
 node scripts/build-client.mjs
 
+# Public demo build: same command plus PHOENIX_DEMO_BUILD=true, which is a
+# SEPARATE flag (src/build_flags.rs, option_env!) that hides the host settings
+# cog's Debug/Cheat tab. Only .github/workflows/deploy-demo.yml sets it —
+# ci.yml's GitHub Pages deploy is the dev host and keeps its debug tooling.
+
 # Smoke tests (Playwright, Chromium) — requires dist/ built first
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/

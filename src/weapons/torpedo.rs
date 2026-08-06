@@ -616,6 +616,42 @@ impl TorpedoSystem {
             .sum()
     }
 
+    /// Every round this ship still HAS: the magazine, plus the rounds already
+    /// moved out of it into the tubes (issue #943).
+    ///
+    /// `torpedoes_remaining` alone is the rounds left to *reload* with, not the
+    /// rounds aboard: the magazine is debited when a load STARTS
+    /// ([`Self::start_load`], [`Self::claim_magazine_round`], the auto-load
+    /// block in [`Self::tick`]), so a round parked in a tube has already left
+    /// the counter. A hull whose tube doctrine keeps its tubes topped up
+    /// therefore reads permanently short by its parked volley — the
+    /// `alliance_destroyer` parks 3 of its 12 — and anything that rations
+    /// rounds against that number strands the parked ones for ever.
+    ///
+    /// The three states are counted exactly once each, which is why this is a
+    /// method and not a call-site sum:
+    /// * `Loaded`/`Unloading` rounds sit in `loaded_count` (an `Unloading` tube
+    ///   keeps its round there until [`Self::tick`] completes the unload and
+    ///   moves it back to the magazine);
+    /// * a `Loading` tube's round is in NEITHER field — already debited from
+    ///   the magazine, not yet in `loaded_count` — so it is counted here from
+    ///   the state itself, the same "already paid for" reading
+    ///   [`Self::salvo_shortfall`] takes;
+    /// * everything else is in `torpedoes_remaining`.
+    ///
+    /// Rounds in flight are NOT counted: they have been spent.
+    pub fn rounds_aboard(&self) -> u32 {
+        self.torpedoes_remaining
+            + self
+                .tubes
+                .iter()
+                .map(|t| {
+                    t.loaded_count
+                        + u32::from(matches!(t.load_state, TubeLoadState::Loading { .. }))
+                })
+                .sum::<u32>()
+    }
+
     /// Start loading a torpedo into the given tube.
     ///
     /// Consumes one torpedo from the shared pool. Returns `false` if the pool
@@ -1281,6 +1317,57 @@ mod tests {
             0,
             "a hull with no tubes is short of nothing — callers asking `can I fill \
              my tubes` must rule the tubeless case out themselves"
+        );
+    }
+
+    /// Issue #943: the count a conservation decision is made against is
+    /// CONSERVED — only a launch may lower it. Loading, waiting, unloading and
+    /// reloading all move a round between the magazine and a tube, and none of
+    /// them is a round spent.
+    #[test]
+    fn rounds_aboard_only_falls_when_a_round_is_launched() {
+        let mut sys = default_system();
+        let aboard = sys.rounds_aboard();
+        assert_eq!(
+            aboard, sys.torpedoes_remaining,
+            "with every tube empty the two measures agree — they only diverge \
+             once rounds are parked in tubes, which is the whole defect"
+        );
+
+        // Mid-load: the magazine is already debited and `loaded_count` has not
+        // risen yet, the one moment the round is in neither field.
+        sys.tubes[0].target_count = 1;
+        assert!(sys.start_load("fore_port"));
+        assert_eq!(sys.torpedoes_remaining, aboard - 1);
+        assert_eq!(
+            sys.rounds_aboard(),
+            aboard,
+            "a round in transit from the magazine to a tube is still aboard"
+        );
+
+        // Landed in the tube.
+        let load_time = sys.tube("fore_port").unwrap().load_time;
+        sys.tick(load_time, &HashMap::new(), &mut no_uuid);
+        assert_eq!(sys.tube("fore_port").unwrap().loaded_count, 1);
+        assert_eq!(sys.rounds_aboard(), aboard);
+
+        // Unloading it holds the count too: it is in `loaded_count` while the
+        // timer runs and back in the magazine after it. (`target_count` back to
+        // 0 first, or `tick`'s auto-reload claims it again the same tick.)
+        sys.tubes[0].target_count = 0;
+        assert!(sys.start_unload("fore_port"));
+        assert_eq!(sys.rounds_aboard(), aboard);
+        sys.tick(load_time, &HashMap::new(), &mut no_uuid);
+        assert_eq!(sys.torpedoes_remaining, aboard);
+        assert_eq!(sys.rounds_aboard(), aboard);
+
+        // Only a launch spends one.
+        load_tube(&mut sys, "fore_port");
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        assert_eq!(
+            sys.rounds_aboard(),
+            aboard - 1,
+            "a launched round is spent — an in-flight torpedo is not aboard"
         );
     }
 

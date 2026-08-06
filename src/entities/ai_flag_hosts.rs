@@ -256,10 +256,20 @@ pub const TORPEDO_MAGAZINE: AiHost = AiHost {
     system: "Torpedo magazine",
     block: "[torpedoes].ai",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site(
-        "src/console/weapons/torpedo.rs",
-        "torpedo_magazine_grant_policy_fires",
-    )],
+    eval_sites: &[
+        site(
+            "src/console/weapons/torpedo.rs",
+            "torpedo_magazine_grant_policy_fires",
+        ),
+        // The conservation channel (issue #943) is the magazine's second axis,
+        // resolved from `handle_fire_torpedo` rather than from the claim
+        // consumer — that is what makes it symmetric across origins — but it is
+        // the SAME authored `[torpedoes].ai` block, so it belongs to this host.
+        site(
+            "src/console/weapons/torpedo.rs",
+            "torpedo_conservation_policy_fires",
+        ),
+    ],
     history_fold: None,
 };
 

@@ -264,6 +264,22 @@ pub enum AiPolicyVerb {
     /// policy is a data-authored arbiter layered on top, and never becomes a second
     /// writer of `torpedoes_remaining`.
     GrantTorpedoRound,
+    /// Spend an already-authorised round on THIS launch rather than holding it
+    /// for later in the mission (the `torpedo_conservation` channel of the
+    /// shared torpedo magazine fine system, issue #943).
+    ///
+    /// A value-less action verb, and the only one resolved on BOTH origins'
+    /// behalf: its channel is read inside `handle_fire_torpedo`, the single
+    /// consumer of an admitted `FireTorpedo`, so a human Tactical operator and
+    /// an AI backfill meet the same guard and the resolve cannot see which one
+    /// asked (AGENTS.md #6). Its absence ("hold"/idle) drops this launch without
+    /// touching the magazine or unloading the tube — the round stays where it is
+    /// and the decision is offered again next tick.
+    ///
+    /// Every quantity it reasons about is a host reading (magazine level, the
+    /// world's remaining mission threat, the ship's own objective count); the
+    /// reserve those readings are measured against is an authored `param`.
+    ReleaseTorpedo,
     /// Focus a shield arc this tick (the `shield_focus` channel of the Shields
     /// fine system, issue #783). A value-less action verb, the shields twin of
     /// [`AiPolicyVerb::FirePhaser`]: *which* of the four arcs is focused is NOT

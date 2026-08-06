@@ -124,6 +124,117 @@ pub fn seed_torpedo_magazine_facts(magazine: u32, in_flight: u32) -> crate::worl
     facts
 }
 
+/// Seed the policy fact snapshot for the shared magazine's CONSERVATION
+/// decision (issue #943) — the world-scoped half of the torpedo doctrine,
+/// resolved once per ship per tick, ahead of that ship's admitted command loop
+/// in [`handle_fire_torpedo`], for human-origin and AI-origin launches alike.
+///
+/// `rounds_aboard` is [`crate::torpedo::TorpedoSystem::rounds_aboard`] — the
+/// magazine PLUS the rounds already parked in the tubes, not the bare
+/// `torpedoes_remaining` counter, which a hull with a "keep the tubes loaded"
+/// doctrine drives permanently below what it is actually carrying and which
+/// would therefore strand the parked volley for the rest of the mission.
+/// `mission_threat_remaining` is the scenario's own
+/// [`crate::entities::config::MISSION_THREAT_REMAINING_COUNTER`] as this ship's
+/// layered flag chain reads it, so nothing here knows how long a mission is —
+/// the world says. `targeted_objective_count` is how many of the ship's own
+/// `[behaviour].doctrine` entries are a Destroy directive naming its target, the
+/// reading a sole-objective carve-out clause gates on.
+///
+/// The derived `rounds_per_threat` exists because the predicate grammar
+/// compares ONE atom to ONE operand and has no arithmetic: "rounds per remaining
+/// unit of threat" is the quantity a reserve is authored against, and only the
+/// host can compute it. With no remaining threat published it is
+/// `f64::INFINITY`, so an unpaced world (and a mission whose threat is spent)
+/// takes the permissive branch of `>= param(...)` — the pre-#943 behaviour, and
+/// the reason a world that authors no counter is unaffected.
+pub fn seed_torpedo_conservation_facts(
+    rounds_aboard: u32,
+    mission_threat_remaining: i64,
+    targeted_objective_count: usize,
+) -> crate::world::flags::AiFacts {
+    use crate::entities::config as cfg;
+    let mut facts = crate::world::flags::AiFacts::new();
+    let remaining = mission_threat_remaining.max(0);
+    facts.set(cfg::TORPEDO_ROUNDS_ABOARD_FACT, rounds_aboard as f64);
+    facts.set(cfg::TORPEDO_MISSION_THREAT_FACT, remaining as f64);
+    facts.set(
+        cfg::TORPEDO_ROUNDS_PER_THREAT_FACT,
+        if remaining > 0 {
+            rounds_aboard as f64 / remaining as f64
+        } else {
+            f64::INFINITY
+        },
+    );
+    facts.set(
+        cfg::TORPEDO_TARGETED_OBJECTIVE_COUNT_FACT,
+        targeted_objective_count as f64,
+    );
+    facts
+}
+
+/// How many of a ship's standing doctrine entries name a specific Destroy
+/// target — the carve-out lever of [`seed_torpedo_conservation_facts`]
+/// (issue #943).
+///
+/// See [`crate::entities::config::TORPEDO_TARGETED_OBJECTIVE_COUNT_FACT`] for
+/// why the question is "how many NAMED targets" rather than "how many doctrine
+/// entries": a world's spawn override appends its brief to the template's
+/// standing orders instead of replacing them, so the entry count of a ship sent
+/// after one specific target is never 1.
+pub fn targeted_objective_count(behaviour: &crate::entities::config::BehaviourConfig) -> usize {
+    behaviour
+        .doctrine
+        .iter()
+        .filter(|d| d.directive_kind.as_deref() == Some("Destroy") && d.directive_target.is_some())
+        .count()
+}
+
+/// Does this magazine policy author a conservation doctrine at all (issue #943)?
+///
+/// The difference between "this hull holds its rounds back" and "this hull was
+/// never asked to". A policy with no rule on
+/// [`crate::entities::config::TORPEDO_CONSERVATION_CHANNEL`] resolves that
+/// channel to `None`, which is indistinguishable from an authored guard that
+/// declined — so without this question every legacy hull, every bare-`App`
+/// fixture and every world that publishes no threat counter would silently stop
+/// launching torpedoes the moment the channel existed. Conservation is content:
+/// unauthored means unconstrained.
+///
+/// Scans the stateless rules and NOTHING else, because the magazine host
+/// resolves this channel statelessly: [`torpedo_conservation_policy_fires`] goes
+/// through [`crate::ai::policy::AiPolicy::resolve_channel`], which reads
+/// `self.rules` and never `self.machine`. A machine-shaped `[torpedoes].ai` is
+/// authorable and validates, so a conservation rule CAN be written into a state
+/// — and would be unreachable from here. Counting it would invert the default
+/// this whole question exists to protect: declared, never fires, holds for ever,
+/// muting that hull's torpedoes for the entire mission. So a state-authored rule
+/// fails OPEN, exactly like the unauthored case above.
+pub fn torpedo_conservation_declared(policy: &crate::ai::policy::AiPolicy) -> bool {
+    let channel = crate::entities::config::TORPEDO_CONSERVATION_CHANNEL;
+    policy.rules.iter().any(|r| r.channel == channel)
+}
+
+/// Resolve the shared magazine's policy to a bare "spend a round on this launch?"
+/// boolean (issue #943). Returns `true` only when a guard fires on the
+/// `torpedo_conservation` channel yielding `ReleaseTorpedo`; `None`/idle/
+/// mismatched verbs "hold" — the launch is dropped and the round stays loaded.
+///
+/// Callers must ask [`torpedo_conservation_declared`] first: an unauthored
+/// channel also resolves to `None`, and that case means "no conservation
+/// doctrine", not "hold".
+pub fn torpedo_conservation_policy_fires(
+    policy: &crate::ai::policy::AiPolicy,
+    facts: &crate::world::flags::AiFacts,
+    flags: &[&crate::world::flags::FlagStore],
+) -> bool {
+    policy.resolve_channel(
+        crate::entities::config::TORPEDO_CONSERVATION_CHANNEL,
+        facts,
+        flags,
+    ) == Some(&crate::ai::policy::AiPolicyVerb::ReleaseTorpedo)
+}
+
 /// Resolve a torpedo tube's policy to a bare "load this tick?" boolean
 /// (issue #782). Returns `true` only when a guard fires on the `torpedo_load`
 /// channel yielding `LoadTorpedo`; `None`/idle/mismatched verbs "hold".
@@ -398,6 +509,19 @@ pub(crate) fn handle_set_torpedo_volley_target(
 ///
 /// No `InboundMessage` / token resolution: admission stripped the source
 /// identity. No human-vs-AI branch below this point.
+///
+/// # Why the world-scoped conservation gate lives here (issue #943)
+///
+/// This is the ONLY consumer of `SystemControlPayload::FireTorpedo`, for every
+/// ship in the world. `ai_torpedo_auto_fire` does not launch anything — it
+/// resolves the tube's authored `torpedo_launch` doctrine and then emits the
+/// same admitted command a human's Tactical console does, which lands here. A
+/// gate placed in the AI decider (the shape the red-alert gate of issue #872
+/// takes, because it belongs to the tube) would therefore constrain NPC crews
+/// and leave a human player free to empty the magazine into the first wave —
+/// which is exactly the defect #943 reports. So the magazine's
+/// `torpedo_conservation` channel is resolved below, downstream of admission,
+/// where the source identity is already gone and there is nothing to branch on.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_fire_torpedo(
     mut ship_q: Query<
@@ -411,6 +535,13 @@ pub(crate) fn handle_fire_torpedo(
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&mut TorpedoSystemResource>,
             Option<&mut crate::server_app::WeaponFiredThisTick>,
+            // The world-scoped conservation gate's three inputs (issue #943):
+            // the magazine's authored doctrine, this ship's own standing
+            // objectives, and the layer it was spawned into (which anchors the
+            // flag chain the mission counter is read through).
+            Option<&TorpedoMagazineAiPolicy>,
+            Option<&crate::entity_spawner::BehaviourSection>,
+            Option<&crate::world::server::EntityOriginLayer>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -421,6 +552,12 @@ pub(crate) fn handle_fire_torpedo(
     // reason as the blaster's projectile ids: an id that is a function of
     // draw order made two instances diverge even on the same seed.
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    // Read-only scenario flag/counter chain (issue #943, same shape as
+    // `handle_torpedo_magazine_inter_system`). `Option` so bare-`App` fixtures
+    // still pass parameter validation — absent, the chain is empty and the
+    // mission counter reads 0, i.e. no conservation pressure.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
 ) {
     for (
         control_sources,
@@ -432,6 +569,9 @@ pub(crate) fn handle_fire_torpedo(
         source_uuid_opt,
         torpedo_sys_comp,
         weapon_fired_comp,
+        magazine_policy_opt,
+        behaviour_opt,
+        origin_layer_opt,
     ) in ship_q.iter_mut()
     {
         // Per-entity component first; global Resource fallback for legacy tests.
@@ -441,6 +581,57 @@ pub(crate) fn handle_fire_torpedo(
             Some(c) => &mut c.0,
             None => &mut torpedo_sys_res.0,
         };
+
+        // Nothing below this point concerns a ship with no launch to gate, and
+        // this system runs for EVERY `With<Ship>` entity on every `FixedUpdate`
+        // tick — the axis a horde scenario grows, while an admitted set holding
+        // a `FireTorpedo` is the rare tick. Asking the cheap question first
+        // keeps the snapshot's cost (a flag-chain `Vec`, a fact map, and a full
+        // predicate resolve) on the ticks that actually spend a round; it is the
+        // same short-circuit `handle_torpedo_magazine_inter_system` takes on an
+        // empty claim list. Placed AFTER the `torpedo_sys` binding above so the
+        // component's change-detection behaviour is untouched.
+        if !admitted
+            .0
+            .iter()
+            .any(|c| matches!(c.payload, SystemControlPayload::FireTorpedo { .. }))
+        {
+            continue;
+        }
+
+        // ── World-scoped conservation snapshot (issue #943) ─────────────────
+        //
+        // Resolved once per ship rather than per command, which is also what
+        // makes a same-tick multi-tube salvo ONE decision instead of a race
+        // between tubes. `rounds_aboard` does move inside the loop — a launch
+        // spends rounds — and taking the reading before the first of them is
+        // deliberate: the volley caps (issue #942) decide how much a single
+        // opportunity may spend, conservation decides whether the ship can
+        // afford to take the opportunity at all.
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_layer_opt,
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
+        let conservation_facts = seed_torpedo_conservation_facts(
+            torpedo_sys.rounds_aboard(),
+            crate::world::flags::counter_in_chain(
+                &flag_chain,
+                crate::entities::config::MISSION_THREAT_REMAINING_COUNTER,
+            ),
+            behaviour_opt
+                .map(|b| targeted_objective_count(&b.0))
+                .unwrap_or(0),
+        );
+        // A ship whose magazine authors no conservation doctrine — and every
+        // fixture with no `TorpedoMagazineAiPolicy` at all — is unconstrained,
+        // exactly as before the channel existed.
+        let conservation_holds = magazine_policy_opt
+            .map(|p| &p.0)
+            .filter(|p| torpedo_conservation_declared(p))
+            .is_some_and(|p| {
+                !torpedo_conservation_policy_fires(p, &conservation_facts, &flag_chain)
+            });
 
         // Track whether any command in this ship's admitted set fired a torpedo,
         // so the WeaponFiredThisTick component (Mut<T>, not Copy) is only set
@@ -493,6 +684,15 @@ pub(crate) fn handle_fire_torpedo(
                 if !magazine_policy.accept_human_input && !magazine_policy.operate_ai {
                     continue;
                 }
+            }
+
+            // Conservation gate (issue #943). The last gate before the round is
+            // spent, and the only one that is about the MISSION rather than
+            // about this ship's hardware: holding drops the launch without
+            // unloading the tube, so the same decision is offered again next
+            // tick and a shot held for wave 6 is still a shot.
+            if conservation_holds {
+                continue;
             }
 
             let uuid = crate::world_id::mint_id_with(

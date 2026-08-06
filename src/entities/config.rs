@@ -2116,10 +2116,110 @@ pub const TORPEDO_MAGAZINE_CHANNEL: &str = "torpedo_magazine_grant";
 /// the claim without touching the magazine counter.
 pub const TORPEDO_MAGAZINE_GRANT_VERB: &str = "grant_torpedo_round";
 
-/// The registered output channels a torpedo magazine policy may drive (#782).
-pub const TORPEDO_MAGAZINE_CHANNELS: &[&str] = &[TORPEDO_MAGAZINE_CHANNEL];
-/// The registered verbs a torpedo magazine policy may emit (issue #782).
-pub const TORPEDO_MAGAZINE_VERBS: &[&str] = &[TORPEDO_MAGAZINE_GRANT_VERB];
+// ── Torpedo conservation: magazine vs remaining mission (issue #943) ─────────
+//
+// The second channel the shared magazine drives, and the one place a torpedo
+// launch is gated SYMMETRICALLY: it is resolved inside `handle_fire_torpedo`,
+// the single consumer of `SystemControlPayload::FireTorpedo` for every ship,
+// which admission reaches with the source identity already stripped. A human
+// Tactical operator's launch and an AI backfill's launch pass through the same
+// resolve, and nothing below admission may ask which one it was (AGENTS.md #6).
+//
+// The question it answers is not "may this weapon fire" — the tube's own
+// `torpedo_launch` doctrine already answers that for the AI, and red alert
+// answers it for the ship — but "can this ship AFFORD to spend a round here,
+// given how much of the mission is still ahead". That measure is WORLD-scoped:
+// the scenario publishes [`MISSION_THREAT_REMAINING_COUNTER`] and the host reads
+// it off the ship's own layered flag chain, so the same hull paces differently
+// in an eight-wave defence and in a single-target strike, with no per-hull
+// constant anywhere.
+
+/// The `torpedo_conservation` output channel: the shared magazine's
+/// spend-a-round-here axis, resolved once per ship per tick, ahead of that
+/// ship's admitted command loop.
+pub const TORPEDO_CONSERVATION_CHANNEL: &str = "torpedo_conservation";
+/// The `release_torpedo` verb. Its presence permits an already-authorised
+/// launch to spend its round; its absence ("hold"/idle) holds the round for
+/// later in the mission WITHOUT touching the magazine or the tube — the round
+/// stays loaded and the same decision is offered again next tick.
+///
+/// A magazine policy that authors NO rule on
+/// [`TORPEDO_CONSERVATION_CHANNEL`] is unconstrained: conservation is content,
+/// so a hull (or a whole fleet) that never authors it fires exactly as it did
+/// before this channel existed.
+pub const TORPEDO_RELEASE_VERB: &str = "release_torpedo";
+
+/// The WORLD counter a scenario publishes to say how much of the mission's
+/// threat is still ahead of the ships flying it (issue #943).
+///
+/// Engine vocabulary, not a gameplay value: the NAME is fixed so a hull's
+/// doctrine can be written once and paced by any scenario, while the NUMBER —
+/// how much threat a mission poses, and when each unit of it is cleared — is
+/// authored entirely in world TOML through the ordinary `set_flag_value` /
+/// `increment_flag` trigger actions. `assets/worlds/combat_test.toml` sets it to
+/// its eight-wave schedule and decrements it as each wave dies.
+///
+/// A world that publishes nothing leaves it at the unset default of `0`, which
+/// the host reads as "no mission pressure" — see
+/// [`TORPEDO_ROUNDS_PER_THREAT_FACT`] — so every existing scenario keeps
+/// firing freely.
+pub const MISSION_THREAT_REMAINING_COUNTER: &str = "mission_threat_remaining";
+
+/// Host-seeded fact name: every round this ship still HAS —
+/// `TorpedoSystem::rounds_aboard`, i.e. the magazine plus the rounds already
+/// moved out of it into the tubes.
+///
+/// Deliberately NOT `torpedoes_remaining`. That counter is debited when a load
+/// *starts*, so a hull whose tube doctrine keeps its tubes topped up reads
+/// permanently short by its parked volley — three of the destroyer's twelve —
+/// and a reserve measured against it would strand exactly those rounds: the
+/// counter can reach 0 with a full salvo still sitting in the tubes, and every
+/// further launch is refused for the rest of the mission. Conservation is about
+/// what the ship can still put in the water, which is this.
+pub const TORPEDO_ROUNDS_ABOARD_FACT: &str = "rounds_aboard";
+/// Host-seeded fact name: [`MISSION_THREAT_REMAINING_COUNTER`] as this ship's
+/// own layer chain reads it, so a ship spawned into a sub-world paces against
+/// that layer's mission rather than the base world's.
+pub const TORPEDO_MISSION_THREAT_FACT: &str = "mission_threat_remaining";
+/// Host-seeded fact name: [`TORPEDO_ROUNDS_ABOARD_FACT`] PER remaining unit of
+/// mission threat — the derived ratio a conservation guard compares against an
+/// authored reserve, because the predicate grammar compares one atom to one
+/// operand and has no arithmetic of its own.
+///
+/// With no remaining threat published (an unpaced world, or a mission whose
+/// threat is spent) the ratio is `f64::INFINITY`: unbounded rounds per remaining
+/// threat is the honest answer to "how many can I spend on each of the zero
+/// things left", and it makes `>= param(...)` fire, so the unpaced case is the
+/// permissive one.
+pub const TORPEDO_ROUNDS_PER_THREAT_FACT: &str = "rounds_per_threat";
+/// Host-seeded fact name: how many of this ship's own `[behaviour].doctrine`
+/// entries are a Destroy directive that NAMES its target
+/// (`directive_target`) — the "homing in on one target" reading of the issue's
+/// carve-out.
+///
+/// Counting doctrine entries outright cannot express that carve-out, because a
+/// world's `spawn_entity` override APPENDS to the template's doctrine rather
+/// than replacing it (`behaviour.doctrine` reconciles by `id`, and an
+/// `InstanceOverride` may not tombstone what the template authored). So
+/// combat_test's raid cruiser — the shipped case the issue describes — carries
+/// its template's untargeted `destroy-hostiles` standing order alongside the
+/// `assault-starbase` brief the world gives it, and reads as two objectives
+/// however sole its actual brief is. What is singular about it is the NAMED
+/// target: a hull ordered to kill one specific thing has one engagement, and
+/// the untargeted standing order underneath is what it does with whatever is in
+/// front of it, not a second engagement to hoard rounds for.
+///
+/// A hull with no named target at all reads 0 and is NOT carved out — the
+/// player destroyer's brief (`destroy-hostiles` + `hold-station`) is open-ended,
+/// which is precisely the ship #943 was filed about.
+pub const TORPEDO_TARGETED_OBJECTIVE_COUNT_FACT: &str = "targeted_objective_count";
+
+/// The registered output channels a torpedo magazine policy may drive (#782,
+/// widened by #943).
+pub const TORPEDO_MAGAZINE_CHANNELS: &[&str] =
+    &[TORPEDO_MAGAZINE_CHANNEL, TORPEDO_CONSERVATION_CHANNEL];
+/// The registered verbs a torpedo magazine policy may emit (issues #782, #943).
+pub const TORPEDO_MAGAZINE_VERBS: &[&str] = &[TORPEDO_MAGAZINE_GRANT_VERB, TORPEDO_RELEASE_VERB];
 
 // ── Shields focus fine-system AI policy channel/verb (issue #783) ─────────────
 //
@@ -2834,6 +2934,11 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         TORPEDO_LOAD_VERB => crate::ai::policy::AiPolicyVerb::LoadTorpedo,
         TORPEDO_LAUNCH_VERB => crate::ai::policy::AiPolicyVerb::LaunchTorpedo,
         TORPEDO_MAGAZINE_GRANT_VERB => crate::ai::policy::AiPolicyVerb::GrantTorpedoRound,
+        // Torpedo conservation verb (issue #943): value-less too — the
+        // magazine level, the remaining mission threat and this ship's own
+        // objective count are all host readings, and the reserve they are
+        // compared against is an authored `param`.
+        TORPEDO_RELEASE_VERB => crate::ai::policy::AiPolicyVerb::ReleaseTorpedo,
         // Shields focus action verb (issue #783): value-less, like the
         // weapon-bank verbs. The `value` field is ignored — which of the
         // four arcs is focused comes from the retained ranking kernel in

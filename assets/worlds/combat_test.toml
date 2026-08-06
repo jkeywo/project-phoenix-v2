@@ -107,6 +107,23 @@
 #          Player ship destroyed → handled by the built-in apply_hull_damage
 #          path which sets GamePhase::GameOver directly with reason
 #          "All consoles destroyed" — no scenario trigger needed.
+#
+# Pacing: this world also PUBLISHES how much of itself is still ahead, as the
+#   world counter `mission_threat_remaining` (issue #943). It is set to 8 on
+#   `on_world_loaded` and decremented beside each wave's `complete_objective`,
+#   so at any moment it reads how many waves are still to come. Anything that
+#   has to ration a finite resource across the whole run reads it instead of
+#   guessing — today that is the torpedo magazine's `torpedo_conservation`
+#   doctrine (see `[torpedoes.ai]` on any hull with tubes), which divides the
+#   rounds the ship still has ABOARD — magazine plus tubes — by this number and
+#   holds fire once the quotient falls under the reserve the hull authors.
+#   Without it a ship — player or NPC — meets wave 1 with twelve torpedoes and
+#   waves 2-8 with none.
+#
+#   It is deliberately a SECOND counter rather than arithmetic on
+#   `waves_spawned`: that one counts waves RELEASED (and is what victory waits
+#   for), this one counts waves REMAINING, and the two move at different
+#   moments — a wave is released ten seconds after the previous one dies.
 
 [global]
 seed = 475
@@ -347,6 +364,26 @@ condition = "on_world_loaded"
   faction = "Federation"
   enemy   = "Harrow"
 
+  # How much threat this mission poses, published for anything that has to pace
+  # itself against the WHOLE run rather than the fight in front of it (issue
+  # #943). Read today by the torpedo magazine's `torpedo_conservation` doctrine
+  # — see `[torpedoes.ai]` on any hull with tubes — which divides the rounds the
+  # ship still has aboard (magazine plus tubes) by this number and holds fire
+  # once the quotient drops below the reserve the hull authors.
+  #
+  # Eight, because eight waves is what the schedule below releases. It is the
+  # same number the victory guard counts up to in `counter(waves_spawned) >= 8`,
+  # stated the other way round: that one asks "have all eight been RELEASED",
+  # this one says "how many are still to come". Each wave's death trigger
+  # decrements it, so while the last wave is alive it reads 1 and the fleet's
+  # authored reserve of one round per remaining wave comes to exactly one round
+  # — a hull that has been holding rounds back can spend every one of them on
+  # the ships actually left. It reaches 0 as that wave dies.
+  [[trigger.action]]
+  type  = "set_flag_value"
+  name  = "mission_threat_remaining"
+  value = 8
+
   [[trigger.action]]
   type          = "spawn_entity"
   template_path = "assets/entities/ship_harrow_patrol.toml"
@@ -432,6 +469,15 @@ group     = "wave_1"
   type = "complete_objective"
   id   = "obj-destroy-wave-1"
 
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
   [[trigger.action]]
   type          = "spawn_entity"
   template_path = "assets/entities/ship_harrow_destroyer.toml"
@@ -481,6 +527,15 @@ group     = "wave_2"
   type = "complete_objective"
   id   = "obj-destroy-wave-2"
 
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
   [[trigger.action]]
   type          = "spawn_entity"
   template_path = "assets/entities/ship_harrow_cruiser.toml"
@@ -529,6 +584,15 @@ group     = "wave_3"
   type = "complete_objective"
   id   = "obj-destroy-wave-3"
 
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
   [[trigger.action]]
   type          = "spawn_entity"
   template_path = "assets/entities/ship_harrow_destroyer.toml"
@@ -576,6 +640,15 @@ group     = "wave_4"
   [[trigger.action]]
   type = "complete_objective"
   id   = "obj-destroy-wave-4"
+
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -638,6 +711,15 @@ group     = "wave_5"
   type = "complete_objective"
   id   = "obj-destroy-wave-5"
 
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
   [[trigger.action]]
   type          = "spawn_entity"
   template_path = "assets/entities/ship_harrow_destroyer.toml"
@@ -694,6 +776,15 @@ group     = "wave_6"
   [[trigger.action]]
   type = "complete_objective"
   id   = "obj-destroy-wave-6"
+
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -753,6 +844,15 @@ group     = "wave_7"
   type = "complete_objective"
   id   = "obj-destroy-wave-7"
 
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
   [[trigger.action]]
   type          = "spawn_entity"
   template_path = "assets/entities/ship_harrow_patrol.toml"
@@ -806,6 +906,15 @@ group     = "wave_8"
   [[trigger.action]]
   type = "complete_objective"
   id   = "obj-destroy-wave-8"
+
+  # One less wave still to come (issue #943). Paired with the completion above
+  # rather than with the next wave's spawn, so the count falls the moment the
+  # threat is actually gone — including for wave 8, which has no successor to
+  # carry the action for it.
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
 
 # ── Endings ──────────────────────────────────────────────────────────────────
 

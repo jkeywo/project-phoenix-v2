@@ -9570,6 +9570,631 @@ fn magazine_flag_guard_reads_the_world_in_both_directions() {
     );
 }
 
+// ── Torpedo conservation: magazine vs remaining mission (issue #943) ──────────
+//
+// The gate lives in `handle_fire_torpedo`, so every case below drives that
+// system DIRECTLY from a hand-written `AdmittedCommands` entry — the shape a
+// human Tactical console's `ControlSystem` takes once admission has stripped the
+// source identity. No AI decider is registered in these apps at all, which is
+// the point: a gate that only bit AI-emitted launches would be the very
+// asymmetry AGENTS.md #6 forbids, and the defect #943 reports (a player emptying
+// the magazine into wave 1 while the NPCs pace themselves).
+//
+// All four run the SHIPPED fleet doctrine (`shipped_policy_toml`), so they pin
+// the authored `[torpedoes.ai]` blocks rather than a rule invented here.
+
+/// Build a `handle_fire_torpedo` fixture with a loaded tube, the shipped
+/// magazine doctrine, an authored world, and one hand-written HUMAN-origin
+/// `FireTorpedo` in the ship's admitted set.
+///
+/// `doctrine` is the ship's standing brief, one element per
+/// `[[behaviour.doctrine]]` entry: `Some(target)` for a Destroy directive that
+/// NAMES what it is sent to kill, `None` for an untargeted standing order. The
+/// carve-out's lever is how many of them are named, not how many there are.
+///
+/// `rounds_aboard` is everything the ship is CARRYING — the fixture parks a
+/// round in `fore_port`, and the magazine is back-solved so the total comes out
+/// at this number, because the total is what the gate measures.
+/// `mission_threat_remaining` is what the world publishes.
+fn conservation_fixture(
+    doctrine: &[Option<&str>],
+    rounds_aboard: u32,
+    mission_threat_remaining: i64,
+) -> (App, Entity) {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    load_tube_now(&mut app, "fore_port");
+    let ship = local_ship(&mut app);
+
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .flags
+        .set_flag_value(
+            crate::entities::config::MISSION_THREAT_REMAINING_COUNTER,
+            mission_threat_remaining,
+        );
+
+    let doctrine = doctrine
+        .iter()
+        .enumerate()
+        .map(|(i, target)| crate::entities::config::DoctrineObjective {
+            id: format!("objective-{i}"),
+            directive_kind: Some("Destroy".into()),
+            directive_target: target.map(|t| t.to_string()),
+            ..Default::default()
+        })
+        .collect();
+    app.world_mut().entity_mut(ship).insert((
+        crate::weapons_plugin::TorpedoMagazineAiPolicy(
+            crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_magazine")
+                .to_policy()
+                .expect("the shipped torpedo-magazine policy decodes"),
+        ),
+        crate::entity_spawner::BehaviourSection(crate::entities::config::BehaviourConfig {
+            doctrine,
+            ..Default::default()
+        }),
+    ));
+    {
+        let mut sys = app
+            .world_mut()
+            .get_mut::<TorpedoSystemResource>(ship)
+            .expect("the fixture ship carries a torpedo system");
+        // Rounds already out of the magazine and in the tubes. Solved for
+        // rather than assumed, so this fixture keeps saying what it means if
+        // the fixture hull ever parks a different volley.
+        let parked = sys.0.rounds_aboard() - sys.0.torpedoes_remaining;
+        assert!(
+            rounds_aboard >= parked,
+            "this fixture parks {parked} round(s) in tubes, so it cannot describe a \
+             ship carrying only {rounds_aboard}"
+        );
+        sys.0.torpedoes_remaining = rounds_aboard - parked;
+    }
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<AdmittedCommands>()
+        .unwrap()
+        .0
+        .push(AdmittedCommand {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo {
+                target_uuid: Some("target-uuid".into()),
+            },
+            response_token: None,
+        });
+    (app, ship)
+}
+
+/// Run `handle_fire_torpedo` once and report whether a round left a tube.
+fn launched_from_admitted_command(app: &mut App) -> bool {
+    use bevy::ecs::system::RunSystemOnce;
+    app.world_mut()
+        .run_system_once(handle_fire_torpedo)
+        .expect("handle_fire_torpedo should run");
+    app.world()
+        .resource::<SimOutbox>()
+        .0
+        .iter()
+        .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. }))
+}
+
+/// **AC1 (the symmetry claim).** A HUMAN-origin `FireTorpedo` is held by the
+/// conservation gate when the magazine is thin against a long mission.
+///
+/// Nothing in this app decides anything for the AI — `ai_torpedo_auto_fire` is
+/// not registered — so the only thing that can refuse this launch is the gate
+/// inside `handle_fire_torpedo`. Before #943 a human's launch met no doctrine
+/// check whatsoever (only the tube and magazine online gates), which is exactly
+/// how a player emptied twelve rounds into the first wave of an eight-wave
+/// defence while every NPC around them paced itself.
+#[test]
+fn torpedo_conservation_holds_a_human_origin_launch_when_the_mission_is_long() {
+    // The player destroyer's shape: an open-ended brief that names no target,
+    // 2 rounds aboard against 8 waves still to come — a quarter of a round per
+    // remaining unit of threat, under the one-per the fleet authors.
+    let (mut app, _ship) = conservation_fixture(&[None, None], 2, 8);
+    assert!(
+        !launched_from_admitted_command(&mut app),
+        "the magazine's authored conservation doctrine must hold a human-origin \
+         launch when the rounds left cannot cover the mission left. A launch here \
+         means the gate sits somewhere only AI commands pass through."
+    );
+}
+
+/// **The measure itself.** Conservation counts the rounds the ship HAS, not the
+/// magazine counter — the rounds parked in its tubes are rounds it can still
+/// fire.
+///
+/// The magazine is debited when a load STARTS, so a hull whose tube doctrine
+/// keeps its tubes topped up (`when = "true"`, which is every shipped hull)
+/// drives `torpedoes_remaining` to 0 with a full salvo still sitting in the
+/// tubes. A reserve measured against that counter refuses every launch from
+/// there on: the rounds aboard are stranded for the rest of the mission, which
+/// is the same defect #943 was filed against, moved to the back half of the run.
+#[test]
+fn torpedo_conservation_counts_the_rounds_parked_in_the_tubes() {
+    // One round aboard, and it is IN THE TUBE — the magazine counter reads 0.
+    // One unit of threat left, so the authored reserve comes to exactly one
+    // round and this last round is spendable.
+    let (mut app, ship) = conservation_fixture(&[None, None], 1, 1);
+    assert_eq!(
+        app.world()
+            .get::<TorpedoSystemResource>(ship)
+            .expect("fixture ship carries a torpedo system")
+            .0
+            .torpedoes_remaining,
+        0,
+        "precondition: the whole round must be in the tube, or this is not the \
+         case where the two measures disagree"
+    );
+    assert!(
+        launched_from_admitted_command(&mut app),
+        "a ship holding its last round in a loaded tube must be able to fire it. \
+         Refusing here means the gate is reading `torpedoes_remaining` — the \
+         rounds left to RELOAD with — and every round already moved into a tube \
+         is stranded for the rest of the mission."
+    );
+}
+
+/// **AC2 (world-scoped, not per-hull).** The SAME hull, the SAME magazine and
+/// the SAME command fire or hold purely on what the WORLD publishes.
+///
+/// This is the whole difference between conservation and a hull-side ammo limit:
+/// nothing about the ship changes between the three cases.
+#[test]
+fn torpedo_conservation_is_derived_from_the_world_not_from_the_hull() {
+    let (mut app, _) = conservation_fixture(&[None, None], 2, 8);
+    assert!(
+        !launched_from_admitted_command(&mut app),
+        "precondition: two rounds against eight waves must hold"
+    );
+
+    // Same ship, same two rounds — the world now says one thing left to fight.
+    let (mut app, _) = conservation_fixture(&[None, None], 2, 1);
+    assert!(
+        launched_from_admitted_command(&mut app),
+        "two rounds against ONE remaining unit of threat is two rounds per threat, \
+         well over the authored reserve — the identical hull must now spend. If \
+         this holds, the gate is reading something on the ship rather than the \
+         mission counter the scenario publishes."
+    );
+
+    // A world that publishes no threat at all paces nothing: the ratio is
+    // unbounded, which is what keeps every pre-#943 scenario firing freely.
+    let (mut app, _) = conservation_fixture(&[None, None], 2, 0);
+    assert!(
+        launched_from_admitted_command(&mut app),
+        "a world that publishes no `mission_threat_remaining` must not constrain \
+         anyone — conservation is something a mission asks for"
+    );
+}
+
+/// **AC3 (the carve-out).** A ship sent after ONE named target spends freely, in
+/// the exact conditions that hold back a ship with an open-ended brief.
+///
+/// The lever is how many of the ship's standing objectives NAME a target, not
+/// how many objectives it has, and the difference is not academic: a world's
+/// `spawn_entity` override APPENDS its brief to the template's standing orders
+/// (doctrine reconciles by `id` and an instance override may not tombstone what
+/// the template authored), so the shipped raid cruiser — the worked example the
+/// issue describes — carries two entries and exactly one named target. Counting
+/// entries would put it on the constrained path and leave the carve-out with no
+/// shipped instance at all;
+/// `combat_test_raid_cruisers_are_the_shipped_sole_objective_ship` pins that
+/// shape against the actual content.
+#[test]
+fn torpedo_conservation_carves_out_a_sole_objective_ship() {
+    // The raid cruiser's shape: the template's untargeted standing order, plus
+    // the world's brief against one named target. Otherwise identical to the
+    // AC1 fixture, which holds.
+    let (mut app, _) = conservation_fixture(&[None, Some("Starbase Alpha")], 2, 8);
+    assert!(
+        launched_from_admitted_command(&mut app),
+        "a hull sent after ONE named target must not hold rounds back: there is no \
+         second engagement to hold them for. The open-ended twin of this fixture is \
+         held by \
+         `torpedo_conservation_holds_a_human_origin_launch_when_the_mission_is_long`."
+    );
+
+    // "Sole" is load-bearing in both directions. Two named targets is two
+    // engagements, and a ship with two engagements paces between them.
+    let (mut app, _) = conservation_fixture(&[Some("Starbase Alpha"), Some("Starbase Beta")], 2, 8);
+    assert!(
+        !launched_from_admitted_command(&mut app),
+        "a hull briefed against TWO named targets is not a sole-objective ship — \
+         if this fires, the carve-out is reading `has a named target at all` and \
+         every escort with a priority target stops pacing"
+    );
+}
+
+/// The shipped instance of the carve-out, asserted against the CONTENT rather
+/// than described in a comment (issue #943).
+///
+/// combat_test's cruiser waves are the ship the issue names — "an attacker
+/// homing in on one target". This walks the real merge that produces one:
+/// `ship_harrow_cruiser.toml` resolved as the loader resolves it, the world's
+/// own wave-1 `overrides` merged on top under `MergePolicy::InstanceOverride`,
+/// and then the hull's own authored `[torpedoes.ai]` block asked the question
+/// the gate asks.
+///
+/// The doctrine-entry count is asserted at 2 on purpose: it is the number that
+/// makes an entry-counting carve-out silently dead content in every shipped
+/// world, and the reason the lever counts named targets instead.
+#[test]
+fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
+    let template = crate::entities::config::EntityConfig::from_toml(
+        &crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
+            .expect("the shipped raid cruiser must resolve")
+            .toml,
+    )
+    .expect("the shipped raid cruiser must parse");
+
+    let world =
+        crate::world::config::parse_world(include_str!("../../../assets/worlds/combat_test.toml"))
+            .expect("combat_test.toml must parse");
+    let overrides = world
+        .triggers
+        .iter()
+        .flat_map(|t| t.actions.iter())
+        .find_map(|a| match a {
+            crate::world::config::TriggerAction::SpawnEntity {
+                name,
+                overrides: Some(o),
+                ..
+            } if name == "wave_1" => Some(o.clone()),
+            _ => None,
+        })
+        .expect("combat_test must spawn `wave_1` with inline overrides");
+
+    // Exactly the two steps `dispatch_spawn_entity` takes.
+    let merged = crate::entity_override::merge_entity_config_toml(
+        &template
+            .to_toml_value()
+            .expect("the template round-trips to TOML"),
+        &overrides,
+    )
+    .expect("the shipped override must merge");
+    let spawned = crate::entities::config::EntityConfig::from_toml(
+        &toml::to_string(&merged).expect("the merged document serialises"),
+    )
+    .expect("the merged raid cruiser must parse");
+    let behaviour = spawned
+        .behaviour
+        .expect("the merged raid cruiser carries a behaviour section");
+
+    assert_eq!(
+        behaviour.doctrine.len(),
+        2,
+        "the world's brief APPENDS to the template's standing orders, so the raid \
+         cruiser flies two doctrine entries: {:?}. If this is ever 1, the override \
+         has started replacing rather than appending and the entry-count reading of \
+         `sole objective` becomes available again — but until then, counting entries \
+         puts the one ship the issue describes on the constrained path.",
+        behaviour.doctrine.iter().map(|d| &d.id).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        crate::console::weapons::torpedo::targeted_objective_count(&behaviour),
+        1,
+        "the raid cruiser is sent after ONE named target (`assault-starbase` →  \
+         Starbase Alpha); the template's `destroy-hostiles` names nothing and is \
+         what it does with whatever is in front of it, not a second engagement"
+    );
+
+    // End to end through the hull's OWN authored doctrine, in combat_test's own
+    // conditions: eight waves published, a magazine far under the reserve.
+    let policy = spawned
+        .torpedoes
+        .expect("the raid cruiser carries a torpedo section")
+        .ai
+        .expect("the raid cruiser authors `[torpedoes.ai]`")
+        .to_policy()
+        .expect("the authored magazine policy decodes");
+    let thin = crate::console::weapons::torpedo::seed_torpedo_conservation_facts(1, 8, 1);
+    assert!(
+        crate::console::weapons::torpedo::torpedo_conservation_policy_fires(&policy, &thin, &[]),
+        "the shipped raid cruiser must take the carve-out in the shipped world — a \
+         ship that dies in its own wave has nothing to save rounds for"
+    );
+    // The same hull, the same rounds, the same world: without the named target
+    // it paces. This is what makes the assertion above about the carve-out
+    // rather than about a permissive ratio.
+    let open_ended = crate::console::weapons::torpedo::seed_torpedo_conservation_facts(1, 8, 0);
+    assert!(
+        !crate::console::weapons::torpedo::torpedo_conservation_policy_fires(
+            &policy,
+            &open_ended,
+            &[]
+        ),
+        "with no named target the same doctrine must hold — otherwise the carve-out \
+         is not what let the launch through above"
+    );
+}
+
+/// **AC1 over the WHOLE mission.** The shipped destroyer's twelve rounds are
+/// spread across combat_test's eight waves, and every one of them is spent by
+/// the end of it.
+///
+/// Everything here is shipped content driving real code: the hull's authored
+/// `[torpedoes]` block through the real `TorpedoSystem` (its load timers, its
+/// volley caps, its magazine accounting), its authored `[torpedoes.ai]`
+/// doctrine through the real conservation resolve, and the threat count the
+/// world itself publishes. Only the SCHEDULE is scripted — one engagement per
+/// unit of published threat, each lasting as long as the hull is willing to
+/// keep shooting.
+///
+/// That scripting is why this test exists beside the headless run.
+/// `combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat`
+/// flies the same doctrine for real, but the destroyer dies partway down the
+/// schedule, so a real run can never answer the question that matters most
+/// here: what does the LAST wave meet? A reserve of one round per remaining
+/// unit of threat comes to exactly one round at the last of them, which is what
+/// makes the payload spendable to the end instead of stranded — and measuring
+/// that reserve against the magazine counter instead of the rounds aboard
+/// strands the parked volley outright.
+#[test]
+fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission() {
+    use crate::console::weapons::torpedo::{
+        seed_torpedo_conservation_facts, torpedo_conservation_policy_fires,
+    };
+
+    /// Let every load, unload and burst timer in flight run to completion —
+    /// what the seconds between two engagements do for a real hull.
+    fn settle(sys: &mut crate::torpedo::TorpedoSystem) {
+        let targets = std::collections::HashMap::new();
+        let mut n = 0usize;
+        let mut next_uuid = || {
+            n += 1;
+            format!("settle-{n}")
+        };
+        for _ in 0..120 {
+            sys.tick(0.5, &targets, &mut next_uuid);
+        }
+    }
+
+    let hull = crate::entities::config::EntityConfig::from_toml(
+        &crate::entity_includes::resolve_from_disk("assets/entities/alliance_destroyer.toml")
+            .expect("the demo hull must resolve")
+            .toml,
+    )
+    .expect("the demo hull must parse");
+    let torpedoes = hull.torpedoes.expect("the destroyer carries torpedoes");
+    let policy = torpedoes
+        .ai
+        .as_ref()
+        .expect("the destroyer authors `[torpedoes.ai]`")
+        .to_policy()
+        .expect("the authored magazine policy decodes");
+    let mut sys =
+        crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
+    let payload = sys.rounds_aboard();
+    // The shipped per-tube doctrine is an unconditional `torpedo_load` rule, so
+    // an AI-crewed hull holds every tube at its volley target — the standing
+    // `SetTorpedoVolleyTarget` the tube host emits.
+    for t in &mut sys.tubes {
+        t.target_count = t.ai_target_count;
+    }
+
+    // The mission length is the world's, not this test's.
+    let world =
+        crate::world::config::parse_world(include_str!("../../../assets/worlds/combat_test.toml"))
+            .expect("combat_test.toml must parse");
+    let waves = world
+        .triggers
+        .iter()
+        .flat_map(|t| t.actions.iter())
+        .find_map(|a| match a {
+            crate::world::config::TriggerAction::SetWorldFlagValue { name, value }
+                if name == crate::entities::config::MISSION_THREAT_REMAINING_COUNTER =>
+            {
+                Some(*value)
+            }
+            _ => None,
+        })
+        .expect("combat_test must publish its remaining-threat count");
+
+    let mut launch_id = 0usize;
+    // Rounds spent in each engagement, wave 1 first.
+    let mut spent_per_wave: Vec<u32> = Vec::new();
+    // Rounds still aboard when each engagement began.
+    let mut aboard_per_wave: Vec<u32> = Vec::new();
+    for threat in (1..=waves).rev() {
+        settle(&mut sys);
+        let before = sys.rounds_aboard();
+        aboard_per_wave.push(before);
+        loop {
+            let facts = seed_torpedo_conservation_facts(sys.rounds_aboard(), threat, 0);
+            if !torpedo_conservation_policy_fires(&policy, &facts, &[]) {
+                break;
+            }
+            let Some(tube) = sys
+                .tubes
+                .iter()
+                .find(|t| t.loaded_count > 0)
+                .map(|t| t.id.clone())
+            else {
+                break;
+            };
+            launch_id += 1;
+            sys.launch(
+                &tube,
+                format!("round-{launch_id}"),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                None,
+                None,
+            );
+            settle(&mut sys);
+        }
+        spent_per_wave.push(before - sys.rounds_aboard());
+    }
+
+    // Measured on the shipped content: 6 rounds spent on wave 1, then
+    // [0, 2, 0, 2, 0, 1, 1] — twelve rounds over eight waves, five of them met
+    // with torpedoes and none left over. The same walk with the reserve read
+    // off `torpedoes_remaining` at the pre-fix 0.75 gives
+    // [4, 0, 2, 0, 2, 0, 0, 2] and ENDS TWO ROUNDS ABOARD: the parked volley is
+    // never released, which is what assertion 2 exists to catch.
+
+    // 1. Wave 1 does not eat the payload — the defect as reported. Half is the
+    //    stated ceiling and the shipped hull sits exactly on it: the floor at
+    //    eight published waves is 8 rounds, and the fore tube's volley of 2
+    //    carries it one volley past. A retune that pushes the first engagement
+    //    over half the payload is meant to fail here.
+    assert!(
+        spent_per_wave[0] <= payload / 2,
+        "the destroyer spent {} of its {payload} rounds on the FIRST wave of an \
+         eight-wave defence. Rounds per wave: {spent_per_wave:?}",
+        spent_per_wave[0]
+    );
+
+    // 2. Nothing is stranded. The reserve is one round per remaining unit of
+    //    threat, so at the last of them it is one round and the hull can spend
+    //    whatever it still has. Measured against `torpedoes_remaining` instead,
+    //    the three rounds parked in the tubes are never spendable at all.
+    assert_eq!(
+        sys.rounds_aboard(),
+        0,
+        "the mission ended with {} of {payload} rounds still aboard — the reserve \
+         never released them. Rounds per wave: {spent_per_wave:?}, aboard entering \
+         each wave: {aboard_per_wave:?}",
+        sys.rounds_aboard()
+    );
+
+    // 3. And the payload is SPREAD, not front-loaded into a couple of waves and
+    //    then dry. Counted only while the hull still had something to fire: a
+    //    wave that meets an empty ship is out of rounds, not holding them.
+    let mut dry_streak = 0usize;
+    let mut worst_dry_streak = 0usize;
+    for (spent, aboard) in spent_per_wave.iter().zip(&aboard_per_wave) {
+        if *aboard > 0 && *spent == 0 {
+            dry_streak += 1;
+            worst_dry_streak = worst_dry_streak.max(dry_streak);
+        } else {
+            dry_streak = 0;
+        }
+    }
+    assert!(
+        worst_dry_streak <= 2,
+        "the destroyer went {worst_dry_streak} consecutive waves without firing a \
+         torpedo it was still carrying. Conservation is meant to spread the payload \
+         over the mission, not lock the hull out of the middle of it. Rounds per \
+         wave: {spent_per_wave:?}, aboard entering each wave: {aboard_per_wave:?}"
+    );
+}
+
+/// A magazine that authors NO conservation rule is unconstrained — the channel
+/// resolving to `None` must mean "never asked", not "declined".
+///
+/// Without that distinction, adding the channel would silently stop every hull
+/// that predates it, and every fixture with no magazine policy at all, from ever
+/// launching a torpedo again.
+#[test]
+fn a_magazine_with_no_conservation_doctrine_is_unconstrained() {
+    let (mut app, ship) = conservation_fixture(&[None, None], 2, 8);
+    // Strip the conservation rule, keep the grant rule: the shape every hull
+    // authored between #782 and #943.
+    let mut policy = app
+        .world()
+        .get::<crate::weapons_plugin::TorpedoMagazineAiPolicy>(ship)
+        .expect("fixture attaches the shipped magazine policy")
+        .0
+        .clone();
+    let before = policy.rules.len();
+    policy
+        .rules
+        .retain(|r| r.channel != crate::entities::config::TORPEDO_CONSERVATION_CHANNEL);
+    assert!(
+        policy.rules.len() < before,
+        "the shipped magazine doctrine must actually carry a conservation rule, or \
+         this test removes nothing and passes vacuously"
+    );
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(policy));
+
+    assert!(
+        launched_from_admitted_command(&mut app),
+        "a magazine that authors no conservation doctrine must fire exactly as it \
+         did before the channel existed"
+    );
+}
+
+/// A conservation rule authored ONLY inside a state machine must fail OPEN.
+///
+/// `[torpedoes.ai]` is authorable as a machine — `FineSystemAiConfigToml::state`
+/// exists and content validation accepts the shape for this host — but the
+/// magazine resolves conservation through `AiPolicy::resolve_channel`, the
+/// STATELESS path, which scans `policy.rules` and never `policy.machine`. So a
+/// state-authored rule is unreachable from the gate, and counting it as
+/// "declared" inverts the default the feature rests on: declared, never fires,
+/// holds for ever — that hull's torpedoes muted for the whole mission instead of
+/// falling back to unconstrained, which is the opposite of what the unauthored
+/// case above deliberately does.
+#[test]
+fn a_conservation_rule_authored_only_in_a_state_machine_fails_open() {
+    // The same guard the fleet authors at top level, moved into a state — the
+    // one shape the "is conservation declared?" question exists to get right.
+    let machine_toml = r#"
+initial_state = "engaging"
+param = { min_rounds_per_threat = 1.0 }
+
+[[state]]
+id = "engaging"
+
+[[state.rule]]
+priority = 0
+channel = "torpedo_conservation"
+when = "fact(rounds_per_threat) >= param(min_rounds_per_threat)"
+verb = "release_torpedo"
+"#;
+    let cfg: crate::entities::config::FineSystemAiConfigToml =
+        toml::from_str(machine_toml).expect("a machine-shaped magazine block parses");
+    crate::entities::config::validate_fine_system_ai_policy_for(
+        &crate::entities::ai_flag_hosts::TORPEDO_MAGAZINE,
+        &cfg,
+        crate::entities::config::TORPEDO_MAGAZINE_CHANNELS,
+        crate::entities::config::TORPEDO_MAGAZINE_VERBS,
+    )
+    .expect(
+        "precondition: content validation must ACCEPT this shape at entity load — if it \
+         ever rejects a machine-shaped `[torpedoes.ai]` outright, this whole case stops \
+         being reachable and the test should be revisited rather than deleted",
+    );
+    let policy = cfg
+        .to_policy()
+        .expect("the machine-shaped magazine block decodes");
+    assert!(
+        policy.machine.is_some() && policy.rules.is_empty(),
+        "precondition: the fixture must be a MACHINE with no top-level rules, or it is \
+         not testing the unreachable position at all"
+    );
+    assert!(
+        !crate::console::weapons::torpedo::torpedo_conservation_declared(&policy),
+        "a conservation rule the magazine's stateless resolve can never read must not \
+         count as a declared doctrine: `resolve_channel` scans `policy.rules` alone, so \
+         calling this declared means the gate asks a question that is answered `None` \
+         for ever and holds every launch of the mission"
+    );
+
+    // End to end, through the gate itself: the fixture that HOLDS with the
+    // shipped stateless doctrine must LAUNCH with the machine-shaped one.
+    let (mut app, ship) = conservation_fixture(&[None, None], 2, 8);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(policy));
+    assert!(
+        launched_from_admitted_command(&mut app),
+        "two rounds against eight waves holds with the shipped doctrine, but with the \
+         rule parked in a state nothing constrains this launch — the hull is in the \
+         'never asked' case, not the 'asked and declined' one. A hold here is the \
+         inversion: every launch for the rest of the mission would be dropped"
+    );
+}
+
 // ── Fire torpedo: magazine-online gate ────────────────────────────────
 
 #[test]

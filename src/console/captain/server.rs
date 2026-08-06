@@ -428,6 +428,10 @@ fn operate_captain_ai(
                 | crate::ai::policy::AiPolicyVerb::LoadTorpedo
                 | crate::ai::policy::AiPolicyVerb::LaunchTorpedo
                 | crate::ai::policy::AiPolicyVerb::GrantTorpedoRound
+                // Torpedo conservation verb (issue #943) resolves inside
+                // `handle_fire_torpedo`, never on the Captain's red_alert
+                // channel, but the match must stay exhaustive.
+                | crate::ai::policy::AiPolicyVerb::ReleaseTorpedo
                 // Shields focus verb (issue #783) never resolves on the
                 // Captain's red_alert channel, but the match must stay exhaustive.
                 | crate::ai::policy::AiPolicyVerb::FocusShieldArc

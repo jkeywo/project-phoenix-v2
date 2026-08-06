@@ -321,8 +321,9 @@ pub(crate) use torpedo::{
     handle_set_torpedo_volley_target, handle_unload_tube, tick_torpedo_lifecycle,
 };
 pub use torpedo::{
-    handle_torpedo_magazine_inter_system, seed_torpedo_magazine_facts,
-    seed_torpedo_tube_launch_facts, seed_torpedo_tube_load_facts,
+    handle_torpedo_magazine_inter_system, seed_torpedo_conservation_facts,
+    seed_torpedo_magazine_facts, seed_torpedo_tube_launch_facts, seed_torpedo_tube_load_facts,
+    torpedo_conservation_declared, torpedo_conservation_policy_fires,
     torpedo_magazine_grant_policy_fires, torpedo_tube_launch_policy_fires,
     torpedo_tube_load_policy_fires, TorpedoMagazineAiPolicy, TorpedoSystemResource,
     TorpedoTubeAiPolicies,

@@ -388,17 +388,74 @@ when = "true"
 verb = "set_red_alert"
 value = false
 
-# Torpedo magazine — always grant a claim the host has already found legal. The
-# offline + non-empty gates remain the hard authority; this policy is the
-# authored arbiter layered on top, which is where a hull would ration rounds
-# between tubes.
+# Torpedo magazine — two axes on one authored block.
+#
+# GRANT: always grant a claim the host has already found legal. The offline +
+# non-empty gates remain the hard authority; this rule is the authored arbiter
+# layered on top, and it is where a hull would ration rounds between its tubes.
+#
+# CONSERVATION (issue #943): whether a launch the ship has already authorised may
+# SPEND its round here, or should hold it for later in the mission. Resolved
+# inside `handle_fire_torpedo`, the one consumer of an admitted `FireTorpedo`, so
+# a human Tactical operator and an AI backfill meet this guard identically — the
+# per-tube `torpedo_launch` doctrine gates only the AI, and a gate that
+# constrains NPCs alone is how a player empties the whole magazine into wave one.
+#
+# `rounds_per_threat` is a host reading, not an authored number: every round the
+# ship still HAS — the magazine PLUS whatever is already parked in the tubes —
+# divided by the mission threat still ahead, which the SCENARIO publishes as the
+# world counter `mission_threat_remaining`. A world that publishes none leaves
+# the ratio unbounded and this rule always fires, because pacing is something a
+# mission asks for and never something a hull decides for itself.
+#
+# `min_rounds_per_threat = 1.0` reads "keep one round for every thing still
+# coming". Two properties pick that value, and both are about the WHOLE run
+# rather than any one engagement:
+#
+#   * Nothing is stranded. At the last unit of threat the reserve is exactly one
+#     round, so whatever is still aboard can always be spent on the last fight.
+#     Any reserve above 1.0 leaves rounds unfired at the end of the mission —
+#     and one measured against the magazine COUNTER rather than the rounds
+#     aboard strands the parked volley on top of that, because the counter is
+#     debited the moment a tube starts loading.
+#   * The payload lasts the mission. In combat_test's eight-wave defence the
+#     destroyer's twelve rounds meet a floor of eight while wave 1 is alive, so
+#     the first engagement spends at most half of them instead of all of them,
+#     and every wave that dies frees another round for the wave behind it.
+#
+# Both are measured, not asserted by hand.
+# `the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission`
+# (`src/console/weapons/server_tests.rs`) walks this doctrine through the real
+# torpedo system over the world's whole authored schedule: 6 rounds on wave 1,
+# then 0, 2, 0, 2, 0, 1, 1 — five of the eight waves met with torpedoes and
+# nothing left aboard at the end.
+# `combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat`
+# (`tests/headless_runner.rs`) flies it for real: 5 rounds on wave 1, and the
+# hull still spending in the waves after it.
+#
+# `sole_objective_count = 1` is the carve-out, and it counts NAMED Destroy
+# targets rather than doctrine entries. A world's `spawn_entity` override
+# APPENDS its brief to the template's standing orders — doctrine reconciles by
+# `id`, and an instance override may not remove what the template authored — so
+# combat_test's raid cruisers carry their template's untargeted
+# `destroy-hostiles` alongside the `assault-starbase` the world hands them: two
+# entries, one named target, one engagement they will not outlive. Those spend
+# freely. A hull whose brief names no target reads 0 and paces — which is the
+# player's destroyer, the ship #943 was filed about.
 [torpedoes.ai]
+param = { min_rounds_per_threat = 1.0, sole_objective_count = 1.0 }
 
 [[torpedoes.ai.rule]]
 priority = 0
 channel = "torpedo_magazine_grant"
 when = "true"
 verb = "grant_torpedo_round"
+
+[[torpedoes.ai.rule]]
+priority = 0
+channel = "torpedo_conservation"
+when = "fact(targeted_objective_count) == param(sole_objective_count) or fact(rounds_per_threat) >= param(min_rounds_per_threat)"
+verb = "release_torpedo"
 
 # Reactor + battery. Transcribed from `PowerConfig::default()`, which is what
 # this hull ran on before it declared the section: authoring

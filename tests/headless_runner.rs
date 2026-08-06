@@ -1540,6 +1540,162 @@ fn combat_test_chains_its_waves_in_a_real_run() {
     }
 }
 
+/// Issue #943 acceptance: the player's destroyer does NOT dump its magazine
+/// into wave 1 of `combat_test`, and what stops it is the world's own count of
+/// the threat still ahead.
+///
+/// The run is the same demo hull, world and seed the wave-chain guard above
+/// flies, sampled every tick and bucketed by the world's own remaining-threat
+/// count, so what it measures is the SHAPE of the payload across the run rather
+/// than one moment in it. Four things are asserted, and they are the four ways
+/// the feature can fail:
+///
+/// 1. The scenario is PUBLISHING the measure. `mission_threat_remaining` reads 8
+///    while wave 1 is alive — the eight-wave schedule, set by the
+///    `on_world_loaded` trigger and not yet decremented.
+/// 2. The ship is FIGHTING. Rounds left because the hull never got a firing
+///    solution would prove nothing, so the run must also have launched.
+/// 3. Wave 1 does not eat the payload. The fleet authors
+///    `min_rounds_per_threat = 1.0`, so with eight waves published the hull holds
+///    fire once it is down to eight rounds and the first engagement spends about
+///    a third of what it carries instead of all of it.
+/// 4. The back half is not dry. This is the failure the FIRST cut of #943
+///    shipped: measured against `torpedoes_remaining` — the rounds left to
+///    reload with — rather than against the rounds aboard, the reserve reads
+///    three rounds short on this hull (two tubes parking `volley_max` 2 + 1 under
+///    the shipped "keep the tubes loaded" doctrine), so the gate latches shut
+///    after wave 1 and the parked volley is never fired at all. Rounds surviving
+///    wave 1 is only half the acceptance criterion; they have to be SPENT later.
+///
+/// Nobody is connected, so every `FireTorpedo` in this run is AI-origin — the
+/// human-origin half of the same gate is pinned by
+/// `console::weapons::server_tests::
+/// torpedo_conservation_holds_a_human_origin_launch_when_the_mission_is_long`,
+/// which drives `handle_fire_torpedo` from a hand-written admitted command with
+/// no decider in the app at all. They are the same guard: there is only one, and
+/// it sits below admission where the origin is already gone.
+#[test]
+fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
+    use project_phoenix::weapons_plugin::TorpedoSystemResource;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/combat_test.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        // The same 600 s budget the wave-chain guard above flies, because this
+        // measures the WHOLE run and not just its first engagement: seed 2 gets
+        // through wave 5 before the destroyer is lost at ~463 s.
+        max_ticks: ticks_for_sim_seconds(600.0, dt),
+        seed: Some(2),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // Stepped a tick at a time rather than run-then-look, because both questions
+    // are about the SHAPE of the whole run rather than about wherever a single
+    // sample lands: a ship that empties itself and then reloads out of a
+    // still-stocked magazine reads full again a few seconds later, and a ship
+    // that has gone dry for the back half looks identical at the final tick to
+    // one that spent its last round on the last wave.
+    //
+    // `trace[t]` is (rounds aboard on entering threat level `t`, lowest seen
+    // while there), for every level the run actually reached.
+    let mut trace: std::collections::BTreeMap<i64, (u32, u32)> = std::collections::BTreeMap::new();
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        let remaining = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("mission_threat_remaining");
+        // 0 before the first tick's `on_world_loaded` dispatch, and again once
+        // the last wave is dead — neither is a wave in progress.
+        if remaining <= 0 {
+            continue;
+        }
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<LocalShip>>();
+        // The player hull is gone once it dies, which is how seed 2 ends.
+        let Ok(torps) = q.single(app.world()) else {
+            break;
+        };
+        let aboard = torps.0.rounds_aboard();
+        trace
+            .entry(remaining)
+            .and_modify(|(_, low)| *low = (*low).min(aboard))
+            .or_insert((aboard, aboard));
+    }
+    let report = build_report(&mut app, &args, 0.0);
+
+    let (entered_wave_one, lowest_in_wave_one) = *trace.get(&8).expect(
+        "combat_test never published `mission_threat_remaining` as 8, so the world \
+                 is not declaring its eight-wave threat at all and the conservation doctrine \
+                 reads an unbounded ratio that paces nothing",
+    );
+    let launched = report
+        .message_counts
+        .get("TorpedoLaunched")
+        .copied()
+        .unwrap_or(0);
+    assert!(
+        launched > 0,
+        "nothing launched in the whole run, so rounds left aboard say nothing about \
+         conservation — it would only mean the hull never got a shot. \
+         message_counts: {:?}",
+        report.message_counts
+    );
+
+    // 1. Wave 1 does not eat the payload. Measured: the hull enters wave 1 with
+    //    all 12 authored rounds and bottoms out at 7, i.e. it spends 5 against a
+    //    floor of 8 (`min_rounds_per_threat = 1.0` × 8 waves published) and the
+    //    volley granularity carries it one round past. Stated as 6 — a round of
+    //    slack — so retuning the reserve or the tube volleys does not fail this,
+    //    but losing the gate does: un-gated, this same run bottoms out at 0.
+    assert_eq!(
+        entered_wave_one, 12,
+        "precondition: the destroyer must start the run with its full authored \
+         magazine aboard, or the low-water mark below is measuring something else"
+    );
+    assert!(
+        lowest_in_wave_one >= 6,
+        "the destroyer was down to {lowest_in_wave_one} of its 12 rounds while wave 1 \
+         was still alive. The whole point of #943 is that the first wave cannot eat \
+         the payload: with seven more waves published as remaining threat, the \
+         magazine's `torpedo_conservation` guard should have held fire long before \
+         this. Trace by remaining threat (entered, lowest): {trace:?}"
+    );
+
+    // 2. And the hull is still SPENDING rounds after wave 1 — the other way this
+    //    feature fails. A reserve measured against `torpedoes_remaining` rather
+    //    than the rounds aboard reads three rounds short on this hull (its two
+    //    tubes park `volley_max` 2 + 1 with the shipped "keep the tubes loaded"
+    //    doctrine), which locks the gate shut for waves 2-4 and strands the
+    //    parked volley for good: rounds survive wave 1, and then nothing is ever
+    //    fired again. Measured: 7 aboard entering wave 2, 5 by the end of it.
+    let later_waves: Vec<_> = trace.iter().filter(|(threat, _)| **threat < 8).collect();
+    assert!(
+        !later_waves.is_empty(),
+        "the run never got past wave 1, so it cannot say whether the hull keeps \
+         shooting for the rest of the mission. Trace: {trace:?}"
+    );
+    let spent_after_wave_one: u32 = later_waves
+        .iter()
+        .map(|(_, (entered, lowest))| entered.saturating_sub(*lowest))
+        .sum();
+    assert!(
+        spent_after_wave_one > 0,
+        "the destroyer launched nothing at all once wave 1 was dead — it went dry \
+         for the rest of the run while still carrying rounds. Conservation is meant \
+         to SPREAD the payload across the mission, not spend it on the first \
+         engagement and then lock the hull out of every later one. Trace by \
+         remaining threat (entered, lowest): {trace:?}"
+    );
+}
+
 /// Production-schedule guard: an AI-crewed ship actually LAUNCHES a torpedo in
 /// a real run.
 ///

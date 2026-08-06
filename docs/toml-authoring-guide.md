@@ -552,7 +552,7 @@ defining bridge crew layouts; see **§6.3**.
 | `radar_range` | f32 | `0.0` | Tactical radar range. |
 | `target_range` | f32 | `0.0` | Max lock range. |
 | `fire_arc` | f32 | `0.0` | Half-angle of forward fire arc (rad). |
-| `beam_range` | f32 | `0.0` | Phaser beam range. **Scaled by `ModifierSlot::RadarRange`, i.e. by the `sensors` power group** — see *Power levels are gameplay numbers* below. |
+| `beam_range` | f32 | `0.0` | Phaser beam range. **This is the reach, full stop** — no power level, region effect or damage state scales it (issue #955); see *Power levels are gameplay numbers* below. |
 | `beam_damage_per_sec` | f32 | `0.0` | Beam DPS. |
 | `beam_duration_secs` | f32 | `0.0` | Time beam stays on per fire. |
 | `cooldown_secs` | f32 | `0.0` | Cooldown after firing. |
@@ -580,7 +580,7 @@ defining bridge crew layouts; see **§6.3**.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `power_multipliers` | `[f32; 4]` | none | Bonus per sensors power level 1..4. Drives `ModifierSlot::RadarRange`, which scales **every phaser bank's `beam_range`** and `[weapons_console.radar] range` — the Tactical/weapons engagement horizon, not this console's own — see *Power levels are gameplay numbers* below. This console's own horizon, `[sensors_console.long_range_radar] range`, is scaled by the separate `SensorRadarRange` slot instead, which only system damage drives (helm's horizon works the same way, off `HelmRadarRange`) — neither is power-driven. |
+| `power_multipliers` | `[f32; 4]` | none | Bonus per sensors power level 1..4. Drives `ModifierSlot::RadarRange`, which scales the Tactical **acquisition** horizon — `[weapons_console.radar] range` and the tactical radar blips — and **not** any weapon's reach (issue #955). This console's own horizon, `[sensors_console.long_range_radar] range`, is scaled by the separate `SensorRadarRange` slot instead, which only system damage drives (helm's horizon works the same way, off `HelmRadarRange`) — neither is power-driven. |
 | `[sensors_console.long_range_radar]` | RadarConfig | default | See **§6.1**. |
 | `complexity_toml` | string | none | |
 
@@ -610,7 +610,7 @@ chart pushed to the viewscreen.
 | `rates` | `[f32; 6]` | **required** | Per-level drain/regen rates (level 0..5). Negative = recharge. |
 | `emergency_threshold` | f32 | **required** | Battery level below which all consoles lock to level 1. |
 
-#### Power levels are gameplay numbers — and `sensors` is weapon reach
+#### Power levels are gameplay numbers — and what each group actually buys
 
 **Read this before authoring or retuning any range on a hull.** The power model
 is not a side system: three of its groups multiply values you author elsewhere,
@@ -621,7 +621,7 @@ through `ModifierSlot`s that `apply_power_modifiers_from_read_state`
 |---|---|---|
 | `helm` | `MaxSpeed`, `MaxYawRate` | `[helm_console] max_speed` / `max_yaw_rate` |
 | `weapons` | `PhaserDamage` | every bank's `beam_damage_per_sec` |
-| `sensors` | `RadarRange` | every bank's **`beam_range`**, `[weapons_console.radar] range` — the Tactical horizon. Not `[sensors_console.long_range_radar] range` (scaled by `SensorRadarRange`) or helm's radar (scaled by `HelmRadarRange`) — both of those are damage-driven only, never power-driven. |
+| `sensors` | `RadarRange` | **acquisition only** — `[weapons_console.radar] range` (the horizon a target lock is taken through, human or AI) and the Tactical radar blips. Not `[sensors_console.long_range_radar] range` (scaled by `SensorRadarRange`) or helm's radar (`HelmRadarRange`) — both of those are damage-driven only. |
 
 The bonus per level is the console's own `power_multipliers` (**§2.2**), and
 `ShipModifiers::rebuild_cache` folds the summed bonus as `1 + sum` when it is
@@ -635,37 +635,56 @@ positive and `1 / (1 + |sum|)` when it is negative. With the fleet-standard
 | 3 | +0.25 | ×1.25 |
 | 4 | +0.5 | ×1.5 |
 
-So **a phaser bank's effective reach is `beam_range × RadarRange`**, and the
-sensors group decides it. Level 2 is the level at which an authored range means
-what it says.
+**Power does not buy REACH.** A phaser bank reaches its authored `beam_range`, a
+blaster its authored `range` and a torpedo `speed × lifespan`, at every power
+level, in every region, at any hull damage. If you write 40 in a file, the gun
+reaches 40.
 
-That matters most for hulls with no human at Sensors. The four Alliance hulls
-author `[power_groups.sensors] default_level = 1` so their four groups rest at a
-sustainable total, which means a backfilled hull only reaches its authored range
-if an authored power rule raises the group. It is a `[[power.ai_policy.rule]]`
-on the `sensors` channel that does it (issue #923 — before that rule existed,
-every AI-crewed Alliance hull fought at two thirds of every range in its own
-file, and nothing in any TOML said so). The shipped rule lives in
-`assets/entities/fragments/ai/fleet_baseline.toml`, whose power header carries
-the full derivation, the 8-point total budget the allocation has to fit inside,
-and the measurements behind it.
+That is worth stating loudly because it was not always true. Until issue #955
+every firing path multiplied `beam_range` by `RadarRange`, so a hull resting
+`[power_groups.sensors]` at 1 — which all four Alliance hulls do, to keep their
+four groups at a total their reactor sustains — fought at two thirds of every
+range its own file authored, silently. Issue #923 compensated for that with an
+authored red-alert `sensors` elevation, paid for by dropping the `weapons` one.
+#955 removed the multiplication instead, so both halves are gone: there is no
+`sensors` channel in `fragments/ai/fleet_baseline.toml` and the red-alert point
+is back on `weapons`, where it buys ×1.25 damage.
 
-Two consequences a doctrine author has to design around:
+What the `sensors` group still buys is **acquisition**: how far the ship can
+paint and lock a contact, bounded by the radar ranges the hull authors. A hull
+with its sensors down shoots just as far — it simply has less warning about what
+to shoot at. When you retune this group, you are tuning what a ship can SEE.
 
-* **Reach is a two-rung ladder, not a constant.** The elevation is guarded on
-  `param(min_reserve_sensors)`, and no Alliance reactor sustains a total above 6,
-  so the hull holds nominal reach while the battery is above that reserve and
-  falls back to ×0.667 below it. Size a fighting ring, a standoff or a commit
-  range against the **lower** rung unless the engagement is short.
-* **A range derived from a TARGET's reach already tracks this.** The
-  `safe_range_margin` recovery ring adds the margin to
+Three consequences a doctrine author designs around:
+
+* **A fighting ring, commit range or standoff is sized against the authored
+  weapon range**, not against a power-dependent one. There is no low rung to
+  hedge a REACH against any more.
+* **Acquisition still bounds engagement, and it is still power-scaled.** A lock
+  is a precondition for firing, so `[weapons_console.radar] range ×
+  RadarRange` is a ceiling on what a hull can actually engage even though it is
+  not a ceiling on how far the gun shoots. And because there is no `sensors`
+  channel in any authored power policy, an AI-crewed hull never leaves level 1 —
+  the live horizon is **×0.667 of the authored number, permanently**, not
+  occasionally. So `[weapons_console.radar] range` must be authored **above the
+  hull's longest gun with room to spare**: comfortably above its longest
+  `beam_range` / blaster `range`, and above the outer edge of any engagement
+  envelope it flies (`max_artillery_range`), because the doctrine leg that steps
+  outside that envelope still needs the lock it is repositioning against. Pinned
+  for the whole fleet by
+  `every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`
+  (`src/modifiers/coordination.rs`), which fails naming the hull and the value to
+  author. A hull that authors no `[weapons_console.radar]` at all is unbounded
+  and exempt.
+* **A range derived from a TARGET's reach is the same number the target's file
+  authors.** The `safe_range_margin` recovery ring adds the margin to
   `target_direct_fire_range`, which `entity_direct_fire_range` reads off that
-  ship's live banks with its own `RadarRange` applied — so it needs no retune
-  when a hull's sensor allocation changes.
+  ship's live banks — offline banks drop out, nothing scales what is left.
 
-Pinned by `every_alliance_hull_reaches_its_authored_beam_range_at_combat_stations`
-(`src/modifiers/coordination.rs`) and
-`a_backfilled_cruiser_reaches_its_authored_beam_range_while_at_combat_stations`
+Pinned by `direct_fire_reach_ignores_the_radar_range_slot` (`src/ai/server.rs`),
+`phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot`
+(`src/console/weapons/server_tests.rs`) and
+`a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel`
 (`tests/headless_runner.rs`).
 
 ### 2.2.1 Example — `assets/entities/alliance_cruiser.toml`

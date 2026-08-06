@@ -2283,22 +2283,9 @@ pub const POWER_THRUST_THRESHOLD_PARAM: &str = "thrust_threshold";
 /// Authored policy-parameter name: the minimum battery reserve (0–100) the
 /// default helm-elevation rule requires before raising helm power (AC2).
 pub const POWER_HELM_RESERVE_PARAM: &str = "min_reserve_helm";
-/// Authored policy-parameter name: the minimum battery reserve (0–100) a
-/// weapons-elevation rule requires before raising weapons power (AC2). Still
-/// authored by the six NPC hulls; the Alliance fleet baseline dropped its
-/// weapons elevation in issue #923 and spends that point on
-/// [`POWER_SENSORS_RESERVE_PARAM`] instead.
-pub const POWER_WEAPONS_RESERVE_PARAM: &str = "min_reserve_weapons";
 /// Authored policy-parameter name: the minimum battery reserve (0–100) the
-/// fleet's sensors-elevation rule requires before raising the sensor suite to
-/// NOMINAL at red alert (issue #923).
-///
-/// That elevation is what makes a backfilled hull's weapon reach equal its
-/// authored `beam_range`: `ModifierSlot::RadarRange` is driven off the sensors
-/// power group, level 1 folds to ×0.667 and level 2 to ×1.0, so below this
-/// reserve every direct-fire range on the hull is two thirds of the number its
-/// own file authors.
-pub const POWER_SENSORS_RESERVE_PARAM: &str = "min_reserve_sensors";
+/// default weapons-elevation rule requires before raising weapons power (AC2).
+pub const POWER_WEAPONS_RESERVE_PARAM: &str = "min_reserve_weapons";
 /// Authored policy-parameter name: the (zero) reserve the default LOWERING
 /// baseline rules reference so every rule declares a reserve (AC2) without ever
 /// gating a de-allocation, which can never cause a brownout.
@@ -11605,11 +11592,9 @@ default_level = 1
 
     #[test]
     fn default_power_policy_validates_and_resolves() {
-        // The shipped authored block is five rules since issue #923 — helm
-        // elevate + baseline, the weapons baseline (its red-alert elevation is
-        // the point now spent on sensors), and sensors elevate + baseline — all
-        // emitting the value-carrying allocation verb, every rule declaring a
-        // reserve param.
+        // The shipped authored block reproduces the retired engine as four rules
+        // (helm elevate + baseline, weapons elevate + baseline), all emitting the
+        // value-carrying allocation verb, and every rule declares a reserve param.
         let cfg = crate::entities::authored_ai_pins::shipped_policy_toml("power");
         // Validated against the canonical group channels.
         assert!(validate_fine_system_ai_policy(
@@ -11620,7 +11605,7 @@ default_level = 1
         .is_ok());
         let p = cfg.to_policy().expect("default power policy resolves");
         assert!(!p.idle);
-        assert_eq!(p.rules.len(), 5);
+        assert_eq!(p.rules.len(), 4);
         // The elevate rules carry the absolute magnitude in the verb payload, and
         // the elevated level is strictly above the baseline one — the authored
         // numbers themselves are the designer's business (#885b stage 5d deleted
@@ -11633,13 +11618,13 @@ default_level = 1
                 _ => None,
             })
             .collect();
-        assert_eq!(levels.len(), 5, "every rule carries an allocation payload");
+        assert_eq!(levels.len(), 4, "every rule carries an allocation payload");
         assert!(
             levels.iter().max() > levels.iter().min(),
             "the elevate rules must raise their group above the baseline rules, or              the whole policy is a no-op: {levels:?}"
         );
         assert!(cfg.param.contains_key(POWER_HELM_RESERVE_PARAM));
-        assert!(cfg.param.contains_key(POWER_SENSORS_RESERVE_PARAM));
+        assert!(cfg.param.contains_key(POWER_WEAPONS_RESERVE_PARAM));
     }
 
     #[test]

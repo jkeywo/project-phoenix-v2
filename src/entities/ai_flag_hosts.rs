@@ -1307,13 +1307,10 @@ mod tests {
     /// load path, a flag added to its `[power.ai_policy]` instead.
     #[test]
     fn a_flag_guard_on_a_plumbed_host_of_a_shipped_hull_still_loads() {
-        // The reactor's one red-alert elevation, which since issue #923 is the
-        // SENSORS one: the fleet buys nominal weapon REACH with the point the
-        // weapons group used to spend on damage.
         let mutated = with_guard(
             &cruiser(),
-            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_sensors)""#,
-            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_sensors) and flag(weapons_free)""#,
+            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)""#,
+            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons) and flag(weapons_free)""#,
         );
         crate::entities::config::EntityConfig::from_toml(&mutated).expect(
             "the Power reactor passes a real flag chain, so a flag() guard on it is valid content",

@@ -402,7 +402,7 @@ What the early PRDs called the Science console has been split into **three indep
 ### Modifier wiring
 - Helm power → `ModifierSlot::MaxSpeed` AND `ModifierSlot::MaxYawRate`.
 - Tactical power → `ModifierSlot::PhaserDamage`.
-- Sensors power → `ModifierSlot::RadarRange`.
+- Sensors power → `ModifierSlot::RadarRange` — the tactical **acquisition** horizon (radar blips, the range a target lock may be taken at). It does not scale weapon reach: a bank reaches its authored `beam_range` at every power level (issue #955).
 - Per-level bonus table per console, configurable per ship; level 2 is baseline (0.0 bonus = 1.0× multiplier), level 1 is half performance (−0.5), level 4 is +0.5 (1.5×).
 
 ### `PowerState` broadcast

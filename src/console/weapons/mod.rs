@@ -494,7 +494,6 @@ fn tick_weapons_arc_request(
             Option<&PhaserCombatConfigResource>,
             Option<&blaster::BlasterSystemResource>,
             Option<&torpedo::TorpedoSystemResource>,
-            Option<&crate::modifiers::ShipModifiers>,
             &mut WeaponsArcRequestState,
         ),
         With<crate::server_app::Ship>,
@@ -517,7 +516,6 @@ fn tick_weapons_arc_request(
         combat_config_opt,
         blaster_opt,
         torpedo_opt,
-        modifiers_opt,
         mut state,
     ) in ship_q.iter_mut()
     {
@@ -538,11 +536,6 @@ fn tick_weapons_arc_request(
             continue;
         };
 
-        let modifiers_default = crate::modifiers::ShipModifiers::new();
-        let modifiers: &crate::modifiers::ShipModifiers =
-            modifiers_opt.unwrap_or(&modifiers_default);
-        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-
         let is_offline = |sid: Option<crate::messages::SystemId>| -> bool {
             match sid {
                 Some(id) => control_sources.0.is_offline(&id),
@@ -562,20 +555,23 @@ fn tick_weapons_arc_request(
             )
         };
 
-        // ── Phaser banks: facing + AI auto-fire arc, per-bank beam range ×
-        // radar modifier (keep consistent with pre-#767 behaviour). ──────────
+        // ── Phaser banks: facing + AI auto-fire arc, per-bank beam range. ────
+        // The authored `beam_range`, unscaled (issue #955) — the same number
+        // the blaster and torpedo emitters below already use for their own
+        // families, and the same one `ai_phaser_auto_fire` fires on. An arc
+        // request sized against anything else would ask Helm to turn for a
+        // shot the guns cannot take, or decline one they can.
         let phaser_emitters: Vec<EmitterArcInput> = combat_config_opt
             .map(|cfg| {
                 cfg.0
                     .banks
                     .iter()
                     .map(|b| {
-                        let base = if b.beam_range > 0.0 {
+                        let range = if b.beam_range > 0.0 {
                             b.beam_range
                         } else {
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
-                        let range = base * radar_range_mult;
                         EmitterArcInput {
                             online: !is_offline(crate::system_registry::phaser_bank_system_id(
                                 &b.id,

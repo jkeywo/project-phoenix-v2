@@ -329,41 +329,42 @@ emergency_threshold = 10
 # at or above that reserve — allocation never rises past what the reactor can
 # sustain (no avoidable brownout), replacing the old global emergency exception.
 #
-# The `sensors` channel is the fleet's #923 COMBAT-STATIONS allocation,
+# The `weapons` channel is the fleet's #955 COMBAT-STATIONS allocation,
 # transcribed from `fragments/ai/fleet_baseline.toml` — this hull composes no
 # fragment, so it owns its copy and a retune there has to be repeated here. The
-# full derivation (sensors level → `ModifierSlot::RadarRange` → weapon reach and
-# Tactical radar horizon, and the 8-point total cap that makes the WEAPONS group
-# pay for the sensor point by giving up its own red-alert elevation) lives in that
-# fragment's header and in `docs/toml-authoring-guide.md` §2.2.
+# full derivation (weapons level → `ModifierSlot::PhaserDamage` → beam
+# intensity, not reach) lives in that fragment's header and in
+# `docs/toml-authoring-guide.md` §2.2.
 #
-# This hull mounts no phaser bank, so nothing here changes a BEAM range on it.
-# What it changes is the `[weapons_console.radar] range = 250` horizon it takes
-# its lock through — same slot, same multiplier — so a courier at red alert
-# sees and locks at authored range until the first sustained alert drains the
-# reserve; recovery requires the battery to recharge, which the authored rates
-# do not do at the resting total — accepted for the courier, revisit with
-# #877/#922.
+# This hull mounts no phaser bank, so nothing here changes anything it fires:
+# `PhaserDamage` only multiplies a bank's authored `beam_damage_per_sec`
+# (`console::weapons::beam::tick_beams`), and this hull's one weapon is a
+# blaster bank, whose `damage` field no power group scales at all. The
+# red-alert `weapons` elevation is therefore inert on this hull by
+# construction — recorded here so the frozen-battery exception below is not
+# mistaken for a live damage bug.
 #
-# ── The frozen-battery exception (issue #923 follow-up) ─────────────────────
+# ── The frozen-battery exception (issue #923 follow-up; #955 moved the elevated
+# channel from `sensors` to `weapons`) ───────────────────────────────────────
 #
 # This hull's own `rates = [3, 2, 1, 0, -1, -3]` put a flat 0 at total-6 — the
 # resting allocation once red alert has drained the battery far enough to shed
-# `helm` (below `min_reserve_helm`) and then `sensors` (below
-# `min_reserve_sensors`): ops 1 + helm 2 + weapons 2 + sensors 1 = 6. At that
+# `helm` (below `min_reserve_helm`) and then `weapons` (below
+# `min_reserve_weapons`): ops 1 + helm 2 + weapons 2 + sensors 1 = 6. At that
 # total the battery neither drains nor recharges, so it settles there and stays
-# — sensors can never re-cross `min_reserve_sensors` to climb back to 2, and
-# reach is stuck at two thirds (167) for the rest of the encounter. Every other
-# Alliance hull's total-6 entry is positive (recharges); this is a one-way
-# ladder unique to the courier's own authored rates, not a bug in the shared
-# fleet policy. DO NOT retune the rates to "fix" it — the courier is a
-# non-demo hull and this is an accepted, honestly-recorded exception rather
-# than a design goal. No console on this hull surfaces the sensors power level
-# to warn a crew it has happened (see the wiki information-parity audit).
+# — weapons can never re-cross `min_reserve_weapons` to climb back to 3 for the
+# rest of the encounter. Every other Alliance hull's total-6 entry is positive
+# (recharges); this is a one-way ladder unique to the courier's own authored
+# rates, not a bug in the shared fleet policy. DO NOT retune the rates to "fix"
+# it — the courier is a non-demo hull and this is an accepted,
+# honestly-recorded exception rather than a design goal. Unlike the #923-era
+# version of this exception, it costs the courier nothing in practice (see the
+# phaser-bank note above); it stays recorded so nobody "fixes" a frozen power
+# group without first checking whether the freeze does anything at all.
 [power.ai_policy.param]
 thrust_threshold = 0.7
 min_reserve_helm = 50.0
-min_reserve_sensors = 10.0
+min_reserve_weapons = 10.0
 min_reserve_baseline = 0.0
 
 # helm: elevate to 3 under sustained thrust with a healthy battery, AT RED
@@ -386,33 +387,20 @@ when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
 
-# weapons: hold 2, at red alert and away from it alike. The red-alert elevation
-# to 3 that used to sit here — guarded on `min_reserve_weapons = 10.0`, both now
-# gone — is the point #923 spends on `sensors` below.
+# weapons: elevate to 3 on red alert with a healthy battery, else hold 2.
+[[power.ai_policy.rule]]
+priority = 10
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
 [[power.ai_policy.rule]]
 priority = 0
 channel = "weapons"
 when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
-
-# sensors: elevate to 2 — NOMINAL, ×1.0 on `RadarRange` — on red alert with a
-# healthy battery, else rest at 1. Two, not three: 2 is the level whose
-# multiplier is exactly 1.0, so the hull reaches what its own file authors and
-# no further.
-[[power.ai_policy.rule]]
-priority = 10
-channel = "sensors"
-when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_sensors)"
-verb = "set_power_group_allocation"
-level = 2
-
-[[power.ai_policy.rule]]
-priority = 0
-channel = "sensors"
-when = "fact(battery_pct) >= param(min_reserve_baseline)"
-verb = "set_power_group_allocation"
-level = 1
 
 [power_groups.ops]
 label = "entity.alliance_courier.power_groups.ops.label"

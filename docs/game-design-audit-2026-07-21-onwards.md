@@ -205,7 +205,7 @@ Records live in-repo in:
 ### Per-group power allocation, reserve-guarded
 | Field | Value |
 |---|---|
-| **Decision** | Power is split into authored groups, each with a level by player or authored AI rules. Every rule's `when` guard must pass a minimum battery reserve before firing, so allocation never rises beyond what the battery sustains (no all-or-nothing emergency); reactor capped at 8 so elevating one group visibly costs another. *Audit resolution (2026-08-05): the AI should **see current available power** and prioritize which systems get points, never exceeding the max — budget-aware allocation, not silent cap-refusal-and-reemit.* *Audit note (2026-08-05): `fleet_baseline.toml`'s sensors-budget rationale ("SENSORS POWER IS WEAPON REACH") and the sensors rest-at-1 seeding are stale after the range-coupling revert above — re-author whichever sensors rules remain once sensors no longer scales phaser range.* |
+| **Decision** | Power is split into authored groups, each with a level by player or authored AI rules. Every rule's `when` guard must pass a minimum battery reserve before firing, so allocation never rises beyond what the battery sustains (no all-or-nothing emergency); reactor capped at 8 so elevating one group visibly costs another. *Audit resolution (2026-08-05): the AI should **see current available power** and prioritize which systems get points, never exceeding the max — budget-aware allocation, not silent cap-refusal-and-reemit.* *Audit note (2026-08-05): `fleet_baseline.toml`'s sensors-budget rationale ("SENSORS POWER IS WEAPON REACH") and the sensors rest-at-1 seeding are stale after the range-coupling revert above — re-author whichever sensors rules remain once sensors no longer scales phaser range.* **DONE (#955).** The rationale block is now "POWER BUYS DAMAGE, NOT REACH" and there are no `sensors` rules left to re-author — the channel is gone from `fleet_baseline.toml` and from `alliance_courier.toml`. The rest-at-1 seeding STAYS, and is now load-bearing in a new way: with no rule ever raising the group, every AI-crewed hull sits at ×0.667 acquisition permanently, so `[weapons_console.radar] range` has to be authored above the hull's longest gun. `alliance_battleship.toml` was not (75 × 0.667 = 50.0 against a 50.0 blaster and a 50.0 artillery envelope) and is now 100; pinned fleet-wide by `every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`. |
 | **File** | `pasm/spec/architecture/power-modifiers-regions.yaml`, `pasm/spec/design/power.yaml` |
 | **Date** | 2026-07-24 (refined 07-25) |
 
@@ -399,10 +399,23 @@ need implementation:
    **damage**, not range; phasers/blasters attack independent of radar range. Remove
    the sensors→RadarRange→phaser-range chain in `src/modifiers/coordination.rs`
    (`apply_power_modifiers_from_read_state`).
+   *DONE (#955).* The chain was severed at the CONSUMER end rather than the producer:
+   every firing and reach-reporting path (`console/weapons/beam.rs`,
+   `console/weapons/blackboard.rs`, `console/weapons/mod.rs`, `ai/server.rs`) stopped
+   multiplying `beam_range` by `RadarRange`, so reach is the authored number.
+   `apply_power_modifiers_from_read_state` still writes the slot, because the surviving
+   consumers are ACQUISITION — the `[weapons_console.radar]` lock horizon and the
+   tactical radar blips — which is a distinct concept from reach and one the fleet still
+   wants power-scaled.
 3. **Drop the red-alert sensors elevation** — was bug-compensation for the range issue;
    re-grant those reactor points to weapons at red alert. Re-author stale sensors
    budget/rules in `assets/entities/fragments/ai/fleet_baseline.toml` ("SENSORS POWER IS
    WEAPON REACH" rationale + sensors rest-at-1 seeding).
+   *DONE (#955).* Both `sensors` rules are gone from `fleet_baseline.toml` and from
+   `alliance_courier.toml` (which composes no fragment and carried its own copy); the
+   red-alert elevation to level 3 is back on `weapons`, guarded on
+   `min_reserve_weapons`. The rationale block is replaced by a "POWER BUYS DAMAGE, NOT
+   REACH" header.
 4. **Budget-aware AI power allocation** — AI should see current available power and
    prioritize point distribution without exceeding the max, replacing the silent
    cap-refusal-and-reemit mechanism.

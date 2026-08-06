@@ -381,13 +381,13 @@ pub(crate) fn build_world_snapshot(
         Option<&crate::ship_state::ShipPhysics>,
         // Direct-fire reach (issue #788): the longest range this entity can put
         // unguided fire at, published as a threat fact so another ship's helm
-        // can derive a safe standoff ring from it. Needs the control sources
-        // (to know which banks are offline) and the radar-range modifier (which
-        // scales beam reach, exactly as the arc-bearing evaluation scales it).
+        // can derive a safe standoff ring from it. Needs the control sources (to
+        // know which banks are offline) and nothing else — reach is the AUTHORED
+        // range of each bank, and issue #955 took `ModifierSlot::RadarRange` out
+        // of it, so this query no longer reads `ShipModifiers` at all.
         Option<&crate::ship_plugin::ShipSystemControlSources>,
         Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
         Option<&crate::weapons_plugin::BlasterSystemResource>,
-        Option<&crate::modifiers::ShipModifiers>,
     )>,
     asteroids: Query<
         (
@@ -412,7 +412,6 @@ pub(crate) fn build_world_snapshot(
                 control_sources,
                 phasers,
                 blasters,
-                modifiers,
             )| {
                 let hull_fraction = hull.map(|h| {
                     let max = h.0.total_max();
@@ -427,7 +426,7 @@ pub(crate) fn build_world_snapshot(
                 // Use ShipPhysics.forward_speed (authoritative after #581).
                 let forward_speed = physics.map(|p| p.forward_speed).unwrap_or(0.0);
                 let direct_fire_range =
-                    entity_direct_fire_range(control_sources, phasers, blasters, modifiers);
+                    entity_direct_fire_range(control_sources, phasers, blasters);
                 // The SIMULATION's heading, in `ShipPhysics.yaw`'s convention —
                 // NOT the render transform's euler (issue #937).
                 //
@@ -462,7 +461,7 @@ pub(crate) fn build_world_snapshot(
                 // the helm AI exposure fact and the helm-radar overlay — reads
                 // these sectors rather than deriving arcs of its own.
                 let weapon_arcs =
-                    entity_weapon_arc_sectors(yaw, control_sources, phasers, blasters, modifiers);
+                    entity_weapon_arc_sectors(yaw, control_sources, phasers, blasters);
                 crate::ai::AiWorldEntity {
                     uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
                     name: name.as_ref().map(|n| n.0.clone()),
@@ -530,20 +529,24 @@ pub(crate) fn build_world_snapshot(
 ///
 /// The Bevy adapter for the pure
 /// [`longest_usable_direct_fire_range`](crate::weapons_plugin::longest_usable_direct_fire_range):
-/// it reads the per-bank configuration off the entity, applies the same
-/// offline gate and the same radar-range beam modifier the arc-bearing
-/// evaluation applies, and hands a flat list to the pure function. Torpedo
-/// tubes are deliberately absent — a homing round has no standoff radius.
+/// it reads the per-bank configuration off the entity, applies the same offline
+/// gate the arc-bearing evaluation applies, and hands a flat list to the pure
+/// function. Torpedo tubes are deliberately absent — a homing round has no
+/// standoff radius.
+///
+/// Reach is the AUTHORED per-bank range and nothing else (issue #955). It used
+/// to be scaled by `ModifierSlot::RadarRange`, which made a standoff ring shrink
+/// and grow with the target's sensor power; that coupling is gone, so the ring a
+/// helm derives from this fact is the ring the target's guns actually hold.
 fn entity_direct_fire_range(
     control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
     phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
     blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
-    modifiers: Option<&crate::modifiers::ShipModifiers>,
 ) -> f32 {
     use crate::weapons_plugin::{longest_usable_direct_fire_range, DirectFireEmitter};
 
     let emitters: Vec<DirectFireEmitter> =
-        entity_direct_fire_banks(control_sources, phasers, blasters, modifiers)
+        entity_direct_fire_banks(control_sources, phasers, blasters)
             .into_iter()
             .map(|(online, bank)| DirectFireEmitter {
                 online,
@@ -573,10 +576,9 @@ fn entity_weapon_arc_sectors(
     control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
     phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
     blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
-    modifiers: Option<&crate::modifiers::ShipModifiers>,
 ) -> Vec<crate::weapons::arc_geometry::WeaponArcSector> {
     let banks: Vec<crate::weapons::arc_geometry::WeaponArcBank> =
-        entity_direct_fire_banks(control_sources, phasers, blasters, modifiers)
+        entity_direct_fire_banks(control_sources, phasers, blasters)
             .into_iter()
             .filter(|(online, _)| *online)
             .map(|(_, bank)| bank)
@@ -594,14 +596,9 @@ fn entity_direct_fire_banks(
     control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
     phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
     blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
-    modifiers: Option<&crate::modifiers::ShipModifiers>,
 ) -> Vec<(bool, crate::weapons::arc_geometry::WeaponArcBank)> {
     use crate::weapons::arc_geometry::WeaponArcBank;
 
-    let default_modifiers = crate::modifiers::ShipModifiers::new();
-    let radar_range_mult = modifiers
-        .unwrap_or(&default_modifiers)
-        .get(&crate::messages::ModifierSlot::RadarRange);
     // No control sources (a bare test spawn) means nothing is known to be
     // offline, which is the same reading the arc-bearing path takes.
     let is_offline = |sid: Option<crate::messages::SystemId>| -> bool {
@@ -614,7 +611,9 @@ fn entity_direct_fire_banks(
     let mut banks: Vec<(bool, WeaponArcBank)> = Vec::new();
     if let Some(cfg) = phasers {
         for b in &cfg.0.banks {
-            let base = if b.beam_range > 0.0 {
+            // The authored `beam_range`, unscaled (issue #955) — exactly what
+            // the blaster arm below already does with its own authored range.
+            let range = if b.beam_range > 0.0 {
                 b.beam_range
             } else {
                 crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
@@ -624,7 +623,7 @@ fn entity_direct_fire_banks(
                 WeaponArcBank {
                     facing_deg: b.facing_deg,
                     fire_arc_deg: b.fire_arc_deg,
-                    range: base * radar_range_mult,
+                    range,
                 },
             ));
         }
@@ -1680,6 +1679,93 @@ verb = "fire_blaster"
             snapshot.entities[0].direct_fire_range, 320.0,
             "the reach is the longest bank, not the first or the sum"
         );
+    }
+
+    /// **The reach fact is the authored range, not the radar-scaled one
+    /// (issue #955).**
+    ///
+    /// `entity_direct_fire_range` used to multiply each phaser bank's authored
+    /// `beam_range` by `ModifierSlot::RadarRange`, so the standoff ring another
+    /// helm derived from this fact shrank and grew with the TARGET's sensor
+    /// power — a hull resting `sensors` at 1 published two thirds of the reach
+    /// its guns were credited with. Blasters were never scaled, which is what
+    /// made the two families disagree about the same question.
+    ///
+    /// The entity here carries a live `ShipModifiers` with the slot crushed to
+    /// ×0.667 and, in the second half, doubled. The published reach must not
+    /// move in either direction: the phaser bank reaches 200 and the blaster 320
+    /// because that is what they author.
+    ///
+    /// **Both numbers are asserted, per bank, and that is load-bearing.** The
+    /// scalar `direct_fire_range` is a MAX, and the bug this targets only ever
+    /// scaled the phaser arm — so on the ×0.667 leg the old coupled code returned
+    /// 320 too (`200 × 0.667 = 133` loses to the unscaled blaster) and a
+    /// max-only assertion passed against the very bug it names. The per-bank
+    /// sectors on `AiWorldEntity::weapon_arcs` are the same
+    /// `entity_direct_fire_banks` list unreduced, so checking them makes the
+    /// crushed leg discriminate as sharply as the doubled one.
+    #[test]
+    fn direct_fire_reach_ignores_the_radar_range_slot() {
+        use crate::messages::{ModifierSlot, PowerGroupId};
+        use crate::modifiers::cache::ModifierSource;
+        use crate::modifiers::{Modifier, ShipModifiers};
+
+        let radar_slot_at = |bonus: f32| -> ShipModifiers {
+            let mut mods = ShipModifiers::new();
+            mods.add_or_update(Modifier {
+                source: ModifierSource::PowerGroup(PowerGroupId(
+                    crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
+                )),
+                slot: ModifierSlot::RadarRange,
+                bonus,
+            });
+            mods
+        };
+
+        for (bonus, label) in [(-0.5f32, "sensors at rest"), (1.0, "sensors doubled")] {
+            let mut app = snapshot_test_app();
+            let (phasers, blasters) = armed_hull_components();
+            let mods = radar_slot_at(bonus);
+            let mult = mods.get(&ModifierSlot::RadarRange);
+            assert!(
+                (mult - 1.0).abs() > 0.1,
+                "{label}: the fixture must actually move the slot or this proves \
+                 nothing (got x{mult})"
+            );
+            app.world_mut().spawn((
+                crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                phasers,
+                blasters,
+                mods,
+            ));
+
+            app.update();
+
+            let published = &app.world().resource::<WorldSnapshot>().entities[0];
+            assert_eq!(
+                published.direct_fire_range, 320.0,
+                "{label} (RadarRange x{mult:.3}): the published reach must be the \
+                 authored longest bank. A ring sized off this fact has to describe \
+                 where the target's guns actually stop, and since #955 that is the \
+                 number its file authors — nothing scales it"
+            );
+
+            // The phaser's own 200, which the max above can never see: it is the
+            // arm the retired coupling scaled, and the only reading that fails on
+            // the crushed leg if the multiplication comes back.
+            let mut per_bank: Vec<f32> = published.weapon_arcs.iter().map(|s| s.range).collect();
+            per_bank.sort_by(|a, b| a.partial_cmp(b).expect("no NaN range"));
+            assert_eq!(
+                per_bank,
+                vec![200.0f32, 320.0],
+                "{label} (RadarRange x{mult:.3}): the PER-BANK reaches must be the two \
+                 authored numbers. 200 scaled by this slot is {:.1}, which the scalar \
+                 `direct_fire_range` above hides behind the unscaled blaster's 320 — so \
+                 this is where a phaser arm quietly scaled again shows up",
+                200.0 * mult
+            );
+        }
     }
 
     /// An offline bank is not a threat, so it must not inflate the ring another

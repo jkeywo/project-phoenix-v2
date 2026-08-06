@@ -257,7 +257,12 @@
 # weapons envelope it will sit and do nothing for the rest of the engagement.
 # Measured on the player cruiser with no gate: parked at 26.7 units, three
 # hundredths of a unit outside its own effective beam reach, for 810 of 901 ticks,
-# dealing nothing.
+# dealing nothing. (That measurement predates issue #955, when a bank's reach was
+# `beam_range × ModifierSlot::RadarRange` and the cruiser's 40-unit banks reached
+# only 26.7. Reach is now the authored `beam_range`, so the cruiser's own gate has
+# a wider margin than it was sized for — the FAILURE MODE is unchanged, and an
+# including hull whose gate sits outside its envelope still freezes and does
+# nothing.)
 #
 # So an including hull authors this as the range inside which pointing the bow
 # still leaves its own guns on the target — a property of that hull's envelope,

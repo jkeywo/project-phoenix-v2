@@ -181,6 +181,34 @@ pub fn apply_radar_damage_modifiers(
 /// [`ModifierSource::PowerGroup`]. Re-registration replaces the previous entry
 /// (no stacking). Multiplier arrays are indexed by power level 1–4 (1 maps
 /// to index 0).
+///
+/// # What each group buys, and the one it does NOT (issue #955)
+///
+/// * HELM → [`ModifierSlot::MaxSpeed`] + [`ModifierSlot::MaxYawRate`].
+/// * WEAPONS → [`ModifierSlot::PhaserDamage`]. Power buys INTENSITY: the beam
+///   hurts more. `console::weapons::beam::tick_beams` multiplies each bank's
+///   authored `beam_damage_per_sec` by this slot.
+/// * SENSORS → [`ModifierSlot::RadarRange`]. Power buys ACQUISITION and nothing
+///   else: how far the tactical radar paints blips, how far a `SetTarget` lock
+///   may reach (`console::weapons::beam::handle_set_target`), and how far the AI
+///   selector will consider a candidate (`console::weapons::ai_target_selection`).
+///   All three are bounded by the hull's authored `[weapons_console.radar]
+///   range` / `tactical_radar_range`, which are radar numbers.
+///
+/// It does NOT buy REACH. Until #955 every firing path multiplied a bank's
+/// authored `beam_range` by `RadarRange`, so a hull resting `sensors` at 1
+/// fought at two thirds of every range its own file authored, and #923 papered
+/// over that with a red-alert `sensors` elevation. The multiplication is gone
+/// from every reach path: a gun reaches what it authors, at every power level,
+/// and the point #923 spent on `sensors` is back on `weapons` where it buys
+/// damage. A hull with its sensors down still shoots as far — it just has less
+/// warning about what to shoot at.
+///
+/// Acquisition is not therefore free of consequence, and the distinction is a
+/// fine one worth stating: a LOCK is a precondition for firing, so a horizon
+/// authored below a hull's own guns is a range cap wearing a different name.
+/// The fleet keeps its horizons clear of its guns by AUTHORING, pinned by
+/// `tests::every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`.
 pub fn apply_power_modifiers(
     modifiers: &mut ShipModifiers,
     power: &PowerSystem,
@@ -224,6 +252,10 @@ pub fn apply_power_modifiers_from_read_state(
         bonus: weapons_bonus,
     });
 
+    // SENSORS buys ACQUISITION, not reach (issue #955) — see this function's
+    // doc comment. `RadarRange` has three producers (this one, radar hull damage
+    // in `apply_radar_damage_modifiers`, and `RegionEffectKind::RadarDampening`)
+    // and, since #955, no consumer that decides how far a gun shoots.
     let sensors_level = channel_1.power_level(&sensors_id).unwrap_or(2);
     let sensors_level = (sensors_level as usize).saturating_sub(1).min(3);
     let sensors_bonus = multipliers.get(&sensors_id).unwrap_or(&default_mult)[sensors_level];
@@ -419,20 +451,25 @@ mod tests {
         assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
     }
 
-    /// **Every shipped Alliance hull reaches its own authored `beam_range` at
-    /// combat stations (issue #923).**
+    /// **Every shipped Alliance hull spends its combat-stations point on WEAPONS
+    /// DAMAGE, and its reach does not depend on the reactor at all (#955).**
     ///
-    /// The drift this pins is silent by construction and cost the fleet a third
-    /// of its reach for four issues: `ModifierSlot::RadarRange` is driven off the
-    /// SENSORS power group, the hulls rest that group at 1, level 1 folds to
-    /// ×0.667 — and until #923 no authored policy anywhere carried a `sensors`
-    /// channel, so nothing ever raised it. Nothing in Rust was wrong and nothing
-    /// in any hull file looked wrong; the reach was simply two thirds of every
-    /// number a designer had written down.
+    /// This replaces `every_alliance_hull_reaches_its_authored_beam_range_at_combat_stations`
+    /// (#923), which asserted the opposite of the second half: that
+    /// `beam_range × RadarRange` *equalled* the authored `beam_range` at combat
+    /// stations, i.e. that a hull had to SPEND a reactor point to reach the
+    /// numbers its own file wrote down. That assertion was pinning a coupling
+    /// that should not have existed — the old test could only ever be satisfied
+    /// by holding `sensors` at exactly the ×1.0 rung, so it silently forbade the
+    /// fleet from ever moving that group — and #955 deleted the multiplication
+    /// instead. Reach is now a property of the gun and is not asserted here at
+    /// all; it is pinned where it is computed
+    /// (`ai::server::tests::direct_fire_reach_ignores_the_radar_range_slot` and
+    /// `console::weapons::server_tests::phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot`).
     ///
-    /// So this walks the whole authored path rather than asserting on a
-    /// multiplier in isolation, on the SHIPPED files through the include
-    /// resolver:
+    /// What is left for this pin is the half that IS a reactor question, walked
+    /// on the SHIPPED files through the include resolver rather than asserted on
+    /// a multiplier in isolation:
     ///
     ///   1. seed a `PowerSystem` from the hull's `[power_groups.*]`, in the
     ///      runtime's own order (`authored_power_group_seed`);
@@ -441,16 +478,12 @@ mod tests {
     ///      the winning level through `set_group_allocation` — so the silent
     ///      8-point total cap is exercised for real, in emission order, and a
     ///      policy that asks for nine points fails here rather than in a duel;
-    ///   3. translate that power state through `apply_power_modifiers_from_read_state`
-    ///      with the hull's own `[sensors_console] power_multipliers`;
-    ///   4. assert each authored phaser bank's effective reach —
-    ///      `beam_range × RadarRange` — is exactly its authored `beam_range`.
-    ///
-    /// Deliberately NOT `assert_eq!(mult, 1.0)`: the claim is about REACH, and
-    /// stating it as reach is what makes a hull that retunes `power_multipliers`
-    /// fail the test for the right reason.
+    ///   3. translate that power state through `apply_power_modifiers_from_read_state`;
+    ///   4. assert `ModifierSlot::PhaserDamage` is strictly ABOVE nominal — the
+    ///      point #923 moved to `sensors` is back on `weapons`, and it buys
+    ///      intensity.
     #[test]
-    fn every_alliance_hull_reaches_its_authored_beam_range_at_combat_stations() {
+    fn every_alliance_hull_elevates_its_phaser_damage_at_combat_stations() {
         for path in [
             "assets/entities/alliance_battleship.toml",
             "assets/entities/alliance_cruiser.toml",
@@ -479,8 +512,8 @@ mod tests {
             assert!(
                 !seed.is_empty(),
                 "{path} authors no [power_groups.*]; this pin is about the four-group \
-                 Alliance hulls, whose resting `sensors` level is what makes the rule \
-                 load-bearing"
+                 Alliance hulls, whose 8-point cap is what makes the red-alert \
+                 allocation load-bearing"
             );
             let mut power = PowerSystem::from_authored_groups(reactor.capacity, &seed);
 
@@ -529,6 +562,185 @@ mod tests {
             // (3) Power → modifiers, through the hull's own multiplier table.
             let mut multipliers = default_multipliers();
             if let Some(pm) = config
+                .weapons_console
+                .as_ref()
+                .and_then(|wc| wc.power_multipliers)
+            {
+                multipliers.insert(PowerGroupId(WEAPONS_POWER_GROUP.into()), pm);
+            }
+            let mut mods = ShipModifiers::new();
+            apply_power_modifiers_from_read_state(&mut mods, &power.read_state(), &multipliers);
+
+            // (4) The claim: the alert buys DAMAGE.
+            let damage_mult = mods.get(&ModifierSlot::PhaserDamage);
+            assert!(
+                damage_mult > 1.0,
+                "{path}: at combat stations `weapons` sits at level {} and \
+                 `ModifierSlot::PhaserDamage` resolves to x{damage_mult:.3}, i.e. nominal \
+                 or worse. #955 put the red-alert reactor point back on this group \
+                 precisely so going to combat stations means something; a hull that \
+                 elevates nothing has a red alert that changes no number at all",
+                power.level_for(&weapons())
+            );
+        }
+    }
+
+    /// Every shipped `assets/entities/*.toml`, as the relative paths the include
+    /// resolver keys on. Read off the directory rather than listed, so a new hull
+    /// is covered by the invariant below the moment it is added.
+    fn shipped_entity_paths() -> Vec<String> {
+        let mut out: Vec<String> = std::fs::read_dir("assets/entities")
+            .expect("assets/entities must be readable")
+            .map(|e| e.expect("readable dir entry").path())
+            .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// How much daylight an acquisition horizon must keep beyond the longest
+    /// thing the hull can shoot with, as a fraction of that reach.
+    ///
+    /// A TEST threshold, not a gameplay tunable: no simulation code reads it and
+    /// every number it constrains lives in TOML. A fifth is the smallest margin
+    /// that is unambiguously a decision rather than a coincidence — before this
+    /// pin the battleship's horizon and its bow blaster were the same 50.0, and
+    /// a bare `>` would have called that healthy.
+    const ACQUISITION_MARGIN: f32 = 1.2;
+
+    /// **Every shipped hull can SEE further than it can SHOOT, at the sensors
+    /// level its own reactor rests it at.**
+    ///
+    /// The invariant #955 needs and did not have. A LOCK is a precondition for
+    /// firing, and the horizon a lock is taken through is
+    /// `[weapons_console.radar] range × ModifierSlot::RadarRange`
+    /// (`console::weapons::mod::ai_target_selection`, `console::weapons::beam::handle_set_target`).
+    /// That slot is still driven off the SENSORS power group, and #955 removed
+    /// the `sensors` channel from every authored policy — so no AI-crewed hull
+    /// ever leaves `[power_groups.sensors] default_level = 1` and the horizon is
+    /// permanently ×0.667. Decoupling reach from power is only half the fix: if
+    /// the horizon lands under the guns, reach is capped again by acquisition
+    /// instead of by the multiplier, and just as silently.
+    ///
+    /// The battleship shipped exactly that: `75 × 0.667 = 50.000002` against a
+    /// `heavy-fore` blaster authoring `range = 50.0` and an artillery envelope
+    /// authoring `max_artillery_range = 50.0`. The shadow and reposition legs are
+    /// entered on `range_to_target > max_artillery_range` — precisely where
+    /// `make_candidate` culls every candidate including the retention one, so the
+    /// hull dropped the lock at the instant its doctrine stepped out to reacquire.
+    ///
+    /// What is deliberately NOT asserted: the DEFENSIVE ring
+    /// (`target_direct_fire_range + safe_range_margin`), which is derived from
+    /// whoever is being fought rather than authored on this hull, so no static
+    /// walk of the shipped files can bound it.
+    #[test]
+    fn every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest() {
+        use crate::ai::policy::AiPolicyVerb;
+        use crate::ship::helm_ai::MAX_ARTILLERY_RANGE_PARAM;
+
+        let mut checked: Vec<String> = Vec::new();
+        for path in shipped_entity_paths() {
+            let config = crate::entity_includes::load_entity_config(&path)
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let Some(wc) = config.weapons_console.as_ref() else {
+                continue;
+            };
+
+            // The longest thing this hull can put unguided fire at, read off the
+            // FIRING paths rather than off the threat-ring projection: an
+            // unauthored `beam_range` reaches the phaser default, and a hull that
+            // authors NO `[[weapons_console.phaser_banks]]` at all still fires the
+            // implicit legacy bank — `combat_config.0.banks.is_empty()` in both
+            // `console::weapons::beam::{handle_fire_phaser, ai_phaser_auto_fire}`
+            // shoots at `DEFAULT_PHASER_RANGE`. `ai::server::entity_direct_fire_banks`
+            // has no such branch, so reading it instead would understate the
+            // courier by 5 and let the next bankless hull through. Torpedoes are
+            // absent because a homing round has no bounded reach to clear.
+            let mut longest_gun = 0.0f32;
+            for bank in &wc.phaser_banks {
+                let reach = if bank.beam_range > 0.0 {
+                    bank.beam_range
+                } else {
+                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                };
+                longest_gun = longest_gun.max(reach);
+            }
+            if wc.phaser_banks.is_empty() {
+                longest_gun =
+                    longest_gun.max(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
+            }
+            for bank in &wc.blaster_banks {
+                longest_gun = longest_gun.max(bank.range);
+            }
+            if longest_gun <= 0.0 {
+                continue;
+            }
+
+            // The OUTER edge of an authored engagement envelope, where the hull
+            // flies one. `max_artillery_range` is the boundary that matters: its
+            // doctrine leaves the firing position on
+            // `range_to_target > max_artillery_range`, so the hull has to still
+            // hold a lock OUTSIDE the envelope or the leg it just entered has
+            // nothing left to reposition against.
+            let helm = config.helm_console.as_ref();
+            let envelope = [
+                helm.and_then(|h| h.engines_ai.as_ref()),
+                helm.and_then(|h| h.steering_ai.as_ref()),
+            ]
+            .into_iter()
+            .flatten()
+            .filter_map(|ai| ai.param.get(MAX_ARTILLERY_RANGE_PARAM).copied())
+            .fold(0.0f32, f32::max);
+            let required = longest_gun.max(envelope);
+
+            let Some(radar_range) = wc.radar.as_ref().map(|r| r.range) else {
+                // No `[weapons_console.radar]` at all. `ai_target_selection`
+                // reads that as UNBOUNDED (`range_bounds_targets` is false), so
+                // range never culls a candidate and there is no horizon to
+                // clear. Every Harrow hull is here.
+                continue;
+            };
+
+            // The reactor as the spawner seeds it, then AT REST: no red alert,
+            // nothing under way, a full battery. That is the state a hull spends
+            // most of its life in and the FLOOR of its sensors allocation, which
+            // is the only level at which this invariant is worth anything — a
+            // horizon that clears the guns only at combat stations is a horizon
+            // that fails on the approach.
+            let seed = crate::ship::power::authored_power_group_seed(
+                &config
+                    .ship_config
+                    .as_ref()
+                    .map(|s| s.power_groups.clone())
+                    .unwrap_or_default(),
+            );
+            let capacity = config.power.as_ref().map(|p| p.capacity).unwrap_or(100.0);
+            let mut power = PowerSystem::from_authored_groups(capacity, &seed);
+            if let Some(authored) = config.power.as_ref().and_then(|p| p.ai_policy.as_ref()) {
+                let policy = authored
+                    .to_policy()
+                    .unwrap_or_else(|e| panic!("{path}: {e}"));
+                // battery_pct 100 (above every authored reserve), thrust 0
+                // (station-keeping), red alert DOWN, no combat in living memory,
+                // no enemy in sensor range, no Destroy directive, nothing offline.
+                let facts = crate::ship::power::seed_power_facts(
+                    &power, 100.0, 0.0, false, None, None, false, 0,
+                );
+                let group_ids: Vec<PowerGroupId> = power.iter().map(|(id, _)| id.clone()).collect();
+                for id in &group_ids {
+                    if let Some(AiPolicyVerb::SetPowerGroupAllocation(level)) =
+                        policy.resolve_channel(&id.0, &facts, &[])
+                    {
+                        power
+                            .set_group_allocation(id, *level)
+                            .unwrap_or_else(|e| panic!("{path}: {e:?}"));
+                    }
+                }
+            }
+
+            let mut multipliers = default_multipliers();
+            if let Some(pm) = config
                 .sensors_console
                 .as_ref()
                 .and_then(|sc| sc.power_multipliers)
@@ -537,28 +749,32 @@ mod tests {
             }
             let mut mods = ShipModifiers::new();
             apply_power_modifiers_from_read_state(&mut mods, &power.read_state(), &multipliers);
-            let reach_mult = mods.get(&ModifierSlot::RadarRange);
+            let radar_mult = mods.get(&ModifierSlot::RadarRange);
+            let horizon = radar_range * radar_mult;
 
-            // (4) The claim, stated as reach.
-            let banks = config
-                .weapons_console
-                .as_ref()
-                .map(|wc| wc.phaser_banks.as_slice())
-                .unwrap_or_default();
-            for bank in banks.iter().filter(|b| b.beam_range > 0.0) {
-                let effective = bank.beam_range * reach_mult;
-                assert!(
-                    (effective - bank.beam_range).abs() < 1e-4,
-                    "{path}: phaser bank `{}` authors beam_range {} but reaches {effective:.1} \
-                     at combat stations (RadarRange ×{reach_mult:.3}, sensors at level {}). \
-                     Every doctrine range on this hull — its ring, its commit range, its \
-                     artillery envelope — is sized against a number the guns do not have",
-                    bank.id,
-                    bank.beam_range,
-                    power.level_for(&sensors())
-                );
-            }
+            assert!(
+                horizon >= required * ACQUISITION_MARGIN,
+                "{path}: at rest this hull acquires out to {horizon:.3} \
+                 (`[weapons_console.radar] range` {radar_range} × RadarRange ×{radar_mult:.3}, \
+                 `sensors` at level {}) but must engage out to {required:.1} (longest gun \
+                 {longest_gun:.1}, authored artillery envelope {envelope:.1}). A lock is a \
+                 precondition for firing, so a horizon inside the guns caps reach just as \
+                 surely as the multiplier #955 deleted, and just as silently. Author \
+                 `[weapons_console.radar] range` up to at least {:.1}",
+                power.level_for(&sensors()),
+                required * ACQUISITION_MARGIN / radar_mult,
+            );
+            checked.push(path);
         }
+
+        assert!(
+            checked.len() >= 4,
+            "only {} shipped hull(s) exercised this invariant ({checked:?}). The four \
+             Alliance hulls all author `[weapons_console.radar]` and direct-fire banks; \
+             if fewer than that reached the assertion, the walk stopped finding them \
+             rather than the fleet having got smaller",
+            checked.len()
+        );
     }
 
     #[test]

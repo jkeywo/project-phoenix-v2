@@ -625,7 +625,6 @@ pub(crate) fn handle_fire_phaser(
             &PhaserCooldown,
             &AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
-            Option<&crate::modifiers::ShipModifiers>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -643,7 +642,6 @@ pub(crate) fn handle_fire_phaser(
         cooldown,
         admitted,
         combat_config_opt,
-        modifiers_opt,
     ) in ship_q.iter_mut()
     {
         for cmd in admitted.0.iter() {
@@ -707,32 +705,27 @@ pub(crate) fn handle_fire_phaser(
                 continue;
             };
 
-            let modifiers_default = crate::modifiers::ShipModifiers::new();
-            let modifiers: &crate::modifiers::ShipModifiers =
-                modifiers_opt.unwrap_or(&modifiers_default);
-
             let bank_cfg = combat_config.0.bank_by_id(&bank_id);
             let bank_in_arc = if combat_config.0.banks.is_empty() {
-                let effective_phaser_range = PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                    * modifiers.get(&ModifierSlot::RadarRange);
                 crate::radar::is_fire_ready_with_range(
                     tx,
                     tz,
                     physics.x,
                     physics.z,
                     physics.yaw,
-                    effective_phaser_range,
+                    PhaserCombatConfig::DEFAULT_PHASER_RANGE,
                 )
             } else {
                 bank_cfg
                     .map(|bank_cfg| {
-                        let bank_base_range = if bank_cfg.beam_range > 0.0 {
+                        // Reach is the authored `beam_range`, unscaled (issue
+                        // #955) — pinned by `server_tests::
+                        // phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot`.
+                        let effective_bank_range = if bank_cfg.beam_range > 0.0 {
                             bank_cfg.beam_range
                         } else {
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
-                        let effective_bank_range =
-                            bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
                         let (rx, ry) = crate::weapons::phaser::ship_local(
                             tx,
                             tz,
@@ -842,7 +835,6 @@ pub(crate) fn ai_phaser_auto_fire(
             &PhaserCooldown,
             &mut AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
-            Option<&crate::modifiers::ShipModifiers>,
             Option<&PhaserBankAiPolicies>,
             Option<&crate::ship_state::ShipPhaserFrequency>,
             // Issue #872: this ship's own red-alert state, seeded as a typed
@@ -870,7 +862,6 @@ pub(crate) fn ai_phaser_auto_fire(
         cooldown,
         mut admitted,
         combat_config_opt,
-        modifiers_opt,
         bank_policies_opt,
         phaser_freq_opt,
         red_alert_opt,
@@ -940,10 +931,6 @@ pub(crate) fn ai_phaser_auto_fire(
         let combat_config_default = PhaserCombatConfigResource::default();
         let combat_config: &PhaserCombatConfigResource =
             combat_config_opt.unwrap_or(&combat_config_default);
-        let modifiers_default = crate::modifiers::ShipModifiers::new();
-        let modifiers: &crate::modifiers::ShipModifiers =
-            modifiers_opt.unwrap_or(&modifiers_default);
-
         // Find EVERY bank that is off-cooldown, not already burning, and has the
         // target in its auto arc (issue #790 — this was `find_map`, i.e. at most
         // one bank per ship per tick).
@@ -952,15 +939,13 @@ pub(crate) fn ai_phaser_auto_fire(
         // offline (damaged/destroyed) — auto-fire uses the same operate_ai
         // predicate as manual fire.
         let bank_ids: Vec<String> = if combat_config.0.banks.is_empty() {
-            let effective_range =
-                PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
             let ready = crate::radar::is_fire_ready_with_range(
                 tx,
                 tz,
                 physics.x,
                 physics.z,
                 physics.yaw,
-                effective_range,
+                PhaserCombatConfig::DEFAULT_PHASER_RANGE,
             );
             // No authored banks: the legacy single implicit bank, whose id is the
             // empty string. It has no `[[weapons_console.phaser_banks]]` entry
@@ -1006,13 +991,12 @@ pub(crate) fn ai_phaser_auto_fire(
                     if cooldown.is_bank_active(&b.id) || beam.is_bank_firing(&b.id) {
                         return None;
                     }
-                    let bank_base_range = if b.beam_range > 0.0 {
+                    // Reach is the authored `beam_range`, unscaled (issue #955).
+                    let effective_range = if b.beam_range > 0.0 {
                         b.beam_range
                     } else {
                         PhaserCombatConfig::DEFAULT_PHASER_RANGE
                     };
-                    let effective_range =
-                        bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
                     let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
                         <= effective_range * effective_range;
                     let (rx, ry) = crate::weapons::phaser::ship_local(
@@ -1231,26 +1215,25 @@ pub(crate) fn tick_beams_prepare(
             // Bank in-arc/range check (uses per-bank config; falls back to a
             // legacy global range when the config has no banks defined).
             let bank_in_arc = if combat_config.0.banks.is_empty() {
-                let effective_phaser_range = PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                    * modifiers.get(&ModifierSlot::RadarRange);
                 crate::radar::is_fire_ready_with_range(
                     tx,
                     tz,
                     shooter_physics.x,
                     shooter_physics.z,
                     shooter_physics.yaw,
-                    effective_phaser_range,
+                    PhaserCombatConfig::DEFAULT_PHASER_RANGE,
                 )
             } else {
                 active_bank_cfg
                     .map(|bank_cfg| {
-                        let bank_base_range = if bank_cfg.beam_range > 0.0 {
+                        // Reach is the authored `beam_range`, unscaled (#955) —
+                        // a beam that could be LIT at this range must not wink
+                        // out because the radar slot moved under it.
+                        let effective_bank_range = if bank_cfg.beam_range > 0.0 {
                             bank_cfg.beam_range
                         } else {
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
-                        let effective_bank_range =
-                            bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
                         let (rx, ry) = crate::weapons::phaser::ship_local(
                             tx,
                             tz,

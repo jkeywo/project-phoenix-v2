@@ -121,15 +121,6 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .map(|ts| ts.0.torpedoes_remaining)
             .unwrap_or_default()
     };
-    let radar_range_mult = {
-        let mut q = world
-            .query_filtered::<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>(
-            );
-        q.single(world)
-            .ok()
-            .map(|m| m.get(&ModifierSlot::RadarRange))
-            .unwrap_or(1.0)
-    };
     let phaser_mode = world.resource::<CurrentPhaserMode>().0;
     let phaser_frequency = {
         let mut q = world
@@ -284,9 +275,9 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         })
         .collect();
 
+    // Reach is the authored range, unscaled (issue #955).
     let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
-        let effective_phaser_range =
-            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+        let effective_phaser_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
         // Default (no-config) bank is a 180° forward arc, facing 0 — matches
         // `radar::is_fire_ready_with_range`.
         let geometry = target_live_pos.map(|(tx, tz)| {
@@ -323,12 +314,11 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         banks_config
             .iter()
             .map(|b| {
-                let bank_base_range = if b.beam_range > 0.0 {
+                let effective_bank_range = if b.beam_range > 0.0 {
                     b.beam_range
                 } else {
                     crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
-                let effective_bank_range = bank_base_range * radar_range_mult;
                 let geometry = target_live_pos.map(|(tx, tz)| {
                     crate::weapons::phaser::target_geometry(
                         tx,
@@ -452,6 +442,16 @@ fn viewscreen_combat_lock(bbs: &crate::server_app::ShipSystemBlackboards) -> Opt
 /// and `publish_phaser_bank_blackboards` (for the per-bank fine blackboards) so
 /// neither has to read the other's published map entry — recomputing keeps the
 /// two systems free of ordering constraints. Recomputation cost is trivial.
+///
+/// Reach is each bank's AUTHORED `beam_range` (issue #955): the `fire_ready` /
+/// `readiness` this publishes is a report on what the firing paths in
+/// `console::weapons::beam` will do, and those fire at the authored range.
+///
+/// This function used to take a `radar_range_mult` and scale by it, and that was
+/// not a bug at the time: the firing paths scaled by the same slot off the same
+/// entity, so the console and the guns agreed. #955 took the multiplication out
+/// of THEM. Keeping it here is what would have split the two apart — a console
+/// reporting a bank out of range while that same bank would have fired.
 #[allow(clippy::too_many_arguments)]
 fn build_bank_states(
     combat_config: &PhaserCombatConfigResource,
@@ -460,7 +460,6 @@ fn build_bank_states(
     // whether THAT bank is burning, so a single (active?, bank) pair could not
     // describe a ship with two broadsides lit.
     beam: &ActiveBeam,
-    radar_range_mult: f32,
     physics: ShipPhysics,
     target_live_pos: Option<(f32, f32)>,
     control_sources: Option<&ShipSystemControlSources>,
@@ -478,8 +477,7 @@ fn build_bank_states(
         }
     };
     if combat_config.0.banks.is_empty() {
-        let effective_range =
-            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+        let effective_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
         // Default (no-config) bank is a 180° forward arc, facing 0 — matches
         // `radar::is_fire_ready_with_range`.
         let geometry = target_live_pos.map(|(tx, tz)| {
@@ -517,12 +515,11 @@ fn build_bank_states(
             .banks
             .iter()
             .map(|b| {
-                let bank_base_range = if b.beam_range > 0.0 {
+                let effective_bank_range = if b.beam_range > 0.0 {
                     b.beam_range
                 } else {
                     crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
-                let effective_bank_range = bank_base_range * radar_range_mult;
                 let geometry = target_live_pos.map(|(tx, tz)| {
                     crate::weapons::phaser::target_geometry(
                         tx,
@@ -689,7 +686,6 @@ pub(crate) fn publish_weapons_core_blackboard(
             Option<&TorpedoSystemResource>,
             Option<&BlasterSystemResource>,
             Option<&ShipPhysics>,
-            Option<&crate::modifiers::ShipModifiers>,
             Option<&ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
@@ -712,7 +708,6 @@ pub(crate) fn publish_weapons_core_blackboard(
         torpedo_sys,
         blaster_res,
         ship_physics,
-        modifiers,
         control_sources,
         mut entity_bbs,
         is_local,
@@ -744,14 +739,6 @@ pub(crate) fn publish_weapons_core_blackboard(
             None => {
                 combat_config_default = PhaserCombatConfigResource::default();
                 &combat_config_default
-            }
-        };
-        let default_modifiers;
-        let modifiers: &crate::modifiers::ShipModifiers = match modifiers {
-            Some(m) => m,
-            None => {
-                default_modifiers = crate::modifiers::ShipModifiers::new();
-                &default_modifiers
             }
         };
         let torpedo_sys_default;
@@ -800,7 +787,6 @@ pub(crate) fn publish_weapons_core_blackboard(
         // downstream steers on it — so the lag costs a single frame of console
         // latency and nothing else.
         let target_uuid = viewscreen_combat_lock(&entity_bbs);
-        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
 
         let target_live_pos: Option<(f32, f32)> = target_uuid
             .as_deref()
@@ -825,7 +811,6 @@ pub(crate) fn publish_weapons_core_blackboard(
             combat_config,
             cooldown,
             beam,
-            radar_range_mult,
             physics,
             target_live_pos,
             control_sources,
@@ -1056,7 +1041,6 @@ pub(crate) fn publish_phaser_bank_blackboards(
             Option<&PhaserCooldown>,
             Option<&PhaserCombatConfigResource>,
             Option<&ShipPhysics>,
-            Option<&crate::modifiers::ShipModifiers>,
             Option<&ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
@@ -1065,7 +1049,7 @@ pub(crate) fn publish_phaser_bank_blackboards(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    for (beam, cooldown, combat_config, ship_physics, modifiers, control_sources, mut entity_bbs) in
+    for (beam, cooldown, combat_config, ship_physics, control_sources, mut entity_bbs) in
         ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
@@ -1095,15 +1079,6 @@ pub(crate) fn publish_phaser_bank_blackboards(
                 &combat_config_default
             }
         };
-        let default_modifiers;
-        let modifiers: &crate::modifiers::ShipModifiers = match modifiers {
-            Some(m) => m,
-            None => {
-                default_modifiers = crate::modifiers::ShipModifiers::new();
-                &default_modifiers
-            }
-        };
-
         // Combat Lock from this ship's frozen viewscreen blackboard, exactly as
         // `publish_weapons_core_blackboard` reads it (spec §3) — never the live
         // `TacticalRadarSelection`. Drives the per-bank in-arc / in-range
@@ -1115,13 +1090,11 @@ pub(crate) fn publish_phaser_bank_blackboards(
         let target_live_pos: Option<(f32, f32)> = target_uuid
             .as_deref()
             .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
-        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
 
         let banks = build_bank_states(
             combat_config,
             cooldown,
             beam,
-            radar_range_mult,
             physics,
             target_live_pos,
             control_sources,

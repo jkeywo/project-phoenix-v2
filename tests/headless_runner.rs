@@ -3742,42 +3742,63 @@ fn a_world_flag_drives_a_backfilled_doctrine_in_a_real_run() {
     );
 }
 
-/// **A backfilled hull's phasers reach the `beam_range` its own file authors,
-/// in a real engagement (issue #923).**
+/// **A hull's phaser reach is its authored `beam_range`, whatever the radar
+/// slot is doing, in a real engagement (issue #955).**
 ///
-/// The unit pin in `modifiers::coordination` resolves the authored policy by
-/// hand; this one lets the SHIPPED schedule do it — captain AI raises the alert
-/// off real combat, `ai_power_allocation` resolves the `sensors` channel and
-/// emits an admitted `SetPowerGroupAllocation`, `handle_power_messages` applies
-/// it, and `translate_power_modifiers` folds it into `ModifierSlot::RadarRange`.
-/// Nothing here sets a power level or an alert by hand: if any link in that
-/// chain stops firing the reach never reaches 1.0 and this fails.
+/// This test used to assert the opposite (#923): that the cruiser's effective
+/// reach `beam_range × ModifierSlot::RadarRange` *climbed to* nominal at combat
+/// stations, and dipped below it the rest of the time. That assertion was
+/// pinning a coupling that should never have existed — reach is a property of
+/// the gun, and power buys DAMAGE (`ModifierSlot::PhaserDamage`), not distance.
+/// #955 removed the multiplication from every firing and reach-reporting path,
+/// so the old claim is now false by construction and the honest claim is its
+/// inverse: reach must not move at all.
 ///
-/// It is deliberately a MAXIMUM over the run rather than a reading at the end.
-/// Combat stations is a burst the battery pays for — the sensor point is shed
-/// again below the authored reserve, and by 45 s the cruiser in `probe_duel`
-/// has long since dropped back to its resting allocation. The claim is "the
-/// hull reaches its authored range while it is fighting", not "for ever", and
-/// the two-thirds floor is asserted alongside it so a regression in either
-/// direction is visible.
+/// It is asserted through the SHIPPED schedule rather than by hand. The reading
+/// is the production reach fact — `entity_direct_fire_range`, published on
+/// `AiWorldEntity::direct_fire_range` and consumed by the standoff-ring
+/// doctrine — which is exactly the projection that carried the multiplier
+/// before #955. `longest_usable_direct_fire_range` is a max over the ONLINE
+/// banks, so its value is always either 0 (every bank down) or one of the
+/// authored per-bank ranges; anything else means a multiplier crept back in.
+/// A damaged or destroyed bank therefore reads as an authored number or as
+/// zero, never as two thirds of one, which is what makes the set membership
+/// robust in a live duel rather than brittle.
+///
+/// The control is the same one the old test carried, kept for the same reason:
+/// the `RadarRange` slot must actually MOVE across the run, or the run proves
+/// nothing about decoupling, because a slot pinned at 1.0 satisfies an
+/// invariance claim trivially. It moves because the cruiser takes hits —
+/// `apply_radar_damage_modifiers` drives the same slot off the tactical radar's
+/// damage tier. It is deliberately NOT the sensors power group any more: #955
+/// removed that group's red-alert rule along with the coupling it paid for, so
+/// the hull rests at its authored `[power_groups.sensors] default_level = 1`
+/// for the whole run.
 #[test]
-fn a_backfilled_cruiser_reaches_its_authored_beam_range_while_at_combat_stations() {
+fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel() {
     use project_phoenix::messages::ModifierSlot;
     use project_phoenix::modifiers::ShipModifiers;
 
-    // The authored number this test is about, read off the shipped hull rather
-    // than restated — a retune of the bank retunes the assertion with it.
+    // The authored numbers this test is about, read off the shipped hull rather
+    // than restated — a retune of a bank retunes the assertion with it.
     let hull = project_phoenix::entity_includes::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .expect("the shipped cruiser composes");
-    let authored_beam_range = hull
+    let authored_ranges: Vec<f32> = hull
         .weapons_console
         .as_ref()
-        .and_then(|wc| wc.phaser_banks.iter().find(|b| b.id == "fore"))
-        .map(|b| b.beam_range)
-        .expect("the cruiser authors a `fore` phaser bank with a beam_range");
-    assert!(authored_beam_range > 0.0);
+        .map(|wc| wc.phaser_banks.iter().map(|b| b.beam_range).collect())
+        .unwrap_or_default();
+    assert!(
+        !authored_ranges.is_empty() && authored_ranges.iter().all(|r| *r > 0.0),
+        "the cruiser must author at least one phaser bank with a positive \
+         beam_range, or there is no reach for this test to pin: {authored_ranges:?}"
+    );
+    let longest = authored_ranges
+        .iter()
+        .copied()
+        .fold(0.0f32, |a, b| if b > a { b } else { a });
 
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
@@ -3789,41 +3810,88 @@ fn a_backfilled_cruiser_reaches_its_authored_beam_range_while_at_combat_stations
     };
     let mut app = build_headless_app(&args).expect("probe_duel must build an app");
 
-    let mut best: f32 = 0.0;
-    let mut worst: f32 = f32::MAX;
+    // Every distinct reach the production fact reported, and every distinct
+    // radar multiplier the slot held, across the whole run. The LocalShip is
+    // spawned by `spawn_game_start_entities` once the run begins, so its uuid is
+    // resolved lazily rather than before the first tick.
+    let mut local_uuid: Option<uuid::Uuid> = None;
+    let mut reaches: Vec<f32> = Vec::new();
+    let mut radar_mults: Vec<f32> = Vec::new();
+    let mut saw_longest = false;
     for _ in 0..args.max_ticks {
         run(&mut app, 1);
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&ShipModifiers, With<LocalShip>>();
-        let Ok(mods) = q.single(app.world()) else {
+
+        if local_uuid.is_none() {
+            let mut uuid_q = app
+                .world_mut()
+                .query_filtered::<&project_phoenix::entity_spawner::EntityUuid, With<LocalShip>>();
+            local_uuid = uuid_q
+                .single(app.world())
+                .ok()
+                .and_then(|u| uuid::Uuid::parse_str(&u.0).ok());
+        }
+        let Some(local_uuid) = local_uuid else {
             continue;
         };
-        let reach = authored_beam_range * mods.get(&ModifierSlot::RadarRange);
-        best = best.max(reach);
-        worst = worst.min(reach);
+
+        let mut mods_q = app
+            .world_mut()
+            .query_filtered::<&ShipModifiers, With<LocalShip>>();
+        if let Ok(mods) = mods_q.single(app.world()) {
+            let mult = mods.get(&ModifierSlot::RadarRange);
+            if !radar_mults.iter().any(|m| (m - mult).abs() < 1e-6) {
+                radar_mults.push(mult);
+            }
+        }
+
+        let snapshot = app
+            .world()
+            .resource::<project_phoenix::ai::server::WorldSnapshot>();
+        let Some(me) = snapshot.entities.iter().find(|e| e.uuid == local_uuid) else {
+            continue;
+        };
+        let reach = me.direct_fire_range;
+        if (reach - longest).abs() < 1e-3 {
+            saw_longest = true;
+        }
+        if !reaches.iter().any(|r| (r - reach).abs() < 1e-6) {
+            reaches.push(reach);
+        }
     }
 
+    for reach in &reaches {
+        let legal = *reach == 0.0 || authored_ranges.iter().any(|a| (a - reach).abs() < 1e-3);
+        assert!(
+            legal,
+            "the cruiser reported an effective direct-fire reach of {reach:.3} during a \
+             live duel, which is neither zero (every bank offline) nor any authored \
+             beam_range in {authored_ranges:?}. Something is scaling reach again — \
+             #955 made reach a property of the gun, and power buys PhaserDamage \
+             instead. All observed reaches: {reaches:?}"
+        );
+    }
     assert!(
-        (best - authored_beam_range).abs() < 1e-3,
-        "the cruiser's best effective phaser reach across 45 s of a live duel was \
-         {best:.2} against an authored beam_range of {authored_beam_range:.2}. The \
-         sensors → RadarRange → reach chain is not delivering nominal reach at \
-         combat stations, so every doctrine range on this hull is sized against a \
-         number its guns never have"
+        saw_longest,
+        "the cruiser never once reported its longest authored reach ({longest:.2}) across \
+         45 s of a live duel. Every observed value: {reaches:?}. Either the guns are \
+         offline for the whole run or the reach fact is not being published at all, and \
+         either way the invariance above passed vacuously"
     );
-    // The control, and it matters: a slot pinned at 1.0 for the whole run would
-    // satisfy the assertion above while proving nothing about the power chain.
-    // Reach must also read BELOW nominal somewhere, which it does for two
-    // independent reasons — the sensor point is shed below its authored reserve,
-    // and `apply_radar_damage_modifiers` drives the same slot when this hull's
-    // tactical radar is hit. No lower BOUND is asserted, for exactly that second
-    // reason: a destroyed radar takes the slot to ~0.001 by design.
+    // SEED-DEPENDENT, and this is the one assertion in the test that is. The
+    // slot moves only if the cruiser's `tactical-radar` system actually takes
+    // damage inside these 45 s — that is the sole driver left (the sensors power
+    // group does not move at all any more), so it is the only thing guaranteeing
+    // `radar_mults.len() > 1`. `probe_duel` is run `--deterministic` on the
+    // hull's own world seed, so it is reproducible; but a retune of the duel, of
+    // the cruiser's hull layout, or of the tactical radar's damage thresholds can
+    // stop the hit landing and turn this into a red test with nothing wrong.
     assert!(
-        worst < authored_beam_range,
-        "effective reach never left {authored_beam_range:.2} across the whole run, so \
-         this probe never exercised the power chain it claims to measure — something \
-         other than the sensors group is holding the RadarRange slot at 1.0"
+        radar_mults.len() > 1,
+        "`ModifierSlot::RadarRange` held a single value ({radar_mults:?}) for the whole \
+         run, so this probe never exercised the slot it claims reach is independent of. \
+         Since #955 the sensors power group no longer moves — radar hull damage is the \
+         only driver of this slot in a duel — so this means the cruiser's tactical radar \
+         came through 45 s untouched and the invariance above proves nothing"
     );
 }
 

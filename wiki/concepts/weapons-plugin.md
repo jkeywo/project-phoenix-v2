@@ -137,7 +137,8 @@ The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `Weapo
 - `WorldResource` — for target entity position
 - `TacticalRadarSelection`, `PhaserCooldown`, `ActiveBeam`
 - `TorpedoSystemResource` — for per-tube reload state and magazine count
-- `ShipModifiers` — for `RadarRange` multiplier (effective weapons range)
+
+It does **not** read `ShipModifiers`. Since issue #955 a bank reaches its authored `beam_range`, unscaled, so the broadcaster has no use for the `RadarRange` multiplier. That multiplier still bounds the tactical **acquisition** horizon, but it is read by `publish_tactical_radar_blackboard()` (`src/console/weapons/blackboard.rs`) — a different system.
 
 Produces `ServerMessage::WeaponsUpdate` sent to the Tactical console holder at 10 Hz.
 

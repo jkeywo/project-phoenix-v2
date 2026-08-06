@@ -4746,6 +4746,79 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
     npc
 }
 
+/// **Reach is the authored `beam_range`, whatever `ModifierSlot::RadarRange`
+/// says (issue #955).**
+///
+/// The target sits at 45 units against a bank authoring `beam_range = 50`, and
+/// the ship's sensors are crushed: a `-0.5` bonus on `RadarRange`, which
+/// `ShipModifiers::rebuild_cache` folds to `1 / 1.5` = ×0.667 — the exact rung
+/// the four Alliance hulls rested at, and the bug #923 was compensating for.
+///
+/// Until #955 every firing path multiplied `beam_range` by that slot, so this
+/// ship's guns stopped at 33.3 and the target at 45 was unreachable: the hull
+/// fought at two thirds of the number its own file authored, silently. #923
+/// bought the missing third back with a red-alert `sensors` power elevation
+/// rather than removing the multiplication. #955 removed it, so the assertion
+/// here is the inverse of what the old behaviour would give — the beam lights.
+///
+/// 45 is chosen to sit strictly between the two: inside the authored 50 and
+/// outside the scaled 33.3, so the test fails if the coupling comes back in
+/// EITHER firing path (`ai_phaser_auto_fire` selects the bank,
+/// `handle_fire_phaser` re-checks the range before lighting it).
+#[test]
+fn phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot() {
+    use crate::ai_plugin::AiTokenRegistry;
+    use crate::messages::{ModifierSlot, PowerGroupId};
+    use crate::modifiers::cache::ModifierSource;
+    use crate::modifiers::{Modifier, ShipModifiers};
+
+    let mut app = test_app();
+    app.init_resource::<AiTokenRegistry>();
+
+    let npc_uuid = "cc000000-0000-0000-0000-000000000001";
+    let target_uuid = "cc000000-0000-0000-0000-000000000002";
+    let npc = spawn_ai_phaser_npc(&mut app, npc_uuid, target_uuid);
+
+    // Sensors at the resting rung: ×0.667 on the shared tactical radar slot.
+    let mut mods = ShipModifiers::new();
+    mods.add_or_update(Modifier {
+        source: ModifierSource::PowerGroup(PowerGroupId(
+            crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
+        )),
+        slot: ModifierSlot::RadarRange,
+        bonus: -0.5,
+    });
+    let radar_mult = mods.get(&ModifierSlot::RadarRange);
+    assert!(
+        (radar_mult - 1.0 / 1.5).abs() < 1e-4,
+        "the fixture must actually crush the slot, or this test proves nothing: {radar_mult}"
+    );
+    app.world_mut().entity_mut(npc).insert(mods);
+
+    // 45 units out: inside the authored 50, outside 50 × 0.667 = 33.3.
+    let target = app
+        .world_mut()
+        .query_filtered::<(Entity, &crate::entity_spawner::EntityUuid), Without<crate::server_app::Ship>>()
+        .iter(app.world())
+        .find_map(|(e, u)| (u.0 == target_uuid).then_some(e))
+        .expect("the helper spawns the target entity");
+    *app.world_mut().get_mut::<Transform>(target).unwrap() = Transform::from_xyz(0.0, 0.0, -45.0);
+
+    app.update();
+
+    let beam = app
+        .world()
+        .get::<ActiveBeam>(npc)
+        .expect("the NPC carries an ActiveBeam");
+    assert!(
+        beam.is_firing(),
+        "a bank authoring beam_range = 50 must reach a target at 45 with its radar \
+         slot at x{radar_mult:.3}. Reach is a property of the gun (#955): if this \
+         fails, some firing path is multiplying beam_range by RadarRange again and \
+         the hull is silently fighting at two thirds of its authored range"
+    );
+}
+
 /// `ai_phaser_auto_fire` is a *decider*: it publishes its choice to
 /// `AdmittedCommands` (via `emit_ai_command`) and leaves `ActiveBeam`
 /// alone. Running it in isolation proves the two halves are genuinely

@@ -119,8 +119,10 @@
 # pair, its mandatory boost drive, its stations and systems, its doctrine — plus
 # the two ship-level declarations a Harrow deliberately does not share with the
 # fleet: the stand-down `[captain_console.ai]` (#912) and `[power]` +
-# `[power.ai_policy]`, re-authored whole so the baseline's resting `sensors` rule
-# cannot demote a hull that authors no `[power_groups.*]` (#923).
+# `[power.ai_policy]`, re-authored whole because the baseline's `helm` rule
+# gates its elevation on `red_alert` and a Harrow raises the alert only around
+# combat, not for the whole transit, so inheriting the guard would pin the
+# drive at 2 for exactly the leg that needs it (#923; corrected #955).
 # `ship_harrow_patrol.toml` carries the fuller note on both.
 includes = [
   "fragments/ai/fleet_baseline.toml",

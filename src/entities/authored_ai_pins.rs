@@ -474,32 +474,45 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     ("ship_harrow_patrol", "captain"),
     ("ship_harrow_warhawk", "captain"),
     ("ship_requiem_courier", "captain"),
-    // ── The reactors with nothing to raise (issue #923) ──────────────────────
+    // ── The reactors whose drive is not gated by the alert ───────────────────
     //
-    // #923 gave the Alliance fleet baseline a `sensors` channel — nominal at red
-    // alert, resting at 1 — because `ModifierSlot::RadarRange` is driven off that
-    // group and the four Alliance hulls author `[power_groups.sensors]` at level
-    // 1, so a backfilled hull was fighting at two thirds of its own authored
-    // `beam_range`. It pays for that point by dropping the `weapons` elevation,
-    // because the reactor's total is capped at 8 and the Alliance layout has four
-    // groups to fit inside it.
+    // These six author `power` inline and their `helm` elevation reads
+    // `thrust >= thrust_threshold and battery_pct >= min_reserve_helm` with NO
+    // `red_alert` term; the fleet baseline's carries one. That guard exists
+    // because `plan_helm_travel` commands near-max throttle for any ordinary
+    // transit, so an ungated rule holds an Alliance hull's drive elevated for
+    // its whole cruise and browns the reactor out with no combat involved.
     //
-    // Neither half applies to these six, and copying the rules over would make
-    // them WORSE on both counts:
+    // The reactor arithmetic is NOT what distinguishes them, and it is worth
+    // saying so because an earlier revision of this note claimed it was. An
+    // Alliance hull authors four groups resting at `ops 1 + helm 2 + weapons 2 +
+    // sensors 1` = 6; these six author no `[power_groups.*]`, so
+    // `PowerSystem::from_authored_groups` seeds the canonical trio at level 2 —
+    // also 6. Elevating helm puts BOTH at 7, and `PowerSystem::tick` indexes
+    // `config.rates[total - 3]`, which is -2 on the fleet baseline's
+    // `[5, 4, 3, 2, -2, -5]` and -2 on the patrol's `[6, 5, 4, 2, -2, -6]`
+    // alike. Three groups versus four costs the same drain either way.
     //
-    //   * They author NO `[power_groups.*]` at all, so
-    //     `PowerSystem::from_authored_groups` seeds them with the canonical trio
-    //     at level 2 — their sensor suite is already nominal and always has been.
-    //     A resting rule at level 1 would newly take a third off the reach of
-    //     every NPC in the game.
-    //   * They fire UNGATED by the alert (`min_alert_to_fire = 0`, the same
-    //     always-armed doctrine the banks above are listed for) and their captains
-    //     only raise it AFTER combat, so an alert-gated sensor rule would drop
-    //     their reach for exactly the opening exchange it is supposed to protect.
+    // What distinguishes them is WHEN THE ALERT IS UP. An Alliance captain
+    // raises it on first contact (#912), so an alert-gated helm rule still
+    // releases the drive for the whole engagement. These six author the
+    // returning-fire rule ONLY — their captains raise the alert inside a short
+    // `combat_window_secs` of the last exchange of fire and stand it down
+    // otherwise, which is also why their guns are always-armed
+    // (`min_alert_to_fire = 0`, see the gun line above). A Harrow spends almost
+    // all of its life in transit with the alert down, so inheriting the guard
+    // would pin its drive at 2 for exactly the leg that needs it and release it
+    // only once the shooting had already started.
     //
-    // Their layout also has no `ops` group taking a point, so 2/2/2 plus a
-    // red-alert `weapons` elevation still fits the cap — which is why they keep
-    // the elevation the Alliance gave up.
+    // These entries were first added by #923 with a different reason (the
+    // `sensors` channel the Alliance baseline then carried). #955 removed that
+    // channel again, so the departure is now the helm guard alone — a narrower
+    // claim, and the one that is actually true of the shipped files.
+    //
+    // Listed in the direction that keeps the entry meaningful: if one of these
+    // quietly acquires the alert guard its transit doctrine has changed and only
+    // this list notices, and if an Alliance hull quietly loses it the unanimity
+    // requirement notices instead.
     ("ship_harrow_cruiser", "power"),
     ("ship_harrow_destroyer", "power"),
     ("ship_harrow_lancer", "power"),
@@ -2516,7 +2529,7 @@ fn power_guard_truth_table() {
     let p = fleet_baseline_policy("power");
     let thrust_threshold = param(&p, "thrust_threshold");
     let helm_reserve = param(&p, "min_reserve_helm");
-    let sensors_reserve = param(&p, "min_reserve_sensors");
+    let weapons_reserve = param(&p, "min_reserve_weapons");
 
     let elevated = |level: u8| Some(AiPolicyVerb::SetPowerGroupAllocation(level));
     let (hi, lo) = (3u8, 2u8);
@@ -2581,65 +2594,36 @@ fn power_guard_truth_table() {
     );
 
     // ── weapons ─────────────────────────────────────────────────────────────
-    // ONE rule since issue #923: the red-alert elevation that used to live here
-    // is the point the fleet now spends on `sensors`, so this channel holds
-    // nominal in every fact combination. Asserted across all four corners of the
-    // truth table the elevation used to occupy, because "the rule is gone" is
-    // exactly the claim a future retune would silently break.
-    for (alert, battery) in [(1.0, 95.0), (1.0, 5.0), (0.0, 95.0), (0.0, 5.0)] {
-        assert_eq!(
-            resolve(
-                &p,
-                "weapons",
-                &facts(&[("red_alert", alert), ("battery_pct", battery)])
-            ),
-            elevated(lo),
-            "weapons holds nominal at red_alert={alert}, battery={battery}. The fleet \
-             buys its combat-stations SENSORS point from this group (#923), so an \
-             elevation reappearing here would push the red-alert total to 9 against a \
-             cap of 8 and the sensor point would be the one silently refused."
-        );
-    }
-
-    // ── sensors: the #923 rule, and the reach it is really about ────────────
-    // `RadarRange` is driven off this group, and level 2 is the level whose
-    // multiplier is exactly 1.0 — so this pin is what stands between a
-    // backfilled hull and fighting at two thirds of its own authored beam_range.
     assert_eq!(
         resolve(
             &p,
-            "sensors",
-            &facts(&[("red_alert", 1.0), ("battery_pct", sensors_reserve + 70.0)])
+            "weapons",
+            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_reserve + 70.0)])
+        ),
+        elevated(hi),
+        "red alert AND battery above the weapons reserve ⇒ elevate."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_reserve - 5.0)])
         ),
         elevated(lo),
-        "red alert AND battery above the sensor reserve ⇒ NOMINAL (level 2), which is \
-         the ×1.0 rung of `ModifierSlot::RadarRange`. Not 3: the fleet's authored \
-         `beam_range` numbers mean what they say at combat stations, no more."
+        "red alert but battery below the weapons reserve ⇒ baseline."
     );
     assert_eq!(
         resolve(
             &p,
-            "sensors",
-            &facts(&[("red_alert", 1.0), ("battery_pct", sensors_reserve - 5.0)])
+            "weapons",
+            &facts(&[("red_alert", 0.0), ("battery_pct", weapons_reserve + 70.0)])
         ),
-        elevated(1),
-        "red alert but battery below the sensor reserve ⇒ rest at 1, and reach falls \
-         back to two thirds with it. That is the authored consequence of the reserve, \
-         and the reason a doctrine ring is sized against the LOW rung."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "sensors",
-            &facts(&[("red_alert", 0.0), ("battery_pct", sensors_reserve + 70.0)])
-        ),
-        elevated(1),
-        "no red alert ⇒ rest at 1, however full the battery: nominal reach is something \
-         a ship goes to combat stations for, not something it idles at."
+        elevated(lo),
+        "no red alert ⇒ baseline."
     );
 
-    // ── the absent-battery edge, on every channel ───────────────────────────
-    for channel in ["helm", "weapons", "sensors"] {
+    // ── the absent-battery edge, on both channels ───────────────────────────
+    for channel in ["helm", "weapons"] {
         assert_eq!(
             resolve(&p, channel, &facts(&[])),
             None,
@@ -2654,13 +2638,12 @@ fn power_guard_truth_table() {
     assert_eq!(
         resolve(
             &p,
-            "ops",
+            "sensors",
             &facts(&[("battery_pct", 80.0), ("red_alert", 1.0), ("thrust", 1.0)])
         ),
         None,
-        "`ops` is not named, so it resolves to `None` and holds whatever level the \
-         reactor seeded — no matter how favourable the facts. It is also what leaves \
-         the other three a budget of 7 rather than 8."
+        "`sensors` is not named, so it resolves to `None` and holds whatever level the \
+         reactor seeded — no matter how favourable the facts."
     );
 }
 

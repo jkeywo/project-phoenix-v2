@@ -219,12 +219,13 @@ post-#606):
 
 | Location | What it reads |
 |---|---|
-| `src/console/weapons/mod.rs` — `handle_set_target` | `ModifierSlot::RadarRange` for target-lock range gate |
+| `src/console/weapons/beam.rs` — `handle_set_target` | `ModifierSlot::RadarRange` for the human target-lock range gate (ACQUISITION) |
+| `src/console/weapons/mod.rs` — `ai_target_selection` | `ModifierSlot::RadarRange` to bound the AI selector's candidate horizon — the same acquisition gate `handle_set_target` applies to a human, which is what keeps the two symmetric |
+| `src/console/weapons/blackboard.rs` — `publish_tactical_radar_blackboard` | `ModifierSlot::RadarRange` to bound the tactical radar blips the local ship renders |
 | `src/ship/helm_admission.rs` — `process_helm_inputs` | `ModifierSlot::MaxSpeed` for acceleration/reverse-speed caps |
 | `src/server_app.rs:798` — `handle_collisions` | `ModifierSlot::HullDamageTaken` to scale collision damage |
-| `src/console/weapons/mod.rs` — `handle_fire_phaser` | `ModifierSlot::RadarRange` to scale effective phaser range |
+| `src/console/weapons/beam.rs` — `tick_beams_prepare` | `ModifierSlot::PhaserDamage` to scale beam DPS (per shooter). **Not** `RadarRange`: since issue #955 nothing scales a weapon's reach, which is its authored `beam_range` |
 | `src/console/repair/server.rs:176` — `tick_repair_teams` | `ModifierSlot::RepairRate` to scale repair speed |
-| `src/console/weapons/mod.rs` — `tick_beams` | `ModifierSlot::PhaserDamage` to scale beam DPS (per shooter) |
 | `src/regions/server.rs:342` — `handle_slow_zone_speed_clamp` | `ModifierSlot::MaxSpeed` to clamp ship speed on slow-zone entry |
 
 ## How `RegionEffect { uuid }` source identity prevents stale accumulation
@@ -299,7 +300,7 @@ All six modifier slots, defined in `src/core/messages.rs:11`:
 |---|---|---|
 | `MaxSpeed` | Ship forward speed cap | 1.0 |
 | `MaxYawRate` | Ship turn rate cap | 1.0 |
-| `RadarRange` | Radar / phaser lock range | 1.0 |
+| `RadarRange` | Tactical radar horizon: blips and the range a target lock may be taken at. **Acquisition only** — it does not scale weapon reach (issue #955) | 1.0 |
 | `PhaserDamage` | Damage per phaser tick | 1.0 |
 | `HullDamageTaken` | Incoming damage multiplier (penalty) | 1.0 |
 | `RepairRate` | Repair team tick speed | 1.0 |

@@ -2749,6 +2749,172 @@ fn a_targeted_destroy_objective_does_not_cancel_the_hulls_own_attack_pass() {
     );
 }
 
+/// **The destroyer's attack pass is a LOOP: it passes, breaks off, and passes
+/// again (issue #937).**
+///
+/// Every other probe of `movement_attack_pass.toml` stops at the first leg.
+/// `a_targeted_destroy_objective_does_not_cancel_the_hulls_own_attack_pass`
+/// above asserts one escape happens and that its frozen heading is held;
+/// `the_composed_player_destroyer_boots_backfilled_and_flies` asserts the hull
+/// moves at all. A destroyer that ran in ONCE and then never re-opened the range
+/// satisfied both, and that is precisely what shipped: in a live engagement the
+/// hull merged and then ground along at contact range beside the ship it had
+/// just rammed — the "orbits at ~range 5 instead of making attack runs" report.
+///
+/// The cause was not the doctrine and not the posture gate. `inbound` hands off
+/// to `escape` on a closest-approach detector whose load-bearing conjunct is
+/// `fact(closing_rate) < param(closing_rate_epsilon)`, and `closing_rate` is the
+/// radial component of the RELATIVE velocity, reconstructed from both ships'
+/// `(yaw, forward_speed)`. `build_world_snapshot` published every entity's
+/// heading straight off its render `Transform`, which carries the negation
+/// `sync_ship_position` applies — so every target's velocity came back mirrored
+/// and the detector read "still closing" for a hull that had already flown past.
+/// The unit half of that is
+/// `ai::server::tests::the_snapshot_publishes_headings_in_the_simulations_own_convention`;
+/// only a live run can say what it cost the doctrine.
+///
+/// The measurement is the four-phase SEQUENCE, in order, because no single
+/// scalar separates the two behaviours: a jammed hull still has a tiny closest
+/// approach, still publishes a pass surface, and still spends the engagement at
+/// red alert. What only a cycling hull does is re-open the range past its own
+/// authored `commit_range` after a merge and then close again.
+#[test]
+fn the_composed_destroyer_passes_breaks_off_and_passes_again() {
+    use project_phoenix::server_app::Ship;
+    use project_phoenix::ship::helm_ai::HelmPassSurface;
+    use project_phoenix::ship::state::ShipRedAlert;
+
+    // The authored trigger range this hull commits a run inside of, read off the
+    // shipped template through the real (include-resolving) load path rather
+    // than restated here, so a retune in TOML retunes this test with it.
+    let commit_range = project_phoenix::entity_includes::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .expect("the shipped destroyer resolves")
+    .helm_console
+    .as_ref()
+    .and_then(|h| h.steering_ai.as_ref())
+    .and_then(|ai| ai.param.get("commit_range"))
+    .copied()
+    .expect("the composed steering axis authors `commit_range`");
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_attack_pass_cycle.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the composed destroyer must build an app");
+
+    // The phases, advanced strictly in order — reaching phase N is a claim that
+    // all of 1..N happened, in sequence, in one run.
+    //
+    //   1  merged     — closed to inside a fifth of `commit_range`: a real pass,
+    //                   not a long-range exchange.
+    //   2  broke off  — its own Steering policy reached the commitment leg AFTER
+    //                   that merge. Read off `HelmPassSurface`, which the policy
+    //                   publishes, so this says the DOCTRINE committed rather
+    //                   than that the hull happened to drift outward.
+    //   3  re-opened  — past `commit_range`, i.e. all the way back outside its
+    //                   own run-in trigger. This is THE phase the jam could not
+    //                   reach: a hull stuck at contact range never gets here.
+    //   4  re-passed  — merged again. The loop closed.
+    let mut phase = 0u8;
+    let mut surface_ticks = 0usize;
+    let mut red_ticks = 0usize;
+    let mut min_range = f32::MAX;
+    let mut max_range_since_merge = 0.0f32;
+    let mut range_ticks = 0usize;
+    let mut contact_ticks = 0usize;
+    let merge_range = commit_range / 5.0;
+
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        // The one hostile this world spawns. It dies partway through a healthy
+        // run, which is why every phase transition is latched rather than
+        // sampled at the end.
+        let hostile = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipPhysics, (With<Ship>, Without<LocalShip>)>();
+            q.iter(app.world()).next().map(|p| (p.x, p.z))
+        };
+        let mut q = app.world_mut().query_filtered::<(
+            &ShipPhysics,
+            Option<&ShipRedAlert>,
+            Option<&HelmPassSurface>,
+        ), With<LocalShip>>();
+        let Ok((physics, alert, pass)) = q.single(app.world()) else {
+            continue;
+        };
+        if alert.is_some_and(|a| a.0) {
+            red_ticks += 1;
+        }
+        let escaping = pass.is_some_and(|p| p.escape);
+        if pass.is_some() {
+            surface_ticks += 1;
+        }
+        let Some((hx, hz)) = hostile else { continue };
+        let range = ((physics.x - hx).powi(2) + (physics.z - hz).powi(2)).sqrt();
+        range_ticks += 1;
+        min_range = min_range.min(range);
+        if range < merge_range {
+            contact_ticks += 1;
+        }
+        if phase > 0 {
+            max_range_since_merge = max_range_since_merge.max(range);
+        }
+        phase = match phase {
+            0 if range < merge_range => 1,
+            1 if escaping => 2,
+            2 if range > commit_range => 3,
+            3 if range < merge_range => 4,
+            p => p,
+        };
+    }
+
+    // Liveness first: without it every phase claim below could be vacuous on a
+    // world where the two hulls never met.
+    assert!(
+        range_ticks > 0 && red_ticks > 0 && surface_ticks > 0,
+        "the engagement never happened: {range_ticks} ticks with a hostile in \
+         world, {red_ticks} at red alert, {surface_ticks} publishing a pass \
+         surface"
+    );
+    assert!(
+        phase >= 1,
+        "closest approach was {min_range:.1} units against a {merge_range:.0}-unit \
+         merge threshold — the hull never made a pass at all"
+    );
+    assert!(
+        phase >= 2,
+        "the hull merged at {min_range:.1} units and its Steering policy never \
+         reached the commitment leg. Closest approach with no escape is the \
+         signature of a closest-approach detector that cannot fire."
+    );
+    // THE regression assertion. A destroyer that merges and then hangs on its
+    // target reaches phase 2 on a lucky tick and stops; only a hull that really
+    // broke off gets all the way back outside its own run-in trigger.
+    assert!(
+        phase >= 3,
+        "after breaking off, the hull only ever re-opened to \
+         {max_range_since_merge:.1} units against its own authored \
+         `commit_range` of {commit_range:.0} ({contact_ticks} of {range_ticks} \
+         ticks spent inside {merge_range:.0} units). It committed to the outward \
+         heading and did not get out — which is what grinding along at contact \
+         range looks like from the outside."
+    );
+    assert_eq!(
+        phase, 4,
+        "the hull passed, broke off and re-opened to {max_range_since_merge:.1} \
+         units, then never came back in. The doctrine is a LOOP; a hull that \
+         leaves and does not return has stopped attacking."
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Issue #876 — the other two composed player hulls, end to end
 // ─────────────────────────────────────────────────────────────────────────────

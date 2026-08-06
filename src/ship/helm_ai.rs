@@ -137,7 +137,7 @@ fn helm_ai_snapshot_entities(
                 ],
                 faction: faction.map(|f| f.0),
                 hull_fraction,
-                yaw: Some(transform.rotation.to_euler(EulerRot::YXZ).0),
+                yaw: Some(-transform.rotation.to_euler(EulerRot::YXZ).0),
                 radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
                 // Ships are movable, dangerous collision hazards; size rating
                 // tracks the collision radius (issue #743).

@@ -428,7 +428,36 @@ pub(crate) fn build_world_snapshot(
                 let forward_speed = physics.map(|p| p.forward_speed).unwrap_or(0.0);
                 let direct_fire_range =
                     entity_direct_fire_range(control_sources, phasers, blasters, modifiers);
-                let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
+                // The SIMULATION's heading, in `ShipPhysics.yaw`'s convention —
+                // NOT the render transform's euler (issue #937).
+                //
+                // `ship::physics_systems::sync_ship_position` writes
+                // `Quat::from_euler(YXZ, -physics.yaw, 0, roll)`: Bevy's Y euler
+                // turns counter-clockwise and `ShipPhysics.yaw` turns clockwise,
+                // so the transform deliberately carries the NEGATED heading.
+                // Reading that euler straight back published every ship's heading
+                // mirrored, while every consumer of this field — the two
+                // `target_relative_motion` callers, both avoidance projections in
+                // `ai::core`, and `entity_weapon_arc_sectors` below —
+                // reconstructs a forward vector as `(sin(yaw), -cos(yaw))`, which
+                // is `ShipPhysics.yaw`'s convention and nothing else's.
+                //
+                // The visible cost was the destroyer's attack pass. Its
+                // closest-approach detector is `fact(closing_rate) <
+                // param(closing_rate_epsilon)`, and `closing_rate` is built from
+                // BOTH ships' reconstructed velocities; a mirrored target
+                // velocity made it read "still closing" for a hull that had
+                // already flown past, so `inbound` never handed off to `escape`.
+                // The destroyer merged, jammed against its target and ground
+                // there at contact range instead of breaking off and re-passing.
+                //
+                // Preferred off `ShipPhysics` for the same reason `forward_speed`
+                // above is: that component is the authority for anything that
+                // moves. An entity without one (a station, a planet) keeps its
+                // authored transform, converted by the same negation.
+                let yaw = physics
+                    .map(|p| p.yaw)
+                    .unwrap_or_else(|| -transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0);
                 // Issue #874: the one producer call. Everything downstream —
                 // the helm AI exposure fact and the helm-radar overlay — reads
                 // these sectors rather than deriving arcs of its own.
@@ -1703,17 +1732,118 @@ verb = "fire_blaster"
 
     // ── build_world_snapshot: hostile weapon-arc sectors (issue #874) ──────
 
+    /// A ship heading `yaw` radians, stated the way the SIMULATION states it
+    /// (issue #937).
+    ///
+    /// `ShipPhysics.yaw` is the authority for anything that moves, and its
+    /// convention is clockwise (0 = facing −Z, so a heading θ points along
+    /// `(sin θ, −cos θ)` — the convention `arc_geometry::world_bearing_deg`
+    /// resolves bearings in). The `Transform` a ship carries is the RENDER pose
+    /// and holds the negation, because `sync_ship_position` writes
+    /// `Quat::from_euler(YXZ, -physics.yaw, …)` and Bevy's Y euler turns the
+    /// other way.
+    ///
+    /// The fixtures below used to hand-roll the Transform alone and assert on
+    /// what came out, which pinned the render convention onto a field every
+    /// consumer reads in the simulation one. Building both here, from one yaw
+    /// and through the same negation the real sync applies, is what makes these
+    /// tests a statement about a ship rather than about a quaternion.
+    fn hull_pose(yaw: f32) -> (Transform, crate::ship_state::ShipPhysics) {
+        (
+            Transform::from_xyz(0.0, 0.0, 0.0).with_rotation(Quat::from_rotation_y(-yaw)),
+            crate::ship_state::ShipPhysics {
+                yaw,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// **The snapshot's `yaw` is the SIMULATION's heading, not the render
+    /// pose's (issue #937).**
+    ///
+    /// Every consumer of `AiWorldEntity::yaw` reconstructs a forward vector as
+    /// `(sin θ, −cos θ)` — `ai::core::target_relative_motion` for both the helm's
+    /// `closing_rate` and the captain's hostile range, both avoidance
+    /// projections in `ai::core`, and `arc_geometry::weapon_arc_sectors`, whose
+    /// output is compared against `world_bearing_deg`'s `atan2(dx, −dz)`. That
+    /// is `ShipPhysics.yaw`'s convention and nothing else's.
+    ///
+    /// The render `Transform` holds the NEGATION of it, because
+    /// `sync_ship_position` writes `Quat::from_euler(YXZ, −physics.yaw, …)` and
+    /// Bevy's Y euler turns the other way. Reading the euler straight back — as
+    /// this producer did — published every ship's heading mirrored, which is a
+    /// silent failure: the field is still present, still finite, still moves
+    /// when the ship turns, and every test that built its fixture from a
+    /// hand-rolled quaternion still agreed with it.
+    ///
+    /// So this pin is deliberately NOT "the number equals the number". It runs
+    /// the ship through the REAL `sync_ship_position`, then asserts on the
+    /// FORWARD VECTOR the snapshot implies — against the direction the physics
+    /// integrator would actually carry the hull. A sign flip cannot survive
+    /// that, and neither can a future change of either convention that forgets
+    /// the other.
+    ///
+    /// What it cost in play is
+    /// `headless_runner::the_composed_destroyer_passes_breaks_off_and_passes_again`:
+    /// a mirrored target velocity made `closing_rate` read "still closing" for a
+    /// destroyer that had already flown past its target, so the attack pass's
+    /// closest-approach detector never fired and the hull ground along at
+    /// contact range instead of breaking off.
+    #[test]
+    fn the_snapshot_publishes_headings_in_the_simulations_own_convention() {
+        // Four headings rather than one: a sign flip is invisible at 0 and at
+        // pi, which are exactly the two a single-case fixture reaches for.
+        for yaw in [0.7_f32, -1.9, 2.6, std::f32::consts::FRAC_PI_2] {
+            let mut app = snapshot_test_app();
+            app.add_systems(
+                Update,
+                crate::ship::physics_systems::sync_ship_position.before(build_world_snapshot),
+            );
+            app.world_mut().spawn((
+                crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+                Transform::default(),
+                crate::ship_state::ShipPhysics {
+                    yaw,
+                    forward_speed: 10.0,
+                    ..Default::default()
+                },
+            ));
+            app.update();
+
+            let e = &app.world().resource::<WorldSnapshot>().entities[0];
+            let published = e.yaw.expect("a ship publishes a heading");
+            // The direction the integrator carries the hull, straight off
+            // `ShipPhysics` (see `ship_physics::compute_physics`).
+            let (truth_x, truth_z) = (crate::simmath::sin(yaw), -crate::simmath::cos(yaw));
+            // The direction every consumer reconstructs from the published
+            // heading.
+            let (read_x, read_z) = (
+                crate::simmath::sin(published),
+                -crate::simmath::cos(published),
+            );
+            assert!(
+                (read_x - truth_x).abs() < 1e-4 && (read_z - truth_z).abs() < 1e-4,
+                "yaw {yaw}: the snapshot published {published}, which reads as \
+                 forward ({read_x:.3}, {read_z:.3}) — the hull actually travels \
+                 ({truth_x:.3}, {truth_z:.3}). A mirrored heading makes every \
+                 relative-velocity and weapon-arc reading in the AI wrong \
+                 without making any of them absent."
+            );
+        }
+    }
+
     /// AC2: the arcs are published for every armed entity, with no scan gate
     /// and no target involved — a hull's arcs are a fact about the hull.
     #[test]
     fn world_snapshot_publishes_world_bearing_weapon_arc_sectors() {
         let mut app = snapshot_test_app();
         let (phasers, blasters) = armed_hull_components();
+        // Yawed 90 degrees to starboard, so a forward bank bears on +X.
+        let (transform, physics) = hull_pose(std::f32::consts::FRAC_PI_2);
         app.world_mut().spawn((
             crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
-            // Yawed 90 degrees to starboard, so a forward bank bears on +X.
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            transform,
+            physics,
             phasers,
             blasters,
         ));
@@ -1797,10 +1927,11 @@ verb = "fire_blaster"
         let (phasers, blasters) = armed_hull_components();
         let hostile_faction = uuid::Uuid::new_v4();
         let own_faction = uuid::Uuid::new_v4();
+        let (transform, physics) = hull_pose(std::f32::consts::FRAC_PI_2);
         app.world_mut().spawn((
             crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            transform,
+            physics,
             crate::entity_spawner::FactionComponent(hostile_faction),
             phasers,
             blasters,
@@ -1865,10 +1996,11 @@ verb = "fire_blaster"
         let same_faction = uuid::Uuid::new_v4();
         let mut app = snapshot_test_app();
         let (phasers, blasters) = armed_hull_components();
+        let (transform, physics) = hull_pose(std::f32::consts::FRAC_PI_2);
         app.world_mut().spawn((
             crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
-            Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            transform,
+            physics,
             crate::entity_spawner::FactionComponent(same_faction),
             phasers,
             blasters,

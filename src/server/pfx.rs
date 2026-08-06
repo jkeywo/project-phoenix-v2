@@ -41,6 +41,14 @@ const BEAM_GLOW_WIDTH: f32 = 0.22;
 const BEAM_CORE_WIDTH: f32 = 0.045;
 const CONTACT_GLOW_SIZE: f32 = 0.5;
 
+// The single texture column the phaser beam samples along its whole length
+// (issue #938, see `beam_ribbon_quad_mesh`). 0.5 is the horizontal centre of
+// `beam_glow.png` / `beam_core.png` — the widest, brightest cross-section of
+// the lens shape those textures are authored as. This is not a designer knob:
+// it names the middle of a texture, the same way the ribbon quad's vertex
+// positions name its corners.
+const BEAM_PROFILE_U: f32 = 0.5;
+
 // Contact-glow pulse at the target (issue phaser-pfx-core-beam): a static
 // glow at the impact point reads as inert; a rhythmic brightness/size pulse
 // sells continuous energy transfer into the target instead. Phase is
@@ -990,7 +998,7 @@ fn upsert_beam(
     // beam never disappears when viewed edge-on), a camera-facing contact
     // glow at the endpoint, a brief muzzle flash at the origin, and an
     // impact burst (ring + sparks) at the endpoint.
-    let ribbon_mesh = meshes.add(unit_ribbon_quad_mesh());
+    let ribbon_mesh = meshes.add(beam_ribbon_quad_mesh());
     let billboard_mesh = meshes.add(unit_billboard_mesh());
 
     // Glow is the halo, not the body (issue phaser-pfx-core-beam): lower
@@ -1211,10 +1219,44 @@ fn spawn_impact_burst(
 /// Unit quad (local X width -1..1, local Y length -0.5..0.5) reused via
 /// `segment_transform`'s (radius, length, radius) scale — matches the
 /// convention the old unit `Cylinder` primitive used. UV maps local Y
-/// (beam length) to U and local X (beam width) to V, since the source
-/// beam-profile textures run horizontally (length) with the bright falloff
-/// band across their vertical (width) axis.
+/// (segment length) to U and local X (segment width) to V.
+///
+/// This is the *projectile* ribbon: U sweeps 0..1 from tail to head so a
+/// texture authored with a bright rounded tip and a tapered fade reads as a
+/// bolt travelling head-first (blaster bolt, torpedo flare). Sustained beams
+/// want `beam_ribbon_quad_mesh` instead — see the note there.
 fn unit_ribbon_quad_mesh() -> Mesh {
+    ribbon_quad_mesh(0.0, 1.0)
+}
+
+/// The phaser beam's ribbon quad: identical geometry to
+/// `unit_ribbon_quad_mesh`, but with U pinned to a single texture column
+/// instead of sweeping along the beam.
+///
+/// Issue #938: `beam_glow.png` and `beam_core.png` are lens-shaped — opaque
+/// at the centre and fading to transparent at *all four* edges, left and
+/// right included, not just top and bottom. Sweeping U along the beam
+/// therefore stretched that horizontal falloff over the entire
+/// muzzle-to-target span, which is exactly the reported artefact: alpha
+/// peaked at mid-U (the bulge) and fell to zero at U=0 and U=1 (the taper to
+/// nothing at both ends). The geometry was never the problem —
+/// `segment_transform` already scales width independently of length.
+///
+/// A phaser is a sustained beam, not a projectile: it has no head or tail, so
+/// there is nothing for the length axis to encode. Sampling the texture's
+/// widest cross-section at every point along the beam keeps the authored
+/// across-width falloff — V still crosses the soft edge — while making the
+/// profile constant from muzzle to target, at any length and from any camera
+/// angle (the crossed `_a`/`_b` quads are unchanged).
+fn beam_ribbon_quad_mesh() -> Mesh {
+    ribbon_quad_mesh(BEAM_PROFILE_U, BEAM_PROFILE_U)
+}
+
+/// Shared builder for the crossed-ribbon quads. `u_at_tail`/`u_at_head` are
+/// the texture columns sampled at the segment's start (local Y = -0.5) and
+/// end (local Y = +0.5); passing the same value for both makes the sampled
+/// profile constant along the segment.
+fn ribbon_quad_mesh(u_at_tail: f32, u_at_head: f32) -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
@@ -1226,7 +1268,12 @@ fn unit_ribbon_quad_mesh() -> Mesh {
         [-1.0, 0.5, 0.0],
     ];
     let normals: Vec<[f32; 3]> = vec![[0.0, 0.0, 1.0]; 4];
-    let uvs: Vec<[f32; 2]> = vec![[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]];
+    let uvs: Vec<[f32; 2]> = vec![
+        [u_at_tail, 0.0],
+        [u_at_tail, 1.0],
+        [u_at_head, 1.0],
+        [u_at_head, 0.0],
+    ];
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -4604,6 +4651,79 @@ position = [0.5, -0.1, 0.25]
         assert_eq!(transform.scale, Vec3::new(0.25, 4.0, 0.25));
     }
 
+    /// Reads a quad mesh's positions zipped with its UVs, panicking with a
+    /// useful message if either attribute is missing or the wrong shape.
+    fn quad_position_uvs(mesh: &Mesh) -> Vec<([f32; 3], [f32; 2])> {
+        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) => p.clone(),
+            _ => panic!("quad must have Float32x3 positions"),
+        };
+        let uvs = match mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x2(u)) => u.clone(),
+            _ => panic!("quad must have Float32x2 UVs"),
+        };
+        assert_eq!(positions.len(), 4, "ribbon quad must have four corners");
+        assert_eq!(uvs.len(), positions.len());
+        positions.into_iter().zip(uvs).collect()
+    }
+
+    /// Issue #938: the beam ribbon must sample one constant texture column
+    /// along its length. `beam_glow.png` / `beam_core.png` are lens-shaped —
+    /// they fade out at their left and right edges too — so any U that varies
+    /// with local Y stretches that horizontal falloff over the whole
+    /// muzzle-to-target span and reintroduces the mid-beam bulge and the
+    /// taper to nothing at both ends.
+    #[test]
+    fn beam_ribbon_quad_pins_u_so_the_beam_is_constant_width() {
+        let mesh = beam_ribbon_quad_mesh();
+        let corners = quad_position_uvs(&mesh);
+
+        assert!(
+            corners.iter().all(|(_, uv)| uv[0] == BEAM_PROFILE_U),
+            "every corner must sample the same texture column, got {:?}",
+            corners.iter().map(|(_, uv)| uv[0]).collect::<Vec<_>>()
+        );
+
+        // The across-width axis must still sweep the full 0..1 so V keeps
+        // crossing the texture's soft edge — that is what gives the beam its
+        // falloff instead of a hard-edged bar.
+        let v_at_min_x = corners
+            .iter()
+            .filter(|(p, _)| p[0] < 0.0)
+            .map(|(_, uv)| uv[1])
+            .collect::<Vec<_>>();
+        let v_at_max_x = corners
+            .iter()
+            .filter(|(p, _)| p[0] > 0.0)
+            .map(|(_, uv)| uv[1])
+            .collect::<Vec<_>>();
+        assert_eq!(v_at_min_x, vec![0.0, 0.0], "-X edge must sample v=0");
+        assert_eq!(v_at_max_x, vec![1.0, 1.0], "+X edge must sample v=1");
+    }
+
+    /// The projectile ribbon must keep its tail-to-head U sweep: blaster
+    /// bolts and torpedo flares use asymmetric textures (bright rounded tip,
+    /// tapered fade) where the length falloff is the effect, not a bug. This
+    /// guards the fix for #938 from being generalised onto them.
+    #[test]
+    fn projectile_ribbon_quad_keeps_its_tail_to_head_u_sweep() {
+        let corners = quad_position_uvs(&unit_ribbon_quad_mesh());
+
+        let u_at_tail = corners
+            .iter()
+            .filter(|(p, _)| p[1] < 0.0)
+            .map(|(_, uv)| uv[0])
+            .collect::<Vec<_>>();
+        let u_at_head = corners
+            .iter()
+            .filter(|(p, _)| p[1] > 0.0)
+            .map(|(_, uv)| uv[0])
+            .collect::<Vec<_>>();
+
+        assert_eq!(u_at_tail, vec![0.0, 0.0], "-Y (tail) edge must sample u=0");
+        assert_eq!(u_at_head, vec![1.0, 1.0], "+Y (head) edge must sample u=1");
+    }
+
     #[test]
     fn upsert_engine_head_crumb_pins_existing_head_to_marker() {
         let mut crumbs = VecDeque::from([
@@ -4922,6 +5042,77 @@ position = [0.5, -0.1, 0.25]
                 "beam midpoint.z={actual_mid_z} should match this tick's shooter \
                  position (expected {expected_mid_z}, ground-truth shooter.z={ground_truth_z}) \
                  -- beam is reading a stale (last-tick) Transform"
+            );
+        }
+    }
+
+    /// Issue #938, the delivery half. The two mesh-factory tests above prove
+    /// `beam_ribbon_quad_mesh` pins U, but neither proves the phaser is *built*
+    /// from it: swapping the single `meshes.add(..)` call in `upsert_beam` back
+    /// to `unit_ribbon_quad_mesh()` reintroduces the reported artefact in full
+    /// with both of them still green. So boot the real plugin, let
+    /// `sync_phaser_beams` spawn actual beam entities, and read the UVs off the
+    /// mesh those entities genuinely reference.
+    #[test]
+    fn spawned_beam_bodies_use_the_pinned_u_ribbon_mesh() {
+        let mut app = beam_test_app();
+
+        let target_uuid = "target-uuid-3".to_string();
+
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            LocalShip,
+            EntityUuid("shooter-uuid-3".to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            ShipPhysics::default(),
+            {
+                let mut beam = ActiveBeam::default();
+                beam.start("", target_uuid.clone(), 10.0);
+                beam
+            },
+        ));
+
+        app.world_mut().spawn((
+            EntityUuid(target_uuid),
+            Transform::from_xyz(0.0, 0.0, -10.0),
+            ShipPhysics {
+                z: -10.0,
+                ..Default::default()
+            },
+        ));
+
+        app.update();
+
+        // Both layers (glow, core) and both crossed quads (`_a`, `_b`) are
+        // separate entities, so check every one rather than the first: a fix
+        // applied to only one layer must not pass. `>=` rather than `== 4` so
+        // adding a further layer later doesn't fail this for the wrong reason,
+        // while still catching a query that silently matched nothing (which
+        // would make the per-quad assertion below vacuous).
+        let handles: Vec<Handle<Mesh>> = {
+            let mut q = app.world_mut().query_filtered::<&Mesh3d, With<BeamBody>>();
+            q.iter(app.world()).map(|m| m.0.clone()).collect()
+        };
+        assert!(
+            handles.len() >= 4,
+            "expected the crossed glow + core BeamBody quads to be spawned, got {}",
+            handles.len()
+        );
+
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        for (i, handle) in handles.iter().enumerate() {
+            let mesh = meshes
+                .get(handle)
+                .expect("a spawned BeamBody's mesh handle must resolve");
+            let corners = quad_position_uvs(mesh);
+            assert!(
+                corners.iter().all(|(_, uv)| uv[0] == BEAM_PROFILE_U),
+                "BeamBody quad {i} must sample the pinned texture column \
+                 {BEAM_PROFILE_U} at every corner, got {:?} -- `upsert_beam` is \
+                 building the beam from the projectile ribbon, whose U sweeps \
+                 along the beam and stretches the texture's horizontal falloff \
+                 over the whole muzzle-to-target span (issue #938)",
+                corners.iter().map(|(_, uv)| uv[0]).collect::<Vec<_>>()
             );
         }
     }

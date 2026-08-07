@@ -2,13 +2,13 @@
 title: PASM Midpoint Audit
 type: concept
 tags: [pasm, audit, repair, helm, roadmap]
-sources: [pasm/spec/PASM_IMPLEMENTATION_ROADMAP_v1.0.md, pasm/spec/PASM_RUNTIME_v1.0.md, pasm/README.md, pasm/spec/architecture/engineering-damage.yaml, pasm/spec/architecture/helm-controls.yaml, pasm/core/validation.py, pasm/implementation/observation.py, pasm/migration/validation.py, src/console/repair/server.rs, src/modifiers/repair_teams.rs, src/ship_plugin.rs, src/ai/core.rs, gui/console-state.js]
+sources: [pasm/spec/PASM_IMPLEMENTATION_ROADMAP_v1.0.md, pasm/spec/PASM_RUNTIME_v1.0.md, pasm/README.md, pasm/spec/architecture/engineering-damage.yaml, pasm/spec/architecture/helm-controls.yaml, src/console/repair/server.rs, src/modifiers/repair_teams.rs, src/ship_plugin.rs, src/ai/core.rs, gui/console-state.js]
 updated: 2026-07-14
 ---
 
 Summary
 
-This supersedes the Phase 6 midpoint framing. PASM Phases 1-9 are implemented and exercised by 45 Python tests; `pasm validate` is error-free and `cargo check` passes. The model is useful for declared architecture, direct repository-edge observation, migrations, design traceability, and lightweight scenarios. It is not a proof that proposed feature behaviour is already in the game.
+This supersedes the Phase 6 midpoint framing. PASM Phases 1-9 are implemented and exercised by the tool's own test suite, which now lives in vellum rather than here; `pasm validate` is error-free and `cargo check` passes. The model is useful for declared architecture, direct repository-edge observation, migrations, design traceability, and lightweight scenarios. It is not a proof that proposed feature behaviour is already in the game.
 
 ## Phase status
 
@@ -20,8 +20,8 @@ This supersedes the Phase 6 midpoint framing. PASM Phases 1-9 are implemented an
 
 ## Runtime and packaging findings
 
-- `uv run pytest -q tests/pasm` passes 45 tests and `uv run pasm validate` reports no errors.
-- Validation retains ten warnings: two missing mappings for world state entities, four declared Repair/Helm dependencies without observed direct file edges, and four intentional pending Helm migration conditions/overlapping writers.
+- `uv run pasm validate` reports no errors. This line used to also cite a 45-test `uv run pytest -q tests/pasm` run; that suite belonged to the vendored tool and left with it in `ada7a172`, so there is no PASM pytest suite in this repository.
+- Validation retains PASM's informational warning baseline: `uv run pasm validate` reports 39 warnings and exits 0 with `Status: OK` (see `pasm/README.md`). The category mix (missing observed symbols/dependencies, undeclared observed dependencies, missing implementation mappings) drifts as the model and code evolve; a change that neither adds nor resolves one should leave the count alone rather than chase it.
 - Direct-edge observation remains a conservative signal. A clean report cannot prove runtime control flow, actor identity, or information visibility.
 - Some parser diagnostic text still says "Phase 0-2" although the implementation has reached Phase 9. This is documentation noise, not a semantic failure.
 

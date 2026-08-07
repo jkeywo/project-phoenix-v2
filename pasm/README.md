@@ -21,7 +21,13 @@ uv run pasm traceability --json > target/pasm/traceability.json
 
 CI runs `validate` and a gating `scan` through vellum's `pasm-validate`
 composite action, then produces the traceability report and uploads both as the
-`pasm-reports` artifact.
+`pasm-reports` artifact. There is no pytest step: the tool's own suite went to
+vellum with the tool, so those three commands are the whole local gate.
+
+`validate` currently reports `Status: OK` over ~39 informational warnings and
+exits 0. That is green. Only `[error]` findings fail the job — the warnings are
+pre-existing declared-versus-observed drift, and a change that neither adds nor
+resolves one should leave the count alone rather than chase it.
 
 To work on the tool itself, edit a sibling vellum checkout and uncomment the
 `[tool.uv.sources]` block in `pyproject.toml`. That override must never be
@@ -119,7 +125,7 @@ relies on; the remainder are this game's own architecture decisions.
 - The bounded Phase 5/6 audit also scans the whole supported-source inventory for lexical legacy-symbol references outside PASM-mapped files. These are source-located migration candidates, not asserted calls or dataflow; PASM still does not claim to prove runtime authority, actor identity, or information flow.
 - Phase 10 adds provider-neutral semantic audit handoff: `pasm audit bundle <entity>` emits only that entity's PASM declaration and declared source slices, including a deterministic bundle fingerprint. `pasm audit report <json> --bundle <bundle.json> --persist-dir <dir>` validates source-linked structured findings for `architecture`, `migration`, or `design-alignment` and persists canonical revision-bound evidence plus the exact reviewed bundle. Semantic reports remain advisory and never replace deterministic `pasm validate` findings.
 - Phase 11 adds `pasm context --entity <id> [--depth N]`, a deterministic task bundle of explicitly linked PASM entities, implementation paths, migration/evidence declarations, and reported omissions. It deliberately omits source contents and unmodelled runtime relationships.
-- Phase 12 runs `pytest`, `pasm validate`, revision-linked `pasm scan`, and `pasm traceability` in CI. The scan and traceability JSON files are retained as the `pasm-reports` CI artifact; external semantic-audit reports remain advisory.
+- Phase 12 runs `pasm validate`, revision-linked `pasm scan`, and `pasm traceability` in CI. It also ran the vendored copy's `pytest` suite until `ada7a172` moved the tool, and that suite, to vellum. The scan and traceability JSON files are retained as the `pasm-reports` CI artifact; external semantic-audit reports remain advisory.
 - The next-round flow is a shared pre-scenario selection lobby: the server QR is available before a world loads; either the server screen or any connected player may make the first valid scenario and ship selection; there is no vote; and GameOver returns every participant to that same selection state. The second round re-enters the same `SelectScenario` / `SelectPlayerShip` arbiter flow as the first, reusing the already-loaded world without a page reload (issue #756 retired the legacy `ConfirmScenario` compatibility path).
 - Comms dialogue responses are immediate and irreversible once submitted. Future world authoring uses an optional `important: true` response marker solely to request a clear client-side warning and confirmation before submission; it neither changes station authority nor adds server-side reversal semantics.
 - Out-of-range Comms responses should remain visible but greyed out. A stale or forced response rejected by the host must briefly flash red on the attempted control; the necessary rejection feedback is future protocol work.

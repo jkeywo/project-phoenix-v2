@@ -31,7 +31,7 @@ The wiki is not a replacement for code, `README.md`, `CONTEXT.md`, this file, PA
 # ── CI gates you can run locally — ALL green before each COMMIT, run ONCE ────
 # These are the three fast CI jobs (test, editor-test, pasm) in full. Anything
 # red here fails the build. `cargo test` alone is NOT sufficient: clippy denies
-# warnings, and the PASM suite gates on the spec model. The remaining two jobs
+# warnings, and `pasm validate` gates on the spec model. The remaining two jobs
 # (build, smoke) need a WASM build — see the trunk/playwright commands below.
 #
 # Do NOT run this list after every edit, implementation pass, or review pass —
@@ -45,8 +45,16 @@ cargo test                                     # CI: test job, step 3
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
 node scripts/check-strings.mjs --strict        # CI: editor-test job
 npm run lods:check                             # CI: editor-test job (LOD drift)
-uv run pytest -q tests/pasm                    # CI: pasm job — asserts on the spec model
-uv run pasm validate                           # CI: pasm job
+uv run pasm validate                           # CI: pasm job, gates on the spec model
+uv run pasm scan                               # CI: pasm job, gating (scan: gate)
+uv run pasm traceability                       # CI: pasm job, report (still exits nonzero on error)
+#   `pasm validate` prints ~39 pre-existing informational warnings and exits 0
+#   with `Status: OK`. That IS the green state — only `[error]` findings fail
+#   the job, so do not go chasing the warning list before committing.
+#   There is NO PASM pytest suite in this repo. The tool was de-vendored onto
+#   the fleet copy in ada7a172 and its tests went with it to vellum; only the
+#   spec model (pasm/spec/) is phoenix's. Editing a slice still needs the three
+#   commands above, because they assert on that YAML — `cargo test` will not.
 
 # Quick compile check while iterating (not a CI gate)
 cargo check
@@ -130,12 +138,15 @@ git diff perf/baselines
 #   and header prose survive. Write commentary in the HEADER — the RON value
 #   below it is regenerated. See src/perf/baseline.rs.
 
-# CI: ci.yml — seven jobs. `pasm`, `test` and `editor-test` run in PARALLEL and
+# CI: ci.yml — eight jobs. `pasm`, `test` and `editor-test` run in PARALLEL and
 # gate independently (any one of them red fails the build); `build` needs
 # `test`; `smoke` needs `build`; `perf` needs `test` and `smoke`; `balance`
 # needs `test`; `deploy` runs on main and needs none of `perf`/`balance`.
 #
-#   pasm         uv run pasm validate ; uv run pasm scan (fleet-standard step)
+#   pasm         uv run pasm validate ; uv run pasm scan — both through
+#                vellum's `pasm-validate` composite action (fleet-standard,
+#                pinned by rev) ; then uv run pasm scan/traceability --json
+#                uploaded as the `pasm-reports` artifact. No pytest step.
 #   test         cargo fmt --check ; cargo clippy --all-targets --all-features
 #                -D warnings ; cargo test
 #   editor-test  npx vitest run ; node scripts/check-strings.mjs --strict ;
@@ -147,6 +158,8 @@ git diff perf/baselines
 #                scenario only (report --gate, exit 3); every other scenario
 #                reports into the job summary and the perf-capture artifact
 #   balance      scripts/balance-runs.demo.toml — reports, never gates
+#   deploy       peaceiris/actions-gh-pages@v4 — publishes dist/ to GitHub
+#                Pages; main branch only, no gate of its own
 #
 # Keep this list in sync with .github/workflows/ci.yml — if you add a gate
 # there, add it above, and vice versa. Trusting a stale list here is how a
@@ -275,7 +288,7 @@ Two rules that are easy to get wrong:
 - **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels) and the pure `scripts/balance-runs.mjs` merge/format/expand fns (`tests/client/balance-runs.test.js`, fabricated report JSON — no sim).
 - **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed PeerJS shim (no real WebRTC).
 - **Headless runner (`tests/headless_runner.rs`, `--features headless`):** boots the whole simulation natively with nobody connected and asserts on end state. Lives in an *integration* test, not an inline `mod tests`, because building a headless app populates the process-global native template cache — inside the lib test binary that leaks into ~2500 unrelated unit tests. Anything calling `config_cache::insert_native_config` belongs here.
-- **PASM tests (`uv run pytest -q tests/pasm`):** Python tests over the design model in `pasm/spec/` — traceability roll-ups, cross-domain link integrity, CLI output. **These assert on the spec YAML, so editing a slice can fail them without touching a line of Rust.** `cargo test` will not catch it; CI's `pasm` job will. Run them whenever you touch `pasm/spec/`.
+- **PASM model checks (`uv run pasm validate`, `uv run pasm scan`, `uv run pasm traceability`):** the fleet tool's own deterministic checks over the design model in `pasm/spec/` — reference integrity, cross-domain links, declared-versus-observed drift, traceability roll-ups. **These assert on the spec YAML, so editing a slice can fail them without touching a line of Rust.** `cargo test` will not catch it; CI's `pasm` job will. Run them whenever you touch `pasm/spec/`. `validate` is green at `Status: OK` with ~39 informational warnings and exit 0. There is no pytest suite here — the tool, and its tests, live in [vellum](https://github.com/jkeywo/vellum) (de-vendored in `ada7a172`); see [pasm/README.md](./pasm/README.md).
 - **Not tested:** renderer visual output, bridge internals, CI pipeline.
 
 > Good tests: set up state → perform action → assert on observable output through the public interface. Do NOT assert on private fields, internal call counts, or implementation-specific details.

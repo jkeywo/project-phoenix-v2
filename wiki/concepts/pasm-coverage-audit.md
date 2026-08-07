@@ -2,7 +2,7 @@
 title: PASM Coverage Audit
 type: concept
 tags: [pasm, audit, coverage, architecture, authority]
-sources: [pasm/spec/architecture, pasm/spec/design, pasm/implementation/observation.py, pasm/scanners, src/console_bridge.rs, src/core/codec.rs, src/server/bridge.rs, src/entities/tags.rs, src/entities/target.rs, src/console_ai/server.rs]
+sources: [pasm/spec/architecture, pasm/spec/design, pasm/README.md, src/console_bridge.rs, src/core/codec.rs, src/server/bridge.rs, src/entities/tags.rs, src/entities/target.rs, src/console_ai/server.rs]
 updated: 2026-07-14
 ---
 
@@ -131,10 +131,9 @@ of system authority, control flow, or semantic reachability.
 
 ## Existing Findings
 
-`pasm validate` still reports eight established warnings: four unobserved
-direct-edge declarations around remote Helm/Repair command routing, and four
-pending/overlapping Helm migration findings. They are useful visibility rather
-than new feature-coverage failures.
+`pasm validate` reports 39 informational warnings and exits 0 with `Status: OK`
+(see `pasm/README.md`); the category mix drifts as the model and code evolve.
+They are useful visibility rather than new feature-coverage failures.
 
 ## Recommended Order
 

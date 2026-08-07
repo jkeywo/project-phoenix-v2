@@ -100,10 +100,10 @@ half-circles. A single SVG elliptical arc whose endpoints coincide is omitted by
 the spec, which would leave the player's scope blank against exactly the hull the
 AI reads as permanently exposed — so the wedge builder switches to the disc
 whenever the endpoints it is about to EMIT (after rounding to one decimal place)
-are equal, not merely when `fire_arc_deg` reaches 360. `ship_harrow_lancer.toml`
-authors a literal `fire_arc_deg = 360.0` twice, but a sweep just under a full
-turn collapses the same way once the screen radius is small enough, which a
-short-ranged bank on a wide scope reaches routinely.
+are equal, not merely when `fire_arc_deg` reaches 360. `alliance_destroyer.toml`
+authors a literal `fire_arc_deg = 360` on its `omni` suppression phaser, but a
+sweep just under a full turn collapses the same way once the screen radius is
+small enough, which a short-ranged bank on a wide scope reaches routinely.
 Arcs are never scan-gated: they are authored hull configuration, so a helm
 knows them for any hostile it can see at all. The overlay colour is authored
 per hull in `[helm_console] hostile_arc_color` and reaches the client through

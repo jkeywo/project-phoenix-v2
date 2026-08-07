@@ -1891,10 +1891,10 @@ mod tests {
     // ── hostile_arc_exposure: the all-round case (issue #874) ─────────────
 
     /// A hostile carrying an all-round bank (`fire_arc_deg = 360`, which the
-    /// Harrow Lancer authors twice) must reach the fact reduction as
-    /// INESCAPABLE with no escape magnitude — even when a nearer hostile's
-    /// finite arcs offer a real one, because turning out of those does not turn
-    /// out of the all-round one.
+    /// Alliance destroyer's `omni` suppression phaser authors) must reach the
+    /// fact reduction as INESCAPABLE with no escape magnitude — even when a
+    /// nearer hostile's finite arcs offer a real one, because turning out of
+    /// those does not turn out of the all-round one.
     #[test]
     fn an_all_round_hostile_suppresses_the_escape_magnitude_across_the_view() {
         let hostile_faction = uuid::Uuid::new_v4();

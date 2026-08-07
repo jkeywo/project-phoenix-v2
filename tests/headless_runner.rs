@@ -4699,3 +4699,65 @@ fn a_second_round_starts_a_fresh_command_log() {
         "and no command from round one may still be queued for a future tick"
     );
 }
+
+// ── The native template preload walks subdirectories (issue #954) ────────────
+
+/// The headless preload must find a template that lives in a SUBDIRECTORY of
+/// `assets/entities/`, and must still refuse to cache the fragment tree.
+///
+/// Both halves are load-bearing and neither is obvious from the code:
+///
+/// * **Subdirectories are in.** `entity_loader::resolve_entity` is cache-only —
+///   it has no filesystem fallback, unlike `WasmTemplateLoader` — so a world
+///   naming a template the preload skipped does not fail the build. It logs
+///   `entity template not found in cache` and spawns nothing, and the run
+///   continues with a quietly emptier world. That is exactly what happened when
+///   #954 first moved the three-weapon escort to
+///   `assets/entities/test/rng_coverage_lancer.toml`: `rng_coverage.toml` lost
+///   both hostiles, and the only symptom was three of the five RNG chokepoints
+///   silently going quiet.
+/// * **`fragments/` is out.** Nothing under it is spawnable — they are the
+///   partial documents hulls compose FROM. Caching them would offer the world
+///   loader entities that are not entities.
+///
+/// Asserted against the process-global native config cache, which any
+/// `build_headless_app` in this binary populates from `assets/entities`.
+#[test]
+fn the_preload_caches_subdirectory_templates_but_never_the_fragment_tree() {
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/rng_coverage.toml".into(),
+        max_ticks: 0,
+        ..test_args()
+    };
+    // The app is not what this asserts on — BUILDING it is what runs the
+    // preload, and the preload's product is the process-global cache below.
+    let _app = build_headless_app(&args).expect("app should build");
+
+    let cache = project_phoenix::config_cache::get_config_cache();
+
+    assert!(
+        cache.contains_key("assets/entities/test/rng_coverage_lancer.toml"),
+        "the RNG-coverage escort lives one directory down and `rng_coverage.toml` \
+         names it by that path; a preload that only reads the top level leaves it \
+         unspawnable with no build error. Cached keys under assets/entities/test/: \
+         {:?}",
+        cache
+            .keys()
+            .filter(|k| k.starts_with("assets/entities/test/"))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        cache.contains_key("assets/entities/alliance_destroyer.toml"),
+        "precondition: the top-level walk still works, so the assertion above is \
+         about recursion and not about the cache being populated at all"
+    );
+
+    let fragments: Vec<&String> = cache
+        .keys()
+        .filter(|k| k.starts_with("assets/entities/fragments/"))
+        .collect();
+    assert!(
+        fragments.is_empty(),
+        "no fragment may be cached as a spawnable template: {fragments:?}"
+    );
+}

@@ -80,7 +80,7 @@ target_speed  = 0.0
 # `[hull] hull_integrity`; Alliance hulls have none, and their equivalent pool
 # is the SUM of the per-system `max_hp` below. Shields sit on top of both.
 #
-#   Dynasty   destroyer 200 | patrol/cruiser 300 | warhawk 400 | lancer 800
+#   Dynasty   destroyer 200 | patrol/cruiser 300 | warhawk 400
 #   Alliance  courier 200 | destroyer 300 | cruiser 500 | battleship 800
 #
 # The Alliance figures were reached by scaling each hull's authored system HP

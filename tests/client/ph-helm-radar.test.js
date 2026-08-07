@@ -317,9 +317,9 @@ describe('PhHelmRadar', () => {
   it('paints a full disc for a 360-degree bank, not a collapsed arc', () => {
     const { el } = setup();
     const g = el.shadowRoot.getElementById('hostile-arcs');
-    // `assets/entities/ship_harrow_lancer.toml` authors two `fire_arc_deg =
-    // 360.0` banks — half_angle_deg 180 — on the canonical Harrow attack hull,
-    // so this is the arc the player actually fights. The AI's `arc_exposure`
+    // `assets/entities/alliance_destroyer.toml` authors a `fire_arc_deg = 360`
+    // `omni` suppression phaser — half_angle_deg 180 — so this is a real
+    // shipped bank, not a synthetic edge case. The AI's `arc_exposure`
     // reads a 180-degree half-angle as always covering; if the overlay drew
     // nothing here, human and AI would hold different information (AC4).
     el.state = baseState({

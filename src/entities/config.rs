@@ -7402,12 +7402,20 @@ hull_max_hp = 6
         // SLOW: slower than every other blaster the game ships, and slow enough
         // that crossing the hull's own envelope takes real seconds — which is the
         // window a course change after launch has to work in.
+        //
+        // Full paths rather than `shipped_hull` stems because the comparison set
+        // deliberately reaches OUTSIDE the shipped fleet: issue #954 moved the
+        // three-weapon RNG-coverage escort to `assets/entities/test/`, and its
+        // `spike` bank is still a blaster this repo authors. Dropping it because
+        // it stopped shipping would quietly shrink the set this claim is measured
+        // against, which is the weaker test dressed up as the same one.
         for name in [
-            "ship_harrow_lancer",
-            "ship_harrow_destroyer",
-            "alliance_destroyer",
+            "assets/entities/test/rng_coverage_lancer.toml",
+            "assets/entities/ship_harrow_destroyer.toml",
+            "assets/entities/alliance_destroyer.toml",
         ] {
-            let other = shipped_hull(name);
+            let other = crate::entity_includes::load_entity_config(name)
+                .unwrap_or_else(|e| panic!("{name} must compose and parse: {e}"));
             for bank in &other.weapons_console.as_ref().unwrap().blaster_banks {
                 assert!(
                     bolt.projectile_speed < bank.projectile_speed,

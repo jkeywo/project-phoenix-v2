@@ -548,13 +548,17 @@ power_group = "ops"
             }
         }
 
-        // Ten since issue #892 retired `pirate_raider.toml` and
+        // Nine since issue #954 moved the three-weapon RNG-coverage escort out of
+        // `assets/entities/` into the test-fixture directory this walk (top level
+        // only, like every other fleet walk) no longer reads. Ten before that,
+        // since issue #892 retired `pirate_raider.toml` and
         // `pirate_raider_reinforcement.toml` as display-name duplicates of
         // `ship_harrow_destroyer.toml`. The floor is a "did the scan actually
-        // find the hulls?" guard, so it tracks the shipped count down; it must
-        // never be lowered to accommodate a hull that stopped parsing.
+        // find the hulls?" guard, so it tracks the shipped count down — but only
+        // for a hull that genuinely LEFT the fleet. It must never be lowered to
+        // accommodate a hull that stopped parsing.
         assert!(
-            checked_hulls >= 10,
+            checked_hulls >= 9,
             "expected every shipped hull to be checked, got {checked_hulls}"
         );
     }

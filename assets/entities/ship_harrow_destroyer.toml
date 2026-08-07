@@ -138,8 +138,8 @@ tags = ["ship"]
 threat_level = "high"
 description = "entity.ship_harrow_destroyer.target.description"
 
-# Lighter than the Lancer: this hull trades staying power for the speed and turn
-# rate the pass depends on.
+# The lightest hull that still fights the ladder: it trades staying power for
+# the speed and turn rate the pass depends on.
 #
 # 900 -> 200 (#915 tuning pass). 900 was an outlier against this hull's own
 # class ladder — patrol 120, warhawk 280, cruiser 420 — and it made the demo's
@@ -408,7 +408,7 @@ sensor_range = 400.0
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
-# Destroy only, like the Lancer. The doctrine entry supplies the objective the
+# Destroy only. The doctrine entry supplies the objective the
 # helm surfaces score; the *manoeuvre* is the policy machine's, not this
 # section's — `target_speed`/`maintain_range` here only apply on the fallback
 # path (no pass target visible), where ordinary doctrine travel resumes.

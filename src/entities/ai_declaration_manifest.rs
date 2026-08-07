@@ -418,11 +418,10 @@ fn declared_from(authored: bool) -> Declared {
 /// Two gates matter and are easy to get backwards:
 ///
 /// * **Ship-level systems gate on `[behaviour]` ALONE.** Not on the console
-///   section they belong to. `ship_harrow_lancer.toml` declares no
-///   `[sensors_console]`, `[navigation_console]`, `[repair]` or
-///   `[comms_console]` and receives all five selectors regardless. Computing
-///   this from "which sections does the hull declare?" would under-report the
-///   gap by four slots per bare hull.
+///   section they belong to. A hull that declares no `[sensors_console]`,
+///   `[navigation_console]`, `[repair]` or `[comms_console]` still receives all
+///   five selectors. Computing this from "which sections does the hull
+///   declare?" would under-report the gap by four slots per bare hull.
 /// * **Per-weapon systems sit OUTSIDE the `[behaviour]` gate.** They gate on
 ///   `[weapons_console]` / `[torpedoes]` instead, so an entity with weapons and
 ///   no `[behaviour]` gets bank policies and nothing else.
@@ -691,10 +690,18 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
 ///
 /// # The table is EMPTY, and that is the point
 ///
-/// Ten hulls, 191 AI-capable fine-system slots, **zero of them undeclared**.
+/// Nine hulls, 172 AI-capable fine-system slots, **zero of them undeclared**.
 /// Every slot on every shipped hull now carries an authored block, transcribed
 /// verbatim from the synthesiser that used to invent it and pinned equal to it
 /// by `default_ai_policy_pins::spawn_path`.
+///
+/// It was ten hulls and 191 slots until #954 moved the three-weapon RNG-coverage
+/// escort out of the fleet to `assets/entities/test/rng_coverage_lancer.toml`.
+/// The 19 slots that left with it are not a burn-down step: nothing was
+/// authored, and the fixture still declares all 19 for itself. What moved is the
+/// scope of the word "shipped" — `tests::hull_files` reads
+/// `assets/entities/*.toml` at the top level only, the same convention that
+/// keeps `fragments/` out.
 ///
 /// The burn-down was 206 → 174 → 124 → **0**, and the steps are not the same
 /// kind of progress:
@@ -1016,10 +1023,11 @@ mod tests {
 
     /// A minimal AI-bearing entity: `[behaviour]` and NOT ONE console section.
     ///
-    /// This was the Harrow Lancer's shape until #885b stage 5b, and it is the
-    /// shape the gating rule below is about. It is a fixture rather than a
-    /// shipped hull because every shipped hull now authors all five selectors,
-    /// and authoring `[sensors_console.selector]` necessarily brings
+    /// This was the shape of the three-weapon escort now at
+    /// `assets/entities/test/rng_coverage_lancer.toml` until #885b stage 5b, and
+    /// it is the shape the gating rule below is about. It is a fixture rather
+    /// than a shipped hull because every shipped hull now authors all five
+    /// selectors, and authoring `[sensors_console.selector]` necessarily brings
     /// `[sensors_console]` into existence — so no shipped file omits them any
     /// more. The RULE is unchanged, and a fixture is the only thing left that
     /// can still exercise it.
@@ -1194,31 +1202,31 @@ base_priority = 40.0
             rollup.push((kind.key.as_str(), declared, slots));
         }
         assert_eq!(
-            total, 191,
-            "the shipped hulls carry 191 AI-capable fine-system slots in total"
+            total, 172,
+            "the shipped hulls carry 172 AI-capable fine-system slots in total"
         );
         assert_eq!(
             rollup,
             vec![
-                ("captain", 10, 10),
-                ("engines", 10, 10),
-                ("steering", 10, 10),
-                ("lateral", 10, 10),
-                ("vertical", 10, 10),
-                ("impulse", 10, 10),
-                ("boost", 10, 10),
-                ("phaser_bank", 12, 12),
-                ("blaster_bank", 8, 8),
-                ("torpedo_tube", 15, 15),
-                ("torpedo_magazine", 6, 6),
-                ("shields_focus", 10, 10),
-                ("power", 10, 10),
-                ("comms_response", 10, 10),
-                ("sensors_selector", 10, 10),
-                ("tactical_selector", 10, 10),
-                ("navigation_selector", 10, 10),
-                ("repair_selector", 10, 10),
-                ("comms_selector", 10, 10),
+                ("captain", 9, 9),
+                ("engines", 9, 9),
+                ("steering", 9, 9),
+                ("lateral", 9, 9),
+                ("vertical", 9, 9),
+                ("impulse", 9, 9),
+                ("boost", 9, 9),
+                ("phaser_bank", 11, 11),
+                ("blaster_bank", 7, 7),
+                ("torpedo_tube", 14, 14),
+                ("torpedo_magazine", 5, 5),
+                ("shields_focus", 9, 9),
+                ("power", 9, 9),
+                ("comms_response", 9, 9),
+                ("sensors_selector", 9, 9),
+                ("tactical_selector", 9, 9),
+                ("navigation_selector", 9, 9),
+                ("repair_selector", 9, 9),
+                ("comms_selector", 9, 9),
             ],
             "the per-kind roll-up moved. Every one of the nineteen kinds is now \
              DECLARED on every hull that has it — declared == slots on every row — \
@@ -1265,7 +1273,7 @@ base_priority = 40.0
 
     /// **The completion gate for #885b, asserted directly.**
     ///
-    /// Every shipped hull declares every one of its 191 AI-capable fine-system
+    /// Every shipped hull declares every one of its 172 AI-capable fine-system
     /// slots, so the strict default cannot stop a hull loading.
     ///
     /// This is deliberately stated as "strict mode ACCEPTS them" rather than as
@@ -1301,11 +1309,13 @@ base_priority = 40.0
     /// …and strict mode still rejects, and still names the worklist, for
     /// anything that declares nothing.
     ///
-    /// This was pointed at `ship_harrow_lancer.toml` until #885b stage 5c
-    /// authored its last fourteen policies. No shipped hull can play the part
-    /// any more — that is the whole achievement — so the fixture takes over,
-    /// which keeps the RULE under test rather than loosening the assertion to
-    /// whatever the fleet happens to still owe.
+    /// This was pointed at the three-weapon escort (then
+    /// `assets/entities/ship_harrow_lancer.toml`, and since #954 a test fixture
+    /// under `assets/entities/test/`) until #885b stage 5c authored its last
+    /// fourteen policies. No shipped hull can play the part any more — that is
+    /// the whole achievement — so the fixture takes over, which keeps the RULE
+    /// under test rather than loosening the assertion to whatever the fleet
+    /// happens to still owe.
     #[test]
     fn strict_mode_rejects_an_undeclared_policy_and_names_the_worklist() {
         let err = EntityConfig::from_toml_in_mode(BARE_BEHAVIOUR_HULL, AiDeclarationMode::Strict)

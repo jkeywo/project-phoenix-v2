@@ -28,9 +28,10 @@
 //!
 //! ## All-round banks, and why escape is a flag rather than a magnitude
 //!
-//! `fire_arc_deg = 360.0` is authored content — `ship_harrow_lancer.toml` gives
-//! its phaser and blaster banks both — so a half-angle of 180 is a case this
-//! module must answer honestly rather than a degenerate input it can dismiss.
+//! `fire_arc_deg = 360.0` is authored content — `alliance_destroyer.toml` gives
+//! its `omni` suppression phaser one (issue #639) — so a half-angle of 180 is a
+//! case this module must answer honestly rather than a degenerate input it can
+//! dismiss.
 //! Such a sector covers every bearing, so there is no bearing change that leaves
 //! it. Feeding it through the same `half_angle − offset` arithmetic as a narrow
 //! bank would report an "escape" of up to 360 degrees: a magnitude a dodging
@@ -422,7 +423,7 @@ mod tests {
 
     /// An all-round bank covers every bearing, so it must read as covering from
     /// every relative pose in reach — and must never claim an escape magnitude.
-    /// `ship_harrow_lancer.toml` authors two of these.
+    /// `alliance_destroyer.toml` authors one of these (`omni`).
     #[test]
     fn an_all_round_bank_is_inescapable_from_every_bearing() {
         let sectors = weapon_arc_sectors(0.0, &[bank(0.0, 360.0, 100.0)]);

@@ -71,6 +71,15 @@ fn crate_root() -> std::path::PathBuf {
 }
 
 /// Every `assets/entities/*.toml` stem, sorted.
+///
+/// TOP LEVEL ONLY, and deliberately so — the same rule
+/// `include_resolve::tests::shipped_tree::shipped_templates` follows. A
+/// subdirectory of `assets/entities/` is by convention not shipped content:
+/// `fragments/` holds the partial documents hulls compose FROM, and `test/`
+/// holds fixtures that exist for one test world (issue #954 put the
+/// three-weapon RNG-coverage escort there). Neither is a hull the fleet flies,
+/// so neither belongs in a baseline derived from what the fleet unanimously
+/// says.
 fn entity_stems() -> Vec<String> {
     let dir = crate_root().join("assets/entities");
     let mut out: Vec<String> = Vec::new();
@@ -439,9 +448,6 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
         "ship_harrow_destroyer",
         "blaster_bank[harrow-lance-starboard]",
     ),
-    ("ship_harrow_lancer", "phaser_bank[lash]"),
-    ("ship_harrow_lancer", "blaster_bank[spike]"),
-    ("ship_harrow_lancer", "torpedo_tube[lance]"),
     ("ship_harrow_patrol", "phaser_bank[port]"),
     ("ship_harrow_patrol", "phaser_bank[starboard]"),
     ("ship_harrow_warhawk", "phaser_bank[port]"),
@@ -455,7 +461,7 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // half #912 added, without which a backfilled Alliance hull whose guns are
     // gated on the alert could only ever return fire).
     //
-    // These six author the first rule and NOT the second, and it is the same
+    // These five author the first rule and NOT the second, and it is the same
     // doctrine as the always-armed gun line above rather than an oversight. A
     // Harrow needs no captain's permission to shoot — its banks author
     // `min_alert_to_fire = 0` — so giving its captain a first-contact rule would
@@ -465,18 +471,17 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // Requiem courier is unarmed and merely carries the same stand-down doctrine.
     //
     // Listed here in the direction that keeps the entry meaningful: if one of
-    // these six quietly acquires the first-contact rule it collapses onto the
+    // these five quietly acquires the first-contact rule it collapses onto the
     // baseline and this list notices, and if an Alliance hull quietly loses it
     // the unanimity requirement notices instead.
     ("ship_harrow_cruiser", "captain"),
     ("ship_harrow_destroyer", "captain"),
-    ("ship_harrow_lancer", "captain"),
     ("ship_harrow_patrol", "captain"),
     ("ship_harrow_warhawk", "captain"),
     ("ship_requiem_courier", "captain"),
     // ── The reactors whose drive is not gated by the alert ───────────────────
     //
-    // These six author `power` inline and their `helm` elevation reads
+    // These five author `power` inline and their `helm` elevation reads
     // `thrust >= thrust_threshold and battery_pct >= min_reserve_helm` with NO
     // `red_alert` term; the fleet baseline's carries one. That guard exists
     // because `plan_helm_travel` commands near-max throttle for any ordinary
@@ -486,7 +491,7 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // The reactor arithmetic is NOT what distinguishes them, and it is worth
     // saying so because an earlier revision of this note claimed it was. An
     // Alliance hull authors four groups resting at `ops 1 + helm 2 + weapons 2 +
-    // sensors 1` = 6; these six author no `[power_groups.*]`, so
+    // sensors 1` = 6; these five author no `[power_groups.*]`, so
     // `PowerSystem::from_authored_groups` seeds the canonical trio at level 2 —
     // also 6. Elevating helm puts BOTH at 7, and `PowerSystem::tick` indexes
     // `config.rates[total - 3]`, which is -2 on the fleet baseline's
@@ -495,7 +500,7 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     //
     // What distinguishes them is WHEN THE ALERT IS UP. An Alliance captain
     // raises it on first contact (#912), so an alert-gated helm rule still
-    // releases the drive for the whole engagement. These six author the
+    // releases the drive for the whole engagement. These five author the
     // returning-fire rule ONLY — their captains raise the alert inside a short
     // `combat_window_secs` of the last exchange of fire and stand it down
     // otherwise, which is also why their guns are always-armed
@@ -515,7 +520,6 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // requirement notices instead.
     ("ship_harrow_cruiser", "power"),
     ("ship_harrow_destroyer", "power"),
-    ("ship_harrow_lancer", "power"),
     ("ship_harrow_patrol", "power"),
     ("ship_harrow_warhawk", "power"),
     ("ship_requiem_courier", "power"),
@@ -2928,10 +2932,12 @@ fn an_unknown_channel_resolves_to_nothing_on_every_authored_policy() {
         }
     }
     assert_eq!(
-        checked, 141,
-        "the fourteen policy kinds account for 141 of the fleet's 191 AI-capable \
-         fine-system slots (the other 50 are the selectors). A change in this number \
-         means a hull, weapon or kind moved."
+        checked, 127,
+        "the fourteen policy kinds account for 127 of the fleet's 172 AI-capable \
+         fine-system slots (the other 45 are the selectors). A change in this number \
+         means a hull, weapon or kind moved. 127-of-172 since #954, which moved the \
+         three-weapon RNG-coverage escort — 14 policies and 5 selectors — out of \
+         `assets/entities/` to the test-fixture directory; 141-of-191 before that."
     );
 }
 

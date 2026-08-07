@@ -1287,11 +1287,13 @@ mod tests {
             checked.push(path);
         }
         assert!(
-            checked.len() >= 10,
+            checked.len() >= 9,
             "only {} shipped hull(s) reached this invariant ({checked:?}). Every \
-             ship in the fleet authors a `[power]` block; if fewer than ten were \
+             ship in the fleet authors a `[power]` block; if fewer than nine were \
              walked, the walk stopped finding them rather than the fleet having \
-             got smaller",
+             got smaller. It was ten until #954 moved the three-weapon RNG-coverage \
+             escort out of `assets/entities/` to the test fixture directory — a hull \
+             leaving the fleet is the one reason this number may fall",
             checked.len()
         );
     }
@@ -1419,8 +1421,9 @@ mod tests {
             checked.push(path);
         }
         assert!(
-            checked.len() >= 10,
-            "only {} shipped hull(s) reached this invariant ({checked:?})",
+            checked.len() >= 9,
+            "only {} shipped hull(s) reached this invariant ({checked:?}). Nine, not \
+             ten, since #954 moved the RNG-coverage escort out of the fleet",
             checked.len()
         );
     }

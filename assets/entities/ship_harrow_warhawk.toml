@@ -392,13 +392,14 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
 #   than either phaser bank lands in a whole 8-second beam. One bolt is the point:
 #   at this range the battleship gets one shot every twelve seconds and it has to
 #   be worth waiting for.
-# * `projectile_speed = 35` — SLOW, and the slowest bolt in the set (the lancer's
-#   is 60, the default 40). This is the number the whole issue turns on. It is
-#   what makes the flight time across the envelope five and a half seconds, which
-#   is what makes the intercept prediction necessary; and because the heading is
-#   frozen at launch, it is also what makes a course change AFTER the bolt is away
-#   pay off. A player who holds a constant heading is hit by a shot aimed where
-#   they were going. A player who turns is not.
+# * `projectile_speed = 35` — SLOW, and the slowest bolt in the set (the
+#   RNG-coverage escort's test-only `spike` is 60, the default 40). This is the
+#   number the whole issue turns on. It is what makes the flight time across the
+#   envelope five and a half seconds, which is what makes the intercept
+#   prediction necessary; and because the heading is frozen at launch, it is
+#   also what makes a course change AFTER the bolt is away pay off. A player
+#   who holds a constant heading is hit by a shot aimed where they were going.
+#   A player who turns is not.
 # * `range = 200` — the envelope the doctrine's `max_artillery_range` names, and
 #   nearly three times the 75-unit beam banks. Inside 75 this hull is an ordinary
 #   gunship; the artillery is what it does at a distance nothing else of its

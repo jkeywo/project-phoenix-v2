@@ -54,7 +54,44 @@ fn read_toml(path: &str, what: &str) -> Result<String, BuildError> {
         .map_err(|e| BuildError(format!("could not read {what} {path:?}: {e}")))
 }
 
-/// Load every `assets/entities/*.toml` into the native template cache.
+/// Every spawnable template under `dir`, recursively, EXCEPT the fragment tree.
+///
+/// Recursive since issue #954, which moved the three-weapon RNG-coverage escort
+/// to `assets/entities/test/rng_coverage_lancer.toml` so that no *shipped fleet*
+/// hull carries all three weapon kinds. That relocation is invisible to the
+/// fleet walks, which read the top level only — but it must NOT be invisible
+/// here, because `entity_loader::resolve_entity` is cache-only with no
+/// filesystem fallback of its own: a world naming a template this walk skipped
+/// logs "entity template not found in cache" and silently spawns nothing.
+///
+/// `fragments/` is the one subdirectory excluded, and it is excluded for a
+/// reason that is a property of its contents rather than of its name: nothing in
+/// it is spawnable. They are partial documents that hulls compose FROM (see
+/// `include_resolve::tests::the_fragments_live_outside_the_shipped_template_directory`),
+/// so caching them as templates would offer the world loader entities that are
+/// not entities.
+fn spawnable_templates_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    // Sorted so the cache is populated in the same order on every filesystem —
+    // the load order is observable through `content_ledger::record`.
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            if path.file_name().is_some_and(|n| n == "fragments") {
+                continue;
+            }
+            spawnable_templates_under(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+            out.push(path);
+        }
+    }
+}
+
+/// Load every spawnable template under `assets/entities/` into the native
+/// template cache.
 ///
 /// The browser fills this cache from a JS-driven preload before the app starts.
 /// Several simulation paths (`asteroids::lifecycle`, the spawn helpers in
@@ -87,26 +124,32 @@ fn read_toml(path: &str, what: &str) -> Result<String, BuildError> {
 fn preload_entity_templates(
     dir: &str,
 ) -> Result<(usize, Vec<MarkerFinding>, AiDeclarationReport), BuildError> {
-    let entries =
-        std::fs::read_dir(dir).map_err(|e| BuildError(format!("could not list {dir:?}: {e}")))?;
+    // Trailing slash trimmed for the same reason the old `format!`-built key did
+    // it: the cache key is this path with separators normalised, and
+    // `"assets/entities/"` would key everything under `assets/entities//…`,
+    // which matches nothing a world file authors.
+    let root = std::path::Path::new(dir.trim_end_matches('/'));
+    // A missing directory stays an error, as it was when this read the directory
+    // itself: a preload that silently caches nothing is the worst possible way
+    // to report a wrong `--ship` path.
+    std::fs::read_dir(root).map_err(|e| BuildError(format!("could not list {dir:?}: {e}")))?;
+    let mut entries: Vec<std::path::PathBuf> = Vec::new();
+    spawnable_templates_under(root, &mut entries);
+
     let mut loaded = 0;
     let mut findings: Vec<MarkerFinding> = Vec::new();
     // Accumulated across the whole template set so the summary is a fleet total
     // rather than a per-file trickle.
     let mut report = AiDeclarationReport::default();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-            continue;
-        }
+    for path in entries {
         // Key on the repo-relative path the world TOML uses, with forward
         // slashes — on Windows `Path::display` would emit backslashes and every
-        // lookup would miss.
-        let key = format!(
-            "{}/{}",
-            dir.trim_end_matches('/'),
-            path.file_name().unwrap_or_default().to_string_lossy()
-        );
+        // lookup would miss. Built from the WHOLE path rather than
+        // `dir` + file name, so a template in a subdirectory is keyed by the
+        // path a world actually names it with
+        // (`assets/entities/test/rng_coverage_lancer.toml`, not
+        // `assets/entities/rng_coverage_lancer.toml`).
+        let key = path.to_string_lossy().replace('\\', "/");
         if std::fs::read_to_string(&path).is_err() {
             warn!(target: "config", "template unreadable, skipping: {key}");
             continue;

@@ -2445,7 +2445,14 @@ ai_only = true
     /// Issue #749: a behaviour NPC that omits an explicit red_alert system must
     /// still spawn with the provisioned red_alert control source resolving to
     /// `Ai` — the causal link that lets `operate_captain_ai` raise its Red
-    /// Alert. The Harrow Lancer authors [behaviour] but no red_alert block.
+    /// Alert. The RNG-coverage escort authors [behaviour] but no red_alert block.
+    ///
+    /// That template moved out of the shipped fleet in issue #954 — it is a test
+    /// fixture under `assets/entities/test/`, kept only so `rng_coverage.toml`
+    /// has a hull that fires all three weapon kinds. It still loads through the
+    /// real composed path, which is all this test needs of it, and pointing at a
+    /// fixture is honest about what it is: the #749 provision is a property of
+    /// the SPAWNER, not of any one shipped hull.
     #[test]
     fn spawned_behaviour_npc_red_alert_is_ai_operated() {
         use bevy::prelude::*;
@@ -2453,9 +2460,10 @@ ai_only = true
         // Through the REAL load path: the hull is composed since issue #878, so
         // its ship-level AI declarations arrive from the fragment library and
         // `include_str!` would spawn an unresolved document.
-        let config =
-            crate::entity_includes::load_entity_config("assets/entities/ship_harrow_lancer.toml")
-                .expect("harrow lancer must resolve and parse");
+        let config = crate::entity_includes::load_entity_config(
+            "assets/entities/test/rng_coverage_lancer.toml",
+        )
+        .expect("the rng-coverage escort must resolve and parse");
 
         let mut app = test_app();
         let uuid = uuid::Uuid::new_v4().to_string();

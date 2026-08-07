@@ -82,7 +82,7 @@ fn tubes_loaded_by_ai(app: &mut App) -> usize {
 /// only the invisible internal distribution of that NPC's hull). NPC torpedo
 /// auto-fire refuses to launch until its target's online shield facings total
 /// zero HP — the doctrine is "phasers strip the shields, torpedoes finish the
-/// hull" — so with the player's shields up the Lancers never throw one. The
+/// hull" — so with the player's shields up the escorts never throw one. The
 /// world file cannot do this: the player ship is built from the `--ship`
 /// template, not the scenario's `[[entity]]` block, so its `overrides` are
 /// ignored. Reaching in here is the equivalent of `arm_every_torpedo_tube` for
@@ -196,14 +196,18 @@ fn rng_coverage_run(seed: u64) -> CoverageRun {
 /// The `assert!`s below are the part that stops the guard rotting back into a
 /// comparison of two identical empty reports. Each names one chokepoint by the
 /// weapon label its balance events carry, and those labels are unique *within
-/// this scenario*: `lash` and `spike` are the Lancer's phaser and blaster,
-/// `lance` its torpedo tube (the player destroyer's own phaser bank is `omni`
-/// and its tubes are `fore`/`aft`, so no torpedo label can be a beam in
+/// this scenario*: `lash` and `spike` are the RNG-coverage escort's phaser and
+/// blaster, `lance` its torpedo tube (the player destroyer's own phaser bank is
+/// `omni` and its tubes are `fore`/`aft`, so no torpedo label can be a beam in
 /// disguise), and `collision` / `region` are the two fixed environmental
 /// labels. Reusing any of those ids on another hull in this world would quietly
-/// break the classification. Every check is against hull damage dealt *to the
-/// player* — see [`CoverageRun::player_hull_damage_by_weapon`] for why NPC
-/// damage would not prove anything.
+/// break the classification — SILENTLY, attributing one chokepoint's damage to
+/// another and passing while proving nothing, which is why
+/// `assets/entities/test/rng_coverage_lancer.toml` says so at the top of the
+/// file rather than trusting this note to be found. Every check is against hull
+/// damage dealt *to the player* — see
+/// [`CoverageRun::player_hull_damage_by_weapon`] for why NPC damage would not
+/// prove anything.
 ///
 /// `wall_seconds` is passed as 0.0 so the derived timing fields
 /// (`ticks_per_second`, `speedup_vs_realtime`) are constants rather than
@@ -213,7 +217,7 @@ fn two_runs_with_the_same_seed_produce_byte_identical_reports() {
     let first = rng_coverage_run(20260720);
 
     // One entry per seeded chokepoint: (SimStream variant, weapon labels that
-    // can only have come from it in this scenario). `lance` is the Lancer's
+    // can only have come from it in this scenario). `lance` is the escort's
     // torpedo landing on the player; the player's own `fore`/`aft` tubes only
     // ever hit the NPCs, so they are not listed — an NPC hit would not be
     // observable and so would not guard anything.

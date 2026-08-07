@@ -32,8 +32,8 @@ Records live in-repo in:
 ### Radar systems carry no hull
 | Field | Value |
 |---|---|
-| **Decision** | `helm-radar` / `tactical-radar` / `sensor-radar` carry no `[[hull.system_hull]]` on the Alliance hulls **as currently authored** — a snapshot, not a persistent design rule. Their points were redistributed to surviving systems; the commit notes radar had been doing "real work as damage soak" (patrol 4/5 → 3/5). The engine-level "blinded ship forgets its target" mechanic (#893) remains in place and test-exercised (`assets/worlds/probe_radar_kill.toml`); any hull or scenario that authors radar HP gets it. *Audit resolution (2026-08-05): "no ship has damageable radar" was a point-in-time statement, not a rule — the mechanic stays test-only, no load-time guard.* The Lancer sits deliberately **off** the ladder at 800. *Audit resolution (2026-08-05): the Lancer (ln class) is a coverage-instrumentation stat, not fleet design — intended to be **removed**; `rng_coverage.toml` should author its own local ln variant instead of pulling the shipped hull.* |
-| **File** | `assets/entities/alliance_*.toml` (RADAR SYSTEMS CARRY NO HULL), `assets/entities/ship_harrow_lancer.toml` |
+| **Decision** | `helm-radar` / `tactical-radar` / `sensor-radar` carry no `[[hull.system_hull]]` on the Alliance hulls **as currently authored** — a snapshot, not a persistent design rule. Their points were redistributed to surviving systems; the commit notes radar had been doing "real work as damage soak" (patrol 4/5 → 3/5). The engine-level "blinded ship forgets its target" mechanic (#893) remains in place and test-exercised (`assets/worlds/probe_radar_kill.toml`); any hull or scenario that authors radar HP gets it. *Audit resolution (2026-08-05): "no ship has damageable radar" was a point-in-time statement, not a rule — the mechanic stays test-only, no load-time guard.* The Lancer sits deliberately **off** the ladder at 800. *Audit resolution (2026-08-05): the Lancer (ln class) is a coverage-instrumentation stat, not fleet design — intended to be **removed**; `rng_coverage.toml` should author its own local ln variant instead of pulling the shipped hull.* **Implemented #954 by relocation, not deletion** (a template-free local entity is not expressible in the world schema): the hull is now the test fixture `assets/entities/test/rng_coverage_lancer.toml`, outside every shipped-fleet walk, and 800 is no longer a fleet stat at all. |
+| **File** | `assets/entities/alliance_*.toml` (RADAR SYSTEMS CARRY NO HULL), `assets/entities/test/rng_coverage_lancer.toml` (was `assets/entities/ship_harrow_lancer.toml`) |
 | **Date** | 2026-08-02 |
 
 ### Low-speed turn
@@ -53,7 +53,7 @@ Records live in-repo in:
 ### `min_win_rate` is a regression floor, not a description
 | Field | Value |
 |---|---|
-| **Decision** | `destroyer_vs_harrow_patrol` `min_win_rate` 0.8 → 0.4, reframed as a REGRESSION FLOOR (below the true 56% to survive 5-seed noise) rather than a description. Recorded that five fixed seeds cannot resolve a 56% duel; re-measure at 25 seeds. *Audit resolution (2026-08-05): a red `min_win_rate` **flags, never blocks** — the batch is advisory; a red threshold is a message to a human to resolve (cf. the Lancer removal), not a gate that refuses to record.* |
+| **Decision** | `destroyer_vs_harrow_patrol` `min_win_rate` 0.8 → 0.4, reframed as a REGRESSION FLOOR (below the true 56% to survive 5-seed noise) rather than a description. Recorded that five fixed seeds cannot resolve a 56% duel; re-measure at 25 seeds. *Audit resolution (2026-08-05): a red `min_win_rate` **flags, never blocks** — the batch is advisory; a red threshold is a message to a human to resolve (cf. the Lancer's removal from the fleet), not a gate that refuses to record.* |
 | **File** | `scripts/balance-runs.demo.toml` |
 | **Date** | 2026-08-02 |
 
@@ -391,10 +391,22 @@ gameplay/balance intent.
 Decisions from this session that **change** current authored behaviour and still
 need implementation:
 
-1. **Remove the Lancer (ln) fleet hull** — delete `assets/entities/ship_harrow_lancer.toml`
-   (and its `assets/entities/ln.toml` template reference); have `assets/worlds/rng_coverage.toml`
-   author its own local ln variant instead of pulling the shipped hull. Update
-   `assets/strings/strings.csv` `entity.ln.*` entries accordingly.
+1. **Remove the Lancer (ln) fleet hull** — *DONE (#954), by relocation rather than
+   deletion.* The action as written asked `rng_coverage.toml` to author a local entity
+   clone, and the world schema cannot express one: `WorldEntity.template_path`
+   (`src/world/config.rs`) is a required `String` and `overrides` is a keyed deep-merge
+   ON TOP OF a template, so there is no such thing as a template-free local entity.
+   The hull moved to `assets/entities/test/rng_coverage_lancer.toml` instead, which
+   achieves the actual goal: every shipped-fleet walk reads `assets/entities/*.toml`
+   at the TOP LEVEL only — the same convention that keeps `fragments/` out — so no
+   fleet hull exists for it, and the fleet totals those walks pin came down by one
+   hull. `rng_coverage.toml` is its only consumer. The strings moved to the
+   `entity.rng_coverage_lancer.*` prefix; the action's `entity.ln.*` prefix and the
+   `assets/entities/ln.toml` it names never existed. The bank and tube ids `lash` /
+   `spike` / `lance` are byte-identical across the move, because
+   `tests/rng_determinism.rs` classifies beam/blaster/torpedo by exact weapon-id
+   match: a collision there would not fail, it would pass while attributing one
+   chokepoint's damage to another.
 2. **Revert phaser/blaster power range-coupling (#923)** — weapons power should scale
    **damage**, not range; phasers/blasters attack independent of radar range. Remove
    the sensors→RadarRange→phaser-range chain in `src/modifiers/coordination.rs`

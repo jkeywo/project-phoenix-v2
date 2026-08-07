@@ -26,10 +26,20 @@
 // read it as two answers rather than one.
 //
 // `assets.glb.without_lod` moved 12 → 9 in that same window and is an
-// improvement, not a regression: ship_harrow_{destroyer,lancer,warhawk} gained
-// ladders. Largest model (17,298,572) and ladder depth (4) did not move at all,
-// which is the check that says the rest of this is content and not a collector
-// that started reading the tree differently.
+// improvement, not a regression: ship_harrow_{destroyer,warhawk} and the
+// three-weapon escort that then sat beside them gained ladders. Largest model
+// (17,298,572) and ladder depth (4) did not move at all, which is the check
+// that says the rest of this is content and not a collector that started
+// reading the tree differently.
+//
+// NOT re-recorded for issue #954, which moved that escort out of the shipped
+// fleet to `assets/entities/test/rng_coverage_lancer.toml`. `inventory` walks
+// `assets/entities` at the top level only, so the template left the sample:
+// templates carrying a ladder went 35 → 34. None of the four gated numbers can
+// move for it — it authors no geometry of its own (it named
+// `dynasty_battleship.glb`, which the destroyer and warhawk still name, so the
+// byte total and the largest model are untouched), its own ladder was 3 deep so
+// it never set the depth max, and it HAD a ladder so it was never one of the 9.
 //
 // NOT re-recorded for issue #947, which added the huge asteroid size class —
 // and that is the point of it. The new size reuses the four common `.glb`

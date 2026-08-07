@@ -249,8 +249,8 @@ export class PhHelmRadar extends HTMLElement {
     // Testing `halfDeg * 2 >= 360` instead would miss every sweep just under a
     // full turn whose residual gap rounds away at small screen radii — a
     // short-ranged bank on a wide scope lands there routinely. A
-    // `fire_arc_deg = 360.0` bank is authored content (the Harrow Lancer
-    // carries two), so the collapsing case is exactly the hull that shoots you.
+    // `fire_arc_deg = 360.0` bank is authored content (the Alliance destroyer's
+    // `omni` suppression phaser), so the collapsing case is a real hull's bank.
     // Emit the full disc as two half-circles, which have distinct endpoints and
     // so survive the spec's degenerate-arc rule.
     //

@@ -239,7 +239,14 @@ pub fn resync_for_token(world: &mut World, token: &str) {
             .cloned();
         let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
         if let Ok(bb) = q.single(world) {
-            let updates: Vec<(SystemId, SystemBlackboard)> =
+            // Sorted for the same reason `broadcast_blackboard_updates` sorts
+            // its changed set (issue #965): `ShipSystemBlackboards` is a
+            // `HashMap` deliberately — see its docs — on the understanding that
+            // ordering happens wherever its iteration order is OBSERVED, and
+            // this resync payload is one of those places. Unsorted, two hosts
+            // replaying the same reconnect emitted the same blackboards in a
+            // different order. Once per reconnect, over a handful of systems.
+            let mut updates: Vec<(SystemId, SystemBlackboard)> =
                 bb.0.iter()
                     .map(|(id, bb)| {
                         (
@@ -252,6 +259,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
                         )
                     })
                     .collect();
+            updates.sort_by(|a, b| a.0.cmp(&b.0));
             if !updates.is_empty() {
                 messages.push(ServerMessage::BlackboardUpdate { updates });
             }

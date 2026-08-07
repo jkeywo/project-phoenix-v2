@@ -2,13 +2,13 @@ use crate::messages::FlagKind;
 pub use crate::messages::{ModifierSlot, ModifierSource};
 use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 // ── Integer modifier system ───────────────────────────────────────────────────
 
 /// Which integer attribute a modifier affects. Server-internal only; not in
 /// `messages.rs` because integer modifier values are never sent to clients.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntModifierSlot {
     /// Additional repair teams granted to a ship.
     RepairTeams,
@@ -120,15 +120,59 @@ pub enum ModifierEvent {
 #[derive(Component, Clone, Debug)]
 pub struct ShipModifiers {
     /// Sparse table: `(source, slot) → bonus`.
-    table: HashMap<(ModifierSource, ModifierSlot), f32>,
+    ///
+    /// A `BTreeMap`, and this is load-bearing rather than a taste call
+    /// (issue #965). [`Self::rebuild_cache`] walks this table adding `f32`
+    /// bonuses. IEEE-754 `f32` addition is commutative — only associativity
+    /// fails — and `0.0 + b` is exact, so a slot with exactly two producers
+    /// computes `(0.0 + b1) + b2` and `(0.0 + b2) + b1` to the same bits
+    /// regardless of which one the walk visits first. Divergence needs
+    /// three or more producers stacked on one slot, at which point how the
+    /// running sum parenthesises depends on the order they arrived — and
+    /// under a `HashMap`, that order came from `RandomState`, whose key is
+    /// drawn per process (and in fact per map).
+    ///
+    /// The named slots are not equally exposed. `HullDamageTaken` has no
+    /// code producer at all today. `RadarRange` has exactly one baseline
+    /// producer — `apply_radar_damage_modifiers`'s per-slot `SystemDamage`
+    /// entry — plus one more for every `RadarDampening` region a ship is
+    /// standing in. Only `MaxSpeed` reaches three producers in ordinary
+    /// play: helm power, the impulse drive, and a region's `SlowZone`
+    /// thrust modifier all write it, so the failure needs a world that
+    /// authors a slow zone (or a scripted `apply_modifier` trigger stacking
+    /// a third source onto some slot) — a scenario with neither never
+    /// exercised this defect, however its table happened to hash. Once a
+    /// slot's producers do stack three deep, a ULP does not stay a ULP: it
+    /// steers a helm a hair differently, which lands a shot differently,
+    /// which draws the seeded RNG a different number of times. Ordering by
+    /// key makes the walk a property of WHICH modifiers are held, never of
+    /// where they hashed.
+    ///
+    /// The same ordering is what makes [`Self::clear_source`] queue its
+    /// `ModifierEvent::Removed`s in a fixed sequence, and those become
+    /// outbound messages.
+    table: BTreeMap<(ModifierSource, ModifierSlot), f32>,
     /// Pre-computed multipliers, indexed by `ModifierSlot::index()`.
     cache: [f32; ModifierSlot::COUNT],
     /// Pending broadcast events. Drained each frame by `broadcast_modifier_events`.
     pub pending_events: Vec<ModifierEvent>,
     /// Boolean flags keyed by `FlagKind`, each backed by a set of sources.
     /// A flag is set iff its source-set is non-empty.
-    flags: HashMap<FlagKind, HashSet<ModifierSource>>,
+    ///
+    /// Ordered for the same reason as `table`, though the stake is smaller:
+    /// the aggregation here is a non-empty check rather than a sum, so no
+    /// arithmetic depends on it, but [`Self::flags`] hands the key set out as
+    /// a `Vec` and a caller that put that on the wire would inherit whatever
+    /// order the map felt like. Ordering it costs nothing at these sizes and
+    /// removes the trap.
+    flags: BTreeMap<FlagKind, BTreeSet<ModifierSource>>,
     /// Sparse table for integer modifiers: `(source, slot) → bonus`.
+    ///
+    /// A `HashMap` deliberately, unlike `table` above. `i32` addition IS
+    /// associative and exact, so [`Self::rebuild_int_cache`]'s sum is the same
+    /// number in any order, and nothing else iterates this table into an
+    /// order-sensitive output — `format_debug` sorts its own rendering. That
+    /// leaves point lookups, which is what a hash map is for.
     int_table: HashMap<(ModifierSource, IntModifierSlot), i32>,
     /// Pre-computed sums for integer slots, indexed by `IntModifierSlot::index()`.
     int_cache: [i32; IntModifierSlot::COUNT],
@@ -139,10 +183,10 @@ impl ShipModifiers {
     /// integer sums default to `0`.
     pub fn new() -> Self {
         Self {
-            table: HashMap::new(),
+            table: BTreeMap::new(),
             cache: [1.0; ModifierSlot::COUNT],
             pending_events: Vec::new(),
-            flags: HashMap::new(),
+            flags: BTreeMap::new(),
             int_table: HashMap::new(),
             int_cache: [0; IntModifierSlot::COUNT],
         }
@@ -281,14 +325,28 @@ impl ShipModifiers {
         }
     }
 
+    /// Recomputes every float slot's multiplier from `table`.
+    ///
+    /// One ordered walk, accumulating into a per-slot array, rather than the
+    /// nine filtered walks this used to be. Each slot's bonuses are therefore
+    /// still added in exactly the order the table yields them — the same
+    /// sequence the old per-slot filter saw — so this is not a change of
+    /// arithmetic, only of how many times the table is traversed. That matters
+    /// because this runs on a hot path: `apply_power_modifiers` re-applies
+    /// every power group's bonus each fixed tick, so `add_or_update` and hence
+    /// this rebuild fire several times per ship per tick. Nine passes over the
+    /// whole table became one, which more than pays for the ordered map's
+    /// `O(log n)` lookups (n is a handful of entries per ship — power groups,
+    /// the impulse drive, damaged systems, and whichever regions the ship is
+    /// standing in — so the whole table lives inside a single B-tree node and
+    /// the walk is a linear scan of contiguous memory).
     fn rebuild_cache(&mut self) {
+        let mut sums = [0.0_f32; ModifierSlot::COUNT];
+        for ((_, slot), bonus) in self.table.iter() {
+            sums[slot.index()] += *bonus;
+        }
         for slot in ModifierSlot::all() {
-            let sum: f32 = self
-                .table
-                .iter()
-                .filter(|((_, s), _)| s == &slot)
-                .map(|(_, &bonus)| bonus)
-                .sum();
+            let sum = sums[slot.index()];
             self.cache[slot.index()] = if sum >= 0.0 {
                 1.0 + sum
             } else {
@@ -316,7 +374,7 @@ impl ShipModifiers {
 
         // ── Flags ────────────────────────────────────────────────────────────
         out.push_str("[Flags]\n");
-        let flag_entries: Vec<(&FlagKind, &HashSet<ModifierSource>)> = {
+        let flag_entries: Vec<(&FlagKind, &BTreeSet<ModifierSource>)> = {
             let mut v: Vec<_> = self.flags.iter().collect();
             v.sort_by_key(|(f, _)| format!("{f:?}"));
             v
@@ -600,6 +658,185 @@ mod tests {
             1.0,
         ));
         assert!((mods.get(&ModifierSlot::RadarRange) - 2.0).abs() < 1e-6);
+    }
+
+    // ── Determinism guard (issue #965) ────────────────────────────────────
+
+    /// Number of independent `ShipModifiers` instances each producer set is
+    /// summed by. Every one draws its own `RandomState`, so under a hashed
+    /// table these are 24 different walks of the same keys.
+    const GUARD_INSTANCES: usize = 24;
+    /// Number of distinct producer sets the guard tries. One set is not
+    /// enough: whether a given set's ULP disagreement survives the
+    /// `1.0 + sum` rounding into the published multiplier depends on where
+    /// the sum lands in its binade, and not every set shows it.
+    /// Re-measured directly against the pre-fix code (swap `table` back to a
+    /// `HashMap`, rerun the two guard tests below, restore the `BTreeMap`):
+    /// `same_producers_publish_identical_bits_in_every_instance` (the
+    /// `1.0 + sum` branch) saw 42 of these 48 sets disagree, and
+    /// `negative_sum_slots_publish_identical_bits_in_every_instance` (the
+    /// `1.0 / (1.0 + |sum|)` branch) saw 36 of 48. Both figures move a
+    /// little from run to run — the split depends on the process's random
+    /// hash seed, same as the bug itself — but in every run the large
+    /// majority of sets disagree, which is why 48 sets is enough to make the
+    /// guard reliable without being slow.
+    const GUARD_SETS: usize = 48;
+
+    /// Bonus for producer `j` of set `set_idx` — a spread of ordinary modifier
+    /// magnitudes in `[-0.5, 0.8)`, none of them exactly representable in
+    /// binary (the `/101` sees to that), so their partial sums round.
+    /// Arithmetic rather than a literal table so the guard covers a family of
+    /// value shapes instead of one lucky tuple.
+    fn guard_bonus(set_idx: usize, j: usize) -> f32 {
+        (((set_idx * 8 + j) * 37 % 101) as f32 / 101.0) * 1.3 - 0.5
+    }
+
+    /// Every `ShipModifiers` holding the SAME producers must publish the SAME
+    /// BITS for a slot, whatever order those producers arrived in and whichever
+    /// instance holds them.
+    ///
+    /// This is the standing guard against unordered float accumulation coming
+    /// back into the modifier cache (issue #965). It deliberately is not "the
+    /// multiplier equals a constant": the defect only shows under a *different
+    /// iteration order*, and any one instance's order is fixed, so a
+    /// single-instance assertion would have passed throughout the bug's life.
+    ///
+    /// It gets those different orders honestly. `HashMap::new()` draws a fresh
+    /// `RandomState` per instance — std seeds a thread-local key once and bumps
+    /// it on every construction — so a hashed table walks the same eight keys in
+    /// a different order in each of these instances. That is the same class of
+    /// disagreement two *processes* see from the per-process seed, which is the
+    /// one this test cannot itself create and the one that was diverging seeded
+    /// runs. Insertion order is rotated too, so a table that ordered by
+    /// insertion rather than by key would also be caught.
+    ///
+    /// This guard exists alongside `tests/rng_determinism.rs`'s
+    /// `two_runs_with_the_same_seed_produce_byte_identical_reports` — not
+    /// because that integration guard is structurally unable to see this
+    /// class of bug. It is not: `HashMap::new()` reseeds per MAP, not only
+    /// per process, so that guard's two sequential app builds already
+    /// construct their `ShipModifiers` tables from fresh, independently
+    /// seeded `RandomState`s and are just as capable of diverging. It has
+    /// stayed green through this defect's whole life because its world,
+    /// `rng_coverage.toml`, declares exactly one region and that region's
+    /// only effect is a bare `damage_zone`, which `apply_region_effects`
+    /// does not turn into a modifier at all — so no slot in that run ever
+    /// picked up the three-or-more producers this defect needs, regardless
+    /// of table order. This unit guard earns its place for a different
+    /// reason: it is fast, it is targeted at the one function that matters,
+    /// and it names the invariant directly instead of hoping a full
+    /// simulation's damage numbers happen to move.
+    ///
+    /// Comparing `to_bits()` rather than an epsilon is the point: a single ULP
+    /// is the whole issue, because a ULP compounds chaotically across a 600 s
+    /// simulation.
+    #[test]
+    fn same_producers_publish_identical_bits_in_every_instance() {
+        let mut split_sets: Vec<(usize, Vec<f32>)> = Vec::new();
+
+        for set_idx in 0..GUARD_SETS {
+            let mut published: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+            for rotation in 0..GUARD_INSTANCES {
+                let mut mods = ShipModifiers::new();
+                for k in 0..8 {
+                    let j = (k + rotation) % 8;
+                    mods.add_or_update(ms(
+                        ModifierSource::RegionEffect {
+                            uuid: uuid::Uuid::from_u128(j as u128 + 1),
+                        },
+                        ModifierSlot::MaxSpeed,
+                        guard_bonus(set_idx, j),
+                    ));
+                }
+                published.insert(mods.get(&ModifierSlot::MaxSpeed).to_bits());
+            }
+            if published.len() > 1 {
+                split_sets.push((
+                    set_idx,
+                    published.iter().map(|b| f32::from_bits(*b)).collect(),
+                ));
+            }
+        }
+
+        assert!(
+            split_sets.is_empty(),
+            "{} of {GUARD_SETS} producer sets published more than one multiplier \
+             across {GUARD_INSTANCES} instances holding identical modifiers — the \
+             modifier cache is accumulating f32 over an unordered collection again, \
+             so two processes running the same seed will diverge. Offenders: {:?}",
+            split_sets.len(),
+            split_sets
+        );
+    }
+
+    /// The same guard for the reciprocal branch of the cache formula: a slot
+    /// whose producers sum negative goes through `1.0 / (1.0 + |sum|)`, a
+    /// different rounding path from `1.0 + sum`, and `HullDamageTaken` is one
+    /// of the real slots that lands there.
+    #[test]
+    fn negative_sum_slots_publish_identical_bits_in_every_instance() {
+        let mut split = 0usize;
+        for set_idx in 0..GUARD_SETS {
+            let mut published: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+            for rotation in 0..GUARD_INSTANCES {
+                let mut mods = ShipModifiers::new();
+                for k in 0..8 {
+                    let j = (k + rotation) % 8;
+                    mods.add_or_update(ms(
+                        ModifierSource::RegionEffect {
+                            uuid: uuid::Uuid::from_u128(j as u128 + 1),
+                        },
+                        ModifierSlot::HullDamageTaken,
+                        // Shifted negative so every set sums below zero.
+                        guard_bonus(set_idx, j) - 0.35,
+                    ));
+                }
+                published.insert(mods.get(&ModifierSlot::HullDamageTaken).to_bits());
+            }
+            if published.len() > 1 {
+                split += 1;
+            }
+        }
+        assert_eq!(
+            split, 0,
+            "{split} of {GUARD_SETS} negative-sum producer sets published more than \
+             one multiplier across instances holding identical modifiers"
+        );
+    }
+
+    /// `clear_source` walks the table to decide which `ModifierEvent::Removed`
+    /// to queue, and those events reach the wire. The sequence must not depend
+    /// on which instance queued them.
+    #[test]
+    fn clear_source_queues_removals_in_the_same_order_in_every_instance() {
+        let slots = ModifierSlot::all();
+        let mut sequences: std::collections::BTreeSet<Vec<String>> = Default::default();
+        for _ in 0..GUARD_INSTANCES {
+            let mut mods = ShipModifiers::new();
+            for (i, slot) in slots.iter().enumerate() {
+                mods.add_or_update(ms(
+                    ModifierSource::ImpulseDrive,
+                    slot.clone(),
+                    0.1 * (i as f32 + 1.0),
+                ));
+            }
+            mods.pending_events.clear();
+            mods.clear_source(&ModifierSource::ImpulseDrive);
+            sequences.insert(
+                mods.pending_events
+                    .iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect(),
+            );
+        }
+        assert_eq!(
+            sequences.len(),
+            1,
+            "clear_source queued its removals in {} different orders — that \
+             sequence becomes an outbound message stream, so two processes \
+             running the same seed emit different bytes",
+            sequences.len()
+        );
     }
 
     // ── Flag API tests ─────────────────────────────────────────────────────

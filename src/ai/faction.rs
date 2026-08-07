@@ -65,11 +65,19 @@ impl FactionRegistry {
     /// Used by world trigger actions that reference factions by name
     /// (e.g. `add_faction_enemy { faction = "Harrow", enemy = "Federation" }`)
     /// so scenario authors don't have to write raw UUIDs in TOML.
+    ///
+    /// Lowest matching uuid wins, rather than "whichever the map yields first"
+    /// (issue #965). Names are expected to be unique and nothing here enforces
+    /// it; with a `find` over a `HashMap`, two factions sharing a name would
+    /// have resolved a world trigger to a DIFFERENT faction in each process,
+    /// because the walk order follows `RandomState`'s per-process seed. `min`
+    /// is the same single pass and gives duplicate names one answer everywhere.
     pub fn uuid_by_name(&self, name: &str) -> Option<Uuid> {
         self.factions
             .values()
-            .find(|fc| fc.name == name)
+            .filter(|fc| fc.name == name)
             .map(|fc| fc.uuid)
+            .min()
     }
 
     /// Add `enemy_uuid` to `faction_uuid`'s enemies list.

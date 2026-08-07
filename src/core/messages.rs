@@ -11,7 +11,9 @@ use uuid::Uuid;
 /// inlined here — it is a wire type like everything else in this module).
 /// Set by modifiers (e.g. region effects) keyed by source; a flag reads true
 /// while any source holds it. Serde round-trip pinned in `core/codec.rs`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// `Ord` so a flag can key a `BTreeMap` — `ShipModifiers` stores its flag
+/// source-sets in one, for the same reason `SystemId` below carries `Ord`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FlagKind {
     CommsJammed,
     SensorBlind,
@@ -19,7 +21,13 @@ pub enum FlagKind {
 
 /// Which ship attribute a modifier affects. Defined here so it can be used in
 /// wire messages without creating a circular dependency with `modifiers.rs`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Ord` because `(ModifierSource, ModifierSlot)` keys `ShipModifiers`' table,
+/// and that table is a `BTreeMap` — its walk is a float accumulation, so the
+/// key order has to be a property of the keys and not of a hash seed. The
+/// derived order follows declaration order; nothing depends on which order it
+/// is, only that every process agrees on it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ModifierSlot {
     MaxSpeed,
     MaxYawRate,
@@ -43,7 +51,13 @@ pub enum ModifierSlot {
 }
 
 /// Who or what applied a modifier.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// `Ord` for the same reason [`ModifierSlot`] carries it: the two together key
+/// `ShipModifiers`' `BTreeMap` of bonuses, whose iteration order decides the
+/// order f32 bonuses are summed in. Every field the derive compares is
+/// authored or minted content (a uuid, a world id/tag, a group or system id),
+/// so the resulting order is identical in every process.
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ModifierSource {
     ImpulseDrive,
     RegionEffect {
@@ -210,7 +224,8 @@ pub struct StationId(pub String);
 pub struct SystemId(pub String);
 
 /// Stable, designer-authored identifier for an operator-facing power group.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// `Ord` so it can sit inside a `ModifierSource` that keys a `BTreeMap`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PowerGroupId(pub String);
 
 /// The single reason a weapon instance (phaser bank, torpedo tube, blaster

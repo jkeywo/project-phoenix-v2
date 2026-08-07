@@ -16,7 +16,17 @@ use crate::simulation::{LocalShip, ShipImpulse};
 #[derive(Resource, Default)]
 pub struct RegionMembership {
     /// Maps ship entity Ã¢â€ â€™ set of region entities the ship is currently inside.
-    pub inside: HashMap<Entity, HashSet<Entity>>,
+    /// A `BTreeSet` of regions, not a `HashSet` (issue #965). The set
+    /// differences in `update_region_membership` are what emit
+    /// `RegionEntered`/`RegionExited`, and a ship that crosses two boundaries
+    /// on one tick emits one event per region — so the set's iteration order
+    /// IS the event order. Those events queue `WorldEvent::EnteredRegion` for
+    /// the world-trigger pipeline and queue `ModifierEvent`s for broadcast,
+    /// neither of which may depend on a hash seed. Ordering by `Entity` costs
+    /// nothing at these sizes (a ship is inside a handful of regions at most)
+    /// and is stable across processes because ECS entity allocation in a
+    /// seeded run is.
+    pub inside: HashMap<Entity, std::collections::BTreeSet<Entity>>,
     /// Cached UUIDs for region entities (persists after entity despawn).
     pub region_uuids: HashMap<Entity, String>,
 }
@@ -93,7 +103,7 @@ pub(crate) fn update_region_membership(
         let ship_pos = glam::Vec3::new(physics.x, 0.0, physics.z);
 
         // Determine current region occupancy for this ship.
-        let current_inside: HashSet<Entity> = regions
+        let current_inside: std::collections::BTreeSet<Entity> = regions
             .iter()
             .filter(|(entity, origin)| {
                 region_shapes
@@ -129,12 +139,15 @@ pub(crate) fn update_region_membership(
     // Clean up membership entries for ships that no longer exist. Emit
     // implicit exit events so downstream systems (modifier caches, etc.)
     // can clear per-region state tied to the vanished ship.
-    let stale_ships: Vec<Entity> = membership
+    // Sorted, because these keys come from a `HashMap` and each one below
+    // emits an implicit exit event per region the vanished ship was in.
+    let mut stale_ships: Vec<Entity> = membership
         .inside
         .keys()
         .copied()
         .filter(|e| !seen_ships.contains(e))
         .collect();
+    stale_ships.sort();
     for ship_entity in stale_ships {
         if let Some(prev_inside) = membership.inside.remove(&ship_entity) {
             for region_entity in prev_inside {

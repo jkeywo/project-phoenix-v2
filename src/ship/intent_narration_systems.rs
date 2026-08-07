@@ -426,6 +426,7 @@ mod tests {
             .entity_mut(ship)
             .insert(crate::ship::power::PowerBrownoutState {
                 notified_groups: ["weapons".to_string()].into_iter().collect(),
+                ..Default::default()
             });
         set_target(&mut app, Some("harrow-raider-1"));
         {

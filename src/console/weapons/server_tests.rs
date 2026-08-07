@@ -4768,7 +4768,7 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
 #[test]
 fn phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot() {
     use crate::ai_plugin::AiTokenRegistry;
-    use crate::messages::{ModifierSlot, PowerGroupId};
+    use crate::messages::ModifierSlot;
     use crate::modifiers::cache::ModifierSource;
     use crate::modifiers::{Modifier, ShipModifiers};
 
@@ -4779,12 +4779,13 @@ fn phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot() {
     let target_uuid = "cc000000-0000-0000-0000-000000000002";
     let npc = spawn_ai_phaser_npc(&mut app, npc_uuid, target_uuid);
 
-    // Sensors at the resting rung: ×0.667 on the shared tactical radar slot.
+    // The shared tactical radar slot crushed to ×0.667. Written under a
+    // radar-DAMAGE source since issue #952 retired the `sensors` power group —
+    // the slot no longer has a power producer, and what this test is about is
+    // that NOTHING which writes it may change how far the gun shoots.
     let mut mods = ShipModifiers::new();
     mods.add_or_update(Modifier {
-        source: ModifierSource::PowerGroup(PowerGroupId(
-            crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
-        )),
+        source: ModifierSource::SystemDamage(crate::system_registry::tactical_radar_system_id()),
         slot: ModifierSlot::RadarRange,
         bonus: -0.5,
     });

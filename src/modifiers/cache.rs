@@ -43,7 +43,7 @@ pub struct IntModifier {
 }
 
 impl ModifierSlot {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
 
     /// Maps each slot to a fixed index for use in the cache array.
     pub fn index(&self) -> usize {
@@ -56,6 +56,7 @@ impl ModifierSlot {
             ModifierSlot::RepairRate => 5,
             ModifierSlot::HelmRadarRange => 6,
             ModifierSlot::SensorRadarRange => 7,
+            ModifierSlot::ShieldRegen => 8,
         }
     }
 
@@ -69,6 +70,7 @@ impl ModifierSlot {
             ModifierSlot::RepairRate,
             ModifierSlot::HelmRadarRange,
             ModifierSlot::SensorRadarRange,
+            ModifierSlot::ShieldRegen,
         ]
     }
 }

@@ -3646,6 +3646,17 @@ fn spawn_game_start_entities(
                     capacity: pc.capacity,
                     rates: pc.rates,
                     emergency_threshold: pc.emergency_threshold,
+                    // Battery floors (issue #952) — see the NPC-side twin in
+                    // `entities::spawner`.
+                    group_floors: crate::ship::power::authored_power_group_floors(
+                        &pc.battery_floor,
+                        &config
+                            .ship_config
+                            .as_ref()
+                            .map(|sc| sc.power_groups.clone())
+                            .unwrap_or_default(),
+                    ),
+                    floor_release_margin_pct: pc.battery_floor_release_margin,
                 })
             } else {
                 PowerConfigResource::default()
@@ -3683,7 +3694,7 @@ fn spawn_game_start_entities(
                     defaults,
                 ),
                 (
-                    crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
+                    crate::messages::PowerGroupId(crate::power_system::SHIELDS_POWER_GROUP.into()),
                     defaults,
                 ),
             ]);
@@ -3705,12 +3716,12 @@ fn spawn_game_start_entities(
                     );
                 }
             }
-            if let Some(sc) = &config.sensors_console {
+            if let Some(sc) = &config.shields_console {
                 if let Some(pm) = sc.power_multipliers {
-                    // sensors_console power drives the Sensors radar range multiplier
+                    // shields_console power drives ModifierSlot::ShieldRegen (#952)
                     multipliers.insert(
                         crate::messages::PowerGroupId(
-                            crate::power_system::SENSORS_POWER_GROUP.into(),
+                            crate::power_system::SHIELDS_POWER_GROUP.into(),
                         ),
                         pm,
                     );
@@ -8095,7 +8106,7 @@ station = "pilot"
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
                     group: crate::messages::PowerGroupId(
-                        crate::power_system::SENSORS_POWER_GROUP.into(),
+                        crate::power_system::SHIELDS_POWER_GROUP.into(),
                     ),
                     level: 1,
                 },
@@ -8108,7 +8119,7 @@ station = "pilot"
                 .resource::<ShipPowerSystem>()
                 .0
                 .level_for(&crate::messages::PowerGroupId(
-                    crate::power_system::SENSORS_POWER_GROUP.into()
+                    crate::power_system::SHIELDS_POWER_GROUP.into()
                 )),
             2,
             "non-Power sender should not be able to decrease power"
@@ -8344,8 +8355,13 @@ station = "pilot"
         );
     }
 
+    /// Re-aimed by issue #952: a flat battery takes back each group's SPENT
+    /// point, landing it on the level its file seeds it at (nominal for a hull
+    /// that authors no `[power_groups.*]`, as this fixture does) rather than
+    /// slamming every group to 1. The old name and its x0.667 assertions
+    /// described the retired brownout lock.
     #[test]
-    fn exhaustion_forces_consoles_to_one_and_updates_all_modifiers() {
+    fn a_flat_battery_floors_every_group_and_updates_all_modifiers() {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
@@ -8369,13 +8385,13 @@ station = "pilot"
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
             .insert(
-                crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
+                crate::messages::PowerGroupId(crate::power_system::SHIELDS_POWER_GROUP.into()),
                 defaults,
             );
 
-        // Set state that will trigger exhaustion on the next tick:
-        // total=8 (negative rate), battery already at 0 ? tick keeps it at 0
-        // and forces all consoles to 1 + lock.
+        // Set state that will trigger the battery floors on the next tick:
+        // total=8 (negative rate), battery already at 0 -> tick keeps it at 0,
+        // and every group is under its authored floor (#952).
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
             let _ = ps.0.set_group_allocation(
@@ -8387,34 +8403,37 @@ station = "pilot"
                 2,
             );
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
+                &crate::messages::PowerGroupId(crate::power_system::SHIELDS_POWER_GROUP.into()),
                 2,
             );
             ps.0.battery_charge = 0.0;
-            ps.0.locked = false;
         }
 
-        // Tick triggers exhaustion ? lock changes ? sync_power_modifiers runs
+        // Tick applies the floors -> translate_power_modifiers runs
         tick(&mut app);
 
-        // All three forced to 1 ? bonus -0.5 (negative) ? multiplier = 1.0 / (1.0 + 0.5) ˜ 0.666...
-        let expected = 1.0 / 1.5;
+        // All three at their nominal floor -> bonus 0.0 -> multiplier 1.0.
         let mods = get_ship_modifiers(&mut app);
-
-        assert!(
-            (mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
-            "after exhaustion MaxSpeed should be {expected}, got {}",
-            mods.get(&ModifierSlot::MaxSpeed)
-        );
-        assert!(
-            (mods.get(&ModifierSlot::PhaserDamage) - expected).abs() < 1e-6,
-            "after exhaustion PhaserDamage should be {expected}, got {}",
-            mods.get(&ModifierSlot::PhaserDamage)
-        );
-        assert!(
-            (mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
-            "after exhaustion RadarRange should be {expected}, got {}",
-            mods.get(&ModifierSlot::RadarRange)
+        for (slot, label) in [
+            (ModifierSlot::MaxSpeed, "MaxSpeed"),
+            (ModifierSlot::PhaserDamage, "PhaserDamage"),
+            (ModifierSlot::ShieldRegen, "ShieldRegen"),
+        ] {
+            let mult = mods.get(&slot);
+            assert!(
+                (mult - 1.0).abs() < 1e-6,
+                "with every group held at its NOMINAL floor, {label} should be                  x1.0, got {mult}"
+            );
+        }
+        assert_eq!(
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .commanded_level_for(&crate::messages::PowerGroupId(
+                    crate::power_system::HELM_POWER_GROUP.into()
+                )),
+            4,
+            "the brownout must not have rewritten the standing order"
         );
     }
 
@@ -8423,7 +8442,7 @@ station = "pilot"
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Set total to 8: helm=4, weapons=2, sensors=2.
+        // Set total to 8: helm=4, weapons=2, shields=2.
         let _ = app
             .world_mut()
             .resource_mut::<ShipPowerSystem>()
@@ -8433,7 +8452,7 @@ station = "pilot"
                 4,
             );
 
-        // Try to set sensors to 3 — total would be 9 (over cap), should be blocked at 2.
+        // Try to set shields to 3 — total would be 9 (over cap), should be blocked at 2.
         push(
             &mut app,
             "power",
@@ -8441,7 +8460,7 @@ station = "pilot"
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
                     group: crate::messages::PowerGroupId(
-                        crate::power_system::SENSORS_POWER_GROUP.into(),
+                        crate::power_system::SHIELDS_POWER_GROUP.into(),
                     ),
                     level: 3,
                 },
@@ -8453,13 +8472,13 @@ station = "pilot"
         let power_state = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::PowerState { sensors, .. } => Some(*sensors),
+                ServerMessage::PowerState { shields, .. } => Some(*shields),
                 _ => None,
             })
             .expect("expected a PowerState message");
         assert_eq!(
             power_state, 2,
-            "sensors should stay at 2 when total is already at the cap of 8"
+            "shields should stay at 2 when total is already at the cap of 8"
         );
         assert_eq!(
             app.world().resource::<ShipPowerSystem>().0.total(),

@@ -931,7 +931,7 @@ describe('buildPowerConsoleState', () => {
     expect(s.consoles).toEqual([]);
     expect(s.total).toBe(0);
     expect(s.battery_charge).toBe(0);
-    expect(s.locked).toBe(false);
+    expect(s.draining).toBe(false);
     expect(s.reactor_online).toBe(true);
     expect(s.battery_online).toBe(true);
   });
@@ -944,7 +944,7 @@ describe('buildPowerConsoleState', () => {
             { id: 'helm',    label: 'HELM',    level: 3, max_level: 4 },
             { id: 'weapons', label: 'WEAPONS', level: 1, max_level: 4 },
           ],
-          total: 4, total_max: 8, battery_charge: 25, battery_max: 100, locked: false,
+          total: 4, total_max: 8, battery_charge: 25, battery_max: 100, draining: true,
         },
       },
     }));
@@ -954,6 +954,8 @@ describe('buildPowerConsoleState', () => {
     ]);
     expect(s.total).toBe(4);
     expect(s.battery_charge).toBe(25);
+    // `draining` replaced `locked` when issue #952 retired the brownout lock.
+    expect(s.draining).toBe(true);
   });
 
   it('falls back to empty consoles when groups is missing', () => {
@@ -962,11 +964,55 @@ describe('buildPowerConsoleState', () => {
     const s = parse(buildPowerConsoleState({
       blackboards: {
         power: {
-          total: 2, total_max: 8, battery_charge: 0, battery_max: 100, locked: false,
+          total: 2, total_max: 8, battery_charge: 0, battery_max: 100, draining: false,
         },
       },
     }));
     expect(s.consoles).toEqual([]);
+  });
+
+  it('passes `charging` through rather than negating `draining`', () => {
+    // A hull may author a reactor rate of exactly zero for some total. There
+    // the reserve is FROZEN — neither emptying nor filling — and the battery
+    // bar's pulsing CHARGING indicator must not promise a recovery that will
+    // never arrive. So the panel carries both flags and never derives one from
+    // the other.
+    const frozen = parse(buildPowerConsoleState({
+      blackboards: {
+        power: {
+          groups: [], total: 6, total_max: 8, battery_charge: 12, battery_max: 100,
+          draining: false, charging: false,
+        },
+      },
+    }));
+    expect(frozen.draining).toBe(false);
+    expect(frozen.charging).toBe(false);
+
+    const filling = parse(buildPowerConsoleState({
+      blackboards: {
+        power: {
+          groups: [], total: 4, total_max: 8, battery_charge: 12, battery_max: 100,
+          draining: false, charging: true,
+        },
+      },
+    }));
+    expect(filling.charging).toBe(true);
+  });
+
+  it('carries each group\'s commanded level alongside its effective one', () => {
+    // Issue #952: the panel's +/- send an ABSOLUTE level measured against the
+    // standing order, so the order has to reach the client or a floored group's
+    // controls step from the wrong number and lower it.
+    const s = parse(buildPowerConsoleState({
+      blackboards: {
+        power: {
+          groups: [{ id: 'helm', label: 'HELM', level: 2, commanded_level: 4, max_level: 4 }],
+          total: 5, total_max: 8, battery_charge: 10, battery_max: 100, draining: true,
+        },
+      },
+    }));
+    expect(s.consoles[0].level).toBe(2);
+    expect(s.consoles[0].commanded_level).toBe(4);
   });
 });
 
@@ -1899,7 +1945,7 @@ describe('cruiser engineering station via buildSystemStationConsoleState', () =>
           total_max: 8,
           battery_charge: 75,
           battery_max: 100,
-          locked: false,
+          draining: false,
         },
       },
     };
@@ -2468,7 +2514,7 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
           total_max: 8,
           battery_charge: 75,
           battery_max: 100,
-          locked: false,
+          draining: false,
         },
       },
     };

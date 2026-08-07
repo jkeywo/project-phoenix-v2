@@ -3796,10 +3796,10 @@ fn a_world_flag_drives_a_backfilled_doctrine_in_a_real_run() {
 /// nothing about decoupling, because a slot pinned at 1.0 satisfies an
 /// invariance claim trivially. It moves because the cruiser takes hits —
 /// `apply_radar_damage_modifiers` drives the same slot off the tactical radar's
-/// damage tier. It is deliberately NOT the sensors power group any more: #955
-/// removed that group's red-alert rule along with the coupling it paid for, so
-/// the hull rests at its authored `[power_groups.sensors] default_level = 1`
-/// for the whole run.
+/// damage tier. It is deliberately NOT a power group any more: #955 removed
+/// the sensors red-alert rule along with the coupling it paid for, and #952
+/// retired the `sensors` power group outright in favour of `shields` — so
+/// nothing the reactor does touches this slot, for the whole run or ever.
 #[test]
 fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel() {
     use project_phoenix::messages::ModifierSlot;
@@ -3844,8 +3844,49 @@ fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel()
     let mut reaches: Vec<f32> = Vec::new();
     let mut radar_mults: Vec<f32> = Vec::new();
     let mut saw_longest = false;
-    for _ in 0..args.max_ticks {
+    // The radar slot is DRIVEN here, at two points in the run, rather than
+    // waited on.
+    //
+    // Until issue #952 it moved by itself, and by accident: the modifier table
+    // starts empty, so the first sample read x1.0 and every later one read the
+    // x0.667 the `sensors` power group wrote — two distinct values, and the
+    // control below passed on an ordering artefact rather than on anything the
+    // duel did. #952 retired that power group, and on an Alliance hull nothing
+    // else in a duel can move this slot: their radar systems deliberately carry
+    // no `[[hull.system_hull]]` entry, so `apply_radar_damage_modifiers` writes
+    // a constant 0.0 however hard the ship is hit, and `probe_duel` authors no
+    // dampening region.
+    //
+    // Writing it here under `RegionEffect` — a real producer of this slot —
+    // makes the control assert what it always claimed to: that reach holds
+    // while the slot moves underneath it. It also retires the seed dependence
+    // the old comment had to warn about.
+    let dampen_at = args.max_ticks / 3;
+    let amplify_at = (args.max_ticks * 2) / 3;
+    let drive_radar_slot = |app: &mut App, bonus: f32| {
+        use project_phoenix::messages::ModifierSource;
+        use project_phoenix::modifiers::Modifier;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipModifiers, With<LocalShip>>();
+        let world = app.world_mut();
+        if let Ok(mut mods) = q.single_mut(world) {
+            mods.add_or_update(Modifier {
+                source: ModifierSource::RegionEffect {
+                    uuid: uuid::Uuid::from_u128(0x952),
+                },
+                slot: ModifierSlot::RadarRange,
+                bonus,
+            });
+        }
+    };
+    for tick in 0..args.max_ticks {
         run(&mut app, 1);
+        if tick == dampen_at {
+            drive_radar_slot(&mut app, -0.5);
+        } else if tick == amplify_at {
+            drive_radar_slot(&mut app, 1.0);
+        }
 
         if local_uuid.is_none() {
             let mut uuid_q = app
@@ -3903,21 +3944,19 @@ fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel()
          offline for the whole run or the reach fact is not being published at all, and \
          either way the invariance above passed vacuously"
     );
-    // SEED-DEPENDENT, and this is the one assertion in the test that is. The
-    // slot moves only if the cruiser's `tactical-radar` system actually takes
-    // damage inside these 45 s — that is the sole driver left (the sensors power
-    // group does not move at all any more), so it is the only thing guaranteeing
-    // `radar_mults.len() > 1`. `probe_duel` is run `--deterministic` on the
-    // hull's own world seed, so it is reproducible; but a retune of the duel, of
-    // the cruiser's hull layout, or of the tactical radar's damage thresholds can
-    // stop the hit landing and turn this into a red test with nothing wrong.
+    // The control: the slot must actually have MOVED, or the invariance above
+    // is satisfied trivially by a slot pinned at x1.0. Driven from the loop
+    // (see the note there) rather than waited on, so this is a statement about
+    // the harness now and not about the seed — it fails only if the write
+    // stopped landing.
     assert!(
-        radar_mults.len() > 1,
-        "`ModifierSlot::RadarRange` held a single value ({radar_mults:?}) for the whole \
-         run, so this probe never exercised the slot it claims reach is independent of. \
-         Since #955 the sensors power group no longer moves — radar hull damage is the \
-         only driver of this slot in a duel — so this means the cruiser's tactical radar \
-         came through 45 s untouched and the invariance above proves nothing"
+        radar_mults.len() > 2,
+        "`ModifierSlot::RadarRange` held {} distinct value(s) ({radar_mults:?}) across \
+         the run, but the loop writes a dampening and then an amplifying region \
+         effect onto the cruiser, so it should have held three (nominal, crushed, \
+         doubled). Whatever this probe measured, it did not measure reach holding \
+         steady while the radar slot moved underneath it",
+        radar_mults.len()
     );
 }
 

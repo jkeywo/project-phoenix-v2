@@ -24,7 +24,7 @@ entity.alliance_battleship.shield_arc.omni.label,assets/entities/alliance_battle
 entity.alliance_battleship.power_groups.ops.label,assets/entities/alliance_battleship.toml → [power_groups.ops] label,[Operations]
 entity.alliance_battleship.power_groups.helm.label,assets/entities/alliance_battleship.toml → [power_groups.helm] label,[Propulsion]
 entity.alliance_battleship.power_groups.weapons.label,assets/entities/alliance_battleship.toml → [power_groups.weapons] label,[Weapons]
-entity.alliance_battleship.power_groups.sensors.label,assets/entities/alliance_battleship.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_battleship.power_groups.shields.label,assets/entities/alliance_battleship.toml → [power_groups.shields] label,[Shields]
 entity.alliance_battleship.station.captain.description,assets/entities/alliance_battleship.toml → [station] description,[Command the bridge.]
 entity.alliance_battleship.station.helm.description,assets/entities/alliance_battleship.toml → [station] description,[Pilot the ship.]
 entity.alliance_battleship.station.tactical.description,assets/entities/alliance_battleship.toml → [station] description,[Manage weapons systems.]
@@ -49,7 +49,7 @@ entity.alliance_courier.shield_arc.aft.label,assets/entities/alliance_courier.to
 entity.alliance_courier.power_groups.ops.label,assets/entities/alliance_courier.toml → [power_groups.ops] label,[Operations]
 entity.alliance_courier.power_groups.helm.label,assets/entities/alliance_courier.toml → [power_groups.helm] label,[Propulsion]
 entity.alliance_courier.power_groups.weapons.label,assets/entities/alliance_courier.toml → [power_groups.weapons] label,[Weapons]
-entity.alliance_courier.power_groups.sensors.label,assets/entities/alliance_courier.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_courier.power_groups.shields.label,assets/entities/alliance_courier.toml → [power_groups.shields] label,[Shields]
 entity.alliance_courier.station.captain.description,assets/entities/alliance_courier.toml → [station] description,"[Command the ship, coordinate the mission and manage its support systems.]"
 entity.alliance_courier.station.tactical.description,assets/entities/alliance_courier.toml → [station] description,"[Fly the Courier, track contacts and operate its blaster.]"
 entity.alliance_cruiser.name,assets/entities/alliance_cruiser.toml → name (top level),[Alliance Cruiser]
@@ -75,7 +75,7 @@ entity.alliance_cruiser.shield_arc.starboard.label,assets/entities/alliance_crui
 entity.alliance_cruiser.power_groups.ops.label,assets/entities/alliance_cruiser.toml → [power_groups.ops] label,[Operations]
 entity.alliance_cruiser.power_groups.helm.label,assets/entities/alliance_cruiser.toml → [power_groups.helm] label,[Propulsion]
 entity.alliance_cruiser.power_groups.weapons.label,assets/entities/alliance_cruiser.toml → [power_groups.weapons] label,[Weapons]
-entity.alliance_cruiser.power_groups.sensors.label,assets/entities/alliance_cruiser.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_cruiser.power_groups.shields.label,assets/entities/alliance_cruiser.toml → [power_groups.shields] label,[Shields]
 entity.alliance_cruiser.station.captain.description,assets/entities/alliance_cruiser.toml → [station] description,[Command the bridge.]
 entity.alliance_cruiser.station.helm.description,assets/entities/alliance_cruiser.toml → [station] description,[Pilot the ship.]
 entity.alliance_cruiser.station.tactical.description,assets/entities/alliance_cruiser.toml → [station] description,[Manage weapons systems.]
@@ -102,7 +102,7 @@ entity.alliance_destroyer.shield_arc.aft.label,assets/entities/alliance_destroye
 entity.alliance_destroyer.power_groups.ops.label,assets/entities/alliance_destroyer.toml → [power_groups.ops] label,[Operations]
 entity.alliance_destroyer.power_groups.helm.label,assets/entities/alliance_destroyer.toml → [power_groups.helm] label,[Propulsion]
 entity.alliance_destroyer.power_groups.weapons.label,assets/entities/alliance_destroyer.toml → [power_groups.weapons] label,[Weapons]
-entity.alliance_destroyer.power_groups.sensors.label,assets/entities/alliance_destroyer.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_destroyer.power_groups.shields.label,assets/entities/alliance_destroyer.toml → [power_groups.shields] label,[Shields]
 entity.alliance_destroyer.station.captain.description,assets/entities/alliance_destroyer.toml → [station] description,[Command the bridge and monitor sensors.]
 entity.alliance_destroyer.station.helm.description,assets/entities/alliance_destroyer.toml → [station] description,[Pilot the ship.]
 entity.alliance_destroyer.station.tactical.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage weapons, navigation and comms.]"
@@ -502,6 +502,7 @@ component.phasers.bank_fallback,"Phaser bank row label when the bank has no name
 component.power.title,"Power allocation panel heading","[POWER ALLOCATION]"
 component.power.empty,"Power panel when the ship defines no power groups","[NO POWER GROUPS]"
 component.power.level,"Power group level readout. {n} is the allocated level","[LVL {n}]"
+component.power.held,"Power group level readout while the reactor's battery floor is holding the group below its standing order. {n} is the level it is running at, {c} the level it was commanded to","[LVL {n}/{c} HELD]"
 component.red_alert.title,"Red alert control heading (Captain console)","[RED ALERT]"
 component.red_alert.active,"Red alert button while the alert is raised","[RED ALERT]"
 component.red_alert.standby,"Red alert button while the ship is stood down","[STAND DOWN]"

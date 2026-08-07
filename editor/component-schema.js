@@ -249,6 +249,9 @@ export const COMPONENT_SCHEMA = {
       { key: 'capacity', type: 'number' },
       { key: 'rates', type: 'array', items: 'number' },
       { key: 'emergency_threshold', type: 'number' },
+      // Hysteresis band for the `[power.battery_floor]` ladder, in percentage
+      // points of `capacity` (issue #952). Optional — the parse default is 5.
+      { key: 'battery_floor_release_margin', type: 'number', optional: true },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
     ],
   },
@@ -257,7 +260,6 @@ export const COMPONENT_SCHEMA = {
     section: 'sensors_console',
     label: 'Sensors Console',
     fields: [
-      { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
       {
         key: 'long_range_radar',
@@ -286,6 +288,9 @@ export const COMPONENT_SCHEMA = {
     section: 'shields_console',
     label: 'Shields Console',
     fields: [
+      // Moved here from `sensors_console` in issue #952: the third power group
+      // is `shields` now, and this curve drives ModifierSlot::ShieldRegen.
+      { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
       { key: 'focus_bonus_max_hp', type: 'number', default: 50 },
       { key: 'focus_bonus_regen', type: 'number', default: 5.0 },
       { key: 'focus_penalty_max_hp', type: 'number', default: 25 },

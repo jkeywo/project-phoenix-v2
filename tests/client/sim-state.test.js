@@ -564,16 +564,21 @@ describe('view helpers', () => {
     expect(shieldStatusView([])).toEqual([]);
   });
 
+  // The third powered console is Shields, not Sensors — issue #952 swapped the
+  // third power group over — and the `locked` argument is gone with the
+  // server's brownout lock. The old assertions passed a third `true` and
+  // expected a refusal; nothing on the server can produce that state any more,
+  // so left as they were they would have gone on passing against a lock that
+  // does not exist while the real third console went untested.
   it('power helpers enforce the 6+2 allocation rules', () => {
     expect(powerTotal([2, 2, 2])).toBe(6);
-    expect(canIncreasePower([2, 2, 2], 'Helm', false)).toBe(true);
-    expect(canIncreasePower([4, 2, 2], 'Helm', false)).toBe(false);  // console at cap
-    expect(canIncreasePower([4, 2, 2], 'Tactical', false)).toBe(false); // total at 8
-    expect(canIncreasePower([2, 2, 2], 'Helm', true)).toBe(false);   // locked
-    expect(canIncreasePower([2, 2, 2], 'Comms', false)).toBe(false); // not a powered console
-    expect(canDecreasePower([2, 2, 2], 'Sensors', false)).toBe(true);
-    expect(canDecreasePower([2, 2, 1], 'Sensors', false)).toBe(false); // at floor
-    expect(canDecreasePower([2, 2, 2], 'Sensors', true)).toBe(false);  // locked
+    expect(canIncreasePower([2, 2, 2], 'Helm')).toBe(true);
+    expect(canIncreasePower([4, 2, 2], 'Helm')).toBe(false);  // console at cap
+    expect(canIncreasePower([4, 2, 2], 'Tactical')).toBe(false); // total at 8
+    expect(canIncreasePower([2, 2, 2], 'Comms')).toBe(false); // not a powered console
+    expect(canDecreasePower([2, 2, 2], 'Shields')).toBe(true);
+    expect(canDecreasePower([2, 2, 1], 'Shields')).toBe(false); // at its per-group minimum
+    expect(canDecreasePower([2, 2, 2], 'Sensors')).toBe(false); // no longer a powered console
   });
 
   it('isSciencePhaserPanelVisible only when Tactical is Low', () => {

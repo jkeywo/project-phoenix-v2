@@ -1030,7 +1030,8 @@ export function buildRepairConsoleState(state) {
  * gui/battleship/power.html.
  *
  * @typedef {{ consoles: Array, total: number, total_max: number,
- *             battery_charge: number, battery_max: number, locked: boolean,
+ *             battery_charge: number, battery_max: number, draining: boolean,
+ *             charging: boolean,
  *             reactor_online: boolean, battery_online: boolean,
  *             own_hull: StationHullAggregate, power_auto: boolean,
  *             station_rating: string }} PowerConsolePayload
@@ -1064,7 +1065,16 @@ export function buildPowerConsoleState(state) {
     total_max:      bb.total_max      ?? 8,
     battery_charge: bb.battery_charge ?? 0,
     battery_max:    bb.battery_max    ?? 100,
-    locked:         bb.locked         || false,
+    // `draining` replaced `locked` when issue #952 retired the brownout lock:
+    // the reserve emptying is what the gauge needs, and the reserve having run
+    // out no longer freezes anything.
+    draining:       bb.draining       || false,
+    // NOT `!draining`. A hull can author a reactor rate of exactly zero for
+    // some total, and there the reserve is frozen — neither emptying nor
+    // filling. The battery bar's pulsing CHARGING indicator reads this, so a
+    // parked reserve says nothing rather than promising a recovery that is
+    // never going to arrive.
+    charging:       bb.charging       || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),

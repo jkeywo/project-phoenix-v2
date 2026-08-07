@@ -578,18 +578,24 @@ defining bridge crew layouts; see **§6.3**.
 
 #### `[sensors_console]`
 
+There is no `power_multipliers` here since issue #952 removed the `sensors`
+power group. No radar horizon is power-driven any more: `RadarRange`,
+`SensorRadarRange` and `HelmRadarRange` are all written only by system damage
+and region effects.
+
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `power_multipliers` | `[f32; 4]` | none | Bonus per sensors power level 1..4. Drives `ModifierSlot::RadarRange`, which scales the Tactical **acquisition** horizon — `[weapons_console.radar] range` and the tactical radar blips — and **not** any weapon's reach (issue #955). This console's own horizon, `[sensors_console.long_range_radar] range`, is scaled by the separate `SensorRadarRange` slot instead, which only system damage drives (helm's horizon works the same way, off `HelmRadarRange`) — neither is power-driven. |
 | `[sensors_console.long_range_radar]` | RadarConfig | default | See **§6.1**. |
 | `complexity_toml` | string | none | |
 
 #### `[shields_console]`
 
-Tunes the four-quadrant shield *focus* mechanic.
+Tunes the four-quadrant shield *focus* mechanic, and carries the `shields`
+power group's per-level curve.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
+| `power_multipliers` | `[f32; 4]` | none | Bonus per shields power level 1..4. Drives `ModifierSlot::ShieldRegen`, which scales every `[[shield_arc]]`'s `regen_per_sec` (issue #952). It does **not** scale the offline delay or focus decay. Moved here from `[sensors_console]`. |
 | `focus_bonus_max_hp` | i32 | `50` | Extra max HP on the focused facing. |
 | `focus_bonus_regen` | f32 | `5.0` | Extra regen/s on the focused facing. |
 | `focus_penalty_max_hp` | i32 | `25` | Max HP subtracted from each non-focused facing. |
@@ -608,7 +614,118 @@ chart pushed to the viewscreen.
 |---|---|---|---|
 | `capacity` | f32 | **required** | Total battery capacity. |
 | `rates` | `[f32; 6]` | **required** | Per-level drain/regen rates (level 0..5). Negative = recharge. |
-| `emergency_threshold` | f32 | **required** | Battery level below which all consoles lock to level 1. |
+| `emergency_threshold` | f32 | **required** | Emergency reserve marker, in the same ABSOLUTE units as `capacity`. Published on `PowerBatteryBlackboard` so the battery gauge can paint the reserve band; since issue #952 removed the brownout lock it gates nothing in the simulation. |
+| `battery_floor_release_margin` | f32 | `5.0` | Hysteresis band for the ladder below, in the same PERCENTAGE-of-`capacity` units as the floors. A floored group is released only once the charge climbs to its own floor **plus** this. Must be positive wherever a floor can bite — `0` fails the entity load; see below. |
+
+#### `[power.battery_floor]` — the brownout ladder (issue #952)
+
+`<group> = <percent-of-capacity>`. While the battery sits below a group's
+percentage, that group is held at its own `[power_groups.<group>] min_level`;
+it is released once the charge climbs back past that percentage **plus**
+`battery_floor_release_margin` **and** no rung above it is still engaged. A
+group with no entry is never cut, and a group whose hull declares no
+`[power_groups.*]` at all lands on `2` — the level the runtime seeds it at,
+i.e. nominal.
+
+The landing level is the other half of the decision and it lives with the
+group, not here. A brownout is meant to take back what was SPENT: the four
+Alliance hulls author `min_level = 2` on `helm` and `weapons` so the reactor
+reclaims the combat-stations point and stops at nominal, and `min_level = 1`
+on `shields`, which rests there anyway — so on those hulls the shields rung is
+only reachable by a human Power officer who has bought it.
+
+Note the units differ from `emergency_threshold` above: these are PERCENTAGES,
+because "half the reserve gone" means the same thing on every hull and a raw
+charge does not. Values outside `0..=100` fail the entity load, and so does a
+ladder that does not DESCEND helm → weapons → shields.
+
+The parse default is `helm = 50`, `weapons = 25`, `shields = 5`, so a falling
+battery costs the ship its helm first, then its guns, and keeps its screens
+longest. There is no lock: a ship that bottoms out sits at its floors and is
+still flying. The shipped fleet authors `weapons = 25` and `shields = 5` but
+`helm = 40` — see the tuning note below.
+
+##### The ladder releases from the top
+
+Falling and recovering are not mirror images, and the asymmetry is deliberate.
+Falling, the rungs are cut one at a time in descending order. Recovering, a cut
+rung waits for **every rung above it** as well as for its own release band, so
+the whole ladder comes back together and the LOWEST-floor group is the last one
+released, not the first.
+
+The reason is arithmetic, not taste. The cut that finally flips the `rates` rung
+positive is the lowest engaged one — that is what it means for the reserve to
+start climbing at all. Release it the moment it clears its own band and the draw
+goes straight back up, so the charge stalls in a limit cycle a few points wide
+and every higher rung's release threshold is unreachable for the rest of the
+encounter. On the shipped destroyer an officer commanding the legal `ops 1 /
+helm 3 / weapons 3 / shields 1` used to park at exactly that: weapons cycling
+across 25–30 % at ±2/s with zero net drift, helm latched at its `min_level`
+against a release threshold of 45 % it could never reach, and nothing on the
+Power panel to explain why. Pinned by
+`ship::power::tests::a_human_commanded_destroyer_climbs_back_out_of_its_own_floor_ladder`.
+
+##### Two thresholds, not one
+
+`battery_floor_release_margin` is the field a retune most often gets wrong, so:
+**flooring a group lowers the EFFECTIVE total, and the effective total is what
+picks the `rates` rung.** On every shipped reactor the rungs either side of the
+resting total have opposite signs, so the cut immediately starts recharging the
+reserve straight back through the threshold that made it. With a single
+threshold the group is released on the very next tick, the draw goes back up,
+the threshold is re-crossed — at 60 Hz, with `MaxSpeed`, `PhaserDamage` and the
+brownout advisory to Helm and Tactical toggling along with it. The margin turns
+that into a relaxation cycle whose period *you* choose: bigger margin, longer
+and more deliberate brownouts.
+
+##### Floors and `min_reserve_*`
+
+A hull's `[power.ai_policy.param] min_reserve_<group>` answers a related
+question — when the CREW stops spending — and the relation between the two is a
+tuning choice, not a rule:
+
+* **Floor above the reserve** (`weapons` 25 against `min_reserve_weapons` 10, as
+  the fleet ships) gives a band where the reactor has cut and the policy has
+  not. **This is the only shape that does anything on an AI-crewed hull**, and
+  it is worth being blunt about why: a floor bites only when it is reached while
+  the operator is still commanding above the landing level, and a policy with a
+  reserve guard has already commanded the group down to exactly that level by
+  the time a lower floor is reached. The reactor then finds nothing to take.
+* **Floor below the reserve** (`helm` 40 against `min_reserve_helm` 50, as the
+  fleet ships) makes the reactor a backstop for an operator with no reserve
+  guard — chiefly a human Power officer, who has none at all — and inert under
+  AI. That is the right answer where the group is the ship's way out of
+  trouble: raising the fleet's `helm` floor to 50 fails
+  `the_composed_destroyer_passes_breaks_off_and_passes_again`, because holding
+  helm down through a band the crew has already decided it can afford leaves an
+  attack-pass hull grinding along at contact range instead of breaking off.
+
+The margin is not part of that trade. `battery_floor_release_margin = 0` fails
+the entity load as soon as ANY authored floor can bite — that is, as soon as its
+group can be commanded above the level the floor lands it on — whichever side of
+a reserve the floor sits on. (An earlier revision only refused the margin on a
+floor at or above a reserve, which exempted the shipped `helm = 40` on the one
+hull a human Power officer flies.) The fleet walk
+`ship::power::tests::every_hulls_battery_floors_descend` states the same rule
+over `assets/entities`.
+
+```toml
+[power]
+capacity = 70
+rates = [ 5, 4, 3, 2, -2, -5 ]
+emergency_threshold = 20
+battery_floor_release_margin = 5.0
+
+[power.battery_floor]
+helm = 40.0      # under `min_reserve_helm = 50` — the crew's guard binds first
+weapons = 25.0   # above `min_reserve_weapons = 10` — a real 15-point band
+shields = 5.0
+```
+
+One more rule the fleet walk enforces: a hull's FULLY FLOORED total — every
+group on its landing level — must land on a strictly positive `rates` rung. A
+zero there is a trap with no exit, since the reserve then never climbs back
+through the release margin and no floor can ever lift.
 
 #### Power levels are gameplay numbers — and what each group actually buys
 
@@ -621,7 +738,9 @@ through `ModifierSlot`s that `apply_power_modifiers_from_read_state`
 |---|---|---|
 | `helm` | `MaxSpeed`, `MaxYawRate` | `[helm_console] max_speed` / `max_yaw_rate` |
 | `weapons` | `PhaserDamage` | every bank's `beam_damage_per_sec` |
-| `sensors` | `RadarRange` | **acquisition only** — `[weapons_console.radar] range` (the horizon a target lock is taken through, human or AI) and the Tactical radar blips. Not `[sensors_console.long_range_radar] range` (scaled by `SensorRadarRange`) or helm's radar (`HelmRadarRange`) — both of those are damage-driven only. |
+| `shields` | `ShieldRegen` | every `[[shield_arc]]`'s `regen_per_sec`. Authored on `[shields_console] power_multipliers`. |
+
+`sensors` was the third group until issue #952 and drove `ModifierSlot::RadarRange`; it is gone. No power group writes `RadarRange` now — a hull's acquisition horizon is exactly its authored `[weapons_console.radar] range`, reduced only by radar hull damage and `RegionEffectKind::RadarDampening`.
 
 The bonus per level is the console's own `power_multipliers` (**§2.2**), and
 `ShipModifiers::rebuild_cache` folds the summed bonus as `1 + sum` when it is

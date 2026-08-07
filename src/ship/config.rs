@@ -113,7 +113,13 @@ pub struct PowerGroupConfig {
     pub max_level: u8,
 }
 
-fn default_power_level() -> u8 {
+/// The level a `[power_groups.<id>]` entry is seeded at when its hull authors
+/// no `default_level` — and, through
+/// [`crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL`], the level a
+/// battery floor lands a group on when the hull describes no such entry at all.
+/// `const` so that constant can be defined by CALLING this rather than by
+/// restating the number next to it.
+pub const fn default_power_level() -> u8 {
     2
 }
 
@@ -121,7 +127,15 @@ fn default_min_power_level() -> u8 {
     1
 }
 
-fn default_max_power_level() -> u8 {
+/// The ceiling a `[power_groups.<id>]` entry gets when its hull authors no
+/// `max_level` — and the ceiling the allocation API clamps every group to, so
+/// it is also the highest level ANY operator can command a group to.
+///
+/// `pub const` because the battery-floor validation in
+/// [`crate::entities::config`] needs "the highest level this group could be
+/// commanded to" for a group whose hull describes no `[power_groups.*]` block
+/// at all, and restating `4` next to that check would let the two drift.
+pub const fn default_max_power_level() -> u8 {
     4
 }
 

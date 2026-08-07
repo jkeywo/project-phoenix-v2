@@ -700,11 +700,21 @@ fn ai_power_allocation(
         // for `group`, but only when the target level actually differs from the
         // current allocation (skip saturated no-ops so admission is not spammed
         // every tick).
+        //
+        // The comparison is against the COMMANDED level, not the effective one
+        // (issue #952). A group the battery floor is holding down reads lower
+        // than it was set to, and comparing against that reading would make the
+        // AI think its own standing order had already been carried out: it
+        // would stop correcting the order downward for as long as the brownout
+        // lasted, and the group would snap back to a level nobody had asked for
+        // since the fight started the moment the reserve recovered. The floor is
+        // the REACTOR's business; what the crew has asked for is this policy's,
+        // and the two are allowed to disagree.
         let emit_level =
             |group: &crate::messages::PowerGroupId,
              level: u8,
              admitted: &mut crate::messages::AdmittedCommands| {
-                let current = power.0.level_for(group);
+                let current = power.0.commanded_level_for(group);
                 if level == current {
                     return;
                 }
@@ -2652,6 +2662,233 @@ station = "sensors"
         app.update();
     }
 
+    /// Variant of [`power_test_app`] built from a SHIPPED hull file: its own
+    /// `[power]` reactor (capacity, rates, `[power.battery_floor]` ladder and
+    /// release margin), its own `[power_groups.*]` seeding, and its own
+    /// `[power.ai_policy]`, with `ship::power::tick_power_system` chained after
+    /// the applier so the reactor's floors are re-derived every tick.
+    ///
+    /// Nothing is hand-written: everything the ladder depends on comes off the
+    /// file the fleet actually flies.
+    fn shipped_hull_power_app(path: &str) -> (App, Entity) {
+        let config = crate::entity_includes::load_entity_config(path)
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+        let reactor = config.power.as_ref().expect("hull authors [power]");
+        let power_groups = config
+            .ship_config
+            .as_ref()
+            .map(|s| s.power_groups.clone())
+            .unwrap_or_default();
+        let power_config =
+            crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
+                capacity: reactor.capacity,
+                rates: reactor.rates,
+                emergency_threshold: reactor.emergency_threshold,
+                group_floors: crate::ship::power::authored_power_group_floors(
+                    &reactor.battery_floor,
+                    &power_groups,
+                ),
+                floor_release_margin_pct: reactor.battery_floor_release_margin,
+            });
+        let seed = crate::ship::power::authored_power_group_seed(&power_groups);
+        let policy = PowerAiPolicy(
+            reactor
+                .ai_policy
+                .as_ref()
+                .expect("hull authors [power.ai_policy]")
+                .to_policy()
+                .expect("shipped policy decodes"),
+        );
+
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<crate::ship::power::PowerConfigResource>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
+            .add_systems(
+                Update,
+                (
+                    ai_power_allocation,
+                    crate::ship::power::handle_power_messages,
+                    crate::ship::power::tick_power_system,
+                )
+                    .chain(),
+            );
+
+        let mut control_sources = ShipSystemControlSources::default();
+        control_sources.0.set(
+            crate::system_registry::power_reactor_system_id(),
+            ControlSource::Ai,
+        );
+        let e = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                control_sources,
+                crate::ship::power::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                        reactor.capacity,
+                        &seed,
+                    ),
+                ),
+                power_config,
+                crate::ship_state::ShipRedAlert(true),
+                crate::ship_plugin::LastHelmInput {
+                    thrust: 0.9,
+                    ..Default::default()
+                },
+                policy,
+                AdmittedCommands::default(),
+                AiHighFidelity,
+            ))
+            .id();
+        (app, e)
+    }
+
+    /// **The battery-floor ladder acts on an AI-crewed hull, in floor order.**
+    ///
+    /// The invariant issue #952's first revision did not have, and the one that
+    /// matters: every hull in the fleet but the player's is crewed by
+    /// `ai_power_allocation`, so a ladder that only bites for a human Power
+    /// officer does nothing where the game spends its time.
+    ///
+    /// It did exactly that. With every floor authored strictly UNDER the same
+    /// group's `min_reserve_*`, the policy had already commanded the group down
+    /// to the floor's own landing level by the time the charge reached the
+    /// floor, so `apply_battery_floors` skipped it (`held >= commanded`) and no
+    /// AI hull was ever cut. Raising `weapons` from 8 to 25 against a reserve of
+    /// 10 opens a fifteen-point band in which the reactor has cut and the crew
+    /// has not, and the assertions below check that EFFECT — a group running
+    /// below the level its own crew is still asking for — rather than the
+    /// arithmetic that produces it.
+    ///
+    /// `helm` is deliberately NOT symmetrical: its floor of 40 sits under this
+    /// hull's `min_reserve_helm` of 50, so the crew's guard binds first and the
+    /// reactor is only the backstop for an operator who has no guard at all — a
+    /// human Power officer. See the `[power.battery_floor]` note in
+    /// `assets/entities/fragments/ai/fleet_baseline.toml` for the measurement
+    /// behind that asymmetry.
+    ///
+    /// Cutting runs in floor order; RELEASING runs from the top of the ladder,
+    /// not in reverse. The recovery leg below pins that: the guns wait for
+    /// helm's rung above them even after clearing their own band, because
+    /// releasing the lowest engaged rung first restores the very draw that was
+    /// emptying the battery. See
+    /// `modifiers::power_system::PowerSystem::apply_battery_floors`.
+    #[test]
+    fn the_battery_floor_ladder_cuts_an_ai_crewed_hull_in_floor_order() {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let (mut app, e) = shipped_hull_power_app("assets/entities/alliance_destroyer.toml");
+        let capacity = 70.0_f32; // `[power] capacity` on this hull.
+
+        // Park the charge, step the world, read back. `dt` is small enough that
+        // the tick's own integration cannot carry the charge across a floor.
+        let at = |app: &mut App, pct: f32| {
+            set_battery(app, e, capacity * pct / 100.0);
+            power_tick_with_dt(app, 0.01);
+            (
+                power_level(app, e, HELM_POWER_GROUP),
+                power_level(app, e, WEAPONS_POWER_GROUP),
+                power_level(app, e, SHIELDS_POWER_GROUP),
+            )
+        };
+        let floored = |app: &App, group: &str| {
+            app.world()
+                .entity(e)
+                .get::<crate::ship::power::ShipPowerSystem>()
+                .unwrap()
+                .0
+                .is_floored(&crate::messages::PowerGroupId(group.into()))
+        };
+
+        // Combat stations on a healthy reserve: the policy spends its two
+        // points, and no floor is anywhere near.
+        assert_eq!(
+            at(&mut app, 90.0),
+            (3, 3, 1),
+            "red alert + thrust must reach the hull's authored combat-stations \
+             allocation before any floor is tested"
+        );
+
+        // 30 %: under `min_reserve_helm`, over `weapons`' floor of 25. Helm
+        // loses its point — to its own crew's discipline, not to the reactor —
+        // and the guns keep theirs.
+        assert_eq!(at(&mut app, 30.0), (2, 3, 1), "helm goes first");
+
+        // 20 %: under `weapons`' floor of 25 but still well over the crew's own
+        // `min_reserve_weapons` of 10 — so this cut is the REACTOR's, and the
+        // standing order it is overriding is still on the books.
+        assert_eq!(at(&mut app, 20.0), (2, 2, 1), "the guns go next");
+        assert!(
+            floored(&app, WEAPONS_POWER_GROUP),
+            "weapons must be held down BY THE FLOOR at 20 %, not merely resting \
+             low — if this fails the ladder is inert again and the policy's own \
+             reserve is doing all the work"
+        );
+        assert_eq!(
+            app.world()
+                .entity(e)
+                .get::<crate::ship::power::ShipPowerSystem>()
+                .unwrap()
+                .0
+                .commanded_level_for(&crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into())),
+            3,
+            "and the crew's standing order survives the brownout intact"
+        );
+
+        // 1 %: everything is under its floor, and shields — resting at the
+        // `min_level` its own file gives it — has nothing left to lose. That is
+        // what "shields hold longest" means on this hull.
+        assert_eq!(
+            at(&mut app, 1.0),
+            (2, 2, 1),
+            "shields never gave anything up"
+        );
+        assert!(
+            !floored(&app, SHIELDS_POWER_GROUP),
+            "a group resting at its own landing level is never recorded as held: \
+             the brownout has nothing to take from it"
+        );
+
+        // Recovery: crossing a floor is not enough, the charge has to clear the
+        // release margin as well, or the cut chatters at tick rate.
+        assert_eq!(
+            at(&mut app, 27.0),
+            (2, 2, 1),
+            "27 % is inside weapons' 25+5 band"
+        );
+        assert!(
+            floored(&app, WEAPONS_POWER_GROUP),
+            "still the reactor holding the guns down, against a live order of 3"
+        );
+
+        // …and clearing its OWN band is not enough either, while a rung above it
+        // is still engaged. 31 % is past weapons' 25+5, but helm's floor of 40
+        // is engaged (it releases at 45), so the guns wait. This is the half of
+        // the ladder issue #952's review found latched: releasing the lowest
+        // engaged rung here restores the draw that was emptying the battery, and
+        // on this hull's own rates that caps the reserve in a 25–30 % limit cycle
+        // helm's 45 % release threshold can never be reached from. See
+        // `ship::power::tests::a_human_commanded_destroyer_climbs_back_out_of_its_own_floor_ladder`,
+        // which flies this same hull through the excursion with a live battery.
+        assert_eq!(
+            at(&mut app, 31.0),
+            (2, 2, 1),
+            "the guns wait for the rung above them"
+        );
+        assert!(floored(&app, WEAPONS_POWER_GROUP));
+
+        // Clear of helm's 40+5 the whole ladder releases together, and the crew
+        // is over `min_reserve_helm` (50) as well, so the policy re-spends both
+        // combat-stations points at once.
+        assert_eq!(at(&mut app, 51.0), (3, 3, 1), "and then everything is back");
+        assert!(!floored(&app, HELM_POWER_GROUP));
+        assert!(!floored(&app, WEAPONS_POWER_GROUP));
+    }
+
     #[test]
     fn baseline_default_reallocates_toward_weapons_on_red_alert() {
         // Baseline preservation: the synthesised default policy reproduces the
@@ -3145,7 +3382,7 @@ station = "sensors"
     fn authored_guard_fires_from_seeded_facts() {
         // The #779 empty-facts lesson, applied to power: an authored `fact(...)`
         // guard actually fires because the host SEEDS the fact. Here a guard on
-        // the seeded `total_allocation` ship fact elevates sensors only once the
+        // the seeded `total_allocation` ship fact elevates shields only once the
         // total crosses the authored threshold.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
@@ -3153,12 +3390,12 @@ station = "sensors"
         // `>= 7` would not.
         app.world_mut().entity_mut(e).insert(power_policy(
             &[],
-            vec![alloc_rule(10, "sensors", "fact(total_allocation) >= 6", 3)],
+            vec![alloc_rule(10, "shields", "fact(total_allocation) >= 6", 3)],
         ));
 
         power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
-            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
+            power_level(&app, e, crate::modifiers::power_system::SHIELDS_POWER_GROUP),
             3,
             "a guard reading the seeded total_allocation fact fires"
         );
@@ -3272,7 +3509,7 @@ station = "sensors"
                         // A DROP, so the ship-wide total cap cannot mask the
                         // read: two simultaneous elevations would fight the
                         // total-allocation clamp.
-                        alloc_rule(10, "sensors", "flag(parent:base_flag)", 1),
+                        alloc_rule(10, "shields", "flag(parent:base_flag)", 1),
                         // The mirror-image case, driven through the real host
                         // rather than asserted against a hand-built chain
                         // (issue #891 review finding 4): an UNPREFIXED guard
@@ -3321,7 +3558,7 @@ station = "sensors"
              ship's guard — the chain is anchored at the layer, not the base"
         );
         assert_eq!(
-            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
+            power_level(&app, e, crate::modifiers::power_system::SHIELDS_POWER_GROUP),
             1,
             "a `parent:`-prefixed guard climbs from the layer to the BASE store \
              — the chain is layered, not flattened"

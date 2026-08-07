@@ -229,7 +229,17 @@ impl Plugin for ShipShieldsPlugin {
                     // (Modifiers) and `publish_shields_blackboard` (Publish).
                     handle_shields_messages.in_set(crate::sim_sets::SimSet::Physics),
                     emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
-                    tick_shields.in_set(crate::sim_sets::SimSet::Modifiers),
+                    // `translate_power_modifiers` is ALSO in `Modifiers`, so
+                    // set membership alone leaves their order unspecified and
+                    // `tick_shields` would read a one-tick-stale
+                    // `ModifierSlot::ShieldRegen` (issue #952). The explicit
+                    // edge makes a same-tick reallocation land on this tick's
+                    // regen. Dropped harmlessly in harnesses that register
+                    // `ShipShieldsPlugin` without the simulation's modifier
+                    // translators.
+                    tick_shields
+                        .in_set(crate::sim_sets::SimSet::Modifiers)
+                        .after(crate::modifier_coordination::translate_power_modifiers),
                     publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
@@ -240,16 +250,31 @@ impl Plugin for ShipShieldsPlugin {
 /// Tick shield regen and offline timers each frame for every ship
 /// (player + NPCs). PR-7 (issue #597) unifies this with the old
 /// `tick_npc_shield_regen` — one system iterating all ships with `Ship` marker.
+///
+/// Each ship regenerates at its own [`ModifierSlot::ShieldRegen`] multiplier
+/// (issue #952), which the `shields` power group drives through
+/// `modifiers::coordination::apply_power_modifiers_from_read_state`. A ship
+/// without a `ShipModifiers` component regenerates at ×1.0 — its arcs'
+/// authored rates, unchanged.
+///
+/// Runs in `SimSet::Modifiers`, i.e. AFTER `translate_power_modifiers`, so a
+/// reallocation made this tick is already in the slot when it is read here.
 pub fn tick_shields(
     time: Res<Time>,
-    mut shields_q: Query<&mut ShipShields, With<crate::server_app::Ship>>,
+    mut shields_q: Query<
+        (&mut ShipShields, Option<&crate::modifiers::ShipModifiers>),
+        With<crate::server_app::Ship>,
+    >,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
         return;
     }
-    for mut shield in shields_q.iter_mut() {
-        shield.0.tick(dt);
+    for (mut shield, mods) in shields_q.iter_mut() {
+        let regen_scale = mods
+            .map(|m| m.get(&crate::messages::ModifierSlot::ShieldRegen))
+            .unwrap_or(1.0);
+        shield.0.tick_with_regen_scale(dt, regen_scale);
     }
 }
 
@@ -754,6 +779,94 @@ mod tests {
         for m in reader.read() {
             box_.0.push(m.clone());
         }
+    }
+
+    /// **`tick_shields` regenerates at the ship's own `ModifierSlot::ShieldRegen`**
+    /// (issue #952) — the wire from the `shields` power group to the screens.
+    ///
+    /// Two ships in one world so the reading is per-entity: the same system
+    /// pass must give them different regen. A ship carrying no `ShipModifiers`
+    /// at all regenerates at its authored rate, which is what keeps every
+    /// fixture that predates this slot honest.
+    #[test]
+    fn tick_shields_scales_regen_by_the_shield_regen_modifier() {
+        use crate::modifiers::{Modifier, ShipModifiers};
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
+
+        let config = ShieldConfig {
+            num_facings: 1,
+            max_hp: 100,
+            regen_per_sec: 10.0,
+            offline_duration: 0.0,
+        };
+        let damaged = || {
+            let mut s = ShieldSystem::new(&config);
+            s.apply_damage(50, 0.0);
+            s
+        };
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            // 250 ms is `Time<Virtual>`'s default `max_delta`, so a longer step
+            // would be silently clamped and the arithmetic below would not say
+            // what it looks like it says.
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(250),
+            ))
+            .add_systems(Update, tick_shields);
+
+        let mut boosted_mods = ShipModifiers::new();
+        boosted_mods.add_or_update(Modifier {
+            source: crate::messages::ModifierSource::PowerGroup(crate::messages::PowerGroupId(
+                crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
+            )),
+            slot: crate::messages::ModifierSlot::ShieldRegen,
+            bonus: 1.0, // x2.0
+        });
+        let boosted = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipShields(damaged(), 0.5),
+                boosted_mods,
+            ))
+            .id();
+        let plain = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipShields(damaged(), 0.5),
+                ShipModifiers::new(),
+            ))
+            .id();
+        let unmodified = app
+            .world_mut()
+            .spawn((crate::server_app::Ship, ShipShields(damaged(), 0.5)))
+            .id();
+
+        // Bevy's first `update()` after `TimePlugin` reports a zero delta and
+        // `tick_shields` returns early on it, so five passes are four 250 ms
+        // steps: one second of regen.
+        for _ in 0..5 {
+            app.update();
+        }
+
+        let hp = |e: Entity, app: &App| app.world().get::<ShipShields>(e).unwrap().0.facings[0].hp;
+        assert_eq!(
+            hp(plain, &app),
+            60,
+            "no bonus is x1.0: the arc's authored 10 HP/s over one second"
+        );
+        assert_eq!(
+            hp(unmodified, &app),
+            60,
+            "a ship with no ShipModifiers at all regenerates at its authored rate"
+        );
+        assert_eq!(
+            hp(boosted, &app),
+            70,
+            "shields power at x2.0 doubles the same second's regen"
+        );
     }
 
     /// Test-only glue (issue #829): seed each ship's viewscreen combat_lock

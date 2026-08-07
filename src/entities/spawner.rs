@@ -381,6 +381,18 @@ pub fn spawn_entity(
                     capacity: pc.capacity,
                     rates: pc.rates,
                     emergency_threshold: pc.emergency_threshold,
+                    // Battery floors (issue #952): the authored
+                    // `[power.battery_floor]` percentages, each paired with its
+                    // group's own `[power_groups.*] min_level`.
+                    group_floors: crate::ship::power::authored_power_group_floors(
+                        &pc.battery_floor,
+                        &config
+                            .ship_config
+                            .as_ref()
+                            .map(|sc| sc.power_groups.clone())
+                            .unwrap_or_default(),
+                    ),
+                    floor_release_margin_pct: pc.battery_floor_release_margin,
                 },
             ),
             None => crate::power_plugin::PowerConfigResource::default(),
@@ -406,9 +418,9 @@ pub fn spawn_entity(
             ));
         }
         // Per-entity power multipliers. Seeded from any per-console TOML
-        // `power_multipliers` blocks (helm_console/weapons_console/sensors_console)
+        // `power_multipliers` blocks (helm_console/weapons_console/shields_console)
         // and otherwise defaulted so NPC ships still get MaxSpeed / PhaserDamage
-        // / RadarRange bonuses translated by `translate_power_modifiers`.
+        // / ShieldRegen bonuses translated by `translate_power_modifiers`.
         //
         // After issue #617 the map is keyed by `PowerGroupId`.
         let defaults = [-0.5f32, 0.0, 0.25, 0.5];
@@ -428,7 +440,7 @@ pub fn spawn_entity(
                 ),
                 (
                     crate::messages::PowerGroupId(
-                        crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
+                        crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                     ),
                     defaults,
                 ),
@@ -453,11 +465,11 @@ pub fn spawn_entity(
                 );
             }
         }
-        if let Some(sc) = &config.sensors_console {
+        if let Some(sc) = &config.shields_console {
             if let Some(pm) = sc.power_multipliers {
                 multipliers.insert(
                     crate::messages::PowerGroupId(
-                        crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
+                        crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                     ),
                     pm,
                 );

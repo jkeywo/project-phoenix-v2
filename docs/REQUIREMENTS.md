@@ -389,25 +389,27 @@ What the early PRDs called the Science console has been split into **three indep
 ## Power
 
 ### Layout and controls
-- Three rows: Helm, Tactical (Weapons), Sensors. Each row shows current level (1–4) plus increment and decrement buttons. (The Sensors row inherits what older PRDs called the "Science" allocation; Shields and Navigation are not separately powered.)
-- Total budget: 6 base points + up to 2 from the auxiliary battery (cap 8).
-- A battery charge bar and percentage display sit alongside the rows.
-- Increment is disabled when total allocated = 8 or when locked. Decrement is disabled when a console is at 1 or when locked.
+- Three rows: Helm, Tactical (Weapons), Shields (issue #952 replaced the Sensors row, which inherited what older PRDs called the "Science" allocation; Navigation is not separately powered). Each row shows the level the group is RUNNING at (1–4) plus increment and decrement buttons.
+- Total budget: 6 base points + up to 2 from the auxiliary battery (cap 8), spent against the COMMANDED total.
+- A battery charge bar and percentage display sit alongside the rows. The bar's CHARGING indicator is driven by an explicit `charging` flag, not by the negation of `draining`: a reactor rate of exactly zero means a frozen reserve and must claim neither.
+- Increment is disabled when the commanded total = 8 or the group's own command is at its maximum; decrement when its command is at its minimum. Both step from the COMMANDED level, since the wire message carries an absolute level the server measures against the standing order — a group the reactor is holding down still takes commands.
 
 ### Battery economics
-- Battery rate table indexed by total allocated points: 3=+6.0/s, 4=+5.0/s, 5=+4.0/s, 6=+2.0/s, 7=−2.0/s, 8=−6.0/s (configurable per ship).
-- Exhaustion: battery hits 0 → all consoles forced to 1, controls locked, battery recharges at the maximum rate.
-- Unlocks once the battery reaches `emergency_threshold` (default 25%).
+- Battery rate table indexed by total allocated points: 3=+6.0/s, 4=+5.0/s, 5=+4.0/s, 6=+2.0/s, 7=−2.0/s, 8=−6.0/s (configurable per ship). Indexed by the EFFECTIVE total, so a browned-out group stops costing what it is no longer being given.
+- Brownout is a per-group ladder, not a lock (issue #952). Each group is held at its own `[power_groups.<id>] min_level` while the charge sits under its `[power.battery_floor]` percentage of capacity, and released once the charge climbs back through that percentage plus `battery_floor_release_margin`. The commanded level survives untouched, so recovery needs no one to re-issue anything.
+- The two thresholds are load-bearing: flooring a group lowers the effective total and therefore picks a different rates rung, so a single threshold would release the group on the next tick and chatter at tick rate. `battery_floor_release_margin = 0` fails the entity load wherever a floored group can be commanded above the level its floor lands it on.
+- The ladder releases from the TOP: a cut rung also waits until no rung above it is still engaged. Falling, the ship loses helm first and keeps its screens longest; recovering, the groups return in that same order, so the lowest-floor group is the LAST one back. Releasing the lowest engaged rung first restores the very draw that emptied the battery, which caps the reserve in a narrow limit cycle and latches every higher rung down for the rest of the encounter.
+- `emergency_threshold` no longer gates anything; it is published so the gauge can paint the reserve band.
 
 ### Modifier wiring
 - Helm power → `ModifierSlot::MaxSpeed` AND `ModifierSlot::MaxYawRate`.
 - Tactical power → `ModifierSlot::PhaserDamage`.
-- Sensors power → `ModifierSlot::RadarRange` — the tactical **acquisition** horizon (radar blips, the range a target lock may be taken at). It does not scale weapon reach: a bank reaches its authored `beam_range` at every power level (issue #955).
+- Shields power → `ModifierSlot::ShieldRegen` — every arc's `regen_per_sec` (issue #952, which replaced `sensors` with `shields` as the third power group). `ModifierSlot::RadarRange` no longer has a power producer at all: it is written only by radar hull damage and region dampening, so a hull's acquisition horizon is what its own `[weapons_console.radar] range` authors and a bank reaches its authored `beam_range` at every power level (issue #955).
 - Per-level bonus table per console, configurable per ship; level 2 is baseline (0.0 bonus = 1.0× multiplier), level 1 is half performance (−0.5), level 4 is +0.5 (1.5×).
 
 ### `PowerState` broadcast
-- `PowerState { helm, weapons, sensors, battery_charge, locked }` is sent to the Power holder at 10 Hz.
-- `SimSnapshot.power_levels` carries Helm/Tactical/Sensors levels (as a `(u8, u8, u8)` tuple) to all clients so other consoles can present their power state.
+- `PowerState { helm, weapons, shields, battery_charge, draining }` is sent to the Power holder at 10 Hz. The levels are EFFECTIVE levels: a group held down by its battery floor reports the floor, not what it was commanded at.
+- `SimSnapshot.power_levels` was a `(u8, u8, u8)` tuple of Helm/Tactical/Sensors levels broadcast to all clients; it no longer exists in the snapshot struct (only in a legacy decode fixture in `codec.rs`). Per-console power state reaches the client through `PowerBlackboard`.
 
 ---
 
@@ -646,7 +648,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - Tactical / weapons: `TargetLock`, `WeaponsUpdate` (per-tick to Tactical: target uuid, fire-ready, cooldown, torpedo magazine count, per-tube loaded/reload state), `BeamStarted`, `BeamEnded`, `PhaserFired { bank, target_uuid }`, `TorpedoLaunched`, `TorpedoDestroyed`, `FrequencyHint { frequency }` (sent to Tactical when a Sensors-Low / AI hint fires), `SensorsTargetSuggestion` (current) and `ScienceTargetSuggestion` (legacy, retained).
 - Shields: `ShieldStatus { facings: Vec<ShieldFacingStatus> }`.
 - Repair: `RepairState { teams }`.
-- Power: `PowerState { helm, weapons, sensors, battery_charge, locked }`.
+- Power: `PowerState { helm, weapons, shields, battery_charge, draining }`.
 - Comms: `CommsState { messages, objectives, contacts }`, `ObjectiveSummary { objectives }` (captain only, event-driven).
 - Damage / feedback: `DamageTaken { hull, shield }`, `ShipDestroyed` (one-shot, fired in lockstep with the `GameOver` phase transition when all per-console hull pools reach 0).
 - Modifiers: `ModifierAdded`, `ModifierRemoved`.
@@ -686,7 +688,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - Repair console parameters: repair rate, HP per cycle, repair cooldown, team count.
 - Shields: `[shields] default_hp, default_regen_rate, default_offline_duration, [[shields.arcs]] start_angle, end_angle, hp`.
 - Impulse: `[impulse] speed_multiplier, charge_time`.
-- Power: `[power] capacity, rates, emergency_threshold` plus `[<console>.power_multipliers]` per-level bonus tables.
+- Power: `[power] capacity, rates, emergency_threshold, battery_floor_release_margin`, `[power.battery_floor] <group> = <percent-of-capacity>` (per-group brownout floors — the group is held at its `[power_groups.<group>] min_level` while the battery is under that percentage, and released at that percentage plus the release margin, once no higher rung is engaged either; the ladder must descend helm → weapons → shields, the release margin must be positive wherever a floor can bite, and a hull's fully-floored total must land on a strictly positive rates rung), plus `[<console>.power_multipliers]` per-level bonus tables.
 - AI: `[behaviour] initial_state, [[behaviour.state]] name, params, [[behaviour.transition]] from, condition, to`.
 - Faction: `faction = "<uuid>"` references `assets/factions/<name>.toml`.
 - Region effects: `[effects.blocks_impulse] / [effects.radar_dampening] / [effects.damage_zone] / [effects.slow_zone] / [effects.comms_jammed] / [effects.sensor_blind]` per template.

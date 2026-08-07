@@ -3357,6 +3357,47 @@ pub struct PowerConfigSection {
     pub capacity: f32,
     pub rates: [f32; 6],
     pub emergency_threshold: f32,
+    /// Per-group battery floors (issue #952), authored as
+    /// `[power.battery_floor] <group> = <percent>`.
+    ///
+    /// Each value is the percentage of `capacity` below which that group is
+    /// held down to its `[power_groups.<group>] min_level` — so the ladder is a
+    /// statement about how deep into the reserve each system is allowed to
+    /// reach, and a hull retunes the whole thing in one block. A group absent
+    /// from the table is never cut.
+    ///
+    /// Note the units differ from `emergency_threshold` above, which is
+    /// compared against the raw charge. Percentages here because a floor is a
+    /// statement about how much of the reserve is left, and hulls do not all
+    /// carry the same reserve.
+    ///
+    /// The parse default is helm 50 / weapons 25 / shields 5 — shields last, so
+    /// a dying ship keeps its screens longest. The shipped fleet authors
+    /// `weapons` and `shields` at those numbers and `helm` at 40; see
+    /// [`crate::modifiers::power_system::default_group_floors`] for why the two
+    /// differ.
+    #[serde(default = "default_battery_floor_pct")]
+    pub battery_floor: std::collections::HashMap<String, f32>,
+    /// Hysteresis band for the ladder above (issue #952), authored as
+    /// `[power] battery_floor_release_margin`, in the same percentage-of-
+    /// `capacity` units as `battery_floor`.
+    ///
+    /// A floored group is released only once the charge climbs to its own
+    /// floor PLUS this margin. Without the band the cut chatters at tick rate,
+    /// because flooring a group lowers the effective total and the effective
+    /// total is what picks the `rates` rung — the cut therefore starts
+    /// recharging the reserve straight back through the threshold that made it.
+    /// See [`crate::modifiers::power_system::PowerConfig::floor_release_margin_pct`].
+    ///
+    /// Raise it for a hull whose brownouts should read as long, deliberate
+    /// events; lower it for one that should scrabble back fast. `0.0` fails the
+    /// entity load as soon as any authored floor can BITE — that is, as soon as
+    /// its group can be commanded above the level the floor lands it on —
+    /// because with no band the cut and its release share one threshold. It
+    /// remains authorable on a hull whose every floored group is pinned
+    /// (`min_level == max_level`) and therefore never cut.
+    #[serde(default = "default_battery_floor_release_margin")]
+    pub battery_floor_release_margin: f32,
     /// Inline stateless AI policy for the Power reactor fine system (issue
     /// #784), loaded from `[power.ai_policy]`. Replaces the retired stateful
     /// `[power.ai]` engine (`PowerAiConfigToml` + `EngageState` hysteresis).
@@ -3371,6 +3412,23 @@ pub struct PowerConfigSection {
     /// from the ship's `[power_groups.*]` keys (AC1 — no fixed catalogue).
     #[serde(default)]
     pub ai_policy: Option<FineSystemAiConfigToml>,
+}
+
+/// The shipped `[power.battery_floor]` ladder — the TOML-parse default for
+/// [`PowerConfigSection::battery_floor`]. Mirrors
+/// [`crate::modifiers::power_system::default_group_floors`], which is the same
+/// ladder expressed for the pure module (where each entry also carries the
+/// group's `min_level`, resolved from `[power_groups.*]` at spawn).
+fn default_battery_floor_pct() -> std::collections::HashMap<String, f32> {
+    crate::modifiers::power_system::default_group_floors()
+        .into_iter()
+        .map(|(id, floor)| (id, floor.battery_pct))
+        .collect()
+}
+
+/// TOML-parse default for [`PowerConfigSection::battery_floor_release_margin`].
+fn default_battery_floor_release_margin() -> f32 {
+    crate::modifiers::power_system::DEFAULT_FLOOR_RELEASE_MARGIN_PCT
 }
 
 /// AI tuning parameters for the shields focus controller.
@@ -3423,6 +3481,16 @@ fn default_shields_ai_health_ratio_threshold() -> f32 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShieldsConsoleConfig {
+    /// Per-level bonus table for the `shields` power group (issue #952),
+    /// indexed by level-1. Feeds `ModifierSlot::ShieldRegen`, so it decides
+    /// what a reactor point spent here buys in regeneration. Absent ⇒ the
+    /// fleet-wide `[-0.5, 0.0, 0.25, 0.5]` default.
+    ///
+    /// This field moved here from `[sensors_console]` when `shields` replaced
+    /// `sensors` as a power group: nothing reads a `sensors` curve any more,
+    /// because `ModifierSlot::RadarRange` no longer has a power producer.
+    #[serde(default)]
+    pub power_multipliers: Option<[f32; 4]>,
     /// Extra max HP applied to the focused facing.
     #[serde(default = "default_focus_bonus_max_hp")]
     pub focus_bonus_max_hp: i32,
@@ -3498,6 +3566,7 @@ fn default_focus_unfocused_damage_multiplier() -> f32 {
 impl Default for ShieldsConsoleConfig {
     fn default() -> Self {
         Self {
+            power_multipliers: None,
             focus_bonus_max_hp: default_focus_bonus_max_hp(),
             focus_bonus_regen: default_focus_bonus_regen(),
             focus_penalty_max_hp: default_focus_penalty_max_hp(),
@@ -3970,8 +4039,6 @@ pub struct NavigationConsoleConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensorsConsoleConfig {
-    #[serde(default)]
-    pub power_multipliers: Option<[f32; 4]>,
     /// Long-range radar config for the Sensors console.
     #[serde(default)]
     pub long_range_radar: crate::radar_config::RadarConfig,
@@ -4556,6 +4623,118 @@ impl EntityConfig {
                 SHIELD_FOCUS_VERBS,
             )
             .map_err(SerdeError::custom)?;
+        }
+
+        // Validate the authored `[power.battery_floor]` ladder (issue #952).
+        // The units are the trap worth catching at load: `emergency_threshold`
+        // two fields up is an ABSOLUTE charge and these are PERCENTAGES, so an
+        // author copying the shape of one into the other writes a number that
+        // is silently either never reached or always in force.
+        //
+        // Deliberately NOT rejecting a floor that names a group the hull does
+        // not carry: the parse default lists the canonical trio, so a hull that
+        // authors a narrower `[power_groups.*]` set would fail on authoring it
+        // never wrote. A floor for a missing group is inert.
+        if let Some(pc) = config.power.as_ref() {
+            let mut floor_groups: Vec<&String> = pc.battery_floor.keys().collect();
+            floor_groups.sort();
+            for group in floor_groups {
+                let pct = pc.battery_floor[group];
+                if !pct.is_finite() || !(0.0..=100.0).contains(&pct) {
+                    return Err(SerdeError::custom(format!(
+                        "[power.battery_floor] {group} = {pct}: a battery floor is a \
+                         PERCENTAGE of `[power] capacity` and must be within 0–100"
+                    )));
+                }
+            }
+            let margin = pc.battery_floor_release_margin;
+            if !margin.is_finite() || !(0.0..=100.0).contains(&margin) {
+                return Err(SerdeError::custom(format!(
+                    "[power] battery_floor_release_margin = {margin}: the hysteresis \
+                     band is a PERCENTAGE of `capacity`, like the floors it widens, \
+                     and must be within 0–100"
+                )));
+            }
+            // …and 0 is inside that range but is not a legal band for a floor
+            // that can actually BITE. At 0 the cut and release thresholds
+            // collapse onto each other, so the group is released on the very
+            // next tick after it is cut: flooring lowers the EFFECTIVE total,
+            // the effective total picks the `rates` rung, and on every shipped
+            // reactor the rungs either side of a resting total have opposite
+            // signs — so the cut recharges the reserve straight back through
+            // the threshold that made it, at 60 Hz, dragging `MaxSpeed`,
+            // `PhaserDamage`, `ShieldRegen` and the brownout advisory with it.
+            //
+            // Checked against `min_level < max_level` rather than against any
+            // `min_reserve_*`: an AI reserve has nothing to do with the flicker
+            // (an earlier revision guarded it that way and let the shipped
+            // `helm = 40` past with the band switched off, because 40 is under
+            // `min_reserve_helm`). What decides whether a floor can bite is
+            // whether the group can be COMMANDED above the level the floor
+            // lands it on — by a human Power officer with no reserve guard at
+            // all, if by no one else.
+            if margin <= 0.0 {
+                let power_groups = config
+                    .ship_config
+                    .as_ref()
+                    .map(|sc| &sc.power_groups)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut biting: Vec<&String> = pc
+                    .battery_floor
+                    .keys()
+                    .filter(|group| {
+                        match power_groups.get(&crate::messages::PowerGroupId((*group).clone())) {
+                            Some(cfg) => cfg.min_level < cfg.max_level,
+                            // A group the hull describes no `[power_groups.*]`
+                            // for lands on the level the runtime seeds it at and
+                            // is still commandable to 4, so it can bite too.
+                            None => {
+                                crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL
+                                    < crate::ship::config::default_max_power_level()
+                            }
+                        }
+                    })
+                    .collect();
+                biting.sort();
+                if let Some(group) = biting.first() {
+                    return Err(SerdeError::custom(format!(
+                        "[power] battery_floor_release_margin = {margin} with a \
+                         `[power.battery_floor] {group}` that can bite: `{group}` can be \
+                         commanded above the level its floor lands it on, so with no \
+                         hysteresis band the cut and its release share one threshold and \
+                         chatter at tick rate. Author a positive margin, or drop the \
+                         floor"
+                    )));
+                }
+            }
+            // The LADDER, checked here rather than only in the fleet walk
+            // (`ship::power::tests::every_hulls_battery_floors_descend`), so a
+            // hull added outside `assets/entities` — or one whose author
+            // retunes the block without running that walk — cannot load with
+            // the order inverted. An inverted ladder makes the ship keep helm
+            // and lose its screens first, which is the exact opposite of the
+            // behaviour issue #952 exists to buy, and nothing at runtime
+            // notices. Only checked when all three canonical groups are named:
+            // a hull is free to author a narrower table.
+            use crate::modifiers::power_system::{
+                HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+            };
+            let rung = |g: &str| pc.battery_floor.get(g).copied();
+            if let (Some(helm), Some(weapons), Some(shields)) = (
+                rung(HELM_POWER_GROUP),
+                rung(WEAPONS_POWER_GROUP),
+                rung(SHIELDS_POWER_GROUP),
+            ) {
+                if !(helm > weapons && weapons > shields) {
+                    return Err(SerdeError::custom(format!(
+                        "[power.battery_floor] is helm {helm} / weapons {weapons} / \
+                         shields {shields}: the floors must DESCEND in that order, so \
+                         a failing ship loses helm first, then its guns, and keeps its \
+                         screens longest"
+                    )));
+                }
+            }
         }
 
         // Validate an authored inline Power allocation policy before world
@@ -5300,9 +5479,6 @@ emergency_threshold = 30.0
         let toml_str = r##"
 tags = ["player", "ship"]
 
-[sensors_console]
-power_multipliers = [-0.5, 0.0, 0.25, 0.5]
-
 [sensors_console.long_range_radar]
 range = 200.0
 shows = ["region", "asteroid_field", "asteroid", "ship"]
@@ -5311,7 +5487,6 @@ shows = ["region", "asteroid_field", "asteroid", "ship"]
         let sensors = config
             .sensors_console
             .expect("sensors_console must be Some");
-        assert_eq!(sensors.power_multipliers, Some([-0.5, 0.0, 0.25, 0.5]));
         assert_eq!(sensors.long_range_radar.range, 200.0);
         assert!(sensors.long_range_radar.shows.contains(&EntityTag::Region));
         assert!(sensors
@@ -5328,6 +5503,38 @@ shows = ["region", "asteroid_field", "asteroid", "ship"]
     fn sensors_console_omitted_when_not_in_toml() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.sensors_console.is_none());
+    }
+
+    /// `power_multipliers` lives on `[shields_console]` since issue #952 moved
+    /// the third power group from `sensors` to `shields`. Replaces the
+    /// `[sensors_console]` half of `sensors_console_parses_with_long_range_radar`,
+    /// whose assertion was that a curve authored there was READ — which is no
+    /// longer true of any curve on that console, because `RadarRange` has no
+    /// power producer left to read it.
+    #[test]
+    fn shields_console_power_multipliers_parses() {
+        let toml_str = r##"
+[shields_console]
+power_multipliers = [0.0, 0.25, 0.5, 1.0]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let shields = config
+            .shields_console
+            .expect("shields_console must be Some");
+        assert_eq!(shields.power_multipliers, Some([0.0, 0.25, 0.5, 1.0]));
+    }
+
+    /// A curve on `[sensors_console]` is now an unknown field, and the section
+    /// is `deny_unknown_fields`, so an author who leaves one behind is told at
+    /// load rather than watching it silently do nothing.
+    #[test]
+    fn sensors_console_power_multipliers_is_rejected() {
+        let err = EntityConfig::from_toml(
+            "[sensors_console]\npower_multipliers = [-0.5, 0.0, 0.25, 0.5]\n",
+        )
+        .expect_err("the field moved to [shields_console] in #952")
+        .to_string();
+        assert!(err.contains("power_multipliers"), "got: {err}");
     }
 
     #[test]
@@ -11815,13 +12022,19 @@ level = 2"#,
     /// runtime seeds it with, not against an empty set.
     ///
     /// `PowerSystem::from_authored_groups` falls back to
-    /// `seeded_with_defaults` — helm / weapons / sensors at level 2 — for an
+    /// `seeded_with_defaults` — helm / weapons / shields at level 2 — for an
     /// empty authored map, and `ai_power_allocation` then resolves the policy
     /// against exactly those groups. Validating against nothing would have
     /// rejected a policy the runtime was about to run, and that is not
     /// hypothetical: the six NPC hulls that declare no power groups had to
     /// author `[power.ai_policy]` in #885b stage 5c, so they are all in this
     /// state today.
+    ///
+    /// The negative case is `sensors`, which is the group that no longer
+    /// exists. It used to be `shields` — issue #952 swapped the two over in
+    /// `POWER_GROUP_ORDER`, and left as it was this test would have asserted
+    /// that a channel the runtime now seeds is rejected, i.e. the exact
+    /// opposite of the rule it is guarding.
     #[test]
     fn power_ai_policy_on_a_hull_with_no_authored_groups_validates_against_the_seeded_trio() {
         let toml = |channel: &str| {
@@ -11856,10 +12069,144 @@ level = 2
         }
         // …and the check has not simply been switched off: a group neither
         // authored nor seeded is still rejected.
-        let err = EntityConfig::from_toml(&toml("shields"))
-            .expect_err("`shields` is neither authored nor seeded")
+        let err = EntityConfig::from_toml(&toml("sensors"))
+            .expect_err("`sensors` is neither authored nor seeded")
             .to_string();
         assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    /// `[power.battery_floor]` parses, defaults to the shipped ladder, and
+    /// refuses a value that is not a percentage (issue #952).
+    #[test]
+    fn power_battery_floor_parses_and_defaults_to_the_shipped_ladder() {
+        let base = "[power]\ncapacity = 100.0\nrates = [ 6, 5, 4, 2, -2, -6 ]\n\
+                    emergency_threshold = 25.0\n";
+
+        let defaulted = EntityConfig::from_toml(base)
+            .expect("parse must succeed")
+            .power
+            .expect("power section");
+        assert_eq!(defaulted.battery_floor.get("helm"), Some(&50.0));
+        assert_eq!(defaulted.battery_floor.get("weapons"), Some(&25.0));
+        assert_eq!(defaulted.battery_floor.get("shields"), Some(&5.0));
+
+        let authored = EntityConfig::from_toml(&format!(
+            "{base}\n[power.battery_floor]\nhelm = 70.0\nweapons = 40.0\nshields = 2.5\n"
+        ))
+        .expect("parse must succeed")
+        .power
+        .expect("power section");
+        assert_eq!(authored.battery_floor.get("helm"), Some(&70.0));
+        assert_eq!(authored.battery_floor.get("shields"), Some(&2.5));
+
+        // The units trap: `emergency_threshold` beside it is an absolute
+        // charge, so a floor copied from it on a big-battery hull would be a
+        // percentage well over 100 and silently always in force.
+        let err =
+            EntityConfig::from_toml(&format!("{base}\n[power.battery_floor]\nhelm = 250.0\n"))
+                .expect_err("250 is not a percentage")
+                .to_string();
+        assert!(err.contains("PERCENTAGE"), "got: {err}");
+    }
+
+    /// The release margin parses, defaults, and is range-checked (issue #952).
+    #[test]
+    fn power_battery_floor_release_margin_parses_and_defaults() {
+        let base = "[power]\ncapacity = 100.0\nrates = [ 6, 5, 4, 2, -2, -6 ]\n\
+                    emergency_threshold = 25.0\n";
+
+        let defaulted = EntityConfig::from_toml(base)
+            .expect("parse must succeed")
+            .power
+            .expect("power section");
+        assert_eq!(
+            defaulted.battery_floor_release_margin,
+            crate::modifiers::power_system::DEFAULT_FLOOR_RELEASE_MARGIN_PCT
+        );
+
+        let authored =
+            EntityConfig::from_toml(&format!("{base}battery_floor_release_margin = 12.5\n"))
+                .expect("parse must succeed")
+                .power
+                .expect("power section");
+        assert_eq!(authored.battery_floor_release_margin, 12.5);
+
+        let err = EntityConfig::from_toml(&format!("{base}battery_floor_release_margin = -3.0\n"))
+            .expect_err("a negative band would release a group below its own floor")
+            .to_string();
+        assert!(err.contains("PERCENTAGE"), "got: {err}");
+    }
+
+    /// **A band of zero fails the load wherever a floor can actually bite.**
+    ///
+    /// Zero is inside the 0–100 range check above and used to be accepted
+    /// silently, and the fleet walk that was supposed to catch it only asked
+    /// whether the floor sat at or above the same group's `min_reserve_*` — so
+    /// the shipped `helm = 40` against a `min_reserve_helm` of 50 could have
+    /// shipped with the hysteresis switched off and passed everything. The AI
+    /// reserve is not what the band guards. At zero the cut and its release are
+    /// the same number, so the group flips at tick rate the moment any operator
+    /// commands it above the level its floor lands it on.
+    #[test]
+    fn a_zero_release_margin_fails_the_load_when_a_floor_can_bite() {
+        let base = "[power]\ncapacity = 100.0\nrates = [ 6, 5, 4, 2, -2, -6 ]\n\
+                    emergency_threshold = 25.0\n";
+
+        // The parse-default ladder on a hull with no `[power_groups.*]`: every
+        // rung lands on the seeded nominal 2 and every group is commandable to
+        // 4, so all three can bite.
+        let err = EntityConfig::from_toml(&format!("{base}battery_floor_release_margin = 0.0\n"))
+            .expect_err("no band on a ladder that can bite")
+            .to_string();
+        assert!(err.contains("chatter"), "got: {err}");
+
+        // The same hull with a floor authored UNDER its group's own reserve —
+        // the shape the old clause exempted. Still rejected: the reserve is a
+        // statement about the crew, and the crew is not who flies the player's
+        // ship.
+        let err = EntityConfig::from_toml(&format!(
+            "{base}battery_floor_release_margin = 0.0\n\
+             [power.battery_floor]\nhelm = 40.0\n"
+        ))
+        .expect_err("a floor under a reserve chatters just as hard")
+        .to_string();
+        assert!(err.contains("chatter"), "got: {err}");
+
+        // …and a positive band on the same hull is fine.
+        EntityConfig::from_toml(&format!("{base}battery_floor_release_margin = 0.5\n"))
+            .expect("any positive band is a band");
+    }
+
+    /// **An inverted ladder fails the entity load.**
+    ///
+    /// Caught here rather than only in the fleet walk over `assets/entities`,
+    /// because the ordering is the whole behaviour and nothing at runtime
+    /// notices when it is wrong: a hull authored weapons-above-helm simply
+    /// keeps its guns and loses its screens first, quietly, for ever.
+    #[test]
+    fn power_battery_floors_must_descend_at_load() {
+        let base = "[power]\ncapacity = 100.0\nrates = [ 6, 5, 4, 2, -2, -6 ]\n\
+                    emergency_threshold = 25.0\n";
+
+        let err = EntityConfig::from_toml(&format!(
+            "{base}\n[power.battery_floor]\nhelm = 10.0\nweapons = 40.0\nshields = 5.0\n"
+        ))
+        .expect_err("weapons must not outlast helm")
+        .to_string();
+        assert!(err.contains("DESCEND"), "got: {err}");
+
+        // Equal rungs are not a ladder either.
+        let err = EntityConfig::from_toml(&format!(
+            "{base}\n[power.battery_floor]\nhelm = 40.0\nweapons = 40.0\nshields = 5.0\n"
+        ))
+        .expect_err("two groups cut at the same instant tell no story")
+        .to_string();
+        assert!(err.contains("DESCEND"), "got: {err}");
+
+        // A hull is still free to author a narrower table; the check only
+        // applies when all three canonical groups are named.
+        EntityConfig::from_toml(&format!("{base}\n[power.battery_floor]\nhelm = 40.0\n"))
+            .expect("a partial ladder is authorable");
     }
 
     #[test]

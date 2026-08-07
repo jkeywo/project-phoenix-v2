@@ -260,8 +260,20 @@ impl ShieldFacing {
         }
     }
 
-    /// Advance the facing by `dt` seconds: tick offline timer and regen.
+    /// Advance the facing by `dt` seconds: tick offline timer and regen at the
+    /// arc's authored rate.
     pub fn tick(&mut self, dt: f32) {
+        self.tick_with_regen_scale(dt, 1.0);
+    }
+
+    /// [`Self::tick`] with the regen rate scaled by `regen_scale` (issue #952).
+    ///
+    /// `1.0` is the arc's authored `regen_per_sec`. The scale is
+    /// [`crate::messages::ModifierSlot::ShieldRegen`], driven by the `shields`
+    /// power group. It deliberately does NOT touch the OFFLINE timer: how long
+    /// a collapsed facing stays down is the arc's authored `offline_duration`
+    /// and a damage-control property, not something the reactor buys.
+    pub fn tick_with_regen_scale(&mut self, dt: f32, regen_scale: f32) {
         if !self.is_online() {
             self.offline_remaining = (self.offline_remaining - dt).max(0.0);
             if self.is_online() {
@@ -273,7 +285,7 @@ impl ShieldFacing {
             }
         } else {
             // Regen while online, accumulating fractional HP across frames.
-            self.hp_frac += self.regen_per_sec * dt;
+            self.hp_frac += self.regen_per_sec * regen_scale.max(0.0) * dt;
             let whole = self.hp_frac as i32;
             if whole > 0 {
                 self.hp = (self.hp + whole).min(self.max_hp);
@@ -704,6 +716,17 @@ impl ShieldSystem {
     /// toward the reduced maximum, regen is suppressed so the transition is gradual
     /// (rather than snapping to max_hp in a single tick).
     pub fn tick(&mut self, dt: f32) {
+        self.tick_with_regen_scale(dt, 1.0);
+    }
+
+    /// [`Self::tick`] with every facing's regen rate scaled by `regen_scale`
+    /// (issue #952 — the `shields` power group's
+    /// [`crate::messages::ModifierSlot::ShieldRegen`]).
+    ///
+    /// Focus DECAY is left unscaled: it is the cost of having concentrated the
+    /// grid somewhere, and letting reactor power soften it would turn the focus
+    /// trade into a straight buff.
+    pub fn tick_with_regen_scale(&mut self, dt: f32, regen_scale: f32) {
         for (i, facing) in self.facings.iter_mut().enumerate() {
             let is_decaying = self.focused_facing != Some(i) && facing.hp > facing.max_hp;
 
@@ -728,7 +751,7 @@ impl ShieldSystem {
                     facing.offline_remaining = (facing.offline_remaining - dt).max(0.0);
                 }
             } else {
-                facing.tick(dt);
+                facing.tick_with_regen_scale(dt, regen_scale);
             }
         }
     }
@@ -1058,6 +1081,36 @@ mod tests {
         s.tick(2.0); // +4 fore → 84, +4 starboard → 94
         assert_eq!(s.facings[0].hp, 84);
         assert_eq!(s.facings[3].hp, 94);
+    }
+
+    /// The `shields` power group's `ModifierSlot::ShieldRegen` scales every
+    /// facing's authored rate (issue #952). ×1.0 is the authored rate exactly,
+    /// so a hull whose reactor never moves the group is unchanged.
+    #[test]
+    fn regen_scale_multiplies_every_facings_authored_rate() {
+        for (scale, expected_gain) in [(1.0f32, 4), (2.0, 8), (0.5, 2)] {
+            let mut s = ShieldSystem::default(); // regen 2/s
+            s.apply_damage(20, 0.0); // fore: 80
+            s.tick_with_regen_scale(2.0, scale);
+            assert_eq!(
+                s.facings[0].hp,
+                80 + expected_gain,
+                "regen scale x{scale} over 2 s at 2 HP/s"
+            );
+        }
+    }
+
+    /// A negative or NaN slot value must not DRAIN a shield. `ShipModifiers`
+    /// cannot produce one (`rebuild_cache` folds a negative sum as
+    /// `1/(1+|sum|)`, always positive), but nothing in this pure module knows
+    /// that, and a regen that ran backwards would be indistinguishable from
+    /// being shot at.
+    #[test]
+    fn a_negative_regen_scale_does_not_drain_the_shield() {
+        let mut s = ShieldSystem::default();
+        s.apply_damage(20, 0.0);
+        s.tick_with_regen_scale(2.0, -5.0);
+        assert_eq!(s.facings[0].hp, 80);
     }
 
     // ── ShieldSystem snapshot ────────────────────────────────────────────────

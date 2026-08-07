@@ -9,7 +9,7 @@ use crate::messages::{ModifierSlot, ModifierSource, PowerGroupId};
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
 use crate::power_system::{
-    Channel1Read, PowerReadState, PowerSystem, HELM_POWER_GROUP, SENSORS_POWER_GROUP,
+    Channel1Read, PowerReadState, PowerSystem, HELM_POWER_GROUP, SHIELDS_POWER_GROUP,
     WEAPONS_POWER_GROUP,
 };
 use crate::region_effects::RegionEffectKind;
@@ -132,9 +132,9 @@ const RADAR_DESTROYED_BONUS: f32 = -999.0;
 /// - `Destroyed` → `RADAR_DESTROYED_BONUS` (near-total blackout).
 ///
 /// `tactical-radar` reuses the existing, shared `ModifierSlot::RadarRange`
-/// slot (already driven by the Sensors power group and region dampening —
-/// see `apply_power_modifiers_from_read_state` / `apply_region_effects`)
-/// since that slot already gates the tactical console's live radar blips and
+/// slot (also written by region dampening — see `apply_region_effects`; the
+/// Sensors power group wrote it too until issue #952 retired that group) since
+/// that slot already gates the tactical console's live radar blips and
 /// weapon engagement range. `helm-radar` and `sensor-radar` get their own
 /// dedicated slots so damaging one radar system cannot bleed into another
 /// console's radar.
@@ -182,32 +182,34 @@ pub fn apply_radar_damage_modifiers(
 /// (no stacking). Multiplier arrays are indexed by power level 1–4 (1 maps
 /// to index 0).
 ///
-/// # What each group buys, and the one it does NOT (issue #955)
+/// # What each group buys (issues #955, #952)
 ///
 /// * HELM → [`ModifierSlot::MaxSpeed`] + [`ModifierSlot::MaxYawRate`].
 /// * WEAPONS → [`ModifierSlot::PhaserDamage`]. Power buys INTENSITY: the beam
 ///   hurts more. `console::weapons::beam::tick_beams` multiplies each bank's
 ///   authored `beam_damage_per_sec` by this slot.
-/// * SENSORS → [`ModifierSlot::RadarRange`]. Power buys ACQUISITION and nothing
-///   else: how far the tactical radar paints blips, how far a `SetTarget` lock
-///   may reach (`console::weapons::beam::handle_set_target`), and how far the AI
-///   selector will consider a candidate (`console::weapons::ai_target_selection`).
-///   All three are bounded by the hull's authored `[weapons_console.radar]
-///   range` / `tactical_radar_range`, which are radar numbers.
+/// * SHIELDS → [`ModifierSlot::ShieldRegen`]. Power buys RECOVERY: every arc
+///   climbs back faster. `ship::shields::tick_shields` scales each facing's
+///   authored `regen_per_sec` by this slot, so level 2 is exactly what the
+///   `[[shield_arc]]` blocks say and the rungs either side of it trade a
+///   reactor point for how quickly a battered ship gets its screens back.
 ///
-/// It does NOT buy REACH. Until #955 every firing path multiplied a bank's
-/// authored `beam_range` by `RadarRange`, so a hull resting `sensors` at 1
-/// fought at two thirds of every range its own file authored, and #923 papered
-/// over that with a red-alert `sensors` elevation. The multiplication is gone
-/// from every reach path: a gun reaches what it authors, at every power level,
-/// and the point #923 spent on `sensors` is back on `weapons` where it buys
-/// damage. A hull with its sensors down still shoots as far — it just has less
-/// warning about what to shoot at.
+/// Power buys neither REACH nor ACQUISITION any more, and both halves of that
+/// took a separate deletion. #955 removed the `beam_range × RadarRange`
+/// multiplication from every firing path: a gun reaches what it authors, at
+/// every power level. #952 then took `sensors` out of
+/// [`crate::modifiers::power_system::POWER_GROUP_ORDER`] entirely, so
+/// [`ModifierSlot::RadarRange`] has no power producer at all — a hull acquires
+/// through the horizon its `[weapons_console.radar] range` authors, reduced
+/// only by radar HULL DAMAGE (`apply_radar_damage_modifiers`) and by
+/// `RegionEffectKind::RadarDampening`. Both of those are things done TO the
+/// ship rather than choices made at the reactor, which is the right shape for a
+/// horizon: the Power officer should not be able to make the ship blind by
+/// spending elsewhere.
 ///
-/// Acquisition is not therefore free of consequence, and the distinction is a
-/// fine one worth stating: a LOCK is a precondition for firing, so a horizon
-/// authored below a hull's own guns is a range cap wearing a different name.
-/// The fleet keeps its horizons clear of its guns by AUTHORING, pinned by
+/// A LOCK remains a precondition for firing, so a horizon authored below a
+/// hull's own guns would still be a range cap wearing a different name. The
+/// fleet keeps its horizons clear of its guns by AUTHORING, pinned by
 /// `tests::every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`.
 pub fn apply_power_modifiers(
     modifiers: &mut ShipModifiers,
@@ -227,7 +229,7 @@ pub fn apply_power_modifiers_from_read_state(
 
     let helm_id = PowerGroupId(HELM_POWER_GROUP.into());
     let weapons_id = PowerGroupId(WEAPONS_POWER_GROUP.into());
-    let sensors_id = PowerGroupId(SENSORS_POWER_GROUP.into());
+    let shields_id = PowerGroupId(SHIELDS_POWER_GROUP.into());
 
     let helm_level = channel_1.power_level(&helm_id).unwrap_or(2);
     let helm_level = (helm_level as usize).saturating_sub(1).min(3);
@@ -252,17 +254,17 @@ pub fn apply_power_modifiers_from_read_state(
         bonus: weapons_bonus,
     });
 
-    // SENSORS buys ACQUISITION, not reach (issue #955) — see this function's
-    // doc comment. `RadarRange` has three producers (this one, radar hull damage
-    // in `apply_radar_damage_modifiers`, and `RegionEffectKind::RadarDampening`)
-    // and, since #955, no consumer that decides how far a gun shoots.
-    let sensors_level = channel_1.power_level(&sensors_id).unwrap_or(2);
-    let sensors_level = (sensors_level as usize).saturating_sub(1).min(3);
-    let sensors_bonus = multipliers.get(&sensors_id).unwrap_or(&default_mult)[sensors_level];
+    // SHIELDS buys RECOVERY (issue #952) — see this function's doc comment.
+    // This block took over from the `sensors` → `RadarRange` one: that slot now
+    // has no power producer at all, only radar hull damage and region
+    // dampening.
+    let shields_level = channel_1.power_level(&shields_id).unwrap_or(2);
+    let shields_level = (shields_level as usize).saturating_sub(1).min(3);
+    let shields_bonus = multipliers.get(&shields_id).unwrap_or(&default_mult)[shields_level];
     modifiers.add_or_update(Modifier {
-        source: ModifierSource::PowerGroup(sensors_id),
-        slot: ModifierSlot::RadarRange,
-        bonus: sensors_bonus,
+        source: ModifierSource::PowerGroup(shields_id),
+        slot: ModifierSlot::ShieldRegen,
+        bonus: shields_bonus,
     });
 }
 
@@ -424,7 +426,7 @@ mod tests {
         HashMap::from([
             (PowerGroupId(HELM_POWER_GROUP.into()), d),
             (PowerGroupId(WEAPONS_POWER_GROUP.into()), d),
-            (PowerGroupId(SENSORS_POWER_GROUP.into()), d),
+            (PowerGroupId(SHIELDS_POWER_GROUP.into()), d),
         ])
     }
 
@@ -434,8 +436,8 @@ mod tests {
     fn weapons() -> PowerGroupId {
         PowerGroupId(WEAPONS_POWER_GROUP.into())
     }
-    fn sensors() -> PowerGroupId {
-        PowerGroupId(SENSORS_POWER_GROUP.into())
+    fn shields() -> PowerGroupId {
+        PowerGroupId(SHIELDS_POWER_GROUP.into())
     }
 
     #[test]
@@ -444,11 +446,52 @@ mod tests {
         let mut power = PowerSystem::default();
         power.set_group_allocation(&helm(), 2).unwrap();
         power.set_group_allocation(&weapons(), 2).unwrap();
-        power.set_group_allocation(&sensors(), 2).unwrap();
+        power.set_group_allocation(&shields(), 2).unwrap();
         apply_power_modifiers(&mut mods, &power, &default_multipliers());
         assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
         assert_eq!(mods.get(&ModifierSlot::PhaserDamage), 1.0);
-        assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
+        assert_eq!(mods.get(&ModifierSlot::ShieldRegen), 1.0);
+    }
+
+    /// **`ModifierSlot::RadarRange` has no power producer since issue #952.**
+    ///
+    /// The half of the swap that is easy to forget: taking `sensors` out of
+    /// `POWER_GROUP_ORDER` also has to take the modifier it wrote with it, or a
+    /// stale `PowerGroup("sensors")` entry would sit in the cache for ever —
+    /// nothing removes a modifier whose producer stopped running, and
+    /// `translate_power_modifiers` re-applies rather than rebuilds.
+    #[test]
+    fn power_no_longer_writes_the_radar_range_slot() {
+        let mut mods = ShipModifiers::new();
+        let mut power = PowerSystem::default();
+        power.set_group_allocation(&shields(), 4).unwrap();
+        apply_power_modifiers(&mut mods, &power, &default_multipliers());
+        assert_eq!(
+            mods.get(&ModifierSlot::RadarRange),
+            1.0,
+            "a hull's acquisition horizon must be what its own file authors, at \
+             every reactor setting"
+        );
+        assert!(mods.get(&ModifierSlot::ShieldRegen) > 1.0);
+    }
+
+    /// The `shields` group buys regen at the rungs its multiplier table says.
+    #[test]
+    fn shields_power_drives_the_shield_regen_slot() {
+        for (level, expected) in [(1u8, 1.0 / 1.5), (2, 1.0), (3, 1.25), (4, 1.5)] {
+            let mut mods = ShipModifiers::new();
+            let mut power = PowerSystem::default();
+            // Free the budget first so level 4 is not refused by the 8-point cap.
+            power.set_group_allocation(&helm(), 1).unwrap();
+            power.set_group_allocation(&weapons(), 1).unwrap();
+            power.set_group_allocation(&shields(), level).unwrap();
+            apply_power_modifiers(&mut mods, &power, &default_multipliers());
+            let got = mods.get(&ModifierSlot::ShieldRegen);
+            assert!(
+                (got - expected).abs() < 1e-5,
+                "shields at {level} should give ShieldRegen x{expected}, got {got}"
+            );
+        }
     }
 
     /// **Every shipped Alliance hull spends its combat-stations point on WEAPONS
@@ -609,19 +652,24 @@ mod tests {
     /// a bare `>` would have called that healthy.
     const ACQUISITION_MARGIN: f32 = 1.2;
 
-    /// **Every shipped hull can SEE further than it can SHOOT, at the sensors
-    /// level its own reactor rests it at.**
+    /// **Every shipped hull can SEE further than it can SHOOT.**
     ///
     /// The invariant #955 needs and did not have. A LOCK is a precondition for
     /// firing, and the horizon a lock is taken through is
     /// `[weapons_console.radar] range × ModifierSlot::RadarRange`
     /// (`console::weapons::mod::ai_target_selection`, `console::weapons::beam::handle_set_target`).
-    /// That slot is still driven off the SENSORS power group, and #955 removed
-    /// the `sensors` channel from every authored policy — so no AI-crewed hull
-    /// ever leaves `[power_groups.sensors] default_level = 1` and the horizon is
-    /// permanently ×0.667. Decoupling reach from power is only half the fix: if
-    /// the horizon lands under the guns, reach is capped again by acquisition
-    /// instead of by the multiplier, and just as silently.
+    /// Decoupling reach from power was only half the fix: if the horizon lands
+    /// under the guns, reach is capped again by acquisition instead of by the
+    /// multiplier, and just as silently.
+    ///
+    /// Since issue #952 the slot has no power producer at all — `sensors` is no
+    /// longer a power group — so the horizon walked here is simply the authored
+    /// `range`. That makes every hull's margin WIDER than when this pin was
+    /// written, and the pin is kept anyway: it guards the authoring, and the
+    /// authored numbers were chosen against the old ×0.667. When #955 landed the
+    /// slot was still driven off SENSORS, no AI-crewed hull ever left
+    /// `[power_groups.sensors] default_level = 1`, and the horizon was
+    /// permanently two thirds of its file value.
     ///
     /// The battleship shipped exactly that: `75 × 0.667 = 50.000002` against a
     /// `heavy-fore` blaster authoring `range = 50.0` and an artillery envelope
@@ -703,11 +751,11 @@ mod tests {
             };
 
             // The reactor as the spawner seeds it, then AT REST: no red alert,
-            // nothing under way, a full battery. That is the state a hull spends
-            // most of its life in and the FLOOR of its sensors allocation, which
-            // is the only level at which this invariant is worth anything — a
-            // horizon that clears the guns only at combat stations is a horizon
-            // that fails on the approach.
+            // nothing under way, a full battery. Since #952 no reactor setting
+            // touches `RadarRange` at all, so this walk is now checking that
+            // nothing has quietly re-coupled them as much as it is checking the
+            // authored number — which is why the `radar_mult == 1.0` assertion
+            // below sits inside the loop rather than being folded away.
             let seed = crate::ship::power::authored_power_group_seed(
                 &config
                     .ship_config
@@ -739,29 +787,27 @@ mod tests {
                 }
             }
 
-            let mut multipliers = default_multipliers();
-            if let Some(pm) = config
-                .sensors_console
-                .as_ref()
-                .and_then(|sc| sc.power_multipliers)
-            {
-                multipliers.insert(PowerGroupId(SENSORS_POWER_GROUP.into()), pm);
-            }
+            let multipliers = default_multipliers();
             let mut mods = ShipModifiers::new();
             apply_power_modifiers_from_read_state(&mut mods, &power.read_state(), &multipliers);
             let radar_mult = mods.get(&ModifierSlot::RadarRange);
+            assert_eq!(
+                radar_mult, 1.0,
+                "{path}: the reactor wrote `ModifierSlot::RadarRange`. Since #952 no \
+                 power group produces that slot, so this is a resurrected coupling \
+                 rather than a tuning question"
+            );
             let horizon = radar_range * radar_mult;
 
             assert!(
                 horizon >= required * ACQUISITION_MARGIN,
                 "{path}: at rest this hull acquires out to {horizon:.3} \
-                 (`[weapons_console.radar] range` {radar_range} × RadarRange ×{radar_mult:.3}, \
-                 `sensors` at level {}) but must engage out to {required:.1} (longest gun \
+                 (`[weapons_console.radar] range` {radar_range} × RadarRange ×{radar_mult:.3}) \
+                 but must engage out to {required:.1} (longest gun \
                  {longest_gun:.1}, authored artillery envelope {envelope:.1}). A lock is a \
                  precondition for firing, so a horizon inside the guns caps reach just as \
                  surely as the multiplier #955 deleted, and just as silently. Author \
                  `[weapons_console.radar] range` up to at least {:.1}",
-                power.level_for(&sensors()),
                 required * ACQUISITION_MARGIN / radar_mult,
             );
             checked.push(path);

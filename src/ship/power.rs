@@ -8,7 +8,7 @@ use crate::messages::{
 };
 use crate::modifiers::power_system::{
     power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
-    SENSORS_POWER_GROUP, WEAPONS_POWER_GROUP,
+    SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -154,19 +154,41 @@ pub fn seed_power_facts(
 /// on subsequent brownout cycles.
 #[derive(Component, Default, Clone)]
 pub struct PowerBrownoutState {
-    /// Group id strings (e.g. "weapons", "helm", "sensors") that are
+    /// Group id strings (e.g. "weapons", "helm", "shields") that are
     /// currently in a notified-brownout state.
     pub notified_groups: std::collections::HashSet<String>,
+    /// Set by [`tick_power_system`] from
+    /// [`crate::modifiers::power_system::PowerSystem::tick`]'s return whenever
+    /// the set of floored groups changed this tick, and consumed (and cleared)
+    /// by [`tick_power_brownout_advisory`] later in the same tick.
+    ///
+    /// This is the edge-triggered half of the advisory (issue #952). The
+    /// debounce below is level-triggered off the reserve's direction, and on
+    /// its own it hides the single most important event on the bus: the tick a
+    /// group is CUT is also the tick the draw drops, which very often flips the
+    /// reactor net-positive — so `is_draining` goes false and the advisory
+    /// clears at the exact moment Helm or Tactical needed telling. The edge
+    /// re-arms the debounce so the cut announces itself.
+    pub floors_changed: bool,
 }
 
 /// Maps a canonical power group id string to its display label in the HTML
-/// power panel. Anything unknown falls back to the upper-cased id string
-/// (via the caller).
+/// power panel. Anything unknown falls back to `"UNKNOWN"`.
+///
+/// **These literals are the live path, for every hull.** This function is the
+/// sole producer of [`PowerGroupEntry::label`], nothing in `gui/` reads a
+/// `power_groups` block, and no other code path resolves an authored
+/// `[power_groups.<id>] label` — so what a Power officer sees on any hull is
+/// "HELM" / "WEAPONS" / "SHIELDS" from right here. The authored `label` fields
+/// are real `strings.csv` ids and are covered by `scripts/check-strings.mjs`,
+/// but nothing displays them yet; wiring them up means carrying the ship's
+/// authored labels into `publish_power_blackboard` and resolving them client
+/// side through `t()`, with these as the fallback for a hull that authors none.
 pub fn power_group_label(group_id: &str) -> &'static str {
     match group_id {
         HELM_POWER_GROUP => "HELM",
         WEAPONS_POWER_GROUP => "WEAPONS",
-        SENSORS_POWER_GROUP => "SENSORS",
+        SHIELDS_POWER_GROUP => "SHIELDS",
         _ => "UNKNOWN",
     }
 }
@@ -183,7 +205,7 @@ pub fn power_level_for(ps: &PowerSystem, group: &PowerGroupId) -> u8 {
 /// [`PowerSystem::from_authored_groups`](crate::modifiers::power_system::PowerSystem::from_authored_groups)
 /// from a ship's authored `[power_groups.*]` config (issue #762).
 ///
-/// The canonical groups (`helm`, `weapons`, `sensors`) come first in their
+/// The canonical groups (`helm`, `weapons`, `shields`) come first in their
 /// stable [`POWER_GROUP_ORDER`], then any extra authored groups (e.g. `ops`)
 /// sorted by id, each seeded at its authored `default_level`. Returns an empty
 /// vec when there are no authored groups so the caller falls back to the
@@ -211,6 +233,49 @@ pub fn authored_power_group_seed(
         seed.push((id.clone(), cfg.default_level));
     }
     seed
+}
+
+/// Build the per-group battery-floor table (issue #952) a ship's
+/// [`PowerConfig`] ticks against.
+///
+/// Two authored sources meet here, and they are separate on purpose:
+///
+/// * WHEN a group is cut — `[power.battery_floor] <group> = <percent>`, which
+///   lives with the battery it thresholds so a hull can retune the whole ladder
+///   in one block.
+/// * WHERE it lands — that group's own `[power_groups.<group>] min_level`,
+///   which already existed as its allocation lower bound and is exactly the
+///   right answer: a brownout must not push a group below a level its own file
+///   says it can never sit under.
+///
+/// A group named in `battery_floor_pct` with no `[power_groups.*]` entry floors
+/// to [`crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL`] — the level the
+/// runtime seeds such a group at. This is the NPC case: the six hulls that
+/// declare no power groups at all get the canonical trio seeded at 2, and a
+/// brownout takes those ships back to nominal rather than below it. Landing
+/// them on `PowerGroupConfig`'s `min_level` parse default of 1 instead would
+/// have been a fleet-wide combat debuff dressed up as a brownout, on hulls
+/// whose files say nothing about the subject.
+pub fn authored_power_group_floors(
+    battery_floor_pct: &std::collections::HashMap<String, f32>,
+    power_groups: &std::collections::HashMap<PowerGroupId, crate::ship::config::PowerGroupConfig>,
+) -> std::collections::HashMap<String, crate::modifiers::power_system::PowerGroupFloor> {
+    battery_floor_pct
+        .iter()
+        .map(|(id, pct)| {
+            let min_level = power_groups
+                .get(&PowerGroupId(id.clone()))
+                .map(|g| g.min_level)
+                .unwrap_or(crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL);
+            (
+                id.clone(),
+                crate::modifiers::power_system::PowerGroupFloor {
+                    battery_pct: *pct,
+                    min_level,
+                },
+            )
+        })
+        .collect()
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
@@ -295,12 +360,22 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
             let Some(power) = power_snapshot else {
                 return vec![];
             };
+            // Same component-then-Resource preference for the reactor config,
+            // which `draining` needs to read this hull's own `rates`.
+            let mut cq =
+                world.query_filtered::<&PowerConfigResource, With<crate::server_app::LocalShip>>();
+            let config = cq
+                .iter(world)
+                .next()
+                .cloned()
+                .or_else(|| world.get_resource::<PowerConfigResource>().cloned())
+                .unwrap_or_default();
             vec![ServerMessage::PowerState {
                 helm: power.0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
                 weapons: power.0.level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
-                sensors: power.0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+                shields: power.0.level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
                 battery_charge: power.0.battery_charge,
-                locked: power.0.locked,
+                draining: power.0.is_draining(&config.0),
             }]
         },
     )
@@ -524,18 +599,26 @@ pub fn handle_power_inter_system(
 /// fallback, so NPC ships without a `[power]` block still tick with defaults.
 /// The Resource fallback path is retained for test environments that only
 /// insert the resource without a ship entity.
+///
+/// Forwards [`PowerSystem::tick`]'s floor-set edge into
+/// [`PowerBrownoutState::floors_changed`] on the same ship, for
+/// [`tick_power_brownout_advisory`] to consume later in the tick.
 pub fn tick_power_system(
     time: Res<Time>,
     mut power_res: Option<ResMut<ShipPowerSystem>>,
     config_res: Option<Res<PowerConfigResource>>,
     mut ships: Query<
-        (&mut ShipPowerSystem, Option<&PowerConfigResource>),
+        (
+            &mut ShipPowerSystem,
+            Option<&PowerConfigResource>,
+            Option<&mut PowerBrownoutState>,
+        ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let dt = time.delta_secs();
     let mut ticked_any = false;
-    for (mut power, config_comp) in ships.iter_mut() {
+    for (mut power, config_comp, brownout_state) in ships.iter_mut() {
         let cfg_default;
         let cfg: &PowerConfigResource = match config_comp {
             Some(c) => c,
@@ -547,14 +630,21 @@ pub fn tick_power_system(
                 }
             },
         };
-        power.0.tick(dt, &cfg.0);
+        let floors_changed = power.0.tick(dt, &cfg.0);
+        if let Some(mut state) = brownout_state {
+            if floors_changed {
+                state.floors_changed = true;
+            }
+        }
         ticked_any = true;
     }
     // Fallback: no ship entity with the component (test environments that only
-    // insert the Resource form). Tick the Resource directly.
+    // insert the Resource form). Tick the Resource directly. The floor edge is
+    // dropped here on purpose — there is no ship entity, so there is no
+    // `PowerBrownoutState` to carry it to and no advisory system to read it.
     if !ticked_any {
         if let (Some(power), Some(config)) = (power_res.as_deref_mut(), config_res.as_deref()) {
-            power.0.tick(dt, &config.0);
+            let _ = power.0.tick(dt, &config.0);
         }
     }
 }
@@ -573,7 +663,7 @@ fn system_id_for_power_group(group: &str) -> Option<SystemId> {
     match group {
         WEAPONS_POWER_GROUP => Some(crate::system_registry::tactical_station_key()),
         HELM_POWER_GROUP => Some(crate::system_registry::helm_station_key()),
-        SENSORS_POWER_GROUP => Some(crate::system_registry::sensors_system_id()),
+        SHIELDS_POWER_GROUP => Some(crate::system_registry::shields_system_id()),
         _ => None,
     }
 }
@@ -582,11 +672,34 @@ fn system_id_for_power_group(group: &str) -> Option<SystemId> {
 /// that cannot be satisfied (total allocation > 6 → battery draining).
 ///
 /// An advisory fires **only** when:
-/// - Total allocation > 6 (battery is draining — supply cannot meet demand)
-/// - The group's allocation level > 1 (system is actively drawing, not idle)
+/// - The reactor is net-negative at the current draw
+///   (`PowerSystem::is_draining`) OR the group is currently being held down by
+///   its authored battery floor (`PowerSystem::is_floored`)
+/// - The group's EFFECTIVE allocation level > 1 (system is actively drawing,
+///   not idle)
+///
+/// The `is_floored` half of the first condition is not redundant with the
+/// draining half — it is the case the draining half structurally cannot see.
+/// Cutting a group LOWERS the effective total, which is what picks the `rates`
+/// rung, so the cut very often makes the reactor net-POSITIVE: on a
+/// draining-only test the advisory would clear on precisely the tick Helm or
+/// Tactical lost its power. A group held below its command is in a brownout by
+/// any useful definition, whatever the reserve is doing.
+///
+/// The second condition is why the retired brownout lock used to silence every
+/// advisory at once: it slammed all three groups to 1 together. Since issue
+/// #952 a group is held at its own authored floor instead, which on the shipped
+/// hulls is NOMINAL for helm and weapons — so a browned-out ship goes on
+/// advising, correctly: those groups are still drawing, they have simply
+/// stopped drawing the extra. A group whose hull authors `min_level = 1` does
+/// fall silent, one at a time, as its own floor bites.
 ///
 /// Debounced via [`PowerBrownoutState`]: fires once on transition into
-/// brownout and clears when the condition resolves, allowing re-fire.
+/// brownout and clears when the condition resolves, allowing re-fire. The
+/// debounce is additionally re-armed by
+/// [`PowerBrownoutState::floors_changed`] — the floor-set edge
+/// [`tick_power_system`] forwards from [`PowerSystem::tick`] — so a NEW cut
+/// re-announces itself even while the ship has been continuously draining.
 ///
 /// # `sender_origin`
 ///
@@ -618,7 +731,6 @@ pub fn tick_power_brownout_advisory(
         let sender_origin = control_sources
             .0
             .source_for(&crate::system_registry::power_reactor_system_id());
-        let total = power.0.total();
         let cfg_default;
         let cfg: &PowerConfigResource = match config_comp {
             Some(c) => c,
@@ -630,18 +742,19 @@ pub fn tick_power_brownout_advisory(
                 }
             },
         };
-        let rate = cfg
-            .0
-            .rates
-            .get((total as usize).clamp(3, 8) - 3)
-            .copied()
-            .unwrap_or(0.0);
-        let is_draining = rate < 0.0;
+        let is_draining = power.0.is_draining(&cfg.0);
+
+        // Consume this tick's floor-set edge. A group the reactor has just cut
+        // (or just released) is a genuine transition, so clear the debounce and
+        // let the groups still in brownout re-announce below.
+        if std::mem::take(&mut brownout_state.floors_changed) {
+            brownout_state.notified_groups.clear();
+        }
 
         let mut still_brownouting = std::collections::HashSet::new();
 
         for (group_id, level) in power.0.iter() {
-            if is_draining && level > 1 {
+            if (is_draining || power.0.is_floored(group_id)) && level > 1 {
                 still_brownouting.insert(group_id.0.clone());
 
                 // Rising edge: group was not previously notified → emit advisory.
@@ -761,6 +874,10 @@ fn publish_power_blackboard(
                 id: gid.0.clone(),
                 label: power_group_label(gid.0.as_str()).into(),
                 level: power_level_for(&power.0, &gid),
+                // The standing order, so the panel's +/- can step from what was
+                // ASKED for rather than from what a battery floor has left the
+                // group running at (issue #952).
+                commanded_level: power.0.commanded_level_for(&gid),
                 max_level,
             }
         })
@@ -772,7 +889,8 @@ fn publish_power_blackboard(
         total_max: 8,
         battery_charge: power.0.battery_charge,
         battery_max: config.0.capacity,
-        locked: power.0.locked,
+        draining: power.0.is_draining(&config.0),
+        charging: power.0.is_charging(&config.0),
     };
     // Fine blackboards (issue #513) — reactor owns the allocation surface,
     // battery owns the emergency-reserve pool. Emitted alongside the legacy
@@ -781,7 +899,7 @@ fn publish_power_blackboard(
         total_allocation: power.0.total(),
         max_allocation: 8,
         is_online: reactor_online,
-        locked: power.0.locked,
+        draining: power.0.is_draining(&config.0),
     };
     let emergency_threshold = if config.0.capacity > 0.0 {
         (config.0.emergency_threshold / config.0.capacity).clamp(0.0, 1.0)
@@ -819,7 +937,7 @@ mod tests {
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
     use crate::messages::{ModifierSlot, ServerMessage, *};
     use crate::modifiers::ShipModifiers;
-    use crate::power_system::SENSORS_POWER_GROUP;
+    use crate::power_system::SHIELDS_POWER_GROUP;
     use crate::shield::ShieldSystem;
     use crate::simulation::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipImpulse,
@@ -1008,6 +1126,448 @@ mod tests {
         }
     }
 
+    // ── Battery floors (issue #952) ─────────────────────────────────────────
+
+    /// `authored_power_group_floors` pairs each authored percentage with its
+    /// group's OWN `[power_groups.<id>] min_level`, and falls back to 1 for a
+    /// group the hull does not describe (the NPC case, where the runtime seeds
+    /// the canonical trio and no `[power_groups.*]` block exists).
+    #[test]
+    fn authored_floors_take_their_landing_level_from_the_groups_own_min_level() {
+        use crate::ship::config::PowerGroupConfig;
+        let groups = std::collections::HashMap::from([(
+            PowerGroupId(HELM_POWER_GROUP.into()),
+            PowerGroupConfig {
+                label: "helm".into(),
+                default_level: 2,
+                min_level: 2,
+                max_level: 4,
+            },
+        )]);
+        let pct = std::collections::HashMap::from([
+            (HELM_POWER_GROUP.to_string(), 50.0),
+            (SHIELDS_POWER_GROUP.to_string(), 5.0),
+        ]);
+
+        let floors = authored_power_group_floors(&pct, &groups);
+        assert_eq!(floors[HELM_POWER_GROUP].battery_pct, 50.0);
+        assert_eq!(
+            floors[HELM_POWER_GROUP].min_level, 2,
+            "a brownout must not push a group under the floor its own file sets"
+        );
+        assert_eq!(
+            floors[SHIELDS_POWER_GROUP].min_level,
+            crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL,
+            "a group the hull does not describe lands on the level the runtime              seeds it at, not on an invented 1"
+        );
+    }
+
+    /// **Every shipped hull ships the ladder, it is a LADDER, and it lands each
+    /// group where that group's own file says it may sit.**
+    ///
+    /// Walked on the shipped files through the include resolver rather than
+    /// asserted on the parse default, because the whole point of issue #952's
+    /// AC4 is that these are authored per hull.
+    ///
+    /// # What this used to also assert, and why it no longer does
+    ///
+    /// An earlier revision required each floor to sit STRICTLY BELOW the same
+    /// group's `[power.ai_policy.param] min_reserve_<g>`, on the reading that
+    /// the two answer the same question through different mechanisms and would
+    /// race when authored at the same percentage. They did race — but the cause
+    /// was that neither had hysteresis, and separating them by ten points hid
+    /// the collision at the cost of the feature.
+    ///
+    /// The cost was total, not partial. With the floor under the reserve, the
+    /// policy has already commanded the group down to the floor's own landing
+    /// level (`min_level`) before the charge reaches the floor, so
+    /// `apply_battery_floors`' `held >= commanded` skip fires and the group is
+    /// never cut. On every AI-crewed hull in the fleet — which is every hull
+    /// but the one a human is sitting at — the ladder did nothing at all, and
+    /// "shields hold longest" was true only in the sense that nothing was ever
+    /// cut. An invariant that holds only because the feature it guards is inert
+    /// is not worth keeping.
+    ///
+    /// [`crate::modifiers::power_system::PowerConfig::floor_release_margin_pct`]
+    /// is what makes the relation safe to break: the floor releases a margin
+    /// ABOVE its own threshold, so a floor authored at or above a reserve damps
+    /// the policy's boundary instead of racing it. What survives is a per-group
+    /// TUNING choice rather than a universal relation, and the fleet answers it
+    /// two different ways on purpose — `weapons` above its reserve so the
+    /// reactor cuts the guns before the crew would, `helm` below its reserve
+    /// because holding helm down through a band the crew has already
+    /// re-authorised measurably costs an attack-pass destroyer its break-off.
+    /// `console_ai::server::tests::the_battery_floor_ladder_cuts_an_ai_crewed_hull_in_floor_order`
+    /// pins the effect, and the `[power.battery_floor]` note in
+    /// `assets/entities/fragments/ai/fleet_baseline.toml` records the
+    /// measurement. What IS still checked below is the release margin, and
+    /// against the hazard it actually guards rather than against the reserve.
+    #[test]
+    fn every_hulls_battery_floors_descend() {
+        let mut checked: Vec<String> = Vec::new();
+        for path in shipped_entity_paths() {
+            let config = crate::entity_includes::load_entity_config(&path)
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let Some(reactor) = config.power.as_ref() else {
+                continue;
+            };
+            let power_groups = config
+                .ship_config
+                .as_ref()
+                .map(|s| s.power_groups.clone())
+                .unwrap_or_default();
+            let floors = authored_power_group_floors(&reactor.battery_floor, &power_groups);
+
+            let read = |g: &str| {
+                floors
+                    .get(g)
+                    .unwrap_or_else(|| panic!("{path} authors no `{g}` battery floor"))
+                    .battery_pct
+            };
+            let (helm, weapons, shields) = (
+                read(HELM_POWER_GROUP),
+                read(WEAPONS_POWER_GROUP),
+                read(SHIELDS_POWER_GROUP),
+            );
+            assert!(
+                helm > weapons && weapons > shields,
+                "{path}: floors are helm {helm} / weapons {weapons} / shields \
+                 {shields}. They must DESCEND in that order or the ship does not \
+                 lose helm first and keep its screens longest, which is the entire \
+                 behaviour #952 buys"
+            );
+
+            // A floor that can BITE needs the hysteresis band, full stop.
+            //
+            // This used to read `floor < reserve || margin > 0.0`, which guards
+            // the wrong hazard: it let the margin be switched off on any floor
+            // authored under the same group's `min_reserve_*` — which is the
+            // shipped `helm = 40` against a `min_reserve_helm` of 50, on the
+            // very hull a human Power officer flies. The AI reserve has nothing
+            // to do with the flicker. At margin 0 the cut and release
+            // thresholds are the same number, so the group is released the tick
+            // after it is cut and chatters at tick rate, and that happens
+            // whenever the group can be COMMANDED above the level its floor
+            // lands it on, by any operator.
+            //
+            // Also checked at load in `EntityConfig::from_toml`, so a hull
+            // added outside `assets/entities` cannot get past it either; this
+            // walk keeps the statement where the rest of the ladder's fleet
+            // invariants live.
+            let margin = reactor.battery_floor_release_margin;
+            for (group, _) in floors.iter() {
+                let can_bite = match power_groups.get(&PowerGroupId(group.clone())) {
+                    Some(cfg) => cfg.min_level < cfg.max_level,
+                    None => {
+                        crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL
+                            < crate::ship::config::default_max_power_level()
+                    }
+                };
+                assert!(
+                    !can_bite || margin > 0.0,
+                    "{path}: `[power.battery_floor] {group}` can bite — the group can be \
+                     commanded above the level its floor lands it on — but \
+                     `battery_floor_release_margin` is {margin}. With no band the cut \
+                     and its release share one threshold and flip at tick rate"
+                );
+            }
+
+            // Every group the hull authors and the ladder names must land on
+            // that group's own min_level — the two blocks have to agree.
+            for (id, cfg) in &power_groups {
+                if let Some(floor) = floors.get(id.0.as_str()) {
+                    assert_eq!(
+                        floor.min_level, cfg.min_level,
+                        "{path}: `{}`'s floor lands on {} but its `[power_groups]` \
+                         min_level is {}",
+                        id.0, floor.min_level, cfg.min_level
+                    );
+                }
+            }
+            checked.push(path);
+        }
+        assert!(
+            checked.len() >= 10,
+            "only {} shipped hull(s) reached this invariant ({checked:?}). Every \
+             ship in the fleet authors a `[power]` block; if fewer than ten were \
+             walked, the walk stopped finding them rather than the fleet having \
+             got smaller",
+            checked.len()
+        );
+    }
+
+    /// **A fully-floored hull must still RECHARGE.**
+    ///
+    /// The trap the `alliance_courier` shipped, and the one no other test could
+    /// see. `PowerSystem::tick` integrates the battery from the EFFECTIVE
+    /// total, so once every floor is in force the ship's draw is the sum of
+    /// each group's landing level — and if the hull's own `[power] rates`
+    /// happen to put a zero (or worse) on that rung, the reserve stops moving,
+    /// no floor can ever climb back through its release margin, and the ship is
+    /// parked at its floors for the rest of the encounter with no way out.
+    /// The courier's `rates` put exactly `0.0` at its floored total of 6
+    /// (`ops 1 + helm 2 + weapons 2 + shields 1`), which also meant a courier
+    /// sitting at anchor never recovered a point of charge.
+    ///
+    /// The retired brownout lock hid this by forcing every group to 1, dropping
+    /// the total to the reactor's fastest-charging rung whatever the hull had
+    /// authored. Per-group floors land where the hull says, so the hull has to
+    /// mean it.
+    ///
+    /// # Computing the total the way `tick` does
+    ///
+    /// The draw modelled here has to be the WORST the runtime can land on, not
+    /// the one a resting hull happens to show, and two things nearly made it
+    /// the latter:
+    ///
+    /// * The landing level is `min_level` CLAMPED to `[1, 4]`, because
+    ///   `apply_battery_floors` clamps it. `PowerGroupConfig::min_level` has no
+    ///   load-time range check, so an authored `min_level = 0` would otherwise
+    ///   make this walk compute a total the ship can never actually draw and
+    ///   clear the assertion on a rung it never lands on.
+    /// * A floored group lands on that level whatever it was commanded to, so
+    ///   the resting level is the wrong input for it — a hull authoring
+    ///   `default_level` under `min_level` would be modelled low. Only a group
+    ///   the ladder does NOT name keeps its commanded level, and for those this
+    ///   walk models the resting level. That is honest only while no such group
+    ///   can be commanded at all, which is asserted below rather than assumed:
+    ///   `ops` on the four Alliance hulls is not in `POWER_GROUP_ORDER`, so
+    ///   `publish_power_blackboard` never puts it on the panel, and no shipped
+    ///   `[power.ai_policy]` names it as a channel. Were it commandable, an
+    ///   `ops 3 / helm 2 / weapons 2 / shields 1 = 8` would be a fully-floored
+    ///   destroyer sitting on `rates[5] = -5` — the exact permanent park this
+    ///   test exists to prevent, invisible to it.
+    #[test]
+    fn every_hulls_fully_floored_total_recharges() {
+        let mut checked: Vec<String> = Vec::new();
+        for path in shipped_entity_paths() {
+            let config = crate::entity_includes::load_entity_config(&path)
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let Some(reactor) = config.power.as_ref() else {
+                continue;
+            };
+            let power_groups = config
+                .ship_config
+                .as_ref()
+                .map(|s| s.power_groups.clone())
+                .unwrap_or_default();
+            let floors = authored_power_group_floors(&reactor.battery_floor, &power_groups);
+
+            // The allocation a fully-floored ship settles on: every group the
+            // ladder names at its landing level, every group it does not at the
+            // level its file rests it on. Where the hull authors no
+            // `[power_groups.*]` at all, the runtime seeds the canonical trio,
+            // which `authored_power_group_floors` has already accounted for.
+            let seed = authored_power_group_seed(&power_groups);
+            let resting: Vec<(String, u8)> = if seed.is_empty() {
+                POWER_GROUP_ORDER
+                    .iter()
+                    .map(|g| {
+                        (
+                            (*g).to_string(),
+                            crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL,
+                        )
+                    })
+                    .collect()
+            } else {
+                seed.iter().map(|(id, lvl)| (id.0.clone(), *lvl)).collect()
+            };
+            // A group the ladder names lands on its clamped `min_level` however
+            // it was commanded; a group it does not keeps its commanded level,
+            // which is its resting level for as long as nothing can command it.
+            let ai_channels: Vec<&str> = reactor
+                .ai_policy
+                .as_ref()
+                .map(|p| {
+                    p.rule
+                        .iter()
+                        .chain(p.state.iter().flat_map(|s| s.rule.iter()))
+                        .map(|r| r.channel.as_str())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let floored_total: u32 = resting
+                .iter()
+                .map(|(id, resting_level)| match floors.get(id.as_str()) {
+                    Some(f) => f.min_level.clamp(1, 4) as u32,
+                    None => {
+                        assert!(
+                            !POWER_GROUP_ORDER.contains(&id.as_str())
+                                && !ai_channels.contains(&id.as_str()),
+                            "{path}: `{id}` has no `[power.battery_floor]` rung but CAN be \
+                             commanded — it is on the Power panel or is an authored \
+                             `[power.ai_policy]` channel. The ladder cannot bound a group \
+                             it does not name, so the total below is not the worst this \
+                             hull can draw and this whole invariant is unenforceable. \
+                             Author a floor for it"
+                        );
+                        *resting_level as u32
+                    }
+                })
+                .sum();
+            let rung = floored_total.clamp(3, 8) as usize - 3;
+            let rate = reactor.rates[rung];
+            assert!(
+                rate > 0.0,
+                "{path}: fully floored this hull draws {floored_total}, and its \
+                 `[power] rates` put {rate} on that rung. A ship whose floors settle \
+                 it on a non-positive rate can never climb back through a release \
+                 margin, so no floor ever lifts and the hull is parked at its \
+                 minimums for the rest of the encounter. Author a positive rate at \
+                 index {rung}"
+            );
+            checked.push(path);
+        }
+        assert!(
+            checked.len() >= 10,
+            "only {} shipped hull(s) reached this invariant ({checked:?})",
+            checked.len()
+        );
+    }
+
+    /// Load a shipped hull's reactor as the runtime configures it: capacity,
+    /// rates, the authored `[power.battery_floor]` ladder paired with each
+    /// group's own `min_level`, and the release margin. Returns the config
+    /// alongside a `PowerSystem` seeded at the hull's authored resting levels.
+    fn shipped_reactor(path: &str) -> (crate::modifiers::power_system::PowerConfig, PowerSystem) {
+        let config = crate::entity_includes::load_entity_config(path)
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+        let reactor = config.power.as_ref().expect("hull authors [power]");
+        let power_groups = config
+            .ship_config
+            .as_ref()
+            .map(|s| s.power_groups.clone())
+            .unwrap_or_default();
+        let cfg = crate::modifiers::power_system::PowerConfig {
+            capacity: reactor.capacity,
+            rates: reactor.rates,
+            emergency_threshold: reactor.emergency_threshold,
+            group_floors: authored_power_group_floors(&reactor.battery_floor, &power_groups),
+            floor_release_margin_pct: reactor.battery_floor_release_margin,
+        };
+        let seed = authored_power_group_seed(&power_groups);
+        let ps = PowerSystem::from_authored_groups(reactor.capacity, &seed);
+        (cfg, ps)
+    }
+
+    /// **A hull a HUMAN Power officer has spent up must be able to climb back
+    /// out of its own ladder.**
+    ///
+    /// The failure this pins is not the hysteresis — that part was always
+    /// right — but what the hysteresis released INTO. A floored group is
+    /// released at `floor + margin`, yet the charge the reactor can actually
+    /// reach is set by the LOWEST engaged floor, because that is the cut deep
+    /// enough to flip the `rates` rung positive. Release the lowest rung first
+    /// and the draw goes straight back up, so the reserve never climbs to the
+    /// higher rung's release band at all.
+    ///
+    /// On the shipped destroyer (capacity 70, `rates = [5,4,3,2,-2,-5]`) with
+    /// the legal 8-point order `ops 1 / helm 3 / weapons 3 / shields 1`:
+    ///
+    /// | charge | engaged | effective total | rate |
+    /// |---|---|---|---|
+    /// | < 40 % | helm | 7 | −2/s |
+    /// | < 25 % | helm + weapons | 6 | **+2/s** |
+    /// | ≥ 30 % | helm only, weapons released at 25+5 | 7 | −2/s |
+    ///
+    /// +2 and −2 are symmetric, so the charge sat in an exact 25–30 % limit
+    /// cycle with zero net drift, and helm's release threshold of 40+5 = 45 %
+    /// was unreachable for the rest of the encounter. Nothing on the Power
+    /// panel explained it, and the only exit was lowering a DIFFERENT group's
+    /// standing order.
+    ///
+    /// `apply_battery_floors` now releases the ladder from the TOP: a rung
+    /// stays cut while any rung above it is still engaged, so the reserve holds
+    /// the deep-cut draw all the way up through the highest engaged release
+    /// band and every group returns together. This test flies the hull's own
+    /// file rather than a fixture, so a retune that re-creates the trap fails
+    /// here.
+    #[test]
+    fn a_human_commanded_destroyer_climbs_back_out_of_its_own_floor_ladder() {
+        let path = "assets/entities/alliance_destroyer.toml";
+        let (config, mut ps) = shipped_reactor(path);
+        let helm = PowerGroupId(HELM_POWER_GROUP.into());
+        let weapons = PowerGroupId(WEAPONS_POWER_GROUP.into());
+
+        // The order a human Power officer can set from the console: the whole
+        // 8-point budget, combat stations on helm and guns. No AI policy is
+        // involved and there is no `min_reserve_*` guard to give a point back.
+        ps.set_group_allocation(&helm, 3).unwrap();
+        ps.set_group_allocation(&weapons, 3).unwrap();
+        assert_eq!(
+            ps.commanded_total(),
+            8,
+            "the officer spends the full budget"
+        );
+
+        let pct = |ps: &PowerSystem| ps.battery_charge / config.capacity * 100.0;
+        let helm_release =
+            config.group_floors[HELM_POWER_GROUP].battery_pct + config.floor_release_margin_pct;
+
+        let dt = 0.1_f32;
+        let mut helm_was_cut = false;
+        let mut high_water = 0.0_f32;
+        let mut recovered_after = None;
+        // Two minutes of simulated time — the whole drain-and-recover excursion
+        // above is about twenty seconds, so a run that does not recover here is
+        // not recovering at all.
+        for step in 0..1200 {
+            ps.tick(dt, &config);
+            if ps.is_floored(&helm) {
+                helm_was_cut = true;
+            }
+            if !helm_was_cut {
+                continue;
+            }
+            high_water = high_water.max(pct(&ps));
+            if !ps.is_floored(&helm) && !ps.is_floored(&weapons) && pct(&ps) >= helm_release {
+                recovered_after = Some(step as f32 * dt);
+                break;
+            }
+        }
+
+        assert!(
+            helm_was_cut,
+            "{path}: the reserve never fell far enough to cut helm, so this test \
+             is not exercising the ladder at all"
+        );
+        let elapsed = recovered_after.unwrap_or_else(|| {
+            panic!(
+                "{path}: helm was cut and never came back. The charge peaked at \
+                 {high_water:.1} % against a helm release threshold of \
+                 {helm_release:.1} % — the ladder released its LOWEST engaged \
+                 rung first, which put the draw back up and capped the reserve \
+                 below every higher rung's release band. A rung must stay cut \
+                 while any rung above it is still engaged"
+            )
+        });
+        assert!(
+            !ps.is_floored(&helm) && !ps.is_floored(&weapons),
+            "every group must be back at its standing order once the reserve has \
+             cleared the top of the ladder"
+        );
+        assert_eq!(
+            ps.total(),
+            ps.commanded_total(),
+            "recovery is free: the effective total returns to what the officer \
+             commanded without anyone re-issuing anything (after {elapsed:.1} s)"
+        );
+    }
+
+    /// Every shipped `assets/entities/*.toml`, as the relative paths the include
+    /// resolver keys on. Read off the directory rather than listed, so a new hull
+    /// is covered by the invariant above the moment it is added.
+    fn shipped_entity_paths() -> Vec<String> {
+        let mut out: Vec<String> = std::fs::read_dir("assets/entities")
+            .expect("assets/entities must be readable")
+            .map(|e| e.expect("readable dir entry").path())
+            .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .collect();
+        out.sort();
+        out
+    }
+
     #[test]
     fn no_power_station_holder_no_power_state_broadcast() {
         let mut app = test_app();
@@ -1061,19 +1621,19 @@ mod tests {
                 2,
             );
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                &crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                 2,
             );
         }
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            ps.0.increase(&PowerGroupId(SENSORS_POWER_GROUP.into()));
+            ps.0.increase(&PowerGroupId(SHIELDS_POWER_GROUP.into()));
         }
         assert_eq!(
             app.world()
                 .resource::<ShipPowerSystem>()
                 .0
-                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+                .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
             2,
             "sensors should stay at 2 when total is already at the cap of 8"
         );
@@ -1150,8 +1710,22 @@ mod tests {
         );
     }
 
+    /// **A flat battery drives every group to its floor, and the floors reach
+    /// the modifier table.**
+    ///
+    /// Renamed and re-aimed from `exhaustion_forces_consoles_to_one_and_updates_all_modifiers`
+    /// (issue #952), which asserted that a flat battery slammed every group to
+    /// 1 and crushed all three multipliers to x0.667. Both halves of that are
+    /// now wrong. Nothing "forces consoles to one": each group is held at its
+    /// own authored floor level, which for a hull that describes no
+    /// `[power_groups.*]` — this fixture — is NOMINAL. So the assertion
+    /// inverts: the spent-up helm loses its point and lands on x1.0, and the
+    /// two groups that were resting there never move at all. The third slot
+    /// changed too — `RadarRange` was the sensors group's and is now nobody's,
+    /// so the group whose collapse shows in the modifiers is shields, through
+    /// `ShieldRegen`.
     #[test]
-    fn exhaustion_forces_consoles_to_one_and_updates_all_modifiers() {
+    fn a_flat_battery_floors_every_group_and_updates_all_modifiers() {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
@@ -1167,7 +1741,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(PowerGroupId(SENSORS_POWER_GROUP.into()), defaults);
+            .insert(PowerGroupId(SHIELDS_POWER_GROUP.into()), defaults);
 
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
@@ -1179,16 +1753,26 @@ mod tests {
                 2,
             );
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                &crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                 2,
             );
             ps.0.battery_charge = 0.0;
-            ps.0.locked = false;
         }
 
         tick(&mut app);
 
-        let expected = 1.0 / 1.5;
+        let power = app.world().resource::<ShipPowerSystem>().0.clone();
+        assert_eq!(
+            power.level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
+            2,
+            "the flat battery took helm's spent point back"
+        );
+        assert_eq!(
+            power.commanded_level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
+            4,
+            "and left the command that spent it standing"
+        );
+
         let mods = {
             let mut q = app
                 .world_mut()
@@ -1196,19 +1780,20 @@ mod tests {
             q.single(app.world()).unwrap().clone()
         };
 
+        for (slot, label) in [
+            (ModifierSlot::MaxSpeed, "MaxSpeed"),
+            (ModifierSlot::PhaserDamage, "PhaserDamage"),
+            (ModifierSlot::ShieldRegen, "ShieldRegen"),
+        ] {
+            let mult = mods.get(&slot);
+            assert!(
+                (mult - 1.0).abs() < 1e-6,
+                "with every group held at its NOMINAL floor, {label} should be                  x1.0, got {mult}. A value below 1 means something landed a group                  under the level its file seeds it at"
+            );
+        }
         assert!(
-            (mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
-            "after exhaustion MaxSpeed should be {expected}, got {}",
-            mods.get(&ModifierSlot::MaxSpeed)
-        );
-        assert!(
-            (mods.get(&ModifierSlot::PhaserDamage) - expected).abs() < 1e-6,
-            "after exhaustion PhaserDamage should be {expected}, got {}",
-            mods.get(&ModifierSlot::PhaserDamage)
-        );
-        assert!(
-            (mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
-            "after exhaustion RadarRange should be {expected}, got {}",
+            (mods.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6,
+            "the reactor must not touch RadarRange at all (#952), got {}",
             mods.get(&ModifierSlot::RadarRange)
         );
     }
@@ -1249,11 +1834,13 @@ mod tests {
             "expected WEAPONS entry"
         );
         assert!(
-            bb.groups.iter().any(|e| e.label == "SENSORS"),
-            "expected SENSORS entry"
+            bb.groups.iter().any(|e| e.label == "SHIELDS"),
+            "expected SHIELDS entry"
         );
         assert!(bb.total > 0, "total should be > 0");
-        assert!(!bb.locked, "should not be locked initially");
+        // Total 6 on the default seed, where the default `rates` are still
+        // positive — the reserve is filling, not emptying.
+        assert!(!bb.draining, "should not be draining at the resting total");
     }
 
     #[test]
@@ -1291,7 +1878,7 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 4,
                 },
             },
@@ -1302,7 +1889,7 @@ mod tests {
             app.world()
                 .resource::<ShipPowerSystem>()
                 .0
-                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+                .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
             4
         );
     }
@@ -1324,7 +1911,7 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: SystemId("power-reactor".to_string()),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 4,
                 },
             },
@@ -1335,7 +1922,7 @@ mod tests {
             app.world()
                 .resource::<ShipPowerSystem>()
                 .0
-                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+                .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
             4,
             "raw wire string \"power-reactor\" must reach handle_power_messages \
              — if this fails, either the handler's for_target() argument or the \
@@ -1608,7 +2195,7 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 4,
                 },
             },
@@ -1618,7 +2205,7 @@ mod tests {
             app.world()
                 .resource::<ShipPowerSystem>()
                 .0
-                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+                .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
             4,
             "baseline sanity: online reactor should accept allocation input"
         );
@@ -1631,7 +2218,7 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 1,
                 },
             },
@@ -1641,7 +2228,7 @@ mod tests {
             app.world()
                 .resource::<ShipPowerSystem>()
                 .0
-                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+                .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
             4,
             "reactor offline must refuse allocation input (sensors should stay at 4)"
         );
@@ -1939,7 +2526,7 @@ mod tests {
         let _ = drain_coord(&mut app); // flush any stale events
         set_ship_power(&mut app, HELM_POWER_GROUP, 3);
         set_ship_power(&mut app, WEAPONS_POWER_GROUP, 3);
-        set_ship_power(&mut app, SENSORS_POWER_GROUP, 1);
+        set_ship_power(&mut app, SHIELDS_POWER_GROUP, 1);
         let _ = tick(&mut app);
         let emitted = drain_coord(&mut app);
         assert_eq!(
@@ -1952,13 +2539,102 @@ mod tests {
                 CoordinationPayload::PowerBrownout { group, .. } => {
                     assert_ne!(
                         group.as_str(),
-                        SENSORS_POWER_GROUP,
+                        SHIELDS_POWER_GROUP,
                         "sensors at level 1 must not get a brownout advisory"
                     );
                 }
                 _ => panic!("unexpected payload type"),
             }
         }
+    }
+
+    /// **A group crossing its floor must not re-fire the advisory at tick rate.**
+    ///
+    /// The regression this pins is the one the release margin exists for, seen
+    /// from the far end of the bus. Flooring a group lowers the EFFECTIVE total,
+    /// `PowerSystem::tick` indexes `rates` by the effective total, and the rungs
+    /// either side of the resting total have opposite signs — so with a single
+    /// threshold the cut recharges the reserve straight back through the
+    /// threshold that made it, and the group is released on the very next tick.
+    /// `is_draining` toggles with it, this system's debounce clears and re-arms
+    /// on alternating ticks, and `CoordinationPayload::PowerBrownout` lands at
+    /// Helm and Tactical around thirty times a second.
+    ///
+    /// So this counts TICKS THAT EMITTED rather than asserting a state: a
+    /// message count is the thing a bridge crew actually experiences, and it is
+    /// the only assertion that fails loudly if the two-threshold shape is ever
+    /// flattened back into one.
+    #[test]
+    fn a_group_crossing_its_floor_does_not_re_advise_every_tick() {
+        let mut app = brownout_test_app();
+        start_game(&mut app);
+
+        // Commanded total 7 → −2/s on the default rates; the floored total of 6
+        // is +2/s, so the cut flips the sign. Start just above helm's 50 % floor.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
+            if let Ok(mut ps) = q.single_mut(app.world_mut()) {
+                let _ =
+                    ps.0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
+                ps.0.battery_charge = 50.5;
+            }
+        }
+        let _ = tick(&mut app);
+        let _ = drain_coord(&mut app);
+
+        let mut emitting_ticks = 0;
+        let mut helm_flips = 0;
+        let mut last_helm = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipPowerSystem, With<crate::simulation::LocalShip>>();
+            q.single(app.world())
+                .unwrap()
+                .0
+                .level_for(&PowerGroupId(HELM_POWER_GROUP.into()))
+        };
+        const TICKS: usize = 40;
+        for _ in 0..TICKS {
+            let _ = tick(&mut app);
+            if !drain_coord(&mut app).is_empty() {
+                emitting_ticks += 1;
+            }
+            let helm = {
+                let mut q = app
+                    .world_mut()
+                    .query_filtered::<&ShipPowerSystem, With<crate::simulation::LocalShip>>();
+                q.single(app.world())
+                    .unwrap()
+                    .0
+                    .level_for(&PowerGroupId(HELM_POWER_GROUP.into()))
+            };
+            if helm != last_helm {
+                helm_flips += 1;
+                last_helm = helm;
+            }
+        }
+
+        assert!(
+            emitting_ticks <= 4,
+            "PowerBrownout advisories went out on {emitting_ticks} of {TICKS} ticks. \
+             A brownout that re-announces itself every other tick is the \
+             single-threshold flip-flop: the cut drops the draw onto a charging \
+             rung, the charge re-crosses the bare floor, and the group is released \
+             again immediately"
+        );
+        assert!(
+            helm_flips <= 4,
+            "helm's effective level changed {helm_flips} times in {TICKS} ticks — \
+             the floor is chattering, and every consumer of `MaxSpeed` is \
+             chattering with it"
+        );
+        assert!(
+            emitting_ticks >= 1,
+            "the fixture never browned out at all, so it proves nothing: helm \
+             must actually cross its floor inside the window"
+        );
     }
 
     /// Issue #873. The brownout advisory's `sender_origin` must report the

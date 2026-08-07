@@ -572,9 +572,9 @@ mod tests {
                 ServerMessage::PowerState {
                     helm: 3,
                     weapons: 2,
-                    sensors: 4,
+                    shields: 4,
                     battery_charge: 65.5,
-                    locked: false,
+                    draining: true,
                 },
             ),
             (
@@ -2502,13 +2502,13 @@ mod tests {
             total_allocation: 5,
             max_allocation: 8,
             is_online: false,
-            locked: true,
+            draining: true,
         });
         let json = serde_json::to_string(&bb).unwrap();
         assert!(json.contains("\"kind\":\"PowerReactor\""), "got: {json}");
         assert!(json.contains("\"is_online\":false"), "got: {json}");
         assert!(json.contains("\"total_allocation\":5"), "got: {json}");
-        assert!(json.contains("\"locked\":true"), "got: {json}");
+        assert!(json.contains("\"draining\":true"), "got: {json}");
         let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
         assert_eq!(bb, decoded);
     }
@@ -2730,6 +2730,8 @@ mod tests {
         // (post-#516 sub-PR-follow-up the `consoles` field is gone from the
         // struct entirely; the legacy field is now an "unknown field" that
         // serde silently ignores, and `groups` defaults to the empty vec).
+        // `locked` joined `consoles` in that ignored set when issue #952
+        // retired the brownout lock; `draining` defaults to false in its place.
         let legacy_json = r#"{
             "kind": "Power",
             "data": {
@@ -2745,6 +2747,11 @@ mod tests {
         match decoded {
             SystemBlackboard::Power(bb) => {
                 assert!(bb.groups.is_empty(), "groups defaults to empty vec");
+                assert!(
+                    !bb.draining,
+                    "a pre-#952 payload's `locked` must not be read as `draining` — \
+                     they are different questions"
+                );
             }
             other => panic!("expected Power blackboard, got {other:?}"),
         }
@@ -2760,11 +2767,19 @@ mod tests {
             id: "helm".into(),
             label: "HELM".into(),
             level: 1,
+            commanded_level: 3,
             max_level: 4,
         };
         let json = serde_json::to_string(&entry).unwrap();
         let decoded: PowerGroupEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, entry);
+
+        // A pre-#952 payload has no `commanded_level`. It must still decode —
+        // the client treats the missing 0 as "unknown" and steps from `level`.
+        let legacy: PowerGroupEntry =
+            serde_json::from_str(r#"{"id":"helm","label":"HELM","level":2,"max_level":4}"#)
+                .unwrap();
+        assert_eq!(legacy.commanded_level, 0);
     }
 
     // ── Batch inbound decode (issue #602) ────────────────────────────────

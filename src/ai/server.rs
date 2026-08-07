@@ -1688,7 +1688,9 @@ verb = "fire_blaster"
     /// `beam_range` by `ModifierSlot::RadarRange`, so the standoff ring another
     /// helm derived from this fact shrank and grew with the TARGET's sensor
     /// power — a hull resting `sensors` at 1 published two thirds of the reach
-    /// its guns were credited with. Blasters were never scaled, which is what
+    /// its guns were credited with. (That power group is gone since #952; the
+    /// slot survives, driven by radar hull damage and region dampening, and the
+    /// invariant this test pins survives with it.) Blasters were never scaled, which is what
     /// made the two families disagree about the same question.
     ///
     /// The entity here carries a live `ShipModifiers` with the slot crushed to
@@ -1706,23 +1708,28 @@ verb = "fire_blaster"
     /// crushed leg discriminate as sharply as the doubled one.
     #[test]
     fn direct_fire_reach_ignores_the_radar_range_slot() {
-        use crate::messages::{ModifierSlot, PowerGroupId};
+        use crate::messages::ModifierSlot;
         use crate::modifiers::cache::ModifierSource;
         use crate::modifiers::{Modifier, ShipModifiers};
 
+        // Written under a radar-DAMAGE source since issue #952 retired the
+        // `sensors` power group: the slot's producers are now hull damage and
+        // region dampening, and this fixture has to move it the way something
+        // real still does. The reach question is unchanged — nothing about how
+        // far a gun shoots may depend on this slot, whoever wrote it.
         let radar_slot_at = |bonus: f32| -> ShipModifiers {
             let mut mods = ShipModifiers::new();
             mods.add_or_update(Modifier {
-                source: ModifierSource::PowerGroup(PowerGroupId(
-                    crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
-                )),
+                source: ModifierSource::SystemDamage(
+                    crate::system_registry::tactical_radar_system_id(),
+                ),
                 slot: ModifierSlot::RadarRange,
                 bonus,
             });
             mods
         };
 
-        for (bonus, label) in [(-0.5f32, "sensors at rest"), (1.0, "sensors doubled")] {
+        for (bonus, label) in [(-0.5f32, "radar crushed"), (1.0, "radar doubled")] {
             let mut app = snapshot_test_app();
             let (phasers, blasters) = armed_hull_components();
             let mods = radar_slot_at(bonus);

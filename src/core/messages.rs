@@ -34,6 +34,12 @@ pub enum ModifierSlot {
     /// Sensors console's long-range radar detection range (dedicated slot —
     /// see `HelmRadarRange`).
     SensorRadarRange,
+    /// Per-second shield regeneration on every arc, driven by the `shields`
+    /// power group (issue #952). Scales each `ShieldFacing::regen_per_sec` in
+    /// `ship::shields::tick_shields`; the arc's authored rate is the ×1.0 rung,
+    /// so a hull that never moves the group regenerates exactly what its
+    /// `[[shield_arc]]` blocks say.
+    ShieldRegen,
 }
 
 /// Who or what applied a modifier.
@@ -1956,14 +1962,20 @@ pub enum ServerMessage {
         radar_size: Option<f32>,
     },
     /// Sent at 10 Hz to the Power console holder only. Carries the current
-    /// power allocation levels, battery charge fraction, and whether the
-    /// system is locked (exhaustion state).
+    /// EFFECTIVE per-group allocation levels (a group held down by its battery
+    /// floor reports the floor, not what it was commanded at), the battery
+    /// charge, and whether the reserve is currently emptying.
+    ///
+    /// The third group is `shields`, not `sensors` (issue #952), and `draining`
+    /// replaces the retired `locked` flag: there is no brownout lock any more,
+    /// so the only thing left worth telling the gauge is which way the reserve
+    /// is moving.
     PowerState {
         helm: u8,
         weapons: u8,
-        sensors: u8,
+        shields: u8,
         battery_charge: f32,
-        locked: bool,
+        draining: bool,
     },
     /// Broadcast when a non-asteroid entity is spawned at runtime (e.g. by a
     /// scenario trigger). Carries a full `EntitySnapshot` so the client can
@@ -2543,9 +2555,10 @@ pub struct PowerReactorBlackboard {
     /// When `false`, `SetPowerGroupAllocation` messages are
     /// refused at admission.
     pub is_online: bool,
-    /// True when the power system is in the locked (battery-exhausted) state.
-    /// Mirrors `PowerBlackboard::locked` for reactor-scoped readers.
-    pub locked: bool,
+    /// True when the reserve is emptying at the current draw. Mirrors
+    /// `PowerBlackboard::draining` for reactor-scoped readers, and replaces the
+    /// `locked` flag issue #952 retired along with the brownout lock.
+    pub draining: bool,
 }
 
 /// Raw sim truth for the Power Battery fine system, published each tick into
@@ -2729,8 +2742,24 @@ pub struct PowerBlackboard {
     pub battery_charge: f32,
     /// Maximum battery capacity.
     pub battery_max: f32,
-    /// Whether the power system is locked (battery exhausted).
-    pub locked: bool,
+    /// Whether the reserve is emptying at the current draw. Replaces the
+    /// `locked` flag issue #952 retired with the brownout lock: a low battery
+    /// no longer freezes the console, it cuts groups back to their authored
+    /// floors one at a time, so what the panel needs to say is which way the
+    /// charge is going. `#[serde(default)]` so a pre-#952 payload (which
+    /// carried `locked` here) still decodes.
+    #[serde(default)]
+    pub draining: bool,
+    /// Whether the reserve is actually FILLING at the current draw.
+    ///
+    /// Deliberately not the negation of `draining`: a hull may author a rate of
+    /// exactly `0.0` for some total, and at that total the reserve is frozen —
+    /// neither emptying nor filling. `ph-battery-bar`'s pulsing CHARGING
+    /// indicator is driven from this, so that a parked reserve says nothing
+    /// rather than promising a recovery that will never arrive.
+    /// `#[serde(default)]` for pre-#952 payloads.
+    #[serde(default)]
+    pub charging: bool,
 }
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.
@@ -2875,8 +2904,23 @@ pub struct PowerGroupEntry {
     pub id: String,
     /// Display label shown in the HTML panel (e.g. `"HELM"`, `"WEAPONS"`).
     pub label: String,
-    /// Current power level (1 – `max_level`).
+    /// Current EFFECTIVE power level (1 – `max_level`) — what the group is
+    /// actually running at, which is `commanded_level` unless the reactor's
+    /// battery floor is holding it down. This is the number the pips light.
     pub level: u8,
+    /// The level this group has been COMMANDED to run at, ignoring any battery
+    /// floor (issue #952).
+    ///
+    /// The panel's `+`/`−` buttons send an ABSOLUTE level, and
+    /// `PowerSystem::set_group_allocation` measures the delta against the
+    /// commanded level — so a client that steps from `level` while a floor is
+    /// in force sends a level BELOW the standing order and silently lowers it.
+    /// Helm commanded 4 and floored to 2: `+` would send 3, which is a
+    /// *decrease*. The control has to step from this field; `level` is for
+    /// display. `#[serde(default)]` for pre-#952 payloads, where a `0` reads as
+    /// "unknown" and the client falls back to `level`.
+    #[serde(default)]
+    pub commanded_level: u8,
     /// Maximum power level for this power group.
     pub max_level: u8,
 }

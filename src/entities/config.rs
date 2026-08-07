@@ -305,9 +305,15 @@ pub struct BehaviourConfig {
     #[serde(default = "default_docking_approach_speed")]
     pub docking_approach_speed: f32,
     /// Authored ignore-smaller rule (issue #743): the shared hazard assessment
-    /// skips a hazard whose `size_rating` is below this ship's own scaled by
-    /// this ratio. `0.0` (the default) disables the rule so every dangerous
-    /// hazard is assessed; `1.0` ignores any hazard strictly smaller than self.
+    /// skips a MOBILE hazard whose `size_rating` is below this ship's own scaled
+    /// by this ratio. `0.0` (the default) disables the rule so every dangerous
+    /// hazard is assessed; `1.0` ignores any *ship* strictly smaller than self.
+    ///
+    /// Never applies to static terrain (issue #958): an asteroid, station or
+    /// planet is avoided at any relative size, because it cannot manoeuvre out
+    /// of the way. The dynamic/static split reads the hazard's own authored
+    /// [`ColliderConfig::movable`] fact.
+    ///
     /// Defaults to [`crate::ai::HAZARD_IGNORE_SIZE_RATIO`] when absent.
     #[serde(default = "default_hazard_ignore_size_ratio")]
     pub hazard_ignore_size_ratio: f32,
@@ -1030,6 +1036,48 @@ pub struct ColliderConfig {
     pub shape: ColliderShape,
     pub radius: f32,
     pub length: f32,
+    /// Authored hazard fact (issue #958): whether this body moves under its own
+    /// power. `true` is a mobile CONTACT (a ship, which can manoeuvre out of the
+    /// way); `false` is static TERRAIN (an asteroid, a station, a planet, a
+    /// moon, a star), which cannot.
+    ///
+    /// Read by the AI world-snapshot builders into
+    /// [`crate::ai::AiWorldEntity::movable`], where it decides three things:
+    /// whether the hazard may be dropped by the authored ignore-smaller rule
+    /// (static terrain never is — issue #958), whether it contributes vertical
+    /// repulsion (issue #780), and whether it counts toward the planner's
+    /// moving-hazard urgency (issue #744).
+    ///
+    /// Defaults to [`default_collider_movable`] — static — so a template that
+    /// forgets the field errs toward being avoided rather than ignored.
+    #[serde(default = "default_collider_movable")]
+    pub movable: bool,
+}
+
+/// Parse-time default for [`ColliderConfig::movable`]: `false`, i.e. static
+/// terrain.
+///
+/// It is the safe direction for exactly ONE of the three things the field
+/// gates, and it is NOT a blanket safe default. A body that forgets the field
+/// is always avoided and never size-ignored (issue #958) — that is the safe
+/// one. For the other two, `false` is the *unsafe* direction, and it fails
+/// quietly rather than loudly:
+///
+///   * A real hull that omits the field stops contributing vertical repulsion
+///     to everyone else's hazard field (issue #780), because
+///     `assess_hazards` zeroes the vertical term for a static obstacle.
+///   * The same hull stops counting toward the helm planner's moving-hazard
+///     urgency (issue #744), which filters to `movable` contributions.
+///
+/// So a ship misfiled as terrain is over-avoided by others and under-reactive
+/// itself, with nothing at parse time to say so. `false` is still the right
+/// default, but only because it is not load-bearing: every shipped hull
+/// authors `movable = true` and
+/// `shipped_hulls_are_mobile_and_shipped_terrain_is_not` walks
+/// `assets/entities/` to hold that line for new templates. The guard is what
+/// makes the default safe, not the default itself.
+fn default_collider_movable() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -5285,6 +5333,125 @@ length = 6.0
             config.collider.as_ref().unwrap().shape,
             ColliderShape::Capsule
         );
+    }
+
+    /// Issue #958: `[collider] movable` is the authored dynamic/static split the
+    /// hazard rule reads. A template that omits it is TERRAIN — the safe
+    /// direction, since terrain is never dropped by the ignore-smaller rule.
+    #[test]
+    fn collider_movable_defaults_to_static_terrain() {
+        let unauthored = EntityConfig::from_toml(
+            r##"
+[collider]
+shape = "Ball"
+radius = 12.0
+length = 0.0
+"##,
+        )
+        .expect("parse must succeed");
+        assert!(
+            !unauthored.collider.as_ref().unwrap().movable,
+            "an unauthored collider must default to static terrain"
+        );
+
+        let authored = EntityConfig::from_toml(
+            r##"
+[collider]
+shape = "Capsule"
+radius = 1.5
+length = 4.0
+movable = true
+"##,
+        )
+        .expect("parse must succeed");
+        assert!(
+            authored.collider.as_ref().unwrap().movable,
+            "`movable = true` must parse into a mobile contact"
+        );
+    }
+
+    /// Issue #958: shipped authoring, not just the parser, and a walk rather
+    /// than a list so a NEW template cannot quietly land on the wrong side.
+    ///
+    /// A template that declares a helm capability is a hull somebody flies, so
+    /// it must author `movable = true` and take its chances with a bigger hull's
+    /// `hazard_ignore_size_ratio`. Everything else with a collider is terrain —
+    /// station, planet, moon, star, asteroid — and must stay static, so it is
+    /// avoided at any relative size.
+    ///
+    /// The walk is RECURSIVE, mirroring `spawnable_templates_under` in
+    /// `src/headless/app.rs`, which issue #954 made recursive for the same
+    /// reason: that issue filed a spawned hull under
+    /// `assets/entities/test/rng_coverage_lancer.toml`, and
+    /// `assets/worlds/rng_coverage.toml` fields it twice. A top-level
+    /// `read_dir` would leave that hull — and anything else a later issue files
+    /// in a subdirectory — outside a guard whose whole purpose is to catch the
+    /// template nobody remembered to author.
+    ///
+    /// `fragments/` is the one exclusion, and it is excluded for a property of
+    /// its contents rather than of its name: nothing in it is spawnable. A
+    /// fragment is a partial document that hulls compose FROM, so it is never
+    /// itself a body publishing a hazard, and `composed_escort.toml` is a
+    /// mechanism fixture rather than shipped content. That does leave the
+    /// ship-shaped `npc_escort_core.toml` unguarded by construction: it authors
+    /// `movable = true` because anything composing from it is by construction a
+    /// hull, but that authoring is a convention this test cannot hold.
+    #[test]
+    fn shipped_hulls_are_mobile_and_shipped_terrain_is_not() {
+        /// Every `.toml` under `dir` except the fragment tree, sorted so the
+        /// failure a designer sees is the same on every filesystem.
+        fn templates_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()));
+            let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
+            paths.sort();
+            for path in paths {
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|n| n == "fragments") {
+                        continue;
+                    }
+                    templates_under(&path, out);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let dir = std::path::Path::new("assets/entities");
+        let mut templates = Vec::new();
+        templates_under(dir, &mut templates);
+        assert!(
+            !templates.is_empty(),
+            "no templates found under {}",
+            dir.display()
+        );
+
+        let (mut hulls, mut terrain) = (0, 0);
+        for path in templates {
+            let key = path.to_string_lossy().replace('\\', "/");
+            let cfg = crate::entity_includes::load_entity_config(&key)
+                .unwrap_or_else(|e| panic!("{key} must parse: {e}"));
+            let Some(collider) = cfg.collider.as_ref() else {
+                continue;
+            };
+            if cfg.helm_capability.is_some() || cfg.helm_console.is_some() {
+                assert!(
+                    collider.movable,
+                    "{key} declares a helm capability, so it is a flyable hull \
+                     and must author `[collider] movable = true`"
+                );
+                hulls += 1;
+            } else {
+                assert!(
+                    !collider.movable,
+                    "{key} has no helm capability, so it is static terrain and \
+                     must never claim `[collider] movable = true`"
+                );
+                terrain += 1;
+            }
+        }
+        assert!(hulls > 0, "no flyable hulls found in {}", dir.display());
+        assert!(terrain > 0, "no static terrain found in {}", dir.display());
     }
 
     #[test]

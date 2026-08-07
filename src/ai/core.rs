@@ -41,10 +41,13 @@ pub const DOCKING_ENGAGE_DISTANCE: f32 = 40.0;
 /// [`crate::entity_config::BehaviourConfig::docking_approach_speed`].
 pub const DOCKING_APPROACH_SPEED: f32 = 0.3;
 const AVOIDANCE_MIN_SPEED: f32 = 0.25;
-/// Authored size-ignore ratio default: a ship ignores a hazard whose
-/// `size_rating` is below `self_size_rating * ratio`. `0.0` disables the rule
-/// (every dangerous hazard is assessed regardless of size), which is the
-/// backward-compatible default. Parse-time default only — see
+/// Authored size-ignore ratio default: a ship ignores a **mobile** hazard whose
+/// `size_rating` is below `self_size_rating * ratio`. Static terrain is never
+/// ignored at any ratio (issue #958). `0.0` disables the rule outright (every
+/// dangerous hazard is assessed regardless of size), which is the
+/// backward-compatible default and what every shipped hull uses today — no
+/// entity TOML authors this field, so the rule is currently inert in shipped
+/// content. Parse-time default only — see
 /// [`crate::entity_config::BehaviourConfig::hazard_ignore_size_ratio`], whose
 /// serde default reads this constant so the two cannot drift apart.
 pub const HAZARD_IGNORE_SIZE_RATIO: f32 = 0.0;
@@ -193,10 +196,16 @@ pub struct AiWorldEntity {
     /// Current forward speed of the entity (world units/s) used for predictive avoidance.
     pub forward_speed: f32,
     /// Hazard fact: whether this entity can move under its own power (a ship)
-    /// versus being a static obstacle (an asteroid). Published so fine helm
-    /// systems can apply their own policy — e.g. a bounded vertical thruster
-    /// dodging only moving hazards while engines still brake for static ones
-    /// (issue #743).
+    /// versus being static terrain (an asteroid, a station, a planet). Published
+    /// so fine helm systems can apply their own policy — e.g. a bounded vertical
+    /// thruster dodging only moving hazards while engines still brake for static
+    /// ones (issue #743).
+    ///
+    /// Authored per template as `[collider] movable` and copied here by the
+    /// world-snapshot builders (issue #958); it is never inferred from which ECS
+    /// query the entity arrived on. [`assess_hazards`] additionally keys the
+    /// ignore-smaller rule off it: only a mobile contact can be dropped for
+    /// being small.
     pub movable: bool,
     /// Hazard fact: whether this entity is a collision hazard worth avoiding at
     /// all. `false` entities are skipped by [`assess_hazards`]. All physical
@@ -1756,9 +1765,17 @@ pub struct HazardAssessmentRaw {
 /// Two authored policies filter the hazard picture (issue #743), applied to the
 /// published facts rather than hard-coded object categories:
 /// - a non-`dangerous` entity is never a hazard and is skipped;
-/// - the ignore-smaller rule skips a hazard whose `size_rating` is below
-///   `self_size_rating * hazard_ignore_size_ratio` — a ratio of `0.0` disables
-///   the rule (every dangerous hazard is assessed).
+/// - the ignore-smaller rule skips a **`movable`** hazard whose `size_rating` is
+///   below `self_size_rating * hazard_ignore_size_ratio` — a ratio of `0.0`
+///   disables the rule (every dangerous hazard is assessed).
+///
+/// The ignore-smaller rule is deliberately mobile-only (issue #958). A big ship
+/// may ignore a small ship, which can manoeuvre out of its way; static terrain —
+/// an asteroid, a station, a planet — cannot, so it is avoided at any size. That
+/// split is a doctrine invariant rather than a knob, but which side of it an
+/// entity falls on is authored: `[collider] movable` in the entity's TOML
+/// becomes [`AiWorldEntity::movable`], and the threshold itself stays authored
+/// on the observer as `hazard_ignore_size_ratio`.
 ///
 /// Pure: no ECS, no Bevy. The planner converts the local force array to the
 /// engine's vector type.
@@ -1795,7 +1812,14 @@ pub fn assess_hazards(
         if !entity.dangerous {
             continue;
         }
-        if hazard_ignore_size_ratio > 0.0
+        // Issue #958: the ignore-smaller rule is a MOBILE-CONTACT rule. A
+        // battleship may sweep past a courier because the courier can get out of
+        // the way; an asteroid, a station or a planet cannot, so static terrain
+        // is assessed regardless of how small it rates. Which side of that split
+        // an entity falls on is the authored `[collider] movable` fact carried
+        // in on `AiWorldEntity`, not a category test on the object here.
+        if entity.movable
+            && hazard_ignore_size_ratio > 0.0
             && entity.size_rating < self_size_rating * hazard_ignore_size_ratio
         {
             continue;
@@ -3901,16 +3925,19 @@ mod tests {
 
     #[test]
     fn assess_hazards_ignores_hazards_smaller_than_self_when_authored() {
-        // Large self (size_rating 10) versus a small obstacle (size_rating 1)
-        // dead ahead. With the ignore rule authored on (ratio 1.0), a hazard
+        // Large self (size_rating 10) versus a small SHIP (size_rating 1) dead
+        // ahead. With the ignore rule authored on (ratio 1.0), a mobile contact
         // strictly smaller than self is skipped entirely — "large ships do not
-        // avoid smaller ships at all" (issue #743).
+        // avoid smaller ships at all" (issue #743). `movable: true` is
+        // load-bearing here: the rule is mobile-only since issue #958, and the
+        // static counterpart is pinned by the sibling test below.
         let small_obstacle = AiWorldEntity {
             uuid: Uuid::from_u128(9),
             position: [0.0, 0.0, -10.0],
             radius: 1.0,
             size_rating: 1.0,
             dangerous: true,
+            movable: true,
             ..Default::default()
         };
         let view = WorldView {
@@ -3955,6 +3982,77 @@ mod tests {
         assert!(
             big.urgency > 0.0,
             "a hazard at or above self's size rating is never ignored"
+        );
+    }
+
+    /// Issue #958: the ignore-smaller rule is a MOBILE-contact rule. A rock, a
+    /// station or a planet cannot manoeuvre out of a big ship's way, so it stays
+    /// in the hazard picture at any relative size — the same authored ratio that
+    /// drops an identically-sized *ship* must leave it alone.
+    ///
+    /// Pinned directly rather than through shipped content on purpose: no entity
+    /// TOML authors `hazard_ignore_size_ratio` today, so the rule is inert in
+    /// production and a content-level assertion would pass for the wrong reason.
+    #[test]
+    fn assess_hazards_never_ignores_static_terrain_below_own_size() {
+        // The one difference between the two hazards is the authored `movable`
+        // fact; geometry, size rating and danger are identical.
+        let terrain = |size_rating: f32, movable: bool| WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            self_size_rating: 10.0,
+            entities: vec![AiWorldEntity {
+                uuid: Uuid::from_u128(9),
+                position: [0.0, 0.0, -10.0],
+                radius: 1.0,
+                size_rating,
+                dangerous: true,
+                movable,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Ratio 1.0 = "ignore anything strictly smaller than self", the most
+        // aggressive setting a designer can author short of ignoring equals.
+        let assess = |view: &WorldView| {
+            assess_hazards(view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 1.0)
+        };
+
+        // A static hazard rated 1 against self's 10 is still avoided.
+        let small_static = assess(&terrain(1.0, false));
+        assert!(
+            small_static.urgency > 0.0,
+            "static terrain below own size must still be avoided, got {small_static:?}"
+        );
+        assert_eq!(small_static.primary, Some(Uuid::from_u128(9)));
+        assert_eq!(
+            small_static.contributions.len(),
+            1,
+            "the static hazard must survive into the contribution list"
+        );
+        assert!(!small_static.contributions[0].movable);
+
+        // The identical hazard published as a mobile contact IS ignorable —
+        // this is what makes the assertion above about `movable` and not about
+        // the geometry.
+        assert_eq!(
+            assess(&terrain(1.0, true)),
+            HazardAssessmentRaw::default(),
+            "a SHIP below own size stays ignorable under the same authored ratio"
+        );
+
+        // Static terrain at or above own size is avoided too — the rule never
+        // had anything to say about it, and still does not.
+        let big_static = assess(&terrain(10.0, false));
+        assert!(
+            big_static.urgency > 0.0,
+            "static terrain at or above own size must be avoided, got {big_static:?}"
+        );
+        let huge_static = assess(&terrain(25.0, false));
+        assert!(
+            huge_static.urgency > 0.0,
+            "static terrain larger than self must be avoided, got {huge_static:?}"
         );
     }
 

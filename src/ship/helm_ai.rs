@@ -139,9 +139,12 @@ fn helm_ai_snapshot_entities(
                 hull_fraction,
                 yaw: Some(-transform.rotation.to_euler(EulerRot::YXZ).0),
                 radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                // Ships are movable, dangerous collision hazards; size rating
-                // tracks the collision radius (issue #743).
-                movable: true,
+                // Mobility is the authored `[collider] movable` fact, matching
+                // `ai::server::build_world_snapshot` (issue #958) so the
+                // fallback picture and the production one classify terrain the
+                // same way. Dangerous, with size rating tracking the collision
+                // radius (issue #743).
+                movable: collider.map(|c| c.0.movable).unwrap_or(false),
                 dangerous: true,
                 size_rating: collider.map(|c| c.0.radius).unwrap_or(0.0),
                 ..Default::default()
@@ -8133,6 +8136,9 @@ mod tests {
                     shape: crate::entity_config::ColliderShape::Ball,
                     radius,
                     length: 0.0,
+                    // The subject is a ship, so it is a mobile contact in
+                    // anyone else's hazard picture (issue #958).
+                    movable: true,
                 },
             ));
     }
@@ -8228,15 +8234,30 @@ mod tests {
         );
     }
 
-    /// The authored ignore-smaller rule reaches the lateral dodge: a large ship
-    /// ignores a hazard below its own size rating entirely, so the same obstacle
-    /// that would otherwise dodge produces zero lateral thrust (issue #743).
+    /// The authored ignore-smaller rule reaches the lateral dodge — and stops at
+    /// mobile contacts. A large ship ignores a small *ship* below its own size
+    /// rating, so an obstacle that would otherwise dodge produces zero lateral
+    /// thrust (issue #743); an identically-placed, identically-rated *rock* is
+    /// still dodged, because static terrain cannot manoeuvre out of the way
+    /// (issue #958).
+    ///
+    /// All three cases share one geometry and one authored buffer, so the only
+    /// variables are the ratio and the hazard's published `movable` fact.
     #[test]
-    fn lateral_thrust_ai_ignores_hazard_smaller_than_self() {
+    fn lateral_thrust_ai_ignores_small_ships_but_never_small_terrain() {
         // Obstacle inside an authored 60-unit buffer so it *is* a threat when
         // the ignore rule is off. Self rates size 10 (collider radius); the
         // obstacle rates 1.
         let obstacle = [4.0, 0.0, -40.0];
+        let ignoring = || {
+            Some(crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                // Ignore any MOBILE hazard whose size rating is below self's
+                // (10 × 1.0 = 10); the obstacle rates 1.
+                hazard_ignore_size_ratio: 1.0,
+                ..Default::default()
+            })
+        };
 
         let mut dodges = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
             avoidance_buffer: 60.0,
@@ -8250,20 +8271,28 @@ mod tests {
             "with the ignore rule off, the in-range obstacle must dodge"
         );
 
-        let mut ignores = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
-            avoidance_buffer: 60.0,
-            // Ignore any hazard whose size rating is below self's (10 × 1.0 = 10);
-            // the obstacle rates 1, so it is skipped.
-            hazard_ignore_size_ratio: 1.0,
-            ..Default::default()
-        }));
+        // A small SHIP: `snapshot_with_moving_obstacle` publishes `movable`, and
+        // a zero forward speed keeps its projected position identical to the
+        // rock's, so the geometry is unchanged.
+        let mut ignores = lateral_thrust_ai_app(ignoring());
         set_ship_collider(&mut ignores, 10.0);
-        snapshot_with_obstacle(&mut ignores, obstacle, 1.0);
+        snapshot_with_moving_obstacle(&mut ignores, obstacle, 1.0, 0.0, 0.0);
         tick_twice(&mut ignores);
         assert_eq!(
             lateral_intent(&mut ignores),
             0.0,
-            "a hazard smaller than self must be ignored under the authored rule"
+            "a SHIP smaller than self must be ignored under the authored rule"
+        );
+
+        // The same small hazard published as static terrain is still avoided.
+        let mut terrain = lateral_thrust_ai_app(ignoring());
+        set_ship_collider(&mut terrain, 10.0);
+        snapshot_with_obstacle(&mut terrain, obstacle, 1.0);
+        tick_twice(&mut terrain);
+        assert!(
+            lateral_intent(&mut terrain).abs() > 0.0,
+            "static terrain below own size must still dodge — the ignore-smaller \
+             rule is a mobile-contact rule (issue #958)"
         );
     }
 

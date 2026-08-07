@@ -207,6 +207,10 @@ offline_duration = 8.0
 shape = "Capsule"
 radius = 3.0
 length = 8.0
+# A ship is a MOBILE contact, so another hull's authored
+# `hazard_ignore_size_ratio` may size-ignore it (issue #958). Static
+# terrain omits this field and is avoided at any relative size.
+movable = true
 
 [radar_appearance]
 colour = [0.85, 0.35, 0.12]

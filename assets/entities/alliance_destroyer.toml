@@ -38,6 +38,10 @@ colour = []
 shape = "Capsule"
 radius = 1.2
 length = 3
+# A ship is a MOBILE contact, so another hull's authored
+# `hazard_ignore_size_ratio` may size-ignore it (issue #958). Static
+# terrain omits this field and is avoided at any relative size.
+movable = true
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #

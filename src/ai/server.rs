@@ -476,10 +476,19 @@ pub(crate) fn build_world_snapshot(
                     radius,
                     forward_speed,
                     shields: None,
-                    // Ships move under their own power and are dangerous
-                    // collision hazards; size rating tracks the collision
-                    // radius (issue #743).
-                    movable: true,
+                    // Mobility is an AUTHORED fact off `[collider] movable`
+                    // (issue #958), not "everything spawned through
+                    // `spawn_entity` is a ship". Publishing `true` for the whole
+                    // query said a station, a planet and a moon all manoeuvre,
+                    // which put them on the wrong side of the ignore-smaller
+                    // rule in `assess_hazards` — the exact hole this closes —
+                    // and let them push vertical avoidance (#780) and moving
+                    // urgency (#744) they have no business pushing. An entity
+                    // with no `[collider]` at all rates 0 radius and falls back
+                    // to the same static default the parser uses.
+                    movable: collider.map(|c| c.0.movable).unwrap_or(false),
+                    // Every physical body in the snapshot is a collision danger;
+                    // size rating tracks the collision radius (issue #743).
                     dangerous: true,
                     size_rating: radius,
                     direct_fire_range,
@@ -511,10 +520,13 @@ pub(crate) fn build_world_snapshot(
                     radius: collider.0.radius,
                     forward_speed: 0.0,
                     shields: None,
-                    // Asteroids are static (do not move) but are still dangerous
-                    // collision hazards; size rating tracks the collision radius
-                    // (issue #743).
-                    movable: false,
+                    // Same authored fact as the query arm above (issue #958):
+                    // a rock's TOML omits `movable`, so the parse default makes
+                    // it terrain — never size-ignored, never a vertical or
+                    // moving-urgency contributor.
+                    movable: collider.0.movable,
+                    // Still a dangerous collision hazard; size rating tracks the
+                    // collision radius (issue #743).
                     dangerous: true,
                     size_rating: collider.0.radius,
                     // An asteroid shoots at nobody.
@@ -1572,6 +1584,7 @@ mod tests {
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: 4.0,
                 length: 0.0,
+                movable: false,
             }),
         ));
 
@@ -1997,6 +2010,7 @@ verb = "fire_blaster"
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: 4.0,
                 length: 0.0,
+                movable: false,
             }),
         ));
         app.update();
@@ -2151,6 +2165,7 @@ verb = "fire_blaster"
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: 2.5,
                 length: 0.0,
+                movable: false,
             }),
         ));
 
@@ -2161,6 +2176,67 @@ verb = "fire_blaster"
         assert!(
             snapshot.entities.iter().any(|e| e.radius == 2.5),
             "the asteroid pass must not replace the entity pass"
+        );
+    }
+
+    /// Issue #958: the `movable` fact the hazard rule keys on is the entity's
+    /// AUTHORED `[collider] movable`, not "everything spawned through
+    /// `spawn_entity` is a ship". A station and a planet come through the same
+    /// `EntityUuid` query a hull does; before this, all three published
+    /// `movable: true`, which put static terrain on the ignorable side of the
+    /// ignore-smaller rule.
+    #[test]
+    fn world_snapshot_publishes_authored_mobility_not_the_query_arm() {
+        let mut app = snapshot_test_app();
+        let ball = |radius: f32, movable: bool| {
+            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius,
+                length: 0.0,
+                movable,
+            })
+        };
+        // A hull: authored mobile.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entity_spawner::EntityName("hull".into()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            ball(5.0, true),
+        ));
+        // A station: same query arm, authored static.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entity_spawner::EntityName("station".into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            ball(12.0, false),
+        ));
+        // An entity with no collider at all falls back to the same static
+        // default the TOML parser uses.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entity_spawner::EntityName("bare".into()),
+            Transform::from_xyz(200.0, 0.0, 0.0),
+        ));
+
+        app.update();
+
+        let snapshot = app.world().resource::<WorldSnapshot>();
+        let movable_of = |name: &str| {
+            snapshot
+                .entities
+                .iter()
+                .find(|e| e.name.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("{name} must be in the snapshot"))
+                .movable
+        };
+        assert!(movable_of("hull"), "an authored hull is a mobile contact");
+        assert!(
+            !movable_of("station"),
+            "a station must publish as static terrain, not as a ship"
+        );
+        assert!(
+            !movable_of("bare"),
+            "an entity with no [collider] must not claim mobility"
         );
     }
 

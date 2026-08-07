@@ -576,6 +576,9 @@ pub fn rock_config(config_path: &str) -> RockConfig {
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: collider_radius,
                 length: 0.0,
+                // A rock is terrain: it never manoeuvres, so it is never
+                // size-ignored by another ship's hazard rule (issue #958).
+                movable: false,
             },
         ),
         max_hp: entity_config

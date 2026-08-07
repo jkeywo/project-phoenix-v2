@@ -1463,6 +1463,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
                 shape: ColliderShape::Ball,
                 radius: 3.0,
                 length: 0.0,
+                movable: true,
             }),
             hull: None,
             appearance: None,

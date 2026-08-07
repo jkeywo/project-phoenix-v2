@@ -197,6 +197,11 @@ max_yaw_rate = 0.55
 low_speed_turn_boost = 0.3
 max_bank_deg = 22.0
 
+[helm_console.engine_pfx]
+color = [ 1.0, 0.22, 0.08, 0.68 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.65
+
 # MANDATORY for this hull, not decoration: the spawner only inserts an ENABLED
 # `BoostConfigResource` when `[helm_console.boost]` is authored, and
 # `ai_helm_boost` returns immediately without one. The escape leg's boost is the

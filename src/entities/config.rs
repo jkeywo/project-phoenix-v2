@@ -9484,6 +9484,97 @@ count = 10
         );
     }
 
+    // ── Shared Harrow engine trail colour (issue #945) ───────────────────────
+
+    #[test]
+    fn every_shipped_harrow_dynasty_hull_shares_the_red_engine_trail_colour() {
+        // The patrol, cruiser and warhawk author `[helm_console.engine_pfx]`
+        // colour [1.0, 0.22, 0.08, 0.68]; the destroyer was missing it
+        // entirely (#945), which meant it silently fell back to the
+        // renderer's default trail colour (`ENGINE_DEFAULT_COLOR` in
+        // `src/server/pfx.rs`, a blue) instead of matching the rest of the
+        // faction. This sweep guards every shipped Harrow hull riding a
+        // `dynasty_*.glb` model, not just the two the issue named, so a
+        // future hull can't reintroduce the same silent-fallback gap.
+        //
+        // Deliberately no Rust-side colour literal here (see
+        // `src/entities/authored_ai_pins.rs`'s rule against re-pinning
+        // authored TOML content in Rust): the TOML is the specification, so
+        // this compares every matched hull's colour against the *others*,
+        // not against a baked-in constant. A designer retuning the Harrow
+        // red across all four TOMLs should not have to also edit this file.
+        const HARROW_FACTION: &str = "cccccccc-3333-4333-8333-cccccccccccc";
+
+        let mut colours: Vec<(String, Option<[f32; 4]>)> = Vec::new();
+        let entries = std::fs::read_dir("assets/entities").expect("assets/entities exists");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            // Through the include resolver (issue #906) so a composed hull is
+            // judged on its resolved document. Top-level only, matching every
+            // other "shipped fleet" walk — `assets/entities/test/` fixtures
+            // (e.g. the RNG-coverage escort, #954) are deliberately excluded.
+            let file = path.to_string_lossy().replace('\\', "/");
+            let Ok(cfg) = crate::entity_includes::load_entity_config(&file) else {
+                continue;
+            };
+            let is_harrow = cfg
+                .faction
+                .map(|f| f.to_string() == HARROW_FACTION)
+                .unwrap_or(false);
+            let uses_dynasty_model = cfg
+                .mesh
+                .as_ref()
+                .and_then(|m| m.model.as_ref())
+                .map(|m| m.contains("assets/models/dynasty_"))
+                .unwrap_or(false);
+            if !is_harrow || !uses_dynasty_model {
+                continue;
+            }
+            let color = cfg
+                .helm_console
+                .as_ref()
+                .and_then(|h| h.engine_pfx.as_ref())
+                .and_then(|pfx| pfx.color);
+            colours.push((file, color));
+        }
+
+        // Non-vacuity: a load failure, a faction-authoring change, or a model
+        // rename can each independently make the loop above match nothing —
+        // and an empty `colours` would otherwise let every assertion below
+        // pass while checking nothing. There are four shipped Harrow dynasty
+        // hulls today (patrol, cruiser, warhawk, destroyer); guard that the
+        // sweep still finds them.
+        assert!(
+            colours.len() >= 4,
+            "expected at least 4 shipped Harrow dynasty hulls, found {}: {:?} — the sweep matched \
+             too few hulls to guard anything (check HARROW_FACTION, the dynasty model path, and \
+             that assets/entities TOMLs still load)",
+            colours.len(),
+            colours.iter().map(|(f, _)| f).collect::<Vec<_>>()
+        );
+
+        for (file, color) in &colours {
+            assert!(
+                color.is_some(),
+                "{file}: [helm_console.engine_pfx] has no colour, so this hull silently falls \
+                 back to the renderer's default trail colour instead of the shared Harrow red"
+            );
+        }
+
+        let (baseline_file, baseline_color) = &colours[0];
+        for (file, color) in &colours[1..] {
+            assert_eq!(
+                color, baseline_color,
+                "{file}: engine_pfx.color = {color:?} does not match {baseline_file}'s \
+                 {baseline_color:?}; every shipped Harrow dynasty hull must share one engine \
+                 trail colour"
+            );
+        }
+    }
+
     // ── Inline fine-system AI policy (issue #775) ────────────────────────────
 
     const CHANNELS: &[&str] = &[CAPTAIN_RED_ALERT_CHANNEL];

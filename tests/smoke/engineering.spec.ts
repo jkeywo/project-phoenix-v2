@@ -73,46 +73,56 @@ test('Engineering player receives SystemHullUpdate after game start', async ({ c
   await engineer.close();
 });
 
-test('Engineering hull detail starts at 189 in first SystemHullUpdate', async ({ context }) => {
+// Issue #941 replaced this test's predecessor, which asserted
+// `expect(total).toBe(189)` — the sum of the hull HP alliance_cruiser.toml
+// happened to author for Engineering's rows on the day it was last edited.
+// That number had already been rewritten four times (#511, #512, #514,
+// #639-641, then the c1af00c0 / f94c356e balance passes) and every rewrite was
+// a false failure: the projection code was fine, a designer had retuned a
+// hull. The exact-row-set arithmetic is covered where it belongs — against a
+// self-contained ship config, in `src/console/repair/visibility.rs::tests`
+// (`live_broadcast_gives_engineering_core_only_with_no_team_on_site`,
+// `live_broadcast_gives_a_station_owner_only_its_own_systems`,
+// `every_recipient_receives_the_same_ship_wide_aggregate`).
+//
+// What only a smoke test can show is that the projection survives the real
+// wire: two clients on one host, holding different stations, are sent
+// *different* row sets over the actual peer connection. Before #737 this was a
+// single `Target::All` broadcast, so a regression to that shape — the actual
+// information leak the issue exists to prevent — fails here, and does so
+// without naming a single authored HP figure.
+test('SystemHullUpdate is projected per recipient, not broadcast whole (#737)', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
-  const msg = await engineer.waitForMessage('SystemHullUpdate', 2_000) as any;
-  const hull = msg.data.entries;
-  const total = hull.reduce((sum: number, e: any) => sum + e.current, 0);
+  // `captain` holds Helm (see startGameWithEngineering), `engineer` holds
+  // Engineering. Both own damageable systems on any hull that declares any:
+  // Engineering is entitled to the ownerless Core bucket plus its own, a
+  // station holder to its own only.
+  const engMsg = await engineer.waitForMessage('SystemHullUpdate', 5_000) as any;
+  const helmMsg = await captain.waitForMessage('SystemHullUpdate', 5_000) as any;
 
-  // Ship-wide arithmetic history (alliance_cruiser, the `default.toml` player
-  // ship). This used to be the asserted figure, back when SystemHullUpdate went
-  // to Target::All and every station received the whole ship:
-  // 150 (post-#511) + 86 (fine Tactical banks/tubes/magazine added in #512,
-  // alongside the retained coarse "Tactical" entry) - 25 (Shields hull moved
-  // out of console_hull into per-arc ShipArcHull in #514)
-  // + 20 (alliance_battleship/destroyer hull added in #639/#640/#641) = 231.
-  // - 25 (coarse Helm/Tactical/Torpedo-Magazine entries replaced by the
-  // smaller helm-radar/tactical-radar/sensor-radar entries) = 206.
-  // + 10 (Lateral Thrusters hull system added to cruiser/destroyer) = 216.
-  //
-  // #737 made SystemHullUpdate a per-recipient projection: the ship-wide 216 is
-  // now host-internal, and each token receives only the rows its role entitles
-  // it to (src/console/repair/visibility.rs). Engineering's entitlement is the
-  // ownerless "Core" bucket plus the systems its own station owns, plus any
-  // system a repair team is on site at — none at game start. At the time #737
-  // shipped this was:
-  //   Core (no [[system]] declares them): science 20 + core 20 = 40
-  //   engineering-owned: power-reactor 15 + power-battery 10 = 25
-  // for a total of 65.
-  //
-  // The balance pass in c1af00c0 ("one durability ladder for the fleet") and
-  // f94c356e ("radar systems carry no hull, and the Lancer goes back up")
-  // re-pegged alliance_cruiser.toml's whole durability ladder (cruiser pool
-  // 216 -> 500, see the `[[hull.system_hull]]` header comment there), moving
-  // Engineering's authored entitlement to:
-  //   Core: science 58 + core 58 = 116
-  //   engineering-owned: power-reactor 44 + power-battery 29 = 73
-  // 189 for this viewer. The ship-wide figure survives as `aggregate_fraction`,
-  // which is computed over the whole (now larger) pool and so is still 1.0
-  // here.
-  expect(total).toBe(189);
-  expect(msg.data.aggregate_fraction).toBe(1);
+  const rowIds = (m: any): string[] =>
+    (m.data.entries as any[]).map((e) => e.system_id).sort();
+  const engIds = rowIds(engMsg);
+  const helmIds = rowIds(helmMsg);
+
+  expect(engIds.length, 'Engineering must receive its Core + owned rows').toBeGreaterThan(0);
+  expect(helmIds.length, 'a station holder must receive its own rows').toBeGreaterThan(0);
+
+  // The projection claim: no row reaches both recipients. A regression to the
+  // pre-#737 `Target::All` broadcast makes these two lists identical.
+  const shared = engIds.filter((id) => helmIds.includes(id));
+  expect(
+    shared,
+    `Engineering and Helm were both sent ${JSON.stringify(shared)} — SystemHullUpdate is ` +
+      'no longer a per-recipient projection',
+  ).toEqual([]);
+
+  // The aggregate is the one whole-ship figure every recipient may have, so it
+  // must be identical across two clients that see different rows...
+  expect(helmMsg.data.aggregate_fraction).toBe(engMsg.data.aggregate_fraction);
+  // ...and an undamaged ship is at full hull whatever the authored ladder says.
+  expect(engMsg.data.aggregate_fraction).toBe(1);
 
   await captain.close();
   await engineer.close();

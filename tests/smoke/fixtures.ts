@@ -1,4 +1,64 @@
-import { test as base, BrowserContext, Page } from '@playwright/test';
+// tests/smoke/fixtures.ts — shared Playwright fixtures for the smoke tier.
+//
+// ── Where a spec's world data comes from (issue #941) ────────────────────────
+//
+// Smoke specs must not assert on the *current contents* of production
+// `assets/` — an entity count, a hull HP total, a scenario roster or a
+// per-system tuning value moves whenever a designer edits a TOML, and a spec
+// pinned to it breaks for reasons that have nothing to do with the code under
+// test. Two sanctioned patterns, in order of preference:
+//
+//   1. **Self-contained fixture world** — a small TOML string served over the
+//      requested world path with `context.route`. This is the convention this
+//      suite already uses; the fixtures are inline TOML template literals, NOT
+//      files under `tests/smoke/fixtures/` (no such directory exists — do not
+//      invent one without moving all of the below into it). The committed
+//      fixture worlds are:
+//
+//        * `MINIMAL_DEFAULT_WORLD` (below) — served for
+//          `assets/worlds/default.toml` by the `context` fixture, so it is the
+//          default world for every spec that does not route its own. Used by
+//          `world-bootstrap`, `nav-chart-pipeline`, `comms`, `stations`,
+//          `lobby`, `engineering`, `sim-state`, `view-selector`, …
+//        * `MINIMAL_TEST_WORLD` in `tactical-fire-flow.spec.ts` — player ship
+//          plus one stationary hostile in phaser range.
+//        * `PATROL_TEST_WORLD` in `patrol.spec.ts` — player ship plus one
+//          NPC raider, for the entity-spawn pipeline.
+//        * `MESH_TEST_WORLD` in `ship-mesh-load.spec.ts` — player ship plus one
+//          NPC whose hull declares a GLB, for the model-path transform.
+//
+//      Two rules for anything served this way:
+//
+//        a. **Give `[global]` a title and assert it** — call
+//           `expectFixtureWorld(worldSetupMsg, THE_FIXTURE)` before asserting on
+//           the world's contents. A `context.route` glob that stops matching
+//           falls through to production `assets/` *silently*, and production
+//           `default.toml` happens to supply both a `station`-tagged entity and
+//           an `npc`-tagged raider — so without this the fallthrough leaves the
+//           specs green while testing exactly the content #941 decoupled them
+//           from.
+//        b. **Author tags under `overrides`, not on the block.** `WorldEntity`
+//           (src/world/config.rs) has no `tags` field, and serde ignores
+//           unknown keys, so a bare `tags = [...]` on an `[[entity]]` block is
+//           silently dropped and the entity keeps whatever its production
+//           template authored. `overrides = { tags = [...] }` is the form the
+//           shipped worlds use; the instance layer *replaces* the array rather
+//           than unioning it (src/entities/entity_override.rs), so it can take
+//           a tag away as well as add one.
+//
+//   2. **Derive the expectation from the TOML the test itself serves** — for
+//      the few specs that genuinely exercise a *shipped* asset (the demo
+//      scenario manifest, the combat_test world), read the value out of the
+//      TOML instead of pinning a literal. `assertion == what the TOML says`
+//      still fails when the pipeline drops or mangles the value, but survives
+//      a designer retuning it. The helpers at the bottom of this file
+//      (`countTableArray`, `tomlString`, `tomlNumber`, `tableArrayValues`)
+//      exist for exactly that, and `strings.ts` does the same for string ids.
+//
+// What is NOT acceptable is replacing a pinned production number with an
+// assertion that cannot fail (`toBeGreaterThan(0)` over production data).
+
+import { test as base, expect, BrowserContext, Page } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
@@ -42,10 +102,12 @@ window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
 // sit at distance ≤ 800 from the player. Player spawns at the origin;
 // place the starbase well inside the gate at [500, 0, 0].
 //
-// Tests that need a different scenario (`tactical-fire-flow.spec.ts` with
-// its inline `MINIMAL_TEST_WORLD`, `patrol.spec.ts` and
-// `ship-mesh-load.spec.ts` with `patrol.toml`) keep routing their own
-// world; Playwright matches the most-recently-added route first, so the
+// Tests that need a different scenario keep routing their own world over the
+// same `assets/worlds/default.toml` path — `tactical-fire-flow.spec.ts` with
+// its inline `MINIMAL_TEST_WORLD`, `patrol.spec.ts` with `PATROL_TEST_WORLD`
+// and `ship-mesh-load.spec.ts` with `MESH_TEST_WORLD`. All three are inline
+// fixtures; none of them touches the shipped `patrol.toml` any more (issue
+// #941). Playwright matches the most-recently-added route first, so the
 // per-test override wins over the fixture default below.
 export const MINIMAL_DEFAULT_WORLD = `
 [global]
@@ -117,7 +179,7 @@ export const test = base.extend({
   },
 });
 
-export { expect } from '@playwright/test';
+export { expect };
 
 /** Default timeout for waiting on __wasmReady (PhoenixReady + Peer open).
  *
@@ -308,6 +370,89 @@ export async function createServerPage(
   await page.bringToFront();
   await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout: WASM_READY_TIMEOUT });
   return page;
+}
+
+// ── Reading an expectation out of TOML instead of pinning it (issue #941) ────
+//
+// Deliberately tiny, deliberately not a TOML parser: these read the handful of
+// shapes the smoke specs need out of the exact text the spec is serving to the
+// page. A spec that needs more than this should be using a fixture world
+// instead (see the header of this file).
+
+/** Number of `[[name]]` array-of-table blocks in `toml`.
+ *
+ *  Anchored to start-of-line so `[[name]]` inside a `#` comment is ignored.
+ */
+export function countTableArray(toml: string, name: string): number {
+  const re = new RegExp(String.raw`^\[\[${name}\]\]\s*$`, 'gm');
+  return toml.match(re)?.length ?? 0;
+}
+
+/** Every value of `key` across the `[[name]]` blocks in `toml`, in order. */
+export function tableArrayValues(toml: string, name: string, key: string): string[] {
+  const blocks = toml.split(new RegExp(String.raw`^\[\[${name}\]\]\s*$`, 'm')).slice(1);
+  const out: string[] = [];
+  for (const block of blocks) {
+    // Stop at the next table header so a block's fields can't leak into it.
+    const body = block.split(/^\[/m)[0];
+    const m = body.match(new RegExp(String.raw`^\s*${key}\s*=\s*"([^"]*)"`, 'm'));
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
+/** The body of the `[section]` table in `toml`, up to the next table header. */
+function tableBody(toml: string, section: string): string | undefined {
+  const escaped = section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const start = toml.match(new RegExp(String.raw`^\[${escaped}\]\s*$`, 'm'));
+  if (!start || start.index === undefined) return undefined;
+  const rest = toml.slice(start.index + start[0].length);
+  return rest.split(/^\[/m)[0];
+}
+
+/** A quoted string value from `[section]`. Throws if absent — a missing key is
+ *  a broken expectation, not a reason to silently assert `undefined`. */
+export function tomlString(toml: string, section: string, key: string): string {
+  const body = tableBody(toml, section);
+  const m = body?.match(new RegExp(String.raw`^\s*${key}\s*=\s*"([^"]*)"`, 'm'));
+  if (!m) throw new Error(`TOML has no string [${section}].${key}`);
+  return m[1];
+}
+
+/** A numeric value from `[section]`. Throws if absent (see `tomlString`). */
+export function tomlNumber(toml: string, section: string, key: string): number {
+  const body = tableBody(toml, section);
+  const m = body?.match(new RegExp(String.raw`^\s*${key}\s*=\s*(-?[0-9.]+)`, 'm'));
+  if (!m) throw new Error(`TOML has no number [${section}].${key}`);
+  return parseFloat(m[1]);
+}
+
+/** Fail unless the `WorldSetup` that arrived was built from `fixtureToml`.
+ *
+ *  Route interception is a silent failure mode: `context.route` never reports
+ *  that a glob matched nothing, so a typo'd or out-of-date pattern simply lets
+ *  the request through to the real file under `assets/worlds/`. Production
+ *  `default.toml` supplies both a `station`-tagged entity and an `npc`-tagged
+ *  raider, which is exactly what the fixture-served specs look for — so the
+ *  fallthrough leaves them green while asserting on the production content
+ *  issue #941 exists to decouple them from.
+ *
+ *  `WorldData.scenario_title` is `[global].title` verbatim (declared in
+ *  src/core/messages.rs, populated in src/world/server.rs), so it identifies
+ *  the world that was actually parsed. The expected value is read back out of
+ *  the fixture text rather than written down a second time — same
+ *  derive-don't-pin rule as the rest of this file — which also makes a fixture
+ *  that forgets to declare a title throw here instead of asserting `undefined`.
+ */
+export function expectFixtureWorld(worldSetupMsg: unknown, fixtureToml: string): void {
+  const title = tomlString(fixtureToml, 'global', 'title');
+  const served = (worldSetupMsg as any)?.data?.world?.scenario_title;
+  expect(
+    served,
+    `WorldSetup carries scenario_title ${JSON.stringify(served)}, not this spec's ` +
+      `fixture world ${JSON.stringify(title)} — the context.route glob almost ` +
+      'certainly stopped matching and production assets/worlds/ was served instead',
+  ).toBe(title);
 }
 
 // Reads the host peer ID from the server page's QR-link href, which is set

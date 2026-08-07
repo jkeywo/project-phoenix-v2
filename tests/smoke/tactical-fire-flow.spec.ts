@@ -8,7 +8,14 @@
 //   3. Asserts the NPC's hull_fraction in entity_states decreases.
 //   4. Keeps firing until EntityDespawned arrives (NPC hull reaches 0).
 
-import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
+import {
+  test,
+  expect,
+  readHostPeerId,
+  createTestClient,
+  waitForWasmReady,
+  expectFixtureWorld,
+} from './fixtures';
 import type { BrowserContext } from '@playwright/test';
 
 // Self-contained smoke-test world — intentionally does NOT read or depend on
@@ -21,6 +28,7 @@ import type { BrowserContext } from '@playwright/test';
 const MINIMAL_TEST_WORLD = `
 [global]
 seed = 42
+title = "Tactical Fire Fixture"
 
 [ambient_light]
 color      = [0.6, 0.55, 0.5]
@@ -36,8 +44,13 @@ template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
-tags = ["ship"]
+overrides = { tags = ["ship"] }
 
+# NOTE: this raider still inherits its tags from the production hull rather
+# than authoring them under \`overrides\` the way patrol.spec.ts does — the same
+# production coupling issue #941 removed there. Left as-is deliberately:
+# changing it alters what components the raider spawns with, and this spec's
+# combat path can only be verified by a full Playwright run.
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "raider_alpha"
@@ -134,6 +147,9 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
 
   // Get the raider UUID from WorldSetup.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
+  // Production `default.toml` also carries an `npc`-tagged raider, so confirm
+  // the route actually served MINIMAL_TEST_WORLD before selecting on tags.
+  expectFixtureWorld(worldSetup, MINIMAL_TEST_WORLD);
   const entities: any[] = worldSetup?.data?.world?.entities ?? [];
   // Select on `npc` alone. MINIMAL_TEST_WORLD spawns exactly two entities —
   // the player's cruiser and one hostile — so `npc` is unambiguous here.
@@ -202,6 +218,9 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
 
   // Get raider UUID from WorldSetup.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
+  // Production `default.toml` also carries an `npc`-tagged raider, so confirm
+  // the route actually served MINIMAL_TEST_WORLD before selecting on tags.
+  expectFixtureWorld(worldSetup, MINIMAL_TEST_WORLD);
   const entities: any[] = worldSetup?.data?.world?.entities ?? [];
   // Select on `npc` alone. MINIMAL_TEST_WORLD spawns exactly two entities —
   // the player's cruiser and one hostile — so `npc` is unambiguous here.
@@ -288,6 +307,9 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
 
   // Get raider UUID.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
+  // Production `default.toml` also carries an `npc`-tagged raider, so confirm
+  // the route actually served MINIMAL_TEST_WORLD before selecting on tags.
+  expectFixtureWorld(worldSetup, MINIMAL_TEST_WORLD);
   const entities: any[] = worldSetup?.data?.world?.entities ?? [];
   // Select on `npc` alone. MINIMAL_TEST_WORLD spawns exactly two entities —
   // the player's cruiser and one hostile — so `npc` is unambiguous here.

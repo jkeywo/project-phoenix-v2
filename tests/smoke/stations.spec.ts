@@ -131,42 +131,51 @@ test('ReleaseStation returns player to spectator', async ({ context }) => {
   await client.close();
 });
 
-test('7th connector when all 6 stations are filled becomes spectator', async ({ context }) => {
+// Issue #941: this used to hardcode `['Captain', 'Helm', 'Tactical', 'Science',
+// 'Engineering', 'Comms']` and call itself "7th connector when all 6 stations
+// are filled" — the roster the player hull happened to author. A hull gaining
+// or losing a station broke it, and worse, a hull losing one would have made it
+// pass vacuously (the "overflow" player would just have taken the free seat).
+// The roster now comes off the wire from `Welcome.ship_stations`, which is the
+// same list the real lobby renders, so the test means "one more player than the
+// ship has seats becomes a spectator" for whatever ship is loaded.
+test('a connector arriving after every station is filled becomes a spectator', async ({ context }) => {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 
-  const stations = ['Captain', 'Helm', 'Tactical', 'Science', 'Engineering', 'Comms'];
-  const clients = [];
-  for (let i = 0; i < stations.length; i++) {
-    const c = await createTestClient(context, hostId, { name: `P${i + 1}` });
-    await c.send('SelectStation', { station: stations[i] });
+  const first = await createTestClient(context, hostId, { name: 'P1' });
+  const welcome = await first.page.evaluate(
+    () => (window as any).__messages.find((m: any) => m.type === 'Welcome'),
+  ) as any;
+  const roster: { id: string; name: string }[] = welcome.data.ship_stations.stations;
+  expect(roster.length, 'the ship must declare at least one station to fill').toBeGreaterThan(0);
+
+  // `SelectStation` accepts either the station's display name or its id
+  // (`lobby::stations_config::get_station`); the id is the stabler key.
+  const clients = [first];
+  for (const [i, station] of roster.entries()) {
+    const c = i === 0 ? first : await createTestClient(context, hostId, { name: `P${i + 1}` });
+    if (i > 0) clients.push(c);
+    await c.send('SelectStation', { station: station.id });
     await c.waitForMessage('StationAssigned', 5_000);
-    clients.push(c);
   }
 
-  // 7th player joins — all 6 stations filled, should be spectator
-  const c10 = await createTestClient(context, hostId, { name: 'Spectator' });
+  // Every seat is now held, so the next player to connect has nowhere to sit.
+  const overflow = await createTestClient(context, hostId, { name: 'Spectator' });
 
-  const spectatorMsg = await c10.page.evaluate(
-    () => {
-      const msgs: any[] = (window as any).__messages || [];
-      return msgs.find((m: any) => m.type === 'StationAssigned' && m.data.token === (window as any).__myToken);
-    }
-  ) as any;
-
-  const spectatorMsg2 = await c10.page.evaluate(
+  const spectatorMsg = await overflow.page.evaluate(
     (token) => {
       const msgs: any[] = (window as any).__messages || [];
       return msgs.find((m: any) => m.type === 'StationAssigned' && m.data.token === token);
     },
-    c10.token,
+    overflow.token,
   ) as any;
 
-  expect(spectatorMsg2).not.toBeNull();
-  expect(spectatorMsg2.data.station).toBeNull();
+  expect(spectatorMsg).not.toBeNull();
+  expect(spectatorMsg.data.station).toBeNull();
   // Spectator: serde omits `station_id` when None, so the field is undefined.
-  expect(spectatorMsg2.data.station_id).toBeUndefined();
+  expect(spectatorMsg.data.station_id).toBeUndefined();
 
   for (const c of clients) { await c.close(); }
-  await c10.close();
+  await overflow.close();
 });

@@ -9,9 +9,23 @@
 // believes it holds a station (and receives its state) while the server
 // rejects its actions.
 
-import { test, expect } from './fixtures';
+import fs from 'fs';
+import path from 'path';
+import { test, expect, tomlNumber } from './fixtures';
 import { readHostPeerId, createServerPage, createTestClient } from './fixtures';
 import type { TestClient } from './fixtures';
+
+// The hull `MINIMAL_DEFAULT_WORLD` spawns as the player ship (see fixtures.ts).
+// Only its *legal power range* is read from here — the level the ship boots at
+// is taken off the wire, not from this file — so a rebalance of the authored
+// defaults cannot break these tests. Same derive-don't-pin rule as
+// `sim-state.spec.ts`, per issue #941.
+const PLAYER_HULL_TOML = fs.readFileSync(
+  path.resolve(__dirname, '../../assets/entities/alliance_cruiser.toml'),
+  'utf-8',
+);
+const HELM_POWER_MAX = tomlNumber(PLAYER_HULL_TOML, 'power_groups.helm', 'max_level');
+const HELM_POWER_MIN = tomlNumber(PLAYER_HULL_TOML, 'power_groups.helm', 'min_level');
 
 /** Send SelectStation and wait for a StationAssigned for *this* client's token. */
 async function selectAndWait(client: TestClient, station: string, timeout = 5_000) {
@@ -67,6 +81,33 @@ async function setHelmPower(client: TestClient, level: number) {
   });
 }
 
+/** The helm allocation the ship boots with, read off the first PowerState.
+ *
+ *  Issue #941: these tests used to wait for `data.helm === 2` — the level the
+ *  player hull happened to author for the helm power group. A power rebalance
+ *  moved it and broke a test about *authorisation*, which is what the taps
+ *  below are actually checking. Reading the boot level and then moving off it
+ *  keeps the real assertion (the Engineering holder's tap is honoured) and
+ *  drops the authored constant.
+ */
+async function bootHelmPower(client: TestClient): Promise<number> {
+  await waitForLastMessage(client, 'PowerState', 'data && typeof data.helm === "number"');
+  const msg = await client.lastMessage('PowerState') as any;
+  return msg.data.helm as number;
+}
+
+/** A helm level that is not `from` and is inside the hull's authored range. */
+function otherLevel(from: number): number {
+  const other = from < HELM_POWER_MAX ? from + 1 : from - 1;
+  if (other < HELM_POWER_MIN || other > HELM_POWER_MAX || other === from) {
+    throw new Error(
+      `helm power group has no second level to move to (min=${HELM_POWER_MIN}, ` +
+        `max=${HELM_POWER_MAX}, at=${from}) — these tests need one`,
+    );
+  }
+  return other;
+}
+
 /**
  * Build a 4-player crew at the fixed 6P layout. Returns four clients;
  * c3 is the Power station under test for power-related tests.
@@ -112,10 +153,15 @@ test('Engineering player can change helm allocation', async ({ context }) => {
   await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 10_000);
 
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
+  const boot = await bootHelmPower(c3);
+  const moved = otherLevel(boot);
+  await setHelmPower(c3, moved);
+  await waitForLastMessage(c3, 'PowerState', `data && data.helm === ${moved}`);
 
-  await setHelmPower(c3, 3);
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+  // And back — a one-way move could be an AI nudge rather than this client's
+  // tap being honoured; a round trip to a level it just left cannot be.
+  await setHelmPower(c3, boot);
+  await waitForLastMessage(c3, 'PowerState', `data && data.helm === ${boot}`);
 
   await c1.close();
   await c2.close();
@@ -193,10 +239,10 @@ test('Engineering acts when all four connect before selecting', async ({ context
   await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 10_000);
 
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
-
-  await setHelmPower(c3, 3);
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+  const boot = await bootHelmPower(c3);
+  const moved = otherLevel(boot);
+  await setHelmPower(c3, moved);
+  await waitForLastMessage(c3, 'PowerState', `data && data.helm === ${moved}`);
 
   await c1.close();
   await c2.close();
@@ -214,21 +260,23 @@ test('Engineering can still act after a mid-game reconnect', async ({ context })
   await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 10_000);
 
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
-  await setHelmPower(c3, 3);
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+  const boot = await bootHelmPower(c3);
+  const moved = otherLevel(boot);
+  await setHelmPower(c3, moved);
+  await waitForLastMessage(c3, 'PowerState', `data && data.helm === ${moved}`);
 
   await c3.close();
   const c3b = await createTestClient(context, hostId, { token: powToken, name: 'Eng' });
 
   // Wait for any PowerState (AI may have reset helm during disconnect).
   await waitForLastMessage(c3b, 'PowerState', 'data && typeof data.helm === "number"', 10_000);
-  // Restore helm=3 in case AI changed it, then verify.
-  await setHelmPower(c3b, 3);
-  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 3', 10_000);
+  // Drive both levels from the reconnected device: whatever the AI did while it
+  // was away, the returning holder's taps must still be the ones that land.
+  await setHelmPower(c3b, moved);
+  await waitForLastMessage(c3b, 'PowerState', `data && data.helm === ${moved}`, 10_000);
 
-  await setHelmPower(c3b, 2);
-  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 2', 10_000);
+  await setHelmPower(c3b, boot);
+  await waitForLastMessage(c3b, 'PowerState', `data && data.helm === ${boot}`, 10_000);
 
   await c1.close();
   await c2.close();
@@ -246,10 +294,11 @@ test('shared session-token orphans the first Engineering device (ghost console)'
   await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 10_000);
 
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
+  const boot = await bootHelmPower(c3);
+  const moved = otherLevel(boot);
 
-  await setHelmPower(c3, 3);
-  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+  await setHelmPower(c3, moved);
+  await waitForLastMessage(c3, 'PowerState', `data && data.helm === ${moved}`);
 
   // Record c3's message count before ghost connects
   const preCount = await c3.page.evaluate(() => (window as any).__messages?.length ?? 0);
@@ -258,22 +307,25 @@ test('shared session-token orphans the first Engineering device (ghost console)'
   await waitForLastMessage(ghostWinner, 'PowerState', 'data && typeof data.helm === "number"');
 
   // ghostWinner sends a change so we can verify c3 (ghost) does NOT receive updates
-  await setHelmPower(ghostWinner, 2);
-  await waitForLastMessage(ghostWinner, 'PowerState', 'data && data.helm === 2');
+  await setHelmPower(ghostWinner, boot);
+  await waitForLastMessage(ghostWinner, 'PowerState', `data && data.helm === ${boot}`);
 
   // Small settling window to drain any in-flight SimState (the server tick
   // that might have fired between tokenConns overwrite and this check).
   await c3.page.waitForTimeout(500);
 
-  // Check that c3 did NOT receive the ghostWinner's helm=2 change.
+  // Check that c3 did NOT receive the ghostWinner's change back to `boot`.
   // We check for the specific value rather than any PowerState to avoid
   // flakiness from a PowerState that fired just before tokenConns was
   // updated (in-flight via BroadcastChannel past preCount).
-  const sawGhostChange = await c3.page.evaluate((count) => {
-    const msgs: any[] = (window as any).__messages || [];
-    const newMsgs = msgs.slice(count);
-    return newMsgs.some((m: any) => m.type === 'PowerState' && m.data?.helm === 2);
-  }, preCount);
+  const sawGhostChange = await c3.page.evaluate(
+    ({ count, level }: { count: number; level: number }) => {
+      const msgs: any[] = (window as any).__messages || [];
+      const newMsgs = msgs.slice(count);
+      return newMsgs.some((m: any) => m.type === 'PowerState' && m.data?.helm === level);
+    },
+    { count: preCount, level: boot },
+  );
   expect(sawGhostChange).toBe(false);
 
   await c1.close();

@@ -78,7 +78,7 @@
         var p = system(s, 'power-reactor', 'power-battery');
         var r = system(s, 'repair');
         pwr.state = { groups: p.consoles || [], auto: !!p.power_auto };
-        bat.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !p.locked, emergency_threshold_pct: 20 };
+        bat.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !!p.charging, emergency_threshold_pct: 20 };
         // Overall ship-wide hull (every damageable system), not just this
         // station's own systems.
         var oh = r.overall_hull || {};

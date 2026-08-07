@@ -56,20 +56,23 @@
         var groups = s.groups || s.consoles || [];
         var pct = s.battery_max > 0 ? (s.battery_charge / s.battery_max) * 100 : 0;
         document.getElementById('power-controls').state = { groups: groups, auto: !!s.power_auto };
-        document.getElementById('battery-bar').state = { level_pct: pct, charging: !s.locked, emergency_threshold_pct: 20 };
+        document.getElementById('battery-bar').state = { level_pct: pct, charging: !!s.charging, emergency_threshold_pct: 20 };
         document.getElementById('station-damage').state = s.own_hull || null;
         document.getElementById('bat-val').textContent = Math.round(pct) + '%';
         setAutoState(null, document.getElementById('power-auto-badge'), !!s.power_auto);
         var dataEl = document.getElementById('power-data');
         dataEl.dataset.total = String(s.total || 0);
         dataEl.dataset.totalMax = String(s.total_max || 0);
-        dataEl.dataset.locked = String(!!s.locked);
+        dataEl.dataset.draining = String(!!s.draining);
         dataEl.replaceChildren();
         groups.forEach(function(group) {
           var entry = document.createElement('div');
           entry.className = 'power-entry';
           entry.dataset.id = group.id || '';
           entry.dataset.level = String(group.level || 0);
+          // The standing order, which differs from `level` while a battery
+          // floor is holding the group down (issue #952).
+          entry.dataset.commandedLevel = String(group.commanded_level || group.level || 0);
           entry.dataset.maxLevel = String(group.max_level || 0);
           dataEl.appendChild(entry);
         });

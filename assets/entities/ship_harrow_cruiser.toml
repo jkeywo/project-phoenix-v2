@@ -806,6 +806,32 @@ verb = "release_torpedo"
 capacity = 100.0
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25.0
+# How far above its own floor the reserve has to climb before the reactor lets
+# a group back up, in the same percentage-of-`capacity` units. Without this band
+# a floor chatters at tick rate: cutting a group lowers the EFFECTIVE total, the
+# effective total is what picks the `rates` rung, and on this reactor the rungs
+# either side of the resting total have opposite signs — so the cut immediately
+# recharges the reserve back through the threshold that made it. Raise it for
+# longer, more deliberate brownouts; lower it for a ship that scrabbles back.
+battery_floor_release_margin = 5.0
+
+# Battery floors (issue #952): the percentage of `capacity` below which each
+# group is held down to its `[power_groups.*] min_level`, released again only
+# once the charge climbs back through `battery_floor_release_margin` above it.
+# Falling, the ship loses helm first, then its guns, and keeps its screens
+# longest. Recovering, the ladder releases from the TOP, not in reverse: a cut
+# rung waits for every rung above it, so the reserve climbs on the deep-cut draw
+# instead of re-imposing the one that emptied it, and `shields` — the lowest
+# rung — is the LAST group back rather than the first. `weapons` sits ABOVE
+# this hull's own `min_reserve_weapons`, so the reactor cuts the guns before the
+# crew would and the ladder actually bites on an AI-crewed hull; `helm` stays
+# UNDER `min_reserve_helm`, so the crew's guard binds first there. See the fuller
+# note in `assets/entities/fragments/ai/fleet_baseline.toml` for the measurement
+# behind that asymmetry.
+[power.battery_floor]
+helm = 40.0
+weapons = 25.0
+shields = 5.0
 
 # Power allocation — one rule pair per group. Each ELEVATE rule declares a
 # minimum battery reserve as a `param` its own guard reads, so a group rises

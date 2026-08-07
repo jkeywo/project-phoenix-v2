@@ -29,7 +29,12 @@ export class PhPowerControls extends HTMLElement {
     .pip:hover:not(.disabled) { border-color: var(--ink-dim); }
     .pip.active { background: var(--loaded); border-color: var(--loaded); box-shadow: 0 0 6px rgba(78,200,112,0.5); }
     .pip.inactive { background: transparent; border-color: var(--line-faint); }
+    /* A rung the order asks for that the reactor's battery floor is refusing:
+       outlined in the reloading amber, hollow, so the officer can see the gap
+       between what was commanded and what is running. */
+    .pip.held { background: transparent; border-color: var(--reloading); box-shadow: none; }
     .pip.disabled { cursor: default; opacity: 0.3; }
+    .level-text.held { color: var(--reloading); }
     .pip-btn-row { display: flex; align-items: center; gap: 0.5rem; justify-content: center; }
     .level-text { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
@@ -125,6 +130,8 @@ export class PhPowerControls extends HTMLElement {
             this.sendAction('set_power', { target: gid, level: cur - 1 });
           }
         });
+        // NB: both handlers step from `#currentLevel`, which is the COMMANDED
+        // level, not the effective one — see that method.
         if (idx < container.children.length) {
           container.insertBefore(el, container.children[idx]);
         } else {
@@ -132,12 +139,22 @@ export class PhPowerControls extends HTMLElement {
         }
       }
 
+      // EFFECTIVE (what the group is running at) vs COMMANDED (the standing
+      // order). They differ while the reactor's battery floor is holding the
+      // group down. The pips light the effective level, the rungs between the
+      // two are shown as held, and every CONTROL works off the commanded one.
       const level = group.level != null ? group.level : 0;
+      const commanded = commandedLevel(group);
+      const held = commanded > level;
       const minLevel = group.min_level != null ? group.min_level : 0;
       const maxLevel = group.max_level != null ? group.max_level : 4;
 
       el.querySelector('.group-label').textContent = group.label || group.id;
-      el.querySelector('.level-text').textContent = t('component.power.level', { n: level });
+      const levelText = el.querySelector('.level-text');
+      levelText.textContent = held
+        ? t('component.power.held', { n: level, c: commanded })
+        : t('component.power.level', { n: level });
+      levelText.classList.toggle('held', held);
 
       const pipRow = el.querySelector('.pip-row');
 
@@ -153,7 +170,10 @@ export class PhPowerControls extends HTMLElement {
           this.#pipCache.set(key, pip);
           pipRow.appendChild(pip);
         }
-        pip.className = 'pip' + (i <= level ? ' active' : ' inactive') + (auto ? ' disabled' : '');
+        let stateClass = ' inactive';
+        if (i <= level) stateClass = ' active';
+        else if (i <= commanded) stateClass = ' held';
+        pip.className = 'pip' + stateClass + (auto ? ' disabled' : '');
       }
       for (const [key, pip] of this.#pipCache) {
         if (key.startsWith(gid + ':') && !livePips.has(key)) { pip.remove(); this.#pipCache.delete(key); }
@@ -161,17 +181,41 @@ export class PhPowerControls extends HTMLElement {
 
       const incrBtn = el.querySelector('.mini-btn[data-action="incr"]');
       const decrBtn = el.querySelector('.mini-btn[data-action="decr"]');
-      incrBtn.disabled = auto || level >= maxLevel;
-      decrBtn.disabled = auto || level <= minLevel;
+      // Gated on the COMMANDED level for the same reason the handlers step
+      // from it: a floored group whose order is already at the cap must not
+      // offer a `+` that would silently be a no-op, and one whose order is
+      // above its minimum must still offer a `−`.
+      incrBtn.disabled = auto || commanded >= maxLevel;
+      decrBtn.disabled = auto || commanded <= minLevel;
     });
   }
 
+  /**
+   * The level the `+`/`−` buttons step from: the group's COMMANDED level.
+   *
+   * `set_power` carries an ABSOLUTE level and the server measures the delta
+   * against the standing order, so stepping from the effective level is a bug
+   * whenever a battery floor is holding the group down (issue #952). Helm
+   * commanded 4 and floored to 2: `+` would send 3, which the server reads as
+   * a DECREASE — the panel would not move, a second press would re-send the
+   * same 3, and `−` would send 1 and collapse the order outright.
+   *
+   * Falls back to `level` when `commanded_level` is absent or 0, which is what
+   * a pre-#952 server sends.
+   */
   #currentLevel(groupId) {
     const s = this.#state || {};
     const groups = Array.isArray(s.groups) ? s.groups : [];
     const g = groups.find(x => x.id === groupId);
-    return g ? (g.level != null ? g.level : 0) : 0;
+    return g ? commandedLevel(g) : 0;
   }
+}
+
+/** @see PhPowerControls#currentLevel — the commanded level, with its fallback. */
+function commandedLevel(group) {
+  if (!group) return 0;
+  if (group.commanded_level != null && group.commanded_level > 0) return group.commanded_level;
+  return group.level != null ? group.level : 0;
 }
 
 if (typeof window !== 'undefined' && !customElements.get('ph-power-controls')) {

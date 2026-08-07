@@ -650,29 +650,34 @@ export function shieldStatusView(facings) {
   });
 }
 
-/** Sum of the three power allocation levels `[helm, weapons, sensors]`. */
+/** Sum of the three power allocation levels `[helm, weapons, shields]`. */
 export function powerTotal(levels) {
   return levels[0] + levels[1] + levels[2];
 }
 
-const POWER_INDEX = { Helm: 0, Tactical: 1, Sensors: 2 };
+const POWER_INDEX = { Helm: 0, Tactical: 1, Shields: 2 };
 
 /**
  * True when the Power console may send IncreasePower for `console`:
- * not locked, total below 8, that console below 4.
+ * total below 8, that console below 4.
+ *
+ * The `locked` argument went away with the server's brownout lock (issue #952):
+ * a flat battery no longer freezes the controls, it holds groups down to their
+ * authored floors and lets them back up as the reserve returns — so a low
+ * battery is a reason the request will not TAKE, not a reason to refuse to send
+ * it. The only refusals left are the budget and the per-group cap.
  */
-export function canIncreasePower(levels, console, locked) {
-  if (locked || powerTotal(levels) >= 8) return false;
+export function canIncreasePower(levels, console) {
+  if (powerTotal(levels) >= 8) return false;
   const idx = POWER_INDEX[console];
   return idx !== undefined && levels[idx] < 4;
 }
 
 /**
  * True when the Power console may send DecreasePower for `console`:
- * not locked, that console above 1.
+ * that console above 1. See {@link canIncreasePower} on the retired `locked`.
  */
-export function canDecreasePower(levels, console, locked) {
-  if (locked) return false;
+export function canDecreasePower(levels, console) {
   const idx = POWER_INDEX[console];
   return idx !== undefined && levels[idx] > 1;
 }

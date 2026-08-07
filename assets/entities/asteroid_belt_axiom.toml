@@ -13,14 +13,40 @@ weight = 1.0
 spawn_distance = 250.0
 despawn_distance = 300.0
 asteroid_type_paths = [
-    "assets/entities/asteroid_common_1_small.toml",
-    "assets/entities/asteroid_common_1_large.toml",
-    "assets/entities/asteroid_common_2_small.toml",
-    "assets/entities/asteroid_common_2_large.toml",
-    "assets/entities/asteroid_common_3_small.toml",
-    "assets/entities/asteroid_common_3_large.toml",
-    "assets/entities/asteroid_common_4_small.toml",
-    "assets/entities/asteroid_common_4_large.toml",
+    # common — rarity weight 1.0 (the baseline the others are relative to)
+    { path = "assets/entities/asteroid_common_1_small.toml", weight = 1.0 },
+    { path = "assets/entities/asteroid_common_1_large.toml", weight = 1.0 },
+    { path = "assets/entities/asteroid_common_2_small.toml", weight = 1.0 },
+    { path = "assets/entities/asteroid_common_2_large.toml", weight = 1.0 },
+    { path = "assets/entities/asteroid_common_3_small.toml", weight = 1.0 },
+    { path = "assets/entities/asteroid_common_3_large.toml", weight = 1.0 },
+    { path = "assets/entities/asteroid_common_4_small.toml", weight = 1.0 },
+    { path = "assets/entities/asteroid_common_4_large.toml", weight = 1.0 },
+    # common, huge — 0.1x the class weight (issue #947).
+    # A rock this big is a landmark, not terrain: about 1 gameplay rock
+    # in 23 is one. At the class weight it would be nearly a third of them.
+    { path = "assets/entities/asteroid_common_1_huge.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_common_2_huge.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_common_3_huge.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_common_4_huge.toml", weight = 0.1 },
+    # uncommon — rarity weight 0.1 ≈ 1:10 against a common
+    { path = "assets/entities/asteroid_uncommon_1_small.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_uncommon_1_large.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_uncommon_2_small.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_uncommon_2_large.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_uncommon_3_small.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_uncommon_3_large.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_uncommon_4_small.toml", weight = 0.1 },
+    { path = "assets/entities/asteroid_uncommon_4_large.toml", weight = 0.1 },
+    # rare — rarity weight 0.01 ≈ 1:100 against a common
+    { path = "assets/entities/asteroid_rare_1_small.toml", weight = 0.01 },
+    { path = "assets/entities/asteroid_rare_1_large.toml", weight = 0.01 },
+    { path = "assets/entities/asteroid_rare_2_small.toml", weight = 0.01 },
+    { path = "assets/entities/asteroid_rare_2_large.toml", weight = 0.01 },
+    { path = "assets/entities/asteroid_rare_3_small.toml", weight = 0.01 },
+    { path = "assets/entities/asteroid_rare_3_large.toml", weight = 0.01 },
+    { path = "assets/entities/asteroid_rare_4_small.toml", weight = 0.01 },
+    { path = "assets/entities/asteroid_rare_4_large.toml", weight = 0.01 },
 ]
 cosmetic_type_paths = [
     "assets/entities/asteroid_common_1_cosmetic.toml",

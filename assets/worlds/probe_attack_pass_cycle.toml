@@ -1,0 +1,91 @@
+# Probe world for issue #937 — the destroyer must CYCLE its attack pass.
+#
+# `movement_attack_pass.toml`'s whole shape is a loop: line up, run in, commit to
+# an outward heading, turn back, run in again. Every existing probe of it stops at
+# the first leg. `probe_targeted_pass.toml` asserts that ONE escape happens and
+# that its heading is held; `probe_duel.toml` asserts the hull moves at all.
+# Neither can see the failure this world exists for, which is that the loop runs
+# once and then stops.
+#
+# ── The geometry, and why it is a Harrow CRUISER on the other side ────────────
+#
+# The closest-approach detector that ends `inbound` is three conjuncts, and the
+# load-bearing one is `fact(closing_rate) < param(closing_rate_epsilon)` — the
+# gap has started opening. `closing_rate` is not a difference of two range
+# readings: it is the radial component of the RELATIVE velocity, reconstructed
+# from both ships' `(yaw, forward_speed)`. So it is only as good as the heading
+# the world snapshot publishes for the OTHER ship, and a hull that reads its
+# target's heading wrong reads "still closing" while it is flying away.
+#
+# That is exactly what happened (issue #937): `build_world_snapshot` published
+# every entity's heading off its RENDER transform, which carries the negation
+# `sync_ship_position` applies, so every target's velocity came back mirrored.
+# The destroyer merged, never called closest approach, and ground along at
+# contact range against the ship it had just rammed — the reported "orbits at
+# ~range 5 instead of making attack runs".
+#
+# The other ship must therefore MANOEUVRE, and manoeuvre differently from the
+# destroyer, or the error cancels: two hulls flying the same fly-through pass
+# meet nearly head-on, where a mirrored velocity is still mostly radial and the
+# detector fires anyway (which is why `probe_duel` passes either way). A Harrow
+# cruiser flies `movement_broadside_orbit.toml` — it circles rather than passes
+# — so at the merge its velocity is mostly TANGENTIAL, the component the mirror
+# corrupts most, and it stays alongside afterwards instead of flying out. That
+# pairing is the one that jams, and it is the pairing `combat_test.toml` wave 1
+# actually puts in front of a destroyer player.
+#
+# 140 units of separation, along +X:
+#
+#   * inside the destroyer captain's `alert_on_hostile_within` (150), so the
+#     alert is up on the first tick and `posture` presses the doctrine from the
+#     start — this world is not a test of the posture gate, which
+#     `authored_ai_pins::posture_guard_truth_table` already owns;
+#   * OUTSIDE the destroyer's own `commit_range` (120), so `acquire` → `inbound`
+#     is a transition it reaches by flying rather than one it spawns on;
+#   * well inside both hulls' authored `sensor_range`, so neither drops to low
+#     LOD mid-manoeuvre and freezes on a dead-reckoned heading.
+#
+# Hostility is mutual: a one-directional grudge would leave the cruiser passive,
+# and a passive target does not orbit.
+
+[global]
+seed = 937
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — the headless runner's `--ship` supersedes this template; the
+# entry exists so `spawn_game_start_entities` has a player to spawn.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+# The orbiting hostile. Its own template doctrine (`destroy-hostiles`, an
+# UNTARGETED Destroy) is what licenses the nearest-hostile scan, so no override
+# is needed to make it engage — and none is authored, so this world exercises
+# the shipped hull rather than a scenario-local variant of it.
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/ship_harrow_cruiser.toml"
+  name          = "probe_orbiter"
+  position      = [140.0, 0.0, 0.0]

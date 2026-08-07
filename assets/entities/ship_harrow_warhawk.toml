@@ -167,9 +167,11 @@
 # tubes, its stations and systems, its doctrine — plus the two ship-level
 # declarations a Harrow deliberately does not share with the fleet: the
 # stand-down `[captain_console.ai]` (#912) and `[power]` + `[power.ai_policy]`,
-# re-authored whole so the baseline's resting `sensors` rule cannot demote a hull
-# that authors no `[power_groups.*]` (#923). `ship_harrow_patrol.toml` carries the
-# fuller note on both.
+# re-authored whole because the baseline's `helm` rule gates its elevation on
+# `red_alert` and a Harrow raises the alert only around combat, not for the
+# whole transit, so inheriting the guard would pin the drive at 2 for exactly
+# the leg that needs it (#923; corrected #955). `ship_harrow_patrol.toml`
+# carries the fuller note on both.
 includes = [
   "fragments/ai/fleet_baseline.toml",
   "fragments/ai/movement_artillery.toml",
@@ -884,17 +886,101 @@ when = "true"
 verb = "set_red_alert"
 value = false
 
-# Torpedo magazine — always grant a claim the host has already found legal. The
-# offline + non-empty gates remain the hard authority; this policy is the
-# authored arbiter layered on top, which is where a hull would ration rounds
-# between tubes.
+# Torpedo magazine — two axes on one authored block.
+#
+# GRANT: always grant a claim the host has already found legal. The offline +
+# non-empty gates remain the hard authority; this rule is the authored arbiter
+# layered on top, and it is where a hull would ration rounds between its tubes.
+#
+# CONSERVATION (issue #943): whether a launch the ship has already authorised may
+# SPEND its round here, or should hold it for later in the mission. Resolved
+# inside `handle_fire_torpedo`, the one consumer of an admitted `FireTorpedo`, so
+# a human Tactical operator and an AI backfill meet this guard identically — the
+# per-tube `torpedo_launch` doctrine gates only the AI, and a gate that
+# constrains NPCs alone is how a player empties the whole magazine into wave one.
+#
+# `rounds_per_threat` is a host reading, not an authored number: every round the
+# ship still HAS — the magazine PLUS whatever is already parked in the tubes —
+# divided by the mission threat still ahead, which the SCENARIO publishes as the
+# world counter `mission_threat_remaining`. A world that publishes none leaves
+# the ratio unbounded and this rule always fires, because pacing is something a
+# mission asks for and never something a hull decides for itself.
+#
+# `min_rounds_per_threat = 0.5` reads "keep one round for every TWO things still
+# coming". Before retuning it, understand what kind of gate it is: a ONE-WAY
+# LATCH. `rounds_aboard` only ever FALLS inside a mission, and the threat count
+# only falls when something DIES — so a hull that dips under its own reserve
+# stops firing, stops killing the thing that would bring the count down, and
+# never climbs back over the line. Whatever is authored here is not a soft
+# brake. It is a floor the ship must never be pushed below mid-mission.
+#
+# 0.5 is chosen for the margin it leaves, not for a tidy identity:
+#
+#   * The middle of the mission stays open. Over every position combat_test can
+#     put this hull in while it still carries half its payload or more, the
+#     reserve clears at least 4 rounds — two full volleys — against the wave in
+#     front of it. A wave that survives one volley is a wave that never dies,
+#     and a wave that never dies freezes the threat count and the latch with it.
+#   * Nothing is stranded. At the last unit of threat the floor is half a round,
+#     so anything still aboard clears the gate and can be spent on the last
+#     fight. A reserve measured against the magazine COUNTER rather than the
+#     rounds aboard strands the parked volley whatever this number is, because
+#     the counter is debited the moment a tube starts loading.
+#
+# What it trades away is the front of the mission. The floor at eight published
+# waves is 4 rounds rather than 8, so an engagement lasting as long as the hull
+# is willing to keep shooting may now take 10 of the 12 rounds into wave 1 where
+# 1.0 capped it at 6. That ceiling is a licence rather than a forecast — flown
+# for real the destroyer spends 5 on wave 1 either way, because the engagement
+# ends before the gate does — but it is what 0.5 permits, and it is the price of
+# the margin above.
+#
+# The tidy identity is what 1.0 bought (issue #943): the reserve came to exactly
+# one round at the last unit of threat, so on paper nothing could ever be
+# stranded. It shipped with ZERO margin and it broke. Against the old asteroid
+# layout the destroyer bottomed out at exactly 7 rounds against 7 remaining
+# waves — a ratio of exactly 1.0, the last reading the gate still passes. #946
+# reshuffled which rock lands in which cell (same radii, same split), that moved
+# the engagement by one round, the ratio fell under, the latch shut, and
+# combat_test's wave chain stalled at wave 2 with the hull holding rounds it
+# would never fire.
+#
+# All of it is measured, not asserted by hand.
+# `the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission`
+# (`src/console/weapons/server_tests.rs`) walks this doctrine through the real
+# torpedo system over the world's whole authored schedule, INCLUDING a wave that
+# outlives the engagement fought against it, and states the latch directly on
+# the doctrine.
+# `combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat`
+# (`tests/headless_runner.rs`) flies it for real and prints the magazine's
+# shape bucketed by remaining threat: {8: (12, 7), 7: (7, 3),
+# 6: (3, 1), 5: (1, 1)} — 12 aboard entering wave 1 and 7 leaving it, 7 into
+# wave 2 and 3 leaving it, still spending through wave 3. At 1.0 the same run
+# reads {8: (12, 7), 7: (7, 5)} and stops there: wave 2 never dies.
+#
+# `sole_objective_count = 1` is the carve-out, and it counts NAMED Destroy
+# targets rather than doctrine entries. A world's `spawn_entity` override
+# APPENDS its brief to the template's standing orders — doctrine reconciles by
+# `id`, and an instance override may not remove what the template authored — so
+# combat_test's raid cruisers carry their template's untargeted
+# `destroy-hostiles` alongside the `assault-starbase` the world hands them: two
+# entries, one named target, one engagement they will not outlive. Those spend
+# freely. A hull whose brief names no target reads 0 and paces — which is the
+# player's destroyer, the ship #943 was filed about.
 [torpedoes.ai]
+param = { min_rounds_per_threat = 0.5, sole_objective_count = 1.0 }
 
 [[torpedoes.ai.rule]]
 priority = 0
 channel = "torpedo_magazine_grant"
 when = "true"
 verb = "grant_torpedo_round"
+
+[[torpedoes.ai.rule]]
+priority = 0
+channel = "torpedo_conservation"
+when = "fact(targeted_objective_count) == param(sole_objective_count) or fact(rounds_per_threat) >= param(min_rounds_per_threat)"
+verb = "release_torpedo"
 
 # Reactor + battery. Transcribed from `PowerConfig::default()`, which is what
 # this hull ran on before it declared the section: authoring

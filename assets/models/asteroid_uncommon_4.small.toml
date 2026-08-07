@@ -1,0 +1,49 @@
+[base]
+offset = [ 0, -1.766338141221453, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 2.1025147266245967, 2.1025147266245967, 2.1025147266245967 ]
+
+[extents]
+min = [ -1.5285761996692813, -1.7620743826715202, -1.999454107633282 ]
+max = [ 1.5451497225109794, 1.766338141221453, 1.9999999999999998 ]
+size = [ 3.0737259221802606, 3.528412523892973, 3.999454107633282 ]
+
+[markers]
+
+# Distance-based LOD (issue #914): full GLB up close, two decimated steps, then
+# a shared procedural sphere far away. Levels omit `variant`, `radius` and
+# `colour` so each rock inherits them from the entity's own flat `[mesh]`.
+# The two decimated steps declare how they are regenerated (issue #919):
+#   node scripts/generate-lods.mjs asteroid_uncommon_4
+# Same bands and ratios as the four common asteroids, so every rock in a
+# field switches level at the same distance. No `remesh_voxel_size` here:
+# the import already brought this mesh down to the commons' density with a
+# UV-preserving Blender collapse (scripts/blender-decimate.py), which is
+# what the voxel pre-pass was standing in for on the stubborn commons.
+[[lod]]
+max_distance = 25.0
+model = "assets/models/asteroid_uncommon_4.glb"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/asteroid_uncommon_4_lod1.glb"
+
+[lod.generate]
+source = "assets/models/asteroid_uncommon_4.glb"
+ratio = 0.15
+error = 0.01
+texture_size = 512
+
+[[lod]]
+max_distance = 300.0
+model = "assets/models/asteroid_uncommon_4_lod2.glb"
+
+[lod.generate]
+source = "assets/models/asteroid_uncommon_4.glb"
+ratio = 0.1
+error = 0.1
+texture_size = 256
+
+[[lod]]
+shape = "sphere"
+scale = [ 1.0, 0.5, 1.0 ]

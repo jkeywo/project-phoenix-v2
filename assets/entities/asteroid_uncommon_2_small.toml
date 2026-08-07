@@ -1,0 +1,25 @@
+name = "entity.asteroid_uncommon_2_small.name"
+tags = ["asteroid", "gameplay", "small"]
+
+[target]
+tags = ["asteroid"]
+threat_level = "none"
+
+[collider]
+shape = "Ball"
+radius = 2
+length = 0.0
+
+[hull]
+hull_integrity = 30
+
+[mesh]
+# The LOD ladder for this model lives in its rig sidecar (issue #914).
+model = "assets/models/asteroid_uncommon_2.glb"
+variant = "small"
+shape = "sphere"
+radius = 2
+colour = [0.55, 0.5, 0.42]
+
+[radar_appearance]
+icon = "asteroid"

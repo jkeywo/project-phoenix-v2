@@ -25,15 +25,22 @@
 #     baseline deliberately carries no Captain policy at all, so nothing here is
 #     an override.
 #   * `[power]` + `[power.ai_policy]` — RE-AUTHORED WHOLE, and that is
-#     load-bearing (#923). The baseline's power policy rests `sensors` at 1
-#     because every Alliance hull authors `[power_groups.sensors] default_level =
-#     1`; this hull authors no `[power_groups.*]` at all, so
-#     `PowerSystem::default()` seeds the canonical trio at 2 and inheriting that
-#     rule would DEMOTE its sensor suite — two thirds of every authored weapon
-#     reach — for nothing. A rules array has no stable identity and so replaces
-#     the baseline's wholesale; the reactor scalars are re-authored beside it.
-#     (The baseline's `min_reserve_sensors` param survives the table merge and is
-#     read by no rule here. Harmless, and cheaper than forking the fragment.)
+#     load-bearing. The baseline gates its `helm` elevation on `red_alert`
+#     because an Alliance hull cruises with the alert DOWN and its captain
+#     raises it on first contact, so the guard confines the elevation to combat
+#     without ever costing the drive a point in a fight.
+#     That does not hold here, and the reason is this hull's own captain policy
+#     below: it raises the alert ONLY inside `combat_window_secs` of the last
+#     exchange of fire and stands it down otherwise. A patrol spends almost all
+#     of its life in transit with the alert down, so inheriting the baseline's
+#     guard would pin the drive at 2 for exactly the leg that needs it and
+#     release it only once the shooting had already started. A rules array has
+#     no stable identity and so replaces the baseline's wholesale; the reactor
+#     scalars are re-authored beside it.
+#     (#923 briefly gave the baseline a `sensors` channel, on the theory that
+#     sensor power was weapon reach; #955 removed the range coupling instead, so
+#     that channel and its `min_reserve_sensors` param are gone from the baseline
+#     and nothing here has to work around them.)
 includes = ["fragments/ai/fleet_baseline.toml"]
 
 name = "entity.ship_harrow_patrol.name"

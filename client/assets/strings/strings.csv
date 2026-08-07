@@ -154,17 +154,37 @@ entity.alliance_destroyer.station.engineering.tutorial.repair.text,assets/entiti
 entity.alliance_destroyer.station.engineering.tutorial.damage.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — hull-damage contextual tip heading,[HULL DAMAGE]
 entity.alliance_destroyer.station.engineering.tutorial.damage.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — hull-damage contextual tip body,[Something on the ship just took a hit. Check which system is hurting and get a repair team moving before it fails outright.]
 entity.asteroid_common_1_cosmetic.name,assets/entities/asteroid_common_1_cosmetic.toml → name (top level),[Cosmetic Asteroid 1]
+entity.asteroid_common_1_huge.name,assets/entities/asteroid_common_1_huge.toml → name (top level),[Huge Asteroid 1]
 entity.asteroid_common_1_large.name,assets/entities/asteroid_common_1_large.toml → name (top level),[Large Asteroid 1]
 entity.asteroid_common_1_small.name,assets/entities/asteroid_common_1_small.toml → name (top level),[Small Asteroid 1]
 entity.asteroid_common_2_cosmetic.name,assets/entities/asteroid_common_2_cosmetic.toml → name (top level),[Cosmetic Asteroid 2]
+entity.asteroid_common_2_huge.name,assets/entities/asteroid_common_2_huge.toml → name (top level),[Huge Asteroid 2]
 entity.asteroid_common_2_large.name,assets/entities/asteroid_common_2_large.toml → name (top level),[Large Asteroid 2]
 entity.asteroid_common_2_small.name,assets/entities/asteroid_common_2_small.toml → name (top level),[Small Asteroid 2]
 entity.asteroid_common_3_cosmetic.name,assets/entities/asteroid_common_3_cosmetic.toml → name (top level),[Cosmetic Asteroid 3]
+entity.asteroid_common_3_huge.name,assets/entities/asteroid_common_3_huge.toml → name (top level),[Huge Asteroid 3]
 entity.asteroid_common_3_large.name,assets/entities/asteroid_common_3_large.toml → name (top level),[Large Asteroid 3]
 entity.asteroid_common_3_small.name,assets/entities/asteroid_common_3_small.toml → name (top level),[Small Asteroid 3]
 entity.asteroid_common_4_cosmetic.name,assets/entities/asteroid_common_4_cosmetic.toml → name (top level),[Cosmetic Asteroid 4]
+entity.asteroid_common_4_huge.name,assets/entities/asteroid_common_4_huge.toml → name (top level),[Huge Asteroid 4]
 entity.asteroid_common_4_large.name,assets/entities/asteroid_common_4_large.toml → name (top level),[Large Asteroid 4]
 entity.asteroid_common_4_small.name,assets/entities/asteroid_common_4_small.toml → name (top level),[Small Asteroid 4]
+entity.asteroid_rare_1_large.name,assets/entities/asteroid_rare_1_large.toml → name (top level),[Large Rare Asteroid 1]
+entity.asteroid_rare_1_small.name,assets/entities/asteroid_rare_1_small.toml → name (top level),[Small Rare Asteroid 1]
+entity.asteroid_rare_2_large.name,assets/entities/asteroid_rare_2_large.toml → name (top level),[Large Rare Asteroid 2]
+entity.asteroid_rare_2_small.name,assets/entities/asteroid_rare_2_small.toml → name (top level),[Small Rare Asteroid 2]
+entity.asteroid_rare_3_large.name,assets/entities/asteroid_rare_3_large.toml → name (top level),[Large Rare Asteroid 3]
+entity.asteroid_rare_3_small.name,assets/entities/asteroid_rare_3_small.toml → name (top level),[Small Rare Asteroid 3]
+entity.asteroid_rare_4_large.name,assets/entities/asteroid_rare_4_large.toml → name (top level),[Large Rare Asteroid 4]
+entity.asteroid_rare_4_small.name,assets/entities/asteroid_rare_4_small.toml → name (top level),[Small Rare Asteroid 4]
+entity.asteroid_uncommon_1_large.name,assets/entities/asteroid_uncommon_1_large.toml → name (top level),[Large Uncommon Asteroid 1]
+entity.asteroid_uncommon_1_small.name,assets/entities/asteroid_uncommon_1_small.toml → name (top level),[Small Uncommon Asteroid 1]
+entity.asteroid_uncommon_2_large.name,assets/entities/asteroid_uncommon_2_large.toml → name (top level),[Large Uncommon Asteroid 2]
+entity.asteroid_uncommon_2_small.name,assets/entities/asteroid_uncommon_2_small.toml → name (top level),[Small Uncommon Asteroid 2]
+entity.asteroid_uncommon_3_large.name,assets/entities/asteroid_uncommon_3_large.toml → name (top level),[Large Uncommon Asteroid 3]
+entity.asteroid_uncommon_3_small.name,assets/entities/asteroid_uncommon_3_small.toml → name (top level),[Small Uncommon Asteroid 3]
+entity.asteroid_uncommon_4_large.name,assets/entities/asteroid_uncommon_4_large.toml → name (top level),[Large Uncommon Asteroid 4]
+entity.asteroid_uncommon_4_small.name,assets/entities/asteroid_uncommon_4_small.toml → name (top level),[Small Uncommon Asteroid 4]
 entity.moon_ice.name,assets/entities/moon_ice.toml → name (top level),[Ice Moon]
 entity.moon_ice.target.description,assets/entities/moon_ice.toml → [target] description,[A frozen cryovolcanic moon]
 entity.moon_luna.name,assets/entities/moon_luna.toml → name (top level),[Luna]
@@ -761,6 +781,31 @@ settings.qr_code,"Settings — QR code section heading","[QR Code]"
 settings.toggle_qr,"Settings — button that shows/hides the join QR code on the viewscreen","[Toggle QR on Screen]"
 settings.station,"Settings — station section heading","[Station]"
 settings.leave_station,"Settings — button that releases the player's claimed station","[Leave Station]"
+settings.tab.debug,"Server settings menu — name of the Debug/Cheat tab (hidden in a release build)","[Debug / Cheat]"
+settings.tab.audio,"Server settings menu — name of the Audio tab","[Audio]"
+settings.tab.gameplay,"Server settings menu — name of the Gameplay tab","[Gameplay]"
+settings.master_volume,"Server settings menu — Audio tab, master volume section heading","[Master Volume]"
+settings.master_volume_value,"Server settings menu — master volume readout as a percentage. {value} is the whole-number percentage.","[{value}%]"
+settings.master_volume_hint,"Server settings menu — explains that master volume scales the per-sound volumes authored in the ship and world TOML rather than replacing them","[Scales every authored sound volume.]"
+settings.debug.output,"Server settings menu — Debug tab, heading over the debug output selectors","[Debug Output]"
+settings.debug.output_hint,"Server settings menu — explains that picking a debug output opens the output panel beside the viewscreen","[Pick one to open the output panel.]"
+settings.debug.modifiers,"Server settings menu — debug output showing the ship modifier state","[Modifiers]"
+settings.debug.damage,"Server settings menu — debug output showing the recent damage log","[Damage Log]"
+settings.debug.entities,"Server settings menu — debug output showing per-entity behaviour","[Entity Behaviour]"
+settings.debug.inspector,"Server settings menu — debug output showing the entity inspector","[Entity Inspector]"
+settings.debug.cheats,"Server settings menu — Debug tab, heading over the cheat toggles","[Cheats]"
+settings.debug.wireframes,"Server settings menu — toggle drawing region wireframes in the world","[Region Wireframes]"
+settings.debug.godmode,"Server settings menu — toggle that makes the player ship take no damage","[God Mode]"
+settings.debug.instagib,"Server settings menu — toggle that multiplies weapon damage so hits kill outright","[Instagib]"
+settings.debug.session,"Server settings menu — Debug tab, heading over the session/save actions","[Session]"
+settings.debug.teleport,"Server settings menu — jump the ship to the shared Navigation waypoint; disabled when there is no waypoint","[Teleport to Waypoint]"
+settings.debug.save_snapshot,"Server settings menu — save the running session to the browser","[Save Session]"
+settings.debug.resume_snapshot,"Server settings menu — reload the page and resume the saved session","[Resume Saved Session]"
+settings.gameplay.simulation,"Server settings menu — Gameplay tab, heading over the pause control","[Simulation]"
+settings.gameplay.pause,"Server settings menu — button that pauses the simulation clock","[Pause]"
+settings.gameplay.resume,"Server settings menu — button that resumes a paused simulation clock","[Resume]"
+settings.gameplay.session,"Server settings menu — Gameplay tab, heading over the exit control","[Session]"
+settings.gameplay.exit_to_lobby,"Server settings menu — ends the current mission and returns everyone to the lobby","[Exit to Lobby]"
 station.rating.std.name,"Display name of the Std station rating (identifier in TOML)","[STANDARD]"
 station.rating.simplified.name,"Display name of the Simplified station rating","[SIMPLIFIED]"
 station.rating.backfill.name,"Display name of the implicit Backfill rating (station unmanned, AI operates all its systems)","[BACKFILL (AI)]"

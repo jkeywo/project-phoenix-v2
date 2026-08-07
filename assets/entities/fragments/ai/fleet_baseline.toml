@@ -180,138 +180,49 @@ capacity = 90
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 22
 
-# ── SENSORS POWER IS WEAPON REACH, and the whole reason `sensors` has rules ──
-# (issue #923. Read this before retuning any range on any hull that composes
-# this file.)
+# ── POWER BUYS DAMAGE, NOT REACH (issue #955) ────────────────────────────────
 #
-# A direct-fire weapon's effective reach is
+# A direct-fire weapon reaches exactly the `beam_range` its own
+# `[[weapons_console.phaser_banks]]` entry authors, at every power level, in
+# every region, at any hull damage. Reach is a property of the gun.
 #
-#     authored `beam_range` × `ModifierSlot::RadarRange`
+# #923 read the opposite, and it was reading a coupling that should never have
+# existed: effective reach was `beam_range × ModifierSlot::RadarRange`, that
+# slot is driven off the SENSORS power group, and the four Alliance hulls rest
+# that group at 1 — so a backfilled hull fought at two thirds of every range its
+# own file authored. #923 bought the missing third with an authored
+# red-alert `sensors` elevation. #955 removed the multiplication instead, so the
+# rules that paid for it are gone: there is no `sensors` channel here any more
+# and the red-alert point is back on `weapons`, where it buys
+# `ModifierSlot::PhaserDamage`.
 #
-# and that slot is driven off the SENSORS power group by
-# `apply_power_modifiers_from_read_state` (`src/modifiers/coordination.rs`).
-# The per-level bonus is the hull's own `[sensors_console] power_multipliers`
-# — `[-0.5, 0, 0.25, 0.5]` on every Alliance hull — and
-# `ShipModifiers::rebuild_cache` folds a negative sum as `1 / (1 + |sum|)`.
-# So the slot, and therefore every phaser bank's reach and the Tactical radar
-# horizon the lock is taken through, resolves as:
+# What the SENSORS group still buys is ACQUISITION, not reach: the
+# `[weapons_console.radar] range` horizon a lock is taken through, the tactical
+# radar blips, and the AI target selector's candidate filter. A hull with the
+# group down still shoots as far as its guns go — it just has less warning about
+# what to shoot at. That distinction is the whole point of #955 and is worth
+# preserving when retuning this block.
 #
-#     sensors 1 → ×0.667   sensors 2 → ×1.000   sensors 3 → ×1.25   sensors 4 → ×1.5
+# ── The eight-point budget ───────────────────────────────────────────────────
 #
-# The four Alliance hulls rest `[power_groups.sensors]` at 1 (see the sustainable
-# -total note on their `ops` group), so before #923 a hull with nobody sitting at
-# Sensors fought at TWO THIRDS of every range its own file authors — a 40-unit
-# bank reaching 26.7 — because no authored policy anywhere carried a `sensors`
-# channel and nothing ever raised the group. That was an accident of two
-# unrelated defaults, not a decision. The rules below make it a decision:
-# NOMINAL REACH IS SOMETHING THE SHIP SPENDS POWER ON, and at red alert it spends
-# it. Authored reach is what the hull has at combat stations.
-#
-# ── COMPOSITION TRAP: this fragment ASSUMES `[power_groups.sensors]` rests at 1 ──
-#
-# The priority-0 `sensors` rule below unconditionally sets sensors to 1
-# whenever the battery has charge. That is correct on every Alliance hull
-# because they all author `[power_groups.sensors] default_level = 1` — the
-# rule just reasserts the reactor's own resting seed. A hull that includes
-# this fragment but authors NO `[power_groups.*]` section at all does not get
-# that seed: `PowerSystem::default()` seeds the canonical helm/weapons/sensors
-# trio at 2, and the very first tick of this fragment's baseline rule then
-# DEMOTES sensors to 1 — ×0.667 reach at rest, with no red alert and no
-# combat, on a hull that would have been nominal without this fragment. That
-# is the exact bug #923 fixed, reintroduced by composition instead of by
-# omission.
-#
-# `assets/entities/fragments/composed_escort.toml` → `npc_escort_core.toml` is
-# a LIVE example on this path today: it includes this file for the
-# Captain/helm/Shields/Power declarations it owes but authors no
-# `[power_groups.*]` of its own. #878 (moving the rest of the fleet onto this
-# fragment) will hit this the moment it composes a hull the same way. A hull
-# that includes this fragment must author `[power_groups.sensors]
-# default_level = 1` — and, because the eight-point budget below assumes all
-# four Alliance groups, the matching `ops` / `helm` / `weapons` entries too —
-# or the baseline rule below actively regresses it.
-#
-# ── The eight-point budget, and where the sensor point comes from ────────────
-#
-# `PowerSystem::increase` refuses past a TOTAL of 8 across all groups, SILENTLY.
-# An Alliance hull authors four groups, so combat stations has to fit inside
+# `PowerSystem::increase` refuses past a TOTAL of 8 across all groups, SILENTLY,
+# and a refused level is dropped with no error while `emit_level` goes on
+# re-emitting it every tick. An Alliance hull authors four groups, so combat
+# stations has to fit inside
 #
 #     ops 1  +  helm  +  weapons  +  sensors  <=  8
 #
-# and the pre-#923 red-alert allocation already spent all of it (ops 1, helm 3,
-# weapons 3, sensors 1). There is no free point. Letting the cap arbitrate is not
-# an option either: a level it refuses is dropped with no error, and because
-# `emit_level` only skips when the level already MATCHES, the policy would go on
-# re-emitting the same refused command every tick for as long as the condition
-# held. Whichever group the fourth point comes from has to be authored.
-#
-# It comes from WEAPONS, and it is the same console giving it up: the weapons
-# group's elevation buys ×1.25 phaser DAMAGE, the sensors group's buys ×1.5
-# phaser REACH and the Tactical radar horizon the lock is taken through. At red
-# alert the fire-control power goes into reach rather than into intensity, which
-# is why the pre-#923 `weapons` elevation to 3 is gone from this file. The
-# resting weapons level is unchanged at 2, so nothing about a hull with the alert
-# down has moved.
-#
-# The DRIVE was tried first and rejected on measurement: pinning helm to 2 at red
-# alert (a priority-20 rule) frees the same point and reads well — a hull at
-# combat stations is fighting, not travelling — but a fifth less yaw authority
-# costs the battleship its artillery tracking. `--side-a battleship --side-b
-# ship_harrow_destroyer`, 120 s, seeds 1-3: 1032 damage dealt and a victory on
-# every seed becomes 298 and a timeout on every seed, with the heavy bow blaster
-# firing its eight bolts and landing NONE of them. Slow, heavy hulls lead their
-# shots with the turn rate this group pays for.
-#
-# What the WEAPONS point costs instead, measured the same way, is time-to-kill and
-# nothing structural. Same battleship duel: 955 dealt in 120 s where the elevated
-# guns managed 1032, so the run times out where it used to end in a victory — but
-# at 180 s it is a victory on every seed with the target at zero hull, i.e. the
-# kill is slower, not lost. Everything else it touches got better or held:
-# battleship vs `ship_harrow_cruiser` goes from one victory and two timeouts
-# (taking 880-888) to three victories taking 82-120; `npm run balance:demo` returns
-# the same 10W/5L/5D with every recorded threshold passing.
-#
-# ── `min_reserve_sensors`, and how long nominal reach actually lasts ─────────
-#
-# No Alliance reactor SUSTAINS a total above 6: every hull authors `rates` whose
-# total-7 entry is negative, and every hull but the courier's total-6 entry
-# recharges. The courier's own `[power] rates = [3,2,1,0,-1,-3]` — it composes
-# no fragment, so this file's rules do not reach it, only its numbers do — puts
-# a flat 0 at total-6, so once its battery drains far enough to shed sensors
-# back to 1 the total settles there and stays; see the exception recorded on
-# `alliance_courier.toml`. Combat stations is therefore a BURST the battery pays
-# for on every hull but that one, and this reserve is what says how long it
-# lasts. Traced on `probe_duel` (cruiser, capacity 90,
-# `rates = [6,5,4,2,-2,-6]`, seed 1):
-#
-#   t≈1s    the alert comes up. sensors 1→2, and the drive is still elevated on
-#           its own transit guard, so total 8 at -6/s for a couple of seconds
-#   t≈3s    battery through 50 per cent, helm sheds to 2, total 7 at -2/s
-#   t≈15s   battery through 10 per cent, SENSORS sheds to 1, total 6, recharging
-#
-# So a backfilled cruiser holds authored reach for about FOURTEEN SECONDS of
-# continuous red alert and two thirds of it after that, and both halves are
-# consequences of authored numbers — this reserve and the hull's own `[power]
-# rates`. A doctrine author who wants reach held further down the battery lowers
-# this one number; one who wants it held indefinitely has to find the point
-# somewhere the reactor can carry, which on a four-group hull means a resting
-# total of 6 with `sensors` in it.
-#
-# 10 rather than 50 is deliberate, and it is the same judgement the budget note
-# makes: REACH IS THE LAST THING A FIGHTING SHIP GIVES UP. At two thirds power the
-# guns still hurt whatever they can touch; at two thirds reach a hull sized
-# against its own authored range cannot touch anything at all. So the sensor point
-# outlives the drive's, which sheds at 50.
+# which the red-alert allocation below spends exactly: ops 1, helm 3, weapons 3,
+# sensors 1 (its resting seed — no rule here touches it). Anything added to this
+# block has to find its point from one of the three, not from the cap.
 [power.ai_policy.param]
 thrust_threshold = 0.7
 min_reserve_helm = 50.0
-min_reserve_sensors = 10.0
+min_reserve_weapons = 10.0
 min_reserve_baseline = 0.0
 
 # helm: elevate to 3 under sustained thrust with a healthy battery, AT RED
-# ALERT, else hold 2. UNCHANGED by #923 — the sensor point is bought from
-# weapons, not from the drive, and the note above records what happened when
-# it was bought from here.
+# ALERT, else hold 2.
 #
 # The `red_alert` guard is load-bearing, not decoration. `plan_helm_travel`
 # commands near-max throttle for any ordinary transit — Patrol travel and a
@@ -339,37 +250,22 @@ when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
 
-# weapons: hold 2, at red alert and away from it alike. The red-alert elevation
-# to 3 that used to sit here — guarded on `min_reserve_weapons = 10.0`, both now
-# gone — is the point #923 spends on `sensors` below; see the budget note. One
-# rule, because with the elevation gone there is nothing for a second one to say.
+# weapons: elevate to 3 on red alert with a healthy battery, else hold 2. Level
+# 3 is ×1.25 on `ModifierSlot::PhaserDamage` — the beam hurts more, it does not
+# carry further (#955). This is the point #923 spent on `sensors`; it is back.
+[[power.ai_policy.rule]]
+priority = 10
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
 [[power.ai_policy.rule]]
 priority = 0
 channel = "weapons"
 when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
-
-# sensors: elevate to 2 — NOMINAL, ×1.0 reach — on red alert with a healthy
-# battery, else rest at 1. This is the rule the fleet was missing (#923), and 2
-# rather than 3 is the point: 2 is where the multiplier is exactly 1.0, so a hull
-# at combat stations reaches precisely what its own file authors and no further.
-# Raising it to 3 would mean every authored `beam_range` in the fleet quietly
-# understates the reach of the ship that carries it, which is the same class of
-# mistake in the other direction.
-[[power.ai_policy.rule]]
-priority = 10
-channel = "sensors"
-when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_sensors)"
-verb = "set_power_group_allocation"
-level = 2
-
-[[power.ai_policy.rule]]
-priority = 0
-channel = "sensors"
-when = "fact(battery_pct) >= param(min_reserve_baseline)"
-verb = "set_power_group_allocation"
-level = 1
 
 [comms_console.ai]
 

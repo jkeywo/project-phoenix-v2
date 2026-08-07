@@ -30,6 +30,47 @@ which makes the pin worthless. Land the change in vellum, then bump the rev.
 
 `pasm validate` resolves implementation paths relative to `pasm/spec` by default. For nested fixtures or an external spec root, pass `--workspace-root <path>` explicitly.
 
+## Recording AI design decisions
+
+When a new AI *behaviour* is chosen — a stance, a selection rule, a conservation
+rule, a ladder of thresholds — the choice is recorded as a `decision:` entity in
+the matching `spec/design/<slice>.yaml`. It does not live only in an
+architecture entity's summary or its implementation mapping: a behaviour buried
+there reads as a description of whatever the code happens to do, and the thing
+that was actually decided — and what it ruled out — is lost.
+
+The shape is the one the existing AI decisions already use
+(`ai-shield-focus` in `spec/design/shields.yaml`, `ai-power-allocation-rules` in
+`spec/design/power.yaml`, `ai-sensors-target-selection` in
+`spec/design/sensors.yaml`):
+
+```yaml
+- decision: ai-<system>-<behaviour>
+  core:
+    status: accepted
+    confidence: confirmed
+    title: AI <System> <Behaviour>
+    summary: What the AI does, and the authored inputs it does it from.
+  game_design:
+    enforcement_links: [<architecture entity that enforces it>]
+    owner_role: <system>-ai-operator-role
+    protected: true
+    must_not_be: [<the bypass this choice rules out>]
+```
+
+- `owner_role` names the AI operator role, so an AI decision sits beside its
+  human counterpart in the same slice (`human-shield-focus` next to
+  `ai-shield-focus`) and the symmetry rule stays legible.
+- `must_not_be` carries the part that is easiest to lose later: not what the
+  behaviour is, but what it must never quietly become.
+- `enforcement_links` must name an architecture entity. `pasm validate` rejects
+  a protected decision with no authoritative boundary, and `pasm traceability`
+  then reports the decision through architecture to the files that implement it.
+
+Issue #953 adopts this convention going forward; it audits no existing content.
+An AI slice written before it may still describe its behaviour only in an
+architecture summary, and that is not a finding on its own.
+
 ## Design and tooling notes
 
 The rest of this file is phoenix's running record of what the model asserts and

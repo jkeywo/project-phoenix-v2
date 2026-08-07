@@ -1847,9 +1847,9 @@ fn handle_collisions(
         };
 
         // Entity-scoped trace covering *every* ship. The `DamageLog` below is
-        // player-only and capped at 10 entries because it backs the F8 debug
-        // overlay; this is the channel that survives a headless run and can be
-        // narrowed to one ship with `--log-entity`.
+        // player-only and capped at 10 entries because it backs the damage
+        // debug overlay; this is the channel that survives a headless run and
+        // can be narrowed to one ship with `--log-entity`.
         crate::pdebug!(
             ambient.log,
             crate::logging::LogCat::Damage,

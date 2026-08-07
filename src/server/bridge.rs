@@ -53,9 +53,9 @@ use {
 /// Identifies which debug overlay/toggle a pending request is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DebugToggleKind {
-    /// F4 — region wireframes (`DebugRegionsEnabled`).
+    /// Region wireframes (`DebugRegionsEnabled`).
     Regions,
-    /// F3 — modifier debug overlay (`DebugOverlayEnabled`).
+    /// Modifier debug overlay (`DebugOverlayEnabled`).
     Overlay,
     /// Simulation pause (`SimulationPaused`); also (un)pauses `Time<Virtual>`.
     ///
@@ -63,11 +63,11 @@ pub enum DebugToggleKind {
     /// build-gated — so this variant, unlike its neighbours, has a caller that
     /// survives into a demo build.
     Pause,
-    /// F8 — damage debug log (`DebugDamageEnabled`).
+    /// Damage debug log (`DebugDamageEnabled`).
     Damage,
-    /// F7 — entity behavior overlay (`DebugEntitiesEnabled`).
+    /// Entity behavior overlay (`DebugEntitiesEnabled`).
     Entities,
-    /// F2 — entity inspector overlay (`DebugEntityInspectorEnabled`).
+    /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
     EntityInspector,
 }
 
@@ -698,7 +698,8 @@ pub fn wasm_init() {
     app.add_plugins(crate::server::audio::ServerAudioPlugin);
 
     // Always add the debug overlay plugin; ?debug_regions=1 sets initial state.
-    // Runtime toggling via F4 is handled by drain_debug_toggles.
+    // Runtime toggling via the settings cog's Debug/Cheat tab is handled by
+    // drain_debug_toggles.
     let debug_regions_initial = DEBUG_REGIONS_ENABLED.with(|v| *v.borrow());
     app.add_plugins(crate::debug_overlay::DebugOverlayPlugin {
         enabled: debug_regions_initial,
@@ -1188,7 +1189,8 @@ fn drain_snapshot_restore(world: &mut World) {
     }
 }
 
-/// Called by JS (e.g. F4 keydown) to toggle region wireframes at runtime.
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle region
+/// wireframes at runtime.
 ///
 /// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
 /// `PreUpdate` frame, which flips the `DebugRegionsEnabled` Bevy resource.
@@ -1200,7 +1202,8 @@ pub fn wasm_toggle_debug_regions() {
     });
 }
 
-/// Called by JS (e.g. F3 keydown) to toggle the modifier debug overlay at runtime.
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the modifier
+/// debug overlay at runtime.
 ///
 /// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
 /// `PreUpdate` frame, which flips the `DebugOverlayEnabled` Bevy resource.
@@ -1253,7 +1256,8 @@ pub fn wasm_is_demo_build() -> bool {
     crate::build_flags::is_demo_build()
 }
 
-/// Called by JS (e.g. F8 keydown) to toggle the damage debug overlay at runtime.
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the damage
+/// debug overlay at runtime.
 ///
 /// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
 /// `PreUpdate` frame, which flips the `DebugDamageEnabled` Bevy resource.
@@ -1295,7 +1299,8 @@ pub fn set_damage_log_string(text: String) {
     DAMAGE_LOG_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS (e.g. F5 keydown) to toggle the entity behavior overlay at runtime.
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the entity
+/// behavior overlay at runtime.
 ///
 /// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
 /// `PreUpdate` frame, which flips the `DebugEntitiesEnabled` Bevy resource.
@@ -1322,7 +1327,8 @@ pub fn set_entity_debug_string(text: String) {
     ENTITY_DEBUG_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS (e.g. F6 keydown) to toggle the entity inspector overlay at runtime.
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the entity
+/// inspector overlay at runtime.
 ///
 /// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
 /// `PreUpdate` frame, which flips the `DebugEntityInspectorEnabled` Bevy resource.
@@ -1798,10 +1804,10 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
 }
 
 /// Drains the pending debug-toggle set each frame and updates the
-/// corresponding Bevy resources: `DebugRegionsEnabled` (F4),
-/// `DebugOverlayEnabled`, `SimulationPaused` (settings cog),
-/// `DebugDamageEnabled`, `DebugEntitiesEnabled`, and
-/// `DebugEntityInspectorEnabled`.
+/// corresponding Bevy resources: `DebugRegionsEnabled`, `DebugOverlayEnabled`,
+/// `SimulationPaused`, `DebugDamageEnabled`, `DebugEntitiesEnabled`, and
+/// `DebugEntityInspectorEnabled` — all driven from the settings cog added in
+/// #939.
 ///
 /// The actual flag-flipping logic lives in [`apply_pending_toggles`], a pure
 /// function with no Bevy/wasm dependency so it's unit-testable on native.

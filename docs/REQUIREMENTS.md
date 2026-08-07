@@ -258,7 +258,7 @@ Scenario-applied modifiers and flags have `ModifierSource::Scenario { id, tag }`
 
 ### Debug overlay (developer)
 - A JS-rendered `<div>` overlay reads `wasm_get_debug_state()` once per frame when active and renders three labelled sections: Flags, Float Modifiers, Int Modifiers, each entry showing value and source(s).
-- F3 toggles the debug overlay; F4 toggles region wireframes. Both `keydown` listeners call `preventDefault()` to suppress browser defaults.
+- The settings cog's Debug/Cheat tab toggles the debug overlay and region wireframes independently; there is no keyboard shortcut for either.
 - Region wireframes render on the viewscreen and on every radar when enabled; never reach clients without the toggle.
 
 ---

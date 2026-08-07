@@ -9,7 +9,7 @@ use crate::region_shape::RegionShape;
 #[derive(Resource)]
 pub struct DebugRegionsEnabled(pub bool);
 
-/// Resource indicating whether the modifier debug overlay (F3) is enabled.
+/// Resource indicating whether the modifier debug overlay is enabled.
 #[derive(Resource, Default)]
 pub struct DebugOverlayEnabled(pub bool);
 
@@ -24,22 +24,22 @@ pub struct DebugOverlayEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct SimulationPaused(pub bool);
 
-/// Resource indicating whether the damage debug overlay (F8) is enabled.
+/// Resource indicating whether the damage debug overlay is enabled.
 #[derive(Resource, Default)]
 pub struct DebugDamageEnabled(pub bool);
 
-/// Resource indicating whether the entity behavior debug overlay (F5) is enabled.
+/// Resource indicating whether the entity behavior debug overlay is enabled.
 #[derive(Resource, Default)]
 pub struct DebugEntitiesEnabled(pub bool);
 
-/// Resource indicating whether the entity inspector overlay (F6) is enabled.
+/// Resource indicating whether the entity inspector overlay is enabled.
 #[derive(Resource, Default)]
 pub struct DebugEntityInspectorEnabled(pub bool);
 
 /// Maximum number of damage log entries retained.
 pub const DAMAGE_LOG_CAPACITY: usize = 10;
 
-/// A single damage event recorded for the F8 overlay.
+/// A single damage event recorded for the damage debug overlay.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DamageLogEntry {
     /// Human-readable description of the damage source (e.g. asteroid uuid,
@@ -54,7 +54,7 @@ pub struct DamageLogEntry {
 /// Ring-buffer of the most recent damage events.
 ///
 /// Always retains up to `DAMAGE_LOG_CAPACITY` entries, newest at the front.
-/// Populated by damage application sites; read by the F8 overlay system.
+/// Populated by damage application sites; read by the damage overlay system.
 #[derive(Resource, Default)]
 pub struct DamageLog {
     pub entries: VecDeque<DamageLogEntry>,
@@ -181,7 +181,7 @@ fn write_debug_state(modifiers_q: Query<&ShipModifiers, With<crate::server_app::
 fn write_debug_state(_modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>) {}
 
 /// Reads the `DamageLog` resource and writes the formatted text to the WASM
-/// thread-local `DAMAGE_LOG_STRING` for the F8 overlay.
+/// thread-local `DAMAGE_LOG_STRING` for the damage overlay.
 ///
 /// Only runs when `DebugDamageEnabled` is true.
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
@@ -195,7 +195,8 @@ fn write_damage_log(log: Res<DamageLog>) {
 fn write_damage_log(_log: Res<DamageLog>) {}
 
 /// Reads all entities with `BehaviourSection` (i.e. AI-driven NPCs) and writes a
-/// formatted table (name, position, current state) to the WASM thread-local for F5.
+/// formatted table (name, position, current state) to the WASM thread-local for
+/// the entity behavior overlay.
 ///
 /// Only runs when `DebugEntitiesEnabled` is true.
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
@@ -245,7 +246,7 @@ fn write_entity_debug_state(
 }
 
 /// Reads all non-asteroid entities plus the player ship resources and writes a
-/// formatted entity inspector block to the WASM thread-local for F6.
+/// formatted entity inspector block to the WASM thread-local.
 ///
 /// Displays: name, tags, position, distance from player, faction name, hull HP,
 /// shield arcs (player ship only), comms hailability, and AI state.

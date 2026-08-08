@@ -10,6 +10,7 @@
 // a working Ready click).
 
 import { test, expect, readHostPeerId, createServerPage } from './fixtures';
+import { ts } from './strings';
 
 test('mid-game station claim: Leave and Ready both register via real DOM clicks', async ({ context }) => {
   test.setTimeout(60_000);
@@ -50,7 +51,7 @@ test('mid-game station claim: Leave and Ready both register via real DOM clicks'
   // arms the control (swapping its label to the confirm string) without
   // sending; the second click sends ReleaseStation.
   await p2.click('.detail-release-btn');
-  await expect(p2.locator('.detail-release-btn')).toHaveText('[CONFIRM RELEASE?]', { timeout: 5_000 });
+  await expect(p2.locator('.detail-release-btn')).toHaveText(ts('client.release_confirm'), { timeout: 5_000 });
   await p2.click('.detail-release-btn');
   await p2.waitForSelector('.detail-station-name:has-text("No station assigned")', { timeout: 5_000 });
 
@@ -58,7 +59,7 @@ test('mid-game station claim: Leave and Ready both register via real DOM clicks'
   // the Ready hand-off, #771 AC1). It still sends SetReady{ ready: true }.
   await p2.click('#station-list .station-row:has-text("Helm") button.claim-btn');
   await p2.waitForSelector('#ready-btn:not([style*="display: none"])', { timeout: 5_000 });
-  await expect(p2.locator('#ready-btn')).toHaveText('[TAKE STATION]', { timeout: 5_000 });
+  await expect(p2.locator('#ready-btn')).toHaveText(ts('client.take_station'), { timeout: 5_000 });
   await p2.waitForTimeout(800);
   await p2.click('#ready-btn');
 

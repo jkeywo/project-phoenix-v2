@@ -169,6 +169,23 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     // issue (see `digest-render-interp-fold-point` in
     // deterministic-simulation.yaml); nothing to list here until it is built,
     // at which point it belongs on this line with reason "presentation".
+    //
+    // The debug overlay flags (`src/debug_overlay.rs`) are presentation in the
+    // strictest sense: each one decides whether a wireframe, a log or an
+    // inspector is DRAWN, and nothing reads them to decide anything else. They
+    // reach the registry as of issue #940 because the phone client can now flip
+    // them, so the systems that do it name the resources even in a headless run
+    // that has no `DebugOverlayPlugin` to insert them.
+    //
+    // Their sibling `SimulationPaused` is deliberately NOT here — it is in
+    // AUTHORITATIVE_SYMBOLS, because pausing stops the clock the whole
+    // simulation advances on. The line between the two is exactly "does it
+    // change what the sim computes".
+    ("DebugRegionsEnabled", "presentation"),
+    ("DebugOverlayEnabled", "presentation"),
+    ("DebugDamageEnabled", "presentation"),
+    ("DebugEntitiesEnabled", "presentation"),
+    ("DebugEntityInspectorEnabled", "presentation"),
 
     // Broadcast caches — one-directional delta-suppression mirrors of
     // already-authoritative state, not a second copy of simulation truth.
@@ -180,6 +197,11 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     ("LastBroadcastHull", "cache"),
     ("LastBroadcastShields", "cache"),
     ("LastBroadcastBlackboards", "cache"),
+    // Same family for the phone client's debug/session read-back (issue #940):
+    // `debug_overlay::report_debug_state` compares against it to skip
+    // re-announcing flags nothing moved. A mirror of resources that are
+    // themselves presentation, so it can never be a second copy of sim truth.
+    ("LastReportedDebugState", "cache"),
     // Same family, a different console (`src/console/weapons/blackboard.rs`):
     // "The broadcaster compares against this to skip identical ticks."
     ("LastWeaponsUpdate", "cache"),

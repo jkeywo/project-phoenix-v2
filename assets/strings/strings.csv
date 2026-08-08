@@ -790,6 +790,7 @@ settings.master_volume_value,"Server settings menu — master volume readout as 
 settings.master_volume_hint,"Server settings menu — explains that master volume scales the per-sound volumes authored in the ship and world TOML rather than replacing them","[Scales every authored sound volume.]"
 settings.debug.output,"Server settings menu — Debug tab, heading over the debug output selectors","[Debug Output]"
 settings.debug.output_hint,"Server settings menu — explains that picking a debug output opens the output panel beside the viewscreen","[Pick one to open the output panel.]"
+settings.debug.client_hint,"Client settings menu — explains that a phone's debug toggles draw on the shared host viewscreen, not on the phone itself","[These draw on the host viewscreen.]"
 settings.debug.modifiers,"Server settings menu — debug output showing the ship modifier state","[Modifiers]"
 settings.debug.damage,"Server settings menu — debug output showing the recent damage log","[Damage Log]"
 settings.debug.entities,"Server settings menu — debug output showing per-entity behaviour","[Entity Behaviour]"

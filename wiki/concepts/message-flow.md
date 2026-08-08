@@ -155,8 +155,50 @@ deliberately NOT `TRUNK_BUILD_RELEASE`: the GitHub Pages dev host sets that one
 too, and it keeps its debug tooling. Its overlay, damage, entity, and inspector views are
 host-local diagnostics — selecting one enables just that resource and pops out
 the output panel — but god mode and instagib alter the authoritative simulation
-and are host-only powers rather than diagnostic-only controls. They are never
-sent to phone clients.
+and are host-only powers rather than diagnostic-only controls.
+
+Since issue #940 a connected **phone** can flip most of them too, from the same
+three tabs on its own cog (`gui/settings-panel.js`), by three routes — and none
+of the three exists in a demo build:
+
+- **The overlay flags** travel as `ClientMessage::ToggleDebugFlag`, a top-level
+  *session* control, drained frame-driven in `PreUpdate` by
+  `debug_overlay::drain_client_debug_flags` into the *same*
+  `apply_pending_toggles` the host's own drain calls. It never touches command
+  admission: the flags are presentation and belong in no replay.
+- **Pause** travels as `ClientMessage::TogglePause`, its own top-level variant,
+  drained by `debug_overlay::drain_client_pause`. It could not use command
+  admission even if it wanted to — pausing starves `FixedUpdate`, where
+  admission has run since #895, so an admitted pause could never be undone —
+  and it needs a build gate of its own regardless.
+- **God mode** travels as the ordinary `ControlSystem` / `ToggleGodMode`
+  command #900 already built, because it changes damage outcomes and so has to
+  be tick-stamped, logged and replayable.
+
+The gate is `phoenix_demo_build`, the cfg `build.rs` derives from the same
+`PHOENIX_DEMO_BUILD`. The first two routes are gated at the **variant**: both
+`ClientMessage` variants carry `#[cfg(not(phoenix_demo_build))]`, so a demo
+binary cannot decode either frame and neither drain is compiled. The third is
+gated by `command_admission::debug_route`, which is `#[cfg]`-split because its
+message (`ControlSystem`) exists in every build and only one `(target, payload)`
+pair may vanish. In a demo build all three are *absent*, not merely refused —
+the hidden control and the closed route cannot come apart.
+
+Pause is gated for a blunter reason than the overlays. Nothing on the server
+side checks station, captaincy or `GamePhase` before honouring a client pause,
+and a demo is N strangers on N phones — so any one of them could otherwise
+freeze the mission for everyone, repeatedly. That is why the phone's pause is
+dev-only while the **host's** pause, on the server cog, keeps working in every
+build: the host is one trusted operator standing at the viewscreen.
+
+The host reports the result back as `ServerMessage::DebugState` — flags, pause
+and god mode — broadcast on change from `PreUpdate` so it still reaches a phone
+whose sim is frozen, and the phone paints its buttons from that rather than from
+its own click. That read-back is sent in **every** build, demo included: it
+grants no authority, so a demo phone can learn that the host paused the mission
+and still has no way to pause it itself. **Instagib** stays host-only: unlike
+god mode it was never routed through command admission, so there is nothing to
+admit.
 
 The same tab carries **Teleport to Waypoint**: enabled only while the shared
 authoritative Navigation waypoint exists, and immediately moves the local ship

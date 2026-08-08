@@ -1600,6 +1600,97 @@ pub enum ClientMessage {
     SelectPlayerShip {
         template_path: String,
     },
+    /// Flip one host-page debug overlay from a connected phone's Debug/Cheat
+    /// tab (issue #940).
+    ///
+    /// A **session** control, not a ship-system command, which is why it is a
+    /// top-level variant rather than a `SystemControlPayload` on the
+    /// `ControlSystem` envelope: it carries no simulation state — an overlay
+    /// being drawn changes no outcome — so keeping it out of the command log
+    /// keeps replays clean. The one client-reachable toggle that *does* change
+    /// outcomes, God Mode, stays on the `ControlSystem` admission path (issue
+    /// #900) for exactly the opposite reason.
+    ///
+    /// **Absent from a demo build.** The `phoenix_demo_build` cfg `build.rs`
+    /// derives from `PHOENIX_DEMO_BUILD` removes this variant, its drain
+    /// (`debug_overlay::drain_client_debug_flags`) and its registration, so a
+    /// demo binary's `ClientMessage` has no such shape to decode: the wire
+    /// route is gone, not merely refused. That is what the hidden Debug/Cheat
+    /// tab claims, and a hidden tab is a forgeable UI fact on its own.
+    #[cfg(not(phoenix_demo_build))]
+    ToggleDebugFlag {
+        flag: DebugFlag,
+    },
+    /// Pause or resume the simulation clock from a connected phone's Gameplay
+    /// tab (issue #940).
+    ///
+    /// Its own top-level variant rather than a [`DebugFlag`], for two unrelated
+    /// reasons that happen to point the same way:
+    ///
+    ///  1. Pause is not a debug overlay. It stops the clock every system
+    ///     advances on, which is why `SimulationPaused` is authoritative state
+    ///     while its `Debug*Enabled` neighbours are presentation.
+    ///  2. It has to be build-gated **separately**, and it is gated the same
+    ///     way for a different reason. A demo is played by N strangers on N
+    ///     phones; any one of them could otherwise freeze the mission for
+    ///     everyone, repeatedly, and nothing in the drain checks station,
+    ///     captaincy or `GamePhase`. So the phone's pause is dev-only, and the
+    ///     host's own cog (issue #939) keeps it in every build — the host is a
+    ///     single trusted operator standing at the viewscreen.
+    ///
+    /// Like `ToggleDebugFlag` it never crosses command admission, and here that
+    /// is not a preference but a necessity: pausing starves `FixedUpdate`,
+    /// which is where admission has run since issue #895, so an admitted pause
+    /// could never be undone. It is drained frame-driven in `PreUpdate`
+    /// instead — the same schedule the host page's own pause toggle uses.
+    #[cfg(not(phoenix_demo_build))]
+    TogglePause,
+}
+
+/// One host-page debug overlay a settings menu can flip (issue #940).
+///
+/// Mirrors the diagnostic half of `crate::bridge::DebugToggleKind` — that enum
+/// is the host page's local pending-toggle vocabulary and this is its wire
+/// form, with a `From<DebugFlag>` conversion between them so the two cannot
+/// drift into different flag sets.
+///
+/// Every member is diagnostic-only by construction, which is what lets
+/// `ClientMessage::ToggleDebugFlag` be removed wholesale from a demo build
+/// rather than narrowed flag-by-flag. Pause used to be a member and is not one
+/// any more: it is authoritative state, it needs a different build story, and a
+/// predicate saying "all of these except that one" was the seam through which a
+/// demo phone could still freeze the mission. It is
+/// `ClientMessage::TogglePause` now.
+///
+/// Not itself build-gated: `ServerMessage::DebugState` reports these in every
+/// build, and a read-back grants no authority.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum DebugFlag {
+    /// Region wireframes (`DebugRegionsEnabled`).
+    Regions,
+    /// Modifier debug overlay (`DebugOverlayEnabled`).
+    Modifiers,
+    /// Damage debug log (`DebugDamageEnabled`).
+    Damage,
+    /// Entity behaviour overlay (`DebugEntitiesEnabled`).
+    Entities,
+    /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
+    Inspector,
+}
+
+impl DebugFlag {
+    /// Every flag, in the order `ServerMessage::DebugState` reports them.
+    ///
+    /// A fixed slice rather than map iteration, so identical state always
+    /// produces an identical message — the client's fold diffs it and the
+    /// codec test pins its shape.
+    pub const ALL: [DebugFlag; 5] = [
+        DebugFlag::Regions,
+        DebugFlag::Modifiers,
+        DebugFlag::Damage,
+        DebugFlag::Entities,
+        DebugFlag::Inspector,
+    ];
 }
 
 /// Typed payload for a channel-3 coordination message (issue #494).
@@ -2139,6 +2230,29 @@ pub enum ServerMessage {
     /// authors from it. See `crate::ship::manual`.
     ShipManual {
         manual: ShipManualWire,
+    },
+    /// Authoritative read-back of the host's debug/session flags (issue #940).
+    ///
+    /// Broadcast to every client whenever any of them changes, so a phone's
+    /// settings menu paints from what the simulation actually holds rather than
+    /// from what it just asked for. That matters more here than for most
+    /// controls: a client's toggle can be refused outright (the route does not
+    /// exist in a demo build), and God Mode crosses command admission, so it
+    /// lands a tick later than the click.
+    ///
+    /// `flags` carries one entry per `DebugFlag::ALL`, in that order. `paused`
+    /// and `god_mode` are separate fields because they are a different kind of
+    /// thing: both are authoritative simulation state (a stopped clock, an
+    /// invulnerable ship) rather than host-page overlays, and neither has a
+    /// `DebugFlag` any more.
+    ///
+    /// Reported in **every** build, unlike the two client messages that can
+    /// change it. A read-back grants no authority: a demo phone learns that the
+    /// host paused the mission and still has no way to pause it itself.
+    DebugState {
+        flags: Vec<(DebugFlag, bool)>,
+        paused: bool,
+        god_mode: bool,
     },
 }
 

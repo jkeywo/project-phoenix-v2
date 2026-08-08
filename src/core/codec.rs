@@ -300,6 +300,23 @@ mod tests {
                     template_path: "assets/entities/alliance_cruiser.toml".into(),
                 },
             ),
+            // The two client settings-menu routes (issue #940). Both rows carry
+            // the same `#[cfg]` the variants do, so in a demo build the table
+            // shrinks with the enum and the exhaustiveness test below still
+            // balances — `strum`'s `EnumDiscriminants` copies `cfg` onto the
+            // generated discriminant enum, so both sides lose the same names.
+            #[cfg(not(phoenix_demo_build))]
+            (
+                ClientMessageDiscriminants::ToggleDebugFlag,
+                ClientMessage::ToggleDebugFlag {
+                    flag: crate::messages::DebugFlag::Regions,
+                },
+            ),
+            #[cfg(not(phoenix_demo_build))]
+            (
+                ClientMessageDiscriminants::TogglePause,
+                ClientMessage::TogglePause,
+            ),
         ]
     }
 
@@ -814,6 +831,21 @@ mod tests {
                             },
                         ],
                     },
+                },
+            ),
+            (
+                ServerMessageDiscriminants::DebugState,
+                ServerMessage::DebugState {
+                    // Mixed on/off so a pair whose flag and bool were swapped
+                    // in the encoding would not still round-trip.
+                    flags: crate::messages::DebugFlag::ALL
+                        .iter()
+                        .map(|f| (*f, *f == crate::messages::DebugFlag::Modifiers))
+                        .collect(),
+                    // Mixed again, for the same reason: two adjacent bools that
+                    // agree cannot catch a transposition.
+                    paused: false,
+                    god_mode: true,
                 },
             ),
         ]
@@ -1481,6 +1513,126 @@ mod tests {
             r#"{"type":"ControlSystem","data":{"target":"god-mode","payload":{"type":"ToggleGodMode"}}}"#,
             "ToggleGodMode wire shape must stay pinned"
         );
+    }
+
+    /// The phone settings menu's wire shapes (issue #940), pinned because
+    /// `gui/settings-panel.js` hand-builds them: the two messages it sends and
+    /// the `DebugState` read-back it folds.
+    ///
+    /// The two client messages are `#[cfg]`-gated with the variants they name;
+    /// the read-back is not, because it is reported in every build.
+    #[test]
+    fn client_settings_menu_wire_shapes_are_pinned() {
+        use crate::messages::DebugFlag;
+
+        #[cfg(not(phoenix_demo_build))]
+        {
+            let msg = ClientMessage::ToggleDebugFlag {
+                flag: DebugFlag::Regions,
+            };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_eq!(
+                JsonCodec.encode_client(&msg).unwrap(),
+                r#"{"type":"ToggleDebugFlag","data":{"flag":"Regions"}}"#,
+                "ToggleDebugFlag wire shape must match what settings-panel.js sends"
+            );
+
+            // A unit variant, so the adjacently-tagged encoding omits `data`
+            // entirely — exactly what `connection-manager.js` puts on the wire
+            // when `send()` is given no data, which is how `settings-panel.js`
+            // sends it and how `ReleaseStation` has always been sent. Pinned
+            // because the JS builds this by hand.
+            let pause = ClientMessage::TogglePause;
+            assert_client_roundtrip(&JsonCodec, pause.clone());
+            assert_eq!(
+                JsonCodec.encode_client(&pause).unwrap(),
+                r#"{"type":"TogglePause"}"#,
+                "TogglePause wire shape must match what settings-panel.js sends"
+            );
+            // An explicit null is the same message; an empty object is NOT, and
+            // the JS must not start sending one.
+            assert!(JsonCodec
+                .decode_client(r#"{"type":"TogglePause","data":null}"#)
+                .is_ok());
+            assert!(
+                JsonCodec
+                    .decode_client(r#"{"type":"TogglePause","data":{}}"#)
+                    .is_err(),
+                "`data: {{}}` is not this message — settings-panel.js sends no data at all"
+            );
+        }
+
+        let report = ServerMessage::DebugState {
+            flags: vec![(DebugFlag::Regions, true), (DebugFlag::Modifiers, false)],
+            paused: true,
+            god_mode: true,
+        };
+        assert_server_roundtrip(&JsonCodec, report.clone());
+        assert_eq!(
+            JsonCodec.encode_server(&report).unwrap(),
+            r#"{"type":"DebugState","data":{"flags":[["Regions",true],["Modifiers",false]],"paused":true,"god_mode":true}}"#,
+            "DebugState wire shape must match what settings-panel.js folds"
+        );
+    }
+
+    // ── The demo build's missing routes (issue #940) ─────────────────────────
+    //
+    // **These are the gate tests, and they are the only ones that ask the
+    // question the way an attacker would: over the wire.** Everything else
+    // about the client settings menu is checked through a Rust predicate, and a
+    // predicate can only be consulted by code that chose to consult it. These
+    // two decode a raw JSON frame — exactly what `bridge.rs` hands the codec
+    // when a phone speaks — and assert it is understood in a dev build and
+    // meaningless in a demo one.
+    //
+    // HONESTLY, WHAT THESE SEE, and what they leave to their neighbour: they
+    // pin the ROUTE to the cfg. A variant that quietly loses its `#[cfg]`
+    // decodes in the demo run and fails here; one that gains a stray `#[cfg]`
+    // fails the dev run. What they cannot see is the cfg itself being wrong —
+    // they ask `is_demo_cfg()` the same question the code under test asks, so
+    // a `build.rs` that stopped tracking `PHOENIX_DEMO_BUILD` would move both
+    // sides together and these would still pass. That half is
+    // `build_flags::the_cfg_gate_and_the_runtime_flag_agree`, which compares
+    // the cfg against the `option_env!` read of the same variable. The two
+    // tests are in the same CI step for exactly that reason; neither is
+    // sufficient alone. (Checked, not assumed: inverting `build.rs` turns that
+    // test red under `PHOENIX_DEMO_BUILD=true`.)
+
+    /// A demo binary cannot be told to draw a debug overlay by a phone: the
+    /// variant is not compiled, so the frame does not parse.
+    #[test]
+    fn the_client_debug_route_is_absent_from_a_demo_build() {
+        let decoded =
+            JsonCodec.decode_client(r#"{"type":"ToggleDebugFlag","data":{"flag":"Regions"}}"#);
+        assert_eq!(
+            decoded.is_ok(),
+            !crate::build_flags::is_demo_cfg(),
+            "ToggleDebugFlag must decode in a dev build and be an unknown \
+             message in a demo build — a hidden Debug/Cheat tab is a forgeable \
+             UI fact, so the wire shape has to go too"
+        );
+    }
+
+    /// A demo binary cannot be paused by a phone. This is the one that matters
+    /// in play: a demo is N strangers on N phones, any one of whom could
+    /// otherwise freeze the mission for everyone, repeatedly, with nothing in
+    /// the drain checking station, captaincy or `GamePhase`.
+    ///
+    /// The host's own pause (issue #939) is a different path — a `wasm_*`
+    /// export the host page calls directly — and is deliberately untouched in
+    /// every build.
+    #[test]
+    fn the_client_pause_route_is_absent_from_a_demo_build() {
+        for frame in [
+            r#"{"type":"TogglePause"}"#,
+            r#"{"type":"TogglePause","data":null}"#,
+        ] {
+            assert_eq!(
+                JsonCodec.decode_client(frame).is_ok(),
+                !crate::build_flags::is_demo_cfg(),
+                "a demo build must not understand {frame} from any phone"
+            );
+        }
     }
 
     /// `TorpedoTubeState` with non-default volley fields round-trips (issue #632).

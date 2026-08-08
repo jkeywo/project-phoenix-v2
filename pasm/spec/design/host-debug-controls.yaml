@@ -23,6 +23,19 @@ entities:
       resolution: host-local direct control
       outputs: [diagnostic presentation or active simulation debug override]
 
+  - verb: use-client-debug-control
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Use Client Debug Control
+      summary: A connected player may use the phone client's settings menu to select a diagnostic overlay, enable god mode, or pause the simulation. All three are dev-only - none of them exists in the public demo build. The diagnostic overlays and god mode sit on the Debug/Cheat tab, which a demo build hides entirely; pause sits on the Gameplay tab, which a demo build keeps for its station controls while hiding the pause control alone. Unlike the host operator's equivalent this is not a local call - the phone sends over the wire under its own session identity and the host decides, so a button paints from the host's read-back rather than from the tap.
+    game_design:
+      architecture_links: [client-debug-control-route, debug-overlay-controller, host-debug-simulation-controls]
+      owner_role: connected-player
+      inputs: [selected client debug action]
+      resolution: host-authoritative admitted command
+      outputs: [diagnostic presentation or active simulation debug override]
+
   - mechanic: host-debug-teleport-to-waypoint
     core:
       status: proposed
@@ -41,12 +54,48 @@ entities:
       status: accepted
       confidence: confirmed
       title: Host Debug Controls Available in Normal Builds
-      summary: The complete host Debug/Cheat tab remains accessible in every build except the public demo, including the deployed dev host. Simulation-affecting controls, including waypoint teleport, are intentional host powers rather than hidden development-only controls. Only a demo build (PHOENIX_DEMO_BUILD=true, deliberately a different flag from the TRUNK_BUILD_RELEASE size switch that the dev host also sets) omits the tab entirely; pause and exit-to-lobby survive on the Gameplay tab because they are gameplay controls, not debug ones.
+      summary: The complete host Debug/Cheat tab remains accessible in every build except the public demo, including the deployed dev host. Simulation-affecting controls, including waypoint teleport, are intentional host powers rather than hidden development-only controls. Only a demo build (PHOENIX_DEMO_BUILD=true, deliberately a different flag from the TRUNK_BUILD_RELEASE size switch that the dev host also sets) omits the tab entirely; the host's own pause and exit-to-lobby survive on its Gameplay tab in every build because they are gameplay controls, not debug ones, and because the host is a single trusted operator at the viewscreen rather than one of N phones. The phone client's pause is a different control with a different answer - see client-debug-controls-share-the-build-gate.
     game_design:
       enforcement_links: [host-debug-simulation-controls]
       owner_role: host-debug-operator
       protected: true
-      must_not_be: [exposed to phone clients, silently treated as non-gameplay diagnostics, present in a demo build, stripped from the deployed dev host]
+      must_not_be: [silently treated as non-gameplay diagnostics, present in a demo build, stripped from the deployed dev host]
+
+  - decision: client-debug-controls-share-the-build-gate
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Client Debug Controls Share the Build Gate
+      summary: A connected phone may reach the debug overlays, god mode and the simulation pause from its own settings menu, on the same terms as the host operator, in every build except the public demo. A phone reaches them under its own session identity, never by claiming the reserved local-console token, which the peer identify path refuses. In a demo build each route is absent rather than refused, and each is made absent by the same PHOENIX_DEMO_BUILD flag that hides its control - so hiding a control and closing its route cannot come apart. The three routes are gated at two different depths, deliberately. The overlay flags and the pause are each a top-level client message of their own, and the whole message is compiled out, so a demo host cannot even decode the frame. God mode is a command-admission command, because it changes damage outcomes and must be tick-stamped, logged and replayable, so its message exists in every build and only its admission branch is compiled out.
+    game_design:
+      enforcement_links: [client-debug-control-route, host-debug-simulation-controls]
+      owner_role: connected-player
+      protected: true
+      must_not_be: [reachable in a demo build, reachable by an unidentified sender, routed through the reserved local-console token, a widening of ordinary station-command authority, narrowed per flag instead of removed]
+
+  - decision: client-pause-is-dev-only
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Client Pause Is Dev Only
+      summary: The phone client's pause is a message of its own rather than one of the diagnostic overlay flags, and it is absent from the public demo build. The reason is not diagnostics but authority - nothing on the host side gates a client pause by station, captaincy or game phase, so in a demo any one of N strangers could freeze the mission for everyone, repeatedly. Giving pause its own message is what makes that gateable independently of the overlays. The host operator's own pause is untouched in every build - one trusted operator standing at the viewscreen is a different proposition from N phones - which is why this decision is about the client route alone. A demo client still hides the pause control, and a demo host still cannot decode the message behind it, so the two halves cannot drift apart. The pause state is still reported to every client in every build, because a read-back grants no authority - a demo phone may learn that the host paused the mission and still have no way to pause it itself.
+    game_design:
+      enforcement_links: [client-debug-control-route, host-debug-simulation-controls]
+      owner_role: connected-player
+      protected: true
+      must_not_be: [a debug overlay flag, reachable in a demo build, a restriction on the host operator's own pause, gated only in the client UI]
+
+  - decision: client-settings-menu-tabs
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Client Settings Menu Tabs
+      summary: The phone client carries a single settings cog, top-left, mirroring the host page - the same three tabs, the same one demo-gated. Audio offers one master volume that scales each audio channel's authored level rather than replacing it. Gameplay offers the station controls that predate the tabs (rating, viewscreen QR toggle, leave station) plus, in a dev build only, pause/unpause. The Gameplay tab itself is in every build because a demo needs the station controls on it - pause alone is gated, at the control rather than at the tab, for the reason in client-pause-is-dev-only. Exit-to-lobby is deliberately absent from the phone's menu - a phone may request a return only from the game-over screen, which is the pre-existing participant authority and is not loosened here. Every button paints from the host's authoritative read-back rather than from its own click, so a toggle a build refuses is visibly refused.
+    game_design:
+      enforcement_links: [client-debug-control-route, host-debug-simulation-controls]
+      owner_role: connected-player
+      protected: true
+      must_not_be: [a way for a phone client to end a mission in progress, a second place authored audio levels are authored, painted from local optimism]
 
   - decision: host-settings-menu-tabs
     core:

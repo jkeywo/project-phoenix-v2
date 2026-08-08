@@ -111,6 +111,42 @@ jobs:
       - name: Run registration-order determinism tests
         run: cargo test --features headless --test registration_order_determinism
 
+      # The demo build, actually compiled (issue #940). PHOENIX_DEMO_BUILD is
+      # set in exactly one place in this repo — deploy-demo.yml — and that job
+      # runs `trunk build` and no tests. So before this step, every
+      # `#[cfg(phoenix_demo_build)]` body was source no job had ever built: the
+      # deleted client cheat route, the deleted client debug/pause messages, and
+      # the demo arms of the tests that pin them. Those tests looked like they
+      # covered the gate and did not — with the variable unset both sides of
+      # `the_cfg_gate_and_the_runtime_flag_agree` answer `false` whatever they
+      # compare against, so the assertion passed vacuously. It found a real bug
+      # the first time it was run.
+      #
+      # Deliberately narrow, and deliberately LAST. Setting the variable
+      # changes a cfg on this crate, so rustc rebuilds the crate (not its
+      # dependencies — the cache above still serves those); putting it after
+      # the steps that want the un-flagged build means it invalidates nothing
+      # behind it. `--lib` keeps it to the one target whose answers the flag
+      # can change; the filters name the tests that read the gate, while
+      # everything in the lib still has to compile, which is most of the value.
+      #
+      # The filters, and why each earns its place:
+      #   build_flags                 — the cfg and the `option_env!` agree.
+      #   command_admission::debug_route — the god-mode cheat route is absent.
+      #   route_is_absent_from_a_demo_build — the two client messages
+      #     (`ToggleDebugFlag`, `TogglePause`) do not DECODE here. That is the
+      #     one asked over the wire rather than through a predicate, and it is
+      #     the one that catches a variant quietly losing its `#[cfg]`.
+      #
+      # `debug_overlay::tests::client_route` is deliberately NOT in this list:
+      # that module is itself `#[cfg(not(phoenix_demo_build))]`, so naming it
+      # here would match zero tests and pass vacuously — the exact trap this
+      # step exists to close.
+      - name: Run the demo-build gate tests
+        env:
+          PHOENIX_DEMO_BUILD: 'true'
+        run: cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
+
   # ── WASM build ────────────────────────────────────────────────────────────────
   build:
     needs: test

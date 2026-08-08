@@ -6,9 +6,9 @@ entities:
       title: Connected Player
       summary: A named connected participant who can join a pre-scenario selection and claim a station after a scenario and ship are chosen.
     game_design:
-      architecture_links: [pre-scenario-lobby-surface, game-flow-controller, round-return-controller, station-claim-router]
+      architecture_links: [pre-scenario-lobby-surface, game-flow-controller, round-return-controller, station-claim-router, client-debug-control-route]
       responsibilities: [participate in the next-round selection, claim a station, set ready]
-      player_verbs: [select-next-scenario-or-ship, claim-station, set-ready, take-station]
+      player_verbs: [select-next-scenario-or-ship, claim-station, set-ready, take-station, use-client-debug-control]
 
   - verb: select-next-scenario-or-ship
     core:

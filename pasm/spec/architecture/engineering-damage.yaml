@@ -271,6 +271,11 @@ entities:
       depends_on:
         - system-command-admission-policy
         - admitted-command-router
+        # src/command_admission/mod.rs declares `pub mod debug_route` — the
+        # phone client's Debug/Cheat gate (issue #940), which the seam's
+        # policy consults for the one command ordinary station tenure cannot
+        # authorise.
+        - client-debug-control-route
       runs_in:
         - host-browser-runtime
     implementation:

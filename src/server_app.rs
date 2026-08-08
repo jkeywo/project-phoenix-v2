@@ -816,6 +816,46 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         apply_god_mode_toggle.in_set(crate::sim_sets::SimSet::Input),
     );
 
+    // The phone client's settings route (issue #940): drain the debug flags and
+    // the pause a connected phone asks for, then report the resulting state
+    // back to every client. `PreUpdate`, ordered, and deliberately NOT in
+    // `FixedUpdate` — pausing starves the fixed schedule, so a fixed drain
+    // could never undo a pause and a fixed reporter could never announce one.
+    // See `debug_overlay::drain_client_pause`.
+    //
+    // Gated on the two plugins that own what they touch. `DebugOverlayPlugin`
+    // is added by `wasm_init` and `LobbyPlugin` brings `Sessions` and the
+    // `OutboundMessage` stream — a headless run has neither, and no phone to
+    // serve either, so there is genuinely nothing to drain there.
+    //
+    // The reporter is registered unconditionally and the two drains are not:
+    // in a demo build the phone has no route to either, but it is still told
+    // what the host's own cog did. Two `add_systems` calls rather than one
+    // `#[cfg]`-riddled tuple, so the demo build's schedule is a strictly
+    // smaller thing rather than a differently-shaped one.
+    app.init_resource::<crate::debug_overlay::LastReportedDebugState>();
+    #[cfg(not(phoenix_demo_build))]
+    app.add_systems(
+        PreUpdate,
+        (
+            crate::debug_overlay::drain_client_debug_flags,
+            crate::debug_overlay::drain_client_pause,
+        )
+            .chain()
+            .before(crate::debug_overlay::report_debug_state)
+            .run_if(
+                resource_exists::<crate::debug_overlay::DebugRegionsEnabled>
+                    .and(resource_exists::<crate::lobby::Sessions>),
+            ),
+    );
+    app.add_systems(
+        PreUpdate,
+        crate::debug_overlay::report_debug_state.run_if(
+            resource_exists::<crate::debug_overlay::DebugRegionsEnabled>
+                .and(resource_exists::<crate::lobby::Sessions>),
+        ),
+    );
+
     // Unrouted-command lint (issue #833). Production wires the admission seam
     // through `register_admission_seam` (above) rather than via
     // `AdmissionPlugin`, so the lint is added here too. Warning-only, ordered

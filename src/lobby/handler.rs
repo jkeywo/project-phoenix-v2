@@ -854,6 +854,7 @@ mod tests {
             // WASM. Should one ever reach the running Bevy app (e.g. a late
             // phone message after the world is already loading), the selection
             // is already settled — so it is a deliberate no-op here.
+            //
             ClientMessage::ControlSystem { .. }
             | ClientMessage::SendCoordination { .. }
             | ClientMessage::SelectScenario { .. }
@@ -863,6 +864,22 @@ mod tests {
                 station_rating_update: None,
                 countdown_action: None,
             },
+            // `ToggleDebugFlag` / `TogglePause` (issue #940) are likewise not a
+            // lobby concern: both are drained frame-driven in `debug_overlay`,
+            // which carries their authority check, so the lobby has nothing to
+            // add. A separate arm rather than another `|` because both variants
+            // carry `#[cfg(not(phoenix_demo_build))]` — in a demo build they do
+            // not exist and neither does this arm, and a `#[cfg]` cannot be
+            // hung on one alternative of a pattern.
+            #[cfg(not(phoenix_demo_build))]
+            ClientMessage::ToggleDebugFlag { .. } | ClientMessage::TogglePause => {
+                LobbyHandlerResult {
+                    new_phase: None,
+                    outbound: Vec::new(),
+                    station_rating_update: None,
+                    countdown_action: None,
+                }
+            }
         }
     }
 

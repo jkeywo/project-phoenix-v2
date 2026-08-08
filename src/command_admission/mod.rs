@@ -31,6 +31,7 @@ use crate::messages::ClientMessage;
 use crate::server_app::LocalShip;
 
 pub mod ai_emit;
+pub mod debug_route;
 pub mod log;
 pub mod policy;
 pub mod router;

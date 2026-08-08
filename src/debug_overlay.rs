@@ -89,6 +89,264 @@ impl DamageLog {
     }
 }
 
+// ── The phone client's settings route (issue #940) ──────────────────────────
+//
+// The host page flips these resources through `bridge::drain_debug_toggles`,
+// which drains a thread-local the `wasm_toggle_*` exports fill. A phone has no
+// WASM to call, so it sends a top-level `ClientMessage` and the systems below
+// are its equivalent: two drains and one read-back broadcast.
+//
+// The two drains are `#[cfg(not(phoenix_demo_build))]`, along with the messages
+// they read, so a demo binary contains neither. Their separation is the point:
+// `ToggleDebugFlag` carries diagnostics that a demo simply has no use for,
+// while `TogglePause` is a lever any one of N strangers could pull to freeze
+// everyone else's mission. They go together here only because both answers
+// happen to be "not in the demo" — the host's own pause (issue #939) is
+// untouched in every build.
+//
+// All three live in `PreUpdate`, frame-driven, for the reason spelled out on
+// `ClientMessage::TogglePause` — pausing starves `FixedUpdate`, so anything
+// that has to undo a pause (or report one) cannot be in the fixed schedule.
+// That also makes the read-back reach a phone whose ship is frozen solid.
+
+/// Last `DebugState` broadcast, so the read-back is emitted on change rather
+/// than every frame.
+///
+/// `None` until the first broadcast, which is what makes a client that joins
+/// mid-session get one: the state is re-sent whenever it differs from what was
+/// last *sent*, and a reset of this resource forces a resend.
+///
+/// The tuple is `(flags, paused, god_mode)`, matching the message's fields.
+#[derive(Resource, Default)]
+#[allow(clippy::type_complexity)]
+pub struct LastReportedDebugState(
+    pub Option<(Vec<(crate::messages::DebugFlag, bool)>, bool, bool)>,
+);
+
+/// Decide which flags a batch of inbound messages actually flips.
+///
+/// Pure and Bevy-free so the authority question is testable without an App:
+/// a message counts only when its sender is a connected player. There is no
+/// per-flag question left to ask — every `DebugFlag` is diagnostic-only, and
+/// the build gate is the `#[cfg]` on this function and on the message itself.
+/// Returns the toggle kinds in arrival order; `apply_pending_toggles` dedupes
+/// them, exactly as it does for the host page's own pending set.
+#[cfg(not(phoenix_demo_build))]
+pub fn admitted_flag_toggles<'a>(
+    messages: impl IntoIterator<Item = (&'a str, crate::messages::DebugFlag)>,
+    is_connected: impl Fn(&str) -> bool,
+) -> Vec<crate::bridge::DebugToggleKind> {
+    messages
+        .into_iter()
+        .filter(|(token, _)| is_connected(token))
+        .map(|(_, flag)| crate::bridge::DebugToggleKind::from(flag))
+        .collect()
+}
+
+/// Drain `ClientMessage::ToggleDebugFlag` from connected phones and apply it.
+///
+/// **Not compiled into a demo build**, and neither is the message it reads.
+///
+/// Reads raw `InboundMessage` rather than `AdmittedCommands` deliberately —
+/// see the variant's doc for why these never cross command admission. The
+/// authority check is not skipped, it is [`admitted_flag_toggles`].
+///
+/// The flag-flipping itself is `bridge::apply_pending_toggles`, the same pure
+/// function the host page's drain calls, so a flag flipped from a phone and one
+/// flipped from the host page cannot diverge. `paused` is passed to it as a
+/// throwaway local: no `DebugFlag` maps to `DebugToggleKind::Pause` any more,
+/// so this drain can no longer touch the clock even by accident.
+#[cfg(not(phoenix_demo_build))]
+#[allow(clippy::too_many_arguments)]
+pub fn drain_client_debug_flags(
+    mut reader: MessageReader<crate::lobby::InboundMessage>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut regions: ResMut<DebugRegionsEnabled>,
+    mut overlay: ResMut<DebugOverlayEnabled>,
+    mut damage: ResMut<DebugDamageEnabled>,
+    mut entities: ResMut<DebugEntitiesEnabled>,
+    mut inspector: ResMut<DebugEntityInspectorEnabled>,
+) {
+    let mut requests: Vec<(String, crate::messages::DebugFlag)> = Vec::new();
+    for ev in reader.read() {
+        if let crate::messages::ClientMessage::ToggleDebugFlag { flag } = &ev.msg {
+            requests.push((ev.token.clone(), *flag));
+        }
+    }
+    if requests.is_empty() {
+        return;
+    }
+
+    let pending = admitted_flag_toggles(
+        requests.iter().map(|(token, flag)| (token.as_str(), *flag)),
+        |token| sessions.0.players().iter().any(|p| p.token == token),
+    );
+    if pending.is_empty() {
+        return;
+    }
+
+    let mut unreachable_pause = false;
+    let pause_changed = crate::bridge::apply_pending_toggles(
+        pending,
+        &mut regions.0,
+        &mut overlay.0,
+        &mut unreachable_pause,
+        &mut damage.0,
+        &mut entities.0,
+        &mut inspector.0,
+    );
+    debug_assert!(
+        !pause_changed,
+        "no DebugFlag maps to DebugToggleKind::Pause — pause is ClientMessage::TogglePause"
+    );
+}
+
+/// Count the pause requests in a batch that are honoured.
+///
+/// Pure and Bevy-free, and separate from [`admitted_flag_toggles`] because it
+/// answers a different question about a different message. A request counts
+/// only when its sender is a connected player; the build gate is the `#[cfg]`
+/// on this function and on `ClientMessage::TogglePause` itself.
+///
+/// Returns a count rather than a bool because pause is a *toggle*: two taps in
+/// one frame are two flips, which is a no-op, and collapsing them to "someone
+/// asked" would turn a double-tap into a pause.
+#[cfg(not(phoenix_demo_build))]
+pub fn admitted_pause_toggles<'a>(
+    tokens: impl IntoIterator<Item = &'a str>,
+    is_connected: impl Fn(&str) -> bool,
+) -> usize {
+    tokens.into_iter().filter(|t| is_connected(t)).count()
+}
+
+/// Drain `ClientMessage::TogglePause` from connected phones and apply it.
+///
+/// **Not compiled into a demo build**, and neither is the message it reads.
+/// That is the whole of the protection: a demo phone's pause is not refused
+/// here, it never decodes. See the variant's doc for why N strangers each
+/// holding the pause lever is a different risk from one host operator holding
+/// it, and why the host's own cog keeps working in every build.
+///
+/// No station, captaincy or `GamePhase` check, deliberately — in a dev build
+/// the whole point is that whoever is testing can stop the clock from the phone
+/// in their hand, whatever they are holding.
+#[cfg(not(phoenix_demo_build))]
+pub fn drain_client_pause(
+    mut reader: MessageReader<crate::lobby::InboundMessage>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut paused: ResMut<SimulationPaused>,
+    mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
+) {
+    let tokens: Vec<String> = reader
+        .read()
+        .filter(|ev| matches!(ev.msg, crate::messages::ClientMessage::TogglePause))
+        .map(|ev| ev.token.clone())
+        .collect();
+    if tokens.is_empty() {
+        return;
+    }
+
+    let flips = admitted_pause_toggles(tokens.iter().map(String::as_str), |token| {
+        sessions.0.players().iter().any(|p| p.token == token)
+    });
+    if flips % 2 == 0 {
+        return;
+    }
+
+    paused.0 = !paused.0;
+    // Identical side effect to the host page's drain: pausing `Time<Virtual>`
+    // starves the fixed accumulator and freezes the whole sim. See
+    // `bridge::drain_debug_toggles` for what that costs.
+    if paused.0 {
+        virtual_time.pause();
+    } else {
+        virtual_time.unpause();
+    }
+}
+
+/// Broadcast `ServerMessage::DebugState` whenever the reported state changes.
+///
+/// Present in **every** build, unlike the two drains above. It is a read-back,
+/// and a read-back grants no authority: a demo phone learns the host paused the
+/// mission and still has no message with which to pause it. Keeping it
+/// un-gated also means the flags a host flips from its own cog stay visible to
+/// whatever tooling is watching, in any build.
+///
+/// One reporter for three writers: the overlay flags, `SimulationPaused` — both
+/// reachable from the host's cog in every build and from a phone in a dev build
+/// — and `GodMode`, flipped by an admitted command in `FixedUpdate` (issue
+/// #900). Reading them here means the phone's Debug/Cheat tab paints from the
+/// simulation rather than from its own optimism, which is the point: a demo
+/// build has no route at all and the button has to show that.
+///
+/// It also owns the resend on `Identify`: a peer that just joined has no idea
+/// what the flags are, and this system only speaks on change. That belongs here
+/// rather than in a drain because this is the only system that writes
+/// [`LastReportedDebugState`] — and because the drains are not in a demo build,
+/// where a joining phone still deserves the read-back.
+///
+/// Writes `OutboundMessage` directly rather than `SimOutbox` because that outbox
+/// is drained in `FixedUpdate`: a client that had just paused the game would
+/// never be told it worked.
+#[allow(clippy::too_many_arguments)]
+pub fn report_debug_state(
+    mut reader: MessageReader<crate::lobby::InboundMessage>,
+    regions: Res<DebugRegionsEnabled>,
+    overlay: Res<DebugOverlayEnabled>,
+    paused: Res<SimulationPaused>,
+    damage: Res<DebugDamageEnabled>,
+    entities: Res<DebugEntitiesEnabled>,
+    inspector: Res<DebugEntityInspectorEnabled>,
+    god_mode: Option<Res<crate::server_app::GodMode>>,
+    mut last: ResMut<LastReportedDebugState>,
+    mut writer: MessageWriter<crate::lobby::OutboundMessage>,
+) {
+    use crate::messages::DebugFlag;
+
+    // Forgetting what was last sent makes the compare below re-announce the
+    // current state to everyone, which is cheap and is the only sync a joining
+    // phone gets. That resend and the new peer's own `Welcome` flush in the
+    // same frame, in this order, so `gui/sim-state.js` PRESERVES `debugFlags`
+    // across a `Welcome` reset rather than clearing it — see the field's
+    // own comment.
+    if reader
+        .read()
+        .any(|ev| matches!(ev.msg, crate::messages::ClientMessage::Identify { .. }))
+    {
+        last.0 = None;
+    }
+
+    let god_mode = god_mode.map(|g| g.0).unwrap_or(false);
+    let flags: Vec<(DebugFlag, bool)> = DebugFlag::ALL
+        .iter()
+        .map(|flag| {
+            let on = match flag {
+                DebugFlag::Regions => regions.0,
+                DebugFlag::Modifiers => overlay.0,
+                DebugFlag::Damage => damage.0,
+                DebugFlag::Entities => entities.0,
+                DebugFlag::Inspector => inspector.0,
+            };
+            (*flag, on)
+        })
+        .collect();
+
+    let current = (flags, paused.0, god_mode);
+    if last.0.as_ref() == Some(&current) {
+        return;
+    }
+    last.0 = Some(current.clone());
+    writer.write(crate::lobby::OutboundMessage {
+        target: crate::lobby::Target::All,
+        msg: crate::messages::ServerMessage::DebugState {
+            flags: current.0,
+            paused: current.1,
+            god_mode: current.2,
+        },
+        delivery: crate::messages::DeliveryClass::Reliable,
+    });
+}
+
 /// Server-only plugin that draws region shape wireframes when enabled.
 ///
 /// The `enabled` field is typically set from the `?debug_regions=1` URL parameter
@@ -657,5 +915,125 @@ mod tests {
         plugin.build(&mut app);
         let enabled = app.world().resource::<DebugDamageEnabled>();
         assert!(!enabled.0, "damage overlay should be disabled by default");
+    }
+
+    /// Every wire flag maps onto a distinct host-page toggle kind — the two
+    /// vocabularies stay one-for-one, so no flag silently flips another's
+    /// resource. Compiled in every build, because the conversion is: it is the
+    /// shape of the two enums, not a route.
+    #[test]
+    fn every_flag_maps_to_its_own_toggle_kind() {
+        let kinds: std::collections::HashSet<_> = crate::messages::DebugFlag::ALL
+            .iter()
+            .map(|f| crate::bridge::DebugToggleKind::from(*f))
+            .collect();
+        assert_eq!(kinds.len(), crate::messages::DebugFlag::ALL.len());
+    }
+
+    /// No `DebugFlag` reaches the clock. Pause left this enum precisely so the
+    /// overlay drain could not touch `SimulationPaused` even by accident, and
+    /// this is that claim, checked rather than asserted in prose.
+    #[test]
+    fn no_debug_flag_maps_to_the_pause_toggle() {
+        for flag in crate::messages::DebugFlag::ALL {
+            assert_ne!(
+                crate::bridge::DebugToggleKind::from(flag),
+                crate::bridge::DebugToggleKind::Pause,
+                "{flag:?} would let the overlay drain stop the simulation clock"
+            );
+        }
+    }
+
+    // ── The phone client's settings routes (issue #940) ─────────────────────
+    //
+    // Gated as a whole: in a demo build neither drain exists, so there is
+    // nothing here to test. That the routes are ABSENT there is pinned from
+    // both builds by `codec`'s two
+    // `*_route_is_absent_from_a_demo_build` tests, which ask the question
+    // through the wire rather than through a predicate this module owns.
+
+    #[cfg(not(phoenix_demo_build))]
+    mod client_route {
+        use super::*;
+        use crate::messages::DebugFlag;
+
+        /// Only tokens in this list count as connected players.
+        fn connected<'a>(known: &'a [&'a str]) -> impl Fn(&str) -> bool + 'a {
+            move |token| known.contains(&token)
+        }
+
+        /// The happy path: a connected player's flags reach the pending set as
+        /// the matching `DebugToggleKind`s, in submission order.
+        #[test]
+        fn a_connected_players_flag_is_admitted() {
+            let kinds = admitted_flag_toggles(
+                [("phone", DebugFlag::Regions), ("phone", DebugFlag::Damage)],
+                connected(&["phone"]),
+            );
+            assert_eq!(
+                kinds,
+                vec![
+                    crate::bridge::DebugToggleKind::Regions,
+                    crate::bridge::DebugToggleKind::Damage,
+                ]
+            );
+        }
+
+        /// A token nobody registered is refused. The route widens *who* may
+        /// flip a debug flag, not *whether* a sender has to exist.
+        #[test]
+        fn an_unregistered_token_is_refused() {
+            assert!(
+                admitted_flag_toggles([("ghost", DebugFlag::Regions)], connected(&["phone"]),)
+                    .is_empty()
+            );
+        }
+
+        /// An admitted batch flips exactly the resources it names, through the
+        /// same pure function the host page's own drain uses — and never the
+        /// clock, whatever it names.
+        #[test]
+        fn an_admitted_batch_flips_only_the_flags_it_names() {
+            let (mut regions, mut overlay, mut paused) = (false, false, false);
+            let (mut damage, mut entities, mut inspector) = (false, false, false);
+            let pending =
+                admitted_flag_toggles([("phone", DebugFlag::Damage)], connected(&["phone"]));
+            let pause_changed = crate::bridge::apply_pending_toggles(
+                pending,
+                &mut regions,
+                &mut overlay,
+                &mut paused,
+                &mut damage,
+                &mut entities,
+                &mut inspector,
+            );
+            assert!(damage, "the named flag must flip");
+            assert!(!pause_changed);
+            assert!(!regions && !overlay && !paused && !entities && !inspector);
+        }
+
+        /// Pause is a toggle, so an even number of admitted taps in one frame
+        /// is a no-op and an odd number is one flip. Collapsing the batch to
+        /// "someone asked" would turn a double-tap into a pause.
+        #[test]
+        fn pause_taps_are_counted_not_collapsed() {
+            let known = ["phone", "other"];
+            assert_eq!(admitted_pause_toggles(["phone"], connected(&known)), 1);
+            assert_eq!(
+                admitted_pause_toggles(["phone", "other"], connected(&known)),
+                2
+            );
+        }
+
+        /// The same identity rule the flags use: a token nobody registered
+        /// cannot stop the clock, even in a dev build.
+        #[test]
+        fn an_unregistered_token_cannot_pause() {
+            assert_eq!(
+                admitted_pause_toggles(["ghost"], connected(&["phone"])),
+                0,
+                "an unidentified sender must not reach the simulation clock"
+            );
+        }
     }
 }

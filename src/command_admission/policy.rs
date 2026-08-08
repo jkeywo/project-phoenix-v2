@@ -77,6 +77,23 @@ pub fn is_command_authorized(
         return false;
     }
 
+    // The phone client's Debug/Cheat route (issue #940). Ownerless by
+    // construction — no station holds `god-mode` — so the tenure check below
+    // would deny it, which is what kept cheats host-only until now. The verdict
+    // turns on the (target, payload) pair and the sender being a connected
+    // player, never on *which* player: a phone that gets here is admitted on
+    // the same terms as any other, and downstream sees the ordinary admitted
+    // `ToggleGodMode` with its source identity stripped.
+    //
+    // `crate::command_admission::debug_route` compiles this route out of a demo
+    // build, so the check below is a constant `false` there — the gate and the
+    // hidden tab disappear together.
+    if crate::command_admission::debug_route::admits_debug_command(&effective_target, payload)
+        && sessions.0.players().iter().any(|p| p.token == token)
+    {
+        return true;
+    }
+
     // Human network token: must hold the station for the target system.
     match station_for_system(config, &effective_target) {
         Some(station) => sessions.0.holder_for_station(&station) == Some(token),
@@ -276,17 +293,64 @@ station = "repair"
         ));
     }
 
-    /// A connected player's session token is denied: `station_for_system`
-    /// returns `None` for `god-mode` (no ship TOML declares it), which is the
-    /// "unknown system" deny path every remote human token hits.
+    /// A connected player's session token now reaches God Mode through the
+    /// phone settings menu's Debug/Cheat route (issue #940) — but only in a
+    /// build that has that route. In the demo build
+    /// `debug_route::admits_debug_command` is compiled to a constant `false`
+    /// and the token falls through to the pre-#940 behaviour:
+    /// `station_for_system` returns `None` for `god-mode` (no ship TOML
+    /// declares it) and the unknown-system deny path refuses it.
     #[test]
-    fn toggle_god_mode_is_rejected_for_a_remote_human_token() {
+    fn toggle_god_mode_follows_the_debug_route_for_a_remote_human_token() {
+        assert_eq!(
+            is_command_authorized(
+                "t1",
+                &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+                &toggle_god_mode(),
+                &sources(ControlSource::Human, false),
+                &sessions_with_repair_holder("t1"),
+                &config(),
+            ),
+            !crate::build_flags::is_demo_cfg(),
+        );
+    }
+
+    /// The route is not a blanket "remote tokens may touch `god-mode`": an
+    /// unregistered token — one that never completed `Identify`, so it is in no
+    /// session — is refused even in a dev build. Registration is the whole of
+    /// the identity claim being made, and it has to be a real one.
+    #[test]
+    fn toggle_god_mode_is_rejected_for_a_token_with_no_session() {
         assert!(!is_command_authorized(
-            "t1",
+            "never-identified",
             &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
             &toggle_god_mode(),
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
+            &config(),
+        ));
+    }
+
+    /// The route widens exactly one (target, payload) pair. A connected player
+    /// who does not hold the repair station still cannot dispatch repair teams
+    /// — #940 must not have turned admission into "any registered token, any
+    /// ownerless-looking command".
+    #[test]
+    fn the_debug_route_does_not_widen_ordinary_station_commands() {
+        assert!(!is_command_authorized(
+            "intruder",
+            &SystemId("repair".into()),
+            &dispatch(),
+            &sources(ControlSource::Human, false),
+            &{
+                let mut sm = crate::lobby::session::SessionManager::new();
+                sm.register("t1".into(), "Engineer".into()).unwrap();
+                sm.set_station("t1", Some(StationId("repair".into())));
+                // `intruder` is a registered player too — the deny below is
+                // station tenure, not an unknown token.
+                sm.register("intruder".into(), "Nosy".into()).unwrap();
+                crate::lobby::Sessions(sm)
+            },
             &config(),
         ));
     }

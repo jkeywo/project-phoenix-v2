@@ -28,6 +28,7 @@
 
 import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
+import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
 
 // ── Wiring tables ────────────────────────────────────────────────────────────
 //
@@ -67,12 +68,12 @@ export const DEBUG_COMMANDS = [
   { id: 'resume-snapshot', labelId: 'settings.debug.resume_snapshot', call: '__hostResumeSnapshot' },
 ];
 
-/** The three tabs, in display order. `gated` tabs vanish in the demo build. */
-export const TABS = [
-  { id: 'debug', labelId: 'settings.tab.debug', gated: true },
-  { id: 'audio', labelId: 'settings.tab.audio', gated: false },
-  { id: 'gameplay', labelId: 'settings.tab.gameplay', gated: false },
-];
+// The tab list — and the "which tab survives this build" answer — moved to
+// `gui/settings-tabs.js` when the phone client grew the same three tabs (issue
+// #940). Both pages must gate the same tab in the same build, so both import
+// from there; this page keeps no copy of its own. Re-exported here so this
+// module's existing importers are unchanged.
+export { TABS, visibleTabs, resolveActiveTab };
 
 const BUTTON_ID = 'server-settings-btn';
 const OVERLAY_ID = 'server-settings-overlay';
@@ -84,11 +85,6 @@ const OUTPUT_CONTENT_ID = 'debug-content';
 const VOLUME_MIN = 0;
 const VOLUME_MAX = 1;
 const VOLUME_STEP = 0.01;
-
-/** Which tabs this build actually shows. */
-export function visibleTabs(demo) {
-  return TABS.filter((tab) => !(tab.gated && demo));
-}
 
 /**
  * Fold a click on debug output `id` into the next {enabled, viewing} state.
@@ -381,10 +377,13 @@ export function mountServerSettings(opts = {}) {
   // ── Panel ──────────────────────────────────────────────────────────────────
 
   function buildPanel() {
-    const tabs = visibleTabs(isDemo());
-    if (!tabs.some((tab) => tab.id === activeTab)) {
-      activeTab = tabs.length > 0 ? tabs[0].id : null;
-    }
+    const demo = isDemo();
+    const tabs = visibleTabs(demo);
+    // Shared with the phone client rather than duplicated: a panel whose active
+    // tab was gated away renders an empty body instead of falling back, and the
+    // two pages getting different answers to that is invisible until someone
+    // opens the demo build's cog.
+    activeTab = resolveActiveTab(activeTab, demo);
     controls.toggles = {};
     controls.commands = {};
     controls.outputs = {};

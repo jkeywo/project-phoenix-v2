@@ -110,6 +110,33 @@ node scripts/build-client.mjs
 # SEPARATE flag (src/build_flags.rs, option_env!) that hides the host settings
 # cog's Debug/Cheat tab. Only .github/workflows/deploy-demo.yml sets it —
 # ci.yml's GitHub Pages deploy is the dev host and keeps its debug tooling.
+# Since #940 the same variable ALSO reaches the compiler as a cfg: build.rs
+# turns it into `phoenix_demo_build`, which DELETES three things from a demo
+# binary rather than merely refusing them —
+#   - the god-mode cheat route (src/command_admission/debug_route.rs),
+#   - ClientMessage::ToggleDebugFlag and its drain, and
+#   - ClientMessage::TogglePause and its drain.
+# The last is the blunt one: nothing server-side checks station, captaincy or
+# GamePhase before honouring a client pause, so any one of N demo players could
+# otherwise freeze the mission for everyone, repeatedly. The HOST's own pause,
+# on the server cog (#939), is untouched in every build. A demo binary does not
+# decode either client message at all, so the hidden control and the closed
+# route cannot come apart.
+# The client page has no WASM to bake anything into, so it learns the
+# flag from the `phoenix-build-demo` meta tag the deploy workflow stamps.
+# The literal both halves compare against lives in ONE place —
+# src/demo_build_value.rs, `include!`d by build.rs and src/build_flags.rs —
+# because a build script cannot `use` the crate it builds and two copies
+# could only diverge in a build nothing but deploy-demo.yml produces.
+
+# The demo cfg compiled and tested (ci.yml's "demo-build gate tests" step):
+PHOENIX_DEMO_BUILD=true cargo test --lib -- \
+  build_flags command_admission::debug_route route_is_absent_from_a_demo_build
+# deploy-demo.yml runs no tests, so without this step nothing in the repo ever
+# compiles a `#[cfg(phoenix_demo_build)]` body. Run it after touching the gate.
+# Do NOT filter on a module that is itself cfg'd out — debug_overlay's
+# client_route tests are, so naming them would match zero tests and pass
+# vacuously, which is the exact trap this step exists to close.
 
 # Smoke tests (Playwright, Chromium) — requires dist/ built first
 cd tests/smoke && npm install && npx playwright install chromium

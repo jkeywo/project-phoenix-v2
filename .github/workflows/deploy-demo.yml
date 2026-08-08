@@ -141,12 +141,19 @@ jobs:
           fi
           echo "ok: demo scenario manifest is in place"
 
-          if ! grep -qE '<meta[^>]*name="phoenix-build-demo"[^>]*content="true"|<meta[^>]*content="true"[^>]*name="phoenix-build-demo"' dist/index.html; then
-            echo "dist/index.html is not stamped as a demo build — the settings cog would offer its Debug/Cheat tab (issue #939)" >&2
-            grep -n 'phoenix-build-demo' dist/index.html >&2 || echo "  (the tag is not present at all)" >&2
-            exit 1
-          fi
-          echo "ok: the demo build flag is stamped into dist/index.html"
+          # Both pages. The host page also compiles the flag in, so its tag is
+          # belt-and-braces covering the WASM boot window (issue #939). The
+          # phone page has NO WASM at all and no compile step to bake anything
+          # into, so its tag is the ONLY thing that tells it — an unstamped
+          # client page ships a Debug/Cheat tab a demo player can drive (#940).
+          for page in dist/index.html dist/client/index.html; do
+            if ! grep -qE '<meta[^>]*name="phoenix-build-demo"[^>]*content="true"|<meta[^>]*content="true"[^>]*name="phoenix-build-demo"' "$page"; then
+              echo "$page is not stamped as a demo build — the settings cog would offer its Debug/Cheat tab" >&2
+              grep -n 'phoenix-build-demo' "$page" >&2 || echo "  (the tag is not present at all)" >&2
+              exit 1
+            fi
+            echo "ok: the demo build flag is stamped into $page"
+          done
 
       # Cloudflare Pages refuses any file over 25 MiB, and the release WASM
       # is ~38 MiB even after the -Oz pass (run 30847968215). Models are all

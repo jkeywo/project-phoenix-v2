@@ -14,8 +14,11 @@
 //! Pure and Bevy-free; the `#[wasm_bindgen]` getter that exposes this to JS
 //! lives in `crate::server::bridge` (`wasm_is_demo_build`).
 
-/// The exact value the demo deploy sets (`deploy-demo.yml`).
-const DEMO_VALUE: &str = "true";
+// `DEMO_VALUE`, the exact value the demo deploy sets (`deploy-demo.yml`).
+// `include!`d rather than declared here because `build.rs` needs the same
+// literal and cannot `use` this crate; one source means the two halves of the
+// gate cannot compare against different strings.
+include!("demo_build_value.rs");
 
 /// True when this binary was compiled with `PHOENIX_DEMO_BUILD=true`.
 ///
@@ -31,6 +34,19 @@ pub fn is_demo_build() -> bool {
 /// native without recompiling under a different environment.
 pub fn demo_flag_from_env(value: Option<&str>) -> bool {
     value == Some(DEMO_VALUE)
+}
+
+/// The same answer as [`is_demo_build`], expressed as the `cfg` that `build.rs`
+/// derives from the identical environment variable (issue #940).
+///
+/// `option_env!` can only be read at runtime; `#[cfg]` is what actually removes
+/// code from the binary. The phone client's debug/cheat route needs the second
+/// kind of gate — a demo build must not merely refuse the route, it must not
+/// contain it — so `command_admission::debug_route` is `#[cfg]`-split on
+/// `phoenix_demo_build`. This function exists so the test below can assert the
+/// two gates never disagree.
+pub const fn is_demo_cfg() -> bool {
+    cfg!(phoenix_demo_build)
 }
 
 #[cfg(test)]
@@ -62,6 +78,32 @@ mod tests {
         assert!(
             !is_demo_build() || option_env!("PHOENIX_DEMO_BUILD") == Some("true"),
             "is_demo_build() must answer to PHOENIX_DEMO_BUILD alone"
+        );
+    }
+
+    /// The runtime answer (`option_env!`, read back by JS through
+    /// `wasm_is_demo_build()`) and the compile-time answer (`build.rs`'s cfg,
+    /// which removes the client debug route) come from the same environment
+    /// variable and must never disagree. If they did, a demo build could ship a
+    /// menu whose gate was compiled out — or, worse, a route whose UI was
+    /// hidden but which still admitted commands.
+    ///
+    /// What this can and cannot catch, honestly: with `PHOENIX_DEMO_BUILD`
+    /// unset both sides answer `false` regardless of the literals they compare
+    /// against, so an unset run only pins the *sense* of the gate. The other
+    /// half — that the two sides compare against the same string — is now a
+    /// structural fact rather than an assertion, because `DEMO_VALUE` is one
+    /// `include!`d literal (`src/demo_build_value.rs`). And the demo half of
+    /// this assertion is really exercised because `ci.yml`'s "demo-build gate
+    /// tests" step re-runs it with the variable set; before that step existed,
+    /// no job in the repo ever compiled a `#[cfg(phoenix_demo_build)]` body.
+    #[test]
+    fn the_cfg_gate_and_the_runtime_flag_agree() {
+        assert_eq!(
+            is_demo_cfg(),
+            is_demo_build(),
+            "build.rs's phoenix_demo_build cfg must track PHOENIX_DEMO_BUILD \
+             exactly, or the compiled-out route and the hidden tab disagree"
         );
     }
 }

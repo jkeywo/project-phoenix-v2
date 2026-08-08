@@ -71,6 +71,32 @@ pub enum DebugToggleKind {
     EntityInspector,
 }
 
+impl From<crate::messages::DebugFlag> for DebugToggleKind {
+    /// The wire form of the *diagnostic* half of this enum (issue #940) maps
+    /// one-for-one onto it, so an overlay flipped from a phone and one flipped
+    /// from the host page converge on the same pending-toggle vocabulary and
+    /// the same [`apply_pending_toggles`] call. Exhaustive on purpose: adding a
+    /// `DebugFlag` without a kind to carry it is a compile error rather than a
+    /// silently ignored toggle.
+    ///
+    /// [`DebugToggleKind::Pause`] is deliberately outside this conversion's
+    /// range. `DebugFlag` has no `Pause` member — a phone reaches the clock
+    /// through `ClientMessage::TogglePause`, gated separately — so there is no
+    /// wire flag a client could send that stops the simulation through the
+    /// overlay drain. `debug_overlay::tests::no_debug_flag_maps_to_the_pause_toggle`
+    /// pins that.
+    fn from(flag: crate::messages::DebugFlag) -> Self {
+        use crate::messages::DebugFlag;
+        match flag {
+            DebugFlag::Regions => DebugToggleKind::Regions,
+            DebugFlag::Modifiers => DebugToggleKind::Overlay,
+            DebugFlag::Damage => DebugToggleKind::Damage,
+            DebugFlag::Entities => DebugToggleKind::Entities,
+            DebugFlag::Inspector => DebugToggleKind::EntityInspector,
+        }
+    }
+}
+
 /// Applies a batch of pending debug-toggle requests to plain `bool` flags.
 ///
 /// Pure function, no Bevy/wasm dependency, so it can be exercised directly by
@@ -745,6 +771,7 @@ pub fn wasm_init() {
             flush_host_channels,
             publish_sim_tick,
             publish_god_mode,
+            publish_debug_mirrors,
             // The snapshot seam (issue #862). `PostUpdate` for the same reason
             // the rest of this list is there — it runs *after* the frame's
             // fixed steps, which is the tick boundary a capture and a restore
@@ -2024,6 +2051,24 @@ fn drain_god_mode_toggle(mut writer: MessageWriter<InboundMessage>) {
 fn publish_god_mode(god_mode: Option<Res<crate::server_app::GodMode>>) {
     let active = god_mode.map(|g| g.0).unwrap_or(false);
     GOD_MODE_MIRROR.with(|v| *v.borrow_mut() = active);
+}
+
+/// Mirrors the two debug resources that have `wasm_*` read-backs into their
+/// thread-locals each frame (issue #940).
+///
+/// `drain_debug_toggles` already writes both, but only for flips *it* applied.
+/// Since a phone can now flip the same resources
+/// (`debug_overlay::drain_client_debug_flags`), the host page's own settings cog
+/// would otherwise paint a stale Region Wireframes or Pause button whenever a
+/// client moved one. Mirroring unconditionally each frame removes the whole
+/// staleness class rather than adding a second writer at the new flip site.
+#[cfg(target_arch = "wasm32")]
+fn publish_debug_mirrors(
+    regions: Res<crate::debug_overlay::DebugRegionsEnabled>,
+    paused: Res<crate::debug_overlay::SimulationPaused>,
+) {
+    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = regions.0);
+    SIM_PAUSED.with(|v| *v.borrow_mut() = paused.0);
 }
 
 /// Mirrors the LocalShip's Navigation-waypoint existence into a thread-local

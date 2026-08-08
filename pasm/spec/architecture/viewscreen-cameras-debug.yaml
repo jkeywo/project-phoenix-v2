@@ -146,7 +146,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Debug Simulation Controls
-      summary: Server-page controls that pause the simulation, make the local ship invulnerable, or apply instagib damage. They remain available in normal builds and are never exposed through phone-client authority.
+      summary: Server-page controls that pause the simulation, make the local ship invulnerable, or apply instagib damage. They remain available in normal builds. Since issue #940 a connected phone reaches the same pause and god mode through client-debug-control-route, under its own session identity rather than under host authority.
     architecture:
       kind: host-debug-control
       authority: authoritative
@@ -186,6 +186,30 @@ entities:
       # so it outlives the Debug/Cheat tab in the demo build and is no longer
       # a debug-only concept.
       symbols: [SimulationPaused, GodMode, is_instagib]
+
+  - component: client-debug-control-route
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Debug Control Route
+      summary: The host-side gate that lets a connected phone's settings menu reach the debug overlays, pause, and god mode. It admits a remote session token in its own right rather than by claiming the reserved local-console token, and all three of its routes are compiled out of a demo build.
+      rationale:
+        - "A phone has no wasm_* exports to call, and neither path it does have would let it through: cheats are admitted only for the reserved local-console token, and god-mode is declared by no ship TOML so ordinary station tenure resolves no owning station."
+        - "God mode and the overlay flags split deliberately. God mode changes damage outcomes, so it stays a ControlSystem on the command-admission path where it is tick-stamped, logged and replayable (issue #900); the overlay flags are presentation and take the frame-driven PreUpdate route instead."
+        - "Pause is a third route, not a fourth overlay flag. It is authoritative state rather than presentation, it cannot cross command admission at all because pausing starves the FixedUpdate schedule admission runs in, and it needs a build gate independent of the diagnostics because a demo player freezing everyone's mission is an authority problem rather than a diagnostics one."
+        - "Build-gated with #[cfg], not an if: a hidden control is a UI fact and UI facts are forgeable, so the demo build contains no route to reach. The two session messages are gated at the variant, so a demo host cannot decode the frame; god mode is gated at the admission branch, because its message exists in every build. build.rs derives the phoenix_demo_build cfg from the same PHOENIX_DEMO_BUILD that build_flags reads back through option_env!, and the two answers are pinned to each other."
+        - "The read-back is deliberately NOT gated. DebugState reports the flags, the pause and god mode in every build, because reporting grants no authority - a demo phone may learn that the host paused the mission and still have no way to pause it itself."
+    architecture:
+      kind: admission-policy
+      authority: authoritative
+      validates: [system-control-command]
+      writes: [host-debug-simulation-override-state, debug-overlay-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/command_admission/debug_route.rs, src/command_admission/policy.rs, src/debug_overlay.rs, src/build_flags.rs, src/demo_build_value.rs, build.rs, gui/settings-panel.js]
+      symbols: [admits_debug_command, is_demo_build, admitted_flag_toggles, admitted_pause_toggles, drain_client_pause]
+      tests: [cargo test, npx vitest run tests/client/settings-panel.test.js]
 
   - component: host-debug-waypoint-teleport
     core:

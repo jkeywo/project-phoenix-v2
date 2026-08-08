@@ -25,6 +25,8 @@
 import { readFile, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseCsv } from '../gui/strings.js';
+import { csvField } from './strings-csv.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHIPS = ['battleship', 'cruiser', 'courier', 'destroyer'];
@@ -163,10 +165,6 @@ async function convert(ship, file) {
 
 // ── CSV append (merge — never overwrite existing ids) ───────────────────────
 
-function csvField(s) {
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
 async function main() {
   for (const ship of SHIPS) {
     for (const file of await readdir(path.join(root, 'gui', ship))) {
@@ -176,7 +174,11 @@ async function main() {
 
   const csvPath = path.join(root, 'assets', 'strings', 'strings.csv');
   const existing = await readFile(csvPath, 'utf8');
-  const known = new Set(existing.split('\n').map((l) => l.split(',')[0]));
+  // Read through the real parser. Splitting raw lines on ',' walks straight into
+  // the file's multi-line quoted comms prose and mints ids out of continuation
+  // lines — junk that a genuinely new id could collide with and be dropped from
+  // the merge without a word.
+  const known = new Set(parseCsv(existing).map((r) => r[0]));
   const fresh = [...rows].filter(([id]) => !known.has(id));
   const lines = fresh.map(([id, r]) => [id, r.context, r.en].map(csvField).join(','));
   if (lines.length) {

@@ -364,7 +364,7 @@ world.btf_path_c.comms.path_c_internal.message,assets/worlds/btf_path_c.toml →
 world.btf_path_c.comms.path_c_internal.from_2,assets/worlds/btf_path_c.toml → [comms] from,[_self]
 world.btf_path_c.comms.path_c_internal.message_2,assets/worlds/btf_path_c.toml → [comms] message,"[INTERNAL REPORT — DECRYPTED SIGNAL INTERCEPT from I.V. Ironveil wreckage: HARROW OPERATIONAL ORDER HK-7 CONFIRMED. CODENAME: APHELION PROTOCOL. Authorised by High Executor Veth Harrow, countersigned Archivist Kallas. PRIMARY TARGET: Axiom Station (coordinates attached). SECONDARY TARGET: Kaleth Prime — atmospheric saturation required as territorial demonstration. ASHRENDER CONFIRMED ON STATION. WEAPON CHARGE: PROCEEDING ON SCHEDULE. NOTE: negotiator extraction complete. Varen is aboard Ashrender. — END INTERCEPT.]"
 world.combat_test.global.title,assets/worlds/combat_test.toml → [global] title,[Combat Test: Defend Starbase Alpha]
-world.combat_test.global.description,assets/worlds/combat_test.toml → [global] description,[Eight waves of Harrow attackers, each released when the last one dies. Hold the line.]
+world.combat_test.global.description,assets/worlds/combat_test.toml → [global] description,"[Eight waves of Harrow attackers, each released when the last one dies. Hold the line.]"
 world.entity.earth.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[earth]
 world.entity.gas_giant.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[gas-giant]
 world.entity.ice_moon.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[ice-moon]
@@ -401,7 +401,7 @@ world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] mes
 world.combat_test.comms.7.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
 world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,"[Wave six down. Mixed pair forming east: a cruiser for Starbase Alpha and a destroyer for you. Do not let them split you.]"
 world.combat_test.comms.8.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
-world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,[FLASH: last of the raid — a Harrow patrol cruiser off the picket line, due east. Take it down, then clear the pickets.]
+world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,"[FLASH: last of the raid — a Harrow patrol cruiser off the picket line, due east. Take it down, then clear the pickets.]"
 world.default.global.title,assets/worlds/default.toml → [global] title,[Starbase Alpha]
 world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
 world.entity.earth.name_2,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[earth]

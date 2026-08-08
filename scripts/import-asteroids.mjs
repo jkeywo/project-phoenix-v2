@@ -31,6 +31,8 @@ import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
 import { blenderCandidates } from "./generate-lods.mjs";
+import { parseCsv } from "../gui/strings.js";
+import { csvField, rowLineNumbers } from "./strings-csv.mjs";
 
 const root = process.cwd();
 
@@ -493,38 +495,60 @@ function updateStrings() {
   if (!stringRows.length || PLAN) return;
   const rel = "assets/strings/strings.csv";
   const file = path.join(root, rel);
-  const lines = fs.readFileSync(file, "utf8").split("\n");
-  const idOf = (line) => line.slice(0, line.indexOf(","));
-  const have = new Set(lines.map(idOf));
+  // Read through the real parser, not `split(",")`: the file's comms prose holds
+  // quoted commas and multi-line values, so a naive read invents ids out of
+  // continuation lines and could mistake a genuinely new row for one we already
+  // have — silently dropping it from the merge.
+  const text = fs.readFileSync(file, "utf8");
+  const lines = text.split("\n");
+  const rows = parseCsv(text);
+  const starts = rowLineNumbers(text, rows);
+  if (starts.includes(null)) {
+    // Splicing lines we cannot map back to rows would shred the file. Bail
+    // instead; `node scripts/check-strings.mjs` says which row is malformed.
+    throw new Error(`${rel}: rows do not line up with the file — run scripts/check-strings.mjs`);
+  }
+  const have = new Set(rows.map((r) => r[0]));
   const missing = stringRows
     .filter(([id]) => !have.has(id))
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([id, context, en]) => `${id},${context},${en}`);
+    .sort((a, b) => a[0].localeCompare(b[0]));
   if (!missing.length) return;
 
-  let first = -1;
-  let last = -1;
-  lines.forEach((line, i) => {
-    if (!idOf(line).startsWith("entity.asteroid_")) return;
-    if (first < 0) first = i;
-    last = i;
+  let firstRow = -1;
+  let lastRow = -1;
+  rows.forEach((r, i) => {
+    if (!(r[0] || "").startsWith("entity.asteroid_")) return;
+    if (firstRow < 0) firstRow = i;
+    lastRow = i;
   });
-  if (last < 0) throw new Error(`${rel}: no entity.asteroid_* rows to insert beside`);
+  if (lastRow < 0) throw new Error(`${rel}: no entity.asteroid_* rows to insert beside`);
+  // The physical span of a row runs to wherever the next row begins, so a value
+  // that spans lines is carried across whole rather than cut in half. For the
+  // last row in the file, that's end-of-file — but `lines` is `text.split("\n")`
+  // on a newline-terminated file, so its last element is the empty string after
+  // the trailing newline, not a line. Fall back to before that phantom element
+  // so a block ending at EOF doesn't pick up a blank trailing row.
+  const eof = lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+  const spanEnd = (i) => (i + 1 < rows.length ? starts[i + 1] - 1 : eof);
+
   // Sorted INTO the block, not appended to the end of it: a new size lands
   // between `entity.asteroid_common_1_cosmetic` and `..._large`, and appending
   // would leave the block unsorted for every id that does not happen to sort
   // last. Merged in one pass so the rows keep their relative order.
-  const block = lines.slice(first, last + 1);
+  const first = starts[firstRow] - 1;
+  const blockLength = spanEnd(lastRow) - first;
   const merged = [];
   let m = 0;
-  for (const line of block) {
-    while (m < missing.length && idOf(missing[m]).localeCompare(idOf(line)) < 0) {
-      merged.push(missing[m++]);
+  for (let i = firstRow; i <= lastRow; i += 1) {
+    while (m < missing.length && missing[m][0].localeCompare(rows[i][0]) < 0) {
+      // Escaped on the way out: an unquoted comma in a value splits the row on
+      // the next read and truncates the text (issue #966).
+      merged.push(missing[m++].map(csvField).join(","));
     }
-    merged.push(line);
+    merged.push(...lines.slice(starts[i] - 1, spanEnd(i)));
   }
-  merged.push(...missing.slice(m));
-  lines.splice(first, block.length, ...merged);
+  for (; m < missing.length; m += 1) merged.push(missing[m].map(csvField).join(","));
+  lines.splice(first, blockLength, ...merged);
   fs.writeFileSync(file, lines.join("\n"));
   written.push(`${rel} (+${missing.length} rows)`);
 }

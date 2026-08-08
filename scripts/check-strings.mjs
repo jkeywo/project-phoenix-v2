@@ -10,6 +10,9 @@
  *
  * Errors (always fail):
  *   - duplicate or blank ids in strings.csv
+ *   - a row whose parsed field count does not match the header — an unquoted
+ *     delimiter (usually a comma) inside a value split it early, silently
+ *     truncating player-visible text (issue #966)
  *   - a t('...') / data-i18n id with no CSV row
  *   - a localisable TOML key still holding prose instead of an id
  *
@@ -23,6 +26,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildTable, parseCsv } from '../gui/strings.js';
+import { rowLineNumbers } from './strings-csv.mjs';
 import { isLocalisable } from './strings-rules.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -64,16 +68,29 @@ for (const required of ['id', 'context', 'en']) {
   if (!header.includes(required)) errors.push(`strings.csv: missing '${required}' column`);
 }
 
+// The multi-line quoted values in the comms prose mean a row's index in `rows`
+// is nowhere near its line in the file — 34 adrift by the end. Resolve the real
+// line so an error points a human at the row it is actually complaining about,
+// and fall back to the row number rather than name the wrong line.
+const csvLines = rowLineNumbers(csvText, rows);
+const at = (i) => (csvLines[i] === null ? `strings.csv row ${i + 1}` : `strings.csv:${csvLines[i]}`);
+
 const idCol = header.indexOf('id');
 const contextCol = header.indexOf('context');
 const seen = new Set();
 for (let i = 1; i < rows.length; i += 1) {
   const id = (rows[i][idCol] || '').trim();
-  if (id === '') { errors.push(`strings.csv:${i + 1}: blank id`); continue; }
-  if (seen.has(id)) errors.push(`strings.csv:${i + 1}: duplicate id '${id}'`);
+  if (id === '') { errors.push(`${at(i)}: blank id`); continue; }
+  if (seen.has(id)) errors.push(`${at(i)}: duplicate id '${id}'`);
   seen.add(id);
+  if (rows[i].length !== header.length) {
+    errors.push(
+      `${at(i)}: '${id}' parses to ${rows[i].length} fields, expected ${header.length} — ` +
+      'an unquoted delimiter inside a value is splitting it early and truncating the text',
+    );
+  }
   if ((rows[i][contextCol] || '').trim() === '') {
-    warnings.push(`strings.csv:${i + 1}: '${id}' has no context — a translator cannot place it`);
+    warnings.push(`${at(i)}: '${id}' has no context — a translator cannot place it`);
   }
 }
 

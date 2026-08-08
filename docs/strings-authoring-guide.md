@@ -17,10 +17,27 @@ console.sensors.contacts,"Sensors console — contact count. {n} is the number o
 | --- | --- |
 | `id` | Stable key that code and TOML refer to. Never reuse an id for different text. |
 | `context` | Where it appears and what any `{placeholder}` means. This is what a translator reads — a bare file path is the minimum, a sentence is better. |
-| `en` | The English text. |
+| `en` | The English text. **Wrap any value containing a comma, a double quote or a newline in double quotes** (`"…, …"`), doubling embedded quotes as `""`. An unquoted comma splits the row and truncates the text — see CI below. |
+
+It is standard RFC 4180 CSV, so quoted values may run over several lines; the
+comms prose in the file already does.
 
 Add a locale by appending a column (`fr`, `de`, …). No code changes are needed;
-`buildTable(csv, 'fr')` reads it and falls back to `en` for blank cells.
+`buildTable(csv, 'fr')` reads the column directly — it falls back to `en` only
+when the column itself is missing, not for blank cells within it. A
+present-but-blank cell resolves to `''`, and the console renders nothing for
+that row. Fill the new column for **every** row so CI's field-count check
+passes — CI checks that each row has as many fields as the header, so a
+half-width column fails the build one row at a time — but a blank cell only
+satisfies CI, it gives players nothing to read: carry the English text into
+the new column for rows not yet translated, and swap it for the real
+translation later.
+
+`scripts/extract-strings.mjs` rewrites the whole file as `id,context,en`; it
+does not know about locale columns and drops them. Run it, if at all,
+**before** adding a locale column — running it afterwards silently deletes
+that column, and the field-count gate stays green, because the header it just
+rewrote is 3 wide and every row it just wrote is 3 wide.
 
 ## Square brackets mean "not reviewed yet"
 
@@ -110,6 +127,9 @@ Rust tests therefore assert on **ids**, not English — the id is Rust's contrac
 `node scripts/check-strings.mjs` runs in the `editor-test` job and fails on:
 
 - duplicate or blank ids
+- a row whose field count does not match the header — usually an unquoted comma
+  inside a value, which splits the row and silently truncates player-visible text
+  (issue #966); also catches a stray trailing comma or a short row
 - a `t()` / `data-i18n` id with no CSV row
 - a localisable TOML key still holding prose
 

@@ -36,6 +36,7 @@ import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REFERENCE_KEYS, isLocalisable } from './strings-rules.mjs';
+import { csvField } from './strings-csv.mjs';
 import { parseCsv } from '../gui/strings.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -368,10 +369,6 @@ async function processFile(file, prefix, nameMap, collectOnly) {
 }
 
 // ── CSV emission ────────────────────────────────────────────────────────────
-
-function csvField(s) {
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
 
 function toCsv(entries) {
   const lines = ['id,context,en'];

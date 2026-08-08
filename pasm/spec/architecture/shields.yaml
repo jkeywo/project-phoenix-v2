@@ -20,7 +20,7 @@ entities:
       status: declared
       paths: [src/ship/shields.rs, src/weapons/shield.rs, src/entities/config.rs]
       symbols: [tick_shields, ShieldSystem, ShieldArcConfig, ShieldFacing, fraction]
-      tests: [cargo test, tests/smoke/shields-console.spec.ts]
+      tests: [cargo test, tests/smoke/shields-console.spec.js]
 
   - state: shield-arc-state
     core:

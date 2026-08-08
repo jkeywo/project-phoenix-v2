@@ -102,12 +102,12 @@ The Bevy lobby UI tree (`LobbyScreenRoot`, `LobbyGridRoot`, `LobbyStationCard`, 
 
 ## Tests
 
-Smoke coverage in `tests/smoke/lobby-responsive.spec.ts`:
+Smoke coverage in `tests/smoke/lobby-responsive.spec.js`:
 
 - Portrait viewport (480×900): aggregate chip visible, per-slot empties hidden, rail below grid, no horizontal body scroll, spectator pills rendered.
 - Landscape viewport (1280×720): per-slot empties visible, aggregate hidden, rail right of grid, multi-column grid.
 
-Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.ts` (`SelectStation`, `StartGame`, captain authority, etc.). Those tests do not touch the DOM.
+Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.js` (`SelectStation`, `StartGame`, captain authority, etc.). Those tests do not touch the DOM.
 
 ## Sources
 

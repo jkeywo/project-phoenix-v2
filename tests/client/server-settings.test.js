@@ -502,7 +502,7 @@ describe('server.html host-page guards', () => {
   // both panels. It does NOT assert the rendered geometry. jsdom computes no
   // layout, so getBoundingClientRect() here returns zeroes and an overlap
   // check is not expressible in vitest at all. The real geometry guard is the
-  // Playwright assertion in tests/smoke/server-settings-cog.spec.ts, which
+  // Playwright assertion in tests/smoke/server-settings-cog.spec.js, which
   // measures the actual rects under Chromium; this one only catches someone
   // editing the padding back out.
   it('both top-left panels reserve a keep-out at least as big as the cog', () => {

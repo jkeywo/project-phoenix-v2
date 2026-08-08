@@ -48,7 +48,7 @@ entities:
       status: declared
       paths: [src/lobby/session.rs, src/lobby/stations_policy.rs, src/core/messages.rs]
       symbols: [SessionManager, Player]
-      tests: [cargo test, tests/smoke/stations.spec.ts]
+      tests: [cargo test, tests/smoke/stations.spec.js]
 
   - component: peer-transport-bridge
     core:
@@ -69,7 +69,7 @@ entities:
       status: declared
       paths: [server.html, client.html, gui/connection-manager.js, src/server/bridge.rs]
       symbols: [ConnectionManager]
-      tests: [tests/client/connection-manager.test.js, tests/smoke/client-connect.spec.ts]
+      tests: [tests/client/connection-manager.test.js, tests/smoke/client-connect.spec.js]
 
   - message: session-identify-command
     core:
@@ -106,7 +106,7 @@ entities:
       status: declared
       paths: [src/lobby/handler.rs, src/lobby/stations_policy.rs, src/lobby/server.rs]
       messages: [SelectStation, ReleaseStation, StationAssigned]
-      tests: [cargo test, tests/smoke/stations.spec.ts]
+      tests: [cargo test, tests/smoke/stations.spec.js]
 
   - component: host-state-broadcaster
     core:
@@ -140,7 +140,7 @@ entities:
       status: declared
       paths: [src/core/messages.rs, gui/lobby-state.js]
       messages: [Welcome, PlayerJoined, StationAssigned, ReadyChanged]
-      tests: [tests/client/lobby-state.test.js, tests/smoke/lobby.spec.ts]
+      tests: [tests/client/lobby-state.test.js, tests/smoke/lobby.spec.js]
 
   - state: simulation-state-replica
     core:
@@ -156,4 +156,4 @@ entities:
       status: declared
       paths: [src/core/messages.rs, gui/sim-state.js, gui/console-state.js]
       messages: [SimState, BlackboardUpdate, EntitySpawned, EntityDespawned]
-      tests: [tests/client/sim-state.test.js, tests/smoke/snapshot-channel.spec.ts]
+      tests: [tests/client/sim-state.test.js, tests/smoke/snapshot-channel.spec.js]

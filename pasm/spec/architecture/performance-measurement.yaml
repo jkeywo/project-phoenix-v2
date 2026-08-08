@@ -131,7 +131,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/perf/browser.rs, src/server/bridge.rs, server.html, tests/smoke/perf-browser.spec.ts]
+      paths: [src/perf/browser.rs, src/server/bridge.rs, server.html, tests/smoke/perf-browser.spec.js]
       symbols: [wasm_perf_capture, boot_begin, boot_end, frame_begin, frame_end]
       tests: [npx playwright test]
 

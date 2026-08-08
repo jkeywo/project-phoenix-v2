@@ -173,7 +173,7 @@ the user never saw a 100 % flicker.
 The fix is enforced by a codec round-trip test
 (`src/core/codec.rs::server_loading_progress_wire_format`) that asserts
 the exact string `{"type":"LoadingProgress","data":{"fraction":0.5}}`.
-A Playwright regression at `tests/smoke/loading-progress.spec.ts`
+A Playwright regression at `tests/smoke/loading-progress.spec.js`
 slows GLB fetches by 600 ms so Loading is reachable, then verifies the
 host's `#asset-loading-pct` shows at least one intermediate (non-0,
 non-100) value while the overlay is visible.

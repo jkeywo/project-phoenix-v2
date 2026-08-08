@@ -123,11 +123,11 @@ npx playwright test --headed
 The smoke suite covers:
 | Spec | What it tests |
 |---|---|
-| `shim.spec.ts` | BroadcastChannel PeerJS shim (unit) |
-| `server-load.spec.ts` | WASM initialises without JS errors |
-| `client-connect.spec.ts` | Client page connects and receives Welcome |
-| `lobby.spec.ts` | Console selection broadcasts; only captain can start game |
-| `sim-state.spec.ts` | SimState broadcast; HelmInput changes ship position |
+| `shim.spec.js` | BroadcastChannel PeerJS shim (unit) |
+| `server-load.spec.js` | WASM initialises without JS errors |
+| `client-connect.spec.js` | Client page connects and receives Welcome |
+| `lobby.spec.js` | Console selection broadcasts; only captain can start game |
+| `sim-state.spec.js` | SimState broadcast; HelmInput changes ship position |
 
 CI runs the smoke suite automatically on every push and pull request via `.github/workflows/ci.yml`.
 

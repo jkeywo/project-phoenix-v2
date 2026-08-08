@@ -630,7 +630,7 @@ pub fn run_battery_detailed() -> BatteryRun {
 // The browser-side half of the proof: a smoke spec calls this from inside
 // the running wasm page and asserts the returned digest against the same
 // pinned constant the native test below asserts against (see
-// `tests/smoke/simmath-vectors.spec.ts`). `server.html` has to promote it
+// `tests/smoke/simmath-vectors.spec.js`). `server.html` has to promote it
 // onto `window` alongside the other exports for the spec to reach it — an
 // explicit allowlist, not an automatic re-export.
 //
@@ -656,7 +656,7 @@ mod tests {
     use super::*;
 
     /// The pinned cross-target digest (issue #909). This is what
-    /// `tests/smoke/simmath-vectors.spec.ts` asserts the wasm build produces
+    /// `tests/smoke/simmath-vectors.spec.js` asserts the wasm build produces
     /// too — see [`wasm_simmath_battery`]. If this fails after a deliberate
     /// change (a `libm` upgrade, a widened battery), re-derive the new
     /// expected value from this same function on native, update it here,
@@ -724,7 +724,7 @@ mod tests {
     }
 
     /// The tripwire: this is the actual cross-target proof for issue #909
-    /// AC-3. `tests/smoke/simmath-vectors.spec.ts` re-asserts the same two
+    /// AC-3. `tests/smoke/simmath-vectors.spec.js` re-asserts the same two
     /// constants against the wasm build.
     #[test]
     fn native_battery_matches_the_pinned_cross_target_digest() {
@@ -733,13 +733,13 @@ mod tests {
             result.case_count, EXPECTED_CASE_COUNT,
             "case count drifted — the battery shape changed; if intentional, \
              re-derive EXPECTED_DIGEST and EXPECTED_CASE_COUNT together and \
-             update tests/smoke/simmath-vectors.spec.ts to match"
+             update tests/smoke/simmath-vectors.spec.js to match"
         );
         assert_eq!(
             result.digest, EXPECTED_DIGEST,
             "digest {:016x} != pinned {EXPECTED_DIGEST:016x} — a simmath \
              function's output changed on native. If this is wasm too (see \
-             tests/smoke/simmath-vectors.spec.ts), the libm crate output \
+             tests/smoke/simmath-vectors.spec.js), the libm crate output \
              changed and both pins need a deliberate, reviewed update. If it \
              is native-only, native has drifted off shared libm — that is \
              the exact regression this file exists to catch.",

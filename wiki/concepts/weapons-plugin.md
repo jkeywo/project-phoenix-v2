@@ -570,10 +570,10 @@ but are not applied by the immediate entity spawning path.
   duplicate ids, and out-of-range arcs.
 - `phaser.rs` and `torpedo.rs` stay Bevy-free and test their per-id state
   machines directly.
-- `tests/smoke/tactical-fire-flow.spec.ts` exercises `FirePhaser { bank }`
+- `tests/smoke/tactical-fire-flow.spec.js` exercises `FirePhaser { bank }`
   on the live wire and aggregates `WeaponsUpdate.banks` for fire-ready
   detection.
-- `tests/smoke/weapons-console.spec.ts` injects bank state through
+- `tests/smoke/weapons-console.spec.js` injects bank state through
   `__updateConsole('Tactical', …)` and asserts on per-bank
   `.cooldown-row[data-id]` classes (`is-ready` / `is-cooling`) and the
   countdown text (`READY` / `1.5s`).

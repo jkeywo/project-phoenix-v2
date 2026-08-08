@@ -14,7 +14,7 @@
 //! This module is the single seeded world both targets drive. The native side
 //! is `tests/cross_target_probe.rs`; the browser side is
 //! [`wasm_cross_target_probe`] at the bottom of this file, reached from
-//! `tests/smoke/cross-target-determinism.spec.ts`. Both fold their state
+//! `tests/smoke/cross-target-determinism.spec.js`. Both fold their state
 //! through `crate::sim_digest::world_digest` — the canonical #901 digest, the
 //! same function a headless run folds, not a probe-local approximation — and
 //! both produce a [`DigestLedger`], so comparing them is
@@ -690,7 +690,7 @@ impl ProbeReport {
 // ── WASM export ──────────────────────────────────────────────────────────────
 // The browser-side half of the proof. `server.html` promotes this onto
 // `window` through its export allowlist — an explicit list, not an automatic
-// re-export — and `tests/smoke/cross-target-determinism.spec.ts` calls it.
+// re-export — and `tests/smoke/cross-target-determinism.spec.js` calls it.
 //
 // Deliberately NOT feature-gated, for the same reason `wasm_simmath_battery`
 // is not (see `simmath_vectors.rs`): the claim is about the *deployed*

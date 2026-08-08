@@ -91,7 +91,7 @@ PRD #66 keeps the 10 Hz rate but adds **per-console payloads** routed `Target::O
 (`--hz` is the FRAME rate); the sim still steps at the world's `sim_tick_hz`
 inside the fixed loop, so any frame rate covers the same logical ticks per
 sim-second. The browser exposes the counter as `wasm_sim_tick()` for the
-smoke tests (`tests/smoke/sim-tick.spec.ts`).
+smoke tests (`tests/smoke/sim-tick.spec.js`).
 
 ## Simulation pause (settings cog)
 
@@ -118,7 +118,7 @@ read while paused. `hostReturnToLobby()` in `server.html` — the single funnel
 for both the Game Over button and the cog's **Exit to Lobby** — therefore
 unpauses before it sends.
 
-`tests/smoke/sim-tick.spec.ts`'s DECOUPLING assertion depends on the pause
+`tests/smoke/sim-tick.spec.js`'s DECOUPLING assertion depends on the pause
 being total: it toggles pause, drives real rendered frames, and asserts
 `wasm_sim_tick()` (mirroring `SimTick`) does not advance at all while paused.
 Scoping the pause to only part of `FixedUpdate` in the future would need that

@@ -457,7 +457,7 @@ jobs:
         continue-on-error: true
 
       # `browser.frame` from CI is the ECS schedule under WebDriver, where the
-      # render stack is skipped — see tests/smoke/perf-browser.spec.ts. The
+      # render stack is skipped — see tests/smoke/perf-browser.spec.js. The
       # capture's runtime says so, which is what stops it being read as a
       # rendering number.
       - name: Compare the browser capture

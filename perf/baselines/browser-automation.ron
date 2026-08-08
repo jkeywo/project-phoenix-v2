@@ -13,7 +13,7 @@
 // `wasm-browser` precisely so it can never be silently compared against a real
 // session, and this baseline inherits that: it is a budget for the simulation
 // the page runs, not for the picture it draws. Measuring the real render path
-// would mean the SwiftShader route the `*.capture.ts` aids use, which measures
+// would mean the SwiftShader route the `*.capture.js` aids use, which measures
 // a software rasteriser — a different thing again, and not obviously a better
 // proxy for a player's GPU.
 //

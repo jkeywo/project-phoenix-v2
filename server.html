@@ -2921,14 +2921,14 @@ function finishInit() {
   // collector has sampled so far and changes nothing in the running page.
   window.wasm_perf_capture = wasmBindings.wasm_perf_capture;
   // Cross-target libm vector battery (issue #909). Pure computation over
-  // fixed inputs — touches no simulation state; tests/smoke/simmath-vectors.spec.ts
+  // fixed inputs — touches no simulation state; tests/smoke/simmath-vectors.spec.js
   // calls it and compares the digest against the pinned native one.
   window.wasm_simmath_battery = wasmBindings.wasm_simmath_battery;
   // Cross-target determinism probe (issue #904). Builds its OWN minimal seeded
   // Bevy world, drives it for a fixed number of ticks under a deliberately
   // bursty frame pacing, and returns the canonical #901 digest ledger. It
   // never touches the world this page is running — a separate `App`, no
-  // renderer, no assets. tests/smoke/cross-target-determinism.spec.ts calls it
+  // renderer, no assets. tests/smoke/cross-target-determinism.spec.js calls it
   // and compares the ledger against the native pin in
   // tests/fixtures/cross-target-ledger.json.
   window.wasm_cross_target_probe = wasmBindings.wasm_cross_target_probe;

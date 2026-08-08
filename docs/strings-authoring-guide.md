@@ -144,7 +144,7 @@ Test assertions resolve through the table too, so they survive copy edits:
 
 - **vitest** — `tests/client/setup-strings.js` loads the real CSV before every
   suite; assert with `t('some.id')` from `gui/strings.js`.
-- **Playwright smoke** — import `ts()` from `tests/smoke/strings.ts` (its own
+- **Playwright smoke** — import `ts()` from `tests/smoke/strings.js` (its own
   small loader; the smoke package is CommonJS). `:has-text("Captain")`
   selectors survive bracketing because Playwright matches substrings.
 

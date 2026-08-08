@@ -599,7 +599,7 @@ the whole spread. A criterion phrased as bit-identical timing would be a false
 claim about this scenario.
 
 Playwright smoke coverage deliberately stops at world load, spawn anchors, and
-first-wave spawn (`tests/smoke/combat-test-scenario.spec.ts`). Proving
+first-wave spawn (`tests/smoke/combat-test-scenario.spec.js`). Proving
 *engagement* there would mean waiting on a weapon discharge through the
 BroadcastChannel PeerJS shim, which is precisely the time-sensitive class of
 assertion that suite excludes to stay fast. Engagement is therefore proved on

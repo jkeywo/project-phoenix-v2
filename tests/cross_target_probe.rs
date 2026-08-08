@@ -21,7 +21,7 @@
 //!
 //! `tests/fixtures/cross-target-ledger.json` is the single place the pinned
 //! digests live. Both this file and `tests/smoke/cross-target-determinism.
-//! spec.ts` read it; neither carries a copy. To move it after a *deliberate*
+//! spec.js` read it; neither carries a copy. To move it after a *deliberate*
 //! change — a widened fold, a changed probe world, a `libm` upgrade, a new
 //! tick count:
 //!
@@ -36,7 +36,7 @@
 //!
 //! ```text
 //! TRUNK_BUILD_RELEASE=true trunk build --release && node scripts/build-client.mjs
-//! cd tests/smoke && npx playwright test cross-target-determinism.spec.ts
+//! cd tests/smoke && npx playwright test cross-target-determinism.spec.js
 //! ```
 //!
 //! If the spec fails after a native-only re-bless, the two targets genuinely
@@ -192,7 +192,7 @@ fn a_one_ulp_mutation_is_caught_at_the_tick_it_happens() {
 /// The pin, and the fixture's blessing path.
 ///
 /// `tests/fixtures/cross-target-ledger.json` is the ONE place the expected
-/// digests live; `tests/smoke/cross-target-determinism.spec.ts` reads the same
+/// digests live; `tests/smoke/cross-target-determinism.spec.js` reads the same
 /// file rather than carrying a second copy that could drift. This test is what
 /// keeps the file honest against native, and the smoke spec is what keeps it
 /// honest against wasm.

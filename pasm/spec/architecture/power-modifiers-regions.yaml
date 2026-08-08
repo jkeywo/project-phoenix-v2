@@ -15,7 +15,7 @@ entities:
       status: declared
       paths: [src/ship/power.rs, src/ship/config.rs, src/modifiers/power_system.rs]
       symbols: [handle_power_messages, tick_power_system, authored_power_group_seed, authored_power_group_floors, from_authored_groups, PowerGroupFloor, default_group_floors]
-      tests: [cargo test, tests/smoke/power-console.spec.ts]
+      tests: [cargo test, tests/smoke/power-console.spec.js]
 
   - state: ship-power-state
     core:

@@ -151,7 +151,7 @@ entities:
     implementation:
       status: declared
       paths: [src/lobby/session.rs, src/lobby/server.rs, src/ship_plugin.rs]
-      tests: [cargo test, tests/smoke/reconnect.spec.ts]
+      tests: [cargo test, tests/smoke/reconnect.spec.js]
 
   - component: admitted-command-router
     core:

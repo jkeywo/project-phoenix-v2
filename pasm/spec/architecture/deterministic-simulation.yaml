@@ -327,7 +327,7 @@ entities:
         - src/core/telemetry.rs
         - tests/cross_target_probe.rs
         - tests/fixtures/cross-target-ledger.json
-        - tests/smoke/cross-target-determinism.spec.ts
+        - tests/smoke/cross-target-determinism.spec.js
         - server.html
       symbols: [ProbeConfig, ProbeReport, run_probe, build_probe_app, wasm_cross_target_probe]
       tests: [cargo test, npx playwright test]

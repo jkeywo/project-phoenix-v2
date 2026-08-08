@@ -1877,7 +1877,7 @@ fn drain_debug_toggles(
         if paused.0 {
             // Pausing `Time<Virtual>` starves the fixed accumulator, so
             // `FixedUpdate` (and with it `SimTick`) stops advancing entirely —
-            // deliberately, this is what `sim-tick.spec.ts` DECOUPLING asserts
+            // deliberately, this is what `sim-tick.spec.js` DECOUPLING asserts
             // on. Since issue #895 this freezes more than the `SimSet` chain:
             // lobby (countdown, ready-check, `drain_lobby_outbox`) and command
             // admission both moved into `FixedUpdate` too, so pausing now also

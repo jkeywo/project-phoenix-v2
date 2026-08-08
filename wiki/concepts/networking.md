@@ -62,7 +62,7 @@ The server classifies each `ServerMessage` via `delivery_class_for_msg()` (`src/
 
 PeerJS peer creation, connect/retry/timeout, DataConnection handlers, and `Identify`-on-open were extracted from `client.html` inline script into `gui/connection-manager.js` (issue #603). The module exposes a `ConnectionManager` class with a small callback-based interface that `client.html` wires up: `onData`, `onStatus`, `onLog`, `onError`, and a `getIdent` callback for the session token. Vitest suite (`tests/client/connection-manager.test.js`) covers the pure module logic.
 
-**Auto-reconnect with backoff (#614):** The old hard 3-attempt ICE give-up was replaced with exponential backoff starting at 100ms, capped at 30s, with persistent retry. `_identSent` is reset on DataChannel close/error so `Identify` is re-sent on every reopen, restoring seat + rating through the existing server-side reconnect flow. `client.html` shows a "Retry now" affordance button. A generation guard ignores stale connection callbacks after a retry cycles the generation counter. A Playwright smoke test (`reconnect-midgame-sever.spec.ts`) exercises sever + revive mid-game and verifies the seat is restored and console reflects current system state within one broadcast tick.
+**Auto-reconnect with backoff (#614):** The old hard 3-attempt ICE give-up was replaced with exponential backoff starting at 100ms, capped at 30s, with persistent retry. `_identSent` is reset on DataChannel close/error so `Identify` is re-sent on every reopen, restoring seat + rating through the existing server-side reconnect flow. `client.html` shows a "Retry now" affordance button. A generation guard ignores stale connection callbacks after a retry cycles the generation counter. A Playwright smoke test (`reconnect-midgame-sever.spec.js`) exercises sever + revive mid-game and verifies the seat is restored and console reflects current system state within one broadcast tick.
 
 ## Host page cues via HUD/lobby push (#604)
 
@@ -93,7 +93,7 @@ Both pages show a coloured dot in the top-right:
 
 ## Smoke testing without WebRTC
 
-The Playwright suite swaps `window.Peer` for a `BroadcastChannel`-backed shim before any page script runs (`addInitScript`). The shim (`tests/smoke/peerjs-shim.js`) includes a `DataChannel` implementation that propagates sub-channel creation via control messages, so the snapshot DataChannel works end-to-end in smoke tests. Same surface, no signalling server. See [Testing Strategy](./testing-strategy.md), PRD #51, and `tests/smoke/snapshot-channel.spec.ts`.
+The Playwright suite swaps `window.Peer` for a `BroadcastChannel`-backed shim before any page script runs (`addInitScript`). The shim (`tests/smoke/peerjs-shim.js`) includes a `DataChannel` implementation that propagates sub-channel creation via control messages, so the snapshot DataChannel works end-to-end in smoke tests. Same surface, no signalling server. See [Testing Strategy](./testing-strategy.md), PRD #51, and `tests/smoke/snapshot-channel.spec.js`.
 
 ## Related
 

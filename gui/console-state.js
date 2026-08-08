@@ -599,11 +599,21 @@ export function buildWeaponsConsoleState(state) {
   // Blips: authoritative server blips from the tactical-radar blackboard
   // (issue #829 — moved off the Weapons blackboard), otherwise build from
   // asteroids.
-  let blips = tacRadarBb.blips;
-  if (!blips || blips.length === 0) {
-    blips = state.weaponsBlips || [];
+  //
+  // COPY, never alias. The science marker and waypoint below are `push`ed onto
+  // `blips`, and the first two sources are arrays this builder does not own:
+  // `sim-state.js` replaces `blackboards[systemId]` only when a
+  // `BlackboardUpdate` arrives, and the server's `LastBroadcastBlackboards`
+  // delta cache re-sends a blackboard only when it changes. So on a stationary
+  // ship the store keeps handing back the same array, and pushing into it would
+  // append the same two markers on every build — unbounded growth in the client
+  // store. `buildBlips()` already returns a fresh array, so only the two
+  // borrowed sources need copying.
+  let blips = tacRadarBb.blips ? tacRadarBb.blips.slice() : [];
+  if (blips.length === 0) {
+    blips = (state.weaponsBlips || []).slice();
   }
-  if (!blips || blips.length === 0) {
+  if (blips.length === 0) {
     blips = buildBlips(
       state.asteroids || [],
       state.shipX || 0,

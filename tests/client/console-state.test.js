@@ -457,6 +457,50 @@ describe('buildWeaponsConsoleState', () => {
     expect(s.target_name).toBe('KSV Vega');
   });
 
+  // The builder appends the science marker and the navigation waypoint to
+  // `blips`. The tactical-radar blackboard array is owned by the client store
+  // and is replaced only when a BlackboardUpdate arrives — and the server's
+  // delta cache re-sends a blackboard only when it CHANGES, so a stationary
+  // ship never gets a fresh array. Aliasing it here would append the same two
+  // markers on every build and grow the store's array without bound.
+  it('does not append its markers to the store-owned tactical-radar blip array', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      asteroids: [{ uuid: 'rock-1', x: 10, z: 0, tags: ['asteroid'] }],
+      navigationWaypoint: { x: 20, z: 5 },
+      blackboards: {
+        'sensors': { science_target_uuid: 'rock-1' },
+        'tactical-radar': {
+          blips: [{ uuid: 'srv-1', radar_x: 0.1, radar_y: 0.2, scaled_radius: 0.02, kind: 'ship' }],
+        },
+      },
+    };
+    const stored = state.blackboards['tactical-radar'].blips;
+
+    const first = parse(buildWeaponsConsoleState(state));
+    // Both markers must actually be appended, or this asserts nothing.
+    expect(first.blips.map(b => b.kind)).toContain('science-target');
+    expect(first.blips.map(b => b.kind)).toContain('waypoint');
+    expect(stored.length).toBe(1);
+
+    const second = parse(buildWeaponsConsoleState(state));
+    expect(stored.length).toBe(1);
+    expect(second.blips.length).toBe(first.blips.length);
+  });
+
+  it('does not append its markers to the state-owned weaponsBlips array', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      asteroids: [{ uuid: 'rock-1', x: 10, z: 0, tags: ['asteroid'] }],
+      navigationWaypoint: { x: 20, z: 5 },
+      blackboards: { 'sensors': { science_target_uuid: 'rock-1' } },
+      weaponsBlips: [{ uuid: 'srv-1', radar_x: 0.1, radar_y: 0.2, scaled_radius: 0.02, kind: 'ship' }],
+    };
+    buildWeaponsConsoleState(state);
+    buildWeaponsConsoleState(state);
+    expect(state.weaponsBlips.length).toBe(1);
+  });
+
   it('surfaces volley fields from tubes (issue #632)', () => {
     const tubeWithVolley = {
       id: 'fore_port',

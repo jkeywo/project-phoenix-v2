@@ -25,6 +25,20 @@ hull_integrity = 400.0
 shape = "Capsule"
 radius = 4.0
 length = 10.0
+# A ship is a MOBILE contact, so another hull's authored
+# `hazard_ignore_size_ratio` may size-ignore it (issue #958). Static terrain
+# omits this field and is avoided at any relative size.
+#
+# Authored HERE, on a fragment, because this file carries a `[helm_console]`
+# and a helm system suite: anything composing from it is by construction a
+# hull, and without the field the composed escort resolves to a ship that
+# publishes itself as static terrain — over-avoided by everything else, and
+# contributing neither vertical repulsion (#780) nor moving-hazard urgency
+# (#744) itself. Note that
+# `config::tests::shipped_hulls_are_mobile_and_shipped_terrain_is_not` skips
+# `fragments/`, because nothing here is spawnable, so this line rests on the
+# convention above rather than on that guard.
+movable = true
 
 [helm_console]
 max_speed = 10.0

@@ -38,6 +38,10 @@ colour = []
 shape = "Capsule"
 radius = 1.2
 length = 3
+# A ship is a MOBILE contact, so another hull's authored
+# `hazard_ignore_size_ratio` may size-ignore it (issue #958). Static
+# terrain omits this field and is avoided at any relative size.
+movable = true
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
@@ -86,7 +90,7 @@ target_speed  = 0.0
 # `[hull] hull_integrity`; Alliance hulls have none, and their equivalent pool
 # is the SUM of the per-system `max_hp` below. Shields sit on top of both.
 #
-#   Dynasty   destroyer 200 | patrol/cruiser 300 | warhawk 400 | lancer 800
+#   Dynasty   destroyer 200 | patrol/cruiser 300 | warhawk 400
 #   Alliance  courier 200 | destroyer 300 | cruiser 500 | battleship 800
 #
 # The Alliance figures were reached by scaling each hull's authored system HP

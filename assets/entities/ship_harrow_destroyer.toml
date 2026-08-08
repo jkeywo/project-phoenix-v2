@@ -138,8 +138,8 @@ tags = ["ship"]
 threat_level = "high"
 description = "entity.ship_harrow_destroyer.target.description"
 
-# Lighter than the Lancer: this hull trades staying power for the speed and turn
-# rate the pass depends on.
+# The lightest hull that still fights the ladder: it trades staying power for
+# the speed and turn rate the pass depends on.
 #
 # 900 -> 200 (#915 tuning pass). 900 was an outlier against this hull's own
 # class ladder — patrol 120, warhawk 280, cruiser 420 — and it made the demo's
@@ -170,6 +170,10 @@ offline_duration = 6.0
 shape = "Capsule"
 radius = 3.0
 length = 9.0
+# A ship is a MOBILE contact, so another hull's authored
+# `hazard_ignore_size_ratio` may size-ignore it (issue #958). Static
+# terrain omits this field and is avoided at any relative size.
+movable = true
 
 [radar_appearance]
 colour = [0.95, 0.45, 0.1]
@@ -196,6 +200,11 @@ max_yaw_rate = 0.55
 # out, and matching the bonus would hand it both ends of the trade.
 low_speed_turn_boost = 0.3
 max_bank_deg = 22.0
+
+[helm_console.engine_pfx]
+color = [ 1.0, 0.22, 0.08, 0.68 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.65
 
 # MANDATORY for this hull, not decoration: the spawner only inserts an ENABLED
 # `BoostConfigResource` when `[helm_console.boost]` is authored, and
@@ -408,7 +417,7 @@ sensor_range = 400.0
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
-# Destroy only, like the Lancer. The doctrine entry supplies the objective the
+# Destroy only. The doctrine entry supplies the objective the
 # helm surfaces score; the *manoeuvre* is the policy machine's, not this
 # section's — `target_speed`/`maintain_range` here only apply on the fallback
 # path (no pass target visible), where ordinary doctrine travel resumes.

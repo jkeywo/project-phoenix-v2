@@ -16,9 +16,12 @@
 #
 # Layout — everything sits on top of everything else at the origin:
 #   - Player spawns at [0, 0, 0].
-#   - Two Harrow Lancers 45u away, inside their own weapons envelope from
-#     tick one. The Lancer is the one NPC hull with phasers *and* blasters
-#     *and* torpedoes, which is what covers three of the five sites.
+#   - Two RNG-coverage escorts 45u away, inside their own weapons envelope from
+#     tick one. That hull is the only one carrying phasers *and* blasters *and*
+#     torpedoes, which is what covers three of the five sites — and since #954
+#     it is a TEST FIXTURE (`assets/entities/test/rng_coverage_lancer.toml`)
+#     rather than a shipped fleet hull, because "fires everything" is a shape
+#     no ship the game actually ships has. This world is its only consumer.
 #   - A radiation zone centred on the spawn: region damage from t=0.
 #   - An asteroid field whose inner radius reaches the spawn point, so the
 #     player is manoeuvring inside rocks and collides while it fights.
@@ -35,7 +38,7 @@ description = "world.rng_coverage.global.description"
 # sphere. The player has to be *moving* for the collision chokepoint to matter
 # — collision damage is proportional to speed, so a ship parked at the origin
 # rides through asteroids for free — but it also has to stay inside the zone
-# and inside the Lancers' weapons envelope, hence the small radius.
+# and inside the escorts' weapons envelope, hence the small radius.
 [anchors]
 patrol_a = [55.0, 0.0, 0.0]
 patrol_b = [-30.0, 0.0, 45.0]
@@ -79,12 +82,12 @@ overrides     = { asteroid_field = { inner_radius = 0.0, outer_radius = 400.0, d
 # firing arc regardless of which way it turns.
 
 [[entity]]
-template_path = "assets/entities/ship_harrow_lancer.toml"
+template_path = "assets/entities/test/rng_coverage_lancer.toml"
 name          = "world.entity.lancer_alpha.name"
 transform     = { position = [45.0, 0.0, 0.0] }
 
 [[entity]]
-template_path = "assets/entities/ship_harrow_lancer.toml"
+template_path = "assets/entities/test/rng_coverage_lancer.toml"
 name          = "world.entity.lancer_beta.name"
 transform     = { position = [-45.0, 0.0, 20.0] }
 
@@ -96,7 +99,7 @@ position = [0.0, 0.0, 0.0]
 # The player ship is spawned from the headless `--ship` template, not from this
 # `[[entity]]` block, so a world-file `overrides` on it would be ignored. The
 # one thing the scenario needs done to the player that TOML cannot reach — its
-# shields dropped to zero so the Lancers' torpedoes will engage it — the test
+# shields dropped to zero so the escorts' torpedoes will engage it — the test
 # harness does directly after spawn. See `rng_determinism.rs`.
 [[entity]]
 template_path = "assets/entities/alliance_destroyer.toml"
@@ -107,7 +110,7 @@ spawn_on      = "game_start"
 # ── Triggers ──────────────────────────────────────────────────────────────────
 
 # Harrow and Federation default to neutral in the faction TOMLs so the same
-# hulls can appear as ambient patrols elsewhere; without this both Lancers sit
+# hulls can appear as ambient patrols elsewhere; without this both escorts sit
 # next to the player without ever acquiring it as a target, and three of the
 # five chokepoints never fire. Both directions, on world load, before the first
 # targeting tick — the same pattern `combat_test.toml` uses.

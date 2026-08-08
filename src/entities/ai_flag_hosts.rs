@@ -8,8 +8,9 @@
 //!
 //! `flag(name)` and `counter(name) CMP n` are full citizens of the shared
 //! `world::flags` predicate grammar, and every fine-system policy/selector API
-//! (`AiPolicy::resolve_channel`, `resolve_channel_in_state`,
-//! `resolve_transition`, `TargetSelector::select`) takes a
+//! (`AiPolicy::resolve_channel`, `resolve_channel_ranked`,
+//! `resolve_channel_in_state`, `resolve_transition`,
+//! `TargetSelector::select`) takes a
 //! `flags: &[&FlagStore]` chain. But a chain is only as real as what the HOST
 //! passes — and until #891 stage 2, sixteen of the nineteen hosts passed a
 //! literal `&[]`, on which a `flag(...)` guard parsed, validated, and then
@@ -468,10 +469,17 @@ mod tests {
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
 
-    /// Method-call forms of the four evaluation entry points. A host's flag
-    /// chain is the last argument of whichever of these it calls.
+    /// Method-call forms of the evaluation entry points. A host's flag chain is
+    /// the last argument of whichever of these it calls.
+    ///
+    /// `resolve_channel_ranked` is `resolve_channel` plus the winning rule's
+    /// authored `priority` (issue #959) — the same scan, the same guards, the
+    /// same flag chain in the same argument position. The power host reads it so
+    /// it can rank the groups competing for the reactor's budget by the priority
+    /// their own hull file gave them.
     const EVAL_CALLS: &[&str] = &[
         ".resolve_channel(",
+        ".resolve_channel_ranked(",
         ".resolve_channel_in_state(",
         ".resolve_transition(",
         ".select(",

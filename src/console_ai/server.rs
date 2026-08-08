@@ -533,12 +533,22 @@ pub(crate) fn ai_shield_focus(
 /// it — the per-rule reserve guards REPLACE the retired global emergency
 /// exception. The applier's drain/exhaustion-lock/recovery is unchanged.
 ///
-/// # Absolute-level emit
-/// The verb carries an absolute target level. The host emits **only when that
-/// level differs from the group's current allocation** (skip no-op saturation so
-/// admission is not spammed every tick). The applier re-clamps to the per-group
-/// `[1, 4]` range and the ship-wide `total <= 8` cap, so the emitted value is
-/// safe regardless.
+/// # Absolute-level emit, spent against the reactor's budget (issue #959)
+/// The verb carries an absolute target level, and the levels for ALL of the
+/// ship's groups are decided together rather than one channel at a time.
+/// [`crate::modifiers::power_system::plan_allocation`] takes each group's bid —
+/// the winning rule's level, that rule's authored `priority`, the group's
+/// authored `max_level`, and its rung on the hull's `[power.battery_floor]`
+/// ladder — reserves the budget the un-bid groups are already holding, and
+/// hands out what is left in authored-priority order. The host emits **only the
+/// groups whose commanded level actually changes**, decreases first, so a
+/// settled ship emits nothing.
+///
+/// That is the fix for the silent cap-refusal loop. The applier's re-clamp to
+/// `[1, 4]` and to the ship-wide
+/// [`crate::modifiers::power_system::MAX_COMMANDED_TOTAL`] is still there as the
+/// backstop it always was, but it no longer has anything to catch: a plan that
+/// cannot be refused cannot be re-emitted for ever either.
 fn ai_power_allocation(
     time: Res<Time>,
     sessions: Res<crate::lobby::Sessions>,
@@ -696,66 +706,93 @@ fn ai_power_allocation(
             0,
         );
 
-        // Emit an admitted absolute `SetPowerGroupAllocation` toward the reactor
-        // for `group`, but only when the target level actually differs from the
-        // current allocation (skip saturated no-ops so admission is not spammed
-        // every tick).
+        // Collect the ship's AUTHORED power groups' bids (dynamic channels,
+        // AC1). For each group resolve its channel; the highest-priority
+        // matching rule wins (AC4) and its verb carries the absolute level it
+        // asks the group to hold, alongside that rule's own authored priority.
+        // A group with no matching rule resolves `None` and bids for nothing —
+        // it holds whatever it was last commanded to, and `plan_allocation`
+        // reserves the budget for it.
         //
-        // The comparison is against the COMMANDED level, not the effective one
-        // (issue #952). A group the battery floor is holding down reads lower
-        // than it was set to, and comparing against that reading would make the
-        // AI think its own standing order had already been carried out: it
-        // would stop correcting the order downward for as long as the brownout
-        // lasted, and the group would snap back to a level nobody had asked for
-        // since the fight started the moment the reserve recovered. The floor is
-        // the REACTOR's business; what the crew has asked for is this policy's,
-        // and the two are allowed to disagree.
-        let emit_level =
-            |group: &crate::messages::PowerGroupId,
-             level: u8,
-             admitted: &mut crate::messages::AdmittedCommands| {
-                let current = power.0.commanded_level_for(group);
-                if level == current {
-                    return;
-                }
-                crate::pinfo!(
-                    log,
-                    crate::logging::LogCat::Power,
-                    entity = ship_entity,
-                    "{} power {} -> {} (policy)",
-                    group.0,
-                    current,
-                    level
-                );
-                emit_ai_command(
-                    entity_uuid,
-                    crate::system_registry::power_reactor_system_id(),
-                    crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                        group: group.clone(),
-                        level,
-                    },
-                    control_sources,
-                    &sessions,
-                    ship_config,
-                    admitted,
-                );
-            };
-
-        // Loop the ship's AUTHORED power groups (dynamic channels, AC1). For each
-        // group resolve its channel; the highest-priority matching rule wins
-        // (AC4) and its verb carries the absolute level to hold. A group with no
-        // matching rule resolves `None` — hold (no emit).
+        // Nothing is emitted from this loop. Issue #959: a per-group emit made
+        // in ignorance of what the other groups had asked for is exactly how the
+        // silent cap refusal happened — the applier's budget check refuses the
+        // surplus without an error, and the next decision arm asks again.
         let group_ids: Vec<crate::messages::PowerGroupId> =
             power.0.iter().map(|(id, _)| id.clone()).collect();
+        let mut bids: Vec<crate::modifiers::power_system::AllocationBid> =
+            Vec::with_capacity(group_ids.len());
         for group_id in &group_ids {
             // Only the allocation verb ever resolves on a power-group channel
             // (the policy is validated to carry no other), so an `if let` is
-            // exhaustive in practice; any other verb holds (no emit).
-            if let Some(crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level)) =
-                policy.resolve_channel(&group_id.0, &facts, &flag_chain)
+            // exhaustive in practice; any other verb holds (no bid).
+            if let Some((
+                rule_priority,
+                crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level),
+            )) = policy.resolve_channel_ranked(&group_id.0, &facts, &flag_chain)
             {
-                emit_level(group_id, *level, &mut admitted);
+                bids.push(crate::modifiers::power_system::AllocationBid {
+                    group: group_id.clone(),
+                    want: *level,
+                    // This group's own authored ceiling. A hull that declares no
+                    // `[power_groups.*]` block at all has none to read, so the
+                    // parse default stands in — the same value its groups were
+                    // seeded and are clamped by.
+                    max_level: ship_config
+                        .and_then(|sc| sc.0.power_groups.get(group_id))
+                        .map(|g| g.max_level)
+                        .unwrap_or_else(crate::ship::config::default_max_power_level),
+                    rule_priority,
+                    // This group's rung on the hull's own `[power.battery_floor]`
+                    // ladder — the tie-break when the authored rule priorities
+                    // are equal. `None` for a group the ladder does not name.
+                    floor_pct: cfg
+                        .0
+                        .group_floors
+                        .get(group_id.0.as_str())
+                        .map(|f| f.battery_pct),
+                });
             }
+        }
+
+        // Spend the reactor's budget across those bids (issue #959). What comes
+        // back is a set of levels that FITS — nothing in it can be refused —
+        // with every decrease ahead of every increase so no intermediate state
+        // trips the cap either, and with no-ops already dropped so a settled
+        // ship emits nothing at all.
+        //
+        // No-op suppression compares against the COMMANDED level, not the
+        // effective one (issue #952), and `plan_allocation` inherits that. A
+        // group the battery floor is holding down reads lower than it was set
+        // to, and comparing against that reading would make the AI think its own
+        // standing order had already been carried out: it would stop correcting
+        // the order downward for as long as the brownout lasted, and the group
+        // would snap back to a level nobody had asked for since the fight
+        // started the moment the reserve recovered. The floor is the REACTOR's
+        // business; what the crew has asked for is this policy's, and the two
+        // are allowed to disagree.
+        for (group_id, level) in crate::modifiers::power_system::plan_allocation(&power.0, &bids) {
+            crate::pinfo!(
+                log,
+                crate::logging::LogCat::Power,
+                entity = ship_entity,
+                "{} power {} -> {} (policy)",
+                group_id.0,
+                power.0.commanded_level_for(&group_id),
+                level
+            );
+            emit_ai_command(
+                entity_uuid,
+                crate::system_registry::power_reactor_system_id(),
+                crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: group_id,
+                    level,
+                },
+                control_sources,
+                &sessions,
+                ship_config,
+                &mut admitted,
+            );
         }
     }
 }
@@ -3034,6 +3071,456 @@ station = "sensors"
             2,
             "an elevated group must drop back to baseline once battery dips below reserve"
         );
+    }
+
+    // ── Budget-aware allocation (issue #959) ─────────────────────────────────
+
+    /// A four-group Alliance-shaped reactor (`ops` outside the canonical trio)
+    /// crewed by `policy`, with the production decide→apply pair and a per-tick
+    /// `AdmittedCommands` clear so each arm's emits can be counted on their own.
+    ///
+    /// Commanded at the 8-point cap on arrival — helm 3 / weapons 2 / shields 2
+    /// / ops 1 — because the interesting failure is what a policy does when
+    /// there is NOTHING left to spend.
+    fn over_budget_power_app(policy: PowerAiPolicy) -> (App, Entity) {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let seed = [
+            (crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 3u8),
+            (crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()), 2),
+            (crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()), 2),
+            (crate::messages::PowerGroupId("ops".into()), 1),
+        ];
+
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<crate::ship::power::PowerConfigResource>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
+            .add_systems(
+                Update,
+                (
+                    clear_admitted_each_tick,
+                    ai_power_allocation,
+                    crate::ship::power::handle_power_messages,
+                )
+                    .chain(),
+            );
+
+        let mut control_sources = ShipSystemControlSources::default();
+        control_sources.0.set(
+            crate::system_registry::power_reactor_system_id(),
+            ControlSource::Ai,
+        );
+        let e = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                control_sources,
+                crate::ship::power::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::from_authored_groups(100.0, &seed),
+                ),
+                crate::ship_state::ShipRedAlert(true),
+                crate::ship_plugin::LastHelmInput::default(),
+                policy,
+                AdmittedCommands::default(),
+                AiHighFidelity,
+            ))
+            .id();
+        (app, e)
+    }
+
+    fn commanded(app: &App, e: Entity, group: &str) -> u8 {
+        app.world()
+            .entity(e)
+            .get::<crate::ship::power::ShipPowerSystem>()
+            .unwrap()
+            .0
+            .commanded_level_for(&crate::messages::PowerGroupId(group.into()))
+    }
+
+    fn commanded_total(app: &App, e: Entity) -> u8 {
+        app.world()
+            .entity(e)
+            .get::<crate::ship::power::ShipPowerSystem>()
+            .unwrap()
+            .0
+            .commanded_total()
+    }
+
+    /// Every `SetPowerGroupAllocation` this ship emitted on the arm that just
+    /// ran, in emission order.
+    fn emitted_allocations(app: &App, e: Entity) -> Vec<(String, u8)> {
+        app.world()
+            .entity(e)
+            .get::<AdmittedCommands>()
+            .unwrap()
+            .for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID)
+            .filter_map(|c| match &c.payload {
+                crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
+                    Some((group.0.clone(), *level))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **The silent cap-refusal-and-reemit loop is gone (issue #959).**
+    ///
+    /// Three rules ask for level 4 on a reactor that has 8 points and four
+    /// groups, so the policy is asking for roughly half again what the ship
+    /// owns. Before this issue each channel was emitted in isolation:
+    /// `PowerSystem::increase` refused the surplus SILENTLY, the refused groups
+    /// never reached the level they had been commanded to, and the decider —
+    /// which only skips an emit when the commanded level already MATCHES —
+    /// re-issued the identical admitted command on every arm for the rest of
+    /// the encounter.
+    ///
+    /// Now the arm plans against the budget: the ship lands on a legal
+    /// allocation in ONE arm, every emitted command is actually carried out,
+    /// and the arms that follow emit nothing at all.
+    #[test]
+    fn an_over_budget_power_policy_settles_in_one_arm_and_stops_re_emitting() {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, MAX_COMMANDED_TOTAL, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let policy = power_policy(
+            &[],
+            vec![
+                alloc_rule(20, WEAPONS_POWER_GROUP, "true", 4),
+                alloc_rule(10, HELM_POWER_GROUP, "true", 4),
+                alloc_rule(5, SHIELDS_POWER_GROUP, "true", 4),
+            ],
+        );
+        let (mut app, e) = over_budget_power_app(policy);
+
+        power_tick_with_dt(&mut app, 0.1);
+
+        // Highest authored priority is paid in full; the rest take what is left
+        // and land on their minimum, with `ops` (nothing bid for it) reserved.
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 4);
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 2);
+        assert_eq!(commanded(&app, e, SHIELDS_POWER_GROUP), 1);
+        assert_eq!(commanded(&app, e, "ops"), 1);
+
+        let total = app
+            .world()
+            .entity(e)
+            .get::<crate::ship::power::ShipPowerSystem>()
+            .unwrap()
+            .0
+            .commanded_total();
+        assert_eq!(
+            total, MAX_COMMANDED_TOTAL,
+            "the budget is spent, and not overspent"
+        );
+
+        // The emitted ORDER is load-bearing, not incidental: the applier tests
+        // the budget one command at a time, so weapons 2 → 4 is only affordable
+        // after helm and shields have given their points back. Emitting the
+        // increase first would have it refused — silently — with the ship
+        // already at the cap.
+        assert_eq!(
+            emitted_allocations(&app, e),
+            vec![
+                (HELM_POWER_GROUP.to_string(), 2),
+                (SHIELDS_POWER_GROUP.to_string(), 1),
+                (WEAPONS_POWER_GROUP.to_string(), 4),
+            ],
+            "decreases must be emitted before the increases they pay for"
+        );
+
+        // Every command the arm emitted was actually carried out — the silent
+        // refusal has nothing left to swallow.
+        for (group, level) in emitted_allocations(&app, e) {
+            assert_eq!(
+                commanded(&app, e, &group),
+                level,
+                "{group} was commanded to {level} and the reactor refused it"
+            );
+        }
+
+        // …and the decision has settled: nothing is re-emitted, for ever.
+        for arm in 0..6 {
+            power_tick_with_dt(&mut app, 0.1);
+            assert!(
+                emitted_allocations(&app, e).is_empty(),
+                "arm {arm} re-emitted after the allocation had settled: {:?}",
+                emitted_allocations(&app, e)
+            );
+            assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 4);
+            assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 2);
+        }
+    }
+
+    /// **Which group wins a budget collision is the HULL's decision.** The same
+    /// three over-budget bids with the authored priorities swapped hand the
+    /// spare points to helm instead of weapons. Both of `plan_allocation`'s
+    /// ordering keys are authored, so there is no branch to override the
+    /// authored config with — the Rust seed order breaks only a tie the hull
+    /// left identical on both.
+    #[test]
+    fn the_authored_rule_priority_decides_who_gets_the_last_reactor_point() {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let policy = power_policy(
+            &[],
+            vec![
+                alloc_rule(5, WEAPONS_POWER_GROUP, "true", 4),
+                alloc_rule(20, HELM_POWER_GROUP, "true", 4),
+                alloc_rule(10, SHIELDS_POWER_GROUP, "true", 4),
+            ],
+        );
+        let (mut app, e) = over_budget_power_app(policy);
+        power_tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 4);
+        assert_eq!(commanded(&app, e, SHIELDS_POWER_GROUP), 2);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 1);
+    }
+
+    /// The shipped fleet's own allocation is unchanged by all of this: combat
+    /// stations on a four-group Alliance hull still lands helm 3 / weapons 3
+    /// against `ops` 1 and `shields` 1, and still settles.
+    ///
+    /// All four groups are pinned individually, not just jointly by the total —
+    /// `ops` and `shields` are the un-bid pair `plan_allocation` RESERVES, and a
+    /// planner that cut them to `GROUP_LEVEL_MIN` to buy the bidders more would
+    /// still sum to 8.
+    ///
+    /// The settle is the second half of the name, and it is assertable here
+    /// without a per-tick `AdmittedCommands` clear: `handle_power_messages` does
+    /// not drain the queue, so a second arm that decides to emit nothing leaves
+    /// the emitted list byte-identical.
+    ///
+    /// The emitted ORDER is pinned too, and on this hull it is the one piece of
+    /// shipped evidence that the authored `[power.battery_floor]` ladder reaches
+    /// the planner at all: helm and weapons both win at `priority = 10`, so the
+    /// ladder is the only key left, and this hull puts weapons on the lower rung
+    /// (25 against helm's 40) — keep the guns longest, spend on them first. Read
+    /// no ladder and the two tie, the stable sort falls back to the reactor's
+    /// own seed order, and helm is emitted first instead. Both are paid in full
+    /// either way, which is why the dedicated tie-break wiring test below
+    /// arranges a budget too short to pay everyone.
+    #[test]
+    fn the_shipped_combat_stations_allocation_is_unchanged_and_settles() {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let (mut app, e) = shipped_hull_power_app("assets/entities/alliance_destroyer.toml");
+        power_tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 3);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
+        assert_eq!(
+            commanded(&app, e, SHIELDS_POWER_GROUP),
+            1,
+            "reserved, not cut"
+        );
+        assert_eq!(commanded(&app, e, "ops"), 1, "reserved, not cut");
+        assert_eq!(
+            commanded_total(&app, e),
+            crate::modifiers::power_system::MAX_COMMANDED_TOTAL
+        );
+
+        let first_arm = emitted_allocations(&app, e);
+        assert_eq!(
+            first_arm,
+            vec![
+                (WEAPONS_POWER_GROUP.to_string(), 3),
+                (HELM_POWER_GROUP.to_string(), 3),
+            ],
+            "the hull's own floor ladder orders the two equal-priority bidders"
+        );
+
+        // …and it has settled: the second arm adds nothing to the queue.
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            emitted_allocations(&app, e),
+            first_arm,
+            "the shipped allocation re-emitted after it had settled"
+        );
+    }
+
+    /// A four-group hull config whose `weapons` group is capped at
+    /// `max_level = 2`, parsed through the real `ShipConfig` path so
+    /// `[power_groups.<id>] max_level` is read exactly as an authored hull file
+    /// supplies it — including the `#[serde(default)]` fallback the other three
+    /// groups take by omitting the key.
+    fn weapons_capped_ship_config() -> crate::ship::config::ShipConfig {
+        let toml = r#"
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[power_groups.ops]
+label = "Operations"
+default_level = 1
+
+[power_groups.helm]
+label = "Propulsion"
+default_level = 3
+
+[power_groups.weapons]
+label = "Weapons"
+default_level = 2
+max_level = 2
+
+[power_groups.shields]
+label = "Shields"
+default_level = 2
+"#;
+        crate::ship::config::ShipConfig::from_toml(
+            toml,
+            &[crate::system_registry::POWER_REACTOR_KIND],
+        )
+        .unwrap()
+    }
+
+    /// A `PowerConfigResource` COMPONENT whose `[power.battery_floor]` ladder
+    /// runs the other way to the shipped fleet's: this hull gives its SCREENS up
+    /// first and keeps its guns longest, where every Alliance hull does the
+    /// reverse.
+    ///
+    /// Authored the way a hull authors it — group id to percentage of capacity —
+    /// and resolved into the runtime table by the same
+    /// `ship::power::authored_power_group_floors` a real spawn goes through, so
+    /// there is no hand-built shortcut between the TOML shape and the component.
+    fn inverted_ladder_power_config() -> crate::ship::power::PowerConfigResource {
+        let battery_floor: std::collections::HashMap<String, f32> = toml::from_str(
+            r#"
+helm = 25.0
+weapons = 5.0
+shields = 50.0
+"#,
+        )
+        .expect("[power.battery_floor] ladder parses");
+        crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
+            group_floors: crate::ship::power::authored_power_group_floors(
+                &battery_floor,
+                &std::collections::HashMap::new(),
+            ),
+            ..Default::default()
+        })
+    }
+
+    /// **The hull's own `[power_groups.<id>] max_level` is what caps a grant.**
+    ///
+    /// The wiring test for `AllocationBid::max_level`. Every other power fixture
+    /// in this file spawns a ship with no `ShipConfigComponent` at all, so the
+    /// bid has always taken `ship::config::default_max_power_level`'s 4 through
+    /// the `unwrap_or_else` fallback — a read that ignored the authored ceiling
+    /// entirely would have passed the lot of them.
+    ///
+    /// `weapons` holds the top authored priority and asks for 4 on a hull that
+    /// caps it at 2, so the two points it may not have fall through to `helm`
+    /// queued behind it. Read the ceiling wrong and the same 8 points land the
+    /// exact inverse — weapons 4, helm 2 — which is what makes the authored
+    /// number observable here rather than merely present.
+    #[test]
+    fn the_authored_group_max_level_caps_a_grant_and_the_rest_falls_through() {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, MAX_COMMANDED_TOTAL, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let policy = power_policy(
+            &[],
+            vec![
+                alloc_rule(20, WEAPONS_POWER_GROUP, "true", 4),
+                alloc_rule(10, HELM_POWER_GROUP, "true", 4),
+                alloc_rule(5, SHIELDS_POWER_GROUP, "true", 4),
+            ],
+        );
+        let (mut app, e) = over_budget_power_app(policy);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(crate::ship_plugin::ShipConfigComponent(
+                weapons_capped_ship_config(),
+            ));
+
+        power_tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            2,
+            "the top-priority bid asked for 4 and its own hull caps it at 2"
+        );
+        assert_eq!(
+            commanded(&app, e, HELM_POWER_GROUP),
+            4,
+            "the points weapons was not allowed to take fall through to the next bid"
+        );
+        assert_eq!(commanded(&app, e, SHIELDS_POWER_GROUP), 1);
+        assert_eq!(commanded(&app, e, "ops"), 1);
+        assert_eq!(commanded_total(&app, e), MAX_COMMANDED_TOTAL);
+    }
+
+    /// **The hull's own `[power.battery_floor]` ladder breaks a priority tie.**
+    ///
+    /// The wiring test for `AllocationBid::floor_pct`.
+    /// `plan_allocation_breaks_a_priority_tie_on_the_authored_floor_ladder`
+    /// proves the PLANNER inverts with the data; this proves the data reaches
+    /// it. Every other host fixture leaves `PowerConfigResource` as a bare
+    /// `Resource`, which `ai_power_allocation` never reads — it takes an
+    /// `Option<&PowerConfigResource>` COMPONENT — so the ladder in play has
+    /// always been `default_group_floors`', and on the shipped destroyer both
+    /// bidders are paid in full so the ordering cannot show.
+    ///
+    /// THREE equal-priority bidders, not two, and that is the point of the
+    /// fixture: with only two there are two possible orders, and one of the two
+    /// ways to misread the ladder lands on the same answer as reading it right.
+    /// Three separates every case, because each misread starts the ration with a
+    /// different group and only the first one is paid in full:
+    ///
+    /// | ladder actually read                | ration order     | takes 4 |
+    /// |-------------------------------------|------------------|---------|
+    /// | this hull's (helm 25, wpn 5, shd 50) | wpn, helm, shd  | weapons |
+    /// | the `Resource` default (50, 25, 5)   | shd, wpn, helm  | shields |
+    /// | nothing at all (every group `None`)  | helm, wpn, shd  | helm    |
+    ///
+    /// The last row is the reactor's own seed order, which the stable sort falls
+    /// back to when every key ties — so it is also the case a two-bidder fixture
+    /// would have quietly aliased onto the right answer.
+    #[test]
+    fn the_authored_battery_floor_ladder_breaks_the_hosts_priority_tie() {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, MAX_COMMANDED_TOTAL, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let policy = power_policy(
+            &[],
+            vec![
+                alloc_rule(10, HELM_POWER_GROUP, "true", 4),
+                alloc_rule(10, WEAPONS_POWER_GROUP, "true", 4),
+                alloc_rule(10, SHIELDS_POWER_GROUP, "true", 4),
+            ],
+        );
+        let (mut app, e) = over_budget_power_app(policy);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(inverted_ladder_power_config());
+
+        power_tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            4,
+            "this hull keeps its guns longest, so its guns are served first"
+        );
+        assert_eq!(
+            commanded(&app, e, HELM_POWER_GROUP),
+            2,
+            "helm sits on the middle rung and takes what weapons left"
+        );
+        assert_eq!(
+            commanded(&app, e, SHIELDS_POWER_GROUP),
+            1,
+            "the group this hull gives up first gets nothing discretionary"
+        );
+        assert_eq!(commanded(&app, e, "ops"), 1);
+        assert_eq!(commanded_total(&app, e), MAX_COMMANDED_TOTAL);
     }
 
     #[test]

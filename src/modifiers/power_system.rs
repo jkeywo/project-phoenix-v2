@@ -188,6 +188,52 @@ pub struct PowerConfig {
 /// return and nothing else.
 pub const UNAUTHORED_FLOOR_LEVEL: u8 = crate::ship::config::default_power_level();
 
+/// The lowest level any power group can be commanded to. Defined by CALLING
+/// [`crate::ship::config::default_min_power_level`] — the parse default a
+/// `[power_groups.<id>] min_level` gets — so the setter API's lower clamp and
+/// the authoring default cannot drift apart.
+pub const GROUP_LEVEL_MIN: u8 = crate::ship::config::default_min_power_level();
+
+/// The highest level any power group can be commanded to, whatever its own
+/// `max_level` says. Defined by CALLING
+/// [`crate::ship::config::default_max_power_level`], whose docs already name it
+/// "the ceiling the allocation API clamps every group to".
+pub const GROUP_LEVEL_MAX: u8 = crate::ship::config::default_max_power_level();
+
+/// The reactor's ship-wide allocation budget: the COMMANDED total across every
+/// group that [`PowerSystem::increase`] refuses to go past.
+///
+/// Not a new number — this is the `8` that has always been inline in
+/// `increase`, lifted out so every site that spends against it reads ONE value:
+/// `increase`'s refusal, [`plan_allocation`]'s budget, and the top rung of the
+/// [`PowerConfig::rates`] table that [`PowerSystem::battery_rate`] and
+/// [`PowerSystem::tick`] index. Issue #959: the applier enforced the budget
+/// silently and the AI decider had no idea the budget existed, so a policy
+/// whose per-group targets summed past it had the excess dropped without error
+/// and re-asked for on every decision arm, for ever. [`plan_allocation`] closes
+/// that by spending against this const before anything is emitted.
+///
+/// Still a Rust constant rather than a `[power]` field, and deliberately so
+/// for now: [`PowerSystem::set_group_allocation`] and [`PowerSystem::increase`]
+/// take no [`PowerConfig`], so making the budget per-hull is a signature change
+/// across every caller of the allocation API rather than a tuning change.
+/// Authoring it is a separate piece of work; stating it once is the
+/// precondition for that work, not a substitute for it.
+pub const MAX_COMMANDED_TOTAL: u8 = 8;
+
+/// The lowest total [`PowerConfig::rates`] describes a rate for: the table's
+/// first entry is the battery rate at an EFFECTIVE total of `3` and its last is
+/// the rate at [`MAX_COMMANDED_TOTAL`], which is why every hull authors exactly
+/// six of them.
+///
+/// A DIFFERENT quantity from [`GROUP_LEVEL_MIN`], and not a budget of any kind:
+/// it is the authoring shape of the `rates` table, the number the index is
+/// offset by. It happens to equal the smallest total a three-group hull can
+/// reach, which is where it came from; a four-group hull cannot go under 4 at
+/// all. The clamp against it exists so a hull with fewer groups still indexes
+/// the table rather than underflowing it.
+pub const MIN_RATED_TOTAL: u8 = 3;
+
 /// The parse-default release margin for [`PowerConfig::floor_release_margin_pct`],
 /// in percentage points of capacity — the band a floored group's reserve has to
 /// climb back through before the reactor lets it go.
@@ -314,7 +360,7 @@ impl PowerSystem {
             if map.contains_key(id) {
                 continue;
             }
-            map.insert(id.clone(), (*level).clamp(1, 4));
+            map.insert(id.clone(), (*level).clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX));
             order.push(id.clone());
         }
         Self {
@@ -404,7 +450,7 @@ impl PowerSystem {
             return Err(PowerAllocationError::UnknownGroup(group.clone()));
         }
         let current = self.commanded_level_for(group);
-        let target_level = level.clamp(1, 4);
+        let target_level = level.clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX);
         if target_level > current {
             for _ in 0..(target_level - current) {
                 self.increase(group);
@@ -420,11 +466,11 @@ impl PowerSystem {
     /// Increase the commanded allocation for `group` by 1. Clamped to `4` per
     /// group and to `8` for the commanded total.
     pub fn increase(&mut self, group: &PowerGroupId) {
-        if self.commanded_total() >= 8 {
+        if self.commanded_total() >= MAX_COMMANDED_TOTAL {
             return;
         }
         if let Some(v) = self.groups.get_mut(group) {
-            if *v < 4 {
+            if *v < GROUP_LEVEL_MAX {
                 *v += 1;
             }
         }
@@ -434,7 +480,7 @@ impl PowerSystem {
     /// group.
     pub fn decrease(&mut self, group: &PowerGroupId) {
         if let Some(v) = self.groups.get_mut(group) {
-            if *v > 1 {
+            if *v > GROUP_LEVEL_MIN {
                 *v -= 1;
             }
         }
@@ -444,8 +490,8 @@ impl PowerSystem {
     /// the effective total allocation. Negative means the ship is spending its
     /// reserve faster than the reactor makes it.
     pub fn battery_rate(&self, config: &PowerConfig) -> f32 {
-        let total = self.total().clamp(3, 8) as usize;
-        config.rates[total - 3]
+        let total = self.total().clamp(MIN_RATED_TOTAL, MAX_COMMANDED_TOTAL) as usize;
+        config.rates[total - MIN_RATED_TOTAL as usize]
     }
 
     /// True when the battery is falling at the current draw. Published so the
@@ -495,8 +541,7 @@ impl PowerSystem {
     /// itself to Helm or Tactical instead of being swallowed by a debounce that
     /// only watches the reserve's direction.
     pub fn tick(&mut self, dt: f32, config: &PowerConfig) -> bool {
-        let total = self.total().clamp(3, 8) as usize;
-        let rate = config.rates[total - 3];
+        let rate = self.battery_rate(config);
         self.battery_charge = (self.battery_charge + rate * dt).clamp(0.0, config.capacity);
         self.apply_battery_floors(config)
     }
@@ -608,7 +653,7 @@ impl PowerSystem {
             let Some(floor) = config.group_floors.get(id.0.as_str()) else {
                 continue;
             };
-            let held = floor.min_level.clamp(1, 4);
+            let held = floor.min_level.clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX);
             // A group already resting AT or BELOW its floor level is not
             // recorded at all. The brownout has nothing to take from it, and
             // recording it anyway would both raise a group the brownout is
@@ -631,6 +676,168 @@ impl PowerSystem {
 /// signature but keyed on `PowerGroupId`. Returns `0` for unknown groups.
 pub fn power_level_for_group(ps: &PowerSystem, group: &PowerGroupId) -> u8 {
     ps.level_for(group)
+}
+
+/// One group's claim on the reactor budget for a single allocation decision
+/// (issue #959) — what an authored rule asked for, and the authored data that
+/// decides who gets served when the budget cannot pay for everything.
+///
+/// Every field is READ OFF THE HULL'S OWN TOML. There is no field here a Rust
+/// caller could use to override the authored config, and no ordering the caller
+/// supplies beyond the one [`PowerSystem`] already publishes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllocationBid {
+    /// The power group this bid is for.
+    pub group: PowerGroupId,
+    /// Absolute level the winning `[[power.ai_policy.rule]]` asked this group
+    /// to hold.
+    pub want: u8,
+    /// This group's own ceiling — `[power_groups.<id>] max_level`, or its parse
+    /// default for a hull that authors no such block.
+    pub max_level: u8,
+    /// The `priority` of the authored rule that won this group's channel. The
+    /// PRIMARY ordering key, and the whole of the "priority is data-authored"
+    /// requirement: a designer who wants weapons served before helm when the
+    /// budget is short raises that rule's `priority` in the hull file.
+    ///
+    /// No Rust list outranks a preference the hull expressed. Both ordering
+    /// keys on this struct are authored, and the caller's own order — which is
+    /// [`PowerSystem::iter`]'s, i.e. [`POWER_GROUP_ORDER`] first and then
+    /// alphabetically, via `ship::power::authored_power_group_seed` — breaks
+    /// only the ties the hull left identical on BOTH keys: equal rule
+    /// priorities AND neither group named in `[power.battery_floor]`. See the
+    /// sort site in [`plan_allocation`], which says the same thing from the
+    /// other end.
+    pub rule_priority: i32,
+    /// This group's `[power.battery_floor]` percentage, `None` when the hull
+    /// authors no floor for it.
+    ///
+    /// The SECONDARY key, used only to break a tie the designer left. A floor
+    /// is the hull's statement of the order it gives groups up as the reserve
+    /// falls — highest floor cut first — so a LOWER floor means "keep this one
+    /// longer", and an absent floor ("never cut at all") is the strongest such
+    /// statement there is. Spending a scarce point in that same order is the
+    /// hull's own answer rather than an invented one, and on the shipped fleet
+    /// (helm 40 / weapons 25 / shields 5, every elevation rule at priority 10)
+    /// it is the only authored ranking that exists.
+    pub floor_pct: Option<f32>,
+}
+
+/// Distribute the reactor's allocation budget across the groups that bid for it
+/// (issue #959), returning the levels to COMMAND, in the order they must be
+/// applied.
+///
+/// # The bug this replaces
+///
+/// The AI decider used to resolve each group's channel in isolation and emit
+/// that group's absolute target with no idea what the others had asked for.
+/// [`PowerSystem::increase`] refuses past [`MAX_COMMANDED_TOTAL`] SILENTLY and
+/// drops the surplus with no error, so a policy whose targets summed past the
+/// budget got some groups served, the rest left where they were — and, because
+/// the decider only skips an emit when the commanded level already MATCHES its
+/// target, the unserved ones were re-asked for on every decision arm for the
+/// rest of the encounter. A cap refusal that neither the policy nor any log
+/// could observe, and an admitted command re-issued for ever.
+///
+/// # What this does instead
+///
+/// * Groups with no bid are RESERVED at their current commanded level. The
+///   policy has authored no verb for them, so there is nothing that says they
+///   may be cut; `ops` on the Alliance hulls sits here.
+/// * Every bidding group is guaranteed [`GROUP_LEVEL_MIN`], because that is the
+///   floor the setter API clamps to and no distribution can go under it.
+/// * What is left over — `MAX_COMMANDED_TOTAL - reserved - one per bidder` — is
+///   the DISCRETIONARY budget, handed out in authored-priority order until it
+///   runs out. A group that cannot be paid in full lands as high as the budget
+///   reaches, never at a level the applier would refuse.
+/// * Each grant is capped by that group's own authored `max_level` as well as
+///   by [`GROUP_LEVEL_MAX`], so a bid over the hull's ceiling is trimmed here
+///   rather than silently trimmed by the applier and re-emitted.
+///
+/// The returned total therefore never RISES above the budget, and fits outright
+/// whenever the reactor was already inside it — which is every shipped hull.
+/// Nothing the plan emits can be refused, and a settled ship stops emitting
+/// entirely.
+///
+/// The qualifier is real rather than defensive. [`PowerSystem::from_authored_groups`]
+/// clamps each group to `[GROUP_LEVEL_MIN, GROUP_LEVEL_MAX]` but never checks
+/// their SUM, and nothing validates the `[power_groups.*] default_level` total
+/// at load either — so a hull authoring five groups at `default_level = 2`
+/// spawns already commanded to 10. Whether this function can recover from that
+/// turns on who bids. If every group bids it can: `reserved` is 0, five
+/// minimums leave three discretionary points, and the plan lands on 8. If the
+/// groups holding the overspend do NOT bid it cannot — four un-bid groups at 2
+/// make `reserved + mins` 9 between them, `spare` saturates to `0`, the one
+/// bidder is planned at [`GROUP_LEVEL_MIN`], and the total stays at 9. The
+/// policy authored no verb for those four, and nothing here licenses cutting a
+/// group its own hull never offered up.
+///
+/// The SAFETY property survives that intact — a plan carrying no increase has
+/// nothing for the applier to refuse and nothing to re-emit next arm — but
+/// "fits" is not the word for it. Adding the load-time guard the stronger claim
+/// assumes is a separate piece of work.
+///
+/// # Why the order of the returned commands matters
+///
+/// `ship::power::handle_power_messages` applies admitted commands one at a
+/// time, and [`PowerSystem::increase`] tests the budget against the total AT
+/// THAT MOMENT. A plan that ends at exactly the cap can still be refused
+/// halfway through if an increase is applied before the decrease that pays for
+/// it. So every decrease is returned first: after them the total is at its
+/// lowest, and the increases then climb monotonically to a final total already
+/// known to fit. No-ops (a group already commanded to its planned level) are
+/// dropped, which is what keeps admission quiet on a settled ship.
+pub fn plan_allocation(power: &PowerSystem, bids: &[AllocationBid]) -> Vec<(PowerGroupId, u8)> {
+    // Bids for groups the reactor does not track would be rejected by
+    // `set_group_allocation` as `UnknownGroup`; dropping them here keeps them
+    // out of the budget arithmetic too.
+    let mut ranked: Vec<&AllocationBid> =
+        bids.iter().filter(|b| power.has_group(&b.group)).collect();
+
+    // Groups nothing bid for hold what they were last commanded to, and that
+    // holding costs budget.
+    let reserved: u16 = power
+        .order
+        .iter()
+        .filter(|id| !ranked.iter().any(|b| &b.group == *id))
+        .map(|id| power.commanded_level_for(id) as u16)
+        .sum();
+
+    // Authored order: rule priority first (higher wins), then the hull's own
+    // floor ladder (lower floor — kept longer — wins, absent floor first).
+    // `sort_by` is stable, so a tie on BOTH authored keys falls back to the
+    // caller's order, which is `PowerSystem::iter()`'s. That last fallback is
+    // determinism, not a design opinion: it only decides between groups the
+    // hull has ranked identically.
+    ranked.sort_by(|a, b| {
+        b.rule_priority.cmp(&a.rule_priority).then_with(|| {
+            let key = |f: &Option<f32>| f.unwrap_or(f32::NEG_INFINITY);
+            key(&a.floor_pct)
+                .partial_cmp(&key(&b.floor_pct))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+
+    let mins = ranked.len() as u16 * GROUP_LEVEL_MIN as u16;
+    let mut spare = (MAX_COMMANDED_TOTAL as u16).saturating_sub(reserved + mins);
+
+    let mut planned: Vec<(PowerGroupId, u8)> = Vec::with_capacity(ranked.len());
+    for bid in ranked {
+        let ceiling = bid.max_level.clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX);
+        let want = bid.want.clamp(GROUP_LEVEL_MIN, ceiling);
+        let asked = (want - GROUP_LEVEL_MIN) as u16;
+        let granted = asked.min(spare);
+        spare -= granted;
+        planned.push((bid.group.clone(), GROUP_LEVEL_MIN + granted as u8));
+    }
+
+    // Decreases first (see the doc comment): both halves keep the authored
+    // order within themselves because `partition` is stable.
+    let (down, up): (Vec<_>, Vec<_>) = planned
+        .into_iter()
+        .filter(|(id, level)| *level != power.commanded_level_for(id))
+        .partition(|(id, level)| *level < power.commanded_level_for(id));
+    down.into_iter().chain(up).collect()
 }
 
 #[cfg(test)]
@@ -1203,5 +1410,319 @@ mod tests {
         assert_eq!(channel_1.power_level(&helm()), Some(4));
         assert_eq!(channel_1.power_level(&PowerGroupId("unknown".into())), None);
         assert_eq!(ps.level_for(&helm()), 4);
+    }
+
+    // ── Budget-aware allocation planning (issue #959) ────────────────────────
+
+    fn ops() -> PowerGroupId {
+        PowerGroupId("ops".into())
+    }
+
+    /// A bid at the shipped fleet's ordering: every elevation rule authored at
+    /// priority 10, tie-broken by the hull's own floor ladder.
+    fn bid(
+        group: PowerGroupId,
+        want: u8,
+        rule_priority: i32,
+        floor_pct: Option<f32>,
+    ) -> AllocationBid {
+        AllocationBid {
+            group,
+            want,
+            max_level: crate::ship::config::default_max_power_level(),
+            rule_priority,
+            floor_pct,
+        }
+    }
+
+    /// The four-group Alliance shape: `ops` outside the canonical trio, seeded
+    /// at 1, with nothing in the policy bidding for it.
+    fn alliance_reactor() -> PowerSystem {
+        PowerSystem::from_authored_groups(
+            90.0,
+            &[(helm(), 2), (weapons(), 2), (shields(), 1), (ops(), 1)],
+        )
+    }
+
+    /// **Allocate within the max.** The shipped combat-stations allocation —
+    /// helm 3 / weapons 3 against `ops` 1 and `shields` 1 — spends the budget
+    /// exactly, and every planned level is inside the group's own ceiling.
+    #[test]
+    fn plan_allocation_spends_the_budget_without_exceeding_it() {
+        let ps = alliance_reactor();
+        let plan = plan_allocation(
+            &ps,
+            &[
+                bid(helm(), 3, 10, Some(40.0)),
+                bid(weapons(), 3, 10, Some(25.0)),
+            ],
+        );
+
+        let mut after = ps.clone();
+        for (group, level) in &plan {
+            after.set_group_allocation(group, *level).unwrap();
+        }
+        assert_eq!(after.commanded_level_for(&helm()), 3);
+        assert_eq!(after.commanded_level_for(&weapons()), 3);
+        assert_eq!(after.commanded_total(), MAX_COMMANDED_TOTAL);
+        assert!(
+            plan.iter().all(|(_, l)| *l <= GROUP_LEVEL_MAX),
+            "no planned level may exceed the per-group ceiling"
+        );
+    }
+
+    /// A bid over the group's OWN authored `max_level` is trimmed by the
+    /// planner, not by the applier. Trimming it downstream is what made the
+    /// difference invisible: the applier's clamp is silent, so the decider went
+    /// on asking for a level the hull had already ruled out.
+    #[test]
+    fn plan_allocation_trims_a_bid_to_the_groups_authored_max_level() {
+        let mut ps = alliance_reactor();
+        ps.set_group_allocation(&weapons(), 1).unwrap();
+        let capped = AllocationBid {
+            max_level: 2,
+            ..bid(weapons(), 4, 10, Some(25.0))
+        };
+        assert_eq!(
+            plan_allocation(&ps, std::slice::from_ref(&capped)),
+            vec![(weapons(), 2)],
+            "the bid asked for 4 and the hull's own max_level is 2"
+        );
+
+        // And once it is there, the trimmed bid settles: nothing further is
+        // planned, so the ceiling cannot become a re-emit loop of its own.
+        ps.set_group_allocation(&weapons(), 2).unwrap();
+        assert!(plan_allocation(&ps, &[capped]).is_empty());
+    }
+
+    /// **Budget collision.** Three groups asking for more than the reactor can
+    /// pay for are rationed in AUTHORED priority order, and the plan still
+    /// fits: the top-priority bid is paid in full, the next takes what is left,
+    /// the last lands on its minimum. Nothing is refused by the applier.
+    #[test]
+    fn plan_allocation_rations_a_budget_collision_by_authored_priority() {
+        let ps = alliance_reactor();
+        let plan = plan_allocation(
+            &ps,
+            &[
+                bid(helm(), 4, 5, Some(40.0)),
+                bid(weapons(), 4, 30, Some(25.0)),
+                bid(shields(), 4, 20, Some(5.0)),
+            ],
+        );
+
+        let mut after = ps.clone();
+        for (group, level) in &plan {
+            after.set_group_allocation(group, *level).unwrap();
+        }
+        // ops holds 1 (nothing bid for it); 7 points are left for three groups
+        // that each need at least 1, so 4 are discretionary: weapons (30) takes
+        // 3, shields (20) takes the last 1, helm (5) gets none.
+        assert_eq!(after.commanded_level_for(&weapons()), 4);
+        assert_eq!(after.commanded_level_for(&shields()), 2);
+        assert_eq!(after.commanded_level_for(&helm()), 1);
+        assert_eq!(
+            after.commanded_level_for(&ops()),
+            1,
+            "un-bid groups are reserved"
+        );
+        assert_eq!(after.commanded_total(), MAX_COMMANDED_TOTAL);
+        // And every level the plan asked for is the level the reactor actually
+        // holds — the whole point: no silent refusal anywhere in the plan.
+        for (group, level) in &plan {
+            assert_eq!(
+                after.commanded_level_for(group),
+                *level,
+                "{} was planned at {level} and the applier refused it",
+                group.0
+            );
+        }
+    }
+
+    /// A tie the designer left is broken by the hull's own `[power.battery_floor]`
+    /// ladder — lower floor (kept longer as the reserve falls) served first —
+    /// and NOT by any ordering baked into Rust.
+    #[test]
+    fn plan_allocation_breaks_a_priority_tie_on_the_authored_floor_ladder() {
+        let ps = alliance_reactor();
+        // Both at priority 10, both asking for 4, only 4 discretionary points.
+        let plan = plan_allocation(
+            &ps,
+            &[
+                bid(helm(), 4, 10, Some(40.0)),
+                bid(weapons(), 4, 10, Some(25.0)),
+            ],
+        );
+        let mut after = ps.clone();
+        for (group, level) in &plan {
+            after.set_group_allocation(group, *level).unwrap();
+        }
+        assert_eq!(
+            after.commanded_level_for(&weapons()),
+            4,
+            "weapons' floor of 25 is under helm's 40, so the hull keeps it \
+             longer and it is served first"
+        );
+        assert_eq!(after.commanded_level_for(&helm()), 2);
+
+        // Invert the ladder in the DATA alone and the order inverts with it.
+        let inverted = plan_allocation(
+            &ps,
+            &[
+                bid(helm(), 4, 10, Some(25.0)),
+                bid(weapons(), 4, 10, Some(40.0)),
+            ],
+        );
+        let mut after = ps.clone();
+        for (group, level) in &inverted {
+            after.set_group_allocation(group, *level).unwrap();
+        }
+        assert_eq!(after.commanded_level_for(&helm()), 4);
+        assert_eq!(after.commanded_level_for(&weapons()), 2);
+    }
+
+    /// **No re-emit stall.** Re-planning against the reactor the previous plan
+    /// produced returns NOTHING — the decision has settled, so the host emits
+    /// nothing and admission stays quiet. This is the invariant the old
+    /// per-group emit could not hold: its refused command was re-issued on
+    /// every decision arm for ever.
+    #[test]
+    fn plan_allocation_settles_and_stops_emitting() {
+        let mut ps = alliance_reactor();
+        let bids = [
+            bid(helm(), 4, 10, Some(40.0)),
+            bid(weapons(), 4, 10, Some(25.0)),
+            bid(shields(), 4, 10, Some(5.0)),
+        ];
+
+        let first = plan_allocation(&ps, &bids);
+        assert!(!first.is_empty(), "the first arm has work to do");
+        for (group, level) in &first {
+            ps.set_group_allocation(group, *level).unwrap();
+        }
+        assert!(ps.commanded_total() <= MAX_COMMANDED_TOTAL);
+
+        for arm in 0..5 {
+            let again = plan_allocation(&ps, &bids);
+            assert!(
+                again.is_empty(),
+                "arm {arm} re-emitted {again:?} after the allocation had settled"
+            );
+        }
+    }
+
+    /// Decreases are ordered ahead of increases, because the applier tests the
+    /// budget one command at a time. A plan that ends at the cap is refused
+    /// halfway through if the increase lands before the decrease that pays for
+    /// it — which is the silent refusal wearing a different hat.
+    #[test]
+    fn plan_allocation_orders_decreases_before_the_increases_they_pay_for() {
+        // Commanded at the cap already: helm 4 / weapons 2 / shields 1 / ops 1.
+        let mut ps = alliance_reactor();
+        ps.set_group_allocation(&helm(), 4).unwrap();
+        assert_eq!(ps.commanded_total(), MAX_COMMANDED_TOTAL);
+
+        // The policy now wants the two swapped over.
+        let plan = plan_allocation(
+            &ps,
+            &[
+                bid(helm(), 2, 10, Some(40.0)),
+                bid(weapons(), 4, 20, Some(25.0)),
+            ],
+        );
+        assert_eq!(
+            plan.first().map(|(g, l)| (g.0.as_str(), *l)),
+            Some((HELM_POWER_GROUP, 2)),
+            "the decrease must come first: {plan:?}"
+        );
+
+        // Apply in the planned order through the real applier semantics.
+        for (group, level) in &plan {
+            ps.set_group_allocation(group, *level).unwrap();
+        }
+        assert_eq!(
+            ps.commanded_level_for(&weapons()),
+            4,
+            "the increase was paid for"
+        );
+        assert_eq!(ps.commanded_level_for(&helm()), 2);
+    }
+
+    /// A group the reactor does not track is dropped rather than charged to the
+    /// budget — the applier would reject it as `UnknownGroup`, and counting it
+    /// would starve a real group of a point that was never spent.
+    #[test]
+    fn plan_allocation_ignores_a_bid_for_an_untracked_group() {
+        let ps = alliance_reactor();
+        let plan = plan_allocation(
+            &ps,
+            &[
+                bid(PowerGroupId("life-support".into()), 4, 100, None),
+                bid(weapons(), 4, 10, Some(25.0)),
+            ],
+        );
+        assert_eq!(plan, vec![(weapons(), 4)]);
+    }
+
+    /// **The qualifier on "the returned total fits."** A hull whose
+    /// `[power_groups.*] default_level` values already sum past
+    /// [`MAX_COMMANDED_TOTAL`] is not something this function can undo, and
+    /// nothing rejects that authoring at load — so the doc claim is "never
+    /// rises above the budget", not "always fits", and this is the case that
+    /// makes the difference.
+    ///
+    /// What IS guaranteed on such a reactor is that the plan never makes the
+    /// overspend worse: `reserved + mins` is already over budget, `spare`
+    /// saturates to 0, and the plan carries decreases only — so the applier has
+    /// nothing to refuse and there is nothing to re-emit next arm.
+    #[test]
+    fn plan_allocation_cannot_rescue_a_reactor_authored_over_its_own_budget() {
+        let life_support = PowerGroupId("life-support".into());
+        // Five groups seeded at 2: an authoring nothing rejects, and a commanded
+        // total of 10 against a budget of 8.
+        let over = PowerSystem::from_authored_groups(
+            90.0,
+            &[
+                (helm(), 2),
+                (weapons(), 2),
+                (shields(), 2),
+                (ops(), 2),
+                (life_support.clone(), 2),
+            ],
+        );
+        assert!(over.commanded_total() > MAX_COMMANDED_TOTAL);
+
+        // Only helm bids. The other four hold 8 between them, so there is no
+        // discretionary budget at all and nothing licenses cutting them.
+        let plan = plan_allocation(&over, &[bid(helm(), 4, 10, Some(40.0))]);
+        assert_eq!(plan, vec![(helm(), GROUP_LEVEL_MIN)]);
+        assert!(
+            plan.iter()
+                .all(|(id, level)| *level <= over.commanded_level_for(id)),
+            "an over-budget reactor must never be handed an increase"
+        );
+
+        let mut after = over.clone();
+        for (group, level) in &plan {
+            after.set_group_allocation(group, *level).unwrap();
+        }
+        assert_eq!(
+            after.commanded_total(),
+            9,
+            "the plan lowers the overspend as far as it may and no further"
+        );
+
+        // The other arm, and the reason the claim is conditional rather than
+        // simply false: when EVERY group bids there is nothing held outside the
+        // plan, and the same reactor does land inside the budget.
+        let all_bid: Vec<AllocationBid> = over
+            .iter()
+            .map(|(id, _)| bid(id.clone(), 4, 10, None))
+            .collect();
+        let mut after_all = over.clone();
+        for (group, level) in plan_allocation(&over, &all_bid) {
+            after_all.set_group_allocation(&group, level).unwrap();
+        }
+        assert_eq!(after_all.commanded_total(), MAX_COMMANDED_TOTAL);
     }
 }

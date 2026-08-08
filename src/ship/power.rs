@@ -886,7 +886,7 @@ fn publish_power_blackboard(
     let bb = PowerBlackboard {
         groups: entries,
         total: power.0.total(),
-        total_max: 8,
+        total_max: crate::modifiers::power_system::MAX_COMMANDED_TOTAL,
         battery_charge: power.0.battery_charge,
         battery_max: config.0.capacity,
         draining: power.0.is_draining(&config.0),
@@ -897,7 +897,7 @@ fn publish_power_blackboard(
     // coarse `Power` blackboard so downstream JS panels can pick either or both.
     let reactor_bb = PowerReactorBlackboard {
         total_allocation: power.0.total(),
-        max_allocation: 8,
+        max_allocation: crate::modifiers::power_system::MAX_COMMANDED_TOTAL,
         is_online: reactor_online,
         draining: power.0.is_draining(&config.0),
     };

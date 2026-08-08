@@ -270,25 +270,32 @@ shields = 5.0
 #
 # ── The eight-point budget, and why `shields` has no channel here ────────────
 #
-# `PowerSystem::increase` refuses past a COMMANDED TOTAL of 8 across all groups,
-# SILENTLY, and a refused level is dropped with no error while `emit_level` goes
-# on re-emitting it every tick. An Alliance hull authors four groups, so combat
-# stations has to fit inside
+# The reactor holds a COMMANDED TOTAL of 8 across all groups. An Alliance hull
+# authors four groups, so combat stations has to fit inside
 #
 #     ops 1  +  helm  +  weapons  +  shields  <=  8
 #
 # which the red-alert allocation below spends exactly: ops 1, helm 3, weapons 3,
-# shields 1 (its resting seed). There is deliberately NO `shields` channel in
-# this policy, and that is a budget decision rather than an oversight: every
-# point is already committed at combat stations, so a rule asking for shields 2
-# would be refused in silence and re-asked for ever. Raising shields is a HUMAN
-# Power officer's trade — take a point off helm or weapons and buy regen with it
-# — and, in the other direction, the `[power.battery_floor]` ladder gives the
-# group the protection an AI rule would have: on a failing battery shields is
-# the last thing cut and the first thing back.
+# shields 1 (its resting seed).
 #
-# A hull that wants an AI shields elevation has to find the point from one of the
-# three, not from the cap.
+# Since issue #959 the cap is spent, not merely hit. `ai_power_allocation` plans
+# every group's level together against the budget and hands the discretionary
+# points out in AUTHORED `priority` order (ties broken by the
+# `[power.battery_floor]` ladder above — a lower floor is a group this hull
+# keeps longer, so it is served first). A policy that asks for more than 8 no
+# longer has the surplus dropped in silence and re-asked for on every tick; it
+# is rationed, and the groups that lose out land as high as the budget reaches.
+# What that costs is still real, and it is the reason there is deliberately no
+# `shields` channel here: a rule asking for shields 2 would now take its point
+# OFF helm or weapons, at combat stations, on every hull that composes this
+# fragment. Raising shields stays a HUMAN Power officer's trade — take a point
+# off helm or weapons and buy regen with it — and, in the other direction, the
+# `[power.battery_floor]` ladder gives the group the protection an AI rule would
+# have: on a failing battery shields is the last thing cut.
+#
+# A hull that wants an AI shields elevation still has to find the point from one
+# of the three. It just no longer has to notice: the planner will take it, from
+# whichever group this file ranked lowest.
 [power.ai_policy.param]
 thrust_threshold = 0.7
 min_reserve_helm = 50.0

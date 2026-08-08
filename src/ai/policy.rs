@@ -495,6 +495,24 @@ fn best_in<'a>(
     params: &AiParams,
     flags: &[&FlagStore],
 ) -> Option<&'a AiPolicyVerb> {
+    best_rule_in(rules, channel, facts, memory, params, flags).map(|r| &r.verb)
+}
+
+/// The winning RULE on `channel`, not just its verb.
+///
+/// [`best_in`]'s body, one level down, so the two cannot diverge. A caller that
+/// needs the authored `priority` alongside the verb — issue #959's power-budget
+/// planner, which ranks the groups competing for the reactor's points by the
+/// priority their own hull file gave them — reads it here instead of
+/// re-implementing the scan.
+fn best_rule_in<'a>(
+    rules: &'a [AiPolicyRule],
+    channel: &str,
+    facts: &AiFacts,
+    memory: &AiPolicyMemory,
+    params: &AiParams,
+    flags: &[&FlagStore],
+) -> Option<&'a AiPolicyRule> {
     let mut best: Option<&AiPolicyRule> = None;
     for rule in rules {
         if rule.channel != channel {
@@ -509,7 +527,7 @@ fn best_in<'a>(
             _ => best = Some(rule),
         }
     }
-    best.map(|r| &r.verb)
+    best
 }
 
 impl AiPolicy {
@@ -541,6 +559,36 @@ impl AiPolicy {
             &self.params,
             flags,
         )
+    }
+
+    /// [`Self::resolve_channel`], plus the authored `priority` of the rule that
+    /// won (issue #959).
+    ///
+    /// Same scan, same guards, same tie-break — it IS the same scan — so this
+    /// can never disagree with `resolve_channel` about which verb wins. The
+    /// extra `i32` is for a caller that has to rank several channels' outputs
+    /// against each other rather than apply each in isolation: the power-budget
+    /// planner spends a fixed pool of reactor points across every power group,
+    /// and "which group gets the last point" has to be the hull's decision, so
+    /// it comes out of the hull's own `[[power.ai_policy.rule]] priority`.
+    pub fn resolve_channel_ranked(
+        &self,
+        channel: &str,
+        facts: &AiFacts,
+        flags: &[&FlagStore],
+    ) -> Option<(i32, &AiPolicyVerb)> {
+        if self.idle {
+            return None;
+        }
+        best_rule_in(
+            &self.rules,
+            channel,
+            facts,
+            &AiPolicyMemory::default(),
+            &self.params,
+            flags,
+        )
+        .map(|r| (r.priority, &r.verb))
     }
 
     /// The opt-in state machine, when this policy declares one (issue #882).

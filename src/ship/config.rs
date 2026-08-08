@@ -123,7 +123,15 @@ pub const fn default_power_level() -> u8 {
     2
 }
 
-fn default_min_power_level() -> u8 {
+/// The floor a `[power_groups.<id>]` entry gets when its hull authors no
+/// `min_level` — and the floor the allocation API clamps every group to, so it
+/// is also the lowest level ANY operator can command a group to.
+///
+/// `pub const` for the same reason as [`default_max_power_level`]: issue #959's
+/// budget planner needs "the lowest level this group could be commanded to"
+/// when it works out how much of the reactor budget is discretionary, and
+/// restating `1` there would let the two drift.
+pub const fn default_min_power_level() -> u8 {
     1
 }
 

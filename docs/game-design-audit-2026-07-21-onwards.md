@@ -205,7 +205,7 @@ Records live in-repo in:
 ### Per-group power allocation, reserve-guarded
 | Field | Value |
 |---|---|
-| **Decision** | Power is split into authored groups, each with a level by player or authored AI rules. Every rule's `when` guard must pass a minimum battery reserve before firing, so allocation never rises beyond what the battery sustains (no all-or-nothing emergency); reactor capped at 8 so elevating one group visibly costs another. *Audit resolution (2026-08-05): the AI should **see current available power** and prioritize which systems get points, never exceeding the max — budget-aware allocation, not silent cap-refusal-and-reemit.* *Audit note (2026-08-05): `fleet_baseline.toml`'s sensors-budget rationale ("SENSORS POWER IS WEAPON REACH") and the sensors rest-at-1 seeding are stale after the range-coupling revert above — re-author whichever sensors rules remain once sensors no longer scales phaser range.* **DONE (#955).** The rationale block is now "POWER BUYS DAMAGE, NOT REACH" and there are no `sensors` rules left to re-author — the channel is gone from `fleet_baseline.toml` and from `alliance_courier.toml`. The rest-at-1 seeding STAYS, and is now load-bearing in a new way: with no rule ever raising the group, every AI-crewed hull sits at ×0.667 acquisition permanently, so `[weapons_console.radar] range` has to be authored above the hull's longest gun. `alliance_battleship.toml` was not (75 × 0.667 = 50.0 against a 50.0 blaster and a 50.0 artillery envelope) and is now 100; pinned fleet-wide by `every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`. |
+| **Decision** | Power is split into authored groups, each with a level by player or authored AI rules. Every rule's `when` guard must pass a minimum battery reserve before firing, so allocation never rises beyond what the battery sustains (no all-or-nothing emergency); reactor capped at 8 so elevating one group visibly costs another. *Audit resolution (2026-08-05): the AI should **see current available power** and prioritize which systems get points, never exceeding the max — budget-aware allocation, not silent cap-refusal-and-reemit.* **DONE (#959).** `plan_allocation` spends the reactor's whole budget in one decision, capped by each group's authored `max_level` and rationed in authored `[[power.ai_policy.rule]] priority` order when the bids collide; the emitted plan always fits, so nothing is refused and nothing is re-emitted. *Audit note (2026-08-05): `fleet_baseline.toml`'s sensors-budget rationale ("SENSORS POWER IS WEAPON REACH") and the sensors rest-at-1 seeding are stale after the range-coupling revert above — re-author whichever sensors rules remain once sensors no longer scales phaser range.* **DONE (#955).** The rationale block is now "POWER BUYS DAMAGE, NOT REACH" and there are no `sensors` rules left to re-author — the channel is gone from `fleet_baseline.toml` and from `alliance_courier.toml`. The rest-at-1 seeding STAYS, and is now load-bearing in a new way: with no rule ever raising the group, every AI-crewed hull sits at ×0.667 acquisition permanently, so `[weapons_console.radar] range` has to be authored above the hull's longest gun. `alliance_battleship.toml` was not (75 × 0.667 = 50.0 against a 50.0 blaster and a 50.0 artillery envelope) and is now 100; pinned fleet-wide by `every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`. |
 | **File** | `pasm/spec/architecture/power-modifiers-regions.yaml`, `pasm/spec/design/power.yaml` |
 | **Date** | 2026-07-24 (refined 07-25) |
 
@@ -431,6 +431,22 @@ need implementation:
 4. **Budget-aware AI power allocation** — AI should see current available power and
    prioritize point distribution without exceeding the max, replacing the silent
    cap-refusal-and-reemit mechanism.
+   *DONE (#959).* `ai_power_allocation` no longer emits a group at a time. It collects
+   every group's bid — the winning rule's level and that rule's authored `priority`, the
+   group's `[power_groups.<id>] max_level`, and its rung on the hull's
+   `[power.battery_floor]` ladder — and `power_system::plan_allocation` spends the
+   reactor's commanded-total budget across them in one decision: un-bid groups reserved
+   at what they hold, each grant capped by the group's own ceiling, any shortfall
+   rationed in authored priority order (ties broken by the floor ladder, lowest floor
+   first), and decreases emitted ahead of the increases they pay for. The plan never rises
+   above the budget, and fits outright whenever the reactor was authored inside it — which
+   every shipped hull is — so nothing is refused and a settled ship emits nothing at all.
+   Priority is entirely data-authored: raising a `[[power.ai_policy.rule]] priority` is
+   what changes who gets the last point, and no Rust ordering can override it — the seed
+   order breaks only a tie the hull left identical on both authored keys. Note that
+   #952 had already fixed the half of the loop it could reach — comparing against the
+   COMMANDED rather than the effective level, so a floored group stopped being re-asked
+   for — but the budget half was untouched and is what this closes.
 5. **Arc-bearing family priority not global** — drop the fixed phasers>blasters>torpedoes
     default; family choice is doctrine-driven (e.g. torpedoes when target shields are down).
  6. **Torpedo-armed badge** — add a "torpedo-armed" badge on hostiles so players know a ship

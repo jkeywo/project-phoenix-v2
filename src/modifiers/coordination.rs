@@ -518,9 +518,10 @@ mod tests {
     ///      runtime's own order (`authored_power_group_seed`);
     ///   2. resolve every group's channel against the hull's own
     ///      `[power.ai_policy]` over a COMBAT-STATIONS fact snapshot, and apply
-    ///      the winning level through `set_group_allocation` — so the silent
-    ///      8-point total cap is exercised for real, in emission order, and a
-    ///      policy that asks for nine points fails here rather than in a duel;
+    ///      the winning level through `set_group_allocation` DIRECTLY, group by
+    ///      group, with no budget planning in between — so the 8-point total cap
+    ///      is exercised for real and a policy that asks for nine points fails
+    ///      here rather than in a duel;
     ///   3. translate that power state through `apply_power_modifiers_from_read_state`;
     ///   4. assert `ModifierSlot::PhaserDamage` is strictly ABOVE nominal — the
     ///      point #923 moved to `sensors` is back on `weapons`, and it buys
@@ -560,10 +561,17 @@ mod tests {
             );
             let mut power = PowerSystem::from_authored_groups(reactor.capacity, &seed);
 
-            // (2) Combat stations: red alert, a full battery, under way. The
-            // groups are walked in `power.iter()` order because that is the order
-            // `ai_power_allocation` emits in, and the total cap makes the order
-            // observable.
+            // (2) Combat stations: red alert, a full battery, under way.
+            //
+            // Deliberately the UNPLANNED walk — each channel resolved and
+            // applied on its own, in `power.iter()` order, with none of issue
+            // #959's budget planning. That is the point of this pin: since #959
+            // a policy that over-spends is RATIONED rather than refused, so a
+            // hull could quietly acquire a ninth point and still run. The
+            // assertion below is the authoring guard that says it must not need
+            // rationing at all — every shipped Alliance hull's combat-stations
+            // allocation has to fit the reactor as written, so the planner is
+            // never the thing deciding which of its groups goes without.
             let facts = crate::ship::power::seed_power_facts(
                 &power,
                 100.0, // battery_pct — above every authored reserve
@@ -588,9 +596,11 @@ mod tests {
                         wanted,
                         "{path}: the authored policy asked for `{}` = {wanted} at combat \
                          stations and the reactor's 8-point total cap refused it (total is \
-                         now {}). `PowerSystem::increase` fails SILENTLY, so a policy that \
-                         over-spends the budget ships as a group stuck at the wrong level \
-                         and a command re-emitted every tick for ever",
+                         now {}). Since issue #959 `ai_power_allocation` would ration this \
+                         rather than re-emit it for ever — so nothing would visibly break \
+                         in a duel, and this hull would simply fly with a group the \
+                         planner had quietly cut. Author the allocation to fit: take the \
+                         point off another group rather than off the cap",
                         id.0,
                         power.total()
                     );

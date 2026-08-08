@@ -80,13 +80,14 @@ entities:
       rationale:
         - "Issue #829: publish_tactical_radar_blackboard (SimSet::Publish) writes selected_target for every ship from that ship's TacticalRadarSelection component; blips/regions are computed for the LocalShip only. This system is the tactical radar authority and is the only reader of the live selection besides its writers (handle_set_target, ai_target_selection, kill-clears, revalidation, comms RemoveFactionEnemy) and debug_overlay."
         - "Spec-compliance follow-up: publish_weapons_core_blackboard, publish_phaser_bank_blackboards and compute_current_weapons_update were missed by #829 and still read the live TacticalRadarSelection. All three now read ViewscreenBlackboard.combat_lock, closing the last §3 breach. The two SimSet::Publish publishers therefore see last tick's lock (spec §1 one-tick lag); compute_current_weapons_update runs in SimSet::Broadcast, after the PublishAggregate aggregator, so it sees the current tick's."
+        - "Issue #957: each blip carries RadarBlip.torpedo_armed, the host's answer to whether this contact is a HOSTILE whose hull has torpedo tubes. Read off the contact's own live TorpedoSystemResource joined with crate::faction::is_enemy against the observing ship — the same faction predicate the helm hostile-arc overlay (#874) uses — so the client never infers weapon capability from a hull name, icon or model. It is CAPABILITY, not readiness: true with every tube unloaded and the magazine empty, and it does not promise a launch, which the world-scoped conservation gate (#943) can still refuse. Not scan-gated: the only gates are the ones the blip already passed (the radar's shows tag filter and its effective-range cull), which is the posture RadarBlip.threat_level, RadarBlip.description and RadarBlip.target_tags already take — they are authored hostile intel on the same struct, through the same two gates, with no third. Nor is it red-alert gated, unlike its nearest wire sibling HelmBlackboard.hostile_weapon_arcs (#874): arcs are live per-contact firing geometry carried as an extra channel, so gating them costs nothing until the crew is already fighting, whereas torpedo_armed is one static bit on a contact the radar has already drawn and is exactly the fact a crew needs BEFORE red alert. The wire carries the boolean only; gui/console-state.js foldTorpedoBadges resolves the console.radar.torpedo_armed string id into the badge text and gui/components/ph-tactical-radar.js draws it, because the copy is the client's and never crosses the localiseTree ingress boundary."
     architecture:
       classification: derived
       owner: tactical-weapons-controls
       derived_from: [weapons-target-state, radar-contact-projection-state]
     implementation:
       status: declared
-      paths: [src/console/weapons/blackboard.rs, src/core/messages.rs, gui/console-state.js]
+      paths: [src/console/weapons/blackboard.rs, src/core/messages.rs, gui/console-state.js, gui/components/ph-tactical-radar.js]
       symbols: [TacticalRadarBlackboard]
       tests: [cargo test, npx vitest run]
 

@@ -28,6 +28,10 @@ export class PhTacticalRadar extends HTMLElement {
       '.corner-label.top-left { top: 4%; left: 6%; }',
       '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
       '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
+      '#torpedo-badges text {',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: 3.2px;',
+      '  letter-spacing: 0.08em; fill: #e8c84a;',
+      '}',
       '</style>',
       '<div class="container">',
       '  <ph-radar id="inner-radar"></ph-radar>',
@@ -35,6 +39,7 @@ export class PhTacticalRadar extends HTMLElement {
       '    <g id="phaser-arcs"></g>',
       '    <g id="torpedo-arcs"></g>',
       '    <g id="selected-highlight"></g>',
+      '    <g id="torpedo-badges"></g>',
       '  </svg>',
       '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
       '  <div class="corner-label top-right" id="label-bearing">000°</div>',
@@ -100,6 +105,37 @@ export class PhTacticalRadar extends HTMLElement {
     this.#renderArcGroup(s.phaser_arcs || [], 'phaser-arcs', cx, cy, r, '#4ec870', 0.3);
     this.#renderArcGroup(s.torpedo_arcs || [], 'torpedo-arcs', cx, cy, r, '#e8c84a', 0.25);
     this.#renderHighlight(s, cx, cy, r);
+    this.#renderTorpedoBadges(s, cx, cy, r);
+  }
+
+  /**
+   * Torpedo-armed markers (issue #957): one short badge beside each hostile
+   * contact whose hull carries tubes, drawn BEFORE it fires so the crew can
+   * tell a torpedo boat from a phaser-only escort.
+   *
+   * The text is never composed here — it arrives on the blip as
+   * `torpedo_badge`, already resolved from a strings.csv id by
+   * `foldTorpedoBadges` in gui/console-state.js. A blip without the key draws
+   * nothing, so a server that sent no capability data badges nobody.
+   */
+  #renderTorpedoBadges(s, cx, cy, r) {
+    const g = this.shadowRoot.getElementById('torpedo-badges');
+    if (!g) return;
+    const badged = (s.blips || []).filter(b => b && b.torpedo_badge);
+    while (g.children.length > badged.length) g.removeChild(g.lastChild);
+    badged.forEach((b, i) => {
+      let label = g.children[i];
+      if (!label) {
+        label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        g.appendChild(label);
+      }
+      const bx = cx + (b.radar_x != null ? b.radar_x : 0) * r;
+      const by = cy - (b.radar_y != null ? b.radar_y : 0) * r;
+      label.setAttribute('x', (bx + 3).toFixed(1));
+      label.setAttribute('y', (by - 3).toFixed(1));
+      label.setAttribute('data-uuid', b.uuid || '');
+      label.textContent = b.torpedo_badge;
+    });
   }
 
   #wedgePath(cx, cy, r, facingDeg, arcDeg) {

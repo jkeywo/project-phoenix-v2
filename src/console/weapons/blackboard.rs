@@ -895,12 +895,29 @@ pub(crate) fn publish_weapons_core_blackboard(
 /// only, exactly as they were in `publish_weapons_core_blackboard` before this
 /// system took ownership. Reading the ship's own selection here is not a
 /// cross-system read: this system *is* the tactical radar authority (spec §3).
+///
+/// Issue #957 adds the per-blip torpedo-capability marker. The capability is
+/// read off the contact's own live [`TorpedoSystemResource`] — the very
+/// component the launch path consumes — never inferred from a hull name, model
+/// or icon, and it is resolved here rather than on the client because the
+/// client is never told what a hostile's hull carries.
+///
+/// Note what this publisher deliberately does NOT do: it applies no red-alert
+/// gate to `torpedo_armed`, even though the helm publisher gates
+/// `HelmBlackboard::hostile_weapon_arcs` on red alert. A blip that reaches this
+/// point has already passed the `shows` tag filter and the range cull, and it
+/// already carries ungated hostile intel (`threat_level`, `description`,
+/// `target_tags`) through those same two gates; the whole point of the badge is
+/// to be readable *before* the crew is at red alert. See
+/// [`RadarBlip::torpedo_armed`] for the full argument — do not add a third gate
+/// here on the assumption the arc overlay's gate applies.
 pub(crate) fn publish_tactical_radar_blackboard(
     mut ship_q: Query<
         (
             Option<&TacticalRadarSelection>,
             Option<&ShipPhysics>,
             Option<&crate::modifiers::ShipModifiers>,
+            Option<&crate::entities::spawner::FactionComponent>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
         ),
@@ -908,11 +925,29 @@ pub(crate) fn publish_tactical_radar_blackboard(
     >,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     world_res: Res<WorldResource>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    entity_q: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&TorpedoSystemResource>,
+        ),
+        Without<AsteroidUuid>,
+    >,
 ) {
-    for (weapons_target, ship_physics, modifiers, mut entity_bbs, is_local) in ship_q.iter_mut() {
+    let default_registry = crate::faction::FactionRegistry::default();
+    let registry = faction_registry
+        .as_deref()
+        .map(|r| &r.0)
+        .unwrap_or(&default_registry);
+
+    for (weapons_target, ship_physics, modifiers, self_faction, mut entity_bbs, is_local) in
+        ship_q.iter_mut()
+    {
         let physics = ship_physics.copied().unwrap_or_default();
+        let self_faction = self_faction.map(|f| f.0);
         let radar_range_mult = modifiers
             .map(|m| m.get(&ModifierSlot::RadarRange))
             .unwrap_or(1.0);
@@ -959,12 +994,21 @@ pub(crate) fn publish_tactical_radar_blackboard(
                         meta,
                         &shows,
                         &selects,
+                        // An asteroid has no tubes and no faction.
+                        false,
                     ) {
                         blips.push(b);
                     }
                 }
-                for (uuid_comp, transform) in entity_q.iter() {
+                for (uuid_comp, transform, faction, torpedoes) in entity_q.iter() {
                     let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
+                    // Capability, not readiness (issue #957): a hull with tubes
+                    // is torpedo-armed whether or not any tube happens to be
+                    // loaded this tick. Hostile-only, on the same faction
+                    // predicate the helm's hostile-arc overlay uses, so a
+                    // friendly torpedo boat and this ship itself never badge.
+                    let torpedo_armed = torpedoes.is_some_and(|t| !t.0.tubes.is_empty())
+                        && crate::faction::is_enemy(self_faction, faction.map(|f| f.0), registry);
                     if let Some(b) = project_blip(
                         &uuid_comp.0,
                         transform.translation.x,
@@ -976,6 +1020,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
                         meta,
                         &shows,
                         &selects,
+                        torpedo_armed,
                     ) {
                         blips.push(b);
                     }
@@ -1232,6 +1277,12 @@ pub(crate) fn publish_torpedo_magazine_blackboard(
 /// `meta` supplies the full [`EntitySnapshot`] for richer blip data
 /// (icon name, colour tint, objective flag, display name). Pass `None`
 /// for dynamically-spawned entities not yet in `WorldResource`.
+///
+/// `torpedo_armed` is the caller's already-resolved answer to "is this a hostile
+/// with tubes" (issue #957) — it needs the observing ship's faction and the
+/// contact's live `TorpedoSystemResource`, neither of which is in the static
+/// world registry `meta` comes from, so it is passed in rather than derived
+/// here. See [`RadarBlip::torpedo_armed`].
 fn project_blip(
     uuid: &str,
     wx: f32,
@@ -1243,6 +1294,7 @@ fn project_blip(
     meta: Option<&crate::messages::EntitySnapshot>,
     shows: &[crate::entity_tags::EntityTag],
     selects: &[crate::entity_tags::EntityTag],
+    torpedo_armed: bool,
 ) -> Option<RadarBlip> {
     let raw_tags: &[String] = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
     let radius: f32 = meta.and_then(|e| e.radius).unwrap_or(0.0);
@@ -1328,6 +1380,7 @@ fn project_blip(
         threat_level,
         description,
         target_tags: target_tags_raw.to_vec(),
+        torpedo_armed,
     })
 }
 

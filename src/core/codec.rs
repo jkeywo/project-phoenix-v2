@@ -2723,6 +2723,7 @@ mod tests {
             threat_level: Some("medium".into()),
             description: Some("A pirate vessel".into()),
             target_tags: vec!["ship".into(), "pirate".into()],
+            torpedo_armed: true,
         };
         let json = serde_json::to_string(&blip).unwrap();
         let decoded: RadarBlip = serde_json::from_str(&json).unwrap();
@@ -2730,6 +2731,7 @@ mod tests {
         assert!(json.contains("\"icon\":\"ship\""), "got: {json}");
         assert!(json.contains("\"objective_target\":true"), "got: {json}");
         assert!(json.contains("\"name\":\"Pirate Raider\""), "got: {json}");
+        assert!(json.contains("\"torpedo_armed\":true"), "got: {json}");
     }
 
     #[test]
@@ -2741,6 +2743,10 @@ mod tests {
         assert_eq!(blip.color, [0.0, 0.0, 0.0]);
         assert!(!blip.objective_target);
         assert!(blip.name.is_none());
+        // Issue #957: an old payload carries no capability claim, and the
+        // absence must read as "not known to be torpedo-armed" rather than
+        // badging every legacy contact.
+        assert!(!blip.torpedo_armed);
     }
 
     #[test]

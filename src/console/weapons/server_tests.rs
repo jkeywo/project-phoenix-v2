@@ -5953,6 +5953,121 @@ fn asteroid_beyond_tactical_range_not_in_blips() {
     );
 }
 
+// ── Torpedo-armed contact marker (issue #957) ──────────────────────────
+
+/// Put a single ship-tagged contact in the world registry and configure the
+/// tactical radar to show ships. The registry entry is what carries the tags
+/// `project_blip` filters on, so a contact with no entry never blips at all.
+fn setup_ship_contact_world(app: &mut App, uuid: &str, x: f32, z: f32) {
+    {
+        let mut cfg = app
+            .world_mut()
+            .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
+        cfg.0.tactical_radar_shows = vec!["ship".into()];
+        cfg.0.tactical_radar_range = 300.0;
+    }
+    let mut snapshot = crate::messages::EntitySnapshot::asteroid(uuid, x, z, 2.0);
+    snapshot.tags = vec!["ship".into()];
+    snapshot.radar_icon = Some("ship".into());
+    snapshot.name = Some("entity.contact.name".into());
+    app.world_mut()
+        .insert_resource(WorldResource(crate::messages::WorldData {
+            entities: vec![snapshot],
+            ..Default::default()
+        }));
+}
+
+/// A torpedo system with tubes but NOTHING ready: every tube unloaded and the
+/// magazine empty. Capability without readiness is exactly the state the badge
+/// must still report, so the fixture starts there rather than in a firing state.
+fn cold_torpedo_system() -> crate::weapons_plugin::TorpedoSystemResource {
+    let mut system = crate::torpedo::TorpedoSystem::new(crate::torpedo::TorpedoConfig::default());
+    system.torpedoes_remaining = 0;
+    assert!(
+        !system.tubes.is_empty(),
+        "fixture must actually carry tubes or the test asserts nothing"
+    );
+    crate::weapons_plugin::TorpedoSystemResource(system)
+}
+
+fn blip_for<'a>(blips: &'a [RadarBlip], uuid: &str) -> &'a RadarBlip {
+    blips
+        .iter()
+        .find(|b| b.uuid == uuid)
+        .unwrap_or_else(|| panic!("no blip for {uuid}; got {blips:?}"))
+}
+
+#[test]
+fn hostile_with_torpedo_tubes_is_torpedo_armed_before_it_fires() {
+    let mut app = test_app();
+    let contact = "cc000000-0000-0000-0000-000000000957";
+    setup_ship_contact_world(&mut app, contact, 0.0, -50.0);
+    start_game(&mut app);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    app.world_mut().spawn((
+        crate::simulation::Ship,
+        crate::entity_spawner::EntityUuid(contact.into()),
+        Transform::from_xyz(0.0, 0.0, -50.0),
+        FactionComponent(federation_faction()),
+        cold_torpedo_system(),
+    ));
+    tick(&mut app);
+
+    let blips = tactical_blips(&mut app);
+    assert!(
+        blip_for(&blips, contact).torpedo_armed,
+        "a hostile hull with tubes is torpedo-armed even with every tube \
+         unloaded and an empty magazine — the badge is capability, not readiness"
+    );
+}
+
+#[test]
+fn hostile_without_torpedo_tubes_is_not_torpedo_armed() {
+    let mut app = test_app();
+    let contact = "cc000000-0000-0000-0000-000000000958";
+    setup_ship_contact_world(&mut app, contact, 0.0, -50.0);
+    start_game(&mut app);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    // A phaser-only escort carries no TorpedoSystemResource at all.
+    app.world_mut().spawn((
+        crate::simulation::Ship,
+        crate::entity_spawner::EntityUuid(contact.into()),
+        Transform::from_xyz(0.0, 0.0, -50.0),
+        FactionComponent(federation_faction()),
+    ));
+    tick(&mut app);
+
+    let blips = tactical_blips(&mut app);
+    assert!(
+        !blip_for(&blips, contact).torpedo_armed,
+        "a hostile with no torpedo system must not badge as torpedo-armed"
+    );
+}
+
+#[test]
+fn a_non_hostile_torpedo_boat_is_not_torpedo_armed() {
+    let mut app = test_app();
+    let contact = "cc000000-0000-0000-0000-000000000959";
+    setup_ship_contact_world(&mut app, contact, 0.0, -50.0);
+    start_game(&mut app);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    // Same faction as the observing ship: torpedo tubes, but not a threat.
+    app.world_mut().spawn((
+        crate::simulation::Ship,
+        crate::entity_spawner::EntityUuid(contact.into()),
+        Transform::from_xyz(0.0, 0.0, -50.0),
+        FactionComponent(harrow_faction()),
+        cold_torpedo_system(),
+    ));
+    tick(&mut app);
+
+    let blips = tactical_blips(&mut app);
+    assert!(
+        !blip_for(&blips, contact).torpedo_armed,
+        "the marker names HOSTILE torpedo boats; a friendly one must not badge"
+    );
+}
+
 // ── Tactical AI tests ──────────────────────────────────────────────────
 
 /// Set the ControlSource for every tactical fine system on the LocalShip.

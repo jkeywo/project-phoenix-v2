@@ -105,6 +105,46 @@ describe('PhTacticalRadar', () => {
     expect(el.shadowRoot.getElementById('phaser-arcs')).toBeDefined();
     expect(el.shadowRoot.getElementById('torpedo-arcs')).toBeDefined();
     expect(el.shadowRoot.getElementById('selected-highlight')).toBeDefined();
+    expect(el.shadowRoot.getElementById('torpedo-badges')).toBeDefined();
+  });
+
+  // ── Torpedo-armed marker (issue #957) ──────────────────────────────────────
+
+  it('draws a torpedo-armed badge beside a contact the state marked, before it fires', () => {
+    const { el } = setup();
+    // radar_x=0, radar_y=0.5 → bx = 50 + 0*46 = 50, by = 50 - 0.5*46 = 27
+    el.state = {
+      blips: [
+        { uuid: 'torp-boat', radar_x: 0, radar_y: 0.5, torpedo_badge: t('console.radar.torpedo_armed') },
+      ],
+    };
+    const labels = el.shadowRoot.getElementById('torpedo-badges').querySelectorAll('text');
+    expect(labels.length).toBe(1);
+    expect(labels[0].textContent).toBe(t('console.radar.torpedo_armed'));
+    expect(labels[0].getAttribute('data-uuid')).toBe('torp-boat');
+    expect(labels[0].getAttribute('x')).toBe('53.0');
+    expect(labels[0].getAttribute('y')).toBe('24.0');
+  });
+
+  it('badges only the contacts the state flagged', () => {
+    const { el } = setup();
+    el.state = {
+      blips: [
+        { uuid: 'phaser-boat', radar_x: 0.2, radar_y: 0.2 },
+        { uuid: 'torp-boat', radar_x: 0, radar_y: 0.5, torpedo_badge: 'TORP' },
+      ],
+    };
+    const labels = el.shadowRoot.getElementById('torpedo-badges').querySelectorAll('text');
+    expect(labels.length).toBe(1);
+    expect(labels[0].getAttribute('data-uuid')).toBe('torp-boat');
+  });
+
+  it('clears badges when the contact is gone from a later state', () => {
+    const { el } = setup();
+    el.state = { blips: [{ uuid: 'torp-boat', radar_x: 0, radar_y: 0.5, torpedo_badge: 'TORP' }] };
+    expect(el.shadowRoot.getElementById('torpedo-badges').children.length).toBe(1);
+    el.state = { blips: [] };
+    expect(el.shadowRoot.getElementById('torpedo-badges').children.length).toBe(0);
   });
 
   it('passes base state through to inner ph-radar', () => {

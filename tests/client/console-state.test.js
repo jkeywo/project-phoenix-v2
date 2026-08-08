@@ -10,6 +10,7 @@ import {
   aggregateStationHull,
   repairCoreAndTargets,
   torpSlotStates,
+  foldTorpedoBadges,
   buildWeaponsConsoleState,
   buildCaptainConsoleState,
   buildHelmConsoleState,
@@ -341,6 +342,36 @@ function parse(jsonStr) {
 
 const EMPTY = {};
 
+// ── foldTorpedoBadges (issue #957) ──────────────────────────────────────────
+
+describe('foldTorpedoBadges', () => {
+  it('adds the badge text from the string table, never a hardcoded literal', () => {
+    const [out] = foldTorpedoBadges([{ uuid: 'a', torpedo_armed: true }]);
+    expect(out.torpedo_badge).toBe(t('console.radar.torpedo_armed'));
+    // The id, not the English, is the contract — assert the row exists rather
+    // than pinning the copy, which a human may unbracket at any time.
+    expect(getTable().has('console.radar.torpedo_armed')).toBe(true);
+  });
+
+  it('does not mutate the server-owned blip it was handed', () => {
+    const serverBlip = { uuid: 'a', torpedo_armed: true };
+    foldTorpedoBadges([serverBlip]);
+    expect(serverBlip.torpedo_badge).toBeUndefined();
+  });
+
+  it('passes an unflagged blip through untouched', () => {
+    const plain = { uuid: 'b', kind: 'asteroid' };
+    const [out] = foldTorpedoBadges([plain]);
+    expect(out).toBe(plain);
+    expect(out).not.toHaveProperty('torpedo_badge');
+  });
+
+  it('tolerates an absent or empty blip list', () => {
+    expect(foldTorpedoBadges(undefined)).toEqual([]);
+    expect(foldTorpedoBadges([])).toEqual([]);
+  });
+});
+
 describe('buildWeaponsConsoleState', () => {
   it('returns valid JSON', () => {
     expect(() => parse(buildWeaponsConsoleState(EMPTY))).not.toThrow();
@@ -499,6 +530,42 @@ describe('buildWeaponsConsoleState', () => {
     buildWeaponsConsoleState(state);
     buildWeaponsConsoleState(state);
     expect(state.weaponsBlips.length).toBe(1);
+  });
+
+  // ── Torpedo-armed badge fold-in (issue #957) ──────────────────────────────
+  //
+  // The capability is the SERVER's (`torpedo_armed` on the blip); the builder
+  // only turns it into display text. These assert both halves: that the fold
+  // happens, and that it never invents a capability the server did not send.
+
+  it('folds the server torpedo_armed fact into a localised badge on the blip', () => {
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: {
+        'tactical-radar': {
+          blips: [
+            { uuid: 'torp-boat', radar_x: 0.1, radar_y: 0.2, scaled_radius: 0.02, kind: 'ship', torpedo_armed: true },
+          ],
+        },
+      },
+    }));
+    const badged = s.blips.find(b => b.uuid === 'torp-boat');
+    expect(getTable().has('console.radar.torpedo_armed')).toBe(true);
+    expect(badged.torpedo_badge).toBe(t('console.radar.torpedo_armed'));
+  });
+
+  it('leaves a contact the server did not flag without a badge', () => {
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: {
+        'tactical-radar': {
+          blips: [
+            { uuid: 'phaser-boat', radar_x: 0.1, radar_y: 0.2, scaled_radius: 0.02, kind: 'ship' },
+            { uuid: 'rock', radar_x: -0.3, radar_y: 0, scaled_radius: 0.01, kind: 'asteroid', torpedo_armed: false },
+          ],
+        },
+      },
+    }));
+    expect(s.blips.find(b => b.uuid === 'phaser-boat').torpedo_badge).toBeUndefined();
+    expect(s.blips.find(b => b.uuid === 'rock').torpedo_badge).toBeUndefined();
   });
 
   it('surfaces volley fields from tubes (issue #632)', () => {

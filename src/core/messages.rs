@@ -2292,8 +2292,10 @@ pub struct ViewscreenHudState {
 ///
 /// Positions are normalised to `[-1.0, 1.0]` where ±1.0 = the effective
 /// tactical radar range (base `tactical_radar_range` × `RadarRange` modifier).
-/// Produced server-side by `publish_weapons_core_blackboard` from live ECS
+/// Produced server-side by `publish_tactical_radar_blackboard` from live ECS
 /// transforms joined with the static world entity registry for tags/radius.
+/// (It was `publish_weapons_core_blackboard` until issue #829 moved the blips
+/// and regions onto the `tactical-radar` blackboard.)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RadarBlip {
     /// Stable entity UUID — matches `EntitySnapshot::uuid`. Used to correlate
@@ -2342,6 +2344,42 @@ pub struct RadarBlip {
     /// Targetability tags from the entity's `[target]` section.
     #[serde(default)]
     pub target_tags: Vec<String>,
+    /// `true` when this contact is a HOSTILE whose hull carries at least one
+    /// torpedo tube (issue #957). The tactical console badges these so the crew
+    /// can tell a torpedo boat from a phaser-only escort *before* the first
+    /// torpedo is in flight.
+    ///
+    /// This is a CAPABILITY, not a readiness reading: it is `true` for a hull
+    /// with tubes even when every tube is unloaded and the magazine is empty,
+    /// and it does not promise a launch — the world-scoped torpedo conservation
+    /// gate (issue #943) can still refuse one from a fully-armed hull. Readiness
+    /// flickers tick to tick; what a helm needs to plan around is whether that
+    /// bird has tubes at all.
+    ///
+    /// Hostility is resolved server-side against the observing ship's faction
+    /// (`crate::faction::is_enemy`), the same predicate the helm's hostile-arc
+    /// overlay uses, so a friendly torpedo boat — and the player's own ship —
+    /// never badges itself.
+    ///
+    /// Not scan-gated. The precedent is local to this struct: [`Self::threat_level`],
+    /// [`Self::description`] and [`Self::target_tags`] are already authored
+    /// hostile intel shipped through exactly the two gates this field passes —
+    /// the tactical radar's `shows` tag filter and its effective-range cull —
+    /// and there is no third gate for any of them.
+    ///
+    /// **And deliberately not red-alert gated**, unlike its nearest wire
+    /// sibling [`HelmBlackboard::hostile_weapon_arcs`]. The difference is what
+    /// the two carry. Arcs are live per-contact firing geometry that swings as
+    /// the hostile manoeuvres, bolted onto the helm blackboard as an extra
+    /// channel of its own, so gating them costs the crew nothing until they are
+    /// already fighting. `torpedo_armed` is one static bit about a contact the
+    /// tactical radar has *already* drawn, next to three other ungated intel
+    /// fields on the same blip — and it is precisely the fact a crew needs
+    /// *before* the shooting starts, which is the wrong side of a red-alert
+    /// gate. Gating it would withhold nothing `threat_level` does not already
+    /// give away.
+    #[serde(default)]
+    pub torpedo_armed: bool,
 }
 
 /// A radar overlay region drawn as a coloured shape on the Tactical radar.

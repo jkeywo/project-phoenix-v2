@@ -649,6 +649,7 @@ console.repair.core,"Repair target for the ship's core (systems owned by no stat
 console.repair.footer_status,"repair console footer — hull percent and repair-team activity. {pct} is hull percent; {active} of {total} teams are working","[{pct}% HULL · {active}/{total} ACTIVE]"
 console.radar.science_target,"Radar blip label for the science-locked target","SCIENCE TARGET"
 console.radar.tactical_target,"Radar blip label for the tactical-locked target","TACTICAL TARGET"
+console.radar.torpedo_armed,"Tactical radar badge drawn beside a hostile contact whose hull carries torpedo tubes. A capability warning shown before that contact fires, not a launch warning. Sits next to a blip, so keep it very short","[TORP]"
 station.captain.name,"Captain station display name (station ids stay English in TOML)","Captain"
 station.helm.name,"Helm station display name","Helm"
 station.tactical.name,"Tactical station display name","Tactical"

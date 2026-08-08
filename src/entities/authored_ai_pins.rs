@@ -208,6 +208,10 @@ fn authored_policies(c: &EntityConfig) -> Vec<(String, FineSystemAiConfigToml)> 
         "torpedo_magazine",
         c.torpedoes.as_ref().and_then(|t| t.ai.as_ref()),
     );
+    push(
+        "weapons_doctrine",
+        c.weapons_console.as_ref().and_then(|x| x.ai.as_ref()),
+    );
     // `push` borrows `out` mutably; the per-weapon loops below need it again.
     let _ = push;
     for bank in c.weapons_console.iter().flat_map(|w| w.phaser_banks.iter()) {
@@ -443,6 +447,23 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // threshold.
     ("ship_harrow_cruiser", "phaser_bank[fore]"),
     ("ship_harrow_cruiser", "phaser_bank[aft]"),
+    // ── The one hull that presents a different gun (issue #956) ──────────────
+    //
+    // Which weapon family a ship TURNS TO BRING TO BEAR used to be a Rust array
+    // — `[Phasers, Blasters, Torpedoes]` in `tick_weapons_arc_request` — and is
+    // now `[weapons_console.ai]`, three rank channels naming a family each. The
+    // fleet baseline authors that same order unconditionally, so nothing about
+    // how the fleet flies moved with the decision.
+    //
+    // This hull is the departure and it is the issue's own worked example:
+    // while the arc a round from it would strike is not blocking, the family
+    // worth turning for is its 24-degree bow TUBES, and it falls back to the
+    // fleet order term for term once the gap closes. That conditional is the
+    // whole reason the order stopped being a constant, so it is exactly the
+    // regression this list exists to catch: a doctrine that quietly collapsed
+    // back onto the baseline would still validate, still spawn, still fly its
+    // ring — and would simply never present its tubes again.
+    ("ship_harrow_cruiser", "weapons_doctrine"),
     ("ship_harrow_destroyer", "blaster_bank[harrow-lance-port]"),
     (
         "ship_harrow_destroyer",
@@ -531,7 +552,7 @@ fn is_bespoke(hull: &str, slot: &str) -> bool {
 
 /// **The replacement for the deleted not-equal-to-the-synthesiser assertion.**
 ///
-/// For every one of the fourteen policy kinds: the hulls NOT on
+/// For every one of the fifteen policy kinds: the hulls NOT on
 /// [`BESPOKE_DOCTRINES`] must all author the identical configuration (that is
 /// the fleet baseline), and every hull that IS on the list must differ from it.
 #[test]
@@ -615,7 +636,7 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
          anything."
     );
 
-    // The fourteen policy kinds are all represented, so no kind slipped out of
+    // The fifteen policy kinds are all represented, so no kind slipped out of
     // the comparison by having no authored block anywhere.
     let kinds: Vec<&str> = kinds_seen.keys().map(|s| s.as_str()).collect();
     assert_eq!(
@@ -635,8 +656,9 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
             "torpedo_magazine",
             "torpedo_tube",
             "vertical",
+            "weapons_doctrine",
         ],
-        "all fourteen policy kinds must be authored somewhere in the fleet, or a kind \
+        "all fifteen policy kinds must be authored somewhere in the fleet, or a kind \
          is being compared against nothing"
     );
 }
@@ -2690,8 +2712,18 @@ fn weapons_fire_guard_truth_table() {
              `fact(red_alert)` is seeded 1/0, so anything else would not be a gate."
         );
 
+        // `target_facing_shields` rides along for the torpedo row and is inert
+        // for the two beam ones: since issue #956 the tube's launch guard also
+        // requires the striking arc to be down, so a snapshot carrying only the
+        // alert would hold for a reason this row is not about. Its own truth
+        // table is `torpedo_launch_shield_gate_truth_table` below.
         assert_eq!(
-            resolve(&p, channel, &facts(&[("red_alert", 1.0)])).as_ref(),
+            resolve(
+                &p,
+                channel,
+                &facts(&[("red_alert", 1.0), ("target_facing_shields", 0.0)])
+            )
+            .as_ref(),
             Some(want),
             "{kind}/{channel}: red alert raised ⇒ fire. Every readiness gate the \
              host owns (cooldown, range, arc, target validity) has already passed \
@@ -2782,6 +2814,238 @@ fn weapons_fire_guard_truth_table() {
             Some(AiPolicyVerb::FirePhaser),
             "the Harrow fires with the alert up OR down — it has no captain to \
              raise one, and the threshold of 0 is how the hull says so."
+        );
+    }
+}
+
+/// **The weapon-family arc order, now that it is content (issue #956) — the
+/// FALLBACK half.**
+///
+/// `tick_weapons_arc_request` used to choose which family to turn for from a
+/// Rust array, `[Phasers, Blasters, Torpedoes]`. The fleet baseline authors
+/// exactly that order, unconditionally, so a hull with no preference of its own
+/// resolves the AUTHORED baseline rather than an inline constant — which is the
+/// issue's third acceptance criterion.
+///
+/// Resolved through the REAL host helper over the REAL shipped block, so this
+/// is the order ships actually fly, and it is asserted on an EMPTY fact snapshot
+/// as well: the baseline must not depend on a reading that might be absent, or
+/// the fleet would silently stop turning its guns onto anything (the #779
+/// failure mode).
+#[test]
+fn the_fleet_baseline_arc_order_is_the_authored_one() {
+    use crate::messages::WeaponFamily::{Blasters, Phasers, Torpedoes};
+    let p = fleet_baseline_policy("weapons_doctrine");
+    let order =
+        |snapshot: &AiFacts| crate::weapons_plugin::resolve_arc_bearing_order(&p, snapshot, &[]);
+
+    assert_eq!(
+        order(&facts(&[])),
+        vec![Phasers, Blasters, Torpedoes],
+        "the fleet baseline is the pre-#956 Rust order, authored — and it resolves \
+         with NO facts at all, so a hull that has not yet seen a target still knows \
+         which gun it would rather present."
+    );
+    for hp in [-10.0, 0.0, 40.0] {
+        assert_eq!(
+            order(&facts(
+                &[("target_facing_shields", hp), ("red_alert", 1.0),]
+            )),
+            vec![Phasers, Blasters, Torpedoes],
+            "target_facing_shields = {hp}: the BASELINE is unconditional. Reordering \
+             on the target's screen is a doctrine a hull opts into (see \
+             `the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap`), not \
+             something the fleet does by default — that is what makes the departure \
+             below a departure."
+        );
+    }
+}
+
+/// **…and the DOCTRINE half: "torpedoes when the target's shields are down".**
+///
+/// The issue's worked example, on the one shipped hull that authors it. The
+/// Harrow cruiser fights with two 24-degree bow tubes; nothing but a deliberate
+/// turn ever puts them on a target, so while the arc a round would strike is not
+/// blocking, the family worth asking Helm to present is the TUBES.
+///
+/// Both directions, and the second is the one that matters: with the screen back
+/// up the hull resolves the fleet baseline TERM FOR TERM, so the doctrine is a
+/// conditional promotion rather than a permanently different ship.
+#[test]
+fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
+    use crate::messages::WeaponFamily::{Blasters, Phasers, Torpedoes};
+    let hull = entity("ship_harrow_cruiser");
+    let p = policy(
+        hull.weapons_console
+            .as_ref()
+            .expect("the Harrow cruiser carries weapons")
+            .ai
+            .as_ref()
+            .expect("…and authors `[weapons_console.ai]`"),
+    );
+    let order = |hp: f64| {
+        crate::weapons_plugin::resolve_arc_bearing_order(
+            &p,
+            &facts(&[("target_facing_shields", hp), ("red_alert", 1.0)]),
+            &[],
+        )
+    };
+
+    assert_eq!(
+        order(0.0),
+        vec![Torpedoes, Phasers],
+        "the striking arc is DOWN ⇒ the hull turns for its tubes first, then its \
+         beams. The third rank names the tubes again and the host drops the repeat, \
+         which is what keeps the baseline rules underneath authorable unchanged."
+    );
+    assert_eq!(
+        order(-10.0),
+        vec![Torpedoes, Phasers],
+        "an arc driven past zero is still a gap — the guard is `<= 0`, the same \
+         comparison the tubes' own launch predicate uses, over the same per-arc HP \
+         reading."
+    );
+    assert_eq!(
+        order(40.0),
+        vec![Phasers, Blasters, Torpedoes],
+        "the screen is UP ⇒ the fleet baseline, term for term. Without this row the \
+         hull could be flying a third order nobody wrote down; with it, the \
+         departure is exactly the promotion and nothing else."
+    );
+    assert_eq!(
+        crate::weapons_plugin::resolve_arc_bearing_order(&p, &facts(&[]), &[]),
+        vec![Phasers, Blasters, Torpedoes],
+        "with NO striking-arc reading at all the promotion's guard reads false and \
+         the hull falls back to the baseline. The doctrine fails CLOSED, so a \
+         misspelled fact name costs the hull its bow-tube opening rather than \
+         wedging it permanently onto the tubes."
+    );
+    assert_ne!(
+        order(0.0),
+        crate::weapons_plugin::resolve_arc_bearing_order(
+            &fleet_baseline_policy("weapons_doctrine"),
+            &facts(&[("target_facing_shields", 0.0), ("red_alert", 1.0)]),
+            &[],
+        ),
+        "…and on the SAME snapshot the fleet baseline resolves something else \
+         entirely, which is what makes this hull's BESPOKE_DOCTRINES entry mean \
+         something rather than restating the default."
+    );
+}
+
+/// **The torpedo shields-down gate, now that it is content (issue #956).**
+///
+/// `auto_fire_torpedo` used to open with
+/// `if !target_locked || target_facing_shields > 0 { return vec![] }`. That
+/// second clause is the fleet's entire torpedo doctrine — "phasers strip the
+/// shields, torpedoes finish the hull" — and it sat in Rust, unconditionally,
+/// UPSTREAM of every authored policy: a tube's `torpedo_launch` guard could only
+/// ever narrow it (AND), never authorise a round while the striking arc was up
+/// and never retune the threshold. #956 deleted the clause and every armed tube
+/// in the fleet now authors it.
+///
+/// This is the truth table that guarantees the move cost nothing, and it is
+/// stronger than what it replaced (four `auto_fire_torpedo` unit tests over a
+/// hand-built input): it runs the REAL shipped policy, on both sides of the
+/// fleet, over the same per-arc HP reading `seed_torpedo_tube_launch_facts`
+/// seeds — so a hull that quietly dropped the clause fails here, and so does one
+/// whose guard reads a fact name nobody seeds.
+///
+/// The `<= 0` threshold is read as a literal rather than a `param`, because that
+/// is how the shipped content authors it — the two Harrow doctrines have carried
+/// it as a literal since #791, and the baseline now matches them. It is still a
+/// designer's lever: it is one number in a TOML guard.
+#[test]
+fn torpedo_launch_shield_gate_truth_table() {
+    // (label, the hull's tube policy). The baseline hull holds fire until its
+    // captain calls the alert; the Harrow warhawk is always armed, so the two
+    // together show the shield clause is independent of the alert clause.
+    let baseline = fleet_baseline_policy("torpedo_tube");
+    let warhawk = entity("ship_harrow_warhawk");
+    let warhawk_tube = policy(
+        warhawk
+            .torpedoes
+            .as_ref()
+            .expect("the warhawk carries tubes")
+            .tubes
+            .first()
+            .expect("…at least one")
+            .ai
+            .as_ref()
+            .expect("every shipped tube authors a policy"),
+    );
+
+    for (hull, p) in [
+        ("the fleet baseline", &baseline),
+        ("the warhawk", &warhawk_tube),
+    ] {
+        let alert = param(p, "min_alert_to_fire");
+        // The other conjuncts each hull's own doctrine adds (`tubes_full`,
+        // `loaded`, `in_arc`) are seeded favourable throughout, so the ONLY
+        // thing moving between the rows below is the striking arc.
+        let snapshot = |hp: f64| {
+            facts(&[
+                ("red_alert", alert.max(1.0)),
+                ("tubes_full", 1.0),
+                ("loaded", 1.0),
+                ("in_arc", 1.0),
+                ("target_facing_shields", hp),
+            ])
+        };
+
+        assert_eq!(
+            resolve(p, "torpedo_launch", &snapshot(0.0)).as_ref(),
+            Some(&AiPolicyVerb::LaunchTorpedo),
+            "{hull}: the striking arc is DOWN ⇒ launch. A target with no shield \
+             arcs at all (asteroid, debris, unshielded NPC) reads 0 through the \
+             same fact and is torpedo-eligible for the same reason."
+        );
+        assert_eq!(
+            resolve(p, "torpedo_launch", &snapshot(-5.0)).as_ref(),
+            Some(&AiPolicyVerb::LaunchTorpedo),
+            "{hull}: an arc driven PAST zero is still down — the comparison is \
+             `<= 0`, not `== 0`."
+        );
+        assert_eq!(
+            resolve(p, "torpedo_launch", &snapshot(50.0)),
+            None,
+            "{hull}: the striking arc is UP ⇒ hold, with every other reading \
+             favourable and the alert raised. This is the half that makes the \
+             rows above mean something: without it the gate would be gone rather \
+             than moved, and an AI crew would empty its magazine into a healthy \
+             screen."
+        );
+        // A SECOND healthy reading, well clear of the first: the guard is a
+        // comparison against zero, not a match on one number, so a fatter arc
+        // holds the shot for the same reason a thin one does.
+        //
+        // Note what this table deliberately does NOT claim. The policy sees one
+        // already-resolved scalar, so WHICH arc that number came from is not a
+        // question it can be asked, and no row here can prove the reading is
+        // per-arc. That is the HOST's half, pinned end to end by
+        // `console::weapons::server_tests::
+        // ai_torpedo_auto_fire_gates_on_the_arc_the_torpedo_would_strike`.
+        assert_eq!(
+            resolve(p, "torpedo_launch", &snapshot(120.0)),
+            None,
+            "{hull}: a healthy arc holds the shot at any HP — the guard compares \
+             against zero rather than matching a particular reading."
+        );
+        assert_eq!(
+            resolve(
+                p,
+                "torpedo_launch",
+                &facts(&[
+                    ("red_alert", alert.max(1.0)),
+                    ("tubes_full", 1.0),
+                    ("loaded", 1.0),
+                    ("in_arc", 1.0),
+                ])
+            ),
+            None,
+            "{hull}: with NO striking-arc reading at all the comparison reads \
+             false and the tube holds. The gate fails CLOSED, so a typo in the \
+             fact name cannot turn a doctrine into an ungated launcher (#779)."
         );
     }
 }
@@ -2932,12 +3196,14 @@ fn an_unknown_channel_resolves_to_nothing_on_every_authored_policy() {
         }
     }
     assert_eq!(
-        checked, 127,
-        "the fourteen policy kinds account for 127 of the fleet's 172 AI-capable \
+        checked, 136,
+        "the fifteen policy kinds account for 136 of the fleet's 181 AI-capable \
          fine-system slots (the other 45 are the selectors). A change in this number \
-         means a hull, weapon or kind moved. 127-of-172 since #954, which moved the \
-         three-weapon RNG-coverage escort — 14 policies and 5 selectors — out of \
-         `assets/entities/` to the test-fixture directory; 141-of-191 before that."
+         means a hull, weapon or kind moved. 136-of-181 since #956, which added the \
+         ship-level `weapons_doctrine` kind — one slot on each of the nine AI-bearing \
+         hulls; 127-of-172 after #954 moved the three-weapon RNG-coverage escort out \
+         of `assets/entities/` to the test-fixture directory, and 141-of-191 before \
+         that."
     );
 }
 

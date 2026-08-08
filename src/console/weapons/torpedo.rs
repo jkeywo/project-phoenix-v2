@@ -104,7 +104,10 @@ pub fn seed_torpedo_tube_launch_facts(
     facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
     facts.set("in_range", if in_range { 1.0 } else { 0.0 });
     facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
-    facts.set("target_facing_shields", target_facing_shields as f64);
+    facts.set(
+        crate::entities::config::TARGET_FACING_SHIELDS_FACT,
+        target_facing_shields as f64,
+    );
     facts.set("tubes_full", if tubes_full { 1.0 } else { 0.0 });
     facts.set(
         crate::entities::config::POWER_RED_ALERT_FACT,

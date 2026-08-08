@@ -118,7 +118,12 @@ pub struct TorpedoAiInput {
     /// Whether the player has locked a target.
     pub target_locked: bool,
     /// HP of the **one** shield arc a torpedo arriving from this ship would
-    /// strike — not the target's shield pool. Fire only when this is ≤ 0.
+    /// strike — not the target's shield pool.
+    ///
+    /// Reported for the benefit of the AUTHORED launch guard, never read here:
+    /// since issue #956 the "fire only when this is ≤ 0" decision belongs to the
+    /// tube's own `torpedo_launch` predicate, which the host resolves over a
+    /// snapshot seeded from this value. See [`auto_fire_torpedo`].
     ///
     /// The caller resolves the arc from the attack bearing (see
     /// `ShieldSystem::facing_index_for_bearing`) and reports 0 when that arc
@@ -143,13 +148,34 @@ pub struct TorpedoAiInput {
 
 // ── Decision function ──────────────────────────────────────────────────────
 
-/// Decide which torpedo tubes to fire this tick.
+/// Decide which torpedo tubes are *candidates* to fire this tick.
 ///
-/// Auto-fire conditions (ALL must hold):
+/// Candidate conditions (ALL must hold):
 /// - A target is locked
-/// - The shield arc the torpedo would *strike* is down (`target_facing_shields ≤ 0`)
 /// - The tube is loaded
 /// - The tube is in arc
+///
+/// # Why the striking arc's shields are NOT one of them (issue #956)
+///
+/// They used to be: this function opened with
+/// `if !target_locked || target_facing_shields > 0 { return vec![] }`, and that
+/// second clause is the entire "phasers strip the shields, torpedoes finish the
+/// hull" doctrine, written in Rust, unconditional, and UPSTREAM of every
+/// authored policy. A tube's `torpedo_launch` predicate is resolved after this
+/// returns, so it could only ever narrow the gate further (AND); no doctrine
+/// could authorise a torpedo while the striking arc was up, and none could drop
+/// the gate for a hull that wanted to spend rounds differently.
+///
+/// The gate itself has not gone anywhere — it moved into the content that was
+/// always the right home for it. Every armed tube in the fleet now authors
+/// `fact(target_facing_shields) <= 0` in its own `torpedo_launch` guard, which
+/// is the same text the Harrow tubes already carried, over the same
+/// host-resolved per-arc HP reading (`seed_torpedo_tube_launch_facts`). What
+/// changed is that it is now a threshold a designer can retune — or a doctrine
+/// can decline — rather than a constant compiled into the decision.
+///
+/// `target_facing_shields` stays on [`TorpedoAiInput`] because the host seeds
+/// the fact from it; this function simply no longer reads it.
 ///
 /// # Why the magazine is not one of them
 ///
@@ -176,7 +202,7 @@ pub struct TorpedoAiInput {
 /// running dry belongs. This is shared mechanics: it applies to a player's ship
 /// exactly as it does to an NPC's (AGENTS.md #6).
 ///
-/// # Why the shield gate is per-arc, not ship-wide
+/// # Why the shield reading the authored gate uses is per-arc, not ship-wide
 ///
 /// The doctrine is "phasers strip the shields, torpedoes finish the hull", and
 /// on a single-arc hull those are the same test. On a four-arc hull they are
@@ -185,14 +211,16 @@ pub struct TorpedoAiInput {
 /// the hull is exposed and where the torpedo would land. Since every arc regens
 /// independently and goes offline for only a few seconds, a multi-arc ship
 /// essentially never has all arcs down at once, so the summed gate meant AI
-/// crews on four-arc hulls never launched a torpedo at all. The gate therefore
-/// asks about the *one* arc the shot would hit.
+/// crews on four-arc hulls never launched a torpedo at all. The reading the
+/// authored guard compares against therefore asks about the *one* arc the shot
+/// would hit — `ai_torpedo_auto_fire` resolves it through the target's own arc
+/// router before seeding it.
 ///
-/// Returns a list of `TorpedoTubeId` values to fire in deterministic priority
-/// order `[ForePort, ForeStarboard, Aft]`.  Each tube that passes all
-/// conditions appears at most once in the result.
+/// Returns a list of `TorpedoTubeId` values in deterministic priority order
+/// `[ForePort, ForeStarboard, Aft]`. Each tube that passes all conditions
+/// appears at most once in the result.
 pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
-    if !input.target_locked || input.target_facing_shields > 0 {
+    if !input.target_locked {
         return vec![];
     }
     input
@@ -832,75 +860,60 @@ mod tests {
         }
     }
 
-    // ── Condition: facing-arc shields ──────────────────────────────────────
+    // ── NON-condition: facing-arc shields (issue #956) ─────────────────────
 
+    /// **The gate that left this function.**
+    ///
+    /// A healthy striking arc, a collapsed one, an overkilled one and an
+    /// unshielded target all yield the SAME candidate list here, because
+    /// `auto_fire_torpedo` no longer asks: "phasers strip the shields,
+    /// torpedoes finish the hull" is now the tube's own authored
+    /// `torpedo_launch` guard, resolved by `ai_torpedo_auto_fire` over a
+    /// snapshot seeded from this very number.
+    ///
+    /// This is a NON-condition assertion in the same spirit as
+    /// [`an_empty_magazine_does_not_stop_a_loaded_tube_firing`] below, and it
+    /// is deliberately anti-vacuous: every row is compared against the same
+    /// non-empty baseline, so a function that had quietly stopped returning
+    /// candidates for some other reason cannot pass.
+    ///
+    /// The gate itself did not weaken, and the proof moved WITH it, onto the
+    /// shipped content it now lives in:
+    ///
+    /// * `entities::authored_ai_pins::torpedo_launch_shield_gate_truth_table`
+    ///   resolves the fleet-baseline tube policy over a healthy arc and a
+    ///   downed one and shows it holding and firing respectively. That is the
+    ///   whole of what a POLICY can be shown to do here: it reads one
+    ///   already-resolved scalar, so "which arc" is not a question it can be
+    ///   asked.
+    /// * `console::weapons::server_tests::
+    ///   ai_torpedo_auto_fire_holds_fire_while_target_shields_are_up` drives the
+    ///   whole host end to end against a real shielded target, and its sibling
+    ///   `ai_torpedo_auto_fire_gates_on_the_arc_the_torpedo_would_strike` is
+    ///   where the PER-ARC half is proved — a healthy rear arc holding the shot
+    ///   while the front one is collapsed, and the reverse — because only the
+    ///   host resolves the arc the round would meet.
     #[test]
-    fn facing_arc_up_no_fire() {
-        let mut input = all_ready_input();
-        input.target_facing_shields = 50;
-        let result = auto_fire_torpedo(&input);
+    fn the_striking_arcs_shields_are_no_longer_a_condition_here() {
+        let baseline = auto_fire_torpedo(&all_ready_input());
         assert!(
-            result.is_empty(),
-            "should not fire while the arc the torpedo would strike is up"
+            !baseline.is_empty(),
+            "precondition: the fixture must produce candidates at all"
         );
-    }
-
-    #[test]
-    fn facing_arc_depleted_fires() {
-        let mut input = all_ready_input();
-        input.target_facing_shields = 0;
-        let result = auto_fire_torpedo(&input);
-        assert!(
-            !result.is_empty(),
-            "should fire when the facing arc is depleted"
-        );
-    }
-
-    #[test]
-    fn facing_arc_overkilled_fires() {
-        let mut input = all_ready_input();
-        input.target_facing_shields = -5;
-        let result = auto_fire_torpedo(&input);
-        assert!(
-            !result.is_empty(),
-            "should fire when the facing arc is past zero"
-        );
-    }
-
-    /// A target with no shield arcs at all (asteroid, unshielded NPC) has
-    /// nothing blocking the shot — the caller reports 0 and the AI fires.
-    #[test]
-    fn target_with_no_arcs_fires() {
-        let mut input = all_ready_input();
-        input.target_facing_shields = 0;
-        let result = auto_fire_torpedo(&input);
-        assert!(
-            !result.is_empty(),
-            "an unshielded target must stay torpedo-eligible"
-        );
-    }
-
-    /// The case that motivated the per-arc gate: a four-arc hull whose FRONT
-    /// arc has collapsed while all three others are healthy. Attacking from
-    /// ahead the shot is on; from astern the healthy rear arc still blocks it.
-    /// The caller does the bearing→arc resolution, so the pure fn sees only
-    /// the resolved arc's HP — these two calls are the same target, one tick
-    /// apart, differing solely in where the attacker sits.
-    #[test]
-    fn collapsed_front_arc_fires_only_from_the_front() {
-        let mut from_ahead = all_ready_input();
-        from_ahead.target_facing_shields = 0; // front arc, collapsed
-        assert!(
-            !auto_fire_torpedo(&from_ahead).is_empty(),
-            "healthy rear arcs must not veto a shot into a collapsed front arc"
-        );
-
-        let mut from_astern = all_ready_input();
-        from_astern.target_facing_shields = 120; // rear arc, healthy
-        assert!(
-            auto_fire_torpedo(&from_astern).is_empty(),
-            "a collapsed front arc must not licence a shot into a healthy rear arc"
-        );
+        for hp in [50, 120, 0, -5] {
+            let mut input = all_ready_input();
+            input.target_facing_shields = hp;
+            assert_eq!(
+                auto_fire_torpedo(&input),
+                baseline,
+                "target_facing_shields = {hp}: the pure candidate filter reports \
+                 loaded, in-arc tubes whatever the striking arc is doing. The \
+                 shields-down decision belongs to the tube's authored \
+                 `torpedo_launch` predicate (issue #956), not to this function — \
+                 a Rust gate here sits upstream of every policy and can only ever \
+                 be narrowed by one, never opened or retuned."
+            );
+        }
     }
 
     // ── Condition: target lock ─────────────────────────────────────────────

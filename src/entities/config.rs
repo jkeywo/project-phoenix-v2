@@ -1849,6 +1849,22 @@ pub struct WeaponsConsoleConfig {
     /// before), so baseline behaviour is preserved.
     #[serde(default)]
     pub selector_idle: bool,
+    /// Inline stateless AI policy for the ship's WEAPONS DOCTRINE fine system
+    /// (`[weapons_console.ai]`, issue #956).
+    ///
+    /// The ship-level counterpart of the per-bank/per-tube `ai` blocks below:
+    /// those say *when this emitter opens fire*, and this one says *which family
+    /// the ship turns to bring to bear* when the target is in range but outside
+    /// every arc of a family. It drives the channel-3 `ArcBearingRequest` Weapons
+    /// sends Helm, over the `arc_bearing_first` / `arc_bearing_second` /
+    /// `arc_bearing_third` channels — the rank ladder that replaced the Rust
+    /// `[Phasers, Blasters, Torpedoes]` array in `tick_weapons_arc_request`.
+    ///
+    /// Authored in `fragments/ai/fleet_baseline.toml` for every hull that
+    /// composes the ship-level spine, so a hull with no preference of its own
+    /// resolves the FLEET BASELINE rather than an inline Rust order.
+    #[serde(default)]
+    pub ai: Option<FineSystemAiConfigToml>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2380,6 +2396,65 @@ pub const COMMS_RESPOND_VERB: &str = "respond_to_message";
 pub const COMMS_RESPOND_CHANNELS: &[&str] = &[COMMS_RESPOND_CHANNEL];
 /// The registered verbs a Comms response policy may emit (issue #786).
 pub const COMMS_RESPOND_VERBS: &[&str] = &[COMMS_RESPOND_VERB];
+
+// ── Weapons doctrine: which family the ship turns to present (issue #956) ─────
+//
+// `tick_weapons_arc_request` emits at most ONE channel-3 `ArcBearingRequest` per
+// ship — "turn, so that this family can bear" — so it has to choose a family
+// when several are equally unable to shoot. That choice used to be a Rust array,
+// `[Phasers, Blasters, Torpedoes]`, documented as "structural, not a gameplay
+// value"; which gun a ship manoeuvres to present is a tactical decision, so it
+// is authored now, in `[weapons_console.ai]`.
+//
+// The channel is the RANK and the verb is the FAMILY. Three channels, one per
+// place in the order, each a single ordinary channel decision with its own
+// guards — so a doctrine can lead with its tubes while the target's striking arc
+// is down and with its beams otherwise, which is the shape the issue's worked
+// example asks for. The host resolves them in rank order, drops repeats, and
+// walks the resulting list until a family actually qualifies; a rank nobody
+// authors simply shortens the order.
+
+/// The `arc_bearing_first` channel: the family this ship presents by preference.
+pub const ARC_BEARING_FIRST_CHANNEL: &str = "arc_bearing_first";
+/// The `arc_bearing_second` channel: the family it turns for when the first
+/// cannot be the reason (no emitters, all offline, already bearing, out of
+/// range).
+pub const ARC_BEARING_SECOND_CHANNEL: &str = "arc_bearing_second";
+/// The `arc_bearing_third` channel: the last family in the order.
+pub const ARC_BEARING_THIRD_CHANNEL: &str = "arc_bearing_third";
+
+/// The rank ladder in resolution order. The host reads exactly this slice, so
+/// adding a rank is a one-line content-schema change rather than a host one.
+pub const ARC_BEARING_CHANNELS: &[&str] = &[
+    ARC_BEARING_FIRST_CHANNEL,
+    ARC_BEARING_SECOND_CHANNEL,
+    ARC_BEARING_THIRD_CHANNEL,
+];
+
+/// The `bring_phasers_to_bear` verb: name the phaser banks for this rank.
+pub const BRING_PHASERS_TO_BEAR_VERB: &str = "bring_phasers_to_bear";
+/// The `bring_blasters_to_bear` verb: name the blaster banks for this rank.
+pub const BRING_BLASTERS_TO_BEAR_VERB: &str = "bring_blasters_to_bear";
+/// The `bring_torpedoes_to_bear` verb: name the torpedo tubes for this rank.
+pub const BRING_TORPEDOES_TO_BEAR_VERB: &str = "bring_torpedoes_to_bear";
+
+/// The registered verbs a weapons-doctrine policy may emit (issue #956).
+pub const WEAPONS_DOCTRINE_VERBS: &[&str] = &[
+    BRING_PHASERS_TO_BEAR_VERB,
+    BRING_BLASTERS_TO_BEAR_VERB,
+    BRING_TORPEDOES_TO_BEAR_VERB,
+];
+
+/// Host-seeded fact name: HP of the target's shield arc a round from this ship
+/// would strike, resolved through the target's own arc router. `<= 0` means the
+/// arc is not blocking (down, offline, or absent entirely — an asteroid).
+///
+/// The reading the fleet's torpedo doctrine is authored against, seeded on the
+/// weapons-doctrine snapshot (issue #956) as well as on the tube launch snapshot
+/// (`seed_torpedo_tube_launch_facts`), so "lead with the tubes when the screen
+/// is down" and "launch when the screen is down" ask the same question of the
+/// same number.
+pub const TARGET_FACING_SHIELDS_FACT: &str = "target_facing_shields";
 
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
@@ -2989,6 +3064,13 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // value-carrying verb. Only the response INDEX rides the verb —
         // WHICH message is being answered comes from the host context.
         COMMS_RESPOND_VERB => crate::ai::policy::AiPolicyVerb::RespondToMessage(r.response_index),
+        // Weapons doctrine family verbs (issue #956): value-less, like the
+        // fire verbs. The RANK is the channel and the FAMILY is the verb; the
+        // arcs, ranges and geometry the resulting `ArcBearingRequest` carries
+        // are host readings of this ship's own emitters, never authored here.
+        BRING_PHASERS_TO_BEAR_VERB => crate::ai::policy::AiPolicyVerb::BringPhasersToBear,
+        BRING_BLASTERS_TO_BEAR_VERB => crate::ai::policy::AiPolicyVerb::BringBlastersToBear,
+        BRING_TORPEDOES_TO_BEAR_VERB => crate::ai::policy::AiPolicyVerb::BringTorpedoesToBear,
         other => return Err(format!("unknown ai policy verb '{other}'")),
     })
 }
@@ -4251,7 +4333,7 @@ impl EntityConfig {
     /// The only remaining caller of [`AiDeclarationMode::Lenient`] is a test
     /// fixture that is deliberately NOT a complete hull: a snippet exercising
     /// beam colours, torpedo fields or marker resolution declares no AI and has
-    /// no business authoring nineteen blocks to say so. Nothing in production
+    /// no business authoring twenty blocks to say so. Nothing in production
     /// passes it — `ai_declaration_manifest::tests` asserts the default is
     /// `Strict`, and the spawner attaches nothing for an undeclared system
     /// either way.
@@ -4618,6 +4700,24 @@ impl EntityConfig {
                     )
                     .map_err(SerdeError::custom)?;
                 }
+            }
+            // The ship-level WEAPONS DOCTRINE (issue #956), validated here with
+            // the per-bank policies rather than down among the target selectors:
+            // it is a `[weapons_console.ai]` POLICY, and it belongs beside the
+            // other weapons-console policies its host resolves alongside. Its
+            // channels are the three arc-bearing ranks and its verbs the three
+            // weapon families; a rule on an unknown rank, a misspelled family,
+            // an unparseable guard or an undeclared `param(...)` fails the
+            // entity load here rather than resolving to a silent "no family
+            // qualifies" for the rest of the ship's life.
+            if let Some(ai) = wc.ai.as_ref() {
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::WEAPONS_DOCTRINE,
+                    ai,
+                    ARC_BEARING_CHANNELS,
+                    WEAPONS_DOCTRINE_VERBS,
+                )
+                .map_err(SerdeError::custom)?;
             }
         }
 
@@ -5122,7 +5222,15 @@ shows = ["asteroid"]
 
 [captain_console]
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        // Lenient: this fixture is about which SECTIONS deserialize to `Some`,
+        // and its bare `[weapons_console]` owes a `weapons_doctrine`
+        // declaration under the default strict mode (issue #956 — the kind
+        // gates on the console, not on `[behaviour]`).
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
 
         assert_eq!(
             config.tags,
@@ -5716,13 +5824,21 @@ max_speed = 50.0
         assert_eq!(h.power_multipliers, Some([-0.8, 0.0, 0.4, 0.8]));
     }
 
+    /// Lenient, like the other `[weapons_console]` schema fixtures around it:
+    /// since issue #956 a weapons console owes a `weapons_doctrine` declaration
+    /// (the kind gates on the CONSOLE, not on `[behaviour]`), and this fixture
+    /// is about one power curve rather than about AI authoring.
     #[test]
     fn weapons_console_power_multipliers_parses() {
         let toml_str = r##"
 [weapons_console]
 power_multipliers = [-0.3, 0.0, 0.15, 0.3]
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let w = config
             .weapons_console
             .expect("weapons_console must be Some");
@@ -9151,7 +9267,14 @@ fire_arc_deg = 90.0
         let toml_str = r##"
 [weapons_console]
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        // Lenient: a bare `[weapons_console]` owes a `weapons_doctrine`
+        // declaration since issue #956, and this fixture is about the serde
+        // default for an absent bank list.
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let wc = config.weapons_console.expect("weapons_console");
         assert!(
             wc.phaser_banks.is_empty(),
@@ -12020,6 +12143,12 @@ idle = true
         let toml = r#"
 name = "Gunboat"
 
+# An armed hull owes its ship-level doctrine too since issue #956, whether or
+# not it authors a `[behaviour]`. `idle = true` is the in-band way to say "this
+# hull turns for nothing", which keeps the fixture about the BANK policy below.
+[weapons_console.ai]
+idle = true
+
 [[weapons_console.phaser_banks]]
 id = "fore"
 facing_deg = 0.0
@@ -12047,6 +12176,11 @@ value = false
     fn blaster_bank_inline_idle_ai_policy_parses_from_toml() {
         let toml = r#"
 name = "Escort"
+
+# The SHIP-LEVEL doctrine (issue #956), distinct from the bank's own idle
+# declaration below — both are owed on an armed hull with no `[behaviour]`.
+[weapons_console.ai]
+idle = true
 
 [[weapons_console.blaster_banks]]
 id = "fore"
@@ -13355,7 +13489,14 @@ weight = 1.0
 
     #[test]
     fn tactical_selector_parses_and_resolves_to_typed_selector() {
-        let config = EntityConfig::from_toml(tactical_selector_toml()).expect("parse must succeed");
+        // Lenient: the fixture's `[weapons_console]` owes a `weapons_doctrine`
+        // declaration since issue #956, and this test is about the SELECTOR
+        // schema beside it.
+        let config = EntityConfig::from_toml_in_mode(
+            tactical_selector_toml(),
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let sel = config
             .weapons_console
             .as_ref()
@@ -13436,9 +13577,19 @@ switch_margin = 0.0
 sources = ["not-a-real-source"]
 eligibility = "candidate_fact(detectable) > 0"
 "##;
+        // Assert on the error TEXT, not just `is_err()`: since issue #956 a
+        // bare `[weapons_console.selector]` also owes a `weapons_doctrine`
+        // declaration under strict mode, so a bare `is_err()` here would keep
+        // passing — for the wrong reason — if the unknown-source validation
+        // were ever weakened, because the doctrine check runs later in
+        // `from_toml` and would still reject the fixture. Pinning the message
+        // to the source name keeps this test load-bearing on the Tactical
+        // selector-source validation it names.
+        let err = EntityConfig::from_toml(bad).unwrap_err().to_string();
         assert!(
-            EntityConfig::from_toml(bad).is_err(),
-            "unknown Tactical selector source must fail from_toml before world activation"
+            err.contains("not-a-real-source"),
+            "unknown Tactical selector source must fail from_toml before world \
+             activation, got: {err}"
         );
     }
 

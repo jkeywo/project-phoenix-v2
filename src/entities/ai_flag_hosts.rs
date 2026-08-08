@@ -129,10 +129,19 @@ pub struct AiHost {
     pub history_fold: Option<EvalSite>,
 }
 
-// ── The nineteen hosts ───────────────────────────────────────────────────────
+// ── The twenty hosts ─────────────────────────────────────────────────────────
 //
-// Fourteen policy hosts, then five selector hosts. Ordering mirrors the
-// validation blocks in `EntityConfig::from_toml`.
+// Fifteen policy hosts, then five selector hosts, grouped by the console each
+// belongs to. (The fifteenth policy host is [`WEAPONS_DOCTRINE`], added by issue
+// #956 when the weapon-family arc order stopped being a Rust array.)
+//
+// That grouping is the whole of the claim. This file deliberately does NOT
+// promise to be in the same order as the validation blocks in
+// `EntityConfig::from_toml` — nothing enforces such a claim, and it was already
+// false when it was written: `COMMS_RESPONSE` is listed with the policy hosts
+// but validated last of all, after the comms SELECTOR. The drift tests below
+// iterate this slice as a SET (`BTreeSet` of blocks / eval sites), so ordering
+// here is a reading aid and never a correctness property.
 
 /// The three secondary helm axes collapse their channel to a bare "actuate this
 /// tick?" through one shared helper.
@@ -252,6 +261,20 @@ pub const TORPEDO_TUBE: AiHost = AiHost {
     history_fold: None,
 };
 
+/// The ship-level weapons doctrine (issue #956): which family the ship turns to
+/// bring to bear. Its three arc-bearing rank channels are all resolved through
+/// one shared helper, so that helper is the single site fixing the chain.
+pub const WEAPONS_DOCTRINE: AiHost = AiHost {
+    system: "Weapons doctrine",
+    block: "[weapons_console.ai]",
+    flag_chain: FlagChain::Plumbed,
+    eval_sites: &[site(
+        "src/console/weapons/mod.rs",
+        "resolve_arc_bearing_order",
+    )],
+    history_fold: None,
+};
+
 pub const TORPEDO_MAGAZINE: AiHost = AiHost {
     system: "Torpedo magazine",
     block: "[torpedoes].ai",
@@ -356,6 +379,7 @@ pub const AI_HOSTS: &[AiHost] = &[
     PHASER_BANK,
     BLASTER_BANK,
     TORPEDO_TUBE,
+    WEAPONS_DOCTRINE,
     TORPEDO_MAGAZINE,
     SHIELDS_FOCUS,
     POWER_ALLOCATION,
@@ -1467,11 +1491,20 @@ mod tests {
     /// differs between a hull with a captain and a hull without.
     const FIRE_GATE: &str = r#"when = "fact(red_alert) >= param(min_alert_to_fire)""#;
 
-    /// The cruiser authors the gate on two phaser banks and three torpedo
-    /// tubes. Stated as a number so a refit that adds or removes a weapon
-    /// fails here rather than silently leaving one of them unmutated — which is
-    /// how the mutation below would turn into a vacuous pass.
-    const CRUISER_GATED_WEAPONS: usize = 5;
+    /// …and the TUBE form of the same gate. Since issue #956 a tube's launch
+    /// guard conjoins the fleet's torpedo doctrine — the arc a round would
+    /// strike must not be blocking — onto the same shared alert clause, so the
+    /// text is longer while the alert half is identical. Mutated alongside the
+    /// beam form so the counts below still cover every armed weapon on the hull.
+    const TUBE_FIRE_GATE: &str = r#"when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0""#;
+
+    /// The cruiser authors the gate on two phaser banks (beam form) and three
+    /// torpedo tubes (tube form). Stated as numbers so a refit that adds or
+    /// removes a weapon fails here rather than silently leaving one of them
+    /// unmutated — which is how the mutation below would turn into a vacuous
+    /// pass.
+    const CRUISER_GATED_BEAMS: usize = 2;
+    const CRUISER_GATED_TUBES: usize = 3;
 
     /// Resolve every phaser bank on a hull's `phaser_fire` channel over a fact
     /// snapshot with NO red alert.
@@ -1529,12 +1562,18 @@ mod tests {
             "as shipped, with the alert down, every cruiser bank holds fire"
         );
 
+        // Both forms of the one gate, so the mutated hull has no alert clause
+        // left anywhere. The tube form keeps its shields-down conjunct — that
+        // is the TORPEDO doctrine (issue #956) and a different decision; only
+        // the alert half is being removed.
         let ungated = with_guard_everywhere(
             &cruiser,
-            FIRE_GATE,
-            r#"when = "true""#,
-            CRUISER_GATED_WEAPONS,
+            TUBE_FIRE_GATE,
+            r#"when = "fact(target_facing_shields) <= 0""#,
+            CRUISER_GATED_TUBES,
         );
+        let ungated =
+            with_guard_everywhere(&ungated, FIRE_GATE, r#"when = "true""#, CRUISER_GATED_BEAMS);
         let mutated = phaser_banks_fire_with_the_alert_down(&ungated);
         assert!(
             mutated.iter().all(|fired| *fired),

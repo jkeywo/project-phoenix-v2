@@ -4,12 +4,13 @@
 # Every AI-capable fine system must declare a policy or an explicit idle state
 # (PRD #774 US7), and since stage 5d strict AI-declaration mode makes omitting
 # one a LOAD ERROR — there is no Rust-side synthesiser left to fill the gap.
-# This fragment carries the fourteen ship-level declarations a small NPC hull
-# owes but has no reason to specialise — NINE AI policies (the six helm axes,
-# Shields, Power, Comms) and the FIVE target selectors — transcribed verbatim
-# from `alliance_battleship.toml`. That is the count every other comment in the
-# tree quotes; it is the number of `[…_ai]` / `[….ai_policy]` / `[….selector]`
-# blocks in this file and nothing else.
+# This fragment carries the fifteen ship-level declarations a small NPC hull
+# owes but has no reason to specialise — TEN AI policies (the six helm axes,
+# Shields, Power, Comms, and the weapons doctrine issue #956 added) and the FIVE
+# target selectors — transcribed verbatim from `alliance_battleship.toml`. That
+# is the count every other comment in the tree quotes; it is the number of
+# `[…_ai]` / `[….ai_policy]` / `[….selector]` blocks in this file and nothing
+# else.
 #
 # Deliberately does NOT carry `[captain_console.ai]`: the composition fixture
 # gets that from `ai/captain_red_alert_aggressive.toml`, whose whole point is
@@ -21,14 +22,14 @@
 #
 # This was a #869/#885b mechanism fixture. It is now the ship-level spine of the
 # backfill fragment library. `assets/entities/alliance_destroyer.toml` — the
-# first composed shipped hull — takes ELEVEN of those fourteen from here: all
+# first composed shipped hull — takes TWELVE of those fifteen from here: all
 # but the three travel axes, which `ai/movement_attack_pass.toml` replaces
 # wholesale (see the contract below).
 #
 # Issue #876 added the other two player hulls. `alliance_battleship.toml` takes
-# eleven — all but Engines, Steering and Impulse, which
+# twelve — all but Engines, Steering and Impulse, which
 # `ai/movement_artillery.toml` replaces — and `alliance_cruiser.toml` takes all
-# FOURTEEN, because it composes no class movement fragment at all (see the note
+# FIFTEEN, because it composes no class movement fragment at all (see the note
 # on `includes` in that hull). Nothing about the file changed; what changed is
 # that three shipped hulls now depend on it, so a retune here retunes all three.
 # #878 moves the rest of the fleet onto it.
@@ -366,6 +367,56 @@ weight = 100.0
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_radar) > 0"
 weight = 1.0
+
+# ── The WEAPONS DOCTRINE: which gun the ship turns to present (issue #956) ────
+#
+# Weapons asks Helm to turn — a channel-3 `ArcBearingRequest` — when the target
+# is in reach of a weapon family but outside every one of that family's arcs.
+# Exactly one such request may be active, so *which* family is worth turning for
+# has to be decided, and until #956 that decision was a Rust array in
+# `tick_weapons_arc_request`: `[Phasers, Blasters, Torpedoes]`, with a doc
+# comment calling it "structural, not a gameplay value". It is nothing of the
+# kind. Which gun a ship manoeuvres to present is the shape of the fight it
+# intends to have, and a fleet that always turns for its beams can never fly a
+# doctrine built on fixed bow tubes.
+#
+# The CHANNEL is the rank and the VERB is the family. Three ranks, each an
+# ordinary channel decision with its own guards, so a hull can reorder itself
+# mid-engagement; the host resolves them in order, drops repeats, and walks the
+# result until a family actually qualifies. A rank nobody authors simply
+# shortens the order — there is no Rust default behind it.
+#
+# This block is the FLEET BASELINE and it is deliberately unconditional: beams
+# first, then blasters, then tubes — byte for byte the behaviour the deleted
+# array gave, so nothing about how the fleet flies changed on the day the
+# decision became content. A hull that wants something else says so on top of
+# it; `ship_harrow_cruiser.toml` is the worked example, and it is the issue's
+# own: it leads with its tubes while the target's striking arc is down.
+#
+# Note what the ranks do NOT decide: whether a family is capable at all. Its
+# emitters' arcs, ranges, ammunition and online state are host readings taken
+# after this order comes back, because a policy that could contradict the
+# geometry would ask Helm to turn for a gun that is not there.
+
+[weapons_console.ai]
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_first"
+when = "true"
+verb = "bring_phasers_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_second"
+when = "true"
+verb = "bring_blasters_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_third"
+when = "true"
+verb = "bring_torpedoes_to_bear"
 
 # Tactical — the ship's firing target. `combat-lock` is deliberately ABSENT from
 # the sources: it is Tactical's own output, so unioning it would be circular.

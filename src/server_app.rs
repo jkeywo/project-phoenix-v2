@@ -3603,6 +3603,18 @@ fn spawn_game_start_entities(
                     .insert(crate::weapons_plugin::PhaserBankAiPolicies(
                         phaser_bank_policies,
                     ));
+                // The ship-level WEAPONS DOCTRINE (issue #956) — the player-ship
+                // half of `spawner.rs`'s attachment. Without it the player hull
+                // would carry no family order at all and would never ask Helm to
+                // turn a gun onto its target, which is exactly the
+                // player-path-forgotten failure #785/#786/#882 each shipped.
+                if let Some(ai) = wc.ai.as_ref() {
+                    commands.entity(spawned).insert(
+                        crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+                            ai.to_policy().unwrap_or_default(),
+                        ),
+                    );
+                }
                 if !wc.blaster_banks.is_empty() {
                     let blaster_bank_policies: std::collections::HashMap<
                         String,
@@ -4858,6 +4870,7 @@ station = "pilot"
                     }),
                     selector: None,
                     selector_idle: false,
+                    ai: None,
                 },
             ));
     }

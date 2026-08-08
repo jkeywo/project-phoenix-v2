@@ -807,6 +807,16 @@ pub fn spawn_entity(
         entity_commands.insert(crate::weapons_plugin::PhaserBankAiPolicies(
             phaser_bank_policies,
         ));
+        // The ship-level WEAPONS DOCTRINE (issue #956): which family this hull
+        // turns to bring to bear. Validated in `EntityConfig::from_toml`, so
+        // `to_policy` cannot fail here; a hull that authors none attaches no
+        // component and asks Helm to turn for nothing, which strict
+        // AI-declaration mode makes unreachable for an AI-bearing hull.
+        if let Some(ai) = wc.ai.as_ref() {
+            entity_commands.insert(crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
         // PhaserRenderConfig: take the first bank's beam_color if any, else default.
         let render_config = if let Some(first_bank) = wc.phaser_banks.first() {
             crate::weapons_plugin::PhaserRenderConfig {

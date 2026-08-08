@@ -218,11 +218,11 @@ load_time = 3.0
 volley_max = 2
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down (issue #956 moved that second clause out of
+  # `auto_fire_torpedo` and into the tube's own guard). Loaded state, magazine
+  # stock, target validity, range and arc stay host-side gates.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
@@ -241,7 +241,7 @@ volley_max = 2
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [comms]

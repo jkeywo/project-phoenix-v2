@@ -280,6 +280,46 @@ pub enum AiPolicyVerb {
     /// world's remaining mission threat, the ship's own objective count); the
     /// reserve those readings are measured against is an authored `param`.
     ReleaseTorpedo,
+    /// Present the PHASER banks: name that family as the one this ship turns to
+    /// bring to bear (an `arc_bearing_*` channel of the Weapons doctrine fine
+    /// system, issue #956).
+    ///
+    /// ## Why the channel is a RANK and the verb is a family
+    ///
+    /// Weapons asks Helm to turn (a channel-3 `ArcBearingRequest`) when the
+    /// target is in range of a family but outside every one of that family's
+    /// arcs. Exactly one request may be active, so *which* family is worth
+    /// turning for has to be decided — and until #956 that decision was a Rust
+    /// array, `[Phasers, Blasters, Torpedoes]`, with a doc comment calling it
+    /// "structural, not a gameplay value". Which gun a ship manoeuvres to
+    /// present is a tactical choice, so it is authored now.
+    ///
+    /// It is an ORDER rather than a single choice because a family may not
+    /// qualify (every bank shot offline, every tube empty, the target already
+    /// bearing), and the ship should then turn for the next one rather than fly
+    /// on with nothing to say. The three `arc_bearing_first` /
+    /// `arc_bearing_second` / `arc_bearing_third` channels are that order, one
+    /// rank per channel: each is a single decision in the ordinary sense — "what
+    /// do I present FIRST?" — with its own guards, so a doctrine can reorder
+    /// itself as the fight changes. The host resolves the three in rank order and
+    /// drops repeats, so a doctrine that names the same family twice is
+    /// harmless, and one that leaves a rank unauthored simply has a shorter
+    /// order.
+    ///
+    /// Value-less like the fire verbs: the arcs, ranges and geometry the request
+    /// carries are host readings of the ship's own emitters.
+    BringPhasersToBear,
+    /// Present the BLASTER banks. The blaster twin of
+    /// [`AiPolicyVerb::BringPhasersToBear`]; see it for the whole model.
+    BringBlastersToBear,
+    /// Present the TORPEDO tubes. The torpedo twin of
+    /// [`AiPolicyVerb::BringPhasersToBear`]; see it for the whole model.
+    ///
+    /// This is the verb the issue's worked example is authored with: a hull that
+    /// fights with fixed bow tubes ranks torpedoes first *while the target's
+    /// striking arc is down* and falls back to its beams otherwise, which is a
+    /// doctrine rather than a fixed ordering.
+    BringTorpedoesToBear,
     /// Focus a shield arc this tick (the `shield_focus` channel of the Shields
     /// fine system, issue #783). A value-less action verb, the shields twin of
     /// [`AiPolicyVerb::FirePhaser`]: *which* of the four arcs is focused is NOT

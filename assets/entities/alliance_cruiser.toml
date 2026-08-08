@@ -391,11 +391,21 @@ load_time = 3
 marker = "torpedo_port"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -415,7 +425,7 @@ marker = "torpedo_port"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -426,11 +436,21 @@ load_time = 3
 marker = "torpedo_starboard"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -450,7 +470,7 @@ marker = "torpedo_starboard"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -461,11 +481,21 @@ load_time = 3
 marker = "torpedo_aft"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -485,7 +515,7 @@ marker = "torpedo_aft"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [sensors_console]

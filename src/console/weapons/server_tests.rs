@@ -413,6 +413,17 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
                 .to_policy()
                 .expect("the shipped torpedo-magazine policy decodes"),
         ),
+        // The ship-level WEAPONS DOCTRINE (issue #956): the family order
+        // `tick_weapons_arc_request` turns for. Taken from the fleet baseline
+        // like everything else here, so these fixtures ask Helm to turn in the
+        // order the shipped content authors — and a ship with no doctrine at all
+        // turns for nothing, which is why it belongs in this helper rather than
+        // in each test.
+        crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+            shipped_policy_toml("weapons_doctrine")
+                .to_policy()
+                .expect("the shipped weapons-doctrine policy decodes"),
+        ),
         // Red alert, RAISED (issue #872).
         //
         // The shipped player-hull fire policies this helper attaches are
@@ -4455,6 +4466,7 @@ rank = "Ltn."
                 radar: None,
                 selector: None,
                 selector_idle: false,
+                ai: None,
             }),
             EntitySystemHull(SystemHull::from_config(&[(
                 SystemId("captain".into()),
@@ -4926,6 +4938,7 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            shipped_weapons_doctrine(),
             PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
                 banks: vec![crate::entity_config::PhaserBankConfig {
                     id: "fore".into(),
@@ -4994,6 +5007,7 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        shipped_weapons_doctrine(),
         PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
             banks: vec![crate::entity_config::PhaserBankConfig {
                 id: "fore".into(),
@@ -5049,6 +5063,7 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        shipped_weapons_doctrine(),
         PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
             banks: vec![crate::entity_config::PhaserBankConfig {
                 id: "fore".into(),
@@ -5120,6 +5135,22 @@ fn loaded_torpedo_res(facing_deg: f32, fire_arc_deg: f32) -> TorpedoSystemResour
     TorpedoSystemResource(ts)
 }
 
+/// The SHIPPED fleet-baseline weapons doctrine (issue #956): the authored
+/// family order `tick_weapons_arc_request` turns for — phasers, then blasters,
+/// then torpedoes.
+///
+/// Every arc-request fixture below attaches it, because a ship with no doctrine
+/// asks Helm to turn for nothing at all. Read off the shipped content rather
+/// than hand-built, so a retune of the baseline order retunes these fixtures
+/// with it instead of leaving them asserting an order the fleet no longer flies.
+fn shipped_weapons_doctrine() -> crate::weapons_plugin::WeaponsDoctrineAiPolicy {
+    crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+        crate::entities::authored_ai_pins::shipped_policy_toml("weapons_doctrine")
+            .to_policy()
+            .expect("the shipped weapons-doctrine policy decodes"),
+    )
+}
+
 /// Find the single `ArcBearingRequest` in the log, if any.
 fn find_arc_request(app: &App) -> Option<CoordinationPayload> {
     app.world()
@@ -5147,6 +5178,7 @@ fn tick_weapons_arc_request_fires_for_blaster_family_in_range_out_of_arc() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        shipped_weapons_doctrine(),
         // No phaser config: blasters are the only capable family.
         blaster_res(0.0, 30.0, 50.0),
     ));
@@ -5202,6 +5234,7 @@ fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        shipped_weapons_doctrine(),
         loaded_torpedo_res(0.0, 30.0),
     ));
     // To starboard: in homing reach but 90° off the 30° fore tube arc.
@@ -5234,6 +5267,200 @@ fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
     }
 }
 
+// ── #956: the family order is the ship's own doctrine ────────────────────────
+
+/// The Harrow cruiser's authored weapons doctrine: lead with the TUBES while
+/// the arc a round would strike is not blocking, and fall back to the fleet
+/// baseline otherwise. Read off the shipped hull, so a retune in TOML retunes
+/// the fixture with it.
+fn harrow_cruiser_weapons_doctrine() -> crate::weapons_plugin::WeaponsDoctrineAiPolicy {
+    let hull = crate::entity_config::EntityConfig::from_toml(
+        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
+            .expect("ship_harrow_cruiser must resolve")
+            .toml
+            .as_str(),
+    )
+    .expect("the shipped Harrow cruiser parses");
+    crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+        hull.weapons_console
+            .as_ref()
+            .expect("the Harrow cruiser carries weapons")
+            .ai
+            .as_ref()
+            .expect("…and authors `[weapons_console.ai]`")
+            .to_policy()
+            .expect("and it decodes"),
+    )
+}
+
+/// A ship whose PHASERS and TUBES are both in range of the target and both out
+/// of arc, so the family in the emitted request is decided by nothing but the
+/// authored order. `shields_up` controls the striking arc the doctrine reads.
+fn spawn_two_family_arc_miss(
+    app: &mut App,
+    target_uuid: &str,
+    doctrine: crate::weapons_plugin::WeaponsDoctrineAiPolicy,
+    shields_up: bool,
+) {
+    use crate::entity_spawner::EntityUuid;
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        ShipSystemControlSources::default(),
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        doctrine,
+        // A 30-degree fore beam and a 30-degree fore tube. The target below sits
+        // 90 degrees off both, inside both reaches, so BOTH families qualify.
+        PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+            banks: vec![crate::entity_config::PhaserBankConfig {
+                id: "fore".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 30.0,
+                auto_arc_deg: 30.0,
+                beam_range: 50.0,
+                beam_damage_per_sec: 5.0,
+                beam_duration_secs: 3.0,
+                cooldown_secs: 6.0,
+                beam_color: vec![],
+                shield_pierce: None,
+                marker: None,
+                ai: None,
+            }],
+        }),
+        loaded_torpedo_res(0.0, 30.0),
+    ));
+
+    let target = spawn_shielded_target(app, target_uuid, 20.0, 0.0);
+    if !shields_up {
+        let mut shields = app
+            .world_mut()
+            .get_mut::<crate::ship::shields::ShipShields>(target)
+            .expect("the target carries shields");
+        for facing in shields.0.facings.iter_mut() {
+            facing.hp = 0;
+        }
+    }
+    // The `EntityUuid` marker `live_entity_xz` resolves the lock through is
+    // already on the target; nothing else is needed to make it a live lock.
+    debug_assert!(app.world().get::<EntityUuid>(target).is_some());
+}
+
+fn requested_family(app: &App) -> Option<WeaponFamily> {
+    match find_arc_request(app) {
+        Some(CoordinationPayload::ArcBearingRequest { family, .. }) => Some(family),
+        _ => None,
+    }
+}
+
+/// **Issue #956, the whole point, at the host.** Two hulls, identical geometry,
+/// identical target, identical tick — and they turn for DIFFERENT guns, because
+/// their `[weapons_console.ai]` blocks say different things.
+///
+/// The fleet baseline authors the order that used to be the Rust array
+/// `[Phasers, Blasters, Torpedoes]`, so a hull with no preference of its own
+/// still presents its beams first. The Harrow cruiser authors the issue's worked
+/// example — torpedoes while the target's striking arc is down — and asks Helm
+/// for the tubes on the same snapshot.
+///
+/// Both halves matter. Without the first, "the order is authored" would be
+/// unfalsifiable; without the second, the authoring would be decoration.
+#[test]
+fn the_arc_request_family_follows_the_ships_authored_doctrine() {
+    let uuid = "dd000000-0000-0000-0000-000000000001";
+
+    let mut baseline = test_app();
+    spawn_two_family_arc_miss(&mut baseline, uuid, shipped_weapons_doctrine(), false);
+    baseline.update();
+    assert_eq!(
+        requested_family(&baseline),
+        Some(WeaponFamily::Phasers),
+        "the FLEET BASELINE presents its beams first, even into a collapsed \
+         screen — this is the pre-#956 behaviour, and a hull with no preference \
+         of its own must resolve it from the authored baseline rather than from \
+         an inline Rust order (AC3)."
+    );
+
+    let mut doctrine = test_app();
+    spawn_two_family_arc_miss(
+        &mut doctrine,
+        uuid,
+        harrow_cruiser_weapons_doctrine(),
+        false,
+    );
+    doctrine.update();
+    assert_eq!(
+        requested_family(&doctrine),
+        Some(WeaponFamily::Torpedoes),
+        "the SAME miss, the SAME target, the SAME tick — and the hull whose \
+         doctrine says `bring_torpedoes_to_bear` while the striking arc is down \
+         asks Helm to present its tubes instead (AC2). If this read Phasers, a \
+         family priority would still be coming from Rust."
+    );
+
+    // …and the doctrine is a CONDITION, not a permanent reordering: put the
+    // screen back up and the same hull falls back to the fleet order.
+    let mut screened = test_app();
+    spawn_two_family_arc_miss(&mut screened, uuid, harrow_cruiser_weapons_doctrine(), true);
+    screened.update();
+    assert_eq!(
+        requested_family(&screened),
+        Some(WeaponFamily::Phasers),
+        "with the screen UP the promotion's guard reads false and the hull turns \
+         for its beams again. This is the row that makes the doctrine a doctrine \
+         — it reads the world every tick — rather than a second hardcoded order."
+    );
+}
+
+/// A ship with no `[weapons_console.ai]` at all asks Helm for nothing, however
+/// badly its guns are pointed.
+///
+/// The fail-CLOSED direction of removing the Rust array (issue #956): with no
+/// Rust default left behind it, an undeclared doctrine is silence rather than a
+/// hidden `[Phasers, Blasters, Torpedoes]`. Strict AI-declaration mode makes this
+/// unreachable for a shipped hull — `ai_declaration_manifest` rejects one at load
+/// — so what this pins is that nothing quietly reintroduces the constant.
+#[test]
+fn a_ship_with_no_authored_doctrine_asks_helm_for_nothing() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "dd000000-0000-0000-0000-000000000002";
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        ShipSystemControlSources::default(),
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        // …and deliberately NO WeaponsDoctrineAiPolicy.
+        loaded_torpedo_res(0.0, 30.0),
+    ));
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(20.0, 0.0, 0.0),
+    ));
+
+    app.update();
+
+    assert_eq!(
+        requested_family(&app),
+        None,
+        "an undeclared weapons doctrine turns for nothing. The identical fixture \
+         WITH the shipped baseline attached emits for Torpedoes \
+         (`tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc`), \
+         so this is the declaration being load-bearing rather than the geometry \
+         failing."
+    );
+}
+
 /// No request for an INCAPABLE family: a ship with no emitters of any family
 /// (an empty blaster vec, no phasers, no tubes) must not emit.
 #[test]
@@ -5250,6 +5477,7 @@ fn tick_weapons_arc_request_silent_when_family_incapable() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        shipped_weapons_doctrine(),
         BlasterSystemResource(vec![]), // capable of nothing
     ));
     app.world_mut().spawn((
@@ -5288,6 +5516,7 @@ fn tick_weapons_arc_request_silent_when_family_offline() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        shipped_weapons_doctrine(),
         blaster_res(0.0, 30.0, 50.0),
     ));
     // In range, out of arc — but the bank is offline.
@@ -5324,6 +5553,7 @@ fn tick_weapons_arc_request_silent_when_target_out_of_range() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        shipped_weapons_doctrine(),
         blaster_res(0.0, 30.0, 50.0),
     ));
     // Beyond the 50-unit blaster range (200 away) — out of range entirely.
@@ -5362,6 +5592,7 @@ fn tick_weapons_arc_request_clears_when_target_enters_arc() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            shipped_weapons_doctrine(),
             blaster_res(0.0, 30.0, 50.0),
         ))
         .id();
@@ -5421,6 +5652,7 @@ fn tick_weapons_arc_request_withdraws_when_the_standing_family_drains_to_empty()
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            shipped_weapons_doctrine(),
             loaded_torpedo_res(0.0, 30.0),
         ))
         .id();
@@ -5504,6 +5736,7 @@ fn tick_weapons_arc_request_withdrawal_is_not_repeated_every_tick() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            shipped_weapons_doctrine(),
             loaded_torpedo_res(0.0, 30.0),
         ))
         .id();
@@ -5809,6 +6042,7 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
                 }),
                 selector: None,
                 selector_idle: false,
+                ai: None,
             },
         ));
 }
@@ -5982,6 +6216,7 @@ fn tactical_ai_respects_radar_range() {
                         }),
                         selector: None,
                         selector_idle: false,
+                        ai: None,
                     },
                 ),
             );

@@ -816,8 +816,10 @@ fn most_recent_combat(a: &crate::ship::combat_activity::RecentCombatActivity) ->
 ///   launcher's bearing; `tick_torpedo_lifecycle` routes the hit from the
 ///   torpedo's own impact point, so a torpedo that homes far enough around a
 ///   moving target can still land on a neighbouring arc. One resolver, two
-///   moments in the shot's life.) `auto_fire_torpedo` only fires when this is
-///   `<= 0`: phasers strip the shields, torpedoes finish the hull.
+///   moments in the shot's life.) Since issue #956 nothing in Rust compares it
+///   to anything: it is seeded into the tube's launch snapshot and the tube's
+///   own authored `fact(target_facing_shields) <= 0` guard is what holds fire.
+///   Phasers strip the shields, torpedoes finish the hull — said in TOML.
 ///
 ///   It is deliberately *not* the sum over all arcs. Summing let three
 ///   healthy REAR arcs veto a shot into a collapsed FRONT arc while the
@@ -993,15 +995,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         // `ShipShields` (asteroids, debris) reads 0 — torpedo-eligible.
         let target_facing_shields: i32 = target_shields_comp
             .map(|s| {
-                let incoming = crate::shield::attacker_bearing_relative(
-                    physics.x, physics.z, tx, tz, target_yaw,
-                );
-                let facing = &s.0.facings[s.0.facing_index_for_bearing(incoming)];
-                if facing.is_online() {
-                    facing.hp
-                } else {
-                    0
-                }
+                s.0.hp_facing_attacker(physics.x, physics.z, tx, tz, target_yaw)
             })
             .unwrap_or(0);
 
@@ -1058,15 +1052,16 @@ pub(crate) fn ai_torpedo_auto_fire(
         for tube_id in tubes_to_fire {
             // Per-tube LAUNCH policy gate (issue #782): `auto_fire_torpedo`
             // already resolved this tube's host readiness (loaded, in arc, target
-            // locked, striking-arc shields down — NOT the magazine, whose rounds
-            // are the ones left to reload with and were already spent for
-            // whatever is in the tubes); now resolve
+            // locked — NOT the magazine, whose rounds are the ones left to reload
+            // with and were already spent for whatever is in the tubes, and NOT
+            // the striking arc's shields, which issue #956 moved into the guard
+            // below); now resolve
             // the tube's own authored launch policy over a seeded snapshot. Only a
             // tube whose policy fires `LaunchTorpedo` launches — an idle tube (or
             // one whose guard holds) is skipped, leaving other tubes free to fire
             // (per-tube independence). The candidates all passed the host gates,
-            // so those facts are `true`; `target_facing_shields` passes through
-            // so a policy can still gate on the striking arc.
+            // so those facts are `true`; `target_facing_shields` carries its live
+            // per-arc HP reading, and is now the ONLY gate on the shield state.
             //
             // A tube with NO entry does not launch: since #885b stage 5d there
             // is no synthesised stand-in, and strict AI-declaration mode rejects

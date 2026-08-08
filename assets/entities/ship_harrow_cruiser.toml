@@ -315,6 +315,74 @@ torpedo_run_range = 220.0
 # broadside this hull is built around.
 [weapons_console]
 
+# ── The BESPOKE weapons doctrine: tubes first into a gap (issue #956) ─────────
+#
+# The one hull in the fleet that departs from the baseline order in
+# `fragments/ai/fleet_baseline.toml`, and it is the issue's own worked example:
+# **torpedoes when the target's shields are down.**
+#
+# `arc_bearing_first` is what Weapons asks Helm to turn for, and it carries TWO
+# rules on the same channel rather than one, which is the whole doctrine:
+#
+# * priority 10 — while the arc a round from this ship would strike is not
+#   blocking (`target_facing_shields <= 0`, the same per-arc HP reading the bow
+#   tubes' own launch guard is written against), the family worth turning for is
+#   the TUBES. They are 24-degree bow cones; nothing but a deliberate turn ever
+#   puts them on a target, and a gap in a screen does not stay open.
+# * priority 0 — otherwise the fleet baseline: present the beams. Their 270
+#   degree arcs almost always bear anyway, so in practice this rank is quiet and
+#   the ship keeps flying its ring.
+#
+# Rank two carries the same pair, one place down: the beams while the gap is
+# open, the fleet's blasters otherwise. Rank three is the baseline's, untouched.
+# So the order resolves to
+#
+#     screen down  ⇒  [torpedoes, phasers]      (rank three repeats the tubes,
+#                                                and the host drops repeats)
+#     screen up    ⇒  [phasers, blasters, torpedoes]   — the fleet baseline,
+#                                                exactly, term for term.
+#
+# That second line is the point of authoring it this way rather than reordering
+# the ranks outright: when the gap closes, the hull is flying the fleet's own
+# doctrine again, not a third order nobody wrote down.
+#
+# This pairs with — and does not duplicate — the manoeuvre half in
+# `fragments/ai/movement_broadside_orbit.toml`, whose `torpedo_run_shield_gap`
+# breaks the ring on the same reading. That leg decides where the HULL goes;
+# this decides which gun Weapons asks Helm to present when it cannot bear.
+
+[weapons_console.ai]
+
+[[weapons_console.ai.rule]]
+priority = 10
+channel = "arc_bearing_first"
+when = "fact(target_facing_shields) <= 0"
+verb = "bring_torpedoes_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_first"
+when = "true"
+verb = "bring_phasers_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 10
+channel = "arc_bearing_second"
+when = "fact(target_facing_shields) <= 0"
+verb = "bring_phasers_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_second"
+when = "true"
+verb = "bring_blasters_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_third"
+when = "true"
+verb = "bring_torpedoes_to_bear"
+
 [[weapons_console.phaser_banks]]
 id = "fore"
 facing_deg = 0

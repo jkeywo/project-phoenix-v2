@@ -119,10 +119,11 @@ pub enum IdleLever {
     Absent,
 }
 
-/// The nineteen AI-capable fine-system kinds, as a closed enum.
+/// The twenty AI-capable fine-system kinds, as a closed enum.
 ///
 /// Exhaustively matched in [`slots_of_kind`] and in the manifest's spawner
-/// cross-check, so a new kind cannot be added without both being updated.
+/// cross-check, so a new kind cannot be added without both being updated. The
+/// twentieth is [`FineSystemKey::WeaponsDoctrine`], added by issue #956.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FineSystemKey {
     Captain,
@@ -136,6 +137,7 @@ pub enum FineSystemKey {
     PhaserBank,
     BlasterBank,
     TorpedoTube,
+    WeaponsDoctrine,
     TorpedoMagazine,
     ShieldsFocus,
     Power,
@@ -163,6 +165,7 @@ impl FineSystemKey {
             Self::PhaserBank => "phaser_bank",
             Self::BlasterBank => "blaster_bank",
             Self::TorpedoTube => "torpedo_tube",
+            Self::WeaponsDoctrine => "weapons_doctrine",
             Self::TorpedoMagazine => "torpedo_magazine",
             Self::ShieldsFocus => "shields_focus",
             Self::Power => "power",
@@ -223,7 +226,7 @@ const COMMS_HELPER: &[EvalSite] = &[site(
     "comms_console_ai_components",
 )];
 
-/// Roll call, ordered to mirror [`ai_flag_hosts::AI_HOSTS`]: fourteen policy
+/// Roll call, ordered to mirror [`ai_flag_hosts::AI_HOSTS`]: fifteen policy
 /// kinds, then five selector kinds.
 pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     FineSystemKind {
@@ -293,6 +296,13 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
         key: FineSystemKey::TorpedoTube,
         host: &ai_flag_hosts::TORPEDO_TUBE,
         component: "TorpedoTubeAiPolicies",
+        idle_lever: IdleLever::InBandPolicy,
+        spawn_sites: SPAWNER_AND_PLAYER,
+    },
+    FineSystemKind {
+        key: FineSystemKey::WeaponsDoctrine,
+        host: &ai_flag_hosts::WEAPONS_DOCTRINE,
+        component: "WeaponsDoctrineAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
@@ -422,9 +432,14 @@ fn declared_from(authored: bool) -> Declared {
 ///   `[navigation_console]`, `[repair]` or `[comms_console]` still receives all
 ///   five selectors. Computing this from "which sections does the hull
 ///   declare?" would under-report the gap by four slots per bare hull.
-/// * **Per-weapon systems sit OUTSIDE the `[behaviour]` gate.** They gate on
+/// * **Weapons systems sit OUTSIDE the `[behaviour]` gate.** The per-weapon
+///   kinds — and the ship-level `weapons_doctrine` with them — gate on
 ///   `[weapons_console]` / `[torpedoes]` instead, so an entity with weapons and
-///   no `[behaviour]` gets bank policies and nothing else.
+///   no `[behaviour]` gets bank policies, tube policies and a doctrine, and
+///   nothing else. `weapons_doctrine` is the one ship-level kind on this side of
+///   the line: it is a weapons-console decision, and the host that resolves it
+///   (`tick_weapons_arc_request`) iterates every `Ship` without asking whether
+///   the hull carries a `[behaviour]`.
 pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slot> {
     let ship_level = |authored: bool| -> Vec<Slot> {
         if c.behaviour.is_none() {
@@ -459,6 +474,31 @@ pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slo
                 .is_some_and(|x| x.ai_policy.is_some()),
         ),
         FineSystemKey::Power => ship_level(c.power.as_ref().is_some_and(|x| x.ai_policy.is_some())),
+        // Ship-level in SHAPE (one slot, no instance id) but NOT gated like the
+        // five selectors it sits beside: it gates on `[weapons_console]`, the
+        // way the per-weapon kinds below do, and deliberately not on
+        // `[behaviour]`.
+        //
+        // The reason is that `tick_weapons_arc_request` iterates `With<Ship>`
+        // unconditionally and `spawner.rs` attaches the policy inside its own
+        // `if let Some(wc) = config.weapons_console` arm — neither asks about
+        // `[behaviour]`. A hull with a weapons console and no `[behaviour]`
+        // already owes its bank and tube declarations for exactly that reason;
+        // gating THIS kind on `[behaviour]` would have let the same hull ship
+        // with no doctrine, no load error, and no arc-bearing request at all,
+        // silently losing an advisory a HUMAN helmsman reads off channel 3.
+        //
+        // The `[behaviour]`-gated reading would also under-report against the
+        // real spawn path, which `tests::the_manifest_matches_the_real_spawner`
+        // exists to catch.
+        FineSystemKey::WeaponsDoctrine => match c.weapons_console.as_ref() {
+            Some(w) => vec![Slot {
+                kind,
+                instance: None,
+                declared: declared_from(w.ai.is_some()),
+            }],
+            None => Vec::new(),
+        },
         FineSystemKey::SensorsSelector => ship_level(
             c.sensors_console
                 .as_ref()
@@ -690,7 +730,10 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
 ///
 /// # The table is EMPTY, and that is the point
 ///
-/// Nine hulls, 172 AI-capable fine-system slots, **zero of them undeclared**.
+/// Nine hulls, 181 AI-capable fine-system slots, **zero of them undeclared**.
+/// (172 until issue #956 added the ship-level `weapons_doctrine` kind, authored
+/// on all nine in the same change — a new kind is only allowed to arrive with
+/// its content, which is what the exact-equality assertion below enforces.)
 /// Every slot on every shipped hull now carries an authored block, transcribed
 /// verbatim from the synthesiser that used to invent it and pinned equal to it
 /// by `default_ai_policy_pins::spawn_path`.
@@ -719,7 +762,7 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
 ///
 /// An empty table is not a dead one. It is now the **ratchet at its stop**:
 /// `tests::the_committed_worklist_matches_the_shipped_hulls` asserts exact
-/// equality, so adding a hull, a weapon bank, a torpedo tube or a nineteenth
+/// equality, so adding a hull, a weapon bank, a torpedo tube or a twenty-first
 /// fine-system kind without authoring its declaration puts an entry back and
 /// fails, naming the hull and the system. That is the regression it exists to
 /// catch, and it can only be caught while the expected state is "nothing".
@@ -866,7 +909,7 @@ mod tests {
         let all_hosts: BTreeSet<&str> = ai_flag_hosts::AI_HOSTS.iter().map(|h| h.block).collect();
         assert_eq!(
             unique, all_hosts,
-            "the manifest's kinds and ai_flag_hosts::AI_HOSTS must be the same nineteen \
+            "the manifest's kinds and ai_flag_hosts::AI_HOSTS must be the same twenty \
              hosts. A host with no kind is a fine system whose missing declaration \
              nothing counts — which is exactly the invisibility #885a closes."
         );
@@ -1202,8 +1245,8 @@ base_priority = 40.0
             rollup.push((kind.key.as_str(), declared, slots));
         }
         assert_eq!(
-            total, 172,
-            "the shipped hulls carry 172 AI-capable fine-system slots in total"
+            total, 181,
+            "the shipped hulls carry 181 AI-capable fine-system slots in total"
         );
         assert_eq!(
             rollup,
@@ -1218,6 +1261,7 @@ base_priority = 40.0
                 ("phaser_bank", 11, 11),
                 ("blaster_bank", 7, 7),
                 ("torpedo_tube", 14, 14),
+                ("weapons_doctrine", 9, 9),
                 ("torpedo_magazine", 5, 5),
                 ("shields_focus", 9, 9),
                 ("power", 9, 9),
@@ -1228,12 +1272,14 @@ base_priority = 40.0
                 ("repair_selector", 9, 9),
                 ("comms_selector", 9, 9),
             ],
-            "the per-kind roll-up moved. Every one of the nineteen kinds is now \
+            "the per-kind roll-up moved. Every one of the twenty kinds is now \
              DECLARED on every hull that has it — declared == slots on every row — \
              after #885b stage 5b authored the five selectors and stage 5c the \
-             fourteen policies. A row where the two numbers differ is a fine system \
-             being handed automation nobody wrote, which is exactly what PRD #774 US7 \
-             forbids: author the block rather than editing this expectation."
+             fourteen policies, and #956 added the fifteenth policy kind \
+             (`weapons_doctrine`) already authored on all nine. A row where the two \
+             numbers differ is a fine system being handed automation nobody wrote, \
+             which is exactly what PRD #774 US7 forbids: author the block rather than \
+             editing this expectation."
         );
     }
 
@@ -1434,6 +1480,9 @@ base_priority = 40.0
             FineSystemKey::TorpedoMagazine => w
                 .get::<crate::weapons_plugin::TorpedoMagazineAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
+            FineSystemKey::WeaponsDoctrine => w
+                .get::<crate::weapons_plugin::WeaponsDoctrineAiPolicy>(e)
+                .map(|c| Attached::Policy(c.0.clone())),
             FineSystemKey::PhaserBank => map(w
                 .get::<crate::weapons_plugin::PhaserBankAiPolicies>(e)
                 .map(|c| &c.0)),
@@ -1507,6 +1556,9 @@ base_priority = 40.0
             FineSystemKey::Power => one(w.get::<crate::power_plugin::PowerAiPolicy>(e).is_some()),
             FineSystemKey::TorpedoMagazine => one(w
                 .get::<crate::weapons_plugin::TorpedoMagazineAiPolicy>(e)
+                .is_some()),
+            FineSystemKey::WeaponsDoctrine => one(w
+                .get::<crate::weapons_plugin::WeaponsDoctrineAiPolicy>(e)
                 .is_some()),
             FineSystemKey::SensorsSelector => one(w
                 .get::<crate::ship::sensors::SensorsTargetSelector>(e)

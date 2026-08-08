@@ -681,6 +681,44 @@ impl ShieldSystem {
         best_idx
     }
 
+    /// HP of the ONE arc a shot fired from `(attacker_x, attacker_z)` would
+    /// strike — the reading the fleet's torpedo doctrine is authored against.
+    ///
+    /// Resolves the attack bearing in this ship's own frame (arcs are authored
+    /// relative to its facing) and routes it through
+    /// [`Self::facing_index_for_bearing`], the SAME resolver `apply_damage` uses,
+    /// so a predictive gate and the eventual hit agree about which arc is in the
+    /// way.
+    ///
+    /// An OFFLINE arc reports `0`: it passes damage straight through to the
+    /// hull, so it is not blocking the shot. That, and the per-arc question
+    /// itself, are why this is not a sum over `facings` — a healthy rear arc
+    /// must not veto a shot into a collapsed front one while the attacker sits
+    /// dead ahead.
+    ///
+    /// Lives here rather than at either call site because both
+    /// `console_ai::server::ai_torpedo_auto_fire` (seeding the tube's launch
+    /// facts) and `console::weapons::tick_weapons_arc_request` (seeding the
+    /// weapons doctrine's family-preference facts, issue #956) need exactly this
+    /// number, and two copies of a bearing→arc resolution is two chances to
+    /// disagree about which arc a shot meets.
+    pub fn hp_facing_attacker(
+        &self,
+        attacker_x: f32,
+        attacker_z: f32,
+        ship_x: f32,
+        ship_z: f32,
+        ship_yaw: f32,
+    ) -> i32 {
+        let incoming = attacker_bearing_relative(attacker_x, attacker_z, ship_x, ship_z, ship_yaw);
+        let facing = &self.facings[self.facing_index_for_bearing(incoming)];
+        if facing.is_online() {
+            facing.hp
+        } else {
+            0
+        }
+    }
+
     /// Apply `amount` damage from `bearing_relative` (radians relative to ship yaw).
     ///
     /// Returns the hull passthrough damage (0 if shields fully absorbed the hit).

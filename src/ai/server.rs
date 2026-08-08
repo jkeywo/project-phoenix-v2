@@ -1623,9 +1623,29 @@ mod tests {
             // strict AI-declaration mode rejects a bank that declares neither a
             // policy nor an explicit idle, because nothing would be synthesised
             // for it and it would simply never fire.
+            //
+            // The ship-level `[weapons_console.ai]` doctrine below is owed for
+            // the same reason since issue #956, and this fixture is exactly the
+            // hull that makes the point: it is ARMED and carries no
+            // `[behaviour]`, so gating the doctrine on `[behaviour]` would have
+            // let it ship with no arc-bearing preference at all.
             r#"
 name = "Armed"
 [weapons_console]
+
+[weapons_console.ai]
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_first"
+when = "true"
+verb = "bring_phasers_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_second"
+when = "true"
+verb = "bring_blasters_to_bear"
 
 [[weapons_console.phaser_banks]]
 id = "fore"
@@ -2606,6 +2626,7 @@ verb = "fire_blaster"
             radar: None,
             selector: None,
             selector_idle: false,
+            ai: None,
         }
     }
 

@@ -157,7 +157,22 @@ impl Plugin for WeaponsPlugin {
                     ai_phaser_auto_fire
                         .in_set(crate::sim_sets::SimSet::Input)
                         .run_if(crate::ai::cadence::ai_tick_ready),
-                    tick_weapons_arc_request.in_set(crate::sim_sets::SimSet::Input),
+                    // Weapons DOCTRINE decide (issue #956): resolves the
+                    // ship's authored arc-bearing rank ladder and asks Helm to
+                    // turn. Since #956 this is an AI POLICY HOST
+                    // (`ai_flag_hosts::WEAPONS_DOCTRINE`), so it takes the same
+                    // gate as the three deciders it shares this tuple with —
+                    // AGENTS.md rule 7: every policy host decides on the ONE
+                    // shared cadence, not once per logical tick. Nothing here
+                    // is exempt from that: the
+                    // withdrawal and the debounce are both derived from the
+                    // same resolved order, so running them between decisions
+                    // would only let a family re-qualify against an order
+                    // nobody re-resolved. Stays in `Input` so it keeps reading
+                    // pre-physics `Transform`s, like the other three.
+                    tick_weapons_arc_request
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .run_if(crate::ai::cadence::ai_tick_ready),
                     handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
@@ -354,6 +369,100 @@ pub struct WeaponsArcRequestState {
     pub last: Option<(WeaponFamily, String, Vec<WeaponEmitterArc>)>,
 }
 
+/// The ship's authored WEAPONS DOCTRINE policy (issue #956): the order in which
+/// it presents its weapon families when the target is in range but outside every
+/// arc of one.
+///
+/// Built at spawn from `[weapons_console.ai]` — the fleet's baseline lives in
+/// `assets/entities/fragments/ai/fleet_baseline.toml`, so a hull with no
+/// preference of its own resolves the AUTHORED baseline rather than an inline
+/// Rust order. Strict AI-declaration mode rejects an AI-bearing hull that
+/// authors none, so there is no Rust-side stand-in to fall back to.
+#[derive(Component, Default, Clone, Debug)]
+pub struct WeaponsDoctrineAiPolicy(pub crate::ai::policy::AiPolicy);
+
+/// Seed the per-tick fact snapshot the WEAPONS DOCTRINE resolves its
+/// arc-bearing rank channels over (issue #956).
+///
+/// Deliberately narrow. The two readings here are the ones a "which gun do I
+/// turn to present?" decision is actually made on:
+///
+/// * `target_facing_shields` — HP of the one arc a round from this ship would
+///   strike, resolved through the target's own arc router
+///   ([`crate::shield::ShieldSystem::hp_facing_attacker`]), so this snapshot and
+///   the tube's own launch guard ask the same question of the same number. It is
+///   what makes "lead with the tubes once the screen is down" authorable, and it
+///   was previously seeded for torpedo tubes ALONE — a phaser or blaster guard
+///   could not see target shield state at all, so no cross-family preference
+///   could be expressed.
+/// * `red_alert` — this ship's own alert state, the same typed fact every fire
+///   guard in the fleet is written against, so a doctrine can present a
+///   different family before and after the captain calls stations.
+///
+/// Every emitter's arc, range and online state is a HOST reading resolved after
+/// the order comes back, never a fact: which families are *capable* is not a
+/// decision, and a policy that could contradict the geometry would ask Helm to
+/// turn for a gun that is not there.
+pub fn seed_weapons_doctrine_facts(
+    target_facing_shields: i32,
+    red_alert: bool,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set(
+        crate::entities::config::TARGET_FACING_SHIELDS_FACT,
+        target_facing_shields as f64,
+    );
+    facts.set(
+        crate::entities::config::POWER_RED_ALERT_FACT,
+        if red_alert { 1.0 } else { 0.0 },
+    );
+    facts
+}
+
+/// Resolve the ship's authored weapon-family order for the channel-3 arc-bearing
+/// request (issue #956) — the replacement for the Rust `[Phasers, Blasters,
+/// Torpedoes]` array.
+///
+/// Walks the [`crate::entities::config::ARC_BEARING_CHANNELS`] rank ladder in
+/// order, resolving each as an ordinary channel, and collects the family each
+/// one names. Two properties matter and both are deliberate:
+///
+/// * **Repeats are dropped.** A doctrine that promotes a family into an earlier
+///   rank while leaving the baseline rule on a later one is the natural way to
+///   author a conditional preference, and it must not make the same family
+///   qualify twice.
+/// * **An unauthored (or held) rank is simply absent.** The order shortens; the
+///   ship does not fall back to a Rust default for the empty slot. A doctrine
+///   that names one family only turns for that one, which is a statement a hull
+///   is entitled to make.
+///
+/// The `flags` chain is the caller's — this helper receives one already built,
+/// like every other `*_policy_fires` helper — so authored `flag(...)` /
+/// `counter(...)` guards on this host read live world state.
+pub(crate) fn resolve_arc_bearing_order(
+    policy: &crate::ai::policy::AiPolicy,
+    facts: &crate::world::flags::AiFacts,
+    flags: &[&crate::world::flags::FlagStore],
+) -> Vec<WeaponFamily> {
+    use crate::ai::policy::AiPolicyVerb;
+    let mut order: Vec<WeaponFamily> = Vec::new();
+    for channel in crate::entities::config::ARC_BEARING_CHANNELS {
+        let family = match policy.resolve_channel(channel, facts, flags) {
+            Some(AiPolicyVerb::BringPhasersToBear) => WeaponFamily::Phasers,
+            Some(AiPolicyVerb::BringBlastersToBear) => WeaponFamily::Blasters,
+            Some(AiPolicyVerb::BringTorpedoesToBear) => WeaponFamily::Torpedoes,
+            // Content validation restricts these channels to the three family
+            // verbs, so any other resolution is unreachable through the load
+            // path; treated as "this rank says nothing" rather than panicking.
+            _ => continue,
+        };
+        if !order.contains(&family) {
+            order.push(family);
+        }
+    }
+    order
+}
+
 /// One weapon emitter's inputs to the pure family-arc evaluation (issue #767):
 /// its online/usable state, its family arc geometry against the current target,
 /// and the arc/range Helm would need to turn toward.
@@ -472,19 +581,39 @@ pub fn longest_usable_direct_fire_range(emitters: &[DirectFireEmitter]) -> f32 {
 /// Generalises the pre-#767 phaser-only request to be weapon-family-aware:
 /// each capable family (phasers, blasters, torpedoes) is evaluated via
 /// [`evaluate_family_arc_request`]; a single family's request is emitted so
-/// exactly one is ever active. The family-selection rule is a **fixed
-/// priority — phasers, then blasters, then torpedoes** (structural, not a
-/// gameplay value): the always-available primary beam is brought to bear first,
-/// falling back to secondary families only when the primary cannot be the
-/// reason. There is no per-family Tactical selector surface to key off, so a
-/// deterministic priority keeps exactly one request active and independent of
-/// evaluation order.
+/// exactly one is ever active.
+///
+/// ## The family order is AUTHORED (issue #956)
+///
+/// It used to be a Rust array — `[Phasers, Blasters, Torpedoes]` — with a doc
+/// comment here calling it "structural, not a gameplay value". That was wrong:
+/// which gun a ship manoeuvres to present is a tactical decision, and a fleet
+/// that always turns for its beams can never fight a doctrine built on fixed bow
+/// tubes. The order now comes from the ship's own
+/// [`WeaponsDoctrineAiPolicy`] via [`resolve_arc_bearing_order`], resolved fresh
+/// every tick against [`seed_weapons_doctrine_facts`] — so a hull can lead with
+/// its tubes while the target's striking arc is down and with its beams
+/// otherwise. A hull with no preference of its own resolves the FLEET BASELINE
+/// in `fragments/ai/fleet_baseline.toml`, which authors exactly the old order;
+/// a hull with no policy at all (a bare test fixture — strict AI-declaration
+/// mode rejects a shipped one) asks for nothing, which is the fail-closed
+/// direction.
+///
+/// Exactly one request stays active because the walk stops at the first family
+/// that qualifies, as it always did; what changed is who wrote the walk order.
 ///
 /// Iterates every ship (player + NPC), mirroring `tick_sensors_frequency_hint`.
 /// Debounced via [`WeaponsArcRequestState`]: re-fires when the family, target,
 /// OR the usable arc set changes, not on every tick the same miss persists.
 #[allow(clippy::too_many_arguments)]
 fn tick_weapons_arc_request(
+    // Read-only scenario flag/counter chain (issue #891 stage 2), so authored
+    // `flag(...)` / `counter(...)` guards on the weapons doctrine read live
+    // world state. `Option` so bare-`App` fixtures still pass parameter
+    // validation.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ship_q: Query<
         (
             Entity,
@@ -494,6 +623,8 @@ fn tick_weapons_arc_request(
             Option<&PhaserCombatConfigResource>,
             Option<&blaster::BlasterSystemResource>,
             Option<&torpedo::TorpedoSystemResource>,
+            Option<&WeaponsDoctrineAiPolicy>,
+            Option<&crate::ship_state::ShipRedAlert>,
             &mut WeaponsArcRequestState,
         ),
         With<crate::server_app::Ship>,
@@ -503,6 +634,17 @@ fn tick_weapons_arc_request(
     entity_name_q: Query<(
         &crate::entities::spawner::EntityUuid,
         &crate::entities::spawner::EntityName,
+    )>,
+    // The locked target's own shields and heading, for the one cross-family
+    // reading the doctrine is authored against (issue #956). Separate from
+    // `entity_q` rather than widening it, because `live_entity_xz` is shared
+    // with the other Weapons systems and has no business growing a shield
+    // lookup.
+    target_shield_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &crate::ship::shields::ShipShields,
+        Option<&ShipPhysics>,
+        &Transform,
     )>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
@@ -516,6 +658,8 @@ fn tick_weapons_arc_request(
         combat_config_opt,
         blaster_opt,
         torpedo_opt,
+        doctrine_opt,
+        red_alert_opt,
         mut state,
     ) in ship_q.iter_mut()
     {
@@ -629,15 +773,53 @@ fn tick_weapons_arc_request(
             })
             .unwrap_or_default();
 
-        // Fixed family priority: phasers → blasters → torpedoes. Emit for the
-        // first family that qualifies so exactly one request is ever active.
-        let families = [
-            (WeaponFamily::Phasers, &phaser_emitters),
-            (WeaponFamily::Blasters, &blaster_emitters),
-            (WeaponFamily::Torpedoes, &torpedo_emitters),
-        ];
-        let selected = families.iter().find_map(|(fam, emitters)| {
-            evaluate_family_arc_request(emitters).map(|arcs| (*fam, arcs))
+        // ── The AUTHORED family order (issue #956) ───────────────────────────
+        //
+        // The ship's own doctrine decides which gun it turns to present, and it
+        // decides it against the target's live striking-arc shields — the one
+        // reading that makes "lead with the tubes once the screen is down" a
+        // doctrine rather than a fixed ordering. A hull carrying no policy asks
+        // for nothing; strict AI-declaration mode makes that unreachable for a
+        // shipped hull, so in practice it is the bare-fixture case.
+        //
+        // The fact is seeded whether or not any guard reads it, exactly as the
+        // fire hosts seed `red_alert`: a doctrine that ignores the screen is a
+        // doctrine, not a reason to withhold the reading.
+        let target_facing_shields: i32 = target_shield_q
+            .iter()
+            .find(|(u, ..)| u.0 == target_uuid)
+            .map(|(_, shields, tphys, _)| {
+                shields.0.hp_facing_attacker(
+                    physics.x,
+                    physics.z,
+                    tx,
+                    tz,
+                    tphys.map(|p| p.yaw).unwrap_or(0.0),
+                )
+            })
+            .unwrap_or(0);
+        let doctrine_facts =
+            seed_weapons_doctrine_facts(target_facing_shields, red_alert_opt.is_some_and(|r| r.0));
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
+        let order = doctrine_opt
+            .map(|d| resolve_arc_bearing_order(&d.0, &doctrine_facts, &flag_chain))
+            .unwrap_or_default();
+
+        // Emit for the first family in the authored order that qualifies, so
+        // exactly one request is ever active.
+        let emitters_of = |family: WeaponFamily| -> &Vec<EmitterArcInput> {
+            match family {
+                WeaponFamily::Phasers => &phaser_emitters,
+                WeaponFamily::Blasters => &blaster_emitters,
+                WeaponFamily::Torpedoes => &torpedo_emitters,
+            }
+        };
+        let selected = order.iter().find_map(|fam| {
+            evaluate_family_arc_request(emitters_of(*fam)).map(|arcs| (*fam, arcs))
         });
 
         let Some((family, arcs)) = selected else {

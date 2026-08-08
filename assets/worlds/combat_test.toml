@@ -1,7 +1,7 @@
-# Combat Test Scenario (#475)
+# Combat Test Scenario (#475, re-authored for #960 + #936)
 #
 # An 8-wave defence scenario that exercises the full combat stack:
-#   - on_all_destroyed trigger condition (#470)
+#   - on_timer wave clock + on_all_destroyed completion/victory (#470, #960)
 #   - NPC shields backend + Sensors panel rendering (#471, #473)
 #   - Rebalanced Harrow fleet + Axiom Station (#474)
 #   - Federation-Harrow mutual hostility (#472)
@@ -18,7 +18,7 @@
 #     clear of the spawn anchors.
 #
 # Starbase Alpha sits at [500, 0, 100] — within the clear zone. Player ship
-# spawns at [400, 0, 200] (~140u from the starbase) ready to defend.
+# spawns at [400, 0, 200] (~141u from the starbase) ready to defend.
 #
 # Ship selection: four Alliance hulls are available in the lobby.
 #   Alliance Courier    power_rating = 25   (single-station, solo)
@@ -26,67 +26,119 @@
 #   Alliance Cruiser    power_rating = 90
 #   Alliance Battleship power_rating = 120
 #
-# Wave schedule (issue #892, the corrected eight-wave table). The waves are
-# DEATH-GATED, not timed: wave N+1 is authored on `on_all_destroyed` over wave
-# N's group, and its spawn actions carry `delay_secs = 10.0` — a ten-second
-# breather between clearing one wave and meeting the next. Only wave 1 is on a
-# clock (`on_timer`, t=0).
+# ── The wave clock (issue #960) ──────────────────────────────────────────────
 #
-#   1   1x cruiser                  enemy_n_outer
-#   2   1x destroyer                enemy_se
-#   3   1x cruiser                  enemy_e
-#   4   1x destroyer                enemy_ne
-#   5   2x cruiser                  enemy_ese  + enemy_ene
-#   6   2x destroyer                enemy_s_outer + enemy_n_outer
-#   7   1x cruiser + 1x destroyer   enemy_e_far + enemy_e
-#   8   1x patrol cruiser           enemy_e_far
+# Waves are TIMED, not death-gated. Every wave hangs off its own `on_timer` at a
+# fixed offset, so the raid arrives whether or not the last one has been cleared
+# and falling behind compounds instead of pausing the mission:
 #
-# Singles alternating classes through wave 4, pairs through wave 7, closing on a
-# single patrol cruiser. Patrol cruisers are otherwise the STANDING PICKET
-# presence outside the schedule (see the `[anchors]` note and the two
-# `on_world_loaded` picket spawns): they hold their stations out past the belt
-# while the raid comes to the player.
+#   wave  t (s)  composition                anchors
+#   1       0    1x cruiser                 enemy_n_outer
+#   2      45    1x destroyer                enemy_se
+#   3      90    1x cruiser                 enemy_e
+#   4     135    1x destroyer                enemy_ne
+#   5     180    2x cruiser                 enemy_ese  + enemy_ene
+#   6     225    2x destroyer                enemy_s_outer + enemy_n_outer
+#   7     270    1x cruiser + 1x destroyer   enemy_e_far + enemy_e
+#   8     315    1x patrol cruiser          enemy_e_far
 #
-# `OnAllDestroyed { group }` reads live group membership, so the chain is
-# self-balancing across power tiers: whatever spawned into `wave_N` — primary
-# ships and the tier bonus alike — must all die before wave N+1 is released.
+# The interval is a single authored number repeated as each trigger's
+# `after_secs` (45 s), chosen against transit: a Harrow needs roughly 50 s to
+# cross the ~700 units from its spawn anchor to the starbase, so at 45 s the
+# next wave launches just before the previous one arrives and the player meets a
+# continuous stream rather than a queue. Retune by editing the eight
+# `after_secs` values — nothing in Rust knows the cadence.
+#
+# The ONLY thing still gated on `on_all_destroyed` is the ending window:
+# victory's `on_all_destroyed` over `hostiles` (plus its 5 s `delay_secs`), and
+# the eight per-wave completion triggers that close each objective and pay down
+# `mission_threat_remaining`. Nothing spawns off a death any more.
 #
 # Power-scaled bonus spawns (gated by ship_power counter = player power_rating),
-# authored as an extra gated ACTION on the wave's own trigger rather than as a
-# parallel trigger, so a bonus ship rides the same group and the same breather:
+# authored as an extra gated ACTION on the wave's own timer trigger so a bonus
+# ship rides the same group and the same clock:
 #   ship_power >= 90 (cruiser or battleship): +1 Harrow destroyer on each odd
 #     wave (1, 3, 5, 7).
 #   ship_power >= 100 (battleship only): +1 Harrow cruiser on each even wave
 #     (2, 4, 6, 8).
 #   Bonus ships are named wave_N_bonus. They join `hostiles` and `wave_N`, so
-#   they gate both the chain and victory. They carry no separate objective.
+#   they gate victory and their wave's objective. They carry the same assault
+#   override every other hull in the wave does.
 #
 # The DEMO tier (destroyer, power_rating 70) therefore sees exactly the table
 # above and nothing else; the fuller catalogue is what the two higher tiers add.
 #
-# Targeting model:
-#   Harrow ships spawn in their default `initial_state` (patrol/idle).
-#   Each ship's `enemy_in_range` transition (radius 5000) detects the
-#   player on the first tick and switches to `pursuing` with the player
-#   as the target. The starbase, being factionless, is not auto-targeted —
-#   enemies pursue and engage the player ship directly. If the player
-#   moves to draw fire away from the starbase, the cruiser/destroyer
-#   combat at the player's position will incidentally threaten the
-#   starbase if it's in their weapons cone.
+# ── The single target story (issues #960, #936) ──────────────────────────────
 #
-#   `set_ai_state` in the same trigger as `spawn_entity` was attempted
-#   but found unworkable: Bevy `Commands` defer the spawn until the
-#   next ECS sync, so the AI controller doesn't exist when `set_ai_state`
-#   would run. The `enemy_in_range` approach is robust and uses only
-#   existing engine mechanisms.
+# There are no standing pickets and no patrol circuits left in this world. Every
+# Harrow that spawns is committed to Starbase Alpha, and the scenario is the
+# race between the raid closing on the station and the player breaking it up.
+#
+# Starbase Alpha is now a FEDERATION entity (`assets/entities/station_axiom.toml`
+# authors the faction, issue #936). It used to be factionless, which made it a
+# thing the enemy could be ordered at but never a thing it owned an opinion
+# about; it is now the player's own station, which is what "defend it" is
+# supposed to mean.
+#
+# Every wave — cruiser, destroyer, patrol hull and tier bonus alike — carries the
+# same two-entry doctrine override. Before #936 only the cruiser waves had it,
+# so the destroyer waves never ran at the station at all:
+#
+#   * `assault-starbase`  Destroy @50, target `world.entity.starbase_alpha.name`,
+#     zero-gated on `not_attacked`. THE TARGET NAME IS THE STRING ID, not the
+#     English "Starbase Alpha": `resolve_objective_target_uuid` matches the
+#     entity's authored `name`, and this world authors that name as a string id.
+#     The old override named the display text, resolved nothing, and every
+#     "assault" wave sat on its spawn anchor for the whole run. Shooting one
+#     zeroes this entry and the hull turns to fight whoever hit it.
+#   * `close-on-starbase` Reach @35, anchor `harrow_assault_point`. The RUN-IN,
+#     and the reason the band below does not simply strand the raid: a Destroy
+#     directive resolves nothing until Tactical can actually see its target, so
+#     outside the acquisition band the hull falls through to this Reach and
+#     flies the approach. It sits BELOW the hull's own `destroy-hostiles` entry
+#     (38-40) on purpose — a Harrow that has been shot at fights first and only
+#     resumes the run once it has nothing to shoot at.
+#
+#     It is also what makes a wave move at all before it is close enough to be
+#     promoted to high-fidelity AI: `simulate_low_lod_ships` steers a low-LOD
+#     hull along a Patrol/Reach route and dead-reckons everything else, so a
+#     Destroy-only wave spawned 700 units out has no route to fly and drifts at
+#     zero speed. The Reach entry is that route.
+#
+# ── The engagement band: 200 out, 150 back (issue #960) ──────────────────────
+#
+# Enemies engage only what they can SEE, and in this world they see 200 units.
+# Every Harrow spawn overrides `[weapons_console.radar] range = 200`; the hull
+# templates author no radar block at all, which `ai_target_selection` reads as
+# an UNBOUNDED horizon — a raider that acquires the player from a kilometre away
+# is not an engagement, it is a homing missile. Inside 200 the ship acquires
+# (the station under its assault order, or the player once its assault order has
+# been zeroed by taking fire); outside 200 no candidate survives the host's range
+# gate, Tactical drops the lock, and the hull disengages back onto the
+# `close-on-starbase` Reach. Leaving the band is a real escape.
+#
+# The other half of the band is NOT authored here and deliberately so: the
+# Alliance captain fragment (`assets/entities/fragments/ai/captain_alliance.toml`)
+# calls Red Alert at `alert_on_hostile_within = 150`, and every Alliance gun
+# authors `min_alert_to_fire = 1.0`. A Harrow authors `min_alert_to_fire = 0`
+# and is always armed. So the ordering across the 200 → 150 band is:
+#
+#   * 200 u — the Harrow acquires and commits. Its guns were never locked.
+#   * 150 u — the player's captain calls the alert and the player's guns unlock.
+#
+# The enemy is therefore always the one that opens the engagement, and a player
+# who wants to shoot first has to either close to 150 or take a hit (damage
+# starts `secs_since_combat`, which raises the alert on the other captain rule).
+# Both numbers are content: widen the band by raising the 200 here, or make the
+# fleet twitchier by raising the 150 there.
 #
 #   Harrow defaults to neutral so non-combat worlds (Starbase Alpha,
 #   Before the Fire) can reuse the same ship templates as ambient
 #   patrols. This scenario flips both directions of the Federation
 #   <-> Harrow relationship hostile on `on_world_loaded` via two
-#   `add_faction_enemy` actions, *before* the first wave's
-#   `enemy_in_range` tick — guaranteeing the first wave engages
-#   immediately rather than drifting past the player.
+#   `add_faction_enemy` actions, *before* the first wave's first
+#   acquisition tick — guaranteeing wave 1 engages immediately rather
+#   than drifting past the station as a neutral patrol.
 #
 # Victory: every hostile destroyed → game_over "VICTORY". ONE trigger, not the
 #   three per-tier variants this world used to carry. Those enumerated a fixed
@@ -97,33 +149,54 @@
 #   issue #892). Group membership is dynamic, so a single `on_all_destroyed`
 #   over `hostiles` covers all three tiers with no name list at all.
 #
-#   The guard is `counter(waves_spawned) >= 8` rather than a clock. Waves are
-#   death-gated with a ten-second breather, so there are windows in which every
-#   REGISTERED hostile is dead and the next wave has not spawned yet; without
-#   the counter those windows read as victory. Each wave increments the counter
-#   on the same delayed schedule as its own spawn, so the counter can only reach
-#   8 in the same dispatch batch that registers wave 8.
+#   The guard is `counter(waves_spawned) >= 8` rather than a clock, and under a
+#   wave CLOCK it matters more than it did under the death-gated chain, not
+#   less: a good player can clear every ship on the field with four waves still
+#   unspawned, and without the counter that window reads as victory. Each wave
+#   increments the counter in the same trigger that spawns it, so the counter
+#   reaches 8 in the same dispatch batch that registers wave 8.
 # Defeat:  Starbase Alpha destroyed → game_over "DEFEAT".
 #          Player ship destroyed → handled by the built-in apply_hull_damage
 #          path which sets GamePhase::GameOver directly with reason
 #          "All consoles destroyed" — no scenario trigger needed.
 #
-# Pacing: this world also PUBLISHES how much of itself is still ahead, as the
-#   world counter `mission_threat_remaining` (issue #943). It is set to 8 on
-#   `on_world_loaded` and decremented beside each wave's `complete_objective`,
-#   so at any moment it reads how many waves are still to come. Anything that
-#   has to ration a finite resource across the whole run reads it instead of
-#   guessing — today that is the torpedo magazine's `torpedo_conservation`
-#   doctrine (see `[torpedoes.ai]` on any hull with tubes), which divides the
-#   rounds the ship still has ABOARD — magazine plus tubes — by this number and
-#   holds fire once the quotient falls under the reserve the hull authors.
-#   Without it a ship — player or NPC — meets wave 1 with twelve torpedoes and
-#   waves 2-8 with none.
+# ── Pacing: `mission_threat_remaining` under a clock (issue #943) ────────────
 #
-#   It is deliberately a SECOND counter rather than arithmetic on
-#   `waves_spawned`: that one counts waves RELEASED (and is what victory waits
-#   for), this one counts waves REMAINING, and the two move at different
-#   moments — a wave is released ten seconds after the previous one dies.
+# This world PUBLISHES how much of itself is still ahead, as the world counter
+# `mission_threat_remaining`. It is set to 8 on `on_world_loaded` and paid down
+# by one in each wave's own completion trigger, so at any moment it reads how
+# many waves are still to be FOUGHT. Anything that has to ration a finite
+# resource across the whole run reads it instead of guessing — today that is the
+# torpedo magazine's `torpedo_conservation` doctrine (see `[torpedoes.ai]` on
+# any hull with tubes), which divides the rounds the ship still has ABOARD —
+# magazine plus tubes — by this number and holds fire once the quotient falls
+# under the reserve the hull authors. Without it a ship — player or NPC — meets
+# wave 1 with twelve torpedoes and waves 2-8 with none.
+#
+# WHAT IT COUNTS, AND WHY THAT IS STILL HONEST UNDER A CLOCK. It counts waves
+# NOT YET DESTROYED — which under the death-gated chain was the same set as
+# "waves not yet spawned", and under the clock is not. A timed wave 5 that is
+# already on the field is still threat the ship has to survive, so counting it
+# is exactly right; what would be dishonest is counting waves DOWN as they
+# SPAWN, which would read 0 while the last four waves were alive and in the
+# player's face. The decrement is therefore kept where it was — beside each
+# wave's `complete_objective`, on that wave's own `on_all_destroyed` — and
+# moved OFF the next wave's spawn trigger, which no longer exists. Waves can now
+# also die out of order (a player may focus wave 6 while wave 5 is still alive);
+# the counter does not care, because each wave pays its own single decrement.
+#
+# It stays a SECOND counter rather than arithmetic on `waves_spawned`: that one
+# counts waves RELEASED (and is what victory waits for), this one counts waves
+# still alive or still to come, and under a clock the two are independent.
+#
+# Worth knowing before lengthening this schedule: this counter is the
+# DENOMINATOR of a ONE-WAY LATCH. It falls only when a wave DIES, and a hull
+# that has already dipped under its reserve is not shooting at the wave whose
+# death would make it fall. Publishing more threat than the fleet's magazines
+# can pace against therefore does not make the ships thriftier — it makes them
+# silent. That is exactly what this world did at the fleet's original reserve of
+# one round per remaining wave: the destroyer met wave 2 holding five rounds it
+# was never cleared to fire.
 
 [global]
 seed = 475
@@ -187,43 +260,52 @@ enemy_s_outer  = [900.0, 0.0, 800.0]     # 1204
 enemy_ene      = [1100.0, 0.0, -150.0]   # 1110
 enemy_ese      = [1100.0, 0.0, 350.0]    # 1154
 enemy_e_far    = [1400.0, 0.0, 100.0]    # 1404
+
+# The Harrow run-in point (issue #960). Every wave's `close-on-starbase` Reach
+# entry names this anchor: it is 100 units +X of Starbase Alpha, i.e. on the
+# approach side the whole raid flies in on, and well inside the 200-unit
+# acquisition band from the station itself. A hull that reaches it has the
+# starbase on its scope and its `assault-starbase` Destroy entry — which
+# outscores this one — takes the fight over from here.
+harrow_assault_point = [600.0, 0.0, 100.0]
+
+# The player's own defensive circuit around the object it is defending. This is
+# the mission's `obj-defend` Patrol directive (bottom of the file), not an enemy
+# route: with the raid coming to the station, a backfilled player that had
+# nowhere to be would sit on its spawn point until something wandered inside its
+# 50-unit tactical radar. Four stations, ±200 units on each axis.
 starbase_patrol_north = [500.0, 0.0, -100.0]   # starbase + [  0, 0, -200]
 starbase_patrol_east  = [700.0, 0.0, 100.0]   # starbase + [+200, 0,    0]
 starbase_patrol_south = [500.0, 0.0, 300.0]   # starbase + [  0, 0, +200]
 starbase_patrol_west  = [300.0, 0.0, 100.0]   # starbase + [-200, 0,    0]
 
-# Patrol anchors for enemy ship [[behaviour.doctrine]] routes. These must match
-# the `directive_anchors` referenced in the entity TOMLs so that ships have a
-# resolvable Patrol route; fielding a hull whose route this world does not
-# declare fails the load and names the anchor.
+# The picket line is gone, and its two anchors went with it (issue #960).
+#
+# `ship_harrow_patrol.toml` - the hull wave 8 arrives in - authors a
+# `patrol-ironveil` Patrol entry naming `ironveil_patrol_a`/`_b`, and an
+# unresolved doctrine anchor fails the world load. That is not a reason to
+# declare a route nothing flies: wave 8's spawn override stands the entry DOWN
+# instead of restating it at zero priority. `doctrine_anchor_refs` reads the
+# EFFECTIVE doctrine, template plus overrides, and asks
+# `parse_doctrine_directive` which fields are anchors, so a stood-down entry
+# asks for none and the world loads with none declared. Left a Patrol at
+# `base_priority = 0`, it would still have been a Patrol, and a Patrol keeps its
+# anchors alive.
+#
+# Standing an entry down means clearing EVERY field its old kind owned, not just
+# the anchors. `duel.toml` documents the short form
+# (`directive_kind = "None", directive_anchors = []`), which is enough for a
+# route that only names anchors; this hull also authors `directive_loop`, and
+# `validate_doctrine_directives` rejects a field belonging to another directive
+# kind rather than ignoring it, so `directive_loop = false` goes with it. Get
+# that wrong and the failure is quiet in the wrong place: `doctrine_anchor_refs`
+# treats a merge error as "no anchors to check", so the world would load
+# happily and wave 8 would simply never spawn.
 #
 # There is no `patrol_alpha`/`_beta`/`_gamma` circuit any more (issue #892):
 # those three anchors existed solely for the retired `pirate_raider.toml`.
-#
-# The Harrow cruiser and destroyer author a Destroy doctrine only and need no
-# anchors here. `ship_harrow_patrol.toml` is the one hull in the scenario that
-# authors a Patrol entry, and since issue #892 that entry is a PICKET (see the
-# hull TOML): station-keeping, not a roving sweep. These two anchors are the
-# picket's two stations, out past the outer belt on the +X approach the raid
-# waves fly in on — the standing Harrow presence the player has to go and clear,
-# as against the waves, which come to the player.
-ironveil_patrol_a  = [1000.0, 0.0, -300.0]  # picket station, north approach (1044)
-ironveil_patrol_b  = [1000.0, 0.0,  400.0]  # picket station, south approach (1077)
-
-# `warhawk_patrol_a`/`_b` are gone with the Harrow battleship: the corrected
-# eight-wave schedule (issue #892) closes on a patrol cruiser, not a Warhawk, so
-# no hull in this world reads that route any more.
-#
-# There is deliberately no `pirate_haven` here either, and since issue #892
-# there is nothing left that would read it.
-#
-# The retired `pirate_raider.toml` carried a `retreat-when-hurt` Retreat
-# directive naming that anchor, gated on hull < 30%, and every wave override had
-# to clear the entry: victory is `on_all_destroyed`, so a wave that runs for a
-# haven at full throttle the moment it is nearly dead turns every ending into a
-# stern chase. Neither Harrow hull in the wave list authors a Retreat at all, so
-# the clearing entries are gone with the hull — nothing to fall through to, and
-# nothing to state.
+# `warhawk_patrol_a`/`_b` are gone with the Harrow battleship, and there is
+# deliberately no `pirate_haven` either.
 
 # ── Static map entities ───────────────────────────────────────────────────────
 
@@ -324,29 +406,31 @@ id = "player-ship"
 transform = { position = [400.0, 0.0, 200.0] }
 spawn_on = "game_start"
 
-# Defended object. Named "Starbase Alpha" so on_destroyed can reference it.
+# Defended object, and since #936 a FEDERATION one — the faction is authored on
+# `assets/entities/station_axiom.toml`, not here, because a station tagged
+# `allied` that belongs to nobody is wrong in every world that fields it. Named
+# "world.entity.starbase_alpha.name" so `on_destroyed` and every wave's
+# `assault-starbase` directive can reference it; that string id IS the entity's
+# name as far as name resolution is concerned.
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"
 name = "world.entity.starbase_alpha.name"
 transform = { position = [500.0, 0.0, 100.0] }
 
-# ── Wave spawn triggers ──────────────────────────────────────────────────────
+# ── World load ───────────────────────────────────────────────────────────────
 
 # Make Harrow hostile to the Federation (and vice versa) for the duration
 # of this scenario. The faction TOMLs default both sides to neutral so the
 # same Harrow ship templates can appear as ambient patrols in non-combat
 # worlds (Starbase Alpha, Before the Fire). Two `add_faction_enemy`
 # actions flip both directions of the asymmetric `is_enemy` relationship
-# at world-load time, *before* any wave's first detection tick —
-# guaranteeing the first wave engages on detection rather than drifting
+# at world-load time, *before* any wave's first acquisition tick —
+# guaranteeing wave 1 engages on detection rather than drifting
 # past as a neutral patrol.
 #
-# The same trigger puts the two standing PICKETS on station. They are not part
-# of the wave schedule and gate nothing in the chain — they join `hostiles`
-# (so victory needs them cleared) and `pickets` (so anything that wants to talk
-# about the picket line has a group to name), but no wave waits on them. They
-# hold `ironveil_patrol_a` / `_b` out past the outer belt and let the raid come
-# to the player; clearing them is a trip the player has to choose to make.
+# Since #960 this trigger spawns NOTHING. The two standing pickets it used to
+# put on station are gone with the picket line; the only ships in this world are
+# the eight timed waves.
 #
 # Idempotent for the faction half. Re-running the trigger (e.g. via load_world
 # layering) is a no-op there. Faction names are case-sensitive and must match
@@ -371,51 +455,36 @@ condition = "on_world_loaded"
   # ship still has aboard (magazine plus tubes) by this number and holds fire
   # once the quotient drops below the reserve the hull authors.
   #
-  # Eight, because eight waves is what the schedule below releases. It is the
-  # same number the victory guard counts up to in `counter(waves_spawned) >= 8`,
+  # Eight, because eight waves is what the clock below releases. It is the same
+  # number the victory guard counts UP to in `counter(waves_spawned) >= 8`,
   # stated the other way round: that one asks "have all eight been RELEASED",
-  # this one says "how many are still to come". Each wave's death trigger
-  # decrements it, so while the last wave is alive it reads 1 and the fleet's
-  # authored reserve of half a round per remaining wave comes to half a round —
-  # a hull that has been holding rounds back can spend every one of them on the
-  # ships actually left. It reaches 0 as that wave dies.
-  #
-  # Worth knowing before lengthening this schedule: this counter is the
-  # DENOMINATOR of a ONE-WAY LATCH. It falls only when a wave DIES, and a hull
-  # that has already dipped under its reserve is not shooting at the wave whose
-  # death would make it fall. Publishing more threat than the fleet's magazines
-  # can pace against therefore does not make the ships thriftier — it makes them
-  # silent, and the death-gated chain below stops advancing. That is exactly
-  # what this world did at the fleet's original reserve of one round per
-  # remaining wave: the destroyer met wave 2 holding five rounds it was never
-  # cleared to fire, and wave 3 never spawned.
+  # this one says "how many are still to be fought". Each wave's completion
+  # trigger decrements it, so while the last wave is alive it reads 1 and the
+  # fleet's authored reserve of half a round per remaining wave comes to half a
+  # round — a hull that has been holding rounds back can spend every one of them
+  # on the ships actually left. It reaches 0 as that wave dies.
   [[trigger.action]]
   type  = "set_flag_value"
   name  = "mission_threat_remaining"
   value = 8
 
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_patrol.toml"
-  name          = "picket_north"
-  anchor        = "ironveil_patrol_a"
-  groups        = ["hostiles", "pickets"]
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_patrol.toml"
-  name          = "picket_south"
-  anchor        = "ironveil_patrol_b"
-  groups        = ["hostiles", "pickets"]
-
-# Wave 1 — 1x Harrow cruiser, on the clock at t=0. The only wave that is.
+# ── Wave spawn triggers ──────────────────────────────────────────────────────
 #
-# The cruiser waves (1, 3, 5, 7) carry the `assault-starbase` override: they are
-# the bombardment element, and the `not_attacked` zero-gate means the moment the
-# player shoots one it drops the run on the starbase and turns to fight.
+# Eight `on_timer` triggers, one per wave, at 45-second intervals. Each one:
+#   * spawns its hulls into `hostiles` (victory) and `wave_N` (its objective),
+#   * spawns its power-tier bonus hull under a `when` action predicate,
+#   * adds the player's `obj-destroy-wave-N` objective,
+#   * increments `waves_spawned`.
+# None of them carries `delay_secs`: the trigger's own `after_secs` IS the
+# schedule now, and a second delay on top of it would only make the authored
+# table lie about when a wave arrives.
 #
-# `increment_flag waves_spawned` is what the victory trigger counts. Wave 1's is
-# undelayed because wave 1 is undelayed.
+# Every spawn carries the same two overrides — the 200-unit acquisition band and
+# the assault/run-in doctrine pair. See the header for both. They are restated
+# per spawn rather than factored out because a `spawn_entity` action has no
+# inheritance mechanism; if you retune one, retune all of them.
+
+# Wave 1 — 1x Harrow cruiser, t=0.
 [[trigger]]
 condition = "on_timer"
 after_secs = 0.0
@@ -426,10 +495,12 @@ after_secs = 0.0
   name          = "wave_1"
   anchor        = "enemy_n_outer"
   groups        = ["hostiles", "wave_1"]
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   # Tier bonus: +1 Harrow destroyer for a cruiser or battleship player.
@@ -440,6 +511,13 @@ after_secs = 0.0
   position      = [900.0, 0.0, -560.0]
   groups        = ["hostiles", "wave_1"]
   when          = "counter(ship_power) >= 90"
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -456,37 +534,10 @@ after_secs = 0.0
   name = "waves_spawned"
   by   = 1
 
-# Waves 2..8 — death-gated. Each trigger fires when the previous wave's GROUP is
-# empty of survivors, completes that wave's objective immediately, and releases
-# the next wave ten seconds later.
-#
-# The destroyer waves (2, 4, both halves of 6, the second half of 7) carry NO
-# `overrides.behaviour`. That is where issue #883's fly-through demo went: it
-# used to be an unconditional extra destroyer at t=20 (`wave_1c`) whose whole
-# point was that it came straight for the PLAYER while the scheduled waves ran
-# at the starbase. The corrected eight-wave table has no room for an unscheduled
-# ninth ship, so the pass is not retired so much as promoted — every destroyer
-# wave now flies the hull's own doctrine straight at the player, and the
-# manoeuvre `wave_1c` existed to show is the destroyer's identity in this
-# scenario rather than a one-off cameo.
-
-# Wave 2 — 1x Harrow destroyer.
+# Wave 2 — 1x Harrow destroyer, t=45.
 [[trigger]]
-condition = "on_all_destroyed"
-group     = "wave_1"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-destroy-wave-1"
-
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
-  [[trigger.action]]
-  type = "increment_flag"
-  name = "mission_threat_remaining"
-  by   = -1
+condition = "on_timer"
+after_secs = 45.0
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -494,7 +545,13 @@ group     = "wave_1"
   name          = "wave_2"
   anchor        = "enemy_se"
   groups        = ["hostiles", "wave_2"]
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   # Tier bonus: +1 Harrow cruiser for a battleship player.
   [[trigger.action]]
@@ -504,11 +561,12 @@ group     = "wave_1"
   position      = [1000.0, 0.0, 640.0]
   groups        = ["hostiles", "wave_2"]
   when          = "counter(ship_power) >= 100"
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -520,31 +578,16 @@ group     = "wave_1"
   target         = "wave_2"
   directive_kind = "Destroy"
   base_priority  = 80.0
-  delay_secs     = 10.0
 
-  [[trigger.action]]
-  type       = "increment_flag"
-  name       = "waves_spawned"
-  by         = 1
-  delay_secs = 10.0
-
-# Wave 3 — 1x Harrow cruiser.
-[[trigger]]
-condition = "on_all_destroyed"
-group     = "wave_2"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-destroy-wave-2"
-
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
   [[trigger.action]]
   type = "increment_flag"
-  name = "mission_threat_remaining"
-  by   = -1
+  name = "waves_spawned"
+  by   = 1
+
+# Wave 3 — 1x Harrow cruiser, t=90.
+[[trigger]]
+condition = "on_timer"
+after_secs = 90.0
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -552,11 +595,12 @@ group     = "wave_2"
   name          = "wave_3"
   anchor        = "enemy_e"
   groups        = ["hostiles", "wave_3"]
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -566,7 +610,13 @@ group     = "wave_2"
   position      = [1200.0, 0.0, 140.0]
   groups        = ["hostiles", "wave_3"]
   when          = "counter(ship_power) >= 90"
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -577,31 +627,16 @@ group     = "wave_2"
   target         = "wave_3"
   directive_kind = "Destroy"
   base_priority  = 80.0
-  delay_secs     = 10.0
 
-  [[trigger.action]]
-  type       = "increment_flag"
-  name       = "waves_spawned"
-  by         = 1
-  delay_secs = 10.0
-
-# Wave 4 — 1x Harrow destroyer.
-[[trigger]]
-condition = "on_all_destroyed"
-group     = "wave_3"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-destroy-wave-3"
-
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
   [[trigger.action]]
   type = "increment_flag"
-  name = "mission_threat_remaining"
-  by   = -1
+  name = "waves_spawned"
+  by   = 1
+
+# Wave 4 — 1x Harrow destroyer, t=135.
+[[trigger]]
+condition = "on_timer"
+after_secs = 135.0
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -609,7 +644,13 @@ group     = "wave_3"
   name          = "wave_4"
   anchor        = "enemy_ne"
   groups        = ["hostiles", "wave_4"]
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -618,11 +659,12 @@ group     = "wave_3"
   position      = [1000.0, 0.0, -360.0]
   groups        = ["hostiles", "wave_4"]
   when          = "counter(ship_power) >= 100"
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -634,31 +676,16 @@ group     = "wave_3"
   target         = "wave_4"
   directive_kind = "Destroy"
   base_priority  = 80.0
-  delay_secs     = 10.0
 
-  [[trigger.action]]
-  type       = "increment_flag"
-  name       = "waves_spawned"
-  by         = 1
-  delay_secs = 10.0
-
-# Wave 5 — 2x Harrow cruiser. The pairs begin here.
-[[trigger]]
-condition = "on_all_destroyed"
-group     = "wave_4"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-destroy-wave-4"
-
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
   [[trigger.action]]
   type = "increment_flag"
-  name = "mission_threat_remaining"
-  by   = -1
+  name = "waves_spawned"
+  by   = 1
+
+# Wave 5 — 2x Harrow cruiser, t=180. The pairs begin here.
+[[trigger]]
+condition = "on_timer"
+after_secs = 180.0
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -666,11 +693,12 @@ group     = "wave_4"
   name          = "wave_5"
   anchor        = "enemy_ese"
   groups        = ["hostiles", "wave_5"]
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -679,11 +707,12 @@ group     = "wave_4"
   name          = "wave_5_second"
   anchor        = "enemy_ene"
   groups        = ["hostiles", "wave_5"]
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -693,7 +722,13 @@ group     = "wave_4"
   position      = [1100.0, 0.0, 390.0]
   groups        = ["hostiles", "wave_5"]
   when          = "counter(ship_power) >= 90"
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -704,31 +739,16 @@ group     = "wave_4"
   target         = "wave_5"
   directive_kind = "Destroy"
   base_priority  = 80.0
-  delay_secs     = 10.0
 
-  [[trigger.action]]
-  type       = "increment_flag"
-  name       = "waves_spawned"
-  by         = 1
-  delay_secs = 10.0
-
-# Wave 6 — 2x Harrow destroyer.
-[[trigger]]
-condition = "on_all_destroyed"
-group     = "wave_5"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-destroy-wave-5"
-
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
   [[trigger.action]]
   type = "increment_flag"
-  name = "mission_threat_remaining"
-  by   = -1
+  name = "waves_spawned"
+  by   = 1
+
+# Wave 6 — 2x Harrow destroyer, t=225.
+[[trigger]]
+condition = "on_timer"
+after_secs = 225.0
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -736,7 +756,13 @@ group     = "wave_5"
   name          = "wave_6"
   anchor        = "enemy_s_outer"
   groups        = ["hostiles", "wave_6"]
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -744,7 +770,13 @@ group     = "wave_5"
   name          = "wave_6_second"
   anchor        = "enemy_n_outer"
   groups        = ["hostiles", "wave_6"]
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -753,11 +785,12 @@ group     = "wave_5"
   position      = [900.0, 0.0, 840.0]
   groups        = ["hostiles", "wave_6"]
   when          = "counter(ship_power) >= 100"
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -769,32 +802,17 @@ group     = "wave_5"
   target         = "wave_6"
   directive_kind = "Destroy"
   base_priority  = 80.0
-  delay_secs     = 10.0
 
-  [[trigger.action]]
-  type       = "increment_flag"
-  name       = "waves_spawned"
-  by         = 1
-  delay_secs = 10.0
-
-# Wave 7 — 1x Harrow cruiser + 1x Harrow destroyer, the mixed pair: one hull
-# running at the starbase and one coming for the player, at the same time.
-[[trigger]]
-condition = "on_all_destroyed"
-group     = "wave_6"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-destroy-wave-6"
-
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
   [[trigger.action]]
   type = "increment_flag"
-  name = "mission_threat_remaining"
-  by   = -1
+  name = "waves_spawned"
+  by   = 1
+
+# Wave 7 — 1x Harrow cruiser + 1x Harrow destroyer, t=270: the mixed pair, two
+# hull classes running the same assault from two bearings at once.
+[[trigger]]
+condition = "on_timer"
+after_secs = 270.0
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -802,11 +820,12 @@ group     = "wave_6"
   name          = "wave_7"
   anchor        = "enemy_e_far"
   groups        = ["hostiles", "wave_7"]
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -815,7 +834,13 @@ group     = "wave_6"
   name          = "wave_7_second"
   anchor        = "enemy_e"
   groups        = ["hostiles", "wave_7"]
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -824,7 +849,13 @@ group     = "wave_6"
   position      = [1400.0, 0.0, 140.0]
   groups        = ["hostiles", "wave_7"]
   when          = "counter(ship_power) >= 90"
-  delay_secs    = 10.0
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -835,33 +866,26 @@ group     = "wave_6"
   target         = "wave_7"
   directive_kind = "Destroy"
   base_priority  = 80.0
-  delay_secs     = 10.0
 
-  [[trigger.action]]
-  type       = "increment_flag"
-  name       = "waves_spawned"
-  by         = 1
-  delay_secs = 10.0
-
-# Wave 8 (final) — 1x Harrow patrol cruiser. The picket hull, flown off its
-# picket: the `assault-starbase` override outscores its own station-keeping
-# entry, so this one comes in rather than holding.
-[[trigger]]
-condition = "on_all_destroyed"
-group     = "wave_7"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-destroy-wave-7"
-
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
   [[trigger.action]]
   type = "increment_flag"
-  name = "mission_threat_remaining"
-  by   = -1
+  name = "waves_spawned"
+  by   = 1
+
+# Wave 8 (final) — 1x Harrow patrol cruiser, t=315. The Ironveil-class hull, and
+# the one wave whose template carries a Patrol entry of its own. The override
+# stands `patrol-ironveil` DOWN rather than re-pointing or de-prioritising it:
+# `directive_kind = "None"` leaves nothing for the Helm to serve, and clearing
+# the two Patrol-owned fields with it — `directive_anchors = []`,
+# `directive_loop = false` — is what frees `ironveil_patrol_a`/`_b` from this
+# world's anchor table AND keeps the merge legal (see the anchors section
+# above). `base_priority = 0` and the empty `modifiers` keep it out of the
+# scored pool as well, so it cannot lead a pool every consumer reads the FIRST
+# entry of. There is no picket line for it to hold any more, and it arrives
+# committed to the assault like every other wave.
+[[trigger]]
+condition = "on_timer"
+after_secs = 315.0
 
   [[trigger.action]]
   type          = "spawn_entity"
@@ -869,11 +893,13 @@ group     = "wave_7"
   name          = "wave_8"
   anchor        = "enemy_e_far"
   groups        = ["hostiles", "wave_8"]
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "patrol-ironveil", directive_kind = "None", directive_anchors = [], directive_loop = false, base_priority = 0.0, modifiers = [] },
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -883,11 +909,12 @@ group     = "wave_7"
   position      = [1400.0, 0.0, -40.0]
   groups        = ["hostiles", "wave_8"]
   when          = "counter(ship_power) >= 100"
-  delay_secs    = 10.0
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+  overrides = { weapons_console = { radar = { range = 200.0, shows = ["player", "ship", "station"], selects = ["ship", "station"] } }, behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "world.entity.starbase_alpha.name",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "close-on-starbase", directive_kind = "Reach", directive_anchor = "harrow_assault_point",
+      base_priority = 35.0, target_speed = 0.9 },
   ] } }
 
   [[trigger.action]]
@@ -899,16 +926,113 @@ group     = "wave_7"
   target         = "wave_8"
   directive_kind = "Destroy"
   base_priority  = 80.0
-  delay_secs     = 10.0
 
   [[trigger.action]]
-  type       = "increment_flag"
-  name       = "waves_spawned"
-  by         = 1
-  delay_secs = 10.0
+  type = "increment_flag"
+  name = "waves_spawned"
+  by   = 1
 
-# Wave 8 has no successor, so its objective is completed by a trigger of its
-# own rather than by the next wave's.
+# ── Wave completions ─────────────────────────────────────────────────────────
+#
+# One trigger per wave, on that wave's own group being cleared. Each closes the
+# player's objective and pays down `mission_threat_remaining` by exactly one.
+#
+# These used to ride the NEXT wave's spawn trigger, which only worked because
+# the chain guaranteed the order. Under the clock they stand alone: waves can be
+# cleared out of order, and wave 8 no longer needs a special case for having no
+# successor to carry its decrement.
+
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "wave_1"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-1"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "wave_2"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-2"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "wave_3"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-3"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "wave_4"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-4"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "wave_5"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-5"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "wave_6"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-6"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "wave_7"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-7"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "mission_threat_remaining"
+  by   = -1
+
 [[trigger]]
 condition = "on_all_destroyed"
 group     = "wave_8"
@@ -917,10 +1041,6 @@ group     = "wave_8"
   type = "complete_objective"
   id   = "obj-destroy-wave-8"
 
-  # One less wave still to come (issue #943). Paired with the completion above
-  # rather than with the next wave's spawn, so the count falls the moment the
-  # threat is actually gone — including for wave 8, which has no successor to
-  # carry the action for it.
   [[trigger.action]]
   type = "increment_flag"
   name = "mission_threat_remaining"
@@ -928,10 +1048,11 @@ group     = "wave_8"
 
 # ── Endings ──────────────────────────────────────────────────────────────────
 
-# Victory: every hostile destroyed — the eight waves, their tier bonuses, and
-# the two standing pickets. See the header note for why this is one trigger over
-# a dynamic group rather than three name lists, and why the guard counts waves
-# instead of seconds.
+# Victory: every hostile destroyed — the eight waves and their tier bonuses.
+# See the header note for why this is one trigger over a dynamic group rather
+# than three name lists, and why the guard counts waves instead of seconds. The
+# `delay_secs` on the action is the game-over WINDOW: the one thing in this
+# world still timed off a death rather than off the clock.
 [[trigger]]
 condition  = "on_all_destroyed"
 group      = "hostiles"
@@ -954,6 +1075,13 @@ entity    = "world.entity.starbase_alpha.name"
   outcome = "defeat"
 
 # ── Objectives ───────────────────────────────────────────────────────────────
+#
+# The standing mission. Its Patrol directive is the PLAYER's defensive circuit
+# around the station it is defending — the four `starbase_patrol_*` anchors —
+# and it is the only Patrol left in this world now that the enemy picket line is
+# gone. It scores 20, under every `obj-destroy-wave-N` at 80, so it is what a
+# backfilled player flies between engagements rather than what it does instead
+# of fighting.
 
 [[trigger]]
 condition = "on_world_loaded"
@@ -973,11 +1101,11 @@ condition = "on_world_loaded"
 # ── Comms ────────────────────────────────────────────────────────────────────
 #
 # Federation Command opens with an urgent flash brief, then calls each wave as
-# it is released. Since issue #892 the waves are death-gated, so all but the
-# first announcement rides the same `on_all_destroyed` condition its wave's
-# spawn trigger does: Command calls the next wave the moment the last one dies,
-# which lands ten seconds ahead of the ships themselves — a warning rather than
-# a running commentary. Only wave 1's call is still on a clock.
+# it is detected forming. Since #960 the waves are on a CLOCK, so every call is
+# too: each one is authored eight seconds ahead of its wave's own `after_secs`,
+# which is Command warning the bridge that the next wave has launched rather
+# than reporting that the last one died. Nothing here waits on a kill any more,
+# because a player who is behind the schedule still gets the warning.
 
 [[comms]]
 from    = "world.combat_test.comms.0.from"
@@ -993,46 +1121,46 @@ message = "world.combat_test.comms.1.message"
 
 [[comms]]
 from    = "world.combat_test.comms.2.from"
-trigger = "on_all_destroyed"
-group   = "wave_1"
+trigger = "on_timer"
+after_secs = 37.0
 message = "world.combat_test.comms.2.message"
 
 [[comms]]
 from    = "world.combat_test.comms.3.from"
-trigger = "on_all_destroyed"
-group   = "wave_2"
+trigger = "on_timer"
+after_secs = 82.0
 message = "world.combat_test.comms.3.message"
 
 [[comms]]
 from    = "world.combat_test.comms.4.from"
-trigger = "on_all_destroyed"
-group   = "wave_3"
+trigger = "on_timer"
+after_secs = 127.0
 message = "world.combat_test.comms.4.message"
 
 [[comms]]
 from    = "world.combat_test.comms.5.from"
-trigger = "on_all_destroyed"
-group   = "wave_4"
+trigger = "on_timer"
+after_secs = 172.0
 urgent  = true
 message = "world.combat_test.comms.5.message"
 
 [[comms]]
 from    = "world.combat_test.comms.6.from"
-trigger = "on_all_destroyed"
-group   = "wave_5"
+trigger = "on_timer"
+after_secs = 217.0
 urgent  = true
 message = "world.combat_test.comms.6.message"
 
 [[comms]]
 from    = "world.combat_test.comms.7.from"
-trigger = "on_all_destroyed"
-group   = "wave_6"
+trigger = "on_timer"
+after_secs = 262.0
 urgent  = true
 message = "world.combat_test.comms.7.message"
 
 [[comms]]
 from    = "world.combat_test.comms.8.from"
-trigger = "on_all_destroyed"
-group   = "wave_7"
+trigger = "on_timer"
+after_secs = 307.0
 urgent  = true
 message = "world.combat_test.comms.8.message"

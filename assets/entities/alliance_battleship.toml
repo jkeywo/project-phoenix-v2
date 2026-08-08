@@ -1349,11 +1349,11 @@ source             = "shield"
 #
 # What it trades away is the front of the mission. The floor at eight published
 # waves is 4 rounds rather than 8, so an engagement lasting as long as the hull
-# is willing to keep shooting may now take 10 of the 12 rounds into wave 1 where
-# 1.0 capped it at 6. That ceiling is a licence rather than a forecast — flown
-# for real the destroyer spends 5 on wave 1 either way, because the engagement
-# ends before the gate does — but it is what 0.5 permits, and it is the price of
-# the margin above.
+# is willing to keep shooting may now take 10 of the 12 rounds while the whole
+# schedule is still published, where 1.0 capped it at 6. That ceiling is a
+# licence rather than a forecast — flown for real the destroyer spends 6 across
+# that stretch either way, because the engagement ends before the gate does —
+# but it is what 0.5 permits, and it is the price of the margin above.
 #
 # The tidy identity is what 1.0 bought (issue #943): the reserve came to exactly
 # one round at the last unit of threat, so on paper nothing could ever be
@@ -1373,10 +1373,16 @@ source             = "shield"
 # the doctrine.
 # `combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat`
 # (`tests/headless_runner.rs`) flies it for real and prints the magazine's
-# shape bucketed by remaining threat: {8: (12, 7), 7: (7, 3),
-# 6: (3, 1), 5: (1, 1)} — 12 aboard entering wave 1 and 7 leaving it, 7 into
-# wave 2 and 3 leaving it, still spending through wave 3. At 1.0 the same run
-# reads {8: (12, 7), 7: (7, 5)} and stops there: wave 2 never dies.
+# shape bucketed by remaining threat, (entered, lowest) per bucket:
+# {8: (12, 6), 7: (6, 2), 6: (2, 2), 5: (2, 2)}. Read a bucket as a STRETCH OF
+# THE MISSION rather than as one engagement — since #960 a wave arrives on its
+# own clock whether or not the last one is dead, so the top bucket spans wave 1
+# and the opening of wave 2, and bottoms lower than the death-gated chain used
+# to show. Ten of the twelve rounds go while six or more waves are still
+# published; the last two then sit under the floor (2/6 and 2/5 are both below
+# 0.5) until the count reaches 4. At 1.0 the same run reads
+# {8: (12, 6), 7: (6, 6)} and stops there: the latch shuts the moment wave 1
+# dies, and wave 2 never does.
 #
 # `sole_objective_count = 1` is the carve-out, and it counts NAMED Destroy
 # targets rather than doctrine entries. A world's `spawn_entity` override

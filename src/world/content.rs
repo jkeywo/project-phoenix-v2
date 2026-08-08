@@ -1776,22 +1776,23 @@ mod tests {
         assert_eq!(resolve_layer_prefix("parent:parent:armed", &chain), None);
     }
 
-    // ── combat_test's authored wave chain (#892) ───────────────────────────
+    // ── combat_test's authored wave clock (#892, re-authored for #960) ─────
     //
-    // The eight-wave schedule is death-gated content, not code: wave N+1 hangs
-    // off `on_all_destroyed` over wave N's group, and victory is one
-    // `on_all_destroyed` over `hostiles` guarded by `counter(waves_spawned) >=
-    // 8`. That composition is only as good as the trigger pipeline's actual
-    // semantics, and nothing else tests it end to end — `tests/headless_runner`
-    // boots the real sim but flies the player on AI backfill, which does not
-    // survive wave 1 at any seed sampled for #892, so a run there never reaches
-    // the second link of the chain.
+    // The eight-wave schedule is content, not code: every wave hangs off its own
+    // `on_timer`, each wave's objective and its `mission_threat_remaining`
+    // decrement hang off `on_all_destroyed` over that wave's group, and victory
+    // is one `on_all_destroyed` over `hostiles` guarded by
+    // `counter(waves_spawned) >= 8`. That composition is only as good as the
+    // trigger pipeline's actual semantics, and nothing else tests it end to end
+    // — `tests/headless_runner` boots the real sim but flies the player on AI
+    // backfill, which does not clear the whole raid at any seed sampled, so a
+    // run there never reaches the end of the schedule.
     //
     // This drives the REAL parsed triggers through the REAL evaluator with a
-    // scripted perfect player, and models exactly the two runtime behaviours
-    // the authoring leans on: group membership accumulates on spawn and is
-    // never removed, and an action with `delay_secs` dispatches later than the
-    // trigger that queued it.
+    // scripted player, and models exactly the runtime behaviours the authoring
+    // leans on: `OnTimer` fires once its `after_secs` has elapsed, group
+    // membership accumulates on spawn and is never removed, and an action with
+    // `delay_secs` dispatches later than the trigger that queued it.
 
     /// Outcome of one scripted run of `combat_test.toml`'s trigger set.
     struct ChainRun {
@@ -1801,12 +1802,18 @@ mod tests {
         victory_at: Option<f32>,
         /// `waves_spawned` at the moment victory dispatched.
         waves_at_victory: i64,
+        /// Per-step `(mission_threat_remaining, waves_spawned, wave groups
+        /// fully destroyed, wave groups with a living member)`.
+        trace: Vec<(i64, i64, usize, usize)>,
     }
 
-    /// Run `combat_test.toml`'s triggers against a perfect player at the given
-    /// `ship_power` tier: everything that spawns is destroyed on the next step,
-    /// the standing pickets first and the waves one at a time after.
-    fn run_combat_test_chain(ship_power: i64) -> ChainRun {
+    /// Run `combat_test.toml`'s triggers against a scripted player at the given
+    /// `ship_power` tier. `kill_after_secs` is how long that player takes to
+    /// clear a ship after it arrives — `0.0` is the perfect player that meets
+    /// every wave at its spawn point, and a value larger than the wave interval
+    /// is a player falling behind the clock, which is a state the death-gated
+    /// chain could not produce at all.
+    fn run_combat_test_chain(ship_power: i64, kill_after_secs: f32) -> ChainRun {
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = crate::world::config::parse_world(toml).expect("combat_test.toml must parse");
 
@@ -1827,12 +1834,14 @@ mod tests {
 
         let mut name_to_uuid: HashMap<String, String> = HashMap::new();
         let mut entity_groups: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut alive: HashSet<String> = HashSet::new();
+        // Live ships, as `name -> the elapsed time it may be killed at`.
+        let mut alive: HashMap<String, f32> = HashMap::new();
         let mut pending: Vec<(f32, TriggerAction)> = Vec::new();
         let mut run = ChainRun {
             spawns: Vec::new(),
             victory_at: None,
             waves_at_victory: 0,
+            trace: Vec::new(),
         };
 
         const STEP: f32 = 0.5;
@@ -1846,6 +1855,7 @@ mod tests {
                 apply_action(
                     &action,
                     elapsed,
+                    kill_after_secs,
                     &mut name_to_uuid,
                     &mut entity_groups,
                     &mut alive,
@@ -1854,15 +1864,16 @@ mod tests {
                 );
             }
 
-            // 2. The scripted player: destroy every alive hostile each step,
-            //    which in practice clears the picket line first (it is already
-            //    standing there at elapsed 0.0) and then meets each wave in turn.
-            // The dangerous order, not the convenient one: the pickets are
-            // standing targets, so a player clears them FIRST and then meets
-            // the waves one at a time. That is what opens the window between a
-            // cleared wave and the next one — every registered hostile dead,
-            // more still to come — which the victory guard has to close.
-            let mut targets: Vec<String> = alive.iter().cloned().collect();
+            // 2. The scripted player: destroy every hostile whose kill time has
+            //    come. At `kill_after_secs = 0.0` that is every wave on arrival,
+            //    which spends most of the run with every registered hostile dead
+            //    and more waves still to come — exactly the window the victory
+            //    guard has to close.
+            let mut targets: Vec<String> = alive
+                .iter()
+                .filter(|(_, kill_at)| **kill_at <= elapsed)
+                .map(|(n, _)| n.clone())
+                .collect();
             targets.sort();
             let mut events: Vec<WorldEvent> = targets
                 .iter()
@@ -1871,7 +1882,7 @@ mod tests {
                 })
                 .collect();
             // The clock the pipeline feeds in every tick, plus the one-shot
-            // load event the picket spawns and the faction flip hang off.
+            // load event the faction flip and the threat count hang off.
             events.push(WorldEvent::TimerElapsed {
                 elapsed_secs: elapsed,
             });
@@ -1908,6 +1919,7 @@ mod tests {
                             apply_action(
                                 action,
                                 elapsed,
+                                kill_after_secs,
                                 &mut name_to_uuid,
                                 &mut entity_groups,
                                 &mut alive,
@@ -1919,6 +1931,25 @@ mod tests {
                 }
             }
 
+            // Sample the two counters against the ground truth they claim to
+            // describe: how many wave groups are wholly dead, and how many
+            // still have a living member.
+            let (destroyed, living) = entity_groups
+                .iter()
+                .filter(|(g, _)| g.starts_with("wave_"))
+                .fold((0usize, 0usize), |(d, l), (_, members)| {
+                    if members.iter().any(|m| alive.contains_key(m)) {
+                        (d, l + 1)
+                    } else {
+                        (d + 1, l)
+                    }
+                });
+            run.trace.push((
+                flags.counter("mission_threat_remaining"),
+                flags.counter("waves_spawned"),
+                destroyed,
+                living,
+            ));
             if run.victory_at.is_some() {
                 break;
             }
@@ -1928,22 +1959,25 @@ mod tests {
     }
 
     /// Apply one dispatched action to the scripted world.
+    #[allow(clippy::too_many_arguments)]
     fn apply_action(
         action: &TriggerAction,
         elapsed: f32,
+        kill_after_secs: f32,
         name_to_uuid: &mut HashMap<String, String>,
         entity_groups: &mut HashMap<String, HashSet<String>>,
-        alive: &mut HashSet<String>,
+        alive: &mut HashMap<String, f32>,
         flags: &mut crate::world::flags::FlagStore,
         run: &mut ChainRun,
     ) {
         match action {
             TriggerAction::SpawnEntity { name, groups, .. } => {
                 name_to_uuid.insert(name.clone(), format!("uuid-{name}"));
-                alive.insert(name.clone());
+                alive.insert(name.clone(), elapsed + kill_after_secs);
                 for g in groups {
                     // Membership accumulates and is NEVER removed on death —
-                    // the property the whole chain rests on.
+                    // the property every `on_all_destroyed` in this world rests
+                    // on.
                     entity_groups
                         .entry(g.clone())
                         .or_default()
@@ -1955,6 +1989,9 @@ mod tests {
             }
             TriggerAction::IncrementWorldFlag { name, by } => {
                 flags.increment_flag(name, *by);
+            }
+            TriggerAction::SetWorldFlagValue { name, value } => {
+                flags.set_flag_value(name, *value);
             }
             TriggerAction::GameOver {
                 outcome: Some(crate::balance::Outcome::Victory),
@@ -1968,60 +2005,168 @@ mod tests {
     }
 
     #[test]
-    fn combat_test_wave_chain_releases_eight_waves_in_order_then_victory() {
+    fn combat_test_wave_clock_releases_eight_waves_on_schedule_then_victory() {
         // Destroyer tier (power_rating 70) — the DEMO loadout, below both bonus
         // gates, so this is exactly the eight-wave table the issue specifies.
-        let run = run_combat_test_chain(70);
+        let run = run_combat_test_chain(70, 0.0);
 
         let order: Vec<&str> = run.spawns.iter().map(|(g, _)| g.as_str()).collect();
         assert_eq!(
             order,
             (1..=8).map(|n| format!("wave_{n}")).collect::<Vec<_>>(),
-            "all eight waves must be released, in order, by clearing the one before"
+            "all eight waves must be released, in order"
         );
 
-        // Each link cost the authored breather, so the run is paced rather than
-        // instantaneous — wave 8 cannot arrive at t=0.
-        for pair in run.spawns.windows(2) {
-            let (a, ta) = &pair[0];
-            let (b, tb) = &pair[1];
-            assert!(
-                tb - ta >= 10.0,
-                "{b} must arrive at least a breather after {a}, got {}s",
-                tb - ta
-            );
-        }
+        // The CLOCK, not a chain: each wave lands at its own authored
+        // `after_secs` regardless of how fast the player clears the last one.
+        // This scripted player clears every wave the step it arrives, so under
+        // the old death-gated chain the eighth wave would land at roughly
+        // 8 x 10 = 80 s. Pinning the absolute times is what makes that
+        // difference visible — a chain re-introduced by accident would still
+        // produce the right ORDER and the right count.
+        let times: Vec<f32> = run.spawns.iter().map(|(_, t)| *t).collect();
+        assert_eq!(
+            times,
+            vec![0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0],
+            "each wave must arrive on its authored clock, not a breather after \
+             the previous one died"
+        );
 
         assert!(
             run.victory_at.is_some(),
-            "clearing every wave and both pickets must reach victory"
+            "clearing every wave must reach victory"
         );
         assert_eq!(
             run.waves_at_victory, 8,
-            "victory must not be reachable before all eight waves have been released — \
-             the counter guard is what closes the window between a cleared wave and the next"
+            "victory must not be reachable before all eight waves have been \
+             released — under a clock the counter guard is what closes the long \
+             windows in which every registered hostile is dead and more waves \
+             are still to come"
         );
         let last_spawn = run.spawns.last().expect("wave 8 spawned").1;
         assert!(
             run.victory_at.unwrap() > last_spawn,
             "victory must land after wave 8, not in a gap before it"
         );
+        // Those windows are not hypothetical: with a player this fast, most of
+        // the run has nothing alive at all and several waves still to come. If
+        // the guard were dropped, victory would fire in the first of them.
+        assert!(
+            run.trace
+                .iter()
+                .any(|(_, spawned, _, living)| *living == 0 && *spawned < 8),
+            "the scripted run must actually enter the empty-field window the \
+             victory guard exists to close"
+        );
     }
 
     #[test]
-    fn combat_test_wave_chain_waits_for_the_power_tier_bonus_ships_too() {
+    fn combat_test_remaining_threat_counts_waves_still_to_be_fought() {
+        // Issue #943 under #960's clock. `mission_threat_remaining` is the
+        // DENOMINATOR the torpedo-conservation doctrine divides its rounds by,
+        // so what it MEANS decides how a magazine paces itself across the run.
+        // It counts waves NOT YET DESTROYED — which under the death-gated chain
+        // was indistinguishable from "waves not yet spawned", and under a clock
+        // is not.
+        //
+        // Flown twice: a player that meets each wave on arrival, and one that
+        // takes 60 s per wave and so falls behind a 45 s schedule. The second is
+        // the state the chain could never produce, and the one that separates
+        // the two readings.
+        for kill_after in [0.0, 60.0] {
+            let run = run_combat_test_chain(70, kill_after);
+
+            // It is published before anything can read it, at the number of
+            // waves.
+            assert_eq!(
+                run.trace.first().map(|(threat, ..)| *threat),
+                Some(8),
+                "the world must publish its full threat on load, or a magazine \
+                 paced against it divides by an unbounded ratio and paces \
+                 nothing (kill_after={kill_after})"
+            );
+
+            // THE INVARIANT, and the whole reason the decrement stayed on each
+            // wave's own death rather than moving to its spawn: the published
+            // threat is exactly the waves that are not yet dead. A wave already
+            // on the field is threat the ship still has to survive, so it is
+            // still counted; a wave that is dead is not, whatever order it died
+            // in.
+            for (threat, spawned, destroyed, living) in &run.trace {
+                assert_eq!(
+                    *threat,
+                    8 - *destroyed as i64,
+                    "remaining threat must equal the waves not yet destroyed \
+                     (spawned={spawned}, destroyed={destroyed}, living={living}, \
+                     kill_after={kill_after})"
+                );
+            }
+
+            // It only ever falls, and it reaches zero. A one-way latch that
+            // never reaches 0 strands the fleet's last reserve of rounds; one
+            // that rose would let a hull that had already stopped firing
+            // conclude it had more mission left than it does.
+            for pair in run.trace.windows(2) {
+                assert!(
+                    pair[1].0 <= pair[0].0,
+                    "remaining threat must never rise, got {:?} -> {:?} \
+                     (kill_after={kill_after})",
+                    pair[0],
+                    pair[1]
+                );
+            }
+            assert_eq!(
+                run.trace.last().map(|(threat, ..)| *threat),
+                Some(0),
+                "every wave pays its own single decrement, so a run that clears \
+                 all eight must end at zero (kill_after={kill_after})"
+            );
+        }
+
+        // …and the two counters are genuinely independent under a clock. A
+        // player 60 s per wave behind a 45 s schedule has waves stacked on the
+        // field: `waves_spawned` has run ahead while the threat count has not
+        // fallen, so `8 - waves_spawned` would UNDER-report the threat left and
+        // a magazine paced on it would spend its reserve early. This is why
+        // this stayed a second counter rather than arithmetic on the first.
+        let behind = run_combat_test_chain(70, 60.0);
+        assert!(
+            behind.trace.iter().any(|(_, _, _, living)| *living >= 2),
+            "a player 60s per wave behind a 45s clock must end up with two \
+             waves alive at once"
+        );
+        assert!(
+            behind
+                .trace
+                .iter()
+                .any(|(threat, spawned, _, _)| *threat != 8 - *spawned),
+            "under a clock the remaining-threat count must diverge from \
+             `8 - waves_spawned`; if it never does, the two are redundant and \
+             one of them is wrong"
+        );
+    }
+
+    #[test]
+    fn combat_test_wave_clock_waits_for_the_power_tier_bonus_ships_too() {
         // Battleship tier: every wave carries a bonus hull in its own group, so
-        // the chain has strictly more to kill per link. It must still complete —
-        // and it must not complete FASTER, which is what would happen if the
-        // bonus ships were spawning outside the wave groups.
-        let demo = run_combat_test_chain(70);
-        let full = run_combat_test_chain(120);
+        // there is strictly more to kill per wave. It must still complete — and
+        // the WAVES must still land on the same clock, which is what would break
+        // if a bonus ship were spawning outside its wave's group and holding
+        // that wave's objective (and so its threat decrement) open.
+        let demo = run_combat_test_chain(70, 0.0);
+        let full = run_combat_test_chain(120, 0.0);
 
         let order: Vec<&str> = full.spawns.iter().map(|(g, _)| g.as_str()).collect();
         assert_eq!(
             order,
             (1..=8).map(|n| format!("wave_{n}")).collect::<Vec<_>>(),
-            "the top tier runs the same eight-wave chain"
+            "the top tier runs the same eight-wave schedule"
+        );
+        assert_eq!(
+            full.spawns.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
+            demo.spawns.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
+            "a clock does not care how much there is to kill — both tiers must \
+             see the waves at the same authored times"
         );
         assert!(
             full.victory_at.is_some(),
@@ -2030,6 +2175,12 @@ mod tests {
         assert!(
             full.victory_at.unwrap() >= demo.victory_at.unwrap(),
             "a tier with bonus ships riding the wave groups cannot finish sooner"
+        );
+        assert_eq!(
+            full.trace.last().map(|(threat, ..)| *threat),
+            Some(0),
+            "the bonus hulls ride their wave's group, so the wave's single \
+             decrement still fires once every ship in it is dead"
         );
     }
 }

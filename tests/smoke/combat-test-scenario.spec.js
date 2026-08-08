@@ -64,9 +64,9 @@ const WORLD_LOAD_OBJECTIVES = objectivesAddedBy(COMBAT_TEST_TOML, (b) =>
   /^\s*condition\s*=\s*"on_world_loaded"/m.test(b),
 );
 
-// The undelayed wave: `on_timer` with `after_secs = 0`. Since #892 it is the
-// only timed wave — every later one hangs off `on_all_destroyed` over the
-// previous one's group — so it is the only wave a fast smoke run can see.
+// The undelayed wave: `on_timer` with `after_secs = 0`. Since #960 every wave
+// is on a clock, but the rest of them are 45 seconds and more apart, so this is
+// still the only wave a fast smoke run can see.
 const FIRST_WAVE_OBJECTIVES = objectivesAddedBy(
   COMBAT_TEST_TOML,
   (b) =>

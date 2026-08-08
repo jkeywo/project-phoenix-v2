@@ -4601,46 +4601,91 @@ entity    = "raider"
     }
 
     #[test]
-    fn parse_world_combat_test_toml_parses_and_carries_8_chained_waves() {
-        // (#475, rewritten for #892) The combat-test scenario is a DEATH-GATED
-        // eight-wave defence, not a timetable. This test pins the structure:
+    fn parse_world_combat_test_toml_parses_and_carries_8_timed_waves() {
+        // (#475, rewritten for #892, re-authored for #960 + #936) The
+        // combat-test scenario is a TIMED eight-wave defence. This test pins the
+        // structure the runtime then leans on:
         //
-        //   - exactly ONE on_timer trigger (wave 1 at t=0); every later wave
-        //     hangs off `on_all_destroyed` over the previous wave's group
-        //   - the corrected eight-wave table: singles alternating
-        //     cruiser/destroyer through wave 4, pairs through wave 7, closing
-        //     on a single patrol cruiser
+        //   - EIGHT `on_timer` triggers, one per wave, at 45-second intervals;
+        //     no spawn hangs off a death any more
+        //   - the eight-wave table: singles alternating cruiser/destroyer
+        //     through wave 4, pairs through wave 7, closing on a patrol cruiser
         //   - every hostile spawn registers into `hostiles` (victory) and into
-        //     its own `wave_N` group (the chain), tier bonuses included
-        //   - two standing pickets, in `hostiles` + `pickets`, gating nothing
+        //     its own `wave_N` group (its objective), tier bonuses included
+        //   - NO standing pickets and no `pickets` group
+        //   - every spawn — not just the cruisers (#936) — carries the
+        //     `assault-starbase` Destroy override naming the starbase's STRING
+        //     ID, the `close-on-starbase` Reach run-in, and the 200-unit
+        //     acquisition band (#960)
         //   - ONE victory trigger over the dynamic `hostiles` group, guarded by
-        //     `counter(waves_spawned) >= 8` rather than by a clock
+        //     `counter(waves_spawned) >= 8`, whose `game_over` is the only
+        //     delayed action left in the world
         //   - 1 on_destroyed Starbase Alpha defeat trigger
-        //   - 8 wave objectives, completed on their own group being cleared
-        //   - 1 on_world_loaded patrol objective trigger
-        //   - 9 comms templates (1 intro + 1 timed + 7 chained)
+        //   - 8 wave objectives, each completed on its OWN group being cleared
+        //     alongside a single `mission_threat_remaining` decrement (#943)
+        //   - 1 on_world_loaded objective trigger, and an `on_world_loaded` that
+        //     spawns nothing
+        //   - 9 comms templates (1 on world-load + 8 on the clock)
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
 
-        // Only wave 1 is on a clock.
-        let timer_triggers: Vec<_> = cfg
+        // ── The clock ────────────────────────────────────────────────────────
+        // Eight timer triggers at the authored cadence. `after_secs` IS the
+        // schedule: a reader of the world file can see when each wave lands
+        // without simulating anything, which is the point of the conversion.
+        let timer_starts: Vec<f32> = cfg
             .triggers
             .iter()
-            .filter(|t| matches!(t.condition, TriggerCondition::OnTimer { .. }))
+            .filter_map(|t| match t.condition {
+                TriggerCondition::OnTimer { after_secs } => Some(after_secs),
+                _ => None,
+            })
             .collect();
         assert_eq!(
-            timer_triggers.len(),
-            1,
-            "only wave 1 may be timed — every later wave is death-gated"
+            timer_starts,
+            vec![0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0],
+            "all eight waves must be on the clock, at the authored cadence"
         );
+
+        // Nothing spawns off a death. This is the assertion the conversion is
+        // FOR: an `on_all_destroyed` that spawns is a death-gate by another
+        // name, and re-introducing one would restore the pacing #960 removed.
+        for trigger in &cfg.triggers {
+            if !matches!(trigger.condition, TriggerCondition::OnAllDestroyed { .. }) {
+                continue;
+            }
+            assert!(
+                !trigger
+                    .actions
+                    .iter()
+                    .any(|a| matches!(a, TriggerAction::SpawnEntity { .. })),
+                "no wave may be released by a death — {:?} spawns",
+                trigger.condition
+            );
+        }
+        // …and the game-over window is the only delayed action left, so a
+        // `delay_secs` cannot quietly become a second, hidden schedule.
+        let delayed: Vec<&TriggerAction> = cfg
+            .triggers
+            .iter()
+            .flat_map(|t| t.actions.iter().zip(t.action_delays.iter()))
+            .filter(|(_, d)| **d > 0.0)
+            .map(|(a, _)| a)
+            .collect();
         assert_eq!(
-            timer_triggers[0].condition,
-            TriggerCondition::OnTimer { after_secs: 0.0 },
-            "wave 1 fires at t=0"
+            delayed.len(),
+            1,
+            "expected one delayed action, got {delayed:?}"
+        );
+        assert!(
+            matches!(delayed[0], TriggerAction::GameOver { .. }),
+            "the only delayed action may be the game-over window, got {:?}",
+            delayed[0]
         );
 
         // Collect every spawn in the world, keyed by spawned entity name.
-        let spawns: HashMap<&str, (&str, &Vec<String>)> = cfg
+        #[allow(clippy::type_complexity)]
+        let spawns: HashMap<&str, (&str, &Vec<String>, &Option<toml::Value>)> = cfg
             .triggers
             .iter()
             .flat_map(|t| t.actions.iter())
@@ -4649,8 +4694,9 @@ entity    = "raider"
                     name,
                     template_path,
                     groups,
+                    overrides,
                     ..
-                } => Some((name.as_str(), (template_path.as_str(), groups))),
+                } => Some((name.as_str(), (template_path.as_str(), groups, overrides))),
                 _ => None,
             })
             .collect();
@@ -4659,7 +4705,8 @@ entity    = "raider"
         const DESTROYER: &str = "assets/entities/ship_harrow_destroyer.toml";
         const PATROL: &str = "assets/entities/ship_harrow_patrol.toml";
 
-        // The corrected eight-wave table (#892, 2026-08-03).
+        // The eight-wave table (#892). #960 changed WHEN each wave arrives, not
+        // what is in it.
         let table: &[(&str, &str)] = &[
             ("wave_1", CRUISER),
             ("wave_2", DESTROYER),
@@ -4674,7 +4721,7 @@ entity    = "raider"
             ("wave_8", PATROL),
         ];
         for (name, template) in table {
-            let (path, groups) = spawns
+            let (path, groups, _) = spawns
                 .get(name)
                 .unwrap_or_else(|| panic!("combat_test must spawn {name}"));
             assert_eq!(path, template, "{name} must fly {template}");
@@ -4693,11 +4740,11 @@ entity    = "raider"
             );
         }
 
-        // Tier bonuses ride the wave groups rather than parallel triggers, so
-        // the chain waits for them too.
+        // Tier bonuses ride the wave groups, so a wave's objective waits for
+        // them too.
         for wave in 1..=8 {
             let name = format!("wave_{wave}_bonus");
-            let (path, groups) = spawns
+            let (path, groups, _) = spawns
                 .get(name.as_str())
                 .unwrap_or_else(|| panic!("combat_test must author {name}"));
             let expected = if wave % 2 == 1 { DESTROYER } else { CRUISER };
@@ -4708,7 +4755,7 @@ entity    = "raider"
             assert!(
                 groups.contains(&"hostiles".to_string())
                     && groups.contains(&format!("wave_{wave}")),
-                "{name} must gate both victory and the chain, got {groups:?}"
+                "{name} must gate both victory and its wave, got {groups:?}"
             );
         }
         // Each bonus is gated by an ACTION predicate on its wave's own trigger.
@@ -4726,52 +4773,84 @@ entity    = "raider"
             "all eight tier bonuses must carry a ship_power action predicate"
         );
 
-        // Standing pickets: in `hostiles` and `pickets`, in no wave group.
+        // ── No standing presence (#960) ──────────────────────────────────────
         for picket in ["picket_north", "picket_south"] {
-            let (path, groups) = spawns
-                .get(picket)
-                .unwrap_or_else(|| panic!("combat_test must spawn {picket}"));
-            assert_eq!(*path, PATROL, "pickets fly the patrol hull");
             assert!(
-                groups.contains(&"hostiles".to_string()) && groups.contains(&"pickets".to_string()),
-                "{picket} must join 'hostiles' and 'pickets', got {groups:?}"
+                !spawns.contains_key(picket),
+                "the picket line is retired — {picket} must not spawn"
+            );
+        }
+        for (name, (_, groups, _)) in &spawns {
+            assert!(
+                !groups.contains(&"pickets".to_string()),
+                "{name} joins the retired 'pickets' group"
             );
             assert!(
-                !groups.iter().any(|g| g.starts_with("wave_")),
-                "{picket} stands outside the wave schedule, got {groups:?}"
+                groups.iter().any(|g| g.starts_with("wave_")),
+                "{name} stands outside the wave schedule — every ship in this \
+                 world belongs to a wave now, got {groups:?}"
+            );
+        }
+        // The `on_world_loaded` trigger flips factions and publishes the threat
+        // count; it must no longer put anything on station.
+        for trigger in &cfg.triggers {
+            if !matches!(trigger.condition, TriggerCondition::OnWorldLoaded) {
+                continue;
+            }
+            assert!(
+                !trigger
+                    .actions
+                    .iter()
+                    .any(|a| matches!(a, TriggerAction::SpawnEntity { .. })),
+                "world load must spawn nothing — the raid is the whole roster"
             );
         }
 
-        // The chain itself: wave N+1 hangs off wave N's group.
-        for wave in 1..=7 {
-            let group = format!("wave_{wave}");
-            let chains = cfg.triggers.iter().any(|t| {
-                matches!(&t.condition,
-                    TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)
-                    && t.actions.iter().any(|a| {
-                        matches!(a, TriggerAction::SpawnEntity { name, .. }
-                            if name.starts_with(&format!("wave_{}", wave + 1)))
-                    })
-            });
+        // ── Every wave commits to the assault (#936) ─────────────────────────
+        // Asserted per spawn rather than counted: #936 exists precisely because
+        // the override was authored on some spawns and not others, and a count
+        // cannot tell the difference between "all eleven" and "eleven of twenty".
+        for (name, (_, _, overrides)) in &spawns {
+            let doctrine = overrides
+                .as_ref()
+                .and_then(|o| o.get("behaviour"))
+                .and_then(|b| b.get("doctrine"))
+                .and_then(|d| d.as_array())
+                .unwrap_or_else(|| panic!("{name} must override behaviour.doctrine"));
+            let entry = |id: &str| {
+                doctrine
+                    .iter()
+                    .find(|e| e.get("id").and_then(|i| i.as_str()) == Some(id))
+            };
+            let assault = entry("assault-starbase")
+                .unwrap_or_else(|| panic!("{name} must carry the assault-starbase override"));
+            assert_eq!(
+                assault.get("directive_target").and_then(|t| t.as_str()),
+                Some("world.entity.starbase_alpha.name"),
+                "{name}'s assault must name the starbase's STRING ID — the \
+                 display text 'Starbase Alpha' matches no entity name, which is \
+                 how every wave's assault silently resolved to nothing"
+            );
             assert!(
-                chains,
-                "wave {} must be released by clearing {group}",
-                wave + 1
+                entry("close-on-starbase").is_some(),
+                "{name} must carry the close-on-starbase run-in, or it cannot \
+                 reach a target outside its own acquisition band"
+            );
+            // The 200-unit engagement band (#960), authored per spawn because
+            // the hull templates declare no radar at all — which the host reads
+            // as an UNBOUNDED horizon.
+            let range = overrides
+                .as_ref()
+                .and_then(|o| o.get("weapons_console"))
+                .and_then(|w| w.get("radar"))
+                .and_then(|r| r.get("range"))
+                .and_then(|r| r.as_float());
+            assert_eq!(
+                range,
+                Some(200.0),
+                "{name} must author the 200-unit acquisition band"
             );
         }
-        // And every chained spawn carries the authored breather.
-        let breathers: Vec<f32> = cfg
-            .triggers
-            .iter()
-            .filter(|t| matches!(t.condition, TriggerCondition::OnAllDestroyed { .. }))
-            .flat_map(|t| t.actions.iter().zip(t.action_delays.iter()))
-            .filter(|(a, _)| matches!(a, TriggerAction::SpawnEntity { .. }))
-            .map(|(_, d)| *d)
-            .collect();
-        assert!(
-            !breathers.is_empty() && breathers.iter().all(|d| *d > 0.0),
-            "every death-gated spawn needs a breather delay, got {breathers:?}"
-        );
 
         // Victory: ONE trigger over the dynamic `hostiles` group, guarded by the
         // wave counter. The three per-tier name-list variants are gone — an
@@ -4800,7 +4879,10 @@ entity    = "raider"
         }
         assert!(
             victories[0].when.is_some(),
-            "victory must be guarded by the waves_spawned counter, not a clock"
+            "victory must be guarded by the waves_spawned counter. Under a CLOCK \
+             this matters MORE than it did under the death-gated chain: a good \
+             player can clear every ship on the field with four waves still \
+             unspawned, and without the guard that window reads as victory"
         );
         // The guard has to be satisfiable: eight increments are authored.
         let increments: i64 = cfg
@@ -4842,29 +4924,146 @@ entity    = "raider"
                 "combat_test must define patrol anchor {anchor}"
             );
         }
-        // The picket stations `ship_harrow_patrol.toml` names must resolve here,
-        // or the world fails to load.
+        // The run-in point every wave's Reach entry names.
+        assert!(
+            cfg.anchors.contains_key("harrow_assault_point"),
+            "combat_test must define the Harrow run-in anchor"
+        );
+        // The picket's own stations are GONE, not merely unflown. `combat_test`
+        // retired the picket line; a world that still declares the route it no
+        // longer flies is a world whose anchor table lies about its geography.
         for anchor in ["ironveil_patrol_a", "ironveil_patrol_b"] {
             assert!(
-                cfg.anchors.contains_key(anchor),
-                "combat_test must define picket station {anchor}"
+                !cfg.anchors.contains_key(anchor),
+                "combat_test still declares picket station {anchor}. Nothing in \
+                 this world flies that route: wave 8's override stands the \
+                 template's `patrol-ironveil` entry down, so the load-time \
+                 anchor check (`doctrine_anchor_refs`, which reads the effective \
+                 doctrine) never asks for it."
             );
         }
+        // …which is only true because wave 8 — the one hull carrying that Patrol
+        // entry — stands it DOWN rather than de-prioritising it. A `Patrol` at
+        // `base_priority = 0` is still a Patrol, and a Patrol still names its
+        // anchors, so this is the assertion that keeps the two anchors deleted.
+        let (_, _, wave_8_overrides) = spawns["wave_8"];
+        let ironveil = wave_8_overrides
+            .as_ref()
+            .and_then(|o| o.get("behaviour"))
+            .and_then(|b| b.get("doctrine"))
+            .and_then(|d| d.as_array())
+            .and_then(|d| {
+                d.iter()
+                    .find(|e| e.get("id").and_then(|i| i.as_str()) == Some("patrol-ironveil"))
+            })
+            .expect("wave 8 must restate patrol-ironveil");
+        assert_eq!(
+            ironveil.get("directive_kind").and_then(|k| k.as_str()),
+            Some("None"),
+            "wave 8's picket route must be stood DOWN, not merely quietened — \
+             `directive_kind = \"None\"` is what stops it naming anchors"
+        );
+        assert_eq!(
+            ironveil
+                .get("directive_anchors")
+                .and_then(|a| a.as_array())
+                .map(Vec::len),
+            Some(0),
+            "and its anchor list must be cleared: an override array is only \
+             subtractive when it is empty, and a `directive_anchors` left \
+             populated under `directive_kind = \"None\"` is rejected outright by \
+             `validate_doctrine_directives`"
+        );
+        assert_eq!(
+            ironveil.get("directive_loop").and_then(|l| l.as_bool()),
+            Some(false),
+            "…and so must `directive_loop`, the OTHER Patrol-owned field this \
+             template authors. Standing an entry down means clearing every field \
+             its old kind owned. Leaving this one set fails the merge, and a \
+             failed merge is silent in exactly the wrong place: \
+             `doctrine_anchor_refs` reads it as 'no anchors to check', so the \
+             world would load and wave 8 would simply never spawn"
+        );
+        assert_eq!(
+            ironveil.get("base_priority").and_then(|p| p.as_float()),
+            Some(0.0),
+            "wave 8's picket route must also score zero, so it cannot lead a \
+             pool whose consumers all take the FIRST entry"
+        );
 
-        // Wave objectives complete on their own group being cleared, which is
-        // what makes a two-ship wave's objective honest.
+        // ── Wave completion + the remaining-threat count (#943 under #960) ───
+        // Each wave's objective completes on ITS OWN group being cleared, beside
+        // exactly one `mission_threat_remaining` decrement. Under the clock
+        // these stand alone rather than riding the next wave's spawn trigger,
+        // and waves may now be cleared out of order — so the pairing has to be
+        // per wave rather than a total.
         for wave in 1..=8 {
             let group = format!("wave_{wave}");
             let id = format!("obj-destroy-wave-{wave}");
-            let completed = cfg.triggers.iter().any(|t| {
-                matches!(&t.condition,
-                    TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)
-                    && t.actions.iter().any(
-                        |a| matches!(a, TriggerAction::CompleteObjective { id: cid } if *cid == id),
-                    )
-            });
-            assert!(completed, "{id} must complete when {group} is cleared");
+            let trigger = cfg
+                .triggers
+                .iter()
+                .find(|t| {
+                    matches!(&t.condition,
+                        TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)
+                        && t.actions.iter().any(|a| {
+                            matches!(a, TriggerAction::CompleteObjective { id: cid } if *cid == id)
+                        })
+                })
+                .unwrap_or_else(|| panic!("{id} must complete when {group} is cleared"));
+            let paid: i64 = trigger
+                .actions
+                .iter()
+                .filter_map(|a| match a {
+                    TriggerAction::IncrementWorldFlag { name, by }
+                        if name == "mission_threat_remaining" =>
+                    {
+                        Some(*by)
+                    }
+                    _ => None,
+                })
+                .sum();
+            assert_eq!(
+                paid, -1,
+                "clearing {group} must pay down mission_threat_remaining by \
+                 exactly one — it counts waves still to be FOUGHT, and a wave \
+                 that is dead is not one of them"
+            );
         }
+        // The counter starts at the number of waves and is paid down to zero.
+        let seeded: i64 = cfg
+            .triggers
+            .iter()
+            .flat_map(|t| t.actions.iter())
+            .find_map(|a| match a {
+                TriggerAction::SetWorldFlagValue { name, value }
+                    if name == "mission_threat_remaining" =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("combat_test must publish mission_threat_remaining");
+        let paid_total: i64 = cfg
+            .triggers
+            .iter()
+            .flat_map(|t| t.actions.iter())
+            .filter_map(|a| match a {
+                TriggerAction::IncrementWorldFlag { name, by }
+                    if name == "mission_threat_remaining" =>
+                {
+                    Some(*by)
+                }
+                _ => None,
+            })
+            .sum();
+        assert_eq!(seeded, 8, "eight waves of published threat");
+        assert_eq!(
+            seeded + paid_total,
+            0,
+            "the published threat must reach zero when every wave is dead, or a \
+             magazine paced against it never releases its last reserve"
+        );
 
         let defend = cfg
             .triggers
@@ -4938,25 +5137,40 @@ entity    = "raider"
             assert_eq!(*base_priority, 80.0);
         }
 
-        // Comms: 1 on_world_loaded urgent intro + wave 1's timed call + 7
-        // chained calls, one per cleared wave = 9 total.
+        // Comms: 1 on_world_loaded urgent intro + 8 calls on the clock, one per
+        // wave. Command warns the bridge that the next wave has LAUNCHED; under
+        // a clock there is no death to report, and a player who is behind the
+        // schedule still gets the warning.
         assert_eq!(
             cfg.comms.len(),
             9,
             "combat_test must have 9 comms templates"
         );
-        let timed = cfg
+        let timed: Vec<f32> = cfg
             .comms
             .iter()
-            .filter(|c| matches!(c.trigger, TriggerCondition::OnTimer { .. }))
-            .count();
-        assert_eq!(timed, 1, "only wave 1's call is on a clock");
-        for wave in 1..=7 {
-            let group = format!("wave_{wave}");
+            .filter_map(|c| match c.trigger {
+                TriggerCondition::OnTimer { after_secs } => Some(after_secs),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            timed,
+            vec![0.5, 37.0, 82.0, 127.0, 172.0, 217.0, 262.0, 307.0],
+            "every wave call rides the clock, ahead of its own wave"
+        );
+        assert!(
+            cfg.comms
+                .iter()
+                .all(|c| !matches!(c.trigger, TriggerCondition::OnAllDestroyed { .. })),
+            "no comms template may still wait on a wave dying"
+        );
+        // Each call lands before the wave it announces — the ordering that
+        // makes it a warning rather than a running commentary.
+        for (call, wave_at) in timed.iter().skip(1).zip(timer_starts.iter().skip(1)) {
             assert!(
-                cfg.comms.iter().any(|c| matches!(&c.trigger,
-                    TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)),
-                "Command must call the next wave when {group} is cleared"
+                call < wave_at,
+                "a wave call at {call}s cannot announce a wave that arrives at {wave_at}s"
             );
         }
     }

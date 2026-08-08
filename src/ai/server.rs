@@ -700,7 +700,33 @@ pub(crate) fn aggregate_doctrine_blackboards(
             }
         };
         let red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
-        let attacked = last_attacker_opt.is_some();
+        // Whether this ship HAS an attacker, not whether it carries the
+        // component that would record one (issue #936). `entity_spawner`
+        // inserts `LastShipAttacker::default()` on every ship it spawns, so
+        // `last_attacker_opt.is_some()` was true from the first tick of every
+        // NPC's life and `WorldConditions.attacked` was a constant `true`.
+        //
+        // Every `attacked` / `not_attacked` condition in shipped content was
+        // therefore decided before the fight started, always the same way:
+        // an `attacked` modifier always applied and a `not_attacked` zero-gate
+        // always vetoed. Two shipped consequences, both of them the reverse of
+        // what the content says:
+        //
+        //   * `combat_test.toml`'s `assault-starbase` Destroy override is
+        //     zero-gated on `not_attacked`, so it scored 0 on every wave, on
+        //     every tier, for the whole run — no Harrow has ever flown the
+        //     assault this scenario is named for.
+        //   * `ship_harrow_patrol.toml` documents a picket that HOLDS station
+        //     undisturbed (Patrol 30+15 vs Destroy 38) and commits when shot at
+        //     (Destroy 38+25). With `attacked` pinned true it scored 30 vs 63
+        //     from the first tick and never held anything.
+        //
+        // The LocalShip half of the same publish (`publish_viewscreen_blackboard`,
+        // `src/server_app.rs`) already reads `last_attacker_uuid.is_some()` and
+        // says in a comment that it uses "the same `attacked` signal the NPC
+        // path uses" — which is the symmetry rule (AGENTS.md #6) and was simply
+        // untrue. This is the line that makes it true.
+        let attacked = last_attacker_opt.is_some_and(|la| la.0.is_some());
         let conditions = crate::objectives::WorldConditions {
             red_alert,
             hull_fraction,
@@ -3125,6 +3151,128 @@ verb = "fire_blaster"
                     zero_gates: vec![crate::objectives::ZeroGateCondition {
                         condition: "hull_below".into(),
                         threshold: Some(threshold),
+                    }],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    /// Issue #936: `WorldConditions.attacked` reports whether the ship HAS an
+    /// attacker, not whether it carries the component that would record one.
+    ///
+    /// `entity_spawner` inserts `LastShipAttacker::default()` on every ship it
+    /// spawns, so the pre-fix `last_attacker_opt.is_some()` was a constant
+    /// `true` from an NPC's first tick and every `attacked` / `not_attacked`
+    /// condition in shipped content was decided before the fight began. That
+    /// survived because nothing ever looked: the one test over
+    /// `aggregate_doctrine_blackboards` spawned an entity with NO
+    /// `LastShipAttacker` at all, which reads `false` on both sides of the fix.
+    ///
+    /// So this spawns the component both ways and gates on it. The doctrine
+    /// shape is `combat_test.toml`'s: an assault entry zero-gated on
+    /// `not_attacked`, which is what "commit to the raid unless something is
+    /// shooting at you" is authored as, and which scored 0 on every wave for
+    /// the whole life of the bug.
+    #[test]
+    fn a_default_last_attacker_component_does_not_read_as_attacked() {
+        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+            pool.iter()
+                .find(|o| o.id == id)
+                .unwrap_or_else(|| panic!("{id} must be in the pool"))
+                .score
+        };
+
+        let untouched = scored_pool_for_attacker(assault_behaviour(), None);
+        assert!(
+            score_of(&untouched, "assault-starbase") > 0.0,
+            "a ship carrying `LastShipAttacker::default()` has NOT been \
+             attacked, so a `not_attacked` zero-gate must stay open. Reading \
+             the component's presence instead of its contents vetoed this \
+             entry on every wave of every run: {untouched:?}"
+        );
+
+        let shot_at = scored_pool_for_attacker(assault_behaviour(), Some("attacker-uuid"));
+        assert_eq!(
+            score_of(&shot_at, "assault-starbase"),
+            0.0,
+            "once something IS shooting, the `not_attacked` gate must veto the \
+             assault so the hull turns and fights: {shot_at:?}"
+        );
+        assert!(
+            score_of(&shot_at, "destroy-hostiles") > 0.0,
+            "precondition: the rival entry the veto hands the fight to must be \
+             live: {shot_at:?}"
+        );
+    }
+
+    /// Publish a viewscreen pool for one entity that carries a
+    /// `LastShipAttacker`, and hand back its `scored_objectives`.
+    ///
+    /// Deliberately separate from [`scored_pool_for`]: that helper spawns no
+    /// attacker component at all, which is a third state (`None` vs
+    /// `Some(default)` vs `Some(attacker)`) and the one the pre-#936 bug hid
+    /// behind.
+    fn scored_pool_for_attacker(
+        behaviour: crate::entity_config::BehaviourConfig,
+        attacker: Option<&str>,
+    ) -> Vec<crate::messages::ScoredObjective> {
+        use crate::console::weapons::beam::LastShipAttacker;
+        use crate::damage::SystemHull;
+        use crate::entity_spawner::EntitySystemHull;
+        use crate::messages::SystemId;
+        use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
+
+        let mut app = build_test_app();
+
+        app.world_mut().spawn((
+            BehaviourSection(behaviour),
+            EntitySystemHull(SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                100.0,
+            )])),
+            ShipSystemBlackboards::default(),
+            LastShipAttacker(attacker.map(str::to_string)),
+        ));
+        app.update();
+
+        let mut q = app.world_mut().query::<&ShipSystemBlackboards>();
+        let bb = q.iter(app.world()).next().expect("blackboards").clone();
+        match bb
+            .0
+            .get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+            .expect("viewscreen entry")
+        {
+            crate::messages::SystemBlackboard::Viewscreen(v) => v.scored_objectives.clone(),
+            _ => panic!("expected Viewscreen blackboard"),
+        }
+    }
+
+    /// A raid hull shaped like the ones `combat_test.toml` spawns: the
+    /// template's untargeted Destroy, plus the world's `not_attacked`-gated
+    /// assault on the station.
+    fn assault_behaviour() -> crate::entity_config::BehaviourConfig {
+        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+        BehaviourConfig {
+            doctrine: vec![
+                DoctrineObjective {
+                    id: "destroy-hostiles".into(),
+                    text: "Engage whatever is in front of you".into(),
+                    directive_kind: Some("Destroy".into()),
+                    base_priority: 38.0,
+                    ..Default::default()
+                },
+                DoctrineObjective {
+                    id: "assault-starbase".into(),
+                    text: "Press the assault on the station".into(),
+                    directive_kind: Some("Destroy".into()),
+                    directive_target: Some("world.entity.starbase_alpha.name".into()),
+                    base_priority: 50.0,
+                    zero_gates: vec![crate::objectives::ZeroGateCondition {
+                        condition: "not_attacked".into(),
+                        threshold: None,
                     }],
                     ..Default::default()
                 },

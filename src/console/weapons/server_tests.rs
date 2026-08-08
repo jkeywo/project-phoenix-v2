@@ -10243,9 +10243,13 @@ fn torpedo_conservation_carves_out_a_sole_objective_ship() {
 /// and then the hull's own authored `[torpedoes.ai]` block asked the question
 /// the gate asks.
 ///
-/// The doctrine-entry count is asserted at 2 on purpose: it is the number that
-/// makes an entry-counting carve-out silently dead content in every shipped
-/// world, and the reason the lever counts named targets instead.
+/// The doctrine-entry count is asserted on purpose: it is the number that makes
+/// an entry-counting carve-out silently dead content in every shipped world, and
+/// the reason the lever counts named TARGETS instead. #960 moved it from 2 to 3
+/// — the world now appends a `close-on-starbase` Reach beside the assault, so
+/// a wave can fly the run-in from outside its acquisition band — and that is the
+/// point rather than an inconvenience: the entry count went up, the count of
+/// named engagements did not, and only the second one may move the gate.
 #[test]
 fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
     let template = crate::entities::config::EntityConfig::from_toml(
@@ -10290,20 +10294,24 @@ fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
 
     assert_eq!(
         behaviour.doctrine.len(),
-        2,
+        3,
         "the world's brief APPENDS to the template's standing orders, so the raid \
-         cruiser flies two doctrine entries: {:?}. If this is ever 1, the override \
-         has started replacing rather than appending and the entry-count reading of \
-         `sole objective` becomes available again — but until then, counting entries \
-         puts the one ship the issue describes on the constrained path.",
+         cruiser flies three doctrine entries: {:?}. If this ever drops to the 2 the \
+         override itself authors, the override has started replacing rather than \
+         appending and the entry-count reading of `sole objective` becomes available \
+         again — but until then, counting entries puts the one ship the issue \
+         describes on the constrained path.",
         behaviour.doctrine.iter().map(|d| &d.id).collect::<Vec<_>>()
     );
     assert_eq!(
         crate::console::weapons::torpedo::targeted_objective_count(&behaviour),
         1,
-        "the raid cruiser is sent after ONE named target (`assault-starbase` →  \
+        "the raid cruiser is sent after ONE named target (`assault-starbase` → \
          Starbase Alpha); the template's `destroy-hostiles` names nothing and is \
-         what it does with whatever is in front of it, not a second engagement"
+         what it does with whatever is in front of it, and #960's \
+         `close-on-starbase` is a Reach at an anchor — a place to be, not an \
+         engagement. Neither is a second target, which is why adding the third \
+         entry left the carve-out exactly where it was"
     );
 
     // End to end through the hull's OWN authored doctrine, in combat_test's own

@@ -1349,45 +1349,35 @@ fn requiem_courier_reaches_its_destination_anchor() {
 /// run was only as stable as that authored value — retuning it silently
 /// re-rolled the guard.
 ///
-/// Seed 9 is measured, not assumed — RE-MEASURED for #897's generator swap
-/// (`rand`'s SmallRng -> `vellum_rng::Pcg32`), which re-rolls which system
-/// every hit lands on and so can move which seeds resolve and when. On the
-/// current generator (`phoenix-headless --world assets/worlds/combat_test.toml
-/// --seed 9 --hz 30 --sim-seconds 400 --deterministic --report-format json`),
-/// seed 9 still reaches `GameOver` as a defeat: player `damage_dealt` 79.0 and
-/// `damage_taken` 493.808 against the `> 0` thresholds below, 1 kill (`wave_4`)
-/// against the `> 0` floor. The old figures here (~265 / ~1200 / 5 kills) and
-/// the claim that 9 is "the earliest resolution" of a 1–12 sweep both predate
-/// #897 and were not re-verified — this re-measurement covers only seed 9,
-/// which is all the test pins.
+/// RE-MEASURED for #960 + #936, which changed what this scenario IS: waves
+/// arrive on a clock instead of on the previous wave's death, and every wave now
+/// actually flies the starbase assault (the override named the display text
+/// "Starbase Alpha" where name resolution wants the string id, so no wave had
+/// ever run at the station). Seed 9 now resolves at 175.9 s (tick 10555) as a
+/// DEFEAT — and a different defeat from the old one: the player cruiser survives
+/// on 70.6/500 hull, and it is STARBASE ALPHA that dies, taking all 800 of its
+/// hull. Player `damage_dealt` 106.0 and `damage_taken` 677.3 against the `> 0`
+/// thresholds below; one kill in the ledger, wave 4's, on the station. The 400 s
+/// budget clears the 175.9 s resolution with room and is left alone.
 ///
-/// RE-MEASURED AGAIN for #892's death-gated wave chain. Seed 9 now resolves at
-/// 184.9 s (tick 11091) as a defeat, with `damage_dealt` 64.0, `damage_taken`
-/// 705.6, and 1 kill in the ledger — the kill being wave 1's, on the player.
-/// The 400 s budget still clears that with room, so it is left alone.
+/// The two picket assertions this test used to carry are gone with the picket
+/// line (#960). What replaces them is stronger and is the reason #936 exists:
+/// the STARBASE's own ledger row must show damage taken. That row can only
+/// exist if a Harrow resolved a named Destroy directive onto a station 700 units
+/// from its spawn anchor, flew the `close-on-starbase` run-in to get inside its
+/// 200-unit acquisition band, and opened fire on it — i.e. the whole assault
+/// path, end to end, in a real run. Before this batch that row was never
+/// present at any seed.
 ///
-/// WHAT THIS TEST DOES NOT PIN. The CRUISER never clears wave 1 — a sweep of
-/// seeds 1–10 on the new schedule ends in defeat inside wave 1 every time — so
-/// no run *here* reaches wave 2. That matches the pre-existing #892 finding
-/// (the cruiser tier killed 0 of ~7 engaged enemies across five seeds before
-/// this change either), and it is a statement about the AI-backfilled cruiser,
-/// not about the chain. The chain is pinned twice over elsewhere:
-/// `combat_test_chains_its_waves_in_a_real_run` below flies the demo destroyer
-/// and reaches wave 3 or better, and `world::content::tests::
-/// combat_test_wave_chain_releases_eight_waves_in_order_then_victory` drives
-/// all eight links through the real evaluator with a scripted perfect player.
-///
-/// The old note also claimed `combat_test` is *not* bit-reproducible at this
-/// seed (11 runs landing anywhere in 246–275 sim-seconds, blamed on
-/// per-process `HashMap` seeding). That does not reproduce here either: 12
-/// consecutive runs on the current generator and build produced byte-identical
-/// exit reports, all resolving at tick 10899 / sim_t 181.6667 s. Whatever
-/// drove the old spread, it is not observed under this generator — treat this
-/// scenario as bit-reproducible at this seed until shown otherwise, not as
-/// inherently noisy. The 400 s budget (vs. 300 s) predates this finding and is
-/// left as-is: it still clears the observed 181.7 s resolution with room to
-/// spare, and the timing assertion remains the only one that could flake if a
-/// future change reopens that variance.
+/// WHAT THIS TEST DOES NOT PIN. The CRUISER is not a good defender on AI
+/// backfill — it dealt 106 damage in the whole run — so no run *here* clears the
+/// raid. That is a statement about the AI-backfilled cruiser, not about the
+/// schedule. The schedule is pinned twice over elsewhere:
+/// `combat_test_spawns_its_waves_on_the_clock_in_a_real_run` below flies the
+/// demo destroyer and reads the wave counter against the authored times, and
+/// `world::content::tests::
+/// combat_test_wave_clock_releases_eight_waves_on_schedule_then_victory` drives
+/// all eight waves through the real evaluator with a scripted player.
 #[test]
 fn combat_test_develops_two_sided_combat_and_resolves() {
     let dt = 1.0 / 30.0;
@@ -1442,8 +1432,9 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
 
     // A run that reached GameOver is a terminal victory or defeat, never a
     // draw/timeout (those come only from budget exhaustion) — #843. Which one
-    // is seed-dependent (the scenario's victory triggers and the player-death
-    // latch both feed the flag), so this stays deliberately outcome-agnostic.
+    // is seed-dependent (the scenario's victory triggers, the starbase-destroyed
+    // defeat trigger and the player-death latch all feed the flag), so this
+    // stays deliberately outcome-agnostic.
     assert!(
         matches!(
             report.outcome_report.outcome,
@@ -1453,120 +1444,222 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
         report.outcome_report.outcome
     );
 
-    // #892: the schedule's two halves both reach the ECS in a real run. Wave 1
-    // is the one timed spawn; the pickets come off `on_world_loaded` and stand
-    // outside the schedule entirely. Both appear in the ledger under their
-    // authored `spawn_entity` names, so a mis-authored group or a dropped
-    // `on_world_loaded` action shows up here as a missing row.
+    // #960/#936: the raid actually assaults the thing the scenario is about.
+    // Wave 1 is the first ship on the clock; the starbase row is the assault.
     let ledger_names: Vec<&str> = report
         .damage_by_ship
         .values()
         .filter_map(|l| l.name_id.as_deref())
         .collect();
-    for expected in ["wave_1", "picket_north", "picket_south"] {
-        assert!(
-            ledger_names.contains(&expected),
-            "{expected} never engaged in a real run — got {ledger_names:?}"
-        );
-    }
+    assert!(
+        ledger_names.contains(&"wave_1"),
+        "wave_1 never engaged in a real run — got {ledger_names:?}"
+    );
+    let (starbase_uuid, starbase) = report
+        .damage_by_ship
+        .iter()
+        .find(|(_, l)| l.name_id.as_deref() == Some("world.entity.starbase_alpha.name"))
+        .unwrap_or_else(|| {
+            panic!(
+                "Starbase Alpha has no ledger row, so nothing ever shot at it. \
+                 Every wave carries an `assault-starbase` Destroy override and \
+                 the station is the player's own faction (#936) — if no Harrow \
+                 engaged it, either the directive resolved to no entity or the \
+                 run-in never got one inside its acquisition band. \
+                 Ledger: {:?}",
+                report.damage_by_ship
+            )
+        });
+    assert!(
+        starbase.damage_taken > 0.0,
+        "Starbase Alpha took no damage — the assault this scenario is named for \
+         did not happen: {starbase:?}"
+    );
+
+    // …and a HARROW dealt it. `damage_taken` alone cannot say that: collisions
+    // emit `VictimKind::Ship` too, and the player's own `obj-defend` circuit
+    // flies a 200-unit ring around this station, so a backfilled player that
+    // merely clipped it would satisfy the assertion above while the message
+    // claimed a raid. `by_pair` is keyed by victim, so a raider's row naming
+    // the starbase is the assault stated as the thing it is.
+    let assaulters: Vec<(&str, f32)> = report
+        .damage_by_ship
+        .values()
+        .filter(|l| l.name_id.as_deref().is_some_and(|n| n.starts_with("wave_")))
+        .filter_map(|l| {
+            l.by_pair
+                .get(starbase_uuid)
+                .filter(|dealt| **dealt > 0.0)
+                .map(|dealt| (l.name_id.as_deref().unwrap_or_default(), *dealt))
+        })
+        .collect();
+    assert!(
+        !assaulters.is_empty(),
+        "Starbase Alpha took damage, but no wave's ledger credits a single point \
+         of it — so what hit the station was the player's own defensive circuit \
+         colliding with it, not the raid. Ledger: {:?}",
+        report.damage_by_ship
+    );
 }
 
-/// Issue #892: the death-gated wave chain actually chains in a REAL run.
+/// Issue #960: the wave CLOCK actually runs in a real sim.
 ///
-/// `combat_test.toml`'s waves 2..8 hang off `on_all_destroyed` over the
-/// previous wave's group, with the next wave's spawn actions carrying
-/// `delay_secs = 10.0`. That composition leans on three separate runtime
-/// behaviours at once — group membership registering from a `spawn_entity`
-/// action's authored `groups`, membership surviving the death of its members,
-/// and a delayed action dispatching from `tick_delayed_actions` — and the pure
-/// content test (`world::content::tests::
-/// combat_test_wave_chain_releases_eight_waves_in_order_then_victory`) models
-/// all three rather than exercising them. This is the run that exercises them.
+/// This replaces the death-gated chain guard. That one asserted wave_2 could
+/// only exist if wave_1's group had gone empty; there is no such implication any
+/// more, and asserting the same names would now prove nothing about pacing at
+/// all — a wave arrives whether or not anything died.
+///
+/// So this reads the schedule directly. `waves_spawned` is the world counter
+/// each wave's own timer trigger increments, and the test records the sim-second
+/// at which it first reaches each value, then compares that against the times
+/// authored in `combat_test.toml`. Two things follow that the old test could not
+/// say:
+///
+///   1. Waves land on the authored clock, not on a breather after a kill. A
+///      re-introduced death-gate would still produce the right ORDER and the
+///      right count — only the times give it away.
+///   2. Waves OVERLAP. The run is sampled for a moment at which two different
+///      wave groups both have a living ship, which the death-gated chain could
+///      not produce by construction: it released wave N+1 only once wave N was
+///      empty. This is the pacing change stated as an observable.
 ///
 /// The DESTROYER, not the cruiser `test_args` defaults to: it is the demo hull
-/// (`assets/scenarios.demo.toml`), it sits below both `ship_power` bonus gates
-/// so the run is exactly the authored eight-wave table, and — measured, not
-/// assumed — it is the tier that actually gets through wave 1 on AI backfill.
-/// Sweep of seeds 1–5 at `--hz 30 --sim-seconds 600 --deterministic`, waves
-/// reached: seed 1 → wave_3, seed 2 → wave_5, seed 3 → wave_1, seed 4 →
-/// wave_1, seed 5 → wave_2. Seed 2 is the pick: it is the deepest run of the
-/// five, ending in defeat at 463.2 s having engaged wave_1 through wave_5 plus
-/// both pickets, with 4 kills to the player. The 600 s budget is the sweep's,
-/// and clears that with room.
+/// (`assets/scenarios.demo.toml`), and it sits below both `ship_power` bonus
+/// gates so the run is exactly the authored eight-wave table with no extra
+/// hulls to confuse the "two waves alive" sample.
 ///
-/// The assertion is deliberately `wave_3`, two links below what seed 2 actually
-/// reaches: the point is that the chain LINKS, and pinning the exact depth
-/// would turn every balance change into a failure here.
+/// The budget is 300 s — short of wave 8 at t=315 — deliberately. On seed 2 the
+/// starbase falls at ~314 s, and a test that asserts on trigger dispatch has no
+/// business straddling the tick the mission ends on. Waves 1-7 are the whole
+/// authored cadence apart from its last entry, and the eighth link is covered by
+/// the pure evaluator test in `world::content`.
 #[test]
-fn combat_test_chains_its_waves_in_a_real_run() {
+fn combat_test_spawns_its_waves_on_the_clock_in_a_real_run() {
+    use project_phoenix::entity_spawner::EntityName;
+    use project_phoenix::world::server::WorldContentRuntime;
+
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
         world_path: "assets/worlds/combat_test.toml".into(),
         ship_path: "assets/entities/alliance_destroyer.toml".into(),
         dt,
-        max_ticks: ticks_for_sim_seconds(600.0, dt),
+        max_ticks: ticks_for_sim_seconds(300.0, dt),
         seed: Some(2),
         deterministic: true,
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("app should build");
-    run(&mut app, args.max_ticks);
-    let report = build_report(&mut app, &args, 0.0);
 
+    // `first_seen[n]` is the sim-second at which `waves_spawned` first read n.
+    let mut first_seen: std::collections::BTreeMap<i64, f64> = std::collections::BTreeMap::new();
+    let mut overlapped = false;
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+        let spawned = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("waves_spawned");
+        first_seen.entry(spawned).or_insert(sim_t);
+
+        if !overlapped {
+            // Distinct wave GROUPS with a living ship. Names are the authored
+            // `spawn_entity` names, so `wave_5_second` folds into `wave_5` and a
+            // two-hull wave is not mistaken for two waves.
+            let mut q = app.world_mut().query::<&EntityName>();
+            let live: std::collections::BTreeSet<String> = q
+                .iter(app.world())
+                .filter_map(|n| n.0.strip_prefix("wave_"))
+                .filter_map(|rest| rest.split('_').next())
+                .map(|n| n.to_string())
+                .collect();
+            if live.len() >= 2 {
+                overlapped = true;
+            }
+        }
+    }
+
+    // The authored cadence: wave N at (N-1) x 45 s. Each reading is taken on
+    // the tick after the trigger dispatched, so a one-tick lag is expected; the
+    // tolerance is a second, which is far tighter than the 45 s interval and far
+    // looser than the dispatch jitter.
+    for (wave, authored) in (1..=7).zip([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0]) {
+        let at = first_seen.get(&wave).copied().unwrap_or_else(|| {
+            panic!(
+                "waves_spawned never reached {wave} inside the 300 s budget — \
+                 the clock is not releasing waves. Seen: {first_seen:?}"
+            )
+        });
+        assert!(
+            (at - authored).abs() < 1.0,
+            "wave {wave} was released at {at:.2} s, but combat_test.toml authors \
+             it at {authored} s. A wave that arrives late is a wave still gated \
+             on something dying. All: {first_seen:?}"
+        );
+    }
+
+    assert!(
+        overlapped,
+        "no two waves were ever alive at once in a 300 s run. Under a clock a \
+         wave arrives whether or not the last one is dead, so overlap is the \
+         observable that separates a timed schedule from a death-gated chain — \
+         its absence means the waves are still queueing behind each other"
+    );
+
+    // And they engaged rather than merely existing: the first three waves all
+    // reach the damage ledger, which is built from the balance-event log.
+    let report = build_report(&mut app, &args, 0.0);
     let ledger_names: Vec<&str> = report
         .damage_by_ship
         .values()
         .filter_map(|l| l.name_id.as_deref())
         .collect();
-
-    // Wave 2 can only exist if wave 1's group went empty and released it;
-    // wave 3 can only exist if that happened twice. Nothing else in the world
-    // spawns these names.
     for expected in ["wave_1", "wave_2", "wave_3"] {
         assert!(
             ledger_names.contains(&expected),
-            "{expected} never arrived — the death-gated chain did not link. \
+            "{expected} arrived on the clock but never fought anything. \
              Engaged: {ledger_names:?}"
-        );
-    }
-
-    // The pickets stand outside the schedule and must not be what released the
-    // waves: they are present in the same run, and the chain ran anyway.
-    for picket in ["picket_north", "picket_south"] {
-        assert!(
-            ledger_names.contains(&picket),
-            "{picket} never took station — got {ledger_names:?}"
         );
     }
 }
 
 /// Issue #943 acceptance: the player's destroyer does NOT dump its magazine
-/// into wave 1 of `combat_test`, and what stops it is the world's own count of
-/// the threat still ahead.
+/// into the opening of `combat_test`, and what stops it is the world's own count
+/// of the threat still ahead.
 ///
-/// The run is the same demo hull, world and seed the wave-chain guard above
+/// The run is the same demo hull, world and seed the wave-clock guard above
 /// flies, sampled every tick and bucketed by the world's own remaining-threat
 /// count, so what it measures is the SHAPE of the payload across the run rather
 /// than one moment in it. Four things are asserted, and they are the four ways
 /// the feature can fail:
 ///
 /// 1. The scenario is PUBLISHING the measure. `mission_threat_remaining` reads 8
-///    while wave 1 is alive — the eight-wave schedule, set by the
+///    until the first wave dies — the eight-wave schedule, set by the
 ///    `on_world_loaded` trigger and not yet decremented.
 /// 2. The ship is FIGHTING. Rounds left because the hull never got a firing
 ///    solution would prove nothing, so the run must also have launched.
-/// 3. Wave 1 does not eat the payload. The fleet authors
+/// 3. The opening does not eat the payload. The fleet authors
 ///    `min_rounds_per_threat = 0.5`, so with eight waves published the hull is
 ///    cleared down to a floor of four rounds (three once a volley overshoots
-///    it) and no further, and the first engagement spends a fraction of what it
-///    carries instead of all of it.
+///    it) and no further.
 /// 4. The back half is not dry. This is the failure the FIRST cut of #943
 ///    shipped: measured against `torpedoes_remaining` — the rounds left to
 ///    reload with — rather than against the rounds aboard, the reserve reads
 ///    three rounds short on this hull (two tubes parking `volley_max` 2 + 1 under
 ///    the shipped "keep the tubes loaded" doctrine), so the gate latches shut
-///    after wave 1 and the parked volley is never fired at all. Rounds surviving
-///    wave 1 is only half the acceptance criterion; they have to be SPENT later.
+///    after the first engagement and the parked volley is never fired at all.
+///    Rounds surviving the opening is only half the acceptance criterion; they
+///    have to be SPENT later.
+///
+/// WHAT THE `8` BUCKET NOW MEANS (#960). Under the death-gated chain the top
+/// bucket was exactly "while wave 1 was alive", because nothing else could be.
+/// Under the clock it is "while all eight waves are still to be fought" — wave 2
+/// launches at t=45 whether or not wave 1 is dead, so the bucket can span more
+/// than one engagement. That is the honest reading of the counter and the one
+/// the conservation doctrine wants: it divides rounds aboard by threat REMAINING,
+/// and a wave already on the field is threat remaining. The assertions below are
+/// worded against the counter, not against wave 1's lifetime.
 ///
 /// Nobody is connected, so every `FireTorpedo` in this run is AI-origin — the
 /// human-origin half of the same gate is pinned by
@@ -1585,9 +1678,8 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
         world_path: "assets/worlds/combat_test.toml".into(),
         ship_path: "assets/entities/alliance_destroyer.toml".into(),
         dt,
-        // The same 600 s budget the wave-chain guard above flies, because this
-        // measures the WHOLE run and not just its first engagement: seed 2 gets
-        // through wave 5 before the destroyer is lost at ~463 s.
+        // The same 600 s budget the wave-clock guard's sweep used, because this
+        // measures the WHOLE run and not just its opening.
         max_ticks: ticks_for_sim_seconds(600.0, dt),
         seed: Some(2),
         deterministic: true,
@@ -1620,7 +1712,7 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
         let mut q = app
             .world_mut()
             .query_filtered::<&TorpedoSystemResource, With<LocalShip>>();
-        // The player hull is gone once it dies, which is how seed 2 ends.
+        // The player hull is gone once it dies.
         let Ok(torps) = q.single(app.world()) else {
             break;
         };
@@ -1639,7 +1731,7 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
     println!("magazine trace by remaining threat (entered, lowest): {trace:?}");
     let report = build_report(&mut app, &args, 0.0);
 
-    let (entered_wave_one, lowest_in_wave_one) = *trace.get(&8).expect(
+    let (entered_full_threat, lowest_at_full_threat) = *trace.get(&8).expect(
         "combat_test never published `mission_threat_remaining` as 8, so the world \
                  is not declaring its eight-wave threat at all and the conservation doctrine \
                  reads an unbounded ratio that paces nothing",
@@ -1657,68 +1749,68 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
         report.message_counts
     );
 
-    // 1. Wave 1 does not eat the payload. Measured: the hull enters wave 1 with
-    //    all 12 authored rounds and bottoms out at 7 — the ENGAGEMENT ends
-    //    before the gate does, because at `min_rounds_per_threat = 0.5` × 8
-    //    waves published the floor is 4 rounds and the volley granularity would
-    //    carry it to 3.
-    //
-    //    Stated as 3 rather than as the measured 7, deliberately: 3 is what the
-    //    authored reserve GUARANTEES, and 7 is merely where this seed's first
-    //    engagement happens to stop. A bound pinned to the second number is a
-    //    bound with no margin, and a bound with no margin on this exact quantity
-    //    is what broke combat_test — the previous 1.0 tuning sat exactly on its
-    //    own floor, and #946 moving the engagement by one round was enough to
-    //    push it under and latch the magazine shut. Losing the gate still fails
-    //    here: un-gated this run bottoms out at 0.
+    // 1. The opening does not eat the payload. The floor is what the authored
+    //    reserve GUARANTEES — `min_rounds_per_threat = 0.5` x 8 waves published
+    //    is 4 rounds, and volley granularity can carry it to 3 — not wherever
+    //    this seed's engagements happen to stop. A bound pinned to the measured
+    //    low-water mark is a bound with no margin, and a bound with no margin on
+    //    this exact quantity is what broke combat_test before: the previous 1.0
+    //    tuning sat exactly on its own floor, and #946 moving the engagement by
+    //    one round was enough to push it under and latch the magazine shut.
+    //    Losing the gate still fails here: un-gated this run bottoms out at 0.
     assert_eq!(
-        entered_wave_one, 12,
+        entered_full_threat, 12,
         "precondition: the destroyer must start the run with its full authored \
          magazine aboard, or the low-water mark below is measuring something else"
     );
     assert!(
-        lowest_in_wave_one >= 3,
-        "the destroyer was down to {lowest_in_wave_one} of its 12 rounds while wave 1 \
-         was still alive. The whole point of #943 is that the first wave cannot eat \
-         the payload: with seven more waves published as remaining threat, the \
-         magazine's `torpedo_conservation` guard should have held fire long before \
-         this. Trace by remaining threat (entered, lowest): {trace:?}"
+        lowest_at_full_threat >= 3,
+        "the destroyer was down to {lowest_at_full_threat} of its 12 rounds while \
+         the world still published all eight waves as threat remaining. The whole \
+         point of #943 is that the opening cannot eat the payload: with the full \
+         schedule still ahead, the magazine's `torpedo_conservation` guard should \
+         have held fire long before this. Trace by remaining threat \
+         (entered, lowest): {trace:?}"
     );
 
-    // 2. And the hull is still SPENDING rounds after wave 1 — the other way this
-    //    feature fails, and the one that actually shipped twice.
+    // 2. And the hull is still SPENDING rounds after the first wave dies — the
+    //    other way this feature fails, and the one that actually shipped twice.
     //
     //    A reserve measured against `torpedoes_remaining` rather than the rounds
     //    aboard reads three rounds short on this hull (its two tubes park
     //    `volley_max` 2 + 1 with the shipped "keep the tubes loaded" doctrine),
-    //    which locks the gate shut after wave 1 and strands the parked volley
-    //    for good. A reserve authored too HIGH does the same thing by a
+    //    which locks the gate shut after the opening and strands the parked
+    //    volley for good. A reserve authored too HIGH does the same thing by a
     //    different route: the guard is a one-way latch — rounds aboard only
-    //    fall, and the published threat falls only when something dies — so a
-    //    hull that dips under its reserve stops firing at the very waves whose
-    //    deaths would let it fire again. At the original 1.0 this run read
-    //    {8: (12, 7), 7: (7, 5)} and stopped: 5 rounds against 7 remaining
-    //    waves is 0.71, wave 2 outlived it, and no further wave ever spawned.
-    //    Measured at 0.5: {8: (12, 7), 7: (7, 3), 6: (3, 1), 5: (1, 1)} — 7
-    //    aboard entering wave 2 and 3 by the end of it, and the chain runs on
-    //    through waves 3 and 4.
+    //    fall, and the published threat falls only when a wave dies — so a hull
+    //    that dips under its reserve stops firing at the very waves whose deaths
+    //    would let it fire again.
+    //
+    //    Measured on this seed after #960's clock:
+    //      {8: (12, 6), 7: (6, 2), 6: (2, 2), 5: (2, 2)}
+    //    — six rounds survive the full-threat stretch (the guaranteed floor is
+    //    3), four more are spent as the count falls to 6, and the last two are
+    //    then held: 2/6 and 2/5 are both under the 0.5 reserve, so they wait
+    //    for a count of 4 this run never reaches. Under the clock the top
+    //    bucket spans wave 1 AND the first stretch of wave 2, which is why it
+    //    bottoms lower than the 7 the death-gated chain used to show.
     let later_waves: Vec<_> = trace.iter().filter(|(threat, _)| **threat < 8).collect();
     assert!(
         !later_waves.is_empty(),
-        "the run never got past wave 1, so it cannot say whether the hull keeps \
-         shooting for the rest of the mission. Trace: {trace:?}"
+        "the run never cleared a single wave, so it cannot say whether the hull \
+         keeps shooting for the rest of the mission. Trace: {trace:?}"
     );
-    let spent_after_wave_one: u32 = later_waves
+    let spent_after_first_wave: u32 = later_waves
         .iter()
         .map(|(_, (entered, lowest))| entered.saturating_sub(*lowest))
         .sum();
     assert!(
-        spent_after_wave_one > 0,
-        "the destroyer launched nothing at all once wave 1 was dead — it went dry \
-         for the rest of the run while still carrying rounds. Conservation is meant \
-         to SPREAD the payload across the mission, not spend it on the first \
-         engagement and then lock the hull out of every later one. Trace by \
-         remaining threat (entered, lowest): {trace:?}"
+        spent_after_first_wave > 0,
+        "the destroyer launched nothing at all once the first wave was dead — it \
+         went dry for the rest of the run while still carrying rounds. \
+         Conservation is meant to SPREAD the payload across the mission, not \
+         spend it on the opening and then lock the hull out of every later \
+         engagement. Trace by remaining threat (entered, lowest): {trace:?}"
     );
 }
 

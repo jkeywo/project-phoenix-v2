@@ -840,8 +840,10 @@ fn tick_weapons_arc_request(
             // version of this fix withdrew on every transient satisfied/
             // out-of-range tick, not only genuine incapacitation, and it
             // measurably changed shipped combat behaviour (the death-gated
-            // wave chain in `combat_test_chains_its_waves_in_a_real_run`
-            // stopped linking).
+            // wave chain then in `combat_test.toml` stopped linking, which
+            // that world's real-run guard — now
+            // `combat_test_spawns_its_waves_on_the_clock_in_a_real_run`,
+            // renamed with the schedule in #960 — caught).
             //
             // So: withdraw ONLY when the family `state.last` names has
             // become genuinely UNUSABLE — no ONLINE, USABLE emitter left at

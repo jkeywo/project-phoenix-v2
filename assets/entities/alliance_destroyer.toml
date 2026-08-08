@@ -165,7 +165,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "phaser-omni"
-display_name = "entity.alliance_destroyer.hull.system_hull.phaser_omni.display_name"
+display_name = "weapon.phaser_omni.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
@@ -173,7 +173,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-port"
-display_name = "entity.alliance_destroyer.hull.system_hull.blaster_port.display_name"
+display_name = "weapon.blaster_port.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
@@ -181,7 +181,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-starboard"
-display_name = "entity.alliance_destroyer.hull.system_hull.blaster_starboard.display_name"
+display_name = "weapon.blaster_starboard.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
@@ -189,7 +189,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore"
-display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_fore.display_name"
+display_name = "weapon.torpedo_tube_fore.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
@@ -197,7 +197,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft"
-display_name = "entity.alliance_destroyer.hull.system_hull.torpedo_tube_aft.display_name"
+display_name = "weapon.torpedo_tube_aft.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
@@ -579,14 +579,14 @@ offline_duration = 8
 
 [[shield_arc]]
 id = "fore"
-label = "entity.alliance_destroyer.shield_arc.fore.label"
+label = "shield_arc.fore.label"
 center_deg = 0
 width_deg = 180
 hull_max_hp = 6
 
 [[shield_arc]]
 id = "aft"
-label = "entity.alliance_destroyer.shield_arc.aft.label"
+label = "shield_arc.aft.label"
 center_deg = 180
 width_deg = 180
 hull_max_hp = 5

@@ -191,22 +191,55 @@ function makeId(prefix, stem, pathParts, key) {
 
 // ── Extraction ──────────────────────────────────────────────────────────────
 
-/** @type {Array<{id: string, context: string, en: string}>} */
-const rows = [];
-const seenIds = new Map();
+/**
+ * The CSV rows one extraction run accumulates, plus the id bookkeeping that
+ * keeps them unique.
+ *
+ * Held as a value rather than module state so a test can drive `processFile`
+ * over fabricated sources without one case's rows leaking into the next.
+ *
+ * @returns {{rows: Array<{id: string, context: string, en: string}>,
+ *            addRow: (id: string, context: string, en: string) => string,
+ *            addRowOnce: (id: string, context: string, en: string) => string}}
+ */
+export function createRowSink() {
+  /** @type {Array<{id: string, context: string, en: string}>} */
+  const rows = [];
+  const seenIds = new Map();
 
-function addRow(id, context, en) {
-  // Ids must be unique. Two array entries with no discriminator can collide;
-  // suffix rather than silently dropping one.
-  let finalId = id;
-  if (seenIds.has(finalId)) {
-    const n = seenIds.get(finalId) + 1;
-    seenIds.set(finalId, n);
-    finalId = `${id}_${n}`;
+  /** Add a row, suffixing the id if it is taken. Returns the id actually used. */
+  function addRow(id, context, en) {
+    // Ids must be unique. Two array entries with no discriminator can collide;
+    // suffix rather than silently dropping one.
+    let finalId = id;
+    if (seenIds.has(finalId)) {
+      const n = seenIds.get(finalId) + 1;
+      seenIds.set(finalId, n);
+      finalId = `${id}_${n}`;
+    }
+    seenIds.set(finalId, seenIds.get(finalId) ?? 1);
+    rows.push({ id: finalId, context, en: `[${en}]` });
+    return finalId;
   }
-  seenIds.set(finalId, seenIds.get(finalId) ?? 1);
-  rows.push({ id: finalId, context, en: `[${en}]` });
-  return finalId;
+
+  /**
+   * Add a row for an id that is chosen, not minted — and so must never be
+   * suffixed.
+   *
+   * A world entity name is the same entity wherever it is authored: the id is a
+   * cross-reference key as much as it is display text, and the caller has
+   * already decided which key this value belongs to. Suffixing here would mint
+   * `world.entity.<x>.name_2` while the TOML is rewritten with the unsuffixed
+   * id, so the suffixed row is born referenced by nothing — and the merge at the
+   * end of the run, which only ever appends, would then keep it forever. One
+   * name, one id, one row.
+   */
+  function addRowOnce(id, context, en) {
+    if (seenIds.has(id)) return id;
+    return addRow(id, context, en);
+  }
+
+  return { rows, addRow, addRowOnce };
 }
 
 /**
@@ -242,16 +275,20 @@ function makePathTracker(tokens) {
 }
 
 /**
- * Extract and rewrite one TOML file.
+ * Extract and rewrite one TOML source.
  *
- * @param {string} file absolute path
+ * Takes the text rather than reading it, so the rewrite is a pure function of
+ * (source, name map) that a test can drive without a fixture tree on disk.
+ *
+ * @param {string} file absolute path — used for the id stem and the CSV context
+ * @param {string} src the file's contents
  * @param {string} prefix id namespace ('entity' | 'world' | 'faction')
  * @param {Map<string,string>|null} nameMap entity-name → id, for reference rewriting
  * @param {boolean} collectOnly when true, only harvest `[[entity]] name` values
- * @returns {Promise<{src: string, names: Map<string,string>}>}
+ * @param {ReturnType<typeof createRowSink>} sink where extracted rows accumulate
+ * @returns {{src: string, names: Map<string,string>}}
  */
-async function processFile(file, prefix, nameMap, collectOnly) {
-  const src = await readFile(file, 'utf8');
+export function processFile(file, src, prefix, nameMap, collectOnly, sink) {
   const stem = path.basename(file, '.toml');
   const rel = path.relative(root, file).replace(/\\/g, '/');
   const tokens = tokenise(src);
@@ -322,7 +359,7 @@ async function processFile(file, prefix, nameMap, collectOnly) {
     if (tok.multiline) {
       const value = readMultiline(tok.lines);
       if (value == null || LOOKS_LIKE_ID.test(value)) continue;
-      const id = addRow(makeId(prefix, stem, current, tok.key), context, value);
+      const id = sink.addRow(makeId(prefix, stem, current, tok.key), context, value);
       const indent = tok.lines[0].match(/^\s*/)[0];
       tok.lines = [`${indent}${tok.key} = "${id}"`];
       continue;
@@ -346,13 +383,16 @@ async function processFile(file, prefix, nameMap, collectOnly) {
       continue;
     }
 
-    // A world entity name already has its id assigned by the collect pass.
+    // A world entity name already has its id assigned by the collect pass — and
+    // the second world file to author that name is describing the SAME entity,
+    // so it takes the same id and adds no second row. `addRowOnce`, not
+    // `addRow`: suffixing would mint an orphan (see its doc comment).
     let id;
     if (tok.key === 'name' && currentHeader === 'entity' && nameMap && nameMap.has(value.text)) {
       id = nameMap.get(value.text);
-      addRow(id, `${context} (entity display name; also the cross-reference key)`, value.text);
+      sink.addRowOnce(id, `${context} (entity display name; also the cross-reference key)`, value.text);
     } else {
-      id = addRow(makeId(prefix, stem, current, tok.key), context, value.text);
+      id = sink.addRow(makeId(prefix, stem, current, tok.key), context, value.text);
     }
 
     const rewritten = tok.lines[0].replace(value.raw, `"${id}"`);
@@ -393,10 +433,12 @@ async function main() {
     { dir: 'factions', prefix: 'faction' },
   ];
 
+  const sink = createRowSink();
+
   // Pass 1 — harvest every world entity name so references can follow renames.
   const nameMap = new Map();
   for (const file of await tomlFiles('worlds')) {
-    const { names } = await processFile(file, 'world', null, true);
+    const { names } = processFile(file, await readFile(file, 'utf8'), 'world', null, true, sink);
     for (const [name, id] of names) {
       if (!nameMap.has(name)) nameMap.set(name, id);
     }
@@ -407,7 +449,7 @@ async function main() {
   for (const { dir, prefix } of groups) {
     for (const file of await tomlFiles(dir)) {
       const before = await readFile(file, 'utf8');
-      const { src } = await processFile(file, prefix, nameMap, false);
+      const { src } = processFile(file, before, prefix, nameMap, false, sink);
       if (src !== before) {
         files += 1;
         if (!DRY_RUN) await writeFile(file, src, 'utf8');
@@ -433,7 +475,7 @@ async function main() {
   } catch { /* first run */ }
 
   const known = new Set(existing.map((r) => r.id));
-  const added = rows.filter((r) => !known.has(r.id));
+  const added = sink.rows.filter((r) => !known.has(r.id));
   const merged = [...existing, ...added];
 
   if (!DRY_RUN) {
@@ -442,12 +484,16 @@ async function main() {
   }
 
   const prefix = DRY_RUN ? '[dry run] ' : '';
-  console.log(`${prefix}${rows.length} strings found across ${files} rewritten TOML files`);
+  console.log(`${prefix}${sink.rows.length} strings found across ${files} rewritten TOML files`);
   console.log(`${prefix}${existing.length} existing rows kept, ${added.length} new rows added`);
   console.log(`${prefix}entity names remapped: ${nameMap.size}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only when run as a script. Importing this module to test the rewrite must not
+// walk assets/ and write the CSV as a side effect.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

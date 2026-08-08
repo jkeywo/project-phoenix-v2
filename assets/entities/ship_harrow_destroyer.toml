@@ -159,7 +159,7 @@ hull_integrity = 200.0
 # seconds after the offline delay expires.
 [[shield_arc]]
 id = "all"
-label = "entity.ship_harrow_destroyer.shield_arc.all.label"
+label = "shield_arc.all.label"
 center_deg = 0
 width_deg = 360
 max_hp = 40

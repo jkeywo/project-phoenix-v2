@@ -87,7 +87,7 @@ hull_integrity = 800.0
 # station, so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
 [[shield_arc]]
 id = "all"
-label = "entity.rng_coverage_lancer.shield_arc.all.label"
+label = "shield_arc.all.label"
 center_deg = 0
 width_deg = 360
 max_hp = 5

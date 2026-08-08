@@ -131,7 +131,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-fore"
-display_name = "entity.alliance_courier.hull.system_hull.blaster_fore.display_name"
+display_name = "weapon.blaster_fore.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -321,14 +321,14 @@ offline_duration = 8
 
 [[shield_arc]]
 id = "fore"
-label = "entity.alliance_courier.shield_arc.fore.label"
+label = "shield_arc.fore.label"
 center_deg = 0
 width_deg = 180
 hull_max_hp = 4
 
 [[shield_arc]]
 id = "aft"
-label = "entity.alliance_courier.shield_arc.aft.label"
+label = "shield_arc.aft.label"
 center_deg = 180
 width_deg = 180
 hull_max_hp = 4

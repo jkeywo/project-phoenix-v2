@@ -5,22 +5,6 @@ entity.alliance_battleship.hull.system_hull.power_battery.display_name,assets/en
 entity.alliance_battleship.hull.system_hull.core.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Core
 entity.alliance_battleship.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_battleship.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Starboard)
-entity.alliance_battleship.hull.system_hull.helm_radar.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Helm Radar
-entity.alliance_battleship.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Tactical Radar
-entity.alliance_battleship.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Sensor Radar
-entity.alliance_battleship.hull.system_hull.phaser_fore.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Phaser Bank (Fore)]
-entity.alliance_battleship.hull.system_hull.blaster_heavy_fore.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Heavy Blaster Bank (Fore)]
-entity.alliance_battleship.hull.system_hull.phaser_aft.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Phaser Bank (Aft)]
-entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Port)]
-entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Starboard)]
-entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_centre.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Centre)]
-entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft Port)]
-entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft Starboard)]
-entity.alliance_battleship.shield_arc.fore.label,assets/entities/alliance_battleship.toml → [shield_arc] label,Fore
-entity.alliance_battleship.shield_arc.starboard.label,assets/entities/alliance_battleship.toml → [shield_arc] label,Starboard
-entity.alliance_battleship.shield_arc.aft.label,assets/entities/alliance_battleship.toml → [shield_arc] label,Aft
-entity.alliance_battleship.shield_arc.port.label,assets/entities/alliance_battleship.toml → [shield_arc] label,Port
-entity.alliance_battleship.shield_arc.omni.label,assets/entities/alliance_battleship.toml → [shield_arc] label,Omni
 entity.alliance_battleship.power_groups.ops.label,assets/entities/alliance_battleship.toml → [power_groups.ops] label,Operations
 entity.alliance_battleship.power_groups.helm.label,assets/entities/alliance_battleship.toml → [power_groups.helm] label,Propulsion
 entity.alliance_battleship.power_groups.weapons.label,assets/entities/alliance_battleship.toml → [power_groups.weapons] label,Weapons
@@ -39,13 +23,8 @@ entity.alliance_courier.hull.system_hull.core.display_name,assets/entities/allia
 entity.alliance_courier.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Port Engine
 entity.alliance_courier.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Starboard Engine
 entity.alliance_courier.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Lateral Thrusters
-entity.alliance_courier.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Tactical Radar
-entity.alliance_courier.hull.system_hull.blaster_fore.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Blaster
-entity.alliance_courier.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Sensor Radar
 entity.alliance_courier.hull.system_hull.power_reactor.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Reactor
 entity.alliance_courier.hull.system_hull.power_battery.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Battery
-entity.alliance_courier.shield_arc.fore.label,assets/entities/alliance_courier.toml → [shield_arc] label,Fore
-entity.alliance_courier.shield_arc.aft.label,assets/entities/alliance_courier.toml → [shield_arc] label,Aft
 entity.alliance_courier.power_groups.ops.label,assets/entities/alliance_courier.toml → [power_groups.ops] label,Operations
 entity.alliance_courier.power_groups.helm.label,assets/entities/alliance_courier.toml → [power_groups.helm] label,Propulsion
 entity.alliance_courier.power_groups.weapons.label,assets/entities/alliance_courier.toml → [power_groups.weapons] label,Weapons
@@ -59,19 +38,7 @@ entity.alliance_cruiser.hull.system_hull.power_battery.display_name,assets/entit
 entity.alliance_cruiser.hull.system_hull.core.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Core
 entity.alliance_cruiser.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_cruiser.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Starboard)
-entity.alliance_cruiser.hull.system_hull.helm_radar.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Helm Radar
 entity.alliance_cruiser.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Lateral Thrusters
-entity.alliance_cruiser.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Tactical Radar
-entity.alliance_cruiser.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Sensor Radar
-entity.alliance_cruiser.hull.system_hull.phaser_fore.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Phaser Bank (Fore)]
-entity.alliance_cruiser.hull.system_hull.phaser_aft.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Phaser Bank (Aft)]
-entity.alliance_cruiser.hull.system_hull.torpedo_tube_fore_port.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Port)]
-entity.alliance_cruiser.hull.system_hull.torpedo_tube_fore_starboard.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Starboard)]
-entity.alliance_cruiser.hull.system_hull.torpedo_tube_aft.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft)]
-entity.alliance_cruiser.shield_arc.fore.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,Fore
-entity.alliance_cruiser.shield_arc.port.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,Port
-entity.alliance_cruiser.shield_arc.aft.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,Aft
-entity.alliance_cruiser.shield_arc.starboard.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,Starboard
 entity.alliance_cruiser.power_groups.ops.label,assets/entities/alliance_cruiser.toml → [power_groups.ops] label,Operations
 entity.alliance_cruiser.power_groups.helm.label,assets/entities/alliance_cruiser.toml → [power_groups.helm] label,Propulsion
 entity.alliance_cruiser.power_groups.weapons.label,assets/entities/alliance_cruiser.toml → [power_groups.weapons] label,Weapons
@@ -88,17 +55,7 @@ entity.alliance_destroyer.hull.system_hull.power_battery.display_name,assets/ent
 entity.alliance_destroyer.hull.system_hull.core.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Core
 entity.alliance_destroyer.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_destroyer.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Engine (Starboard)
-entity.alliance_destroyer.hull.system_hull.helm_radar.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Helm Radar
 entity.alliance_destroyer.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Lateral Thrusters
-entity.alliance_destroyer.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Tactical Radar
-entity.alliance_destroyer.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Sensor Radar
-entity.alliance_destroyer.hull.system_hull.phaser_omni.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Phaser Bank (Omni)]
-entity.alliance_destroyer.hull.system_hull.blaster_port.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Blaster Bank (Port)]
-entity.alliance_destroyer.hull.system_hull.blaster_starboard.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Blaster Bank (Starboard)]
-entity.alliance_destroyer.hull.system_hull.torpedo_tube_fore.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore)]
-entity.alliance_destroyer.hull.system_hull.torpedo_tube_aft.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft)]
-entity.alliance_destroyer.shield_arc.fore.label,assets/entities/alliance_destroyer.toml → [shield_arc] label,Fore
-entity.alliance_destroyer.shield_arc.aft.label,assets/entities/alliance_destroyer.toml → [shield_arc] label,Aft
 entity.alliance_destroyer.power_groups.ops.label,assets/entities/alliance_destroyer.toml → [power_groups.ops] label,Operations
 entity.alliance_destroyer.power_groups.helm.label,assets/entities/alliance_destroyer.toml → [power_groups.helm] label,Propulsion
 entity.alliance_destroyer.power_groups.weapons.label,assets/entities/alliance_destroyer.toml → [power_groups.weapons] label,Weapons
@@ -201,7 +158,6 @@ entity.region_nebula.name,assets/entities/region_nebula.toml → name (top level
 entity.region_nebula.target.description,assets/entities/region_nebula.toml → [target] description,Nebula region
 entity.rng_coverage_lancer.name,assets/entities/test/rng_coverage_lancer.toml → name (top level),RNG-coverage Escort
 entity.rng_coverage_lancer.target.description,assets/entities/test/rng_coverage_lancer.toml → [target] description,RNG-coverage escort
-entity.rng_coverage_lancer.shield_arc.all.label,assets/entities/test/rng_coverage_lancer.toml → [shield_arc] label,All
 entity.rng_coverage_lancer.behaviour.doctrine.destroy_hostiles.text,assets/entities/test/rng_coverage_lancer.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
 entity.rng_coverage_lancer.station.captain.description,assets/entities/test/rng_coverage_lancer.toml → [station] description,[Command the bridge and call Red Alert.]
 entity.rng_coverage_lancer.station.helm.description,assets/entities/test/rng_coverage_lancer.toml → [station] description,[Pilot the ship.]
@@ -209,7 +165,6 @@ entity.rng_coverage_lancer.station.tactical.description,assets/entities/test/rng
 entity.rng_coverage_lancer.station.engineering.description,assets/entities/test/rng_coverage_lancer.toml → [station] description,[Manage reactor power.]
 entity.ship_harrow_destroyer.name,assets/entities/ship_harrow_destroyer.toml → name (top level),Harrow Destroyer
 entity.ship_harrow_destroyer.target.description,assets/entities/ship_harrow_destroyer.toml → [target] description,[Harrow Destroyer interceptor]
-entity.ship_harrow_destroyer.shield_arc.all.label,assets/entities/ship_harrow_destroyer.toml → [shield_arc] label,All
 entity.ship_harrow_destroyer.behaviour.doctrine.destroy_hostiles.text,assets/entities/ship_harrow_destroyer.toml → [behaviour.doctrine] text,[Run attack passes on hostile ships]
 entity.ship_harrow_destroyer.station.captain.description,assets/entities/ship_harrow_destroyer.toml → [station] description,[Command the bridge and call Red Alert.]
 entity.ship_harrow_destroyer.station.helm.description,assets/entities/ship_harrow_destroyer.toml → [station] description,[Pilot the ship.]
@@ -217,7 +172,6 @@ entity.ship_harrow_destroyer.station.tactical.description,assets/entities/ship_h
 entity.ship_harrow_destroyer.station.engineering.description,assets/entities/ship_harrow_destroyer.toml → [station] description,[Manage reactor power.]
 entity.ship_harrow_cruiser.name,assets/entities/ship_harrow_cruiser.toml → name (top level),Harrow Cruiser
 entity.ship_harrow_cruiser.target.description,assets/entities/ship_harrow_cruiser.toml → [target] description,[Harrow Cruiser broadside]
-entity.ship_harrow_cruiser.shield_arc.all.label,assets/entities/ship_harrow_cruiser.toml → [shield_arc] label,All
 entity.ship_harrow_cruiser.behaviour.doctrine.destroy_hostiles.text,assets/entities/ship_harrow_cruiser.toml → [behaviour.doctrine] text,[Circle hostile ships and hold the broadside]
 entity.ship_harrow_cruiser.station.captain.description,assets/entities/ship_harrow_cruiser.toml → [station] description,[Command the bridge and call Red Alert.]
 entity.ship_harrow_cruiser.station.helm.description,assets/entities/ship_harrow_cruiser.toml → [station] description,[Pilot the ship.]
@@ -225,7 +179,6 @@ entity.ship_harrow_cruiser.station.tactical.description,assets/entities/ship_har
 entity.ship_harrow_cruiser.station.engineering.description,assets/entities/ship_harrow_cruiser.toml → [station] description,[Manage reactor power.]
 entity.ship_harrow_patrol.name,assets/entities/ship_harrow_patrol.toml → name (top level),[Harrow Patrol Cruiser]
 entity.ship_harrow_patrol.target.description,assets/entities/ship_harrow_patrol.toml → [target] description,[Harrow Patrol Cruiser]
-entity.ship_harrow_patrol.shield_arc.all.label,assets/entities/ship_harrow_patrol.toml → [shield_arc] label,All
 entity.ship_harrow_patrol.behaviour.doctrine.patrol_ironveil.text,assets/entities/ship_harrow_patrol.toml → [behaviour.doctrine] text,[Hold the picket line]
 entity.ship_harrow_patrol.behaviour.doctrine.destroy_hostiles.text,assets/entities/ship_harrow_patrol.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
 entity.ship_harrow_patrol.station.captain.description,assets/entities/ship_harrow_patrol.toml → [station] description,[Command the bridge and call Red Alert.]
@@ -234,7 +187,6 @@ entity.ship_harrow_patrol.station.tactical.description,assets/entities/ship_harr
 entity.ship_harrow_patrol.station.engineering.description,assets/entities/ship_harrow_patrol.toml → [station] description,[Manage reactor power.]
 entity.ship_harrow_warhawk.name,assets/entities/ship_harrow_warhawk.toml → name (top level),Harrow Battleship
 entity.ship_harrow_warhawk.target.description,assets/entities/ship_harrow_warhawk.toml → [target] description,Harrow Battleship
-entity.ship_harrow_warhawk.shield_arc.all.label,assets/entities/ship_harrow_warhawk.toml → [shield_arc] label,All
 entity.ship_harrow_warhawk.behaviour.doctrine.patrol_warhawk.text,assets/entities/ship_harrow_warhawk.toml → [behaviour.doctrine] text,[Patrol the sector]
 entity.ship_harrow_warhawk.behaviour.doctrine.destroy_hostiles.text,assets/entities/ship_harrow_warhawk.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
 entity.ship_harrow_warhawk.station.captain.description,assets/entities/ship_harrow_warhawk.toml → [station] description,[Command the bridge and call Red Alert.]
@@ -404,10 +356,8 @@ world.combat_test.comms.8.from,assets/worlds/combat_test.toml → [comms] from,F
 world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,"[FLASH: last of the raid — a Harrow patrol cruiser off the picket line, due east. Take it down, then clear the pickets.]"
 world.default.global.title,assets/worlds/default.toml → [global] title,Starbase Alpha
 world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
-world.entity.earth.name_2,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),earth
 world.entity.luna.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),luna
 world.entity.lava_planet.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[lava-planet]
-world.entity.starbase_alpha.name_2,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),Starbase Alpha
 world.entity.raider_alpha.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),raider_alpha
 world.default.trigger.action.obj_raider_destroyed.text,assets/worlds/default.toml → [trigger.action] text,[Pirate raider eliminated.]
 world.default.available_ships.0.label,assets/worlds/default.toml → [available_ships] label,Alliance Cruiser
@@ -427,7 +377,6 @@ world.entity.lancer_alpha.name,assets/worlds/rng_coverage.toml → [[entity]] na
 world.entity.lancer_beta.name,assets/worlds/rng_coverage.toml → [[entity]] name,Lancer Beta
 world.patrol.global.title,assets/worlds/patrol.toml → [global] title,Patrol
 world.patrol.global.description,assets/worlds/patrol.toml → [global] description,[Hunt down a pirate raider on patrol through the sector.]
-world.entity.raider_alpha.name_2,assets/worlds/patrol.toml → [entity] name (entity display name; also the cross-reference key),raider_alpha
 world.patrol.trigger.action.obj_patrol_sector.text,assets/worlds/patrol.toml → [trigger.action] text,[Patrol the sector and neutralize threats.]
 world.patrol.trigger.action.obj_raider_destroyed.text,assets/worlds/patrol.toml → [trigger.action] text,[Pirate raider eliminated.]
 world.reinforcements.global.title,assets/worlds/reinforcements.toml → [global] title,Reinforcements
@@ -712,6 +661,26 @@ station.comms.name,"Comms station display name","Comms"
 station.engineering.name,"Engineering station display name","Engineering"
 station.pilot.name,"Pilot station display name (courier)","Pilot"
 station.science.name,"Science station display name (cruiser)","Science"
+shield_arc.fore.label,Shield arc label — the forward facing. Shared by every hull's [[shield_arc]] block,Fore
+shield_arc.aft.label,Shield arc label — the rear facing. Shared by every hull's [[shield_arc]] block,Aft
+shield_arc.port.label,Shield arc label — the left-hand facing. Shared by every hull's [[shield_arc]] block,Port
+shield_arc.starboard.label,Shield arc label — the right-hand facing. Shared by every hull's [[shield_arc]] block,Starboard
+shield_arc.omni.label,Shield arc label — the all-round backup facing that absorbs when a directional arc is down. Shared by every hull's [[shield_arc]] block,Omni
+shield_arc.all.label,"Shield arc label — a single facing covering all bearings, on hulls with no directional arcs. Shared by every hull's [[shield_arc]] block",All
+weapon.phaser_fore.display_name,Weapon mount display name — a forward-facing phaser bank. Shared by every hull carrying that mount,[Phaser Bank (Fore)]
+weapon.phaser_aft.display_name,Weapon mount display name — an aft-facing phaser bank. Shared by every hull carrying that mount,[Phaser Bank (Aft)]
+weapon.phaser_omni.display_name,Weapon mount display name — an all-round phaser bank. Shared by every hull carrying that mount,[Phaser Bank (Omni)]
+weapon.blaster_fore.display_name,Weapon mount display name — a single forward blaster. Shared by every hull carrying that mount,Blaster
+weapon.blaster_heavy_fore.display_name,Weapon mount display name — a forward-facing heavy blaster bank. Shared by every hull carrying that mount,[Heavy Blaster Bank (Fore)]
+weapon.blaster_port.display_name,Weapon mount display name — a port-facing blaster bank. Shared by every hull carrying that mount,[Blaster Bank (Port)]
+weapon.blaster_starboard.display_name,Weapon mount display name — a starboard-facing blaster bank. Shared by every hull carrying that mount,[Blaster Bank (Starboard)]
+weapon.torpedo_tube_fore.display_name,Weapon mount display name — a single forward torpedo tube. Shared by every hull carrying that mount,[Torpedo Tube (Fore)]
+weapon.torpedo_tube_aft.display_name,Weapon mount display name — a single aft torpedo tube. Shared by every hull carrying that mount,[Torpedo Tube (Aft)]
+weapon.torpedo_tube_fore_port.display_name,Weapon mount display name — the port tube of a forward torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Fore Port)]
+weapon.torpedo_tube_fore_starboard.display_name,Weapon mount display name — the starboard tube of a forward torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Fore Starboard)]
+weapon.torpedo_tube_fore_centre.display_name,Weapon mount display name — the centre tube of a forward torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Fore Centre)]
+weapon.torpedo_tube_aft_port.display_name,Weapon mount display name — the port tube of an aft torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Aft Port)]
+weapon.torpedo_tube_aft_starboard.display_name,Weapon mount display name — the starboard tube of an aft torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Aft Starboard)]
 
 help.captain.0.heading,"Help modal — captain station, section 1 heading",Command
 help.captain.0.body,"Help modal — captain station, section 1 body text",[You set the ship's posture. Coordinate the crew and call the shots — no one else has the full picture.]

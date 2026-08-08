@@ -7,6 +7,10 @@ import {
   getSpawnRotation,
   setSpawnScale,
   getSpawnScale,
+  getSpawnName,
+  getSpawnReference,
+  matchesSpawnReference,
+  getRelativeToCandidates,
 } from '../toml-utils.js';
 
 // Positioning helpers must write/read the unified nested `transform` shape
@@ -94,6 +98,83 @@ describe('toml-utils positioning is uniformly transform-only', () => {
 // rotation [0,0,0] and scale [1,1,1] are the Rust schema defaults and MUST
 // NOT be written to the TOML — that keeps round-trips of unmodified spawns
 // byte-clean.
+// Issue #969: an unresolvable `relative_to` now blocks the whole world instead
+// of costing one misplaced entity, so the editor must not be able to author
+// one. Everything the Relative To picker offers has to be something
+// `build_named_entity_positions` will actually put in the runtime table.
+describe('toml-utils relative_to parent candidates', () => {
+  const layerOf = (...entity) => ({ isMap: true, toml: { entity } });
+
+  it('getSpawnReference returns the authored identifier, never the display fallback', () => {
+    expect(getSpawnReference({ name: 'beacon', id: 'b1' })).toBe('beacon');
+    expect(getSpawnReference({ id: 'nebula-1' })).toBe('nebula-1');
+    expect(getSpawnReference({ template_path: 'foo.toml' })).toBeNull();
+    // The display helper still has its fallback; the two must not be confused.
+    expect(getSpawnName({ template_path: 'foo.toml' })).toBe('unnamed');
+  });
+
+  it('drops spawns with neither name nor id — the shipped worlds have several', () => {
+    const anonymous = { template_path: 'assets/entities/star_sun.toml' };
+    const named = { template_path: 'assets/entities/planet_earth.toml', id: 'earth' };
+    const layer = layerOf(anonymous, named);
+    expect(getRelativeToCandidates(layer)).toEqual([named]);
+  });
+
+  it('drops spawns that are themselves relative_to-positioned — chains are unsupported', () => {
+    const planet = { template_path: 'planet.toml', id: 'planet', transform: { position: [1, 0, 0] } };
+    const moon = { template_path: 'moon.toml', id: 'moon', transform: { relative_to: 'planet', offset: [1, 0, 0] } };
+    const layer = layerOf(planet, moon);
+    expect(getRelativeToCandidates(layer)).toEqual([planet]);
+  });
+
+  it('drops the subject itself — nothing can be positioned relative to itself', () => {
+    const planet = { template_path: 'planet.toml', id: 'planet', transform: { position: [1, 0, 0] } };
+    const station = { template_path: 'station.toml', id: 'station', transform: { position: [2, 0, 0] } };
+    const layer = layerOf(planet, station);
+    expect(getRelativeToCandidates(layer, station)).toEqual([planet]);
+  });
+
+  it('never reaches beyond the given layer — the runtime table is per world file', () => {
+    const here = { template_path: 'here.toml', id: 'here', transform: { position: [0, 0, 0] } };
+    const elsewhere = { template_path: 'there.toml', id: 'there', transform: { position: [9, 0, 9] } };
+    // Two separate layers; only the one passed in contributes.
+    expect(getRelativeToCandidates(layerOf(here))).toEqual([here]);
+    expect(getRelativeToCandidates(layerOf(elsewhere))).toEqual([elsewhere]);
+  });
+
+  it('offers a landmark by whichever identifier the runtime resolves', () => {
+    // combat_test.toml's shape: short `id` for authors, strings.csv key as `name`.
+    const gasGiant = {
+      template_path: 'planet.toml',
+      id: 'gas-giant',
+      name: 'world.entity.gas_giant.name',
+      transform: { position: [-1200, 0, 300] },
+    };
+    const [candidate] = getRelativeToCandidates(layerOf(gasGiant));
+    expect(getSpawnReference(candidate)).toBe('world.entity.gas_giant.name');
+  });
+
+  // Writing a reference picks ONE identifier; recognising one already authored
+  // must accept EITHER, because the runtime table is keyed by both.
+  it('matchesSpawnReference accepts id or name, not just the one getSpawnReference picks', () => {
+    const gasGiant = { id: 'gas-giant', name: 'world.entity.gas_giant.name' };
+    expect(matchesSpawnReference(gasGiant, 'gas-giant')).toBe(true);
+    expect(matchesSpawnReference(gasGiant, 'world.entity.gas_giant.name')).toBe(true);
+    // The identifier getSpawnReference would NOT have chosen still matches.
+    expect(getSpawnReference(gasGiant)).not.toBe('gas-giant');
+    expect(matchesSpawnReference(gasGiant, 'earth')).toBe(false);
+  });
+
+  it('matchesSpawnReference never matches an absent reference', () => {
+    // An anonymous spawn must not compare equal to "no reference" by way of
+    // `undefined === undefined`.
+    const anonymous = { template_path: 'star.toml' };
+    expect(matchesSpawnReference(anonymous, undefined)).toBe(false);
+    expect(matchesSpawnReference(anonymous, null)).toBe(false);
+    expect(matchesSpawnReference({ id: 'x' }, null)).toBe(false);
+  });
+});
+
 describe('toml-utils rotation helpers', () => {
   it('setSpawnRotation writes nested transform.rotation', () => {
     const spawn = { template_path: 'foo.toml' };

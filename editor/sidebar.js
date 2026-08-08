@@ -1,5 +1,5 @@
 import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpawnPosition, getAllAnchors, getSpawnRotation, setSpawnRotation, getSpawnScale, setSpawnScale } from './toml-utils.js';
-import { getSpawnsFromAllLayers } from './toml-utils.js';
+import { getRelativeToCandidates, getSpawnReference, matchesSpawnReference } from './toml-utils.js';
 import { renderOverridePanel } from './override-view.js';
 import { renderTriggerPanel } from './trigger-view.js';
 import { renderCommsPanel } from './comms-view.js';
@@ -82,7 +82,16 @@ export class PropertiesPanel {
     const allAnchors = getAllAnchors(this.layerManager.getLayers());
     const pos = getSpawnPosition(spawn, allAnchors);
     const relative = getRelativeInfo(spawn);
-    const layerSpawns = getSpawnsFromAllLayers(this.layerManager.getLayers());
+    const parentCandidates = getRelativeToCandidates(layer, spawn);
+    const parentOptions = this._buildParentOptions(parentCandidates, relative);
+    // A `relative` transform is an offset FROM something. With no eligible
+    // parent in this layer and no authored reference worth keeping there is no
+    // base to offer, and picking the mode anyway would write `relative_to =
+    // null` — which smol-toml drops on the way out, leaving an `offset` with
+    // nothing to offset from. `validate_relative_to` never sees a key to
+    // complain about, so the entity just silently lands on the origin. Offer
+    // the mode only where it can be satisfied.
+    const canBeRelative = parentCandidates.length > 0 || Boolean(relative);
 
     let positionMode = 'absolute';
     if (relative) positionMode = 'relative';
@@ -110,7 +119,7 @@ export class PropertiesPanel {
         <div class="radio-group">
           <label><input type="radio" name="posMode" value="absolute" ${positionMode === 'absolute' ? 'checked' : ''}> Absolute</label>
           <label><input type="radio" name="posMode" value="anchor" ${positionMode === 'anchor' ? 'checked' : ''}> Anchor</label>
-          <label><input type="radio" name="posMode" value="relative" ${positionMode === 'relative' ? 'checked' : ''}> Relative To</label>
+          <label><input type="radio" name="posMode" value="relative" ${positionMode === 'relative' ? 'checked' : ''}${canBeRelative ? '' : ' disabled'}> Relative To</label>
         </div>
       </div>
 
@@ -137,7 +146,7 @@ export class PropertiesPanel {
       <div class="property-group${positionMode !== 'relative' ? ' hidden' : ''}" id="relativePos">
         <label>Parent</label>
         <select id="propParent">
-          ${layerSpawns.map(s => `<option value="${getSpawnName(s)}" ${relative?.parent === getSpawnName(s) ? 'selected' : ''}>${getSpawnName(s)}</option>`).join('')}
+          ${parentOptions}
         </select>
         <div class="input-row" style="margin-top: 8px;">
           <div>
@@ -214,6 +223,49 @@ export class PropertiesPanel {
     );
   }
 
+  /**
+   * `<option>` markup for the Relative To parent picker.
+   *
+   * Only spawns a `relative_to` can actually resolve against are offered — see
+   * `getRelativeToCandidates`. Before issue #969 the picker listed every spawn
+   * in every open layer under `getSpawnName`, so three of its entries could
+   * never resolve: the literal `'unnamed'`, anything in another layer, and any
+   * spawn already positioned by `relative_to`. Each of those used to cost one
+   * misplaced entity; now an unresolvable `relative_to` blocks the whole world,
+   * so the picker must not be able to author one.
+   *
+   * The `value` a NEW selection writes is `getSpawnReference` — one identifier,
+   * `name` first; the label stays `getSpawnName`, which is what the tree and
+   * canvas show. Recognising an EXISTING reference is the other direction and
+   * goes through `matchesSpawnReference`, which accepts `id` or `name` exactly
+   * as the runtime table does. Comparing against `getSpawnReference` instead
+   * marked every shipped landmark unresolved: they all carry both identifiers
+   * and are all referenced by the `id` that `name` beats.
+   *
+   * A `relative_to` already on the spawn that no candidate matches is preserved
+   * as its own option rather than dropped — silently re-pointing an authored
+   * reference at whatever happened to sort first is the failure mode this whole
+   * issue is about.
+   */
+  _buildParentOptions(candidates, relative) {
+    const authored = relative?.parent;
+    const options = candidates.map(s => {
+      const reference = getSpawnReference(s);
+      const selected = matchesSpawnReference(s, authored) ? ' selected' : '';
+      return `<option value="${reference}"${selected}>${getSpawnName(s)}</option>`;
+    });
+
+    if (authored && !candidates.some(s => matchesSpawnReference(s, authored))) {
+      options.unshift(
+        `<option value="${authored}" selected>${authored} (unresolved)</option>`
+      );
+    }
+    if (options.length === 0) {
+      return '<option value="" disabled selected>no eligible parent in this layer</option>';
+    }
+    return options.join('');
+  }
+
   _buildShapeHtml(spawn) {
     if (!spawn.shape) return '';
     const { type } = spawn.shape;
@@ -270,6 +322,14 @@ export class PropertiesPanel {
     document.querySelectorAll('input[name="posMode"]').forEach(radio => {
       radio.addEventListener('change', (e) => {
         const mode = e.target.value;
+        const parentSelect = document.getElementById('propParent');
+        // Belt and braces with the disabled radio: never author a `relative`
+        // transform with no base. When the layer offers no eligible parent the
+        // picker's only entry is the empty sentinel, and `relative_to = null`
+        // serialises to an `offset` alone — no base, nothing for
+        // `validate_relative_to` to reject, entity silently at the origin.
+        // Bail before the undo snapshot so a refused switch costs nothing.
+        if (mode === 'relative' && !parentSelect?.value) return;
         document.getElementById('absolutePos').classList.toggle('hidden', mode !== 'absolute');
         document.getElementById('anchorPos').classList.toggle('hidden', mode !== 'anchor');
         document.getElementById('relativePos').classList.toggle('hidden', mode !== 'relative');
@@ -283,11 +343,11 @@ export class PropertiesPanel {
           const anchorSelect = document.getElementById('propAnchor');
           setSpawnPosition(spawn, 0, 0, 'anchor', anchorSelect?.value || null, null);
         } else if (mode === 'relative') {
-          const parentSelect = document.getElementById('propParent');
           const offsetX = parseFloat(document.getElementById('propOffsetX')?.value || '0');
           const offsetZ = parseFloat(document.getElementById('propOffsetZ')?.value || '0');
           const currentPos = getSpawnPosition(spawn, allAnchors);
-          setSpawnPosition(spawn, currentPos.x, currentPos.z, 'relative', parentSelect?.value || null, { x: offsetX, z: offsetZ });
+          // Non-empty: the guard above returned early otherwise.
+          setSpawnPosition(spawn, currentPos.x, currentPos.z, 'relative', parentSelect.value, { x: offsetX, z: offsetZ });
         }
         layer.isDirty = true;
         this.canvasManager.renderAll();

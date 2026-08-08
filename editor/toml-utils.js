@@ -37,23 +37,84 @@ export function getAllAnchors(layers) {
   return anchors;
 }
 
-export function getSpawnsFromAllLayers(layers) {
-  const spawns = [];
-  for (const layer of layers) {
-    const layerSpawns = getSpawns(layer);
-    for (const spawn of layerSpawns) {
-      spawns.push({ ...spawn, _layer: layer });
-    }
-  }
-  return spawns;
-}
-
 export function getEntityPath(spawn) {
   return spawn.template_path;
 }
 
 export function getSpawnName(spawn) {
   return spawn.name || spawn.id || 'unnamed';
+}
+
+/**
+ * The identifier a runtime `relative_to` resolves against: `name` first, then
+ * `id`, and `null` when the spawn authors neither.
+ *
+ * Deliberately not `getSpawnName`, which falls back to the literal string
+ * `'unnamed'` so the tree and the canvas always have something to draw.
+ * `'unnamed'` is not an authored identifier, so a `relative_to = "unnamed"`
+ * matches no entity — and since issue #969 that no longer costs one misplaced
+ * entity, it fails validation and blocks the entire world. Display text and
+ * reference ids are different jobs; only this one may reach an `<option value>`.
+ *
+ * @param {object} spawn
+ * @returns {string|null}
+ */
+export function getSpawnReference(spawn) {
+  return spawn.name || spawn.id || null;
+}
+
+/**
+ * Does `spawn` answer to an already-authored `relative_to` reference?
+ *
+ * This is the *reading* direction, and it is not the inverse of
+ * `getSpawnReference`. `build_named_entity_positions` (`src/world/config.rs`)
+ * keys the runtime table by BOTH `id` and `name` since issue #969, so a spawn
+ * carrying both answers to either spelling. `getSpawnReference` has to pick one
+ * of them to write into a new `<option value>`; asking whether an existing
+ * reference resolves must accept both, or every shipped landmark reads back as
+ * unresolved — each carries a short `id` (`gas-giant`) plus a strings.csv `name`
+ * (`world.entity.gas_giant.name`), and every shipped `relative_to` names the
+ * `id`, which is the losing side of `getSpawnReference`'s `name`-first pick.
+ *
+ * A `null`/`undefined` reference matches nothing: a spawn with neither `id` nor
+ * `name` must not compare equal to an absent reference by way of
+ * `undefined === undefined`.
+ *
+ * @param {object} spawn
+ * @param {string|null|undefined} reference
+ * @returns {boolean}
+ */
+export function matchesSpawnReference(spawn, reference) {
+  if (reference === null || reference === undefined) return false;
+  return spawn.name === reference || spawn.id === reference;
+}
+
+/**
+ * The spawns a `relative_to` on `subject` may legally name, mirroring what
+ * `build_named_entity_positions` (`src/world/config.rs`) will actually put in
+ * the runtime lookup table. Three rules, each of which the picker used to break:
+ *
+ * 1. **Same layer only.** The runtime table is built from one `WorldConfig`, so
+ *    a reference into another open layer resolves against nothing.
+ * 2. **Must have a `name` or an `id`.** Anonymous spawns are unnameable; the
+ *    shipped worlds have several, and every one of them used to be offered
+ *    under the label `'unnamed'`.
+ * 3. **Must not itself be `relative_to`-positioned.** Chains are unsupported by
+ *    design and such an entity is excluded from the table.
+ *
+ * `subject` is also excluded: an entity cannot be positioned relative to
+ * itself — setting `relative_to` takes it straight out of the table.
+ *
+ * @param {object} layer - The layer the subject spawn lives in.
+ * @param {object|null} subject - The spawn being edited, excluded from the result.
+ * @returns {object[]}
+ */
+export function getRelativeToCandidates(layer, subject = null) {
+  return getSpawns(layer).filter(spawn =>
+    spawn !== subject &&
+    getSpawnReference(spawn) !== null &&
+    !(spawn.transform && spawn.transform.relative_to)
+  );
 }
 
 export function setSpawnPosition(spawn, x, z, mode = 'absolute', parent = null, offset = null) {

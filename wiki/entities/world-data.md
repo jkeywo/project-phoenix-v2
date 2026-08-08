@@ -55,7 +55,7 @@ World comms retain a sender reference for runtime resolution and carry separate 
 
 Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence (see `TransformConfig::resolve` at `src/world/config.rs:80` and `resolve_entity_position_with` at `src/world/config.rs:1734`):
 
-1. `relative_to = "<entity-name>" + offset` — resolved against a previously-spawned named entity
+1. `relative_to = "<id-or-name>" + offset` — resolved against another `[[entity]]` in the **same world file**, named by its `id` or its `name`. Declaration order is irrelevant: `build_named_entity_positions` builds the whole lookup table before anything is positioned, so a target below the reference resolves as readily as one above it. A `name` beats another entity's `id` of the same spelling. The target must not itself use `relative_to` — chains are unsupported — and a reference that resolves to nothing is an `unresolved-relative-to` **error** that blocks activation of the whole world (`validate_relative_to`, issue #969), rather than dropping the one entity
 2. `anchor = "<anchor-name>" + offset` — resolved against a `[[anchor]]`
 3. `position = [x, y, z]` — absolute
 4. otherwise origin

@@ -285,7 +285,7 @@ entities:
     implementation:
       status: declared
       paths: [src/headless/app.rs, src/world/server.rs, src/world/validate.rs]
-      symbols: [validate_composition, has_error, spawn_immediate_entities_internal, apply_world_layer_changes]
+      symbols: [validate_composition, activation_findings, has_error, spawn_immediate_entities_internal, apply_world_layer_changes]
       tests: [cargo test]
 
   - state: world-content-lifecycle-state
@@ -293,15 +293,15 @@ entities:
       status: proposed
       confidence: confirmed
       title: World Content Lifecycle State
-      summary: The authoritative activation state of each world layer and its owned runtime content (spawned entities, triggers, comms, objectives, pending delayed actions). Failed validation leaves no partial root-world content active; unload removes exactly the layer's owned content.
+      summary: The authoritative activation state of each world layer and its owned runtime content (spawned entities, triggers, comms, objectives, pending delayed actions). Failed validation leaves no partial root-world content active — the immediate spawn is split across two unordered Startup systems (named entries and asteroid fields, and the anonymous remainder) and both consult the same gate, so a rejected world loses both halves together. Unload removes exactly the layer's owned content.
     architecture:
       classification: authoritative
       owner: world-load-lifecycle-contract
       writers: [world-load-lifecycle-contract]
     implementation:
       status: declared
-      paths: [src/headless/app.rs, src/world/server.rs]
-      symbols: [spawn_immediate_entities_internal, WorldRuntime, apply_world_layer_changes]
+      paths: [src/headless/app.rs, src/world/server.rs, src/server_app.rs]
+      symbols: [spawn_immediate_entities_internal, spawn_anonymous_entities_internal, world_activation_blocked, WorldRuntime, apply_world_layer_changes]
 
   - component: world-objective-contract
     core:

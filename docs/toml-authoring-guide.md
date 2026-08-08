@@ -223,16 +223,17 @@ is the minimal case above.
 A single entity instance. Anonymous entries are static world layout;
 entries carrying a `name` field become trigger- and comms-eligible (the
 unified pipeline assigns them a stable UUID and registers `name → uuid`
-for trigger/comms/`relative_to` lookups).
+for trigger and comms lookups). `relative_to` does **not** go through that
+map — see the field notes below.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `template_path` | string | **required** | Path to entity template (e.g. `"assets/entities/star_sun.toml"`). |
-| `id` | string | none | Stable instance ID for cross-reference. |
-| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers, comms, and `relative_to` lookups resolve names through this map. |
+| `id` | string | none | Stable instance ID for cross-reference. Also accepted as a `relative_to` target. |
+| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers and comms resolve names through this map. |
 | `position` | `[f32; 3]` | `[0,0,0]` | World position. |
 | `anchor` | string | none | Named entry from `[anchors]`; resolved to `[x,y,z]` at spawn time. |
-| `relative_to` | string | none | Another named `[[entity]]` to position relative to. Used with `offset`. The referenced entity must use `anchor` or `position` (not another `relative_to`). |
+| `relative_to` | string | none | Another `[[entity]]` **in the same file** to position relative to, named by its `id` **or** its `name` (a `name` wins if the two collide). Used with `offset`. Order does not matter — the target may be declared before or after. The target must use `anchor` or `position`, not another `relative_to` (no chains). Resolved against the entity list directly, *not* through `name_to_uuid`. A `relative_to` that does not resolve fails world validation and blocks the whole world from spawning (issue #969) — before, it cost exactly the one entity, silently. |
 | `offset` | `[f32; 3]` | `[0,0,0]` | Offset added to the `relative_to` entity's resolved position. |
 | `spawn_on` | `"immediate"` \| `"game_start"` | `"immediate"` | `"immediate"` spawns at world load (lobby phase); `"game_start"` spawns when phase enters `InProgress`. |
 | `overrides` | inline table | none | TOML overrides merged on top of the template (per-instance field tweaks). |

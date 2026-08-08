@@ -1,4 +1,4 @@
-import { getSpawns, getAnchors, getSpawnPosition, getSpawnName, getEntityPath, getRelativeInfo, setSpawnPosition } from './toml-utils.js';
+import { getSpawns, getAnchors, getSpawnPosition, getSpawnName, getEntityPath, getRelativeInfo, setSpawnPosition, matchesSpawnReference } from './toml-utils.js';
 import { getColorForEntity } from './layers.js';
 import { loadEntityConfig, getEntityConfig } from './entity-cache.js';
 import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-world.js';
@@ -567,7 +567,15 @@ export class CanvasManager {
         const childGroup = this.spawnGroups.get(spawn);
         if (!childGroup) continue;
 
-        const parent = spawns.find(s => getSpawnName(s) === relative.parent);
+        // Match the runtime's lookup, not the display label (issue #969): a
+        // `relative_to` resolves against `name` OR `id`, so a parent that
+        // carries both and is referenced by its `id` would never be found by
+        // `getSpawnName` (which prefers `name`) and its arrow would be missing.
+        // The sidebar's parent picker asks the same question of the same data,
+        // so the two share one predicate rather than each spelling it out —
+        // they disagreed once already, and the canvas drew an arrow to a parent
+        // the sidebar was labelling `(unresolved)`.
+        const parent = spawns.find(s => matchesSpawnReference(s, relative.parent));
         if (!parent) continue;
 
         const parentGroup = this.spawnGroups.get(parent);

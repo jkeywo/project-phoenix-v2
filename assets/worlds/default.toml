@@ -106,10 +106,13 @@ transform = { position = [600.0, 0.0, -600.0] }
 #
 # `[[entity]] name = "..."` is the unified spawn surface (PRD #337). The
 # pipeline assigns a UUID at spawn time and registers it in
-# `WorldConfig.name_to_uuid` so triggers, comms, and `relative_to` lookups
-# can resolve the name. Positioning lives under `[entity.transform]` and may
-# use inline `position`, `anchor = "..."` (resolved from `[anchors]`), or
-# `relative_to = "..." + offset = [x,y,z]` (relative to another named entity).
+# `WorldConfig.name_to_uuid` so triggers and comms can resolve the name.
+# Positioning lives under `[entity.transform]` and may use inline `position`,
+# `anchor = "..."` (resolved from `[anchors]`), or
+# `relative_to = "..." + offset = [x,y,z]`. A `relative_to` names another
+# entity in THIS file by its `id` or its `name`, declared before or after this
+# one; the target may not itself use `relative_to` (no chains). An
+# unresolvable `relative_to` fails world validation (issue #969).
 
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"

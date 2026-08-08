@@ -2756,10 +2756,46 @@ fn setup_world(
     };
 
     let config_cache = crate::config_cache::get_config_cache();
+    spawn_anonymous_entities_internal(
+        &mut commands,
+        &mut world,
+        &world_config,
+        &config_cache,
+        id_mint.as_deref(),
+    );
+}
+
+/// Spawn the `setup_world`-owned anonymous immediate `[[entity]]` instances.
+///
+/// Returns the number spawned. Extracted from `setup_world` for the same reason
+/// [`crate::world::server::spawn_immediate_entities_internal`] was extracted
+/// from `spawn_world_entities`: the spawn logic is then testable on native with
+/// a fixture `ConfigCache`, instead of depending on the process-global native
+/// cache that `insert_native_config` warns is unsafe to touch from a unit test.
+pub(crate) fn spawn_anonymous_entities_internal(
+    commands: &mut Commands,
+    world: &mut WorldResource,
+    world_config: &crate::world::config::WorldConfig,
+    config_cache: &crate::config_cache::ConfigCache,
+    id_mint: Option<&crate::world_id::WorldIdMint>,
+) -> usize {
+    // Atomic-activation guard (issues #750/#752/#906/#969). This system owns one
+    // half of the immediate spawn; `spawn_world_entities` owns the other, and
+    // the two carry no ordering relationship. The loop below answers a failed
+    // resolve by logging and `continue`ing, so without this gate an invalid
+    // world still ships its stars, planets and nebulae while every named entity
+    // and asteroid field silently vanishes — a *more* partial failure than the
+    // single missing entity the gate exists to prevent, and a direct
+    // contradiction of `world-content-lifecycle-state`. Same function, same
+    // parsed config, so both halves always agree.
+    if crate::world::server::world_activation_blocked(world_config, "setup_world") {
+        return 0;
+    }
 
     // Pre-resolve named-entity positions so anonymous entries using
     // `relative_to` can be positioned (PRD #337).
-    let named_positions = crate::world::config::build_named_entity_positions(&world_config);
+    let named_positions = crate::world::config::build_named_entity_positions(world_config);
+    let mut spawned = 0;
 
     for entity_inst in &world_config.entities {
         if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::Immediate {
@@ -2778,7 +2814,7 @@ fn setup_world(
             continue;
         }
 
-        let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
+        let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
             Ok(c) => c,
             Err(e) => {
                 bevy::log::error!(
@@ -2790,8 +2826,7 @@ fn setup_world(
             }
         };
 
-        let uuid =
-            crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+        let uuid = crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Entity);
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &world_config.anchors,
@@ -2805,17 +2840,20 @@ fn setup_world(
         };
 
         crate::entity_spawner::spawn_entity(
-            &mut commands,
+            commands,
             &config,
             pos,
             uuid.clone(),
             entity_inst.id.clone(),
         );
         upsert_world_entity(
-            &mut world,
+            world,
             snapshot_from_entity_config(uuid, entity_inst.id.clone(), &config, pos),
         );
+        spawned += 1;
     }
+
+    spawned
 }
 
 fn player_spawn_rotation_yaw(rot: [f32; 3]) -> (bevy::math::Quat, f32) {

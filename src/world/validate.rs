@@ -70,7 +70,8 @@ pub struct SourceLocation {
 pub struct WorldFinding {
     pub severity: Severity,
     /// Short kebab-case category slug: `duplicate-name`, `unresolved-reference`,
-    /// `ambiguous-reference`, `invalid-qualified-reference`.
+    /// `ambiguous-reference`, `invalid-qualified-reference`,
+    /// `ambiguous-entity-reference`, `unresolved-relative-to`.
     pub category: &'static str,
     pub message: String,
     pub source: SourceLocation,
@@ -90,6 +91,25 @@ impl WorldFinding {
     ) -> Self {
         WorldFinding {
             severity: Severity::Error,
+            category,
+            message,
+            source: SourceLocation {
+                file: file.to_string(),
+                line: line_of(source_text, reference),
+                reference: reference.to_string(),
+            },
+        }
+    }
+
+    fn warning(
+        category: &'static str,
+        file: &str,
+        source_text: &str,
+        reference: &str,
+        message: String,
+    ) -> Self {
+        WorldFinding {
+            severity: Severity::Warning,
             category,
             message,
             source: SourceLocation {
@@ -283,6 +303,23 @@ fn collect_entity_references(config: &WorldConfig) -> Vec<EntityRef> {
 
 /// Validate entity identity for one world: duplicate reference names in a single
 /// namespace are errors (`world-entity-identity-state`).
+///
+/// A second, non-blocking pass covers the *positioning* namespace (issue #969).
+/// A `relative_to` resolves against both authored identifiers — `id` as well as
+/// `name` — so any spelling claimed by more than one `[[entity]]` is ambiguous
+/// as a positioning reference. Two shapes reach it:
+///
+/// * one entity's `id` equal to another entity's `name`. Resolution is defined
+///   (`name` wins, see [`crate::world::config::build_named_entity_positions`]),
+///   but the author almost certainly meant one specific entity, and an `id`
+///   added later can quietly take a reference off a `name` it used to miss.
+/// * two entities sharing an `id`. Nothing decides between them but file order.
+///
+/// Warning, not error: neither shape is wrong until something references it,
+/// `id` has never been required to be unique, and a mod pack may already ship
+/// one. The duplicate **`name`** case stays an error — it breaks the
+/// trigger/comms/objective namespace outright — and is reported there only, so
+/// one collision never produces two findings.
 pub fn validate_entity_identity(
     path: &str,
     source_text: &str,
@@ -314,6 +351,52 @@ pub fn validate_entity_identity(
             }
         }
     }
+
+    // How many entities claim each spelling through EITHER identifier. An
+    // entity whose `id` and `name` are the same string claims it once — that is
+    // one entity, and nothing about it is ambiguous.
+    fn claimed_by(entity: &WorldEntity) -> Vec<&str> {
+        let mut claimed: Vec<&str> = [entity.id.as_deref(), entity.name.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        claimed.dedup();
+        claimed
+    }
+    let mut claimants: HashMap<&str, usize> = HashMap::new();
+    for entity in entities {
+        for spelling in claimed_by(entity) {
+            *claimants.entry(spelling).or_insert(0) += 1;
+        }
+    }
+    let mut warned: HashSet<&str> = HashSet::new();
+    for entity in entities {
+        for spelling in claimed_by(entity) {
+            if claimants.get(spelling).copied().unwrap_or(0) < 2 {
+                continue;
+            }
+            // Already an error in the reference namespace; don't say it twice.
+            if seen.get(spelling).copied().unwrap_or(0) > 1 {
+                continue;
+            }
+            if !warned.insert(spelling) {
+                continue;
+            }
+            findings.push(WorldFinding::warning(
+                "ambiguous-entity-reference",
+                path,
+                source_text,
+                spelling,
+                format!(
+                    "'{spelling}' is claimed as the `id` or `name` of more than one \
+                     [[entity]] in '{path}'; a `relative_to = \"{spelling}\"` resolves \
+                     against exactly one of them (a `name` beats another entity's `id`, \
+                     and otherwise the last declaration wins)"
+                ),
+            ));
+        }
+    }
+
     findings
 }
 
@@ -707,6 +790,158 @@ pub fn validate_template_composition(
     validate_template_composition_in(&src, fragments, &mut seen)
 }
 
+/// Reject an `[[entity]]` whose `transform.relative_to` names nothing this
+/// world can position it against (issue #969).
+///
+/// # Why this is an ERROR and never a warning
+///
+/// Every spawn caller resolves a position and, on failure, logs and `continue`s
+/// — so an unresolvable `relative_to` degrades to *the entity is absent*, with
+/// the rest of the world spawning happily around the hole. That is precisely
+/// how `combat_test.toml`'s ice moon went missing for three weeks: nothing the
+/// scenario asserts on noticed a moon that was never there. An author who wrote
+/// `relative_to` asked for a position they cannot compute themselves; refusing
+/// to place the entity at all is not a degraded answer to that, it is a
+/// different world.
+///
+/// # Why it needs no host gating
+///
+/// Unlike the template-shaped validators above ([`doctrine_anchor_refs`],
+/// [`validate_template_composition_in`]), which stay quiet about templates the
+/// host's loader cannot reach, `relative_to` resolves **entirely within the
+/// parsed [`WorldConfig`] in hand** — no template load, no filesystem, no
+/// preload cache. Every host that can parse the world can decide this
+/// completely, so the browser host is as authoritative as the native one and
+/// the error is unconditional.
+///
+/// # Agreement with the runtime
+///
+/// The check asks
+/// [`crate::world::config::build_named_entity_positions`] — the very table the
+/// spawners look references up in — so "validation passed" means "every
+/// `relative_to` resolves at spawn time", with no second opinion to drift. The
+/// message then inspects the entity list to say *why* it missed, since the three
+/// causes want different fixes: an unknown reference, a base that is itself
+/// `relative_to`-positioned (chains are unsupported by design), or a base whose
+/// own anchor does not resolve.
+fn validate_relative_to_in(src: &WorldSource) -> Vec<WorldFinding> {
+    let resolvable = crate::world::config::build_named_entity_positions(src.config);
+    let mut findings = Vec::new();
+
+    for ent in &src.config.entities {
+        let Some(reference) = ent.transform.as_ref().and_then(|t| t.relative_to.as_ref()) else {
+            continue;
+        };
+        if resolvable.contains_key(reference.as_str()) {
+            continue;
+        }
+
+        // Which authored identifiers name the reference at all, ignoring
+        // whether that entity's own position resolved.
+        let base = src.config.entities.iter().find(|e| {
+            e.id.as_deref() == Some(reference.as_str())
+                || e.name.as_deref() == Some(reference.as_str())
+        });
+        let why = match base {
+            None => format!("no entity in this world declares '{reference}' as its `id` or `name`"),
+            Some(b)
+                if b.transform
+                    .as_ref()
+                    .and_then(|t| t.relative_to.as_ref())
+                    .is_some() =>
+            {
+                format!(
+                    "entity '{reference}' is itself positioned with `relative_to`, and \
+                     relative-to-relative chains are not supported"
+                )
+            }
+            Some(_) => format!(
+                "entity '{reference}' exists but its own position does not resolve \
+                 (check its `anchor`)"
+            ),
+        };
+
+        let label = ent
+            .name
+            .clone()
+            .or_else(|| ent.id.clone())
+            .unwrap_or_else(|| ent.template_path.clone());
+        findings.push(WorldFinding {
+            severity: Severity::Error,
+            category: "unresolved-relative-to",
+            message: format!(
+                "entity '{label}' (template '{}') is positioned \
+                 `relative_to = \"{reference}\"`, which does not resolve in '{}': {why}",
+                ent.template_path, src.path
+            ),
+            source: SourceLocation {
+                file: src.path.clone(),
+                // The authored spelling first (the line the author edits),
+                // then the bare quoted reference for compact/odd spacing,
+                // then the spawn site.
+                line: line_of(src.toml, &format!("relative_to = \"{reference}\""))
+                    .or_else(|| line_of(src.toml, &format!("relative_to=\"{reference}\"")))
+                    .or_else(|| line_of(src.toml, ent.template_path.as_str())),
+                reference: reference.clone(),
+            },
+        });
+    }
+
+    findings
+}
+
+/// `relative_to` findings for one world, for callers that hold a single
+/// [`WorldConfig`] rather than a whole effective composition — the Bevy
+/// `Startup` spawn gate in `world::server`.
+///
+/// `path`/`toml` are accepted for symmetry with [`validate_entity_identity`];
+/// the spawn gate passes `""` for both, exactly as it does there.
+pub fn validate_relative_to(path: &str, toml: &str, config: &WorldConfig) -> Vec<WorldFinding> {
+    validate_relative_to_in(&WorldSource::new(path, toml, config))
+}
+
+/// Every finding that blocks activation of a root world at Bevy `Startup`.
+///
+/// # Why this is one function and not a list each caller assembles
+///
+/// The immediate `[[entity]]` spawn is split across **two** `Startup` systems
+/// with no ordering relationship between them: `spawn_world_entities` takes
+/// asteroid fields and named entries, `setup_world` takes the anonymous
+/// non-asteroid remainder (stars, planets, nebulae — see
+/// [`crate::world::config::is_owned_by_unified_pipeline`]). Both answer a
+/// failure to resolve an entity by logging and `continue`ing, so a gate on one
+/// of them alone does not buy atomicity — it converts "one entity missing" into
+/// "one half of the world missing", which is strictly worse and contradicts
+/// `world-content-lifecycle-state` ("Failed validation leaves no partial
+/// root-world content active"). Both systems consult this, so a world that
+/// fails validation spawns nothing at all whichever of them runs first.
+///
+/// The headless build stays atomic for a different reason: it validates the
+/// whole composition at build time and aborts before `Startup` runs at all.
+///
+/// `fragments` is the include-fragment source; every caller in the Bevy app
+/// passes [`crate::entity_includes::HostFragmentSource`], and tests pass a
+/// fixture.
+pub fn activation_findings(
+    config: &WorldConfig,
+    fragments: &dyn FragmentSource,
+) -> Vec<WorldFinding> {
+    // Entity identity (issue #750): duplicate reference names.
+    let mut findings = validate_entity_identity("", "", &config.entities);
+    // Objective authoring (issue #752): duplicate declarations within a single
+    // action list, or complete/fail references to objectives no add_objective
+    // declares.
+    findings.extend(validate_objectives("", "", config));
+    // Entity-template composition (issue #906): a template whose `includes`
+    // closure is broken — a cycle, a missing fragment, a malformed `includes`
+    // list, or a composed document that does not validate.
+    findings.extend(validate_template_composition("", "", config, fragments));
+    // Positioning references (issue #969): a `relative_to` naming nothing this
+    // world can position the entity against.
+    findings.extend(validate_relative_to("", "", config));
+    findings
+}
+
 /// Validate the effective composition (`world-authoring-validation-state`).
 ///
 /// Runs per-world identity checks, then resolves every authored entity
@@ -938,6 +1173,16 @@ pub fn validate_composition_with_fragments(
             &declared_anchors,
             template_loader,
         ));
+    }
+
+    // `relative_to` positioning references (issue #969). Resolved PER WORLD,
+    // not against the composition union: the runtime lookup table
+    // (`build_named_entity_positions`) is built from one `WorldConfig`, so a
+    // cross-world `relative_to` would not resolve at spawn time either.
+    // Matching that exactly is what lets a pass here promise a spawn.
+    findings.extend(validate_relative_to_in(root));
+    for child in children {
+        findings.extend(validate_relative_to_in(child));
     }
 
     // Entity-template composition (issue #906). Deduplicated across the WHOLE
@@ -1636,6 +1881,259 @@ name = "ghost"
         );
     }
 
+    // ── relative_to positioning references (issue #969) ──────────────────────
+
+    /// The failure case the issue asks for: an entity positioned against a
+    /// reference nothing declares must FAIL VALIDATION, not spawn-loop past a
+    /// log line and leave the world one entity short.
+    #[test]
+    fn an_unresolvable_relative_to_blocks_activation_instead_of_dropping_the_entity() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "earth"
+transform = { position = [400.0, 0.0, 400.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "luna"
+transform = { relative_to = "erth", offset = [60.0, 0.0, 30.0] }
+"#);
+        let toml = r#"transform = { relative_to = "erth", offset = [60.0, 0.0, 30.0] }"#;
+        let src = WorldSource::new("assets/worlds/typo.toml", toml, &config);
+        let findings = validate_relative_to_in(&src);
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolved-relative-to")
+            .expect("a typo'd relative_to must be reported");
+        assert!(err.is_error(), "must block activation, not warn");
+        assert_eq!(err.source.reference, "erth");
+        assert_eq!(
+            err.source.line,
+            Some(1),
+            "the finding points at the authored reference"
+        );
+        assert!(has_error(&findings));
+    }
+
+    /// It reaches the composition gate, not just the helper.
+    #[test]
+    fn an_unresolvable_relative_to_is_reported_by_validate_composition() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "luna"
+transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
+"#);
+        let src = WorldSource::new("assets/worlds/typo.toml", "", &config);
+        let findings = validate_composition(&src, &[]);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unresolved-relative-to" && f.is_error()),
+            "{findings:?}"
+        );
+    }
+
+    /// Both resolution directions pass validation, since the runtime table they
+    /// are checked against is built over the whole file before anything moves.
+    #[test]
+    fn relative_to_declared_earlier_or_later_validates_clean() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "forward-moon"
+transform = { relative_to = "planet", offset = [1.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "planet"
+name = "world.entity.earth.name"
+transform = { position = [100.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_ice.toml"
+id = "backward-moon"
+transform = { relative_to = "world.entity.earth.name", offset = [0.0, 0.0, 5.0] }
+"#);
+        let src = WorldSource::new("assets/worlds/both.toml", "", &config);
+        assert!(
+            validate_relative_to_in(&src).is_empty(),
+            "a reference by `id` (forward) or by `name` (backward) both resolve"
+        );
+    }
+
+    /// A chain reads as "missing entity" to the lookup table but is a distinct
+    /// authoring mistake, so the message says which one it is.
+    #[test]
+    fn a_relative_to_chain_is_named_as_a_chain_not_a_missing_entity() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "planet"
+transform = { position = [100.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "moon"
+transform = { relative_to = "planet", offset = [1.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "outpost"
+transform = { relative_to = "moon", offset = [0.0, 1.0, 0.0] }
+"#);
+        let src = WorldSource::new("assets/worlds/chain.toml", "", &config);
+        let findings = validate_relative_to_in(&src);
+        assert_eq!(findings.len(), 1, "only the chained entity errors");
+        assert!(
+            findings[0].message.contains("chains are not supported"),
+            "{}",
+            findings[0].message
+        );
+    }
+
+    /// No template is loaded to decide any of this, so the check is the same on
+    /// a host whose template loader can see nothing — the browser included.
+    /// (Contrast `unloadable_template_produces_no_anchor_finding` above.)
+    #[test]
+    fn relative_to_validation_needs_no_template_loader() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/nowhere.toml"
+id = "ghost"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/also-nowhere.toml"
+id = "tag-along"
+transform = { relative_to = "ghost", offset = [1.0, 0.0, 0.0] }
+"#);
+        let src = WorldSource::new("assets/worlds/unloadable.toml", "", &config);
+        assert!(
+            validate_relative_to_in(&src).is_empty(),
+            "unloadable is fine"
+        );
+    }
+
+    // ── ambiguous positioning spellings (issue #969) ─────────────────────────
+
+    /// The one shape in which admitting `id` as a positioning key can re-point a
+    /// reference that already worked: entity A holds `foo` as its `name`,
+    /// entity B later claims `foo` as its `id`. It still resolves — to A, by
+    /// rule — but the author who added B may well have meant B, so say so.
+    /// Warning, not error: nothing is broken until something references it.
+    #[test]
+    fn an_id_shadowing_another_entitys_name_warns_without_blocking() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "beacon"
+transform = { position = [1.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "beacon"
+transform = { position = [2.0, 0.0, 0.0] }
+"#);
+        let findings = validate_entity_identity("root.toml", "", &config.entities);
+        let f = findings
+            .iter()
+            .find(|f| f.category == "ambiguous-entity-reference")
+            .expect("the shadowed spelling must be reported");
+        assert!(!f.is_error(), "ambiguity is a warning, not a block");
+        assert_eq!(f.source.reference, "beacon");
+        assert!(!has_error(&findings), "the world still activates");
+    }
+
+    /// Two entities sharing an `id` have no principled winner at all — only file
+    /// order — so the same warning covers them.
+    #[test]
+    fn a_duplicate_id_warns_that_a_relative_to_would_be_ambiguous() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "twin"
+transform = { position = [1.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "twin"
+transform = { position = [2.0, 0.0, 0.0] }
+"#);
+        let findings = validate_entity_identity("root.toml", "", &config.entities);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.category == "ambiguous-entity-reference")
+                .count(),
+            1,
+            "one spelling, one finding: {findings:?}"
+        );
+        assert!(!has_error(&findings));
+    }
+
+    /// A duplicate `name` is already an error in the reference namespace. It
+    /// must not also produce the positioning warning — one collision, one
+    /// finding, and the error is the one worth reading.
+    #[test]
+    fn a_duplicate_name_errors_once_and_is_not_also_warned_about() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+name = "outpost"
+transform = { position = [1.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+name = "outpost"
+transform = { position = [2.0, 0.0, 0.0] }
+"#);
+        let findings = validate_entity_identity("root.toml", "", &config.entities);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].category, "duplicate-name");
+    }
+
+    /// An entity whose `id` and `name` are the same string claims that spelling
+    /// once. That is one entity, and nothing about it is ambiguous.
+    #[test]
+    fn an_entity_whose_id_equals_its_own_name_is_not_ambiguous() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "earth"
+name = "earth"
+transform = { position = [1.0, 0.0, 0.0] }
+"#);
+        assert!(
+            validate_entity_identity("root.toml", "", &config.entities).is_empty(),
+            "a single entity cannot collide with itself"
+        );
+    }
+
+    // ── the shared Startup activation gate (issue #969) ──────────────────────
+
+    /// [`activation_findings`] is what both immediate-spawn systems consult, so
+    /// a `relative_to` failure has to reach it — not only `validate_composition`,
+    /// which the browser host never calls.
+    #[test]
+    fn activation_findings_carries_the_relative_to_error() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "luna"
+transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
+"#);
+        let findings = activation_findings(&config, &crate::entity_includes::HostFragmentSource);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unresolved-relative-to" && f.is_error()),
+            "{findings:?}"
+        );
+        assert!(has_error(&findings));
+    }
+
     // ── shipped worlds validate clean (regression guard) ─────────────────────
 
     #[test]
@@ -1657,6 +2155,17 @@ name = "ghost"
             assert!(
                 errors.is_empty(),
                 "shipped world {path_str} must not error: {errors:?}"
+            );
+            // No shipped world may leave a positioning spelling ambiguous
+            // (issue #969) — a `relative_to` in the catalog must have exactly
+            // one entity it can mean, not one the precedence rule picked.
+            let ambiguous: Vec<_> = findings
+                .iter()
+                .filter(|f| f.category == "ambiguous-entity-reference")
+                .collect();
+            assert!(
+                ambiguous.is_empty(),
+                "shipped world {path_str} has an ambiguous entity spelling: {ambiguous:?}"
             );
             checked += 1;
         }

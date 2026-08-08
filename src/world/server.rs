@@ -510,6 +510,45 @@ fn spawn_world_entities(
     );
 }
 
+/// The `Startup` atomic-activation gate, shared by **both** immediate-spawn
+/// systems: `spawn_world_entities` (asteroid fields + named entries) and
+/// `setup_world` in `server_app.rs` (the anonymous non-asteroid remainder —
+/// stars, planets, nebulae).
+///
+/// Returns `true` when this world must spawn nothing, having logged every
+/// blocking finding. `system` names the caller so the log says which half was
+/// stopped; the answer itself is identical for both, because it reads only the
+/// parsed [`crate::world::config::WorldConfig`].
+///
+/// Both callers matter. The two systems are registered independently with no
+/// ordering relationship between them, and each answers a failed entity
+/// resolution by logging and moving on. Gating only one converts "the world is
+/// missing one entity" into "the world is missing one half", which is a worse
+/// failure than the one being fixed and breaks the atomicity
+/// `world-content-lifecycle-state` promises. See
+/// [`crate::world::validate::activation_findings`] for what is checked.
+pub fn world_activation_blocked(
+    world_config: &crate::world::config::WorldConfig,
+    system: &str,
+) -> bool {
+    let findings = crate::world::validate::activation_findings(
+        world_config,
+        &crate::entity_includes::HostFragmentSource,
+    );
+    let errors = findings.iter().filter(|f| f.is_error()).count();
+    if errors == 0 {
+        return false;
+    }
+    for f in findings.iter().filter(|f| f.is_error()) {
+        bevy::log::error!(target: "world", "world validation [error] {}: {}", f.category, f.message);
+    }
+    bevy::log::error!(
+        target: "world",
+        "{system}: spawn blocked: world composition invalid ({errors} error(s)); spawning zero entities"
+    );
+    true
+}
+
 /// Spawn the unified-pipeline-owned immediate `[[entity]]` instances.
 ///
 /// Returns the list of spawned `Entity` handles in spawn order
@@ -532,38 +571,14 @@ pub fn spawn_immediate_entities_internal(
     flags: Option<&crate::world::flags::FlagStore>,
     id_mint: Option<&crate::world_id::WorldIdMint>,
 ) -> Vec<Entity> {
-    // Atomic-activation guard (issue #750): if this world's entity identity is
-    // invalid (e.g. duplicate reference names), spawn NOTHING. A composition
-    // error must never leave partial root-world content active. The headless
-    // build path aborts earlier on the full composition; this seam is the
-    // last-resort gate for the Bevy `Startup` spawn.
-    let mut identity =
-        crate::world::validate::validate_entity_identity("", "", &world_config.entities);
-    // Objective authoring validation (issue #752): duplicate declarations within
-    // a single action list, or complete/fail references to objectives no
-    // add_objective declares, also block activation so nothing spawns partially.
-    identity.extend(crate::world::validate::validate_objectives(
-        "",
-        "",
-        world_config,
-    ));
-    // Entity-template composition (issue #906): a template whose `includes`
-    // closure is broken — a cycle, a missing fragment, a malformed `includes`
-    // list, or a composed document that does not validate — also blocks
-    // activation. Before this, `build_layer_config_cache` warned and skipped,
-    // so the world spawned MINUS that entity and nothing reached this gate.
-    identity.extend(crate::world::validate::validate_template_composition(
-        "",
-        "",
-        world_config,
-        &crate::entity_includes::HostFragmentSource,
-    ));
-    if crate::world::validate::has_error(&identity) {
-        bevy::log::error!(
-            target: "world",
-            "spawn blocked: world composition invalid ({} error(s)); spawning zero entities",
-            identity.iter().filter(|f| f.is_error()).count()
-        );
+    // Atomic-activation guard (issues #750/#752/#906/#969): if this world's
+    // composition is invalid, spawn NOTHING — a composition error must never
+    // leave partial root-world content active. The headless build path aborts
+    // earlier on the full composition; this seam is the last-resort gate for
+    // the Bevy `Startup` spawn. `setup_world` in `server_app.rs` owns the OTHER
+    // half of that spawn and consults the same gate, so a rejected world loses
+    // both halves together.
+    if world_activation_blocked(world_config, "spawn_world_entities") {
         return Vec::new();
     }
 
@@ -4555,6 +4570,205 @@ pub(crate) mod tests {
         assert_eq!(spawn(&world_cfg), 2, "the control world must spawn both");
 
         crate::config_cache::clear_template_preload_state();
+    }
+
+    /// Issue #969, through the spawn path rather than the resolver: a moon
+    /// authored against the planet's `id` reaches the world at planet+offset,
+    /// and a moon authored against a name nothing declares takes the whole
+    /// world down with it instead of quietly not existing.
+    ///
+    /// Shaped after `combat_test.toml`'s gas giant / ice moon pair, including
+    /// its split identity — `id` is the short reference an author writes,
+    /// `name` the strings.csv key — because that split is the defect.
+    #[test]
+    fn a_relative_to_moon_spawns_at_the_planet_and_a_typo_blocks_the_world() {
+        use crate::entity_config::EntityConfig;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::{TransformConfig, WorldEntity};
+        use std::collections::HashMap;
+
+        let world_for = |reference: &str| -> UnifiedWorldConfig {
+            let mut cfg = UnifiedWorldConfig::default();
+            cfg.entities.push(WorldEntity {
+                template_path: "fixture/planet.toml".into(),
+                id: Some("gas-giant".into()),
+                name: Some("world.entity.gas_giant.name".into()),
+                transform: Some(TransformConfig {
+                    position: Some([-1200.0, 0.0, 300.0]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            cfg.entities.push(WorldEntity {
+                template_path: "fixture/moon.toml".into(),
+                id: Some("ice-moon".into()),
+                name: Some("world.entity.ice_moon.name".into()),
+                transform: Some(TransformConfig {
+                    relative_to: Some(reference.into()),
+                    offset: Some([125.0, 0.0, 40.0]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            cfg.name_to_uuid
+                .insert("world.entity.gas_giant.name".into(), "giant-uuid".into());
+            cfg.name_to_uuid
+                .insert("world.entity.ice_moon.name".into(), "moon-uuid".into());
+            cfg
+        };
+
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert(
+            "fixture/planet.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        m.insert(
+            "fixture/moon.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        let cache = crate::config_cache::ConfigCache::from(m);
+
+        let spawn = |cfg: &UnifiedWorldConfig| -> (usize, Option<Vec3>) {
+            let mut app = App::new();
+            app.add_plugins(bevy::time::TimePlugin);
+            app.insert_resource(cfg.clone());
+            let spawned: Vec<Entity> = {
+                let cfg = app.world().resource::<UnifiedWorldConfig>().clone();
+                let mut commands = app.world_mut().commands();
+                spawn_immediate_entities_internal(&mut commands, &cfg, &cache, None, None)
+            };
+            app.update();
+            let moon = spawned
+                .iter()
+                .find(|e| {
+                    app.world()
+                        .get::<EntityUuid>(**e)
+                        .is_some_and(|u| u.0 == "moon-uuid")
+                })
+                .and_then(|e| app.world().get::<Transform>(*e))
+                .map(|t| t.translation);
+            (spawned.len(), moon)
+        };
+
+        // By the planet's authored `id` — what combat_test.toml writes.
+        let (count, moon) = spawn(&world_for("gas-giant"));
+        assert_eq!(count, 2, "both landmarks must spawn");
+        assert_eq!(
+            moon,
+            Some(Vec3::new(-1075.0, 0.0, 340.0)),
+            "the moon must sit at the gas giant plus its offset"
+        );
+
+        // By the planet's `name` — the documented reference id still works.
+        let (count, moon) = spawn(&world_for("world.entity.gas_giant.name"));
+        assert_eq!(count, 2);
+        assert_eq!(moon, Some(Vec3::new(-1075.0, 0.0, 340.0)));
+
+        // A reference nothing declares blocks the whole world. Before #969 the
+        // count here was 1: the planet spawned, the moon did not, and only a
+        // log line said so.
+        let (count, moon) = spawn(&world_for("gas_giant"));
+        assert_eq!(
+            count, 0,
+            "an unresolvable relative_to must block activation, not cost one entity"
+        );
+        assert_eq!(moon, None);
+    }
+
+    /// The other half of the immediate spawn, which the test above cannot see.
+    ///
+    /// `is_owned_by_unified_pipeline` keys on `name`, so an `id`-only entry —
+    /// `default.toml`'s `nebula-1`, `combat_test.toml`'s dust cloud — belongs to
+    /// `setup_world` in `server_app.rs`, a separate `Startup` system with no
+    /// ordering relationship to `spawn_world_entities`. It answers a failed
+    /// resolve the same way, by logging and moving on, so a gate on the unified
+    /// half alone would turn one missing entity into *half a world*: the stars,
+    /// planets and nebulae still there, every named entity and asteroid field
+    /// gone. Both halves must refuse the same world.
+    #[test]
+    fn an_anonymous_entitys_broken_relative_to_blocks_both_immediate_spawn_halves() {
+        use crate::entity_config::EntityConfig;
+        use crate::lobby::server::WorldResource;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::{TransformConfig, WorldEntity};
+        use std::collections::HashMap;
+
+        let world_for = |reference: &str| -> UnifiedWorldConfig {
+            let mut cfg = UnifiedWorldConfig::default();
+            // Carries a `name` → owned by the unified pipeline.
+            cfg.entities.push(WorldEntity {
+                template_path: "fixture/planet.toml".into(),
+                id: Some("gas-giant".into()),
+                name: Some("world.entity.gas_giant.name".into()),
+                transform: Some(TransformConfig {
+                    position: Some([-1200.0, 0.0, 300.0]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            // `id` but no `name` → anonymous, owned by `setup_world`, and the
+            // holder of the broken reference.
+            cfg.entities.push(WorldEntity {
+                template_path: "fixture/nebula.toml".into(),
+                id: Some("nebula-1".into()),
+                name: None,
+                transform: Some(TransformConfig {
+                    relative_to: Some(reference.into()),
+                    offset: Some([125.0, 0.0, 40.0]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            cfg.name_to_uuid
+                .insert("world.entity.gas_giant.name".into(), "giant-uuid".into());
+            cfg
+        };
+
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert(
+            "fixture/planet.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        m.insert(
+            "fixture/nebula.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        let cache = crate::config_cache::ConfigCache::from(m);
+
+        // `(unified half, setup_world half)`.
+        let halves = |cfg: &UnifiedWorldConfig| -> (usize, usize) {
+            let mut app = App::new();
+            app.add_plugins(bevy::time::TimePlugin);
+            let unified = {
+                let mut commands = app.world_mut().commands();
+                spawn_immediate_entities_internal(&mut commands, cfg, &cache, None, None).len()
+            };
+            let mut world_res = WorldResource::default();
+            let anonymous = {
+                let mut commands = app.world_mut().commands();
+                crate::server_app::spawn_anonymous_entities_internal(
+                    &mut commands,
+                    &mut world_res,
+                    cfg,
+                    &cache,
+                    None,
+                )
+            };
+            app.update();
+            (unified, anonymous)
+        };
+
+        assert_eq!(
+            halves(&world_for("gas-giant")),
+            (1, 1),
+            "the control world splits one entity to each half"
+        );
+        assert_eq!(
+            halves(&world_for("gas_giant")),
+            (0, 0),
+            "an unresolvable relative_to must block BOTH immediate-spawn halves, \
+             not just the one that owns the entity"
+        );
     }
 
     // -- PRD #337 slice 3: NPCs through unified pipeline ------------------

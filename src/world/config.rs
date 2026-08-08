@@ -34,8 +34,10 @@ pub enum WorldEntitySpawnOn {
 /// Positioning, rotation, and scale for a `WorldEntity`.
 ///
 /// All fields are optional. Resolution precedence in `resolve()`:
-/// 1. `relative_to` + `offset` (relative to another named entity's
-///    already-resolved position)
+/// 1. `relative_to` + `offset` (relative to the already-resolved position of
+///    another entity in the same world, named by its `id` or its `name` —
+///    declared before or after this one; see
+///    [`crate::world::config::build_named_entity_positions`])
 /// 2. `anchor` (looked up in the world's `[anchors]` table)
 /// 3. `position` (inline `[x, y, z]`)
 /// 4. Origin `[0, 0, 0]` when nothing is supplied.
@@ -87,7 +89,9 @@ impl TransformConfig {
             let base = entities_by_name.get(name).ok_or_else(|| {
                 format!(
                     "Entity (template '{}') references unknown relative_to entity '{}' \
-                     (must be a previously-declared named entity in the same world)",
+                     (must be the `id` or `name` of another entity in the same world — \
+                     declared before or after this one — that is not itself \
+                     positioned with `relative_to`)",
                     template_path, name
                 )
             })?;
@@ -2076,37 +2080,89 @@ where
 /// PRD #337 slice 3: lifts anchor positioning from the scenario half into
 /// the unified `[[entity]]` pipeline so NPCs can be migrated off
 /// `[[spawn]]`. Pure function — tested without Bevy.
-/// Build a map of `name ? resolved_position` for every named `[[entity]]`
-/// instance in the world, used as the lookup table for `relative_to`
-/// references during spawning.
+/// Build the `reference ? resolved_position` lookup table `relative_to`
+/// references resolve against during spawning.
 ///
-/// Named entities are resolved using anchor/inline `position` only (NOT
-/// `relative_to`), which means relative-to-relative chains are not supported.
-/// This is intentional: it keeps resolution single-pass and avoids cycle
-/// detection complexity for a feature whose primary use is "spawn an enemy
-/// 10 units off this landmark".
+/// # Which authored identifier a `relative_to` may name (issue #969)
+///
+/// Both of an `[[entity]]`'s authored identifiers key the table:
+///
+/// * `name` — the world-reference id triggers, comms and objectives resolve
+///   against, and
+/// * `id` — the authored instance id carried onto the spawned entity.
+///
+/// Accepting only `name` is what silently dropped `combat_test.toml`'s ice
+/// moon: the localisation pass (commit `65becb5e`) rewrote landmark `name`s
+/// from bare ids (`earth`, `luna`) to strings.csv keys
+/// (`world.entity.earth.name`) while leaving `id = "earth"` and every
+/// `relative_to = "earth"` alone, so the reference matched nothing. A
+/// positioning reference is authored beside the entity it points at, and an
+/// author reading `id = "gas-giant"` two lines up reasonably writes
+/// `relative_to = "gas-giant"`.
+///
+/// The table is filled in **two passes** — every `id`, then every `name` over
+/// the top — so that when some world authors one entity's `id` as another's
+/// `name`, `name` wins whichever of the two is declared first: `name` is the
+/// reference id proper, `id` only an accepted alias. One interleaved pass would
+/// instead hand the spelling to whichever entity is last in file order, and
+/// that is the single shape in which admitting `id` as a key could silently
+/// re-point a `relative_to` that already resolved.
+///
+/// Two entities claiming one spelling through the *same* identifier still
+/// resolve by file order, because there is no principled winner between them:
+/// [`crate::world::validate::validate_entity_identity`] errors on a duplicate
+/// `name` and warns on every other ambiguous spelling.
+///
+/// # Ordering
+///
+/// The whole table is built before any entity is positioned, so a reference
+/// resolves whether its target is declared **earlier or later** in the file.
+///
+/// Base positions come from anchor/inline `position` only (NOT `relative_to`),
+/// which means relative-to-relative chains are not supported. This is
+/// intentional: it keeps resolution single-pass and avoids cycle detection
+/// complexity for a feature whose primary use is "spawn an enemy 10 units off
+/// this landmark". [`crate::world::validate::validate_relative_to`] rejects a
+/// chain by name rather than letting it read as a missing entity.
 ///
 /// Resolution failures (missing anchor) are silently skipped — the affected
 /// entity will produce its own error when its position is resolved at spawn
 /// time, so this helper doesn't need to duplicate error reporting.
 pub fn build_named_entity_positions(world: &WorldConfig) -> HashMap<String, [f32; 3]> {
-    let mut out = HashMap::new();
-    for ent in &world.entities {
-        let Some(name) = ent.name.as_ref() else {
-            continue;
-        };
+    // Every entity usable as a positioning base, with the position it resolved
+    // to. Collected once so the two keying passes below cannot disagree about
+    // which entities qualify.
+    let bases: Vec<(&WorldEntity, [f32; 3])> = world
+        .entities
+        .iter()
+        .filter(|ent| ent.id.is_some() || ent.name.is_some())
         // Skip entities whose own position is relative_to-based — their
         // position isn't valid as a base for further relative_to lookups.
-        if ent
-            .transform
-            .as_ref()
-            .and_then(|t| t.relative_to.as_ref())
-            .is_some()
-        {
-            continue;
+        .filter(|ent| {
+            ent.transform
+                .as_ref()
+                .and_then(|t| t.relative_to.as_ref())
+                .is_none()
+        })
+        .filter_map(|ent| {
+            resolve_entity_position(ent, &world.anchors)
+                .ok()
+                .map(|pos| (ent, pos))
+        })
+        .collect();
+
+    let mut out = HashMap::new();
+    // Pass 1: the alias.
+    for (ent, pos) in &bases {
+        if let Some(id) = ent.id.as_ref() {
+            out.insert(id.clone(), *pos);
         }
-        if let Ok(pos) = resolve_entity_position(ent, &world.anchors) {
-            out.insert(name.clone(), pos);
+    }
+    // Pass 2: the reference id proper, over the top — a `name` beats another
+    // entity's `id` no matter which was declared first.
+    for (ent, pos) in &bases {
+        if let Some(name) = ent.name.as_ref() {
+            out.insert(name.clone(), *pos);
         }
     }
     out
@@ -3106,6 +3162,204 @@ transform     = { relative_to = "starbase_alpha", offset = [10.0, 0.0, -5.0] }
         let xf = raider.transform.as_ref().expect("transform present");
         assert_eq!(xf.relative_to.as_deref(), Some("starbase_alpha"));
         assert_eq!(xf.offset, Some([10.0, 0.0, -5.0]));
+    }
+
+    // -- relative_to resolves against `id` as well as `name` (issue #969) ----
+
+    /// The defect proper. `combat_test.toml` authors its ice moon
+    /// `relative_to = "gas-giant"` — the gas giant's `id`, since the
+    /// localisation pass moved every landmark `name` to a strings.csv key. When
+    /// only `name` keyed the lookup table the reference matched nothing, the
+    /// spawn loop logged and `continue`d, and the moon was simply never in the
+    /// scenario. Asserts the shipped world, not a fixture shaped like it.
+    #[test]
+    fn combat_test_ice_moon_resolves_against_the_gas_giants_authored_id() {
+        let world = parse_world(include_str!("../../assets/worlds/combat_test.toml"))
+            .expect("shipped world parses");
+        let table = build_named_entity_positions(&world);
+        let moon = world
+            .entities
+            .iter()
+            .find(|e| e.id.as_deref() == Some("ice-moon"))
+            .expect("combat_test authors an ice moon");
+        let pos = resolve_entity_position_with(moon, &world.anchors, &table)
+            .expect("the ice moon must resolve against the gas giant");
+        // gas-giant [-1200, 0, 300] + offset [125, 0, 40]
+        assert_eq!(pos, [-1075.0, 0.0, 340.0]);
+    }
+
+    /// The same defect in the other shipped world: `default.toml`'s luna is
+    /// `relative_to = "earth"`, and earth's `name` is
+    /// `world.entity.earth.name`.
+    #[test]
+    fn default_world_luna_resolves_against_earths_authored_id() {
+        let world = parse_world(include_str!("../../assets/worlds/default.toml"))
+            .expect("shipped world parses");
+        let table = build_named_entity_positions(&world);
+        let luna = world
+            .entities
+            .iter()
+            .find(|e| e.id.as_deref() == Some("luna"))
+            .expect("default authors luna");
+        let pos = resolve_entity_position_with(luna, &world.anchors, &table)
+            .expect("luna must resolve against earth");
+        // earth [400, 0, 400] + offset [60, 0, 30]
+        assert_eq!(pos, [460.0, 0.0, 430.0]);
+    }
+
+    /// `name` still resolves — the documented reference id keeps working — and
+    /// wins over an `id` of the same spelling on a *different* entity, since
+    /// `name` is the reference id proper and `id` only an accepted alias.
+    ///
+    /// The `name`-bearing entity is declared **first** on purpose. Precedence
+    /// has to come from the two keying passes, not from file order: a single
+    /// interleaved pass gives the spelling to whichever block is last, which
+    /// would pass this assertion with the blocks the other way round and fail
+    /// it as written.
+    #[test]
+    fn build_named_entity_positions_keys_both_id_and_name_with_name_winning() {
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "earth"
+name = "decoy"
+transform = { position = [2.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "decoy"
+transform = { position = [1.0, 0.0, 0.0] }
+"#;
+        let world = parse_world(toml).expect("parse");
+        let table = build_named_entity_positions(&world);
+        assert_eq!(table.get("earth"), Some(&[2.0, 0.0, 0.0]));
+        assert_eq!(
+            table.get("decoy"),
+            Some(&[2.0, 0.0, 0.0]),
+            "a `name` must win a collision with another entity's `id` even when \
+             the `id` is declared later"
+        );
+    }
+
+    /// The mirror image, so neither ordering is left to chance: the `id`-only
+    /// entity first, the `name`-bearing one second. Both orderings must land on
+    /// the `name` holder.
+    #[test]
+    fn a_name_outranks_an_earlier_entitys_id_of_the_same_spelling() {
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "decoy"
+transform = { position = [1.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "earth"
+name = "decoy"
+transform = { position = [2.0, 0.0, 0.0] }
+"#;
+        let world = parse_world(toml).expect("parse");
+        let table = build_named_entity_positions(&world);
+        assert_eq!(
+            table.get("decoy"),
+            Some(&[2.0, 0.0, 0.0]),
+            "a `name` must win a collision with another entity's `id` when the \
+             `id` is declared earlier too"
+        );
+    }
+
+    /// Both directions. The lookup table is built over every `[[entity]]`
+    /// before anything is positioned, so a reference resolves whether its
+    /// target sits above it or below it in the file — the single-pass trap the
+    /// old error message ("previously-declared") implied but the code never
+    /// actually had.
+    #[test]
+    fn relative_to_resolves_a_target_declared_earlier_or_later_in_the_file() {
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "forward-moon"
+transform = { relative_to = "planet", offset = [1.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "planet"
+transform = { position = [100.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_ice.toml"
+id = "backward-moon"
+transform = { relative_to = "planet", offset = [0.0, 0.0, 5.0] }
+"#;
+        let world = parse_world(toml).expect("parse");
+        let table = build_named_entity_positions(&world);
+        let at = |id: &str| {
+            let e = world
+                .entities
+                .iter()
+                .find(|e| e.id.as_deref() == Some(id))
+                .expect("entity present");
+            resolve_entity_position_with(e, &world.anchors, &table).expect("resolves")
+        };
+        assert_eq!(at("forward-moon"), [101.0, 0.0, 0.0], "declared later");
+        assert_eq!(at("backward-moon"), [100.0, 0.0, 5.0], "declared earlier");
+    }
+
+    /// The sweep, kept as a guard. Every `[[entity]]` in every shipped world
+    /// must resolve a position, because every spawn caller answers a failed
+    /// resolve by logging and moving on — so a world that fails here ships with
+    /// an entity nobody will notice is missing.
+    #[test]
+    fn every_shipped_world_entity_resolves_a_position() {
+        let mut checked = 0;
+        for entry in std::fs::read_dir("assets/worlds").expect("worlds dir readable") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let toml = std::fs::read_to_string(&path).expect("shipped world readable");
+            let world = parse_world(&toml).expect("shipped world parses");
+            let table = build_named_entity_positions(&world);
+            for ent in &world.entities {
+                let label = ent
+                    .id
+                    .clone()
+                    .or_else(|| ent.name.clone())
+                    .unwrap_or_else(|| ent.template_path.clone());
+                assert!(
+                    resolve_entity_position_with(ent, &world.anchors, &table).is_ok(),
+                    "{}: entity '{label}' would be silently dropped: {}",
+                    path.display(),
+                    resolve_entity_position_with(ent, &world.anchors, &table).unwrap_err()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "expected shipped entities to check");
+    }
+
+    /// A `relative_to`-positioned entity is still not a valid base — chains
+    /// stay unsupported, and the table must not gain one via the `id` key.
+    #[test]
+    fn build_named_entity_positions_excludes_relative_to_positioned_entities() {
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "planet"
+transform = { position = [100.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "moon"
+transform = { relative_to = "planet", offset = [1.0, 0.0, 0.0] }
+"#;
+        let world = parse_world(toml).expect("parse");
+        let table = build_named_entity_positions(&world);
+        assert!(table.contains_key("planet"));
+        assert!(
+            !table.contains_key("moon"),
+            "a relative_to-positioned entity is not a base for further lookups"
+        );
     }
 
     #[test]

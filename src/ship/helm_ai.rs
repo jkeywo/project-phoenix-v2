@@ -709,6 +709,9 @@ pub(crate) fn helm_ai_decision(
         behaviour_section
             .map(|b| b.0.avoidance_look_ahead_secs)
             .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
+        behaviour_section
+            .map(|b| b.0.hazard_threat_exponent)
+            .unwrap_or(crate::ai::HAZARD_THREAT_EXPONENT),
         forward_speed,
         behaviour_section
             .map(|b| b.0.nav_handoff_speed)
@@ -3756,8 +3759,16 @@ pub(crate) fn ai_helm_thrust(
         // verb to decide WHETHER to actuate this tick. The stateless policy is a
         // pure fact→mode map; the continuous magnitude below still comes from
         // the planner fact, so no geometry lives in the policy (AGENTS.md #11).
-        // A "hold" resolution (no rule fires / explicit idle) emits nothing and
-        // the throttle coasts on its last input.
+        // A "hold" resolution (no rule fires / explicit idle) emits nothing, and
+        // `ThrustInput` therefore keeps the last value it was given. Note what
+        // that is NOT: the throttle does not coast, decay or centre. The intent
+        // component is a latch and `integrate_ship_physics` goes on integrating
+        // it every tick, so "hold" means the ship carries on doing exactly what
+        // it was last told to do, indefinitely. Issue #968 is what that costs
+        // when the axis can no longer be commanded at all: the fix there is a
+        // capability gate in the integrator plus an offline clear in
+        // `process_helm_inputs`, and whether a POLICY "hold" should also decay
+        // toward neutral is still open.
         //
         // Issue #883 (AC5) closes the #779 empty-facts gap on this axis: the
         // snapshot below is really seeded — hazard/availability from the shared
@@ -3905,8 +3916,15 @@ pub(crate) fn ai_helm_steering(
 
         // Resolve the data-authored #779 Steering policy's `yaw` mode verb to
         // decide WHETHER to actuate this tick (see `ai_helm_thrust` for the
-        // mode-verb rationale). "Hold" emits nothing and yaw coasts on its last
-        // input — including any pending arc-bearing this axis owns.
+        // mode-verb rationale). "Hold" emits nothing, so `SteeringInput` keeps
+        // the last yaw fraction it was given — including any pending arc-bearing
+        // this axis owns. It does NOT coast: the integrator applies that latched
+        // fraction every tick, so a held steering axis is a ship turning at a
+        // constant rate for ever, not one settling straight. Issue #968: a hull
+        // whose steering system was destroyed circled out of its scenario on
+        // exactly that mechanism, which the integrator's capability gate and the
+        // offline clear in `process_helm_inputs` now close. Whether a policy
+        // "hold" should ALSO decay toward neutral is a separate, open question.
         //
         // Issue #883 gives this channel a SECOND mode verb and (AC5) a really
         // seeded fact snapshot. `hold_committed_heading` actuates exactly like
@@ -4333,7 +4351,14 @@ pub(crate) fn ai_helm_lateral_thrust(
         // HelmLateralAiPolicy over a fact snapshot seeded from the shared hazard
         // surface — never a doctrine swap (AC3), only a gate on the dodge. Its
         // default (unconditional actuate) reproduces the pre-#780 always-on
-        // avoidance; a "hold" resolution emits nothing and lateral coasts.
+        // avoidance; a "hold" resolution emits nothing, so `LateralThrustInput`
+        // keeps the last fraction it was given. Not a coast — the latch is
+        // re-integrated every tick, so a held lateral axis strafes at a fixed
+        // rate indefinitely (issue #968 measured a wrecked destroyer doing
+        // exactly that at 8.77 u/s for 300 s). The capability gate in
+        // `integrate_ship_physics` and the offline clear in
+        // `process_helm_inputs` cover the DESTROYED case; whether a policy
+        // "hold" should also decay toward neutral is still open.
         if docking_lateral.is_none() {
             let mut facts = seed_helm_actuator_facts(
                 ship_plan.map(|sp| &sp.hazard),
@@ -8432,7 +8457,14 @@ mod tests {
             // A persistent, planar moving hazard: assess_hazards is planar, so it
             // stays a threat no matter how high the ship climbs.
             snapshot_with_moving_obstacle(&mut app, obstacle, 1.0, 0.0, 0.0);
-            for _ in 0..60 {
+            // The observation window, not the assertion, is what issue #968
+            // changed here. This obstacle sits well inside its (authored, 60-unit)
+            // avoidance buffer but nowhere near contact, and the severity ramp is
+            // squared rather than linear from that issue on — so the same climb
+            // takes longer to open the same gap. Sixty ticks was enough at the old
+            // response strength; the claim under test is that Full3D keeps going
+            // where Bounded is capped, and that is unchanged.
+            for _ in 0..150 {
                 tick(&mut app);
             }
             get_ship_physics(&mut app).y

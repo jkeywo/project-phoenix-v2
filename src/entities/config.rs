@@ -317,6 +317,27 @@ pub struct BehaviourConfig {
     /// Defaults to [`crate::ai::HAZARD_IGNORE_SIZE_RATIO`] when absent.
     #[serde(default = "default_hazard_ignore_size_ratio")]
     pub hazard_ignore_size_ratio: f32,
+    /// Authored shape of the avoidance severity ramp (issue #968): the exponent
+    /// the spent share of `avoidance_buffer` is raised to. `1.0` is a straight
+    /// line; the shipped `2.0` reacts gently while there is still room and hard
+    /// once there is not. Both ends of the ramp are fixed by the model (`0.0` a
+    /// full buffer clear, `1.0` at contact, at every obstacle size), so this
+    /// only decides how a hull spends the distance in between — a gameplay trade
+    /// between dodging early and holding a firing solution.
+    /// Defaults to [`crate::ai::HAZARD_THREAT_EXPONENT`] when absent.
+    #[serde(default = "default_hazard_threat_exponent")]
+    pub hazard_threat_exponent: f32,
+    /// Authored ceiling (radians) on how far a DEAD-RECKONED hull will hold its
+    /// heading off its route bearing to clear an obstacle (issue #968). Only the
+    /// low-LOD mover reads it: a high-fidelity hull steers through its helm
+    /// actuators, where its authored `max_yaw_rate` bounds the turn instead.
+    ///
+    /// Defaults to [`crate::ai::LOW_LOD_AVOIDANCE_DEVIATION_RAD`] (a quarter
+    /// turn) when absent. A quarter turn is the largest deviation that still
+    /// makes progress past an obstacle: at 90° off the line to it the ship is
+    /// flying the tangent, and beyond that it is heading back the way it came.
+    #[serde(default = "default_low_lod_avoidance_deviation_rad")]
+    pub low_lod_avoidance_deviation_rad: f32,
     /// Authored lateral-thrust sensitivity to the shared hazard surface (issue
     /// #743): the multiplier the fine lateral-thrust actuator applies to the
     /// hazard assessment's starboard repulsion before clamping to `[-1, 1]`.
@@ -370,6 +391,8 @@ impl Default for BehaviourConfig {
             docking_engage_distance: default_docking_engage_distance(),
             docking_approach_speed: default_docking_approach_speed(),
             hazard_ignore_size_ratio: default_hazard_ignore_size_ratio(),
+            hazard_threat_exponent: default_hazard_threat_exponent(),
+            low_lod_avoidance_deviation_rad: default_low_lod_avoidance_deviation_rad(),
             lateral_hazard_sensitivity: default_lateral_hazard_sensitivity(),
             vertical_hazard_sensitivity: default_vertical_hazard_sensitivity(),
             imminent_collision_facing_threshold: default_imminent_collision_facing_threshold(),
@@ -395,6 +418,14 @@ fn default_nav_handoff_speed() -> f32 {
 
 fn default_avoidance_look_ahead_secs() -> f32 {
     crate::ai::AVOIDANCE_LOOK_AHEAD_SECS
+}
+
+fn default_hazard_threat_exponent() -> f32 {
+    crate::ai::HAZARD_THREAT_EXPONENT
+}
+
+fn default_low_lod_avoidance_deviation_rad() -> f32 {
+    crate::ai::LOW_LOD_AVOIDANCE_DEVIATION_RAD
 }
 
 fn default_docking_engage_distance() -> f32 {

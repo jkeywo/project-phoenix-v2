@@ -4761,3 +4761,271 @@ fn the_preload_caches_subdirectory_templates_but_never_the_fragment_tree() {
         "no fragment may be cached as a spawnable template: {fragments:?}"
     );
 }
+
+/// Issue #968: a hull must not be able to drive INSIDE the `huge` asteroid class
+/// (collider radius 12, added in #947), and must keep flying its authored route
+/// afterwards instead of leaving the map.
+///
+/// `probe_huge_rock.toml` holds the reported geometry still, twice over: a
+/// player destroyer looping a two-anchor patrol whose straight line runs through
+/// a belt with a `huge` rock exactly on it, and — 2 km east, far enough to stay
+/// LOD-demoted for the whole run — a Harrow picket doing the same on the
+/// dead-reckoned path. The world carries no hostiles at all, so nothing here is
+/// seed-sensitive combat: either the ships go round their rocks and keep
+/// shuttling, or they do not.
+///
+/// # What the numbers mean
+///
+/// The instrumented `combat_test` run this issue was diagnosed from measured
+/// **6.5 units** of penetration into a radius-12 rock by the high-fidelity
+/// player hull, **3.7** by the dead-reckoned pickets, and a wreck strafing out
+/// of the scenario at a fixed 8.77 u/s afterwards, never to return. Three causes,
+/// all fixed: hazard severity was normalised by CENTRE distance, so the biggest
+/// obstacles pushed the least (`ai::core::hazard_threat_fraction`); the collision
+/// response only de-overlapped on the tick its 1 Hz damage cooldown let a hit
+/// through (`server_app::handle_collisions`); and the demoted path assessed
+/// hazards as a dimensionless point and answered them by facing radially away
+/// rather than steering around (`ai::server::low_lod_avoid_yaw`).
+///
+/// Against the code as it stands the picket clears every rock by 3.7 units and
+/// the player by 3.2, so both bounds below are met with room; against the code
+/// before the fix the picket ends ticks 3.7 units INSIDE a collider. The
+/// player's own leg is the weaker half of the guard — a clean head-on patrol
+/// approach was survivable even before — which is why the picket is here.
+///
+/// # What the bounds are, and why they are two different numbers
+///
+/// The residual penetration tolerance is two simulation steps of travel, not
+/// zero: rapier publishes a contact the tick AFTER the transforms that produced
+/// it, so the first frame of a touch is always visible. Each ship's step is
+/// derived from ITS OWN authored `max_speed` rather than from a shared
+/// constant — the destroyer tops out at 15 u/s (0.25 per 60 Hz step) and the
+/// Harrow picket at 12.5 (0.208), and quietly measuring the picket against the
+/// destroyer's figure would have given it 20% more slack than its own hull
+/// earns.
+///
+/// The picket carries a SECOND, much tighter bound: a strictly positive
+/// clearance. The low-LOD leg is the half of the run this probe mainly exists
+/// for — the player's head-on approach was survivable even before the fix — and
+/// it has 3.7 units of room, so a penetration tolerance of 0.42 is not guarding
+/// it at all: reverting the severity ramp to linear would still pass. "Never
+/// touches a rock" is the claim the low-LOD path can actually be held to, so
+/// that is the claim asserted.
+#[test]
+fn a_hull_never_ends_a_tick_inside_a_huge_asteroid() {
+    use bevy::prelude::Transform;
+    use project_phoenix::entities::spawner::HelmConsoleSection;
+    use project_phoenix::entity_spawner::ColliderSection;
+    use project_phoenix::server_app::Ship;
+
+    /// Two ticks of travel at a hull's OWN authored top speed — the window in
+    /// which rapier has not yet published a contact the transforms already
+    /// imply.
+    fn tolerated_penetration(max_speed: f32, dt: f32) -> f32 {
+        2.0 * max_speed * dt
+    }
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_huge_rock.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(210.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // The belt, read once: these are `[[entity]]` placements, so they never move
+    // and never stream in or out.
+    let rocks: Vec<(f32, f32, f32)> = {
+        app.update();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&Transform, &ColliderSection), Without<Ship>>();
+        q.iter(app.world())
+            .map(|(t, c)| (t.translation.x, t.translation.z, c.0.radius))
+            .collect()
+    };
+    assert_eq!(
+        rocks.len(),
+        8,
+        "probe precondition: the world places eight rocks across its two belts and \
+         the test must be measuring against all of them, got {rocks:?}"
+    );
+    assert_eq!(
+        rocks.iter().filter(|(_, _, r)| *r == 12.0).count(),
+        2,
+        "probe precondition: each belt must contain the `huge` class this issue is \
+         about, got radii {:?}",
+        rocks.iter().map(|(_, _, r)| *r).collect::<Vec<_>>()
+    );
+
+    let mut worst_gap = f32::MAX;
+    let mut worst_picket_gap = f32::MAX;
+    let mut picket_travelled = 0.0_f32;
+    let mut picket_min_z = f32::MAX;
+    let mut picket_last: Option<(f32, f32)> = None;
+    let mut reached_far = 0_u32;
+    let mut reached_near = 0_u32;
+    let mut at_far = false;
+    let mut at_near = false;
+    let mut furthest_from_lane = 0.0_f32;
+
+    for _ in 1..args.max_ticks {
+        app.update();
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&ShipPhysics, &ColliderSection), With<LocalShip>>();
+        let Some((physics, collider)) = q.iter(app.world()).next() else {
+            panic!("the player destroyer must survive a world with no hostiles in it");
+        };
+        let (x, z, hull_radius) = (physics.x, physics.z, collider.0.radius);
+
+        for (rx, rz, rr) in &rocks {
+            let gap = ((rx - x).powi(2) + (rz - z).powi(2)).sqrt() - rr - hull_radius;
+            worst_gap = worst_gap.min(gap);
+        }
+
+        // The dead-reckoned picket, on its own lane 2 km east through its own
+        // huge rock. It is the only other ship in the world, and it is never the
+        // `LocalShip`.
+        let mut picket_q = app
+            .world_mut()
+            .query_filtered::<(&ShipPhysics, &ColliderSection), (With<Ship>, Without<LocalShip>)>();
+        if let Some((pp, pc)) = picket_q.iter(app.world()).next() {
+            for (rx, rz, rr) in &rocks {
+                let gap = ((rx - pp.x).powi(2) + (rz - pp.z).powi(2)).sqrt() - rr - pc.0.radius;
+                worst_picket_gap = worst_picket_gap.min(gap);
+            }
+            if let Some((lx, lz)) = picket_last {
+                picket_travelled += ((pp.x - lx).powi(2) + (pp.z - lz).powi(2)).sqrt();
+            }
+            picket_last = Some((pp.x, pp.z));
+            picket_min_z = picket_min_z.min(pp.z);
+        }
+
+        // Anchor arrivals, edge-triggered, so a ship loitering at one end counts
+        // once rather than every tick it sits there. `WAYPOINT_ARRIVAL_RADIUS` is
+        // 20; 25 keeps the count about *getting there*, not about the exact tick.
+        let near_far = ((x - 0.0).powi(2) + (z + 240.0).powi(2)).sqrt() < 25.0;
+        let near_near = ((x - 0.0).powi(2) + (z - 40.0).powi(2)).sqrt() < 25.0;
+        if near_far && !at_far {
+            reached_far += 1;
+        }
+        if near_near && !at_near {
+            reached_near += 1;
+        }
+        at_far = near_far;
+        at_near = near_near;
+
+        // How far the hull ever strayed from the anchor pair's own bounding box.
+        let off_lane = x.abs().max((z - 40.0).max(-240.0 - z).max(0.0));
+        furthest_from_lane = furthest_from_lane.max(off_lane);
+    }
+
+    // Each hull's own authored top speed, read off the entity rather than
+    // restated here, so the tolerances below are that hull's and not a shared
+    // guess (issue #968 review). Read after the run rather than before it: the
+    // player ship is a `spawn_on = "game_start"` placement and does not exist
+    // at world load.
+    let player_top_speed = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&HelmConsoleSection, With<LocalShip>>();
+        q.iter(app.world())
+            .next()
+            .expect("the player destroyer authors a helm console")
+            .0
+            .max_speed
+    };
+    let picket_top_speed = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&HelmConsoleSection, (With<Ship>, Without<LocalShip>)>();
+        q.iter(app.world())
+            .next()
+            .expect("the picket authors a helm console")
+            .0
+            .max_speed
+    };
+    assert!(
+        picket_top_speed < player_top_speed,
+        "probe precondition: the two hulls must have DIFFERENT authored top \
+         speeds, else deriving a per-hull tolerance proves nothing (player \
+         {player_top_speed}, picket {picket_top_speed})"
+    );
+    let player_tolerance = tolerated_penetration(player_top_speed, dt as f32);
+    let picket_tolerance = tolerated_penetration(picket_top_speed, dt as f32);
+
+    assert!(
+        worst_gap >= -player_tolerance,
+        "the hull ended a tick {:.2} units inside a collider — more than the \
+         {player_tolerance:.2} units two simulation steps at its own authored \
+         {player_top_speed} u/s can carry it, so it was being driven through the \
+         rock rather than caught on the way in (issue #968)",
+        -worst_gap
+    );
+
+    // Crossing the belt once could be luck; doing it repeatedly, in both
+    // directions, is the ship still flying its route. The far anchor is on the
+    // other side of the rock, so every arrival there is a traverse.
+    assert!(
+        reached_far >= 2 && reached_near >= 2,
+        "the ship must keep shuttling through the belt — reached the far anchor \
+         {reached_far} time(s) and the near anchor {reached_near} time(s) in 210 s"
+    );
+
+    // The dead-reckoned half of the report. A demoted hull used to assess hazards
+    // as a dimensionless point with the parse-default buffer, which is short of
+    // what it actually needs by its own radius; `combat_test`'s two pickets drove
+    // into their belt on every pass because of it.
+    assert!(
+        picket_travelled > 600.0,
+        "probe precondition: the picket must actually be flying its route for its \
+         clearance to say anything — it covered only {picket_travelled:.0} units"
+    );
+    assert!(
+        worst_picket_gap >= -picket_tolerance,
+        "the dead-reckoned picket ended a tick {:.2} units inside a collider, more \
+         than the {picket_tolerance:.2} units two steps at its own authored \
+         {picket_top_speed} u/s could carry it (issue #968)",
+        -worst_picket_gap
+    );
+    // And the real bound on this leg. The picket clears every rock by 4.7 units,
+    // so the penetration tolerance above is not guarding it — reverting the
+    // severity ramp to linear would still satisfy it. A dead-reckoned hull that
+    // steers AROUND obstacles never touches one at all, and that is the claim
+    // worth pinning: it is the half of the run this probe mainly exists for.
+    assert!(
+        worst_picket_gap > 0.0,
+        "the dead-reckoned picket touched a rock (closest approach {:.2} units \
+         of clearance). It has 3.7 units of room when the avoidance is working, \
+         so any contact at all means the low-LOD path stopped clearing its belt \
+         (issue #968)",
+        worst_picket_gap
+    );
+    // And it must go THROUGH the belt, not stop at it. Not clearing a rock and
+    // being pinned against one are the same dead mission; an avoidance that only
+    // pushes the hull back the way it came turns the first failure into the
+    // second, which is exactly what a radial escape heading did here before
+    // `low_lod_avoid_yaw` started steering AROUND obstacles. The belt sits at
+    // z = 0 and the far anchor at z = -200.
+    assert!(
+        picket_min_z < -50.0,
+        "the picket never got past its own belt — its southernmost point was \
+         z = {picket_min_z:.0}, with the rocks at z = 0. A hull pinned against a \
+         rock has lost its mission just as surely as one that flew through it \
+         (issue #968)"
+    );
+
+    // The other half of the report: a ship that wanders off is a mission that
+    // silently ends. The reported hull left its scenario by ~2,600 units.
+    assert!(
+        furthest_from_lane < 250.0,
+        "the ship strayed {furthest_from_lane:.0} units outside its own patrol \
+         box; the failure this probe guards against is a hull leaving the map and \
+         never coming back"
+    );
+}

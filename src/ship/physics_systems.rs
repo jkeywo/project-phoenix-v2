@@ -265,11 +265,75 @@ pub(crate) fn integrate_ship_physics(
             (true, false) | (false, true) => 0.5,
             (false, false) => 1.0,
         };
+
+        // ── Destroyed-actuator gate (issue #968) ───────────────────────────
+        // FOUR axes, one rule: an actuator that is damage-offline commands
+        // nothing. The engine scaling above has always existed; none of
+        // `helm-thrust`, `helm-steering`, `helm-lateral-thrust` or
+        // `helm-vertical-thrust` had an equivalent, and that asymmetry was a
+        // mission-ending bug.
+        //
+        // Every one of `ThrustInput` / `SteeringInput` / `LateralThrustInput` /
+        // `VerticalThrustInput` is a LATCHED intent component of the same shape:
+        // `process_helm_inputs` writes it when a command is admitted and nothing
+        // clears it otherwise, and the per-axis AI operator `continue`s the
+        // moment its own system goes offline (`ControlSource::Offline` ⇒
+        // `operate_ai: false` — `ai_helm_thrust` and `ai_helm_steering` gate on
+        // exactly the same expression as `ai_helm_lateral`). So a hull whose
+        // actuator was shot away kept applying whatever fraction it last
+        // commanded, for ever — measured on `combat_test`: the destroyer lost
+        // `helm-lateral-thrust` (and both engines) at t=285.75 s and then strafed
+        // at a fixed 8.77 u/s for the remaining 300 s of the run, out of the belt
+        // and away from every hostile, its hazard surface reporting real
+        // repulsion the whole time and nothing able to act on it.
+        //
+        // The lateral axis is the one that was observed, but it is the mildest of
+        // the three that shipped content can reach: a latched `SteeringInput`
+        // circles the hull out of its
+        // scenario on a fixed yaw rate, and a Destroyed `helm-thrust` with intact
+        // engines cruises straight off the map at whatever throttle it last held.
+        // Both of those are live in shipped content — every Alliance and Harrow
+        // hull declares `helm-thrust` and `helm-steering` `[[system]]`s. The
+        // vertical arm is the only one that is inert today: no shipped hull
+        // declares a `helm-vertical-thrust` system, and `sync_console_damage_tiers`
+        // only flips SystemIds that are present in `EntitySystemHull`, so nothing
+        // can put that id into the offline set until a hull authors it. It is
+        // written here anyway so the axis arrives already covered.
+        //
+        // `0.0` input rather than a zeroed speed, so the hull coasts down on its
+        // authored acceleration instead of stopping dead. This gate is the
+        // capability check; `process_helm_inputs` separately CLEARS the latch
+        // while the axis is offline so the stale fraction cannot survive a
+        // repair — see the note there.
+        let thrust_offline = sources
+            .0
+            .is_offline(&crate::system_registry::helm_thrust_system_id());
+        let steering_offline = sources
+            .0
+            .is_offline(&crate::system_registry::helm_steering_system_id());
+        let lateral_offline = sources
+            .0
+            .is_offline(&crate::system_registry::lateral_thrust_system_id());
+        let vertical_offline = sources
+            .0
+            .is_offline(&crate::system_registry::vertical_thrust_system_id());
         let scaled_input = ShipPhysicsInput {
-            thrust: input.thrust * engine_thrust_scale,
-            steering: input.steering,
-            lateral: input.lateral,
-            vertical: input.vertical,
+            thrust: if thrust_offline {
+                0.0
+            } else {
+                input.thrust * engine_thrust_scale
+            },
+            steering: if steering_offline {
+                0.0
+            } else {
+                input.steering
+            },
+            lateral: if lateral_offline { 0.0 } else { input.lateral },
+            vertical: if vertical_offline {
+                0.0
+            } else {
+                input.vertical
+            },
         };
 
         let mut config = physics_cfg_comp
@@ -678,6 +742,227 @@ mod tests {
         assert!(
             c.yaw != 0.0 && c.lateral_speed != 0.0,
             "control ship (no impulse) must steer and strafe from the same intent, got {c:?}"
+        );
+    }
+
+    /// Set `entity`'s starting `ShipPhysics` so a coast-down is observable
+    /// rather than being confused with "never moved".
+    ///
+    /// Call it AFTER a warm-up tick: `integrator_only_app`'s very first
+    /// `app.update()` runs with a zero `Time::delta`, so a state seeded before
+    /// it would be measured one step later than the test thinks.
+    fn seed_physics(app: &mut App, entity: Entity, seed: ShipPhysics) {
+        *app.world_mut()
+            .entity_mut(entity)
+            .get_mut::<ShipPhysics>()
+            .expect("spawned with physics") = seed;
+    }
+
+    /// Issue #968: a DESTROYED lateral thruster must stop pushing the hull, and
+    /// the hull must COAST DOWN rather than stop dead.
+    ///
+    /// `LateralThrustInput` is a latched intent component, and the per-axis AI
+    /// operator stops emitting the moment its system goes offline — so without a
+    /// capability gate here the last fraction the thruster was ever commanded
+    /// keeps being integrated for the rest of the run. On `combat_test` that was
+    /// a wrecked destroyer strafing at a fixed 8.77 u/s for 300 s, out of the
+    /// belt and out of the mission. Both ships below carry the identical latched
+    /// intent AND the identical starting strafe; the only difference is which
+    /// one's thruster is in the offline set.
+    ///
+    /// The 8.77 u/s start is the measured figure, and it is what makes the
+    /// coast-down assertion mean something: the gate feeds the axis `0.0`, so
+    /// `compute_lateral_speed` decelerates at the hull's authored
+    /// `lateral_acceleration` (15 u/s² ⇒ 0.5 per capped 1/30 s step) instead of
+    /// zeroing the speed outright.
+    ///
+    /// The repair leg at the end pins what this gate does and does not do. It
+    /// MASKS the latch; it does not clear it. Clearing is
+    /// `process_helm_inputs`' job (issue #968, see
+    /// `helm_admission::an_offline_axis_clears_its_latched_intent`) and this
+    /// integrator-only fixture deliberately does not run it — so here, a repaired
+    /// thruster picks the stale fraction straight back up. That is the honest
+    /// contract of this file: the gate is a per-tick capability check.
+    #[test]
+    fn a_destroyed_lateral_thruster_stops_applying_its_latched_command() {
+        let mut app = integrator_only_app();
+
+        // The wreck's measured strafe when its thruster died.
+        const STRAFE: f32 = 8.77;
+        // `lateral_acceleration` (15) × the `HELM_AI_MAX_DT_SECS` step (1/30).
+        const COAST_STEP: f32 = 0.5;
+
+        let working = spawn_integrator_ship(&mut app, ControlSource::Ai, false, 0.0, 0.0, 1.0);
+        let destroyed = spawn_integrator_ship(&mut app, ControlSource::Ai, false, 0.0, 0.0, 1.0);
+        app.world_mut()
+            .entity_mut(destroyed)
+            .get_mut::<ShipSystemControlSources>()
+            .expect("spawned with control sources")
+            .0
+            .set_offline(crate::system_registry::lateral_thrust_system_id(), true);
+
+        tick(&mut app); // warm-up: the first update integrates a zero `dt`.
+        for e in [working, destroyed] {
+            seed_physics(
+                &mut app,
+                e,
+                ShipPhysics {
+                    lateral_speed: STRAFE,
+                    ..ShipPhysics::default()
+                },
+            );
+        }
+
+        // One tick: the axis must be coasting, not snapped to zero.
+        tick(&mut app);
+        let coasting = physics_of(&mut app, destroyed);
+        assert!(
+            (coasting.lateral_speed - (STRAFE - COAST_STEP)).abs() < 1e-4,
+            "a destroyed lateral thruster must coast down on the hull's authored \
+             acceleration, not stop dead — expected {:.2}, got {coasting:?}",
+            STRAFE - COAST_STEP
+        );
+
+        // And it must reach zero and stay there.
+        for _ in 0..25 {
+            tick(&mut app);
+        }
+        let dead = physics_of(&mut app, destroyed);
+        assert_eq!(
+            dead.lateral_speed, 0.0,
+            "a destroyed lateral thruster must command nothing, got {dead:?}"
+        );
+
+        // Control: the same latched intent and the same starting strafe on an
+        // ONLINE thruster drives on to the hull's cap, so the assertions above
+        // are about the offline gate and not about the intent never having been
+        // applied at all.
+        let alive = physics_of(&mut app, working);
+        assert!(
+            alive.lateral_speed > STRAFE,
+            "an online lateral thruster must still apply its intent, got {alive:?}"
+        );
+
+        // Repair edge: the gate is a mask, not an erase. With the latch still in
+        // place (nothing in this fixture clears it) a repaired thruster resumes
+        // from it immediately — which is exactly why `process_helm_inputs` clears
+        // the intent while the axis is offline.
+        app.world_mut()
+            .entity_mut(destroyed)
+            .get_mut::<ShipSystemControlSources>()
+            .expect("spawned with control sources")
+            .0
+            .set_offline(crate::system_registry::lateral_thrust_system_id(), false);
+        tick(&mut app);
+        assert!(
+            physics_of(&mut app, destroyed).lateral_speed > 0.0,
+            "the gate masks the latch for as long as the axis is offline and no \
+             longer; clearing the latch is `process_helm_inputs`' job"
+        );
+    }
+
+    /// Issue #968: a DESTROYED `helm-steering` must stop turning the hull.
+    ///
+    /// The worst of the three axes and the one the flee fix originally missed.
+    /// `SteeringInput` latches exactly like `LateralThrustInput`, `ai_helm_steering`
+    /// `continue`s on the same `!policy_for(..).operate_ai` gate, and the
+    /// integrator passed `steering` through ungated — so a hull that lost its
+    /// steering gear kept applying its last yaw fraction and simply circled out
+    /// of the scenario for ever.
+    #[test]
+    fn a_destroyed_helm_steering_stops_turning_the_hull() {
+        let mut app = integrator_only_app();
+
+        let working = spawn_integrator_ship(&mut app, ControlSource::Ai, false, 0.0, 1.0, 0.0);
+        let destroyed = spawn_integrator_ship(&mut app, ControlSource::Ai, false, 0.0, 1.0, 0.0);
+        app.world_mut()
+            .entity_mut(destroyed)
+            .get_mut::<ShipSystemControlSources>()
+            .expect("spawned with control sources")
+            .0
+            .set_offline(crate::system_registry::helm_steering_system_id(), true);
+
+        for _ in 0..5 {
+            tick(&mut app);
+        }
+
+        let dead = physics_of(&mut app, destroyed);
+        assert_eq!(
+            dead.yaw, 0.0,
+            "destroyed steering gear must command no yaw, got {dead:?}"
+        );
+
+        let alive = physics_of(&mut app, working);
+        assert!(
+            alive.yaw > 0.0,
+            "online steering gear must still apply its latched intent, got {alive:?}"
+        );
+    }
+
+    /// Issue #968: a DESTROYED `helm-thrust` must stop driving the hull, even
+    /// with both engines intact.
+    ///
+    /// The engine scaling of issue #511 covers `helm-engine-port` /
+    /// `helm-engine-starboard` only; the throttle system itself was ungated, so a
+    /// hull whose `helm-thrust` was shot away but whose engines were fine cruised
+    /// off at its last commanded throttle. Neither ship here has an engine in the
+    /// offline set, so `engine_thrust_scale` is 1.0 for both and the only
+    /// difference is the throttle system.
+    #[test]
+    fn a_destroyed_helm_thrust_stops_driving_the_hull() {
+        let mut app = integrator_only_app();
+
+        // Under way when the throttle died, so the assertion below is a
+        // coast-down and not "the ship never started".
+        const CRUISE: f32 = 10.0;
+        // `deceleration` (25) × the `HELM_AI_MAX_DT_SECS` step (1/30).
+        const COAST_STEP: f32 = 25.0 / 30.0;
+
+        let working = spawn_integrator_ship(&mut app, ControlSource::Ai, false, 1.0, 0.0, 0.0);
+        let destroyed = spawn_integrator_ship(&mut app, ControlSource::Ai, false, 1.0, 0.0, 0.0);
+        app.world_mut()
+            .entity_mut(destroyed)
+            .get_mut::<ShipSystemControlSources>()
+            .expect("spawned with control sources")
+            .0
+            .set_offline(crate::system_registry::helm_thrust_system_id(), true);
+
+        tick(&mut app); // warm-up: the first update integrates a zero `dt`.
+        for e in [working, destroyed] {
+            seed_physics(
+                &mut app,
+                e,
+                ShipPhysics {
+                    forward_speed: CRUISE,
+                    ..ShipPhysics::default()
+                },
+            );
+        }
+
+        tick(&mut app);
+        let coasting = physics_of(&mut app, destroyed);
+        assert!(
+            (coasting.forward_speed - (CRUISE - COAST_STEP)).abs() < 1e-4,
+            "a destroyed throttle must coast down on the hull's authored \
+             deceleration — expected {:.2}, got {coasting:?}",
+            CRUISE - COAST_STEP
+        );
+
+        for _ in 0..20 {
+            tick(&mut app);
+        }
+        let dead = physics_of(&mut app, destroyed);
+        assert_eq!(
+            dead.forward_speed, 0.0,
+            "a destroyed throttle must command nothing even with both engines \
+             online, got {dead:?}"
+        );
+
+        let alive = physics_of(&mut app, working);
+        assert!(
+            alive.forward_speed > CRUISE,
+            "an online throttle with the same latched intent must still drive the \
+             hull, got {alive:?}"
         );
     }
 }

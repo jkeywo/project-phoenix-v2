@@ -1276,6 +1276,15 @@ fn simulate_low_lod_ships(
             Option<&crate::entities::spawner::HelmConsoleSection>,
             Option<&AiProfile>,
             Option<&LodTransitionTimer>,
+            // Read-only, and both `Option`, so neither filters the iteration
+            // set. The hull's own collider radius and its authored avoidance
+            // tuning reach the low-LOD hazard assessment (issue #968) — see
+            // `low_lod_avoid_yaw`.
+            Option<&crate::entities::spawner::ColliderSection>,
+            Option<&crate::entities::spawner::BehaviourSection>,
+            // Needed only to keep this ship's own snapshot entry out of its own
+            // hazard picture — see `low_lod_avoid_yaw`.
+            Option<&crate::entity_spawner::EntityUuid>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -1296,15 +1305,38 @@ fn simulate_low_lod_ships(
     // return-steering (issue #933) needs *some* turn-rate ceiling to clamp to.
     const LOW_LOD_DEFAULT_MAX_YAW_RATE: f32 = 0.5;
 
-    for (mut physics, blackboards, cursors, helm_section, ai_profile, lod_timer) in &mut ships {
+    // Every parse-time default in one place, for hulls that author no
+    // `[behaviour]` block at all. Built once rather than per ship: it owns a
+    // (here always empty) doctrine `Vec`.
+    let default_behaviour = crate::entity_config::BehaviourConfig::default();
+
+    for (
+        mut physics,
+        blackboards,
+        cursors,
+        helm_section,
+        ai_profile,
+        lod_timer,
+        collider_section,
+        behaviour_section,
+        entity_uuid,
+    ) in &mut ships
+    {
         let max_speed = helm_section
             .map(|h| h.0.max_speed)
             .filter(|&s| s > 0.0)
             .unwrap_or(20.0);
-        let max_yaw_rate = helm_section
-            .map(|h| h.0.max_yaw_rate)
-            .filter(|&r| r > 0.0)
-            .unwrap_or(LOW_LOD_DEFAULT_MAX_YAW_RATE);
+        // The same facts the high-fidelity planner feeds `assess_hazards`, read
+        // off this hull rather than defaulted (issue #968): its collider radius,
+        // and the whole authored `[behaviour]` avoidance block (buffer,
+        // look-ahead, severity exponent, deviation ceiling).
+        let self_radius = collider_section.map(|c| c.0.radius.max(0.0)).unwrap_or(0.0);
+        let behaviour = behaviour_section
+            .map(|b| &b.0)
+            .unwrap_or(&default_behaviour);
+        let self_uuid = entity_uuid
+            .and_then(|u| uuid::Uuid::parse_str(&u.0).ok())
+            .unwrap_or_default();
         let route = blackboards.and_then(active_waypoint_route);
 
         // Steer along the route only when we have a Patrol/Reach objective AND
@@ -1348,8 +1380,9 @@ fn simulate_low_lod_ships(
                     physics.yaw,
                     [physics.x, 0.0, physics.z],
                     physics.forward_speed,
-                    max_yaw_rate,
-                    dt,
+                    self_radius,
+                    self_uuid,
+                    behaviour,
                     world_snapshot.as_deref(),
                 );
                 physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
@@ -1367,8 +1400,9 @@ fn simulate_low_lod_ships(
                     physics.yaw,
                     [physics.x, 0.0, physics.z],
                     physics.forward_speed,
-                    max_yaw_rate,
-                    dt,
+                    self_radius,
+                    self_uuid,
+                    behaviour,
                     world_snapshot.as_deref(),
                 );
                 physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
@@ -1462,8 +1496,9 @@ fn simulate_low_lod_ships(
             physics.yaw,
             [physics.x, 0.0, physics.z],
             physics.forward_speed,
-            max_yaw_rate,
-            dt,
+            self_radius,
+            self_uuid,
+            behaviour,
             world_snapshot.as_deref(),
         );
         physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
@@ -1471,8 +1506,9 @@ fn simulate_low_lod_ships(
     }
 }
 
-/// Bend a low-LOD ship's yaw away from imminent collisions using the same
-/// hazard model the high-fidelity Helm AI runs (`crate::ai::assess_hazards`).
+/// Bend a low-LOD ship's heading around imminent collisions, using the same
+/// projected-collision model the high-fidelity Helm AI steers on
+/// (`crate::ai::avoidance_steering`).
 ///
 /// Dead-reckoned ships (demoted out of `AiHighFidelity`) have no helm intent
 /// components, so `helm_motion_planner` never runs for them and they used to
@@ -1482,52 +1518,90 @@ fn simulate_low_lod_ships(
 /// That fix only reached ships still on the full Helm AI path; a ship a
 /// player is not currently looking at is exactly the case most likely to be
 /// demoted, so most of the asteroid-field traffic was never covered. This is
-/// a direct yaw nudge rather than a steering command because there is no
+/// a direct yaw bend rather than a steering command because there is no
 /// per-axis actuator to route one through at this fidelity.
 ///
-/// A ship's own entry in `WorldSnapshot` never registers against itself:
-/// `assess_hazards` requires a projected separation `> 0.01`, and a ship at
-/// its own position has separation `0.0`.
+/// # Why a TURN and not a push (issue #968)
+///
+/// This used to take `assess_hazards`' repulsion vector as a desired heading and
+/// step toward it at `max_yaw_rate * dt * urgency`. Two things were wrong with
+/// that, and only the first was visible while the response was too weak to stop
+/// anything:
+///
+/// * the repulsion points radially AWAY from the obstacle, so the ship's answer
+///   to "there is a rock on my route" was to face back the way it came. The
+///   caller re-snaps yaw onto the route bearing every tick, so the two fought:
+///   turn out, clear the buffer, snap back, drive in. Once severity was fixed
+///   the ship stopped penetrating and simply pinned itself against the rock's
+///   skin instead, its patrol over — the same trapped mission this issue is
+///   about, reached from the other side.
+/// * the step was rate-limited against a bearing the caller had already snapped,
+///   so at 60 Hz the heading could never deviate by more than a single tick's
+///   turn from the route no matter how urgent the hazard.
+///
+/// Both are answered by steering rather than pushing: the deviation is an ANGLE
+/// off the route bearing, applied after the caller's snap and proportional to
+/// the threat, up to the hull's authored
+/// [`BehaviourConfig::low_lod_avoidance_deviation_rad`](crate::entity_config::BehaviourConfig::low_lod_avoidance_deviation_rad).
+/// A ship at full threat flies the tangent — around the obstacle — and eases
+/// back onto its route as it clears. Stateless, so nothing has to be unwound.
+///
+/// One consequence worth naming: the hull's `max_yaw_rate` no longer bounds this
+/// manoeuvre. The old form stepped toward a heading at `max_yaw_rate * dt`; this
+/// one sets the heading outright, so a battleship swings as sharply as a courier
+/// unless the two author different deviation ceilings. That is the trade for
+/// being able to deviate at all — see the constant's own note.
+///
+/// # What this path does NOT share with `assess_hazards` (issue #968)
+///
+/// [`crate::ai::avoidance_steering`] scans every entity in the snapshot. It does
+/// not apply `assess_hazards`' two authored filters: the `dangerous` flag, and
+/// the mobile-only ignore-smaller rule (`hazard_ignore_size_ratio`) that issue
+/// #958 records as a doctrine invariant — static terrain is avoided at any
+/// relative size, a small SHIP may be swept past. Both are inert in shipped
+/// content today (`WorldSnapshot` carries only real obstacles, and no hull
+/// authors a non-zero ratio), so the two fidelities agree. The first hull to
+/// author the ratio will behave differently demoted than promoted, and that is
+/// the point at which this needs the filters rather than a note.
+///
+/// `self_uuid` excludes the ship's own `WorldSnapshot` entry, which projects to
+/// exactly its own position and would otherwise register as an unavoidable
+/// full-threat collision with itself.
 fn low_lod_avoid_yaw(
     yaw: f32,
     pos: [f32; 3],
     forward_speed: f32,
-    max_yaw_rate: f32,
-    dt: f32,
+    self_radius: f32,
+    self_uuid: uuid::Uuid,
+    behaviour: &crate::entity_config::BehaviourConfig,
     snapshot: Option<&WorldSnapshot>,
 ) -> f32 {
     let Some(snapshot) = snapshot else {
         return yaw;
     };
-    let world_view = crate::ai::WorldView {
-        entity_pos: pos,
-        entity_yaw: yaw,
-        entities: snapshot.entities.clone(),
-        ..crate::ai::WorldView::default()
-    };
-    let hazard = crate::ai::assess_hazards(
-        &world_view,
+    // `self_radius` and the hull's OWN authored avoidance tuning are used here
+    // rather than the module defaults (issue #968). A demoted hull was assessing
+    // hazards as if it were a point: the required clearance was short by its own
+    // hull radius, and the severity ramp used the parse default even on a hull
+    // that had authored a wider standoff. Both pushed a low-LOD ship's reaction
+    // late — measured on `combat_test`, the two Harrow pickets ground through
+    // radius-4 rocks to 3.2 units of penetration, being kicked back to the
+    // surface once a second and driving straight back in.
+    let steering = crate::ai::avoidance_steering(
+        pos,
+        yaw,
         forward_speed,
-        crate::ai::AVOIDANCE_BUFFER,
-        crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
-        crate::ai::HAZARD_IGNORE_SIZE_RATIO,
+        self_radius,
+        self_uuid,
+        &snapshot.entities,
+        behaviour.avoidance_buffer,
+        behaviour.avoidance_look_ahead_secs,
+        behaviour.hazard_threat_exponent,
     );
-    if hazard.urgency <= 0.0 {
+    if steering == 0.0 {
         return yaw;
     }
-    // Ship-local escape (x = starboard, z = aft) rotated into a world bearing,
-    // using the same forward/starboard convention as the route-bearing code
-    // above (forward = (sin(yaw), -cos(yaw)), starboard = (cos(yaw), sin(yaw))).
-    let escape_x = hazard.forces_local[0];
-    let escape_z = hazard.forces_local[2];
-    if escape_x * escape_x + escape_z * escape_z < f32::EPSILON {
-        return yaw;
-    }
-    let world_dx = escape_x * simmath::cos(yaw) - escape_z * simmath::sin(yaw);
-    let world_dz = escape_x * simmath::sin(yaw) + escape_z * simmath::cos(yaw);
-    let desired_yaw = simmath::atan2(world_dx, -world_dz);
-    let max_step = max_yaw_rate * dt * hazard.urgency.clamp(0.0, 1.0);
-    crate::ai::lod::step_yaw_toward(yaw, desired_yaw, max_step)
+    yaw + steering * behaviour.low_lod_avoidance_deviation_rad
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────────
@@ -4533,6 +4607,136 @@ verb = "fire_blaster"
             cursor.read(messages).count(),
             0,
             "no arrival must be announced while the ship is still 200 units out"
+        );
+    }
+
+    /// Issue #968: the low-LOD hazard assessment reasons about the ship's OWN
+    /// hull and its OWN authored standoff, not about a point with the module
+    /// default.
+    ///
+    /// `low_lod_avoid_yaw` used to build its `WorldView` from
+    /// `WorldView::default()`, which zeroes `self_radius`, and to pass the
+    /// parse-default `AVOIDANCE_BUFFER` whatever the hull authored. Both push a
+    /// demoted ship's reaction late by exactly the margin it needed: the two
+    /// Harrow pickets in `combat_test` ground 3.2 units into radius-4 rocks,
+    /// were kicked back to the surface once a second by the collision response,
+    /// and drove straight back in.
+    ///
+    /// The obstacle here sits 10 units off the ship's 3-second projection, so it
+    /// is outside a point-model's `0 + 4 + 5` avoidance radius and inside the
+    /// radius a 3-unit hull (or a hull authoring a wider buffer) actually needs.
+    #[test]
+    fn low_lod_avoidance_uses_the_hulls_own_radius_and_authored_buffer() {
+        const ROCK_RADIUS: f32 = 4.0;
+        const DEFAULT_BUFFER: f32 = 5.0;
+
+        let snapshot = WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::from_u128(1),
+                // 10 units from the projected position (0, 0, -9): dx = 6, dz = -8.
+                position: [6.0, 0.0, -17.0],
+                radius: ROCK_RADIUS,
+                ..Default::default()
+            }],
+        };
+        // Facing -Z at 3 u/s, so the 3-second look-ahead projects to z = -9.
+        let avoid = |self_radius: f32, buffer: f32| {
+            let behaviour = crate::entity_config::BehaviourConfig {
+                avoidance_buffer: buffer,
+                ..Default::default()
+            };
+            low_lod_avoid_yaw(
+                0.0,
+                [0.0, 0.0, 0.0],
+                3.0,
+                self_radius,
+                uuid::Uuid::from_u128(99),
+                &behaviour,
+                Some(&snapshot),
+            )
+        };
+
+        assert_eq!(
+            avoid(0.0, DEFAULT_BUFFER),
+            0.0,
+            "control: as a point with the default buffer, this obstacle is out of \
+             range and the ship holds its heading"
+        );
+        assert_ne!(
+            avoid(3.0, DEFAULT_BUFFER),
+            0.0,
+            "a 3-unit hull needs 3 more units of clearance than a point, and must \
+             bend its heading for an obstacle a point would ignore"
+        );
+        assert_ne!(
+            avoid(0.0, 20.0),
+            0.0,
+            "a hull authoring a wider avoidance buffer must react earlier at low \
+             fidelity too — the authored value has to reach this path"
+        );
+    }
+
+    /// Issue #968: the dead-reckoned deviation ceiling is AUTHORED, and the
+    /// deviation actually applied scales with threat up to it.
+    ///
+    /// The 90° default is geometry (the tangent at contact), but the ramp to it
+    /// is not — `threat × ceiling` is a proportional bend, not the tangent angle
+    /// for the distance in hand — so a hull may author its own. This also pins
+    /// what the constant's note warns about: the magnitude no longer passes
+    /// through the hull's `max_yaw_rate` at all.
+    #[test]
+    fn the_low_lod_deviation_ceiling_is_authored_per_hull() {
+        // Directly ahead and close enough to saturate: the ship's projected
+        // point (0, 0, -9) is well inside a radius-4 rock's skin at z = -10,
+        // so the threat fraction is 1.0 and the deviation is the whole ceiling.
+        let snapshot = WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::from_u128(1),
+                position: [0.5, 0.0, -10.0],
+                radius: 4.0,
+                ..Default::default()
+            }],
+        };
+        let avoid = |ceiling: f32| {
+            let behaviour = crate::entity_config::BehaviourConfig {
+                low_lod_avoidance_deviation_rad: ceiling,
+                ..Default::default()
+            };
+            low_lod_avoid_yaw(
+                0.0,
+                [0.0, 0.0, 0.0],
+                3.0,
+                1.0,
+                uuid::Uuid::from_u128(99),
+                &behaviour,
+                Some(&snapshot),
+            )
+        };
+
+        let default_turn = avoid(crate::ai::LOW_LOD_AVOIDANCE_DEVIATION_RAD);
+        assert!(
+            (default_turn.abs() - crate::ai::LOW_LOD_AVOIDANCE_DEVIATION_RAD).abs() < 1e-4,
+            "a saturated hazard must bend the heading by the whole authored \
+             ceiling, got {default_turn}"
+        );
+
+        // Half the ceiling, same geometry: the authored value is what scales it.
+        let half = avoid(crate::ai::LOW_LOD_AVOIDANCE_DEVIATION_RAD / 2.0);
+        assert!(
+            (half.abs() - crate::ai::LOW_LOD_AVOIDANCE_DEVIATION_RAD / 2.0).abs() < 1e-4,
+            "a hull authoring half the ceiling must deviate half as far, got {half}"
+        );
+        assert_eq!(
+            half.signum(),
+            default_turn.signum(),
+            "the authored ceiling must scale the turn, not reverse it"
+        );
+
+        // A hull that authors no deviation at all holds its route bearing.
+        assert_eq!(
+            avoid(0.0),
+            0.0,
+            "a zero ceiling means a hull that never leaves its route"
         );
     }
 

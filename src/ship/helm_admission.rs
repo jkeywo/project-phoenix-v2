@@ -97,6 +97,7 @@ pub(crate) fn process_helm_inputs(
         Option<&mut BoostCommand>,
         Option<&BoostConfigResource>,
         Option<&ShipBoost>,
+        Option<&ShipSystemControlSources>,
         Has<LocalShip>,
     )>,
 ) {
@@ -112,10 +113,67 @@ pub(crate) fn process_helm_inputs(
         mut boost_cmd,
         boost_cfg,
         ship_boost,
+        sources,
         is_local,
     ) in ships.iter_mut()
     {
         let mut last_input = if is_local { last_input } else { None };
+
+        // ── Offline-axis latch clear (issue #968) ─────────────────────────
+        // The four helm intent components are LATCHES: written on admission and
+        // never otherwise reset. `integrate_ship_physics` gates each axis on its
+        // system being online, which stops a destroyed actuator from acting —
+        // but a gate only MASKS the latched fraction. The value survives in the
+        // component (`snapshot.rs` even serialises it), so the tick a repair
+        // lifts the tier back out of `Disabled` the stale command is applied
+        // again, up to a full AI decision period (30 Hz) before the axis owner
+        // gets round to writing a fresh one. A ship that lost its thruster
+        // mid-strafe should not resume that strafe the instant the damage
+        // control party finishes.
+        //
+        // So the axis OWNER clears its own intent while the axis is offline.
+        // This runs ahead of the admitted-command loop below, so a command that
+        // did make it through admission this tick still wins — admission is the
+        // authority on what may be commanded, and this is only about what an
+        // axis that may command NOTHING is left holding. `Offline` refuses both
+        // human input and AI operation, so in practice nothing overrides it.
+        //
+        // `LastHelmInput` is deliberately untouched: it is the LocalShip's HUD
+        // mirror of what the human asked for, not an actuator command.
+        if let Some(sources) = sources {
+            if sources
+                .0
+                .is_offline(&crate::system_registry::helm_thrust_system_id())
+            {
+                if let Some(ti) = thrust_in.as_deref_mut() {
+                    ti.0 = 0.0;
+                }
+            }
+            if sources
+                .0
+                .is_offline(&crate::system_registry::helm_steering_system_id())
+            {
+                if let Some(si) = steering_in.as_deref_mut() {
+                    si.0 = 0.0;
+                }
+            }
+            if sources
+                .0
+                .is_offline(&crate::system_registry::lateral_thrust_system_id())
+            {
+                if let Some(la) = lateral_in.as_deref_mut() {
+                    la.0 = 0.0;
+                }
+            }
+            if sources
+                .0
+                .is_offline(&crate::system_registry::vertical_thrust_system_id())
+            {
+                if let Some(vi) = vertical_in.as_deref_mut() {
+                    vi.0 = 0.0;
+                }
+            }
+        }
 
         if admitted.0.is_empty() {
             continue;
@@ -892,6 +950,77 @@ mod tests {
         assert!(
             (*steering - 0.25).abs() < 0.01,
             "port engine steering should match joystick steering"
+        );
+    }
+
+    /// Issue #968: an offline axis has its latched intent CLEARED, not merely
+    /// masked downstream.
+    ///
+    /// `integrate_ship_physics` gates each helm axis on its system being online,
+    /// which stops a destroyed actuator acting. But a gate leaves the last
+    /// commanded fraction sitting in the component — `snapshot.rs` serialises it,
+    /// and the tick a repair lifts the tier back out of `Disabled` it would be
+    /// applied again for up to a whole AI decision period before the axis owner
+    /// wrote a fresh one. So the owner clears it here, and the repair edge below
+    /// is the half of the behaviour a masking gate cannot give.
+    #[test]
+    fn an_offline_axis_clears_its_latched_intent() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        let thrust_of = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<&ThrustInput, With<LocalShip>>()
+                .single(app.world())
+                .expect("the fixture ship carries a ThrustInput")
+                .0
+        };
+        let set_thrust_offline = |app: &mut App, offline: bool| {
+            let ship = find_ship_entity(app);
+            app.world_mut()
+                .entity_mut(ship)
+                .get_mut::<ShipSystemControlSources>()
+                .expect("the fixture ship carries control sources")
+                .0
+                .set_offline(crate::system_registry::helm_thrust_system_id(), offline);
+        };
+
+        // Latch a real command through the normal admitted path.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 1.0 },
+            },
+        );
+        tick_twice(&mut app);
+        assert_eq!(
+            thrust_of(&mut app),
+            1.0,
+            "precondition: the axis must be holding a latched command for this \
+             test to be about clearing one"
+        );
+
+        // Shoot the throttle away.
+        set_thrust_offline(&mut app, true);
+        tick(&mut app);
+        assert_eq!(
+            thrust_of(&mut app),
+            0.0,
+            "an offline axis must have its latched intent cleared, not left in \
+             the component for a downstream gate to hide"
+        );
+
+        // Repair it. Nothing must resurrect the pre-damage throttle: the axis
+        // starts from rest and waits for its owner to command it again.
+        set_thrust_offline(&mut app, false);
+        tick(&mut app);
+        assert_eq!(
+            thrust_of(&mut app),
+            0.0,
+            "a repaired axis must not resume the command it was holding when it \
+             was destroyed"
         );
     }
 }

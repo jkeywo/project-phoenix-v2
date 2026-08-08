@@ -1793,7 +1793,7 @@ fn handle_collisions(
         // wedged between two rocks, every instance of the simulation picks the
         // same rock, and so deals the same damage from the same bearing into
         // the same shield arc.
-        let contact = ctx
+        let mut contacts: Vec<Entity> = ctx
             .contact_pairs_with(ship_entity)
             // `contact_pairs_with` yields every pair whose *bounding volumes*
             // overlap, not just the ones actually touching (see the method's
@@ -1810,11 +1810,55 @@ fn handle_collisions(
                     pair.collider1()
                 }
             })
-            .min_by_key(|other| collision_order_key(*other, &body_query));
+            .collect();
+        contacts.sort_by_key(|other| collision_order_key(*other, &body_query));
 
-        let Some(attacker_entity) = contact else {
+        // DAMAGE is still one contact per ship per tick, and still the lowest
+        // world id — the #896 guarantee above is unchanged.
+        let Some(&attacker_entity) = contacts.first() else {
             continue;
         };
+
+        // GEOMETRY, by contrast, is resolved against every contact, every tick,
+        // ahead of the damage cooldown (issue #968).
+        //
+        // Separation used to sit behind the `remaining_secs` gate with the
+        // damage, so a hull that drove into something was pushed back to its
+        // surface once and then had a full second to bury itself again before
+        // anything corrected it — measured at up to 6.5 units INSIDE a radius-12
+        // `huge` asteroid on a `combat_test` run, with the hull grinding through
+        // the rock rather than around it. Geometry is not a rate-limited event:
+        // the ship may not take damage more than once a second, but it must never
+        // be allowed to occupy the same space as a rock in between. Damage, the
+        // hard stop and the impulse cancel all stay on the cooldown below, so the
+        // hit rate is unchanged.
+        //
+        // Resolving only the damage contact would not survive that rate change.
+        // `separate_ship_from_collision` snaps the hull onto ONE body's surface
+        // with no regard for any other, so a ship touching two bodies closer
+        // together than `r_ship + r_body + slop` gets pushed out of the
+        // lowest-keyed one and into its neighbour. At 1 Hz that was a transient
+        // nuisance the ship's own motion worked itself out of; at 60 Hz it would
+        // be a steady state, because the pick is deterministic — the same body
+        // wins every tick, so the hull would be pushed into the same neighbour
+        // for ever and never corrected against it. Rocks that close together are
+        // reachable wherever `[asteroid_field]` streaming puts them.
+        //
+        // So every contact is resolved, in the same world-id order, as a
+        // Gauss-Seidel pass: each correction applies on top of the last, and the
+        // order is a function of world ids rather than of rapier's internal
+        // bookkeeping, so every instance of the simulation lands the hull in the
+        // same place.
+        for &other in &contacts {
+            let body = body_query.get(other).ok();
+            separate_ship_from_collision(
+                &mut physics,
+                collider_radius(ship_collider),
+                body.map(|(transform, ..)| transform),
+                collider_radius(body.and_then(|(_, collider, ..)| collider)),
+            );
+        }
+
         if cooldown.remaining_secs > 0.0 {
             continue;
         }
@@ -1826,13 +1870,6 @@ fn handle_collisions(
 
         let speed_at_impact = physics.forward_speed;
         physics.forward_speed = 0.0;
-        let attacker_body = body_query.get(attacker_entity).ok();
-        separate_ship_from_collision(
-            &mut physics,
-            collider_radius(ship_collider),
-            attacker_body.map(|(transform, ..)| transform),
-            collider_radius(attacker_body.and_then(|(_, collider, ..)| collider)),
-        );
         let damage = collision_damage(speed_at_impact) as f32
             * modifiers.get(&ModifierSlot::HullDamageTaken);
 
@@ -7686,6 +7723,154 @@ station = "pilot"
         );
     }
 
+    /// Issue #968: a hull that is INSIDE a collider is de-overlapped on every
+    /// tick of contact, not only on the tick the damage cooldown lets a hit
+    /// through.
+    ///
+    /// Separation used to sit behind the same `remaining_secs` gate as the
+    /// damage, which gave a ship that had driven into something a full second to
+    /// bury itself deeper before anything corrected the geometry. Against the
+    /// `huge` asteroid class (collider radius 12, issue #947) that was measured
+    /// at 6.5 units of penetration on a `combat_test` run — the hull well inside
+    /// the rock, grinding through it rather than around it.
+    ///
+    /// So this ship starts deep inside a radius-12 rock with its cooldown still
+    /// running. It must come back out to the surface, and it must NOT be charged
+    /// a second hit for it: the hit rate is unchanged, only the geometry
+    /// correction is continuous.
+    #[test]
+    fn a_hull_inside_a_collider_is_separated_even_mid_cooldown() {
+        use crate::damage::SystemHull;
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy_rapier3d::prelude::*;
+
+        const SHIP_RADIUS: f32 = 1.2;
+        const ROCK_RADIUS: f32 = 12.0;
+        // Buried well inside the rock, as the instrumented run found it.
+        const START_DEPTH: f32 = 6.0;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(50),
+            ))
+            .add_plugins(bevy::transform::TransformPlugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<bevy::mesh::Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>()
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_plugins(RapierPhysicsPlugin::<()>::default())
+            .init_resource::<SimOutbox>()
+            .init_resource::<WorldResource>()
+            .insert_resource(GameOverReason(None, None))
+            .init_resource::<DamageLog>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_systems(Update, handle_collisions);
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+
+        let hull_max = 100.0f32;
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                EntityUuid("ship-inside-rock".to_string()),
+                Transform::from_xyz(START_DEPTH, 0.0, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+                ShipPhysicsComponent {
+                    x: START_DEPTH,
+                    z: 0.0,
+                    yaw: 0.0,
+                    forward_speed: 20.0,
+                    ..Default::default()
+                },
+                // Mid-cooldown: this ship took its hit a moment ago and is not
+                // due another one.
+                CollisionCooldown {
+                    remaining_secs: 0.9,
+                },
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    hull_max,
+                )])),
+                ShipModifiers::new(),
+                ShipImpulse::default(),
+                ColliderSection(ColliderConfig {
+                    shape: ColliderShape::Ball,
+                    radius: SHIP_RADIUS,
+                    length: 0.0,
+                    movable: true,
+                }),
+                Collider::ball(SHIP_RADIUS),
+                RigidBody::KinematicPositionBased,
+                ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
+            ))
+            .id();
+
+        // A `huge`-class rock centred on the origin, swallowing the ship whole.
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("huge-rock".to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            ColliderSection(ColliderConfig {
+                shape: ColliderShape::Ball,
+                radius: ROCK_RADIUS,
+                length: 0.0,
+                movable: false,
+            }),
+            Collider::ball(ROCK_RADIUS),
+            RigidBody::Fixed,
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+
+        // A few ticks for rapier's broad phase to publish the pair; the cooldown
+        // only falls by 50 ms a tick, so it is still running throughout.
+        for _ in 0..3 {
+            app.update();
+        }
+
+        let physics = app.world().get::<ShipPhysicsComponent>(ship).unwrap();
+        let surface_gap =
+            (physics.x * physics.x + physics.z * physics.z).sqrt() - ROCK_RADIUS - SHIP_RADIUS;
+        assert!(
+            surface_gap >= -1e-5,
+            "a hull inside a collider must be pushed back out to the surface even \
+             while its damage cooldown runs; surface gap was {surface_gap} \
+             (position {}, {})",
+            physics.x,
+            physics.z
+        );
+
+        // The cooldown is still doing its job: no second hit was charged, and the
+        // hard stop that comes with a hit did not fire either.
+        let hull = app.world().get::<EntitySystemHull>(ship).unwrap();
+        assert_eq!(
+            hull.0.total_current(),
+            hull_max,
+            "de-overlapping must not charge a hit while the cooldown is running"
+        );
+        assert_eq!(
+            physics.forward_speed, 20.0,
+            "the hard stop belongs to the damage tick, not to the separation"
+        );
+        assert!(
+            app.world()
+                .get::<CollisionCooldown>(ship)
+                .unwrap()
+                .remaining_secs
+                > 0.0,
+            "the cooldown must still be running for this test to mean anything"
+        );
+    }
+
     /// Issue #896, AC-3: which of several simultaneous contacts a ship is
     /// resolved against is decided by world id, not by whichever pair rapier
     /// hands back first.
@@ -7702,6 +7887,13 @@ station = "pilot"
     /// it ends up separated in says which one was picked — and the answer must
     /// be the same for both spawn orders, because the pick is `ast-aaa`'s to
     /// win on its uuid either way.
+    ///
+    /// Since issue #968 the geometry is resolved against BOTH rocks rather than
+    /// only the picked one, so what the ship's final side pins here is the
+    /// ORDER of that pass rather than a single choice — and the order is the
+    /// same world-id order. It still discriminates: resolving `ast-aaa` first
+    /// lands the hull at −X, resolving `ast-zzz` first would land it at +X. The
+    /// damage contact is still exactly one and still `ast-aaa`.
     #[test]
     fn a_ship_between_two_asteroids_is_resolved_against_the_lower_world_id() {
         use crate::damage::SystemHull;
@@ -7811,6 +8003,131 @@ station = "pilot"
              spawned first — the contact pair is still being taken in rapier's \
              order rather than by world id"
         );
+    }
+
+    /// Issue #968: a hull touching two bodies at once must not be left sitting
+    /// inside the one that was not picked.
+    ///
+    /// `separate_ship_from_collision` snaps the hull onto ONE body's surface
+    /// with no regard for any other, and the damage contact is deliberately a
+    /// single deterministic pick (issue #896). Two rocks closer together than
+    /// `r_ship + r_rock + slop` therefore let the correction push the hull out
+    /// of the lower-keyed rock and straight into the higher-keyed one — and
+    /// because the pick is deterministic, the next tick picks the same rock,
+    /// finds the hull already clear of it, and does nothing. The hull sits
+    /// inside a collider indefinitely.
+    ///
+    /// That was a 1 Hz nuisance while separation ran on the damage cooldown.
+    /// Making the correction continuous would have made it a 60 Hz steady
+    /// state, so the correction resolves every contact instead.
+    ///
+    /// The rocks here are 6 units apart with radius 5 each and a radius-5 hull
+    /// between them — a gap far narrower than the 10.05 units the hull needs
+    /// from either centre, which is what makes the wedge inescapable one rock
+    /// at a time.
+    #[test]
+    fn a_hull_wedged_between_two_bodies_is_separated_from_both() {
+        use crate::damage::SystemHull;
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy_rapier3d::prelude::*;
+
+        const R: f32 = 5.0;
+        const ROCK_X: f32 = 3.0;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(50),
+            ))
+            .add_plugins(bevy::transform::TransformPlugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<bevy::mesh::Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>()
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_plugins(RapierPhysicsPlugin::<()>::default())
+            .init_resource::<SimOutbox>()
+            .init_resource::<WorldResource>()
+            .insert_resource(GameOverReason(None, None))
+            .init_resource::<DamageLog>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_systems(Update, handle_collisions);
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                EntityUuid("ship-wedged".into()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+                ShipPhysicsComponent::default(),
+                // Mid-cooldown, so this is purely about geometry.
+                CollisionCooldown {
+                    remaining_secs: 0.9,
+                },
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    100.0,
+                )])),
+                ShipModifiers::new(),
+                ShipImpulse::default(),
+                ColliderSection(ColliderConfig {
+                    shape: ColliderShape::Ball,
+                    radius: R,
+                    length: 0.0,
+                    movable: true,
+                }),
+                Collider::ball(R),
+                RigidBody::KinematicPositionBased,
+                ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
+            ))
+            .id();
+
+        for (uuid, x) in [("ast-aaa", ROCK_X), ("ast-zzz", -ROCK_X)] {
+            app.world_mut().spawn((
+                Asteroid,
+                AsteroidUuid(uuid.to_string()),
+                Transform::from_xyz(x, 0.0, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+                ColliderSection(ColliderConfig {
+                    shape: ColliderShape::Ball,
+                    radius: R,
+                    length: 0.0,
+                    movable: false,
+                }),
+                Collider::ball(R),
+                RigidBody::Fixed,
+                ActiveCollisionTypes::KINEMATIC_STATIC,
+            ));
+        }
+
+        // Long enough that a per-tick correction which keeps re-wedging the hull
+        // would have had every chance to settle into its steady state.
+        for _ in 0..10 {
+            app.update();
+        }
+
+        let physics = app.world().get::<ShipPhysicsComponent>(ship).unwrap();
+        for rock_x in [ROCK_X, -ROCK_X] {
+            let gap = ((physics.x - rock_x).powi(2) + physics.z.powi(2)).sqrt() - R - R;
+            assert!(
+                gap >= -1e-5,
+                "the hull ended {:.2} units inside the rock at x={rock_x}: \
+                 resolving only one contact pushes it out of that rock and into \
+                 this one, for ever (hull at x={}, z={})",
+                -gap,
+                physics.x,
+                physics.z
+            );
+        }
     }
 
     /// Issue #896 review finding: `contact_pairs_with` yields every pair whose

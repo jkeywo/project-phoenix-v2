@@ -67,6 +67,14 @@ movable = true
 # actually turned the ship's facing away from a closing obstacle — the fix for
 # the "AI flies through asteroid fields" report against the backfilled player
 # hull.
+#
+# Issue #968 changed what 0.6 MEANS without changing the number: urgency is now
+# the spent share of the authored `avoidance_buffer` measured surface-to-surface
+# (squared), so this trips at a fixed 1.13 units of clearance whatever the
+# obstacle's size, rather than at 40% of an avoidance radius that grew with it.
+# Later against `huge` rocks in the sense that matters (the old form only fired
+# once this hull was already inside one), and about fourteen times earlier
+# against `small` ones. The cruiser's note has the arithmetic.
 [behaviour]
 imminent_collision_facing_threshold = 0.6
 

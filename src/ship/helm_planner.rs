@@ -145,12 +145,18 @@ pub(crate) fn helm_motion_planner(
         let hazard_ignore_size_ratio = behaviour_section
             .map(|b| b.0.hazard_ignore_size_ratio)
             .unwrap_or(crate::ai::HAZARD_IGNORE_SIZE_RATIO);
+        // Authored shape of the severity ramp (issue #968). The ends are fixed
+        // by the model; this is how a hull spends the buffer in between.
+        let hazard_threat_exponent = behaviour_section
+            .map(|b| b.0.hazard_threat_exponent)
+            .unwrap_or(crate::ai::HAZARD_THREAT_EXPONENT);
         let hazard_raw = crate::ai::assess_hazards(
             &sf.merged_view,
             physics.forward_speed,
             avoidance_buffer,
             avoidance_look_ahead,
             hazard_ignore_size_ratio,
+            hazard_threat_exponent,
         );
 
         // ── Objective travel decision ────────────────────────────────────────
@@ -255,6 +261,7 @@ pub(crate) fn helm_motion_planner(
                     entities: &sf.merged_view.entities,
                     avoidance_buffer,
                     avoidance_look_ahead_secs: avoidance_look_ahead,
+                    hazard_threat_exponent,
                 })
             };
         // The ring legs — the shield-recovery standoff (issue #788) and the
@@ -290,6 +297,7 @@ pub(crate) fn helm_motion_planner(
                 entities: &sf.merged_view.entities,
                 avoidance_buffer,
                 avoidance_look_ahead_secs: avoidance_look_ahead,
+                hazard_threat_exponent,
             })
         };
         // Ordinary doctrine travel, byte-identical to the pre-#883 path.
@@ -400,6 +408,7 @@ pub(crate) fn helm_motion_planner(
                         entities: &sf.merged_view.entities,
                         avoidance_buffer,
                         avoidance_look_ahead_secs: avoidance_look_ahead,
+                        hazard_threat_exponent,
                     })
                 })
             }

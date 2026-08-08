@@ -25,6 +25,49 @@ pub const PATROL_FULL_STEER_RAD: f32 = PI / 4.0;
 pub const AVOIDANCE_BUFFER: f32 = 5.0;
 /// Look-ahead horizon (seconds) for predictive collision avoidance.
 pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
+/// Authored shape of the avoidance severity ramp (issue #968): the exponent
+/// [`hazard_threat_fraction`] raises "share of the authored `avoidance_buffer`
+/// already spent" to. `1.0` is a straight line; the shipped `2.0` is gentle
+/// where there is still room and steep where there is not.
+///
+/// This is a designer knob, not geometry. Both ends of the ramp are pinned by
+/// the model itself — `0.0` at a full buffer's clearance and `1.0` at contact,
+/// at every obstacle size — and the exponent only decides how a hull spends the
+/// distance in between. That trade is a gameplay one: a flatter ramp reacts
+/// earlier and pulls hulls off their firing solutions in a close fight, a
+/// steeper one leaves the dodge later. See the table in
+/// [`hazard_threat_fraction`] for what the shipped value costs at each size.
+/// Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::hazard_threat_exponent`], whose
+/// serde default reads this constant so the two cannot drift apart.
+pub const HAZARD_THREAT_EXPONENT: f32 = 2.0;
+/// Authored ceiling (radians) on how far a DEAD-RECKONED hull holds its heading
+/// off its route bearing to clear an obstacle (issue #968). A quarter turn.
+///
+/// The ceiling itself is geometric: at 90° off the line to an obstacle the ship
+/// is flying the tangent, less than that is still closing on it, and more is
+/// flying back the way it came — which is how a hull ends up oscillating in
+/// front of a rock instead of getting past it. What is NOT geometry, and is why
+/// this is a knob rather than a bare `const` in the mover, is the ramp UP to it:
+/// the deviation applied is `threat × ceiling`, a smooth proportional bend, and
+/// not the true tangent angle `asin((r_self + r_hazard) / d)` for the distance
+/// in hand. At threat 0.25 a hull holds 22.5° off its route, which is nothing
+/// like that tangent — it is simply "a quarter of the way to the hardest turn I
+/// am willing to make". How eagerly a hull leaves its route is a designer's
+/// call, so a hull may author its own ceiling.
+///
+/// Note what this replaced. The low-LOD avoidance used to step toward a desired
+/// heading at `max_yaw_rate * dt`, so the hull's own authored turn rate bounded
+/// the manoeuvre. It no longer does: this path SETS a heading rather than
+/// turning toward one (see `ai::server::low_lod_avoid_yaw` for why the old form
+/// could never deviate by more than one tick's turn), so a battleship and a
+/// courier now deviate identically unless they author different values here.
+/// `max_yaw_rate` still bounds the Destroy-target turn in the same mover, and
+/// every high-fidelity hull's steering.
+///
+/// Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::low_lod_avoidance_deviation_rad`].
+pub const LOW_LOD_AVOIDANCE_DEVIATION_RAD: f32 = PI / 2.0;
 /// Speed fraction [0, 1] used for the Channel-3 Navigation→Helm handoff
 /// (`NavigationWaypoint`) fallthrough when the entity has no `[behaviour]`
 /// section to author one. Parse-time default only — see
@@ -84,6 +127,25 @@ pub const VERTICAL_RETURN_RATE: f32 = 0.05;
 /// [`crate::entity_config::BehaviourConfig::imminent_collision_facing_threshold`].
 /// Parse-time default only; the override is stateless and evaporates the tick
 /// urgency drops back under the threshold.
+///
+/// Since issue #968 the `1.0` default is REACHABLE rather than merely nominal,
+/// and that is the point. Urgency used to be `1 - centre_distance /
+/// avoidance_radius`, which only reaches 1 when two hulls occupy the same point
+/// — so "off by default" meant "off, full stop", and a ship that had driven
+/// inside a rock had no behaviour that would turn it back out. Urgency is now
+/// the share of the authored buffer the SURFACE clearance has spent
+/// ([`hazard_threat_fraction`]), so it reads 1.0 exactly when the hulls are
+/// touching or overlapping. The default therefore now means what its wording
+/// always claimed: bail out on a collision that is no longer avoidable, and
+/// never before.
+///
+/// Reachable AT SPEED, not merely when stationary: [`assess_hazards`] measures
+/// each hazard from both the projected and the current position and keeps the
+/// worse reading, so a hull moving fast enough to project its look-ahead point
+/// clean past a rock still reads the rock it is inside. Without that half the
+/// claim above holds only for a ship at rest — the projection at a destroyer's
+/// authored cruise is 40.5 units, more than twice the whole avoidance radius
+/// for a `huge` rock.
 pub const IMMINENT_COLLISION_FACING_THRESHOLD: f32 = 1.0;
 /// Proportional deceleration factor for approach: thrust begins ramping down
 /// when distance is within this multiple of the target stop-distance.
@@ -384,7 +446,133 @@ fn offset_approach_target(self_pos: [f32; 3], target_pos: [f32; 3], min_dist: f3
     ]
 }
 
-fn avoidance_steering(
+/// How threatening one projected hazard is, `[0, 1]`, from the share of the
+/// hull's authored `avoidance_buffer` that the SURFACE-TO-SURFACE clearance has
+/// used up, raised to the hull's authored `hazard_threat_exponent`. `0.0` = a
+/// full buffer's worth of clear space still ahead; `1.0` = the two surfaces are
+/// touching or already overlapping. Both ends are size-invariant, which is the
+/// point; the shape in between is explained at the exponent below.
+///
+/// # Why clearance and not centre distance (issue #968)
+///
+/// This used to be `1 - dist / (self_radius + hazard_radius + buffer)`, i.e. the
+/// projected CENTRE separation as a fraction of the whole avoidance radius. That
+/// makes the response depend on how big the obstacle is rather than on how close
+/// the hull is to hitting it, and it gets *weaker* as the obstacle gets *bigger*:
+/// with the shipped 5-unit buffer and a 1.2-radius destroyer, the moment of
+/// contact scored
+///
+/// | rock radius | old threat at contact | clearance-based |
+/// |-------------|-----------------------|-----------------|
+/// | 2           | 0.61                  | 1.00            |
+/// | 4           | 0.49                  | 1.00            |
+/// | 12 (`huge`) | 0.27                  | 1.00            |
+///
+/// so the `huge` class added in issue #947 was pushed away with less than half
+/// the force of the rocks the avoidance was originally tuned against — the
+/// "separation response is too weak for a large obstacle" this issue reports.
+/// Ships ground their way through radius-12 rocks, ending up as much as 6.5
+/// units INSIDE the collider.
+///
+/// Measuring the clearance instead makes the response size-invariant: a hull one
+/// buffer-width off a rock's skin reacts the same whether the rock is a pebble
+/// or a mountain, and a hull actually touching one always reacts at full
+/// strength. The authored `avoidance_buffer` is the whole ramp, which is what a
+/// designer tuning that field already believes it to be.
+///
+/// # What this DOES re-scale for an existing hull
+///
+/// The ends of the ramp are unchanged, but a hull that authored a THRESHOLD
+/// against the old curve now crosses it somewhere else, and the four Alliance
+/// hulls all author `imminent_collision_facing_threshold = 0.6`. That trigger
+/// used to be "projected centre separation below 40% of the avoidance radius";
+/// it is now "surface clearance at or under
+/// `buffer × (1 − √threshold)`" — 1.13 units at the shipped 5-unit buffer,
+/// whatever the obstacle. Against a `huge` rock that is the fix (the old form
+/// did not fire until the hull was already 5.9 units INSIDE it). Against a
+/// `small` rock it fires roughly fourteen times earlier — 1.13 units of
+/// clearance instead of 0.08 — and the override snaps `desired_facing_local`
+/// off the gunnery solution, so it is a real behaviour change on the small end
+/// and not only a repair on the large one. Squaring does not damp it, because a
+/// threshold crossing is not a proportional response. The crossing point is
+/// pinned in
+/// `imminent_collision_facing_threshold_now_crosses_at_a_fixed_surface_clearance`.
+///
+/// `avoidance_buffer <= 0.0` means a hull that authored no standoff at all:
+/// there is no ramp, so the answer is a step — full threat while the surfaces
+/// overlap and none once they do not. Both in-tree callers range-gate before
+/// calling, and for them that is the same answer the `1.0` this used to return
+/// unconditionally gave (their gate reduces to "overlapping" when the buffer is
+/// zero); stating it as a function of the distance rather than ignoring the
+/// distance is what makes this total for any future caller.
+pub fn hazard_threat_fraction(
+    projected_distance: f32,
+    self_radius: f32,
+    hazard_radius: f32,
+    avoidance_buffer: f32,
+    hazard_threat_exponent: f32,
+) -> f32 {
+    let clearance = projected_distance - self_radius - hazard_radius;
+    if avoidance_buffer <= 0.0 {
+        return if clearance <= 0.0 { 1.0 } else { 0.0 };
+    }
+    let spent = (1.0 - clearance / avoidance_buffer).clamp(0.0, 1.0);
+    // The authored exponent shapes the ramp between those two fixed ends. At the
+    // shipped default of 2 it is gentle where there is still room and steep where
+    // there is not. A LINEAR ramp (exponent 1) fixes the size bias but reacts to
+    // a hazard half a buffer away twice as hard as the old model did to ANY of
+    // them, and that is not a free change: the shared surface feeds the lateral
+    // thruster, which does not exclude a ship's own gunnery target the way the
+    // steering legs do, so a hull in a close-range fight strafed off its firing
+    // solution and the `combat_test` demo stopped chaining its waves.
+    //
+    // Squaring is a compromise, not a restoration, and it is only near-neutral
+    // for one band of sizes. Old and new cross at
+    //
+    //     spent = buffer / (self_radius + hazard_radius + buffer)
+    //
+    // and BELOW that crossing (i.e. over the far end of the ramp, where there is
+    // still clearance) the squared response is the WEAKER of the two. For a
+    // 1.2-radius destroyer at the shipped 5-unit buffer:
+    //
+    // | hazard    | crossing | old at spent 0.5 | squared | verdict at mid-ramp |
+    // |-----------|----------|------------------|---------|---------------------|
+    // | r=2       | 0.61     | 0.30             | 0.25    | weaker              |
+    // | r=4       | 0.49     | 0.25             | 0.25    | ~neutral            |
+    // | r=12      | 0.27     | 0.14             | 0.25    | stronger            |
+    // | ship-ship | 0.68     | 0.34             | 0.25    | weaker              |
+    //
+    // So "about as strong as before at mid-range" is true for the radius-4 rocks
+    // the avoidance was tuned against and false either side of them: against a
+    // small rock at spent 0.2 the new response is 0.04 against the old 0.12,
+    // three times weaker. With a wide authored buffer the crossing goes to ~1
+    // and the new curve is weaker over essentially the whole ramp — which is why
+    // `helm_ai`'s 60-unit-buffer climb test needed its observation window
+    // re-baselined from 60 ticks to 150. What is NOT a compromise, and is the
+    // whole point of the issue, is the contact end: 1.0 at every size, for every
+    // exponent.
+    //
+    // Through `simmath` rather than `f32::powf`, like every other transcendental
+    // in the simulation: the authored exponent makes this a real `powf` call
+    // rather than a multiply, and a host-libm `powf` is not bit-identical across
+    // targets (issue #908).
+    simmath::powf(spent, hazard_threat_exponent)
+}
+
+/// Signed steering `[-1, 1]` that turns a hull AROUND a projected obstacle
+/// rather than back off it: negative is to port, positive to starboard, and the
+/// magnitude is the summed [`hazard_threat_fraction`] of everything in play.
+///
+/// Public since issue #968 so the dead-reckoned low-LOD mover
+/// (`ai::server::low_lod_avoid_yaw`) can share it. That path used to take its
+/// heading from [`assess_hazards`]' repulsion VECTOR, which points radially away
+/// from the obstacle — so a ship whose route ran through a rock turned to face
+/// straight back out, cleared the buffer, snapped onto its route bearing again
+/// and drove straight back in. Radial repulsion is the right thing for a
+/// THRUSTER, which can push sideways while the hull points where it likes; it is
+/// the wrong thing for a heading. A signed turn is what actually gets a ship
+/// past something.
+pub fn avoidance_steering(
     self_pos: [f32; 3],
     self_yaw: f32,
     self_speed: f32,
@@ -393,6 +581,7 @@ fn avoidance_steering(
     world_entities: &[AiWorldEntity],
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
+    hazard_threat_exponent: f32,
 ) -> f32 {
     if self_speed.abs() < AVOIDANCE_MIN_SPEED {
         return 0.0;
@@ -427,7 +616,13 @@ fn avoidance_steering(
         let proj_dist = (ddx * ddx + ddz * ddz).sqrt();
 
         if proj_dist < avoidance_radius {
-            let threat_fraction = 1.0 - (proj_dist / avoidance_radius);
+            let threat_fraction = hazard_threat_fraction(
+                proj_dist,
+                self_radius,
+                entity.radius,
+                avoidance_buffer,
+                hazard_threat_exponent,
+            );
             let to_x = ent_proj_x - proj_self_x;
             let to_z = ent_proj_z - proj_self_z;
             let cross = fwd_x * to_z - fwd_z * to_x;
@@ -573,6 +768,7 @@ pub fn plan_helm_travel(
     waypoint_arrival_radius: f32,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
+    hazard_threat_exponent: f32,
     forward_speed: f32,
     nav_handoff_speed: f32,
 ) -> (f32, f32) {
@@ -605,6 +801,7 @@ pub fn plan_helm_travel(
                     world_view,
                     avoidance_buffer,
                     avoidance_look_ahead_secs,
+                    hazard_threat_exponent,
                     forward_speed,
                     weapons_target,
                     target_speed,
@@ -631,6 +828,7 @@ pub fn plan_helm_travel(
                             waypoint_arrival_radius,
                             avoidance_buffer,
                             avoidance_look_ahead_secs,
+                            hazard_threat_exponent,
                             forward_speed,
                             target_speed,
                         )
@@ -659,6 +857,7 @@ pub fn plan_helm_travel(
                     waypoint_arrival_radius,
                     avoidance_buffer,
                     avoidance_look_ahead_secs,
+                    hazard_threat_exponent,
                     forward_speed,
                     target_speed,
                     anchors,
@@ -673,6 +872,7 @@ pub fn plan_helm_travel(
                         waypoint_arrival_radius,
                         avoidance_buffer,
                         avoidance_look_ahead_secs,
+                        hazard_threat_exponent,
                         forward_speed,
                         target_speed,
                     )
@@ -704,6 +904,7 @@ pub fn plan_helm_travel(
                         waypoint_arrival_radius,
                         avoidance_buffer,
                         avoidance_look_ahead_secs,
+                        hazard_threat_exponent,
                         forward_speed,
                         target_speed,
                     )
@@ -733,6 +934,7 @@ pub fn plan_helm_travel(
             waypoint_arrival_radius,
             avoidance_buffer,
             avoidance_look_ahead_secs,
+            hazard_threat_exponent,
             forward_speed,
             nav_handoff_speed,
         ) {
@@ -768,6 +970,7 @@ fn helm_destroy(
     world_view: &WorldView,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
+    hazard_threat_exponent: f32,
     forward_speed: f32,
     weapons_target: Option<Uuid>,
     target_speed: f32,
@@ -816,6 +1019,7 @@ fn helm_destroy(
         &world_view.entities,
         avoidance_buffer,
         avoidance_look_ahead_secs,
+        hazard_threat_exponent,
     );
 
     let base_steer = steer_toward(
@@ -1004,6 +1208,7 @@ pub struct FlyThroughPassInput<'a> {
     pub entities: &'a [AiWorldEntity],
     pub avoidance_buffer: f32,
     pub avoidance_look_ahead_secs: f32,
+    pub hazard_threat_exponent: f32,
 }
 
 /// The fly-through attack pass: `(thrust, steering)` for one tick (issue #883).
@@ -1069,6 +1274,7 @@ pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
         input.entities,
         input.avoidance_buffer,
         input.avoidance_look_ahead_secs,
+        input.hazard_threat_exponent,
     );
     (
         thrust.clamp(-1.0, 1.0),
@@ -1119,6 +1325,7 @@ pub struct RecoveryOrbitInput<'a> {
     pub entities: &'a [AiWorldEntity],
     pub avoidance_buffer: f32,
     pub avoidance_look_ahead_secs: f32,
+    pub hazard_threat_exponent: f32,
 }
 
 /// Hold a ring around a target: `(thrust, steering)` for one tick (issue #788,
@@ -1209,6 +1416,7 @@ pub fn plan_recovery_orbit(input: &RecoveryOrbitInput) -> (f32, f32) {
         input.entities,
         input.avoidance_buffer,
         input.avoidance_look_ahead_secs,
+        input.hazard_threat_exponent,
     );
     (
         input.orbit_speed.clamp(-1.0, 1.0),
@@ -1255,6 +1463,7 @@ pub struct ArtilleryPositionInput<'a> {
     pub entities: &'a [AiWorldEntity],
     pub avoidance_buffer: f32,
     pub avoidance_look_ahead_secs: f32,
+    pub hazard_threat_exponent: f32,
 }
 
 /// Hold the artillery firing position: `(thrust, steering)` for one tick
@@ -1343,6 +1552,7 @@ pub fn plan_artillery_position(input: &ArtilleryPositionInput) -> (f32, f32) {
         input.entities,
         input.avoidance_buffer,
         input.avoidance_look_ahead_secs,
+        input.hazard_threat_exponent,
     );
     (
         input.hold_speed.clamp(-1.0, 1.0),
@@ -1511,6 +1721,7 @@ fn helm_patrol(
     waypoint_arrival_radius: f32,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
+    hazard_threat_exponent: f32,
     forward_speed: f32,
     target_speed: f32,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
@@ -1554,6 +1765,7 @@ fn helm_patrol(
         &world_view.entities,
         avoidance_buffer,
         avoidance_look_ahead_secs,
+        hazard_threat_exponent,
     );
     let base_steer = steer_toward(
         world_view.entity_yaw,
@@ -1573,6 +1785,7 @@ fn helm_navigate_to(
     arrival_radius: f32,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
+    hazard_threat_exponent: f32,
     forward_speed: f32,
     target_speed: f32,
 ) -> Option<(f32, f32)> {
@@ -1596,6 +1809,7 @@ fn helm_navigate_to(
         &world_view.entities,
         avoidance_buffer,
         avoidance_look_ahead_secs,
+        hazard_threat_exponent,
     );
     let base_steer = steer_toward(
         world_view.entity_yaw,
@@ -1777,6 +1991,22 @@ pub struct HazardAssessmentRaw {
 /// becomes [`AiWorldEntity::movable`], and the threshold itself stays authored
 /// on the observer as `hazard_ignore_size_ratio`.
 ///
+/// WHICH hazards register is a function of the avoidance radius
+/// (`self_radius + hazard_radius + avoidance_buffer`); HOW HARD each one pushes
+/// is [`hazard_threat_fraction`], which measures the surface-to-surface
+/// clearance against the authored buffer so the response is the same at contact
+/// whatever the obstacle's size (issue #968). `urgency` therefore reads as "how
+/// much of my authored standoff is gone", and reaches `1.0` exactly when a hull
+/// is touching or inside something — which is also what makes the authored
+/// `imminent_collision_facing_threshold` reachable at its `1.0` default.
+///
+/// Each hazard is measured TWICE — once from the `forward_speed`-projected
+/// position and once from where the ship actually is — and the worse reading
+/// wins, with the repulsion taken from whichever won. The look-ahead exists to
+/// find hazards EARLY; it must never be able to argue a hull out of one it is
+/// already overlapping, which is exactly what a 40-unit projection past a
+/// 12-radius rock used to do. See the note at the comparison itself.
+///
 /// Pure: no ECS, no Bevy. The planner converts the local force array to the
 /// engine's vector type.
 pub fn assess_hazards(
@@ -1785,6 +2015,7 @@ pub fn assess_hazards(
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
     hazard_ignore_size_ratio: f32,
+    hazard_threat_exponent: f32,
 ) -> HazardAssessmentRaw {
     let self_pos = world_view.entity_pos;
     let self_yaw = world_view.entity_yaw;
@@ -1836,56 +2067,105 @@ pub fn assess_hazards(
             (entity.position[0], entity.position[2])
         };
 
-        let ddx = proj_self_x - ent_proj_x;
-        let ddz = proj_self_z - ent_proj_z;
-        let dist = (ddx * ddx + ddz * ddz).sqrt();
-        if dist < avoidance_radius && dist > 0.01 {
-            let threat_fraction = 1.0 - (dist / avoidance_radius);
-            // World-space repulsion: away from the threat, scaled by severity.
-            let inv = threat_fraction / dist;
-            let rx = ddx * inv;
-            let rz = ddz * inv;
-            // Vertical (local +Y = up) repulsion, issue #780: the surface is now
-            // genuinely 3D, but only ELIGIBLE MOVING hazards contribute a vertical
-            // component (AC5) — static obstacles stay a purely planar concern for
-            // the lateral/engine actuators. When the hazard is off the ship's
-            // cruise plane the climb follows the actual vertical separation; when
-            // both share the plane (`dy ≈ 0`, the common case today) the initial
-            // policy climbs UP by convention to clear a co-planar moving threat.
-            // The magnitude matches the planar contribution's severity so a
-            // bounded/full-3D hull's authored sensitivity weights all axes alike.
-            let vertical_contribution = if entity.movable {
-                let dy = self_pos[1] - entity.position[1];
-                if dy.abs() > 0.01 {
-                    dy.signum() * threat_fraction
-                } else {
-                    threat_fraction
-                }
+        let proj_ddx = proj_self_x - ent_proj_x;
+        let proj_ddz = proj_self_z - ent_proj_z;
+        let proj_dist = (proj_ddx * proj_ddx + proj_ddz * proj_ddz).sqrt();
+
+        // ── The look-ahead never subtracts from the here-and-now (issue #968) ──
+        // The projection is a PREDICTION, and a prediction can point clean past
+        // something the hull is standing in. At `combat_test`'s authored cruise
+        // (a destroyer's `target_speed = 0.9` of 15 u/s) the 3-second projection
+        // lands 40.5 units ahead, while the whole avoidance radius for a `huge`
+        // rock is 18.2 — so every centre distance under 22.3 units, INCLUDING
+        // the entire interior of the rock, fell outside the projected picture
+        // and a buried hull read 0.0 urgency. That is the exact case the
+        // reachable `imminent_collision_facing_threshold` exists to answer, so
+        // reading it as "nothing there" is the worst possible moment to be
+        // wrong.
+        //
+        // Both readings are taken and the WORSE one wins. A look-ahead may only
+        // ever discover a hazard earlier than the current geometry does; it may
+        // never talk the hull out of one it is already up against. The repulsion
+        // is taken from whichever reading won, so a hull inside a collider
+        // pushes radially out of it rather than out of a point 40 units the far
+        // side of it.
+        let here_ddx = self_pos[0] - entity.position[0];
+        let here_ddz = self_pos[2] - entity.position[2];
+        let here_dist = (here_ddx * here_ddx + here_ddz * here_ddz).sqrt();
+
+        let in_range = |d: f32| d < avoidance_radius && d > 0.01;
+        if !in_range(proj_dist) && !in_range(here_dist) {
+            continue;
+        }
+        // Severity is the share of the AUTHORED BUFFER the surface-to-surface
+        // clearance has used up, not the share of the whole avoidance radius
+        // the centre separation has (issue #968) — see
+        // [`hazard_threat_fraction`] for why the old form under-reacted to
+        // exactly the biggest obstacles.
+        let threat_of = |d: f32| {
+            if in_range(d) {
+                hazard_threat_fraction(
+                    d,
+                    self_radius,
+                    entity.radius,
+                    avoidance_buffer,
+                    hazard_threat_exponent,
+                )
             } else {
                 0.0
-            };
-            // Rotate the horizontal repulsion into the ship-local frame
-            // (x = starboard, z = aft); the vertical component is already ship-up.
-            let contribution = [
-                rx * stbd_x + rz * stbd_z,
-                vertical_contribution,
-                -(rx * fwd_x + rz * fwd_z),
-            ];
-            force[0] += contribution[0];
-            force[1] += contribution[1];
-            force[2] += contribution[2];
-            contributions.push(HazardContribution {
-                uuid: entity.uuid,
-                movable: entity.movable,
-                dangerous: entity.dangerous,
-                size_rating: entity.size_rating,
-                force_local: contribution,
-                threat_fraction,
-            });
-            if threat_fraction > urgency {
-                urgency = threat_fraction;
-                primary = Some(entity.uuid);
             }
+        };
+        let projected_threat = threat_of(proj_dist);
+        let here_threat = threat_of(here_dist);
+        let (threat_fraction, ddx, ddz, dist) = if here_threat > projected_threat {
+            (here_threat, here_ddx, here_ddz, here_dist)
+        } else {
+            (projected_threat, proj_ddx, proj_ddz, proj_dist)
+        };
+        // World-space repulsion: away from the threat, scaled by severity.
+        let inv = threat_fraction / dist;
+        let rx = ddx * inv;
+        let rz = ddz * inv;
+        // Vertical (local +Y = up) repulsion, issue #780: the surface is now
+        // genuinely 3D, but only ELIGIBLE MOVING hazards contribute a vertical
+        // component (AC5) — static obstacles stay a purely planar concern for
+        // the lateral/engine actuators. When the hazard is off the ship's
+        // cruise plane the climb follows the actual vertical separation; when
+        // both share the plane (`dy ≈ 0`, the common case today) the initial
+        // policy climbs UP by convention to clear a co-planar moving threat.
+        // The magnitude matches the planar contribution's severity so a
+        // bounded/full-3D hull's authored sensitivity weights all axes alike.
+        let vertical_contribution = if entity.movable {
+            let dy = self_pos[1] - entity.position[1];
+            if dy.abs() > 0.01 {
+                dy.signum() * threat_fraction
+            } else {
+                threat_fraction
+            }
+        } else {
+            0.0
+        };
+        // Rotate the horizontal repulsion into the ship-local frame
+        // (x = starboard, z = aft); the vertical component is already ship-up.
+        let contribution = [
+            rx * stbd_x + rz * stbd_z,
+            vertical_contribution,
+            -(rx * fwd_x + rz * fwd_z),
+        ];
+        force[0] += contribution[0];
+        force[1] += contribution[1];
+        force[2] += contribution[2];
+        contributions.push(HazardContribution {
+            uuid: entity.uuid,
+            movable: entity.movable,
+            dangerous: entity.dangerous,
+            size_rating: entity.size_rating,
+            force_local: contribution,
+            threat_fraction,
+        });
+        if threat_fraction > urgency {
+            urgency = threat_fraction;
+            primary = Some(entity.uuid);
         }
     }
 
@@ -2139,6 +2419,7 @@ mod tests {
             &[obstacle],
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
         );
 
         assert_eq!(
@@ -2274,6 +2555,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2294,6 +2576,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2320,6 +2603,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2367,6 +2651,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2400,6 +2685,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2449,6 +2735,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2533,6 +2820,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2571,6 +2859,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2602,6 +2891,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2640,6 +2930,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2668,6 +2959,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2696,6 +2988,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2802,6 +3095,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2845,6 +3139,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2877,6 +3172,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -2961,6 +3257,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3002,6 +3299,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3043,6 +3341,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3082,6 +3381,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3140,6 +3440,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3455,6 +3756,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3484,6 +3786,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3515,6 +3818,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3545,6 +3849,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3578,6 +3883,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3608,6 +3914,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3629,6 +3936,7 @@ mod tests {
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
             0.0,
             0.6,
         );
@@ -3742,6 +4050,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             HAZARD_IGNORE_SIZE_RATIO,
+            HAZARD_THREAT_EXPONENT,
         );
         assert!(
             hz.urgency > 0.0,
@@ -3809,6 +4118,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             HAZARD_IGNORE_SIZE_RATIO,
+            HAZARD_THREAT_EXPONENT,
         );
         assert!(
             moving.forces_local[1] > 0.0,
@@ -3824,6 +4134,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             HAZARD_IGNORE_SIZE_RATIO,
+            HAZARD_THREAT_EXPONENT,
         );
         assert_eq!(
             static_hz.forces_local[1], 0.0,
@@ -3861,6 +4172,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             HAZARD_IGNORE_SIZE_RATIO,
+            HAZARD_THREAT_EXPONENT,
         );
         assert!(below.forces_local[1] > 0.0, "hazard below must push up");
         // Hazard above (y = +5): dy = -5 → descend (-).
@@ -3870,6 +4182,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             HAZARD_IGNORE_SIZE_RATIO,
+            HAZARD_THREAT_EXPONENT,
         );
         assert!(above.forces_local[1] < 0.0, "hazard above must push down");
     }
@@ -3887,6 +4200,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             HAZARD_IGNORE_SIZE_RATIO,
+            HAZARD_THREAT_EXPONENT,
         );
         assert_eq!(hz, HazardAssessmentRaw::default());
     }
@@ -3915,6 +4229,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             HAZARD_IGNORE_SIZE_RATIO,
+            HAZARD_THREAT_EXPONENT,
         );
         assert_eq!(
             hz,
@@ -3950,14 +4265,28 @@ mod tests {
         };
 
         // Rule off (ratio 0.0, the default): the small obstacle is a hazard.
-        let assessed = assess_hazards(&view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 0.0);
+        let assessed = assess_hazards(
+            &view,
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            HAZARD_THREAT_EXPONENT,
+        );
         assert!(
             assessed.urgency > 0.0,
             "with the ignore rule off, even a small obstacle is a hazard"
         );
 
         // Rule on (ratio 1.0): the smaller hazard is ignored → no force at all.
-        let ignored = assess_hazards(&view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 1.0);
+        let ignored = assess_hazards(
+            &view,
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            1.0,
+            HAZARD_THREAT_EXPONENT,
+        );
         assert_eq!(
             ignored,
             HazardAssessmentRaw::default(),
@@ -3978,6 +4307,7 @@ mod tests {
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             1.0,
+            HAZARD_THREAT_EXPONENT,
         );
         assert!(
             big.urgency > 0.0,
@@ -4016,7 +4346,14 @@ mod tests {
         // Ratio 1.0 = "ignore anything strictly smaller than self", the most
         // aggressive setting a designer can author short of ignoring equals.
         let assess = |view: &WorldView| {
-            assess_hazards(view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 1.0)
+            assess_hazards(
+                view,
+                3.0,
+                AVOIDANCE_BUFFER,
+                AVOIDANCE_LOOK_AHEAD_SECS,
+                1.0,
+                HAZARD_THREAT_EXPONENT,
+            )
         };
 
         // A static hazard rated 1 against self's 10 is still avoided.
@@ -4053,6 +4390,255 @@ mod tests {
         assert!(
             huge_static.urgency > 0.0,
             "static terrain larger than self must be avoided, got {huge_static:?}"
+        );
+    }
+
+    /// Issue #968: the response at a given SURFACE clearance must not depend on
+    /// how big the obstacle is.
+    ///
+    /// This is the defect the issue reports, stated as a unit: the shipped
+    /// destroyer (collider radius 1.2) sitting exactly against a rock's skin used
+    /// to register 0.61 urgency for a `small` rock (radius 2) and only 0.27 for
+    /// the `huge` class added in issue #947 (radius 12) — less than half the push
+    /// for the obstacle that is three times harder to get around, because the old
+    /// threat fraction divided the CENTRE separation by the whole avoidance
+    /// radius. Contact is contact: all three sizes must read full urgency, and a
+    /// hull one buffer-width clear of any of them must read none.
+    #[test]
+    fn hazard_severity_is_the_same_at_contact_for_every_obstacle_size() {
+        const SELF_RADIUS: f32 = 1.2;
+        const BUFFER: f32 = 5.0;
+
+        // Stationary hull at the origin, so the projected position is the actual
+        // one and `centre_distance` is exactly what this test places.
+        let at_centre_distance = |rock_radius: f32, centre_distance: f32| {
+            let view = WorldView {
+                entity_pos: [0.0, 0.0, 0.0],
+                entity_yaw: 0.0,
+                self_radius: SELF_RADIUS,
+                entities: vec![AiWorldEntity {
+                    uuid: Uuid::from_u128(1),
+                    position: [0.0, 0.0, -centre_distance],
+                    radius: rock_radius,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            assess_hazards(
+                &view,
+                0.0,
+                BUFFER,
+                AVOIDANCE_LOOK_AHEAD_SECS,
+                0.0,
+                HAZARD_THREAT_EXPONENT,
+            )
+            .urgency
+        };
+
+        for rock_radius in [2.0_f32, 4.0, 12.0] {
+            // Skin-to-skin contact: centre distance == the two radii summed.
+            let touching = at_centre_distance(rock_radius, SELF_RADIUS + rock_radius);
+            assert!(
+                (touching - 1.0).abs() < 1e-5,
+                "a hull touching a radius-{rock_radius} obstacle must read full \
+                 urgency, got {touching}"
+            );
+
+            // Half a buffer of clear space left: the squared ramp's 0.25, and
+            // again the same figure whatever the obstacle's size. Size-invariance
+            // is the property under test; the RAMP SHAPE is stated here too so
+            // that changing it is a deliberate re-bless rather than a silent one
+            // (see `hazard_threat_fraction` for why it is not linear).
+            let half_clear =
+                at_centre_distance(rock_radius, SELF_RADIUS + rock_radius + BUFFER / 2.0);
+            assert!(
+                (half_clear - 0.25).abs() < 1e-5,
+                "half a buffer clear of a radius-{rock_radius} obstacle must read \
+                 the same quarter urgency at every size, got {half_clear}"
+            );
+
+            // What squaring COSTS at mid-ramp, stated rather than glossed. The
+            // old centre-distance form scored `buffer * spent / (self_radius +
+            // hazard_radius + buffer)` here, and the two curves cross at
+            // `spent = buffer / (self_radius + hazard_radius + buffer)`. Below
+            // that crossing the new response is the weaker of the two — for a
+            // `small` rock the crossing is 0.61, so at this mid-ramp sample the
+            // hull now pushes 0.25 where it used to push 0.30. Pinned so a
+            // future exponent change has to face the number.
+            let old_at_half_ramp = BUFFER * 0.5 / (SELF_RADIUS + rock_radius + BUFFER);
+            let delta = half_clear - old_at_half_ramp;
+            let expected_delta = match rock_radius as i32 {
+                2 => -0.055,
+                4 => 0.005,
+                _ => 0.113,
+            };
+            assert!(
+                (delta - expected_delta).abs() < 5e-3,
+                "mid-ramp response against a radius-{rock_radius} obstacle moved \
+                 by {delta:+.3} (old {old_at_half_ramp:.3} → new {half_clear:.3}); \
+                 the recorded figure is {expected_delta:+.3}"
+            );
+
+            // A full buffer clear: nothing to react to, at any size.
+            let clear = at_centre_distance(rock_radius, SELF_RADIUS + rock_radius + BUFFER);
+            assert_eq!(
+                clear, 0.0,
+                "a hull a full buffer clear of a radius-{rock_radius} obstacle \
+                 must read no urgency, got {clear}"
+            );
+        }
+    }
+
+    /// Issue #968: the four Alliance hulls' authored
+    /// `imminent_collision_facing_threshold = 0.6` now trips at a fixed SURFACE
+    /// clearance instead of a fixed fraction of the avoidance radius, and that
+    /// re-scales it — for the better against a `huge` rock, and much earlier
+    /// against a small one.
+    ///
+    /// Old trigger: projected centre separation below `0.4 × (self_radius +
+    /// hazard_radius + buffer)`. New trigger: clearance at or under
+    /// `buffer × (1 − √0.6)` = 1.127 units, whatever the obstacle. Against the
+    /// `huge` class the old form did not fire until the hull was already 5.9
+    /// units INSIDE the rock, which is the bug; against a `small` rock it fired
+    /// at 0.08 units of clearance and now fires at 1.13, roughly fourteen times
+    /// earlier. The override snaps `desired_facing_local` off the gunnery
+    /// solution, so that end is a real behaviour change and is pinned here.
+    #[test]
+    fn imminent_collision_facing_threshold_now_crosses_at_a_fixed_surface_clearance() {
+        const SELF_RADIUS: f32 = 1.2;
+        const BUFFER: f32 = 5.0;
+        const THRESHOLD: f32 = 0.6;
+
+        let urgency_at_clearance = |rock_radius: f32, clearance: f32| {
+            let view = WorldView {
+                entity_pos: [0.0, 0.0, 0.0],
+                entity_yaw: 0.0,
+                self_radius: SELF_RADIUS,
+                entities: vec![AiWorldEntity {
+                    uuid: Uuid::from_u128(1),
+                    position: [0.0, 0.0, -(SELF_RADIUS + rock_radius + clearance)],
+                    radius: rock_radius,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            assess_hazards(
+                &view,
+                0.0,
+                BUFFER,
+                AVOIDANCE_LOOK_AHEAD_SECS,
+                0.0,
+                HAZARD_THREAT_EXPONENT,
+            )
+            .urgency
+        };
+
+        let crossing = BUFFER * (1.0 - THRESHOLD.sqrt());
+        assert!(
+            (crossing - 1.127).abs() < 1e-3,
+            "the recorded crossing clearance is 1.127 units, computed {crossing}"
+        );
+
+        for rock_radius in [2.0_f32, 4.0, 12.0] {
+            assert!(
+                urgency_at_clearance(rock_radius, crossing - 0.01) >= THRESHOLD,
+                "just inside the crossing, a radius-{rock_radius} obstacle must \
+                 trip the authored 0.6 facing override"
+            );
+            assert!(
+                urgency_at_clearance(rock_radius, crossing + 0.01) < THRESHOLD,
+                "just outside the crossing, a radius-{rock_radius} obstacle must \
+                 not trip it — the trigger is a clearance, not a size"
+            );
+        }
+
+        // The small-rock end, said out loud: the old form put this crossing at
+        // 0.08 units of clearance, so a `small` rock now takes the hull's facing
+        // roughly fourteen times further out than the authored 0.6 used to mean.
+        let old_small_crossing =
+            (1.0 - THRESHOLD) * (SELF_RADIUS + 2.0 + BUFFER) - SELF_RADIUS - 2.0;
+        assert!(
+            (old_small_crossing - 0.08).abs() < 1e-2,
+            "the old crossing against a radius-2 rock is 0.08 units of clearance, \
+             computed {old_small_crossing}"
+        );
+        assert!(
+            crossing / old_small_crossing > 13.0,
+            "the small-rock trigger moved {}× further out; if that ratio changes \
+             the note on `hazard_threat_fraction` needs changing with it",
+            crossing / old_small_crossing
+        );
+    }
+
+    /// The overlapping case, which is where issue #968's ships actually ended up:
+    /// a hull INSIDE a `huge` rock must saturate rather than fade. Saturation is
+    /// what makes the authored `imminent_collision_facing_threshold` reachable at
+    /// its `1.0` default, i.e. what gives a buried hull a way back out.
+    ///
+    /// AT SPEED as well as at rest, which is the half that actually matters: the
+    /// hulls this issue is about were doing 13.5 u/s. `assess_hazards` measures
+    /// from a point projected `forward_speed × 3 s` ahead, so at that speed the
+    /// measuring point is 40.5 units up-track while the whole avoidance radius
+    /// for a `huge` rock is 18.2 — the rock the ship is buried in falls out of
+    /// the projected picture entirely and urgency reads 0.0. Both readings are
+    /// taken and the worse one kept, so it does not.
+    #[test]
+    fn hazard_severity_saturates_while_a_hull_is_inside_a_collider() {
+        let buried = |penetration: f32, forward_speed: f32| {
+            let view = WorldView {
+                entity_pos: [0.0, 0.0, 0.0],
+                entity_yaw: 0.0,
+                self_radius: 1.2,
+                entities: vec![AiWorldEntity {
+                    uuid: Uuid::from_u128(2),
+                    position: [0.0, 0.0, -(1.2 + 12.0 - penetration)],
+                    radius: 12.0,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            assess_hazards(
+                &view,
+                forward_speed,
+                AVOIDANCE_BUFFER,
+                AVOIDANCE_LOOK_AHEAD_SECS,
+                0.0,
+                HAZARD_THREAT_EXPONENT,
+            )
+        };
+
+        // 6.5 units inside is what the instrumented `combat_test` run measured;
+        // 13.5 u/s is the destroyer's authored cruise there (`target_speed` 0.9
+        // of a 15 u/s hull), which projects the look-ahead 40.5 units past the
+        // rock.
+        for penetration in [0.5_f32, 3.0, 6.5] {
+            for forward_speed in [0.0_f32, 13.5] {
+                let hz = buried(penetration, forward_speed);
+                assert_eq!(
+                    hz.urgency, 1.0,
+                    "a hull {penetration} units inside a radius-12 collider must \
+                     read full urgency at {forward_speed} u/s, got {:?}",
+                    hz.urgency
+                );
+                assert!(
+                    hz.forces_local[2] > 0.0,
+                    "the repulsion must still push aft, off the obstacle ahead, \
+                     got {:?}",
+                    hz.forces_local
+                );
+            }
+        }
+
+        // Anti-vacuity: the projected reading really would have lost the rock at
+        // that speed, so the loop above is exercising the max and not merely
+        // agreeing with what the projection said anyway. A hull 6.5 units inside
+        // sits 6.7 from the centre; projected 40.5 units on it is 33.8 the far
+        // side, well outside the 18.2 avoidance radius.
+        let projected_separation = (40.5_f32 - (1.2 + 12.0 - 6.5)).abs();
+        assert!(
+            projected_separation > 1.2 + 12.0 + AVOIDANCE_BUFFER,
+            "the projected point must fall outside the avoidance radius for this \
+             test to be about the un-projected reading, got {projected_separation}"
         );
     }
 
@@ -4171,6 +4757,7 @@ mod tests {
             entities,
             avoidance_buffer: AVOIDANCE_BUFFER,
             avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
+            hazard_threat_exponent: HAZARD_THREAT_EXPONENT,
         }
     }
 
@@ -4340,6 +4927,7 @@ mod tests {
             entities,
             avoidance_buffer: AVOIDANCE_BUFFER,
             avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
+            hazard_threat_exponent: HAZARD_THREAT_EXPONENT,
         }
     }
 
@@ -4481,6 +5069,7 @@ mod tests {
             entities,
             avoidance_buffer: AVOIDANCE_BUFFER,
             avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
+            hazard_threat_exponent: HAZARD_THREAT_EXPONENT,
         }
     }
 

@@ -146,14 +146,29 @@ movable = true
 #
 # `imminent_collision_facing_threshold` (issue #780 AC4, and the "AI ships fly
 # through asteroid fields" report against the backfilled player hull): every
-# shipped hull left this at its parse-time default of 1.0 — effectively OFF,
-# since urgency is clamped to [0, 1] and can't exceed it — so ordinary
-# avoidance only ever BENT this hull's travel a little and never actually
-# turned its facing away from a closing rock. 0.6 authors the override for
-# real: once a hazard's projected threat crosses 60%, the desired facing
-# snaps to the escape heading (self-clearing the moment urgency drops back
-# under it) instead of relying on a mild bend to out-turn the obstacle in
-# time.
+# shipped hull left this at its parse-time default of 1.0, and at the time that
+# was effectively OFF — the old urgency measure only reached 1.0 when two hulls
+# occupied the same point — so ordinary avoidance only ever BENT this hull's
+# travel a little and never actually turned its facing away from a closing rock.
+# 0.6 authors the override for real: once hazard urgency crosses 60%, the
+# desired facing snaps to the escape heading (self-clearing the moment urgency
+# drops back under it) instead of relying on a mild bend to out-turn the
+# obstacle in time.
+#
+# WHAT 0.6 MEANS CHANGED IN ISSUE #968, and the value was left alone rather than
+# re-tuned. Urgency is no longer "projected centre separation as a fraction of
+# the avoidance radius" — it is the share of the authored `avoidance_buffer` the
+# SURFACE clearance has spent, squared. So this threshold used to trip at a
+# centre separation under 40% of the avoidance radius, which varied with the
+# obstacle's size; it now trips at a fixed surface clearance of
+# `avoidance_buffer * (1 - sqrt(0.6))` = 1.13 units with the shipped 5-unit
+# buffer, whatever the obstacle. Against the `huge` asteroid class (#947) that
+# is the repair the issue is about: the old form did not fire until this hull
+# was already ~6 units INSIDE the rock. Against a `small` rock it now fires
+# about fourteen times further out (1.13 units of clearance instead of 0.08), so
+# the facing override takes the helm off its gunnery solution earlier around
+# small debris than it used to. That is the deliberate trade; retune HERE, not
+# in the severity curve, if a hull wants the old lateness back.
 [behaviour]
 imminent_collision_facing_threshold = 0.6
 

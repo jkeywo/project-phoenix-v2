@@ -15,6 +15,9 @@
  *     truncating player-visible text (issue #966)
  *   - a t('...') / data-i18n id with no CSV row
  *   - a localisable TOML key still holding prose instead of an id
+ *   - a DERIVED id with no CSV row: one the client composes at runtime from a
+ *     machine identifier in the TOML, so it is spelled out nowhere for the two
+ *     checks above to find (issue #949)
  *
  * Warnings (fail only under --strict):
  *   - untranslated literals still in the client. These are reported rather
@@ -27,7 +30,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildTable, parseCsv } from '../gui/strings.js';
 import { rowLineNumbers } from './strings-csv.mjs';
+import { untranslatedTextContent } from './strings-literals.mjs';
 import { isLocalisable } from './strings-rules.mjs';
+import { resolveThroughIncludes } from './toml-includes.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STRICT = process.argv.includes('--strict');
@@ -141,33 +146,142 @@ for (const file of codeFiles) {
 // An id looks like `entity.foo.bar` — lowercase dotted, no spaces.
 const LOOKS_LIKE_ID = /^[a-z][a-z0-9_]*(\.[a-z0-9_-]+)+$/;
 
-for (const [dir, prefix] of [['entities', 'entity'], ['worlds', 'world'], ['factions', 'faction']]) {
-  for (const file of await walk(path.join(root, 'assets', dir), (f) => f.endsWith('.toml'))) {
-    const src = await readFile(file, 'utf8');
-    let currentHeader = '';
-    let lineNo = 0;
+/**
+ * Every `key = "value"` in a TOML source, tagged with the table header it sits
+ * under ('' at top level) and its 1-based line.
+ * @param {string} src
+ */
+function* tomlPairs(src) {
+  let header = '';
+  let lineNo = 0;
+  for (const line of src.split('\n')) {
+    lineNo += 1;
+    const trimmed = line.trim();
+    if (trimmed.startsWith('#')) continue;
 
-    for (const line of src.split('\n')) {
-      lineNo += 1;
-      const trimmed = line.trim();
-      if (trimmed.startsWith('#')) continue;
+    const head = trimmed.match(/^\[\[?([^\]]+)\]\]?$/);
+    if (head) { header = head[1].trim(); continue; }
 
-      const head = trimmed.match(/^\[\[?([^\]]+)\]\]?$/);
-      if (head) { currentHeader = head[1].trim(); continue; }
+    const kv = trimmed.match(/^([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"/);
+    if (!kv) continue;
+    yield { header, key: kv[1], value: kv[2], lineNo };
+  }
+}
 
-      const kv = trimmed.match(/^([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"/);
-      if (!kv) continue;
-      const [, key, value] = kv;
-      if (!isLocalisable(key, currentHeader, prefix)) continue;
-      if (value === '') continue;
+const isToml = (f) => f.endsWith('.toml');
+const entityFiles = await walk(path.join(root, 'assets', 'entities'), isToml);
+const worldFiles = await walk(path.join(root, 'assets', 'worlds'), isToml);
+const factionFiles = await walk(path.join(root, 'assets', 'factions'), isToml);
+// The scenario manifests are shipped data with a localisable `[[scenario]]
+// label` too, but they sit at the assets root rather than in one of the three
+// directories above — so until #949 nothing looked at them at all.
+const manifestFiles = (await readdir(path.join(root, 'assets')))
+  .filter((name) => /^scenarios.*\.toml$/.test(name))
+  .map((name) => path.join(root, 'assets', name));
 
-      if (!LOOKS_LIKE_ID.test(value)) {
-        errors.push(`${rel(file)}:${lineNo}: ${key} holds prose, not a string id: "${value}"`);
-      } else if (!table.has(value)) {
-        errors.push(`${rel(file)}:${lineNo}: ${key} = "${value}" has no CSV row`);
-      }
+const localisableToml = [
+  ...entityFiles.map((f) => [f, 'entity']),
+  ...worldFiles.map((f) => [f, 'world']),
+  ...factionFiles.map((f) => [f, 'faction']),
+  ...manifestFiles.map((f) => [f, 'world']),
+];
+
+for (const [file, prefix] of localisableToml) {
+  const src = await readFile(file, 'utf8');
+  for (const { header, key, value, lineNo } of tomlPairs(src)) {
+    if (!isLocalisable(key, header, prefix)) continue;
+    if (value === '') continue;
+
+    if (!LOOKS_LIKE_ID.test(value)) {
+      errors.push(`${rel(file)}:${lineNo}: ${key} holds prose, not a string id: "${value}"`);
+    } else if (!table.has(value)) {
+      errors.push(`${rel(file)}:${lineNo}: ${key} = "${value}" has no CSV row`);
     }
   }
+}
+
+// ── 3b. Ids the client COMPOSES from TOML data ──────────────────────────────
+
+// Checks 2 and 3 both need an id spelled out somewhere — as a literal inside a
+// t() call, or as a TOML value. A third class is spelled out nowhere: the
+// client builds the id at runtime by interpolating a value the TOML authors as
+// a machine IDENTIFIER, not as display text.
+//
+// `station.<id>.name` is the plain case. Station ids stay English in TOML
+// because Rust matches stations by name (see strings-rules.mjs), so the display
+// name is looked up from an id derived in gui/console-state.js instead. Neither
+// half of that id is a literal anywhere, so a hull authoring
+// `[[station]] id = "ops"` shipped a manual tab reading ⟨station.ops.name⟩ with
+// every gate green — the reported symptom of issue #949.
+//
+// Derive the same ids the client will, from the same data, and hold them to the
+// same "must have a row" rule.
+
+/** @param {string} id @param {string} where @param {string} why */
+const requireDerived = (id, where, why) => {
+  if (!table.has(id)) errors.push(`${where}: ${why} derives '${id}', which has no CSV row`);
+};
+
+for (const file of entityFiles) {
+  const src = await readFile(file, 'utf8');
+  for (const { header, key, value, lineNo } of tomlPairs(src)) {
+    if (value === '') continue;
+    if (header === 'station' && key === 'id') {
+      requireDerived(
+        `station.${value}.name`,
+        `${rel(file)}:${lineNo}`,
+        'stationDisplayName (gui/console-state.js)',
+      );
+    } else if (header === 'station.rating' && key === 'name') {
+      requireDerived(
+        `station.rating.${value.toLowerCase()}.name`,
+        `${rel(file)}:${lineNo}`,
+        'the station-rating caption (gui/settings-panel.js, gui/manual-panel.js)',
+      );
+    }
+  }
+}
+
+// The lobby ship picker badges a hull with its resolved `class` token and
+// composes the caption id from it. Only hulls a world actually OFFERS can
+// reach that badge, so the sweep starts from `[[available_ships]]` rather than
+// from every entity template — an NPC-only hull never renders a class badge
+// and must not be made to carry a caption for one.
+const offeredHulls = new Set();
+for (const file of worldFiles) {
+  const src = await readFile(file, 'utf8');
+  for (const { header, key, value } of tomlPairs(src)) {
+    if (header === 'available_ships' && key === 'template_path') offeredHulls.add(value);
+  }
+}
+
+// `class` is INHERITABLE: a hull that declares none takes its included
+// fragment's (src/entities/include_resolve.rs), and that resolved value is what
+// reaches the badge — the catalog entry reads `cfg.class` off the fully
+// resolved EntityConfig (src/server/bridge.rs:1581). Reading only a hull's own
+// top-level `class` would leave a composed hull at zero errors while the picker
+// badged it with a raw token, so the closure is walked instead.
+const readOrNull = async (file) => {
+  try { return await readFile(file, 'utf8'); } catch { return null; }
+};
+
+for (const template of [...offeredHulls].sort()) {
+  // Forward slashes throughout: resolveInclude normalises the paths it builds,
+  // and `inherited` below compares one against the hull's own path.
+  const file = path.join(root, template).replace(/\\/g, '/');
+  // A template path that does not resolve is world::validate's finding to
+  // report, not this gate's — say nothing rather than blame the string table.
+  const found = await resolveThroughIncludes(file, 'class', readOrNull);
+  if (!found || found.value === '') continue;
+  const inherited = found.file !== file;
+  requireDerived(
+    `component.ship_picker.class.${found.value.toLowerCase()}`,
+    `${rel(found.file)}:${found.lineNo}`,
+    inherited
+      ? `the lobby ship-picker class badge (gui/components/ph-ship-picker.js), ` +
+        `via the class ${rel(file)} inherits from here`
+      : 'the lobby ship-picker class badge (gui/components/ph-ship-picker.js)',
+  );
 }
 
 // ── 4. Untranslated literals still in the client (report-only for now) ──────
@@ -178,19 +292,15 @@ const DEV_FACING = [
   'WASM trap (RuntimeError)',
 ];
 
-const LITERAL_ASSIGN = /\.textContent\s*=\s*(['"])([^'"]*[A-Za-z]{3}[^'"]*)\1/g;
-// Skip strings that are obviously not prose: css values, ids, single tokens
-// used as keys. A literal is interesting if it contains a space or is
-// all-caps display text.
-const INTERESTING = (s) => /\s/.test(s) || /^[A-Z][A-Z ]{2,}$/.test(s);
-
+// The rule itself lives in scripts/strings-literals.mjs so its edge cases
+// (ternaries, fallbacks, template segments, `===` token tests) are unit-tested
+// rather than only exercised by whatever happens to be in the client today.
 for (const file of codeFiles) {
   let src;
   try { src = await readFile(file, 'utf8'); } catch { continue; }
-  for (const m of src.matchAll(LITERAL_ASSIGN)) {
-    if (INTERESTING(m[2]) && !DEV_FACING.some((d) => m[2].includes(d))) {
-      warnings.push(`${rel(file)}: hardcoded textContent "${m[2]}" — not localised`);
-    }
+  for (const text of untranslatedTextContent(src)) {
+    if (DEV_FACING.some((d) => text.includes(d))) continue;
+    warnings.push(`${rel(file)}: hardcoded textContent "${text}" — not localised`);
   }
 }
 

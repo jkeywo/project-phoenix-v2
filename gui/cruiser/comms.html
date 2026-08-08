@@ -130,7 +130,9 @@
         var wp = nav.waypoint;
         document.getElementById('footer-target').textContent = wp ? wp.name || t('console.common.waypoint') : t('console.common.no_waypoint');
         var msgCount = msgs.length;
-        document.getElementById('footer-right').textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
+        document.getElementById('footer-right').textContent = msgCount === 1
+          ? t('console.comms.messages.one', { n: 1 })
+          : t('console.comms.messages.other', { n: msgCount });
         // Station badge: the retired composite's comms_auto meant "station is
         // Backfill-rated". The per-system equivalent is every owned system
         // AI-run — the conjunction of the resolved views' *_auto flags. Both

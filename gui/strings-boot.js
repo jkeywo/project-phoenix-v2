@@ -25,8 +25,16 @@
  * same-origin, so the one-time parse-blocking cost is a few milliseconds.
  * The deprecation warning in DevTools is the accepted price.
  *
- * In Node (vitest) there is no XMLHttpRequest; tests load the table from disk
- * via tests/client/setup-strings.js instead, so this module is a no-op there.
+ * Under vitest the table is loaded from disk by tests/client/setup-strings.js
+ * and this module stands down. In the `node` environment that is automatic —
+ * there is no XMLHttpRequest — but jsdom supplies one, and there `new URL(rel,
+ * import.meta.url)` resolves against the jsdom document origin rather than the
+ * module's file path, so the request goes to `http://localhost:<port>/assets/
+ * strings/strings.csv`. Whatever happens to be listening there answers, and its
+ * table silently REPLACES the one the setup file installed: on a machine with a
+ * dev server up for another checkout, component tests assert against that
+ * checkout's copy, and a string added in this one reads as missing (issue #949).
+ * Tests own the table; explicitly leave it alone.
  */
 
 import { buildTable, setTable } from './strings.js';
@@ -35,7 +43,9 @@ import { buildTable, setTable } from './strings.js';
 // (dist/client/) and the console pages under gui/<ship>/.
 const CSV_URL = new URL('../assets/strings/strings.csv', import.meta.url);
 
-if (typeof XMLHttpRequest !== 'undefined' && typeof document !== 'undefined') {
+const UNDER_TEST = typeof process !== 'undefined' && process.env?.VITEST === 'true';
+
+if (!UNDER_TEST && typeof XMLHttpRequest !== 'undefined' && typeof document !== 'undefined') {
   try {
     const xhr = new XMLHttpRequest();
     xhr.open('GET', CSV_URL, false); // false = synchronous, see header comment

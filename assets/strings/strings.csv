@@ -549,6 +549,16 @@ component.repair_teams.status.travelling,"Repair team status badge: moving to it
 component.repair_teams.status.repairing,"Repair team status badge: actively repairing","REPAIRING"
 component.repair_teams.status.returning,"Repair team status badge: returning to standby","RETURNING"
 component.repair_teams.priority,"Repair team priority label for onsite-repair priority buttons","Priority"
+component.ship_picker.class.battleship,Lobby ship picker — hull class badge on a battleship card,[BATTLESHIP]
+component.ship_picker.class.courier,Lobby ship picker — hull class badge on a courier card,[COURIER]
+component.ship_picker.class.cruiser,Lobby ship picker — hull class badge on a cruiser card,[CRUISER]
+component.ship_picker.class.destroyer,Lobby ship picker — hull class badge on a destroyer card,[DESTROYER]
+component.ship_picker.class.unknown,Lobby ship picker — hull class badge when the entity template authors no class,[UNKNOWN]
+component.ship_picker.empty,Lobby ship picker when the locked scenario offers no playable hull,[No ships available]
+component.ship_picker.power,Lobby ship picker — stat label above a hull's power rating,[Power]
+component.ship_picker.stations,Lobby ship picker — stat label above a hull's station count,[Stations]
+component.station_damage.popup_title,"Station-damage popup heading. {name} is the owning station (or the ship core)","[{name} Systems]"
+component.station_damage.bar_title,"Station-damage bar tooltip. {name} is the owning station (or the ship core)","[{name} systems]"
 console.comms.doc_title,Browser-tab title of the comms console page,[Project Phoenix - Comms Console]
 console.comms.screen_label,Phone-frame screen label of the comms console,Comms Console
 console.comms.title,comms console — main hero heading,COMMS
@@ -605,6 +615,8 @@ console.cruiser_comms.doc_title,Browser-tab title of the comms console page,[Pro
 console.cruiser_comms.subtitle,comms console — hero sub-heading under the title,[COMMUNICATIONS & NAV]
 console.comms.navigation,"comms console — ""Navigation"" panel heading",Navigation
 console.comms.comms,"comms console — ""Comms"" panel heading",Comms
+console.comms.messages.one,"comms console footer — message count, exactly one. {n} is the count","[{n} MESSAGE]"
+console.comms.messages.other,"comms console footer — message count, zero or several. {n} is the count","[{n} MESSAGES]"
 console.engineering.doc_title,Browser-tab title of the engineering console page,[Project Phoenix — Engineering Console]
 console.engineering.screen_label,Phone-frame screen label of the engineering console,Engineering Console
 console.engineering.title,engineering console — main hero heading,ENGINEERING
@@ -685,6 +697,7 @@ console.sensors.station_footer,"sensors console — footer station name","SENSOR
 console.common.cancel_impulse,"Button that aborts an active impulse-drive charge","Cancel Impulse"
 console.common.target,"Fallback name for an unnamed locked target","TARGET"
 console.repair.core,"Repair target for the ship's core (systems owned by no station)","Core"
+console.repair.footer_status,"repair console footer — hull percent and repair-team activity. {pct} is hull percent; {active} of {total} teams are working","[{pct}% HULL · {active}/{total} ACTIVE]"
 console.radar.science_target,"Radar blip label for the science-locked target","SCIENCE TARGET"
 console.radar.tactical_target,"Radar blip label for the tactical-locked target","TACTICAL TARGET"
 station.captain.name,"Captain station display name (station ids stay English in TOML)","Captain"
@@ -929,6 +942,14 @@ server.hud_eng,"Viewscreen HUD status slot: engineering","Eng"
 server.hud_sys,"Viewscreen HUD status slot: systems","Sys"
 server.hud_heading,"Viewscreen HUD nav readout. {deg} is the 3-digit heading","HEADING {deg}"
 server.hud_hull,"Viewscreen HUD hull readout. {pct} is hull percent","HULL {pct}"
+server.hud_weapons_hot,"Viewscreen HUD tactical slot while the ship is at red alert","[WEAPONS HOT]"
+server.hud_clear,"Viewscreen HUD tactical slot while the ship is not at red alert","[CLEAR]"
+server.unknown_scenario,"Host lobby title when the selected scenario carries no title of its own","[Unknown Scenario]"
+server.complexity_low,"Host lobby station card — complexity pill for a Low-complexity console preset","[LOW]"
+server.complexity_normal,"Host lobby station card — complexity pill for any other console preset","[NORMAL]"
+server.slots_reserved.one,"Host lobby compact chip, exactly one reserved station slot. {n} is the count, {max} the total slots","[↻ {n} station slot reserved (max {max})]"
+server.slots_reserved.other,"Host lobby compact chip, zero or several reserved station slots. {n} is the count, {max} the total slots","[↻ {n} station slots reserved (max {max})]"
+server.spectator_waiting,"Host lobby pill for a connected player holding no station yet. {name} is the player name","[{name} (waiting)]"
 client.status_connected,"Connection status once the WebRTC link is up","Connected"
 client.status_no_host_id,"Connection status when the URL carries no host id","[No host ID in URL. Scan the QR code on the view screen.]"
 client.status_waiting_server,"Connection status while waiting for the signalling server","[Waiting for server]"

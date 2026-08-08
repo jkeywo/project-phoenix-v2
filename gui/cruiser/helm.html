@@ -86,7 +86,9 @@
         setAutoState(null, document.getElementById('helm-auto-badge'), !!s.helm_auto);
         document.getElementById('station-damage').state = s.own_hull || null;
         var n = (s.blips && s.blips.length) || 0;
-        document.getElementById('footer-target').textContent = n > 0 ? '\u25C9 ' + n + ' contacts' : 'NO TARGET';
+        document.getElementById('footer-target').textContent = n > 0
+          ? '\u25C9 ' + (n === 1 ? t('console.common.contacts.one', { n: n }) : t('console.common.contacts.other', { n: n }))
+          : t('console.common.no_target');
         document.getElementById('footer-target').style.color = n > 0 ? 'var(--ink-dim)' : 'var(--ink-faint)';
       }
     });

@@ -62,7 +62,9 @@
         document.getElementById('station-damage').state = s.own_hull || null;
         var active = (s.teams || []).filter(function(t) { return t && t.status && t.status !== 'idle'; }).length;
         var total = (s.teams || []).length;
-        document.getElementById('footer-right').textContent = Math.round((oh.pct != null ? oh.pct : 1) * 100) + '% HULL · ' + active + '/' + total + ' ACTIVE';
+        document.getElementById('footer-right').textContent = t('console.repair.footer_status', {
+          pct: Math.round((oh.pct != null ? oh.pct : 1) * 100), active: active, total: total,
+        });
         setAutoState(null, document.getElementById('repair-auto-badge'), !!s.repair_auto);
       }
     });

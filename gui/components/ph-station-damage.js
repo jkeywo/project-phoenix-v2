@@ -1,3 +1,9 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 import './ph-damage-detail.js';
 
 /**
@@ -68,8 +74,8 @@ export class PhStationDamage extends HTMLElement {
   #applyLabel(label) {
     const root = this.shadowRoot;
     root.getElementById('bar-label').textContent = label;
-    root.getElementById('popup-title').textContent = label + ' Systems';
-    root.getElementById('bar').title = label + ' systems';
+    root.getElementById('popup-title').textContent = t('component.station_damage.popup_title', { name: label });
+    root.getElementById('bar').title = t('component.station_damage.bar_title', { name: label });
   }
 
   connectedCallback() {

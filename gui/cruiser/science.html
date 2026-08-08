@@ -98,7 +98,7 @@
           document.getElementById('threat-bearing').textContent = '—';
         }
         var tn = sensors.target_name || null;
-        document.getElementById('footer-target').textContent = tn ? '\u25C9 ' + tn : 'NO TARGET';
+        document.getElementById('footer-target').textContent = tn ? '\u25C9 ' + tn : t('console.common.no_target');
         document.getElementById('footer-target').style.color = tn ? 'var(--tactical)' : 'var(--ink-faint)';
         // Station badge: the retired composite's science_auto meant "station is
         // Backfill-rated". The per-system equivalent is every owned system

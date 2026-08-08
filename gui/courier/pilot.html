@@ -238,7 +238,7 @@
 
         var targetName = w.target_name || w.target_uuid || null;
         var footerTarget = document.getElementById('footer-target');
-        footerTarget.textContent = targetName ? '◉ ' + targetName : 'NO TARGET';
+        footerTarget.textContent = targetName ? '◉ ' + targetName : t('console.common.no_target');
         footerTarget.style.color = targetName ? 'var(--fire-bright)' : 'var(--ink-faint)';
         document.getElementById('station-damage').state = s.own_hull || null;
       }

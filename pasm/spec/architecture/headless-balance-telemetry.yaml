@@ -98,7 +98,7 @@ entities:
       title: Combat Ledger Aggregator
       summary: Pure fold over the stamped balance-event log producing per-ship ledgers — damage dealt/taken split by weapon and by attacker-victim pair, shield-absorbed vs hull, shots fired, kills, death timestamp, system knockouts with timestamps, and repair HP — keyed by uuid. Asteroid victims are excluded from ship ledgers.
       rationale:
-        - "Aggregation is a pure function over the event log rather than a walk of surviving entities, so ships destroyed mid-run still carry a full ledger, and the report is unit-testable with no ECS app."
+        - "[ai] Aggregation is a pure function over the event log rather than a walk of surviving entities, so ships destroyed mid-run still carry a full ledger, and the report is unit-testable with no ECS app."
     architecture:
       kind: pure-aggregator
       authority: observational
@@ -118,7 +118,7 @@ entities:
       title: Seeded Simulation RNG
       summary: Sim-wide seeded RNG resource exposing per-subsystem streams derived from the master seed and a stream name, replacing the OS-seeded damage-distribution sites and entity/asteroid uuid generation, so a seeded headless run is byte-identically reproducible on the same binary and machine.
       rationale:
-        - "Each stream is a vellum_rng::Pcg32 built as seeded(master, fnv1a64(stream_name)) — the master seeds the generator, the name-derived hash selects the PCG stream — so streams are disjoint by construction rather than offsets into one sequence, and are keyed by name not discriminant, so adding or reordering consumers never shifts an existing site's sequence. Seed precedence is --seed > world [global] seed > a randomly drawn seed; the resolved seed and its provenance are always echoed in the report, and --seed implies the single-threaded deterministic scheduler."
+        - "[ai] Each stream is a vellum_rng::Pcg32 built as seeded(master, fnv1a64(stream_name)) — the master seeds the generator, the name-derived hash selects the PCG stream — so streams are disjoint by construction rather than offsets into one sequence, and are keyed by name not discriminant, so adding or reordering consumers never shifts an existing site's sequence. Seed precedence is --seed > world [global] seed > a randomly drawn seed; the resolved seed and its provenance are always echoed in the report, and --seed implies the single-threaded deterministic scheduler."
         - "The generator is the fleet crate rather than rand's SmallRng (#897) because Pcg32 is Serialize: the six stream positions can leave the process, which is what lets a world snapshot resume a run from where it got to instead of replaying it from tick zero. rand remains a dependency for the cosmetic, deliberately unseeded generators outside this boundary."
     architecture:
       kind: determinism-source
@@ -155,7 +155,7 @@ entities:
       title: Run Outcome Classifier
       summary: Pure classifier assigning each run an outcome — victory, defeat, draw, or timeout — with per-side margins (remaining hull fraction, cumulative damage both ways, closing-window damage rate), sides bucketed by faction relative to the player ship.
       rationale:
-        - "Victory vs defeat has no other structured signal, so the game_over trigger action carries an author-declared outcome threaded through GameOverReason; built-in player-ship death latches Defeat, an undeclared scenario game_over defaults to Victory. Budget exhaustion is timeout when damage still flows in the closing window, draw when it has gone silent — a reported heuristic, never adjudicated by the engine."
+        - "[ai] Victory vs defeat has no other structured signal, so the game_over trigger action carries an author-declared outcome threaded through GameOverReason; built-in player-ship death latches Defeat, an undeclared scenario game_over defaults to Victory. Budget exhaustion is timeout when damage still flows in the closing window, draw when it has gone silent — a reported heuristic, never adjudicated by the engine."
     architecture:
       kind: pure-classifier
       authority: observational
@@ -212,7 +212,7 @@ entities:
       title: Balance Batch Runner
       summary: Node script that reads a TOML config (class-matrix shorthand, explicit matchups, or a scenario sweep), fans out phoenix-headless processes across a bounded concurrency pool, and merges the per-run report JSON into per-matchup win/loss/draw/timeout rates, time-to-kill distributions, and mean damage margins as a markdown table and optional merged JSON.
       rationale:
-        - "The merge and formatting are pure functions exported for vitest; the CLI entry is guarded so importing never spawns. Failed, unparseable, and hung runs (configurable run_timeout_secs kill) are recorded per-run and never sink the batch."
+        - "[ai] The merge and formatting are pure functions exported for vitest; the CLI entry is guarded so importing never spawns. Failed, unparseable, and hung runs (configurable run_timeout_secs kill) are recorded per-run and never sink the batch."
     architecture:
       kind: offline-tool
       authority: observational

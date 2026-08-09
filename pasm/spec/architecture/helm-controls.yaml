@@ -178,7 +178,7 @@ entities:
       summary: Authoritative cached helm intent mirror for the LocalShip, used by the host for engine telemetry, boost drain, and the viewscreen HUD.
       rationale:
         - "Single writer since #824: host-helm-control-router (process_helm_inputs) mirrors every helm payload it applies — human-admitted and AI-emitted alike — into the LocalShip's LastHelmInput as it writes the intent components, so the thrust/steering pair can never tear between two writers. NPC LastHelmInput deliberately stays at its spawn default so ai_power_allocation's movement rule observes what it observed before the migration."
-        - The host stores the latest thrust, steering, and lateral inputs rather than replaying raw control messages every frame.
+        - "[ai] The host stores the latest thrust, steering, and lateral inputs rather than replaying raw control messages every frame."
     architecture:
       classification: authoritative
       owner: host-helm-control-router
@@ -259,12 +259,12 @@ entities:
       title: Hazard Assessment State
       summary: Shared per-ship 3D hazard assessment that publishes capability-style hazard facts, force contributions, and per-actuator sensitivity inputs for helm actuation.
       rationale:
-        - Collision avoidance should be computed centrally for the ship rather than separately inside each fine-system AI operator.
+        - "[ai] Collision avoidance should be computed centrally for the ship rather than separately inside each fine-system AI operator."
         - Different fine systems may filter the same hazard picture differently, such as vertical thrust ignoring static terrain while engines still brake for it.
-        - Hazard publication should expose reusable facts and capabilities rather than hard-coded object categories so fine systems can apply their own policies.
+        - "[ai] Hazard publication should expose reusable facts and capabilities rather than hard-coded object categories so fine systems can apply their own policies."
         - "A ship ignores MOBILE hazards with a lower size_rating than its own: large ships do not avoid smaller ships at all."
         - "Issue #958 scoped that ignore-smaller rule to mobile contacts. Static terrain — an asteroid, a station, a planet — cannot manoeuvre out of a big hull's way, so it is assessed at any relative size, whatever hazard_ignore_size_ratio the observer authors. The split is a doctrine invariant rather than a knob; which side of it a body falls on is authored per template as `[collider] movable`, which the world-snapshot builders publish as AiWorldEntity.movable. That authored fact also decides vertical repulsion (#780) and moving-hazard urgency (#744), so a station no longer masquerades as a ship in any of the three. The parse default is static, so a template that omits the field is avoided rather than ignored."
-        - Each fine actuator owns its sensitivity to hazard distance and force weighting; those authored sensitivities implicitly determine response priority instead of one global priority ladder.
+        - "[ai] Each fine actuator owns its sensitivity to hazard distance and force weighting; those authored sensitivities implicitly determine response priority instead of one global priority ladder."
         - Vertical separation is evaluated for collision and weapon range even when its present visual effect is negligible.
         - "Issue #780 made the single shared scan genuinely 3D: assess_hazards now computes a vertical (local +Y) force for ELIGIBLE MOVING hazards only (a co-planar moving hazard drives an upward climb; an off-plane one follows the actual vertical separation sign), while static obstacles leave the vertical axis at zero (AC5). The one scan (still called once in helm_motion_planner — no duplicate per-actuator scans, AC2) publishes the 3D force plus the moving-hazard threat once into HazardAssessment; the vertical actuator reads those facts, not a re-scan. The planner gates the Y component on VerticalMovementMode so Planar hulls take none. The published facts are further seeded into each secondary actuator's policy snapshot by seed_helm_actuator_facts, resolving the #779 empty-facts edge so authored guards fire."
     architecture:
@@ -335,7 +335,7 @@ entities:
       rationale:
         - Impulse should not force steering fully to zero; the standard steering multiplier is 0.1 so course correction remains possible but severe.
         - Boost is unavailable while impulse is active, regardless of the ship's normal boost capability.
-        - The steering multiplier and any ship-specific override belong in authored capability data rather than executable constants.
+        - "[ai] The steering multiplier and any ship-specific override belong in authored capability data rather than executable constants."
         - "Issue #780 made this state the AC6 home for authored impulse/boost MANOEUVRE POLICY: the [helm_console.impulse_ai] and [helm_console.boost_ai] blocks (HelmImpulseAiPolicy / HelmBoostAiPolicy) are authored per-hull and resolved by helm-impulse-ai-operator / helm-boost-ai-operator to decide whether each drive may engage this tick, respecting the ship's authored policy AND capability availability. At #780 an omitted block was filled by a Rust synthesiser whose defaults preserved the baseline (impulse unconditional permit, boost idle)."
         - "Issue #885 (8555e336) removed that fallback. The synthesisers default_impulse_ai_config / default_boost_ai_config are DELETED, strict AI-declaration mode is the default in EntityConfig::from_toml, and an AI-capable fine system that declares no block is a LOAD ERROR — so on any hull that loads, both blocks are authored content. There is no longer a Rust-side default to describe."
     architecture:
@@ -449,7 +449,7 @@ entities:
       title: Helm Motion Blackboard State
       summary: Replicated or ship-local 3D motion-planning surface exposing objective velocity, desired facing, avoidance velocity, combined desired velocity, avoidance urgency, and primary hazard identity.
       rationale:
-        - The smallest useful shared interface is a local-space velocity-based contract rather than direct thrust or steering commands.
+        - "[ai] The smallest useful shared interface is a local-space velocity-based contract rather than direct thrust or steering commands."
         - Keeping this blackboard 3D allows bounded and full-3D ships to share the same contract even while current consumer logic remains mostly planar.
         - Desired facing belongs beside desired velocity because some helm requests care more about orientation than translation.
     architecture:
@@ -522,7 +522,7 @@ entities:
       summary: Host-side shared motion planner that turns objectives plus world hazards into a 3D desired-motion and hazard-assessment surface for fine helm systems.
       rationale:
         - The intended architecture replaces separate helm and lateral avoidance calculations with a single ship-level planning pass.
-        - Fine systems should interpret a shared desired motion field rather than each generating independent avoidance commands.
+        - "[ai] Fine systems should interpret a shared desired motion field rather than each generating independent avoidance commands."
     architecture:
       kind: service
       authority: authoritative
@@ -645,9 +645,9 @@ entities:
       title: Vertical Movement Mode State
       summary: Ship capability declaring whether the craft supports no vertical motion (Planar), bounded AI vertical motion, or full 3D six-degree-of-freedom flight, plus the authored bounded limits (max vertical offset, gradual return rate).
       rationale:
-        - Vertical movement support is ship-specific rather than universal, just like engines, steering, lateral thrust, and boost.
+        - "[ai] Vertical movement support is ship-specific rather than universal, just like engines, steering, lateral thrust, and boost."
         - Bounded motion provides AI-only above-below avoidance without turning the current player game into full free 3D flight.
-        - In bounded mode the ship should return gradually toward its authored cruise plane once avoidance urgency falls, rather than snapping immediately back.
+        - "[ai] In bounded mode the ship should return gradually toward its authored cruise plane once avoidance urgency falls, rather than snapping immediately back."
     architecture:
       classification: authoritative
       owner: ship-capability-model
@@ -674,7 +674,7 @@ entities:
       title: Ship Capability Model
       summary: Ship-authored capability surface for optional helm systems, movement modes, and manoeuvre policy, loaded from the entity TOML [helm_capability] block.
       rationale:
-        - Ships should declare whether they have engines, steering, lateral thrust, vertical thrust, impulse, and boost instead of relying on universal helm assumptions.
+        - "[ai] Ships should declare whether they have engines, steering, lateral thrust, vertical thrust, impulse, and boost instead of relying on universal helm assumptions."
         - A ship without engines is a stationary installation through capability data, not a special code path.
         - Capability data also owns impulse steering behaviour, boost availability during impulse, actuator hazard sensitivities, and vertical movement limits.
     architecture:
@@ -750,7 +750,7 @@ entities:
       title: Docking Motion Intent State
       summary: Docking-specific desired-motion request that may use controlled reverse and lateral translation for close manoeuvres.
       rationale:
-        - Arc-bearing requests affect desired facing only; they must not ask slow lateral or reverse thrust to drift into a better firing arc.
+        - "[ai] Arc-bearing requests affect desired facing only; they must not ask slow lateral or reverse thrust to drift into a better firing arc."
         - Docking is the distinct concern that may legitimately need low-speed lateral and reverse movement, so it receives its own intent separate from the facing-only arc-bearing request.
         - "Issue #742: the DockingMotionIntent component names the dock the Helm AI is closing on; helm-motion-planner reads it and, once the dock is within the hull's authored docking_engage_distance, folds docking_close_manoeuvre's controlled reverse (+z) and lateral (x) translation into the desired-motion contract, which helm-lateral-thrust-ai-operator and the engine axis then actuate. The planner clears the intent the moment its dock target leaves the merged view, so the manoeuvre never outlives its target."
     architecture:
@@ -911,12 +911,12 @@ entities:
         - "Issue #803 introduced the first shared latch, for the helm axes only: AI helm decisions were coupled to host frame rate — a 144 Hz host steered on ~4x fresher data than a 60 Hz one — a determinism blocker for P2P lockstep (PRD #620). One shared timer replaced per-frame execution and the private AiLateralThrustTimer."
         - "Issue #889 (3d21957d) made it the ONE cadence for all AI, and moved the machinery into the new src/ai/cadence.rs. Before it the cadence was fragmented three ways: the six helm axes on the authored latch; Captain and Sensors on a HARDCODED 10 Hz AiSnapshotTimer gated inside the system body by an Option<Res<_>> that fell back to evaluating every tick when the resource was absent (which every bare-App fixture in the crate hit, so the shipped cadence was exercised by no test at all); and eight further deciders on no gate whatsoever. Because SimSet is configured in Bevy's Update, no gate means once per rendered frame — see AGENTS.md rule #7, which now states this."
         - "The base rate is authored as [global] ai_tick_hz (serde default 30 Hz). The pre-#889 key ai_helm_tick_hz survives as a serde ALIAS and every shipped world deliberately keeps authoring it, so the alias is exercised on every load rather than only by a test. The timer resource is built at plugin registration, before any WorldConfig exists, so tick_ai_cadence reconciles its period against the loaded config each frame."
-        - "The slower cadence is DERIVED, not a second clock. GlobalConfig::checked_snapshot_every_ticks resolves ai_tick_hz / ai_snapshot_hz to a whole number of base ticks, and AiSnapshotPhase counts them; a non-integer relationship (e.g. 25 Hz against 10 Hz) is rejected in world::config::parse_world at load rather than silently rounded, so the two AI clocks can never be commensurate only by luck."
-        - "register_ai_cadence is a plain idempotent function rather than a Plugin because several plugins each register gated systems and duplicate registration of tick_ai_cadence would advance the timer more than once per frame. tick_ai_cadence itself is registered in Bevy's Last schedule: every gated system lives in Update, so the latch is guaranteed consumed before it is re-armed without an .after() edge against each gated system — an edge that would silently degrade to an empty constraint in any fixture that does not register them all."
+        - "[ai] The slower cadence is DERIVED, not a second clock. GlobalConfig::checked_snapshot_every_ticks resolves ai_tick_hz / ai_snapshot_hz to a whole number of base ticks, and AiSnapshotPhase counts them; a non-integer relationship (e.g. 25 Hz against 10 Hz) is rejected in world::config::parse_world at load rather than silently rounded, so the two AI clocks can never be commensurate only by luck."
+        - "[ai] register_ai_cadence is a plain idempotent function rather than a Plugin because several plugins each register gated systems and duplicate registration of tick_ai_cadence would advance the timer more than once per frame. tick_ai_cadence itself is registered in Bevy's Last schedule: every gated system lives in Update, so the latch is guaranteed consumed before it is re-armed without an .after() edge against each gated system — an edge that would silently degrade to an empty constraint in any fixture that does not register them all."
         - "Existing ordering edges between the gated systems are preserved; the latch idiom (a boolean resource written by a tick system and read by a run condition) is unchanged, because run_if conditions must take read-only parameters."
-        - "The one decider that needed more than a gate is the Sensors frequency hint: it accumulates Time::delta, so gating it alone would have STRETCHED the authored delay by the frame-to-tick ratio — twice at 60 Hz, nearly five times at 144 — making it more frame-dependent rather than less. It now advances on the authored tick period."
+        - "[ai] The one decider that needed more than a gate is the Sensors frequency hint: it accumulates Time::delta, so gating it alone would have STRETCHED the authored delay by the frame-to-tick ratio — twice at 60 Hz, nearly five times at 144 — making it more frame-dependent rather than less. It now advances on the authored tick period."
         - "Behaviour was measured, not assumed: a balance A/B over 192 duel runs (sixteen class matchups by twelve seeds) reports identical win rates, 70W/73L/13D/36T on both sides, with time-to-kill moving at most one reporting quantum and always slower — the expected consequence of a bank that becomes ready mid-tick waiting for the next one."
-        - "Seventeen fixtures broke because they assumed one app.update() was one decision. Each was fixed by ticking the latch (cadence::arm_ai_tick), never by restoring an every-tick fallback or loosening an assertion."
+        - "[ai] Seventeen fixtures broke because they assumed one app.update() was one decision. Each was fixed by ticking the latch (cadence::arm_ai_tick), never by restoring an every-tick fallback or loosening an assertion."
         - "The authored PER-POLICY multiple is a separate, still-open half — see ai-policy-tick-scheduler, which stays proposed."
     architecture:
       kind: scheduler
@@ -959,7 +959,7 @@ entities:
       title: Helm Actuator Input State
       summary: Authoritative per-ship control inputs for engines, steering, lateral thrust, vertical thrust, impulse, and boost, regardless of whether a human or AI selected them.
       rationale:
-        - AI and human helm operation should converge on the same input surface; downstream physics and actuator systems must not branch on controller identity.
+        - "[ai] AI and human helm operation should converge on the same input surface; downstream physics and actuator systems must not branch on controller identity."
         - AI derives inputs from objectives, desired motion, docking intent, and hazard assessment, while a player supplies them through admitted commands.
     architecture:
       classification: authoritative
@@ -1264,7 +1264,7 @@ entities:
       title: Torpedo Flight Operator
       summary: Intended projectile-flight operator that should move torpedoes in full 3D once ship vertical separation becomes real simulation truth.
       rationale:
-        - If ships can diverge in Y for collision avoidance, torpedoes should also navigate and resolve travel in 3D rather than remaining effectively planar.
+        - "[ai] If ships can diverge in Y for collision avoidance, torpedoes should also navigate and resolve travel in 3D rather than remaining effectively planar."
     architecture:
       kind: service
       authority: authoritative

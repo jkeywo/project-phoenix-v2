@@ -2,6 +2,7 @@ entities:
   - component: perf-measurement-contract
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Performance Measurement Contract
       summary: "Phoenix's adoption of the fleet's vellum-perf crate — metric series, summaries, capture provenance, versioned baselines, comparison and rendering — plus the repository-owned pieces the crate excludes by charter: where baseline files live, and how a capture is compared against one."
@@ -25,6 +26,7 @@ entities:
   - component: perf-mesh-interior
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Mesh Interior Measurement
       summary: Loads every shipped assets/models/*.glb through Bevy's own asset loader in a headless app — no window, no renderer, no simulation — and counts the triangles and texture pixels the loader actually produced, per model and in total.
@@ -49,6 +51,7 @@ entities:
   - component: perf-baseline-adoption
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Baseline Adoption
       summary: Records a baseline from a capture, so the numbers a runner is held to are the numbers that runner produced. Carries an existing expectation's statistic, tolerances and header prose over untouched and moves only its expected value.
@@ -73,6 +76,7 @@ entities:
   - component: perf-tick-collector
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Headless Tick Collector
       summary: Samples per-tick and whole-run wall time from the headless harness loop, bracketing app.update() from outside the app, and closes the run into a capture. Only instantiated when --perf-capture asks for it.
@@ -93,6 +97,7 @@ entities:
   - component: perf-asset-inventory
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Asset Budget Inventory
       summary: Extracts shipped asset budgets from what is on disk and what entity templates declare — per-model GLB bytes, their total, LOD ladder depth, and templates naming a GLB with no ladder — with no simulation running.
@@ -116,6 +121,7 @@ entities:
   - component: perf-browser-collector
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Browser Host Collector
       summary: Times host boot and the JS-driven config preload at the bridge's own entry points, and samples per-animation-frame schedule time, accumulating into a capture the page hands out through wasm_perf_capture.
@@ -138,6 +144,7 @@ entities:
   - state: perf-capture-artifact
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Performance Capture Artifact
       summary: One scenario's measurement — the raw metric series, their summaries, and the provenance that says whether two captures are comparable at all. Written as JSON and stored by CI so a regression is diagnosed from evidence rather than re-measured.
@@ -154,6 +161,7 @@ entities:
   - state: perf-baseline-file
     core:
       status: implemented
+      origin: ai
       confidence: confirmed
       title: Performance Baseline File
       summary: The committed, versioned expectations for one scenario — statistic, expected value, and the tolerances separating noise from a finding — as reviewable RON under perf/baselines/. One file per scenario, named for it.

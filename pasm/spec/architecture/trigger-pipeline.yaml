@@ -104,7 +104,7 @@ entities:
         - a mis-authored trigger cycle degrades to a logged cutoff, never a hang
       rationale:
         - "determinism contract: each pass is two-phase - every trigger condition is evaluated against the live flag stores before any fired action dispatches, so all triggers in a pass see the same values and their mutations become visible only to the next pass"
-        - "live-store freshness: action dispatch re-projects the live flag stores per action, never a pre-pass snapshot, so duplicate mutations preview correct before/after transitions and each boolean flip emits exactly one event"
+        - "[ai] live-store freshness: action dispatch re-projects the live flag stores per action, never a pre-pass snapshot, so duplicate mutations preview correct before/after transitions and each boolean flip emits exactly one event"
         - "the dispatch name map is rebuilt at the top of every pass, so an action can resolve an entity name that a spawn registered in an earlier pass of the same tick"
         - "event routing is per-caller: this loop feeds produced events into its own next pass (same tick); the delayed-action scheduler queues them for the next tick; the comms-response site pushes onto pending_world_events from SimSet::Input, which the pipeline drains later the same tick"
     architecture:
@@ -145,9 +145,9 @@ entities:
         - every dispatch arm, including every failure path, is testable as a plain function call over plain data
         - one dispatch table serves both world-trigger dispatch sites (immediate and delayed), so those two paths cannot drift apart; the comms-response site (handle_respond_to_message) remains an intentionally parallel inline dispatch, kept symmetric by exhaustive matching plus the comms parity test suite
       rationale:
-        - "purity boundaries: entity targets are UUID strings (never ECS entity handles), logging is returned as warning strings, flag mutation is previewed rather than performed, and produced events are returned unrouted for the caller to place"
+        - "[ai] purity boundaries: entity targets are UUID strings (never ECS entity handles), logging is returned as warning strings, flag mutation is previewed rather than performed, and produced events are returned unrouted for the caller to place"
         - "per-group layout: one exhaustive match routes each variant to its group function - mission state (dispatch_state_action), per-entity modifiers (dispatch_entity_modifier_action), world flags (dispatch_world_flag_action), destruction (dispatch_destroy_entity), spawning (dispatch_spawn_entity). The routing match and the applier are wildcard-free (compile-time exhaustive); each group function ends in an unreachable! guard, so routing a new variant into a group without adding its inner arm is a runtime panic caught by the group's should_panic test, not a compile error"
-        - "non-determinism is injected: the spawn UUID source and the entity template loader are seams on the context, so tests stub them and the module never touches the filesystem or the config cache"
+        - "[ai] non-determinism is injected: the spawn UUID source and the entity template loader are seams on the context, so tests stub them and the module never touches the filesystem or the config cache"
     architecture:
       kind: purity-contract
       authority: authoritative
@@ -176,7 +176,7 @@ entities:
         - add the variant's arm to the comms-response inline dispatch (handle_respond_to_message in src/console/comms/server.rs, an intentionally parallel match — the compiler forces this because that match is also exhaustive) and extend its parity enumeration tests so comms responses stay symmetric with world triggers
         - add pure unit tests beside the dispatch table and pipeline tests beside the Bevy systems
       rationale:
-        - keeping every match exhaustive turns "did I wire the new variant everywhere" into a compile error rather than a runtime gap
+        - "[ai] keeping every match exhaustive turns \"did I wire the new variant everywhere\" into a compile error rather than a runtime gap"
       references:
         - trigger-dispatch-purity-contract
     architecture:
@@ -197,7 +197,7 @@ entities:
       title: World Delayed Action Scheduler
       summary: Holds trigger actions whose authored per-action delay has not yet elapsed and dispatches due ones through the same pure dispatch table as immediate actions. Its produced events queue for the next tick's buffer, because it runs after the chaining loop has already drained this tick's.
       rationale:
-        - sharing the dispatch table with the immediate path means delayed actions gain every dispatch behaviour (including AI target revalidation) instead of drifting on a duplicated table
+        - "[ai] sharing the dispatch table with the immediate path means delayed actions gain every dispatch behaviour (including AI target revalidation) instead of drifting on a duplicated table"
         - "Issue #960: a DelayedAction's fire_at_elapsed and the due check both measure against WorldContentRuntime::mission_clock_anchor_secs — the same mission-start anchor on_timer triggers use (see world-event-collector) — so an action authored with a delay fires that many seconds into the MISSION rather than from app boot. partition_delayed_actions compares plain floats against that clock and this module reads no Bevy resource of its own."
     architecture:
       kind: scheduler

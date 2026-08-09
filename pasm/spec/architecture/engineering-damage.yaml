@@ -415,7 +415,7 @@ entities:
           (2) projected field by field with no struct-update spread, so a newly
           added field cannot silently ride through unprojected.
         - >-
-          Restricting the audience is safe because nothing but the Engineering
+          [ai] Restricting the audience is safe because nothing but the Engineering
           console reads this payload: `buildRepairConsoleState` is reached only
           from a station that owns the `repair` system (battleship `repair`,
           cruiser/destroyer `engineering`, courier `captain`). A viewer who is

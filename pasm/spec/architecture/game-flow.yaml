@@ -6,7 +6,7 @@ entities:
       title: Pre-Scenario Lobby Surface
       summary: Shared server-screen and connected-client selection surface available before any scenario world is loaded; the server QR code is visible from this state.
       rationale:
-        - Players should be able to join before content selection instead of waiting for a host-preloaded scenario.
+        - "[ai] Players should be able to join before content selection instead of waiting for a host-preloaded scenario."
     architecture:
       kind: lobby-interface
       authority: non-authoritative
@@ -60,7 +60,7 @@ entities:
       title: Scenario and Ship Selection Arbiter
       summary: Authoritative first-writer-wins arbiter for scenario and player-ship selection from either the server screen or a connected client. Realized in the host browser runtime (issue 755, Option A) rather than a pre-world Bevy system, because Bevy only starts after the world is loaded; it validates each request against the pre-load catalog and drives the existing world-load path once scenario and ship are both locked.
       rationale:
-        - Selection is deliberately not a vote and does not require a special captain role before the ship topology exists.
+        - "[ai] Selection is deliberately not a vote and does not require a special captain role before the ship topology exists."
     architecture:
       kind: command-handler
       authority: authoritative

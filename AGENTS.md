@@ -363,3 +363,16 @@ When extending `ClientMessage` or `ServerMessage` (prefer a new `SystemControlPa
 5. Client outbound: add the UI action to `gui/action-map.js` (and the button/control to the console's `gui/<name>-console.html`)
 6. Add/extend Vitest coverage in `tests/client/`
 7. Touch `server.html` `routeOutbound()` / `client.html` only if routing or the PeerJS handshake changes
+
+## AI-origin decisions
+
+A decision you (an agent) make while working is marked in the spec:
+`origin: ai` on the entity you originated, or a literal `[ai] ` prefix on the
+rationale bullet you wrote. Unmarked decisions are the human's. AI-origin
+items may be revised without asking when evidence warrants — say so in the
+commit. Never alter an unmarked decision without asking, and never remove a
+marker: ratification is the human deleting it after reviewing
+
+```bash
+uv run pasm review pasm/spec
+```

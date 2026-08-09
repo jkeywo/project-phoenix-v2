@@ -242,8 +242,18 @@ describe('validateLadder', () => {
 
   it('rejects a level that renders nothing', () => {
     expect(validateLadder([{ max_distance: 50 }])).toContain(
-      'level 0: needs either a model or a procedural shape',
+      'level 0: needs a model, a billboard, or a procedural shape',
     );
+  });
+
+  it('accepts a billboard far-LOD level as a valid renderer', () => {
+    // A billboard is the far replacement for a procedural shape (issue #914);
+    // it satisfies the "renders something" rule just like a model or a shape.
+    const problems = validateLadder([
+      { max_distance: 50, model: 'a.glb' },
+      { billboard: 'a_lod3.png', scale: [2, 1, 1] },
+    ]);
+    expect(problems).toEqual([]);
   });
 
   it('rejects distances that do not increase near→far', () => {

@@ -803,15 +803,27 @@ shape = "sphere"
             assert!(gen.texture_size.is_some());
         }
 
-        // The last level is the shared procedural sphere. The authoring tool
-        // (author-ladders.mjs `sphereFromExtents`) sizes and colours it per
-        // variant from the sidecar's own `[extents]` and averaged hull colour, so
-        // a large rock's stand-in restates a radius of ~4 — its collider
-        // half-width — and the hull grey, rather than leaving them to inherit.
+        // The last level is the shared billboard that replaced the procedural
+        // far sphere: a captured yaw-ring atlas of the hull, sized per variant
+        // from the captured world extent by the authoring tool
+        // (scripts/capture-billboards.mjs). It is a billboard, not a shape, and
+        // records how it was baked in `[lod.capture]`.
         let last = rig.lod.last().unwrap();
-        assert_eq!(last.shape, Some(crate::entity_config::MeshShape::Sphere));
-        assert_eq!(last.radius, Some(3.9922));
-        assert_eq!(last.colour, Some(vec![0.3626, 0.3418, 0.3161]));
+        assert_eq!(last.shape, None, "the far level is a billboard, not a shape");
+        assert_eq!(
+            last.billboard.as_deref(),
+            Some("assets/models/asteroid_common_1_lod3.png")
+        );
+        assert_eq!(
+            last.scale,
+            Some([7.9615, 4.8775, 1.0]),
+            "the large variant's billboard is sized to its captured world extent"
+        );
+        assert_eq!(
+            last.capture.as_ref().and_then(|c| c.yaw_views),
+            Some(8),
+            "the billboard records its capture provenance"
+        );
     }
 
     /// The huge size class's ladder (issue #947), which is the same four

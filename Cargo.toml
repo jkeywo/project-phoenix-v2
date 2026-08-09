@@ -32,6 +32,15 @@ name = "phoenix-perf"
 path = "src/bin/phoenix_perf.rs"
 required-features = ["perf"]
 
+# Automatic LOD switch-range tuner (see src/bin/tune_lods.rs). Native-only, same
+# `capture` feature as capture-billboard (both are offscreen GPU render tools),
+# and — like every native-only bin here — it MUST carry `required-features` or
+# Trunk's wasm build finds a second target artifact and refuses to build.
+[[bin]]
+name = "tune-lods"
+path = "src/bin/tune_lods.rs"
+required-features = ["capture"]
+
 [profile.release]
 opt-level = 3
 lto = true

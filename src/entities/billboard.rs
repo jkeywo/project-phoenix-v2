@@ -75,8 +75,9 @@ pub fn spawn_billboard_child(
 }
 
 /// The `uv_transform` that shows tile `k` of a 1×`views` horizontal atlas:
-/// scale U by `1/views`, offset by `k/views`.
-fn tile_uv_transform(k: u32, views: u32) -> bevy::math::Affine2 {
+/// scale U by `1/views`, offset by `k/views`. Pub so the `tune-lods` tool can
+/// pick a billboard's yaw tile directly when it renders a billboard level.
+pub fn tile_uv_transform(k: u32, views: u32) -> bevy::math::Affine2 {
     let inv = 1.0 / views as f32;
     bevy::math::Affine2::from_scale_angle_translation(
         Vec2::new(inv, 1.0),

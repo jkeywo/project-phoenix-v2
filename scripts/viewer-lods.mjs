@@ -287,8 +287,11 @@ export function validateLadder(levels) {
 
   levels.forEach((level, i) => {
     const where = `level ${i}`;
-    if (!level.model && !level.shape) {
-      problems.push(`${where}: needs either a model or a procedural shape`);
+    // A level renders as a GLB (`model`), a captured far-LOD `billboard`, or a
+    // procedural `shape`; a billboard is as valid a renderer as the other two
+    // (issue #914 far-LOD), so it satisfies this check too.
+    if (!level.model && !level.shape && !level.billboard) {
+      problems.push(`${where}: needs a model, a billboard, or a procedural shape`);
     }
     if (level.model && level.shape) {
       problems.push(`${where}: has both a model and a shape — a level is one or the other`);

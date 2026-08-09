@@ -168,6 +168,18 @@ pub mod debug_overlay;
 /// the game renderer and the standalone model viewer.
 pub mod render_setup;
 
+/// Shared native headless-render core (offscreen RGBA target + render-graph
+/// readback + framing maths) for the `capture-billboard` and `tune-lods` tools.
+/// Native + `capture` only: it pulls the render-graph readback plumbing and the
+/// `crossbeam-channel` bridge, neither of which the shipped wasm build wants.
+#[cfg(all(feature = "capture", not(target_arch = "wasm32")))]
+pub mod render_capture;
+
+/// Pure math behind the automatic LOD switch-range tuner (`tune-lods`): the
+/// alpha-aware image difference and the knee-of-curve rule. Ungated so its unit
+/// tests run under the default `cargo test --lib`.
+pub mod lod_tune;
+
 /// Standalone model/shader viewer (`viewer.html`), a dev tool built as its own
 /// Trunk target. Not part of the game binary.
 #[cfg(feature = "viewer")]

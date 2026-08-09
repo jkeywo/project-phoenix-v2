@@ -53,13 +53,22 @@ pub struct WorldContentRuntime {
     /// without duplicating the dispatch logic that lives inside
     /// `tick_trigger_pipeline`.
     pub pending_world_events: Vec<WorldEvent>,
-    /// `Time::elapsed_secs()` snapshot taken when the base world was loaded
-    /// (set by `init_world_runtime`). `on_timer` triggers fire when
-    /// `time.elapsed_secs() - world_loaded_at_secs >= after_secs`.
-    /// `None` while no world is loaded (lobby, fallback bootstrap), in
-    /// which case `collect_world_events` skips emitting `TimerElapsed` events.
-    /// (#475)
-    pub world_loaded_at_secs: Option<f32>,
+    /// Time zero for the mission clock: the `Time::elapsed_secs()` reading taken
+    /// on the first simulation tick of `GamePhase::InProgress`. `on_timer`
+    /// triggers fire when `time.elapsed_secs() - mission_clock_anchor_secs >=
+    /// after_secs`, and `action_delays` schedule `fire_at_elapsed` against the
+    /// same origin. (#475, re-anchored in #960)
+    ///
+    /// `None` means "not anchored yet" — no world loaded at all, or a mission
+    /// that has not started. `collect_world_events` emits no `TimerElapsed`
+    /// while it is `None`, and `tick_delayed_actions` dispatches nothing.
+    ///
+    /// **Written by [`anchor_mission_clock`], cleared by [`arm_mission_clock`],
+    /// and by nothing else.** It is deliberately NOT stamped at `Startup`: the
+    /// world is loaded then, but `Time` keeps running through the whole lobby,
+    /// so a boot anchor made `after_secs` an offset from app launch rather than
+    /// from mission start — see [`anchor_mission_clock`] for what that cost.
+    pub mission_clock_anchor_secs: Option<f32>,
     /// Maps named groups to the set of entity names currently in that group.
     pub entity_groups: HashMap<String, HashSet<String>>,
     /// Actions queued for deferred dispatch (via `action_delays` on triggers).
@@ -312,9 +321,18 @@ impl Plugin for WorldPlugin {
             // `CommsWorldPlugin` with `.before`/`.after` constraints
             // against these two systems, reproducing the original
             // four-system `.chain()` exactly.
+            // The mission clock (#960). `SimSet::Physics` is gated on
+            // `GamePhase::InProgress`, so the first run of
+            // `anchor_mission_clock` is the first simulation tick of the
+            // mission; `arm_mission_clock` re-opens it for a second round.
+            .add_systems(OnEnter(GamePhase::InProgress), arm_mission_clock)
             .add_systems(
                 FixedUpdate,
-                (collect_world_events, tick_trigger_pipeline)
+                (
+                    anchor_mission_clock,
+                    collect_world_events,
+                    tick_trigger_pipeline,
+                )
                     .chain()
                     .in_set(crate::sim_sets::SimSet::Physics),
             )
@@ -805,21 +823,17 @@ pub(crate) fn init_world_runtime(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut world_resource: ResMut<WorldResource>,
-    time: Option<Res<bevy::time::Time>>,
 ) {
     let Some(world_config) = world_config else {
         return;
     };
 
-    // (#475) Stamp the load-time anchor for `on_timer` triggers. All
-    // `after_secs` values are measured relative to this; `collect_world_events`
-    // emits `WorldEvent::TimerElapsed { elapsed_secs }` each tick using
-    // `time.elapsed_secs() - world_loaded_at_secs`. `Time` is wrapped in
-    // `Option` so older test apps that don't install `TimePlugin` continue
-    // to work (they just never see `TimerElapsed` events Ã¢â‚¬â€ same as today).
-    if let Some(t) = time {
-        runtime.world_loaded_at_secs = Some(t.elapsed_secs());
-    }
+    // The mission clock is NOT anchored here. Loading the world and starting
+    // the mission are different moments - the lobby sits between them - and
+    // every `after_secs` in a world TOML is authored against the second one.
+    // `anchor_mission_clock` stamps `mission_clock_anchor_secs` on the first
+    // simulation tick of `GamePhase::InProgress`; see that system for what a
+    // boot anchor cost.
 
     // Populate scenario metadata so the lobby title/description render correctly.
     world_resource.0.scenario_title = world_config.global.title.clone().unwrap_or_default();
@@ -893,6 +907,105 @@ pub(crate) fn broadcast_objective_summary(
     objectives.0.mark_clean();
 }
 
+// -- Mission clock -----------------------------------------------------------
+
+/// `OnEnter(GamePhase::InProgress)` system: disarm the mission clock so the
+/// next simulation tick re-stamps it.
+///
+/// One line, and it is the whole multi-round half of the fix. A session can
+/// reach `InProgress` more than once (`ReturnToLobby` from the game-over screen
+/// puts the crew back in the lobby and a second round starts from there, which
+/// is why `reset_command_log` and `reset_broadcast_caches_on_start` sit in the
+/// same `OnEnter` chain). Without this, round two would measure `after_secs`
+/// from round one's start and arrive with its whole schedule already expired.
+///
+/// It writes `None` rather than a reading of its own because it does not run
+/// in a fixed step. Bevy applies a `NextState<GamePhase>` write at whichever
+/// `StateTransition` site comes first, and the two production start paths use
+/// different ones: the lobby countdown and headless auto-start write from
+/// `FixedUpdate` (the fixed-schedule site `register_fixed_state_transition`
+/// installs), while `auto_transition_from_loading` writes from `Update` (the
+/// frame-level site). `Time` resolves to `Time<Fixed>` at the first and
+/// `Time<Virtual>` at the second, and those two clocks disagree by up to one
+/// timestep, so a reading taken here would make the schedule a function of
+/// which path started the mission and of frame pacing. Deferring the reading
+/// to [`anchor_mission_clock`], which only ever runs inside a fixed step,
+/// keeps it on one clock.
+pub(crate) fn arm_mission_clock(mut runtime: ResMut<WorldContentRuntime>) {
+    runtime.mission_clock_anchor_secs = None;
+}
+
+/// Stamp time zero for the mission clock on the first simulation tick of the
+/// mission.
+///
+/// # The bug this closes (latent since #475, lethal since #960)
+///
+/// `after_secs` used to be measured from a `Time::elapsed_secs()` reading taken
+/// by `init_world_runtime`, a `Startup` system. `GamePhase` defaults to
+/// `Lobby`, the world is loaded at `Startup`, and `Time<Virtual>` (and through
+/// it `Time<Fixed>`) runs the whole time the crew is picking stations. The
+/// `SimSet` chain is gated on `in_state(GamePhase::InProgress)`, so no trigger
+/// was *evaluated* during the lobby - but the clock they would be evaluated
+/// against kept running. After a 90-second lobby the first `InProgress` tick
+/// therefore emitted `TimerElapsed { elapsed_secs: 90 }`, and every trigger
+/// authored at 0, 45 and 90 fired in one dispatch batch. In `combat_test` that
+/// is three waves and four comms bursts landing together on tick one; at a
+/// five-minute lobby the entire eight-wave raid arrives at once and the victory
+/// trigger is armed before the player has moved.
+///
+/// Nothing caught it because the only automated driver is headless, which
+/// auto-starts on the first fixed step with nobody connected - elapsed is
+/// approximately zero at `InProgress`, so the boot anchor and the mission
+/// anchor agree to within a tick. It takes a lobby to tell them apart, and
+/// `combat_test_wave_clock_measures_from_mission_start_not_app_boot`
+/// (`tests/headless_runner.rs`) supplies one.
+///
+/// # Why here
+///
+/// `SimSet::Physics` is gated on `InProgress`, so "the first tick this system
+/// runs" IS "the first simulation tick of the mission" - the gate does the
+/// work, and there is no second predicate to keep in step with it. Running
+/// inside the fixed schedule also means `Time` is `Time<Fixed>`, the same clock
+/// `collect_world_events` and `tick_delayed_actions` read the anchor back
+/// against, and the same clock two hosts would agree on: the reading is a whole
+/// number of sim ticks, not a frame-pacing artifact.
+///
+/// Ordered before `collect_world_events` so a mission whose first wave is
+/// authored at `after_secs = 0` still gets its `TimerElapsed { 0.0 }` on that
+/// very tick rather than one tick late.
+///
+/// # What it does not do
+///
+/// Nothing re-anchors while a mission is running. In particular
+/// `apply_pending_scenario_loads` does not: that applier MERGES a world TOML
+/// into a live runtime (it appends trigger states, it does not replace them),
+/// so re-anchoring there would rewind the clock the base world's own in-flight
+/// `on_timer` triggers and `action_delays` are already scheduled against. A
+/// genuinely new scenario arrives the other way - back to the lobby and in
+/// again - and that path re-arms through [`arm_mission_clock`].
+///
+/// `world_config` gates the stamp for the same reason `init_world_runtime`
+/// gates on it: an app with no world (native unit-test fixtures) must go on
+/// seeing no `TimerElapsed` events at all, or `collect_world_events` would
+/// start writing `WorldEventBuffer` every tick in apps that previously left it
+/// untouched.
+pub(crate) fn anchor_mission_clock(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut runtime: ResMut<WorldContentRuntime>,
+    time: Option<Res<bevy::time::Time>>,
+) {
+    // Both reads go through an immutable deref, so an already-anchored tick
+    // does not mark `WorldContentRuntime` changed.
+    if world_config.is_none() || runtime.mission_clock_anchor_secs.is_some() {
+        return;
+    }
+    // `Time` is optional so test apps without `TimePlugin` keep working: they
+    // never anchor, and therefore never see `TimerElapsed` - same as before.
+    if let Some(t) = time {
+        runtime.mission_clock_anchor_secs = Some(t.elapsed_secs());
+    }
+}
+
 // -- AI-event trigger system -------------------------------------------------
 
 /// Collect this tick's externally-sourced `WorldEvent`s into `WorldEventBuffer`.
@@ -903,14 +1016,17 @@ pub(crate) fn broadcast_objective_summary(
 /// 2. `runtime.pending_world_events` (`WorldLoaded`, `EnteredRegion`, ...
 ///    queued by `init_world_runtime`, `apply_world_layer_changes`, the region
 ///    observers, and `tick_delayed_actions` on the previous tick).
-/// 3. (#475) A synthesised `TimerElapsed` event once the world has loaded.
-///    `on_timer` triggers fire when `elapsed_secs >= after_secs`, measured
-///    from `world_loaded_at_secs` (so `after_secs = 0` fires on the first
-///    post-load tick, and `after_secs = 300` fires 300s into the scenario
-///    regardless of how long the lobby was up beforehand). Single-shot
-///    semantics on `TriggerState.fired` prevent re-firing. `Time` is optional
-///    so test apps without `TimePlugin` continue to work (they just never see
-///    `TimerElapsed`).
+/// 3. (#475) A synthesised `TimerElapsed` event once the mission clock is
+///    anchored. `on_timer` triggers fire when `elapsed_secs >= after_secs`,
+///    measured from `mission_clock_anchor_secs` - which [`anchor_mission_clock`]
+///    stamps on the first simulation tick of `GamePhase::InProgress`, one place
+///    earlier in this same chain. So `after_secs = 0` fires on that first
+///    mission tick, and `after_secs = 300` fires 300s into the MISSION however
+///    long the lobby was up beforehand (#960 - until then the anchor was taken
+///    at `Startup` and a 90-second lobby retired the 0/45/90 triggers in one
+///    batch). Single-shot semantics on `TriggerState.fired` prevent re-firing.
+///    `Time` is optional so test apps without `TimePlugin` continue to work
+///    (they just never see `TimerElapsed`).
 ///
 /// Ordering: chained after `tick_pending_follow_ups` (which snapshots
 /// `pending_world_events` before this system drains them) and before
@@ -957,7 +1073,7 @@ pub(crate) fn collect_world_events(
     }
     let elapsed_secs = time.as_ref().and_then(|t| {
         runtime
-            .world_loaded_at_secs
+            .mission_clock_anchor_secs
             .map(|loaded_at| (t.elapsed_secs() - loaded_at).max(0.0))
     });
     if let Some(es) = elapsed_secs {
@@ -1033,7 +1149,7 @@ pub(crate) fn tick_trigger_pipeline(
     // value `collect_world_events` used earlier in the chain.
     let elapsed_secs = time.as_ref().and_then(|t| {
         runtime
-            .world_loaded_at_secs
+            .mission_clock_anchor_secs
             .map(|loaded_at| (t.elapsed_secs() - loaded_at).max(0.0))
     });
 
@@ -1722,7 +1838,7 @@ pub(crate) fn apply_dispatch_result(
 /// `tick_trigger_pipeline` uses.
 ///
 /// Registered after `tick_trigger_pipeline` in `SimSet::Physics` so that it sees
-/// the same tick's `world_loaded_at_secs` anchor.
+/// the same tick's `mission_clock_anchor_secs` anchor.
 fn tick_delayed_actions(
     mut runtime: ResMut<WorldContentRuntime>,
     time: Option<Res<bevy::time::Time>>,
@@ -1755,7 +1871,7 @@ fn tick_delayed_actions(
 ) {
     let Some(elapsed) = time.as_ref().and_then(|t| {
         runtime
-            .world_loaded_at_secs
+            .mission_clock_anchor_secs
             .map(|loaded| (t.elapsed_secs() - loaded).max(0.0))
     }) else {
         return;
@@ -1987,6 +2103,14 @@ use crate::entity_spawner::EntityUuid;
 /// initial world), so we push paths into the WASM-side pending-world queue and
 /// the implementation returns early until the JS bridge delivers the TOML via
 /// `wasm_push_world_toml`. On native targets `std::fs::read_to_string` is used.
+///
+/// It does NOT re-anchor the mission clock. This is a MERGE into a live
+/// runtime - it extends `trigger_states`, it does not replace them - so the
+/// base world's own in-flight `on_timer` triggers and `action_delays` are still
+/// scheduled against the running clock, and rewinding it here would postpone
+/// every one of them by however long the mission had been going. A genuinely
+/// fresh scenario is reached through the lobby instead, and
+/// `arm_mission_clock` re-anchors on that path.
 fn apply_pending_scenario_loads(
     mut pending: ResMut<PendingScenarioLoad>,
     mut runtime: ResMut<WorldContentRuntime>,
@@ -2610,7 +2734,7 @@ pub(crate) mod tests {
 
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.mission_clock_anchor_secs = Some(0.0);
             runtime.pending_delayed_actions.push(DelayedAction {
                 action: TriggerAction::SetWorldFlag {
                     name: "aphelion_armed".to_string(),
@@ -8147,10 +8271,78 @@ size_max = 2.0
         );
     }
 
+    /// (#960) The mission clock stamps ONCE per mission, off the clock as it
+    /// reads when the mission starts - and `arm_mission_clock` is what lets a
+    /// second round start its own clock instead of inheriting the first's.
+    ///
+    /// The lobby half of the same fix is flown end-to-end by
+    /// `combat_test_wave_clock_measures_from_mission_start_not_app_boot`
+    /// (`tests/headless_runner.rs`), which holds a real app out of `InProgress`
+    /// for 90 s and requires the authored schedule to survive it. This one
+    /// covers what that run cannot reach: the no-world case, the idempotence
+    /// that keeps a running mission's clock from creeping forward every tick,
+    /// and the re-arm a `ReturnToLobby` round depends on.
+    #[test]
+    fn mission_clock_anchors_once_per_mission_and_rearms_for_the_next() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let step = std::time::Duration::from_secs(10);
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))
+            .init_resource::<WorldContentRuntime>()
+            .add_systems(Update, anchor_mission_clock);
+
+        let anchor = |app: &App| {
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .mission_clock_anchor_secs
+        };
+
+        // No world loaded: nothing anchors, so `collect_world_events` goes on
+        // emitting no `TimerElapsed` at all in a fixture that never asked for a
+        // scenario.
+        app.update();
+        assert_eq!(
+            anchor(&app),
+            None,
+            "an app with no `WorldConfig` must not anchor a clock it has no \
+             triggers to measure"
+        );
+
+        app.insert_resource(crate::world::config::WorldConfig::default());
+        app.update();
+        let first = anchor(&app).expect("a world is loaded, so the mission clock anchors");
+
+        // Idempotent: a running mission's time zero must not creep forward with
+        // every tick, or `after_secs` would never be reached.
+        app.update();
+        assert_eq!(
+            anchor(&app),
+            Some(first),
+            "the anchor must be stamped once per mission, not re-stamped every \
+             tick - a clock that follows `now` never elapses anything"
+        );
+
+        // Round two. `OnEnter(GamePhase::InProgress)` runs this on every start,
+        // including the one a `ReturnToLobby` leads back to.
+        app.world_mut()
+            .run_system_once(arm_mission_clock)
+            .expect("arm_mission_clock should run");
+        app.update();
+        let second = anchor(&app).expect("the second mission anchors too");
+        assert!(
+            second > first,
+            "round two must measure from ITS own start ({second}), not inherit \
+             round one's ({first}) - inheriting means every trigger the first \
+             round outlived has already expired when the second begins"
+        );
+    }
+
     /// (#475) `on_timer` triggers fire when `time.elapsed_secs() -
-    /// runtime.world_loaded_at_secs >= after_secs`. Verify the producer
-    /// in `tick_trigger_pipeline` emits `TimerElapsed` events using the
-    /// load-time anchor, and that an `on_timer` trigger correctly fires
+    /// runtime.mission_clock_anchor_secs >= after_secs`. Verify the producer
+    /// in `tick_trigger_pipeline` emits `TimerElapsed` events against the
+    /// mission-clock anchor, and that an `on_timer` trigger correctly fires
     /// a `spawn_entity` action.
     #[test]
     fn on_timer_trigger_fires_spawn_entity_action() {
@@ -8163,7 +8355,7 @@ size_max = 2.0
         // with `after_secs = 0.0` so it should fire on the first tick.
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.mission_clock_anchor_secs = Some(0.0);
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnTimer { after_secs: 0.0 },
@@ -8206,7 +8398,7 @@ size_max = 2.0
             uuid.is_some(),
             "on_timer after_secs=0 must have fired its SpawnEntity action Ã¢â‚¬â€ \
              tick_trigger_pipeline must emit TimerElapsed events when \
-             world_loaded_at_secs is set"
+             mission_clock_anchor_secs is set"
         );
 
         // And the trigger must be marked fired (single-shot).
@@ -8231,7 +8423,7 @@ size_max = 2.0
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             // World loaded "in the future" so elapsed will be negative,
             // clamped to 0, never satisfying after_secs = 100.
-            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.mission_clock_anchor_secs = Some(0.0);
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnTimer { after_secs: 100.0 },
@@ -8291,7 +8483,7 @@ size_max = 2.0
 
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.mission_clock_anchor_secs = Some(0.0);
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnTimer { after_secs: 0.0 },

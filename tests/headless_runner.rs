@@ -1624,6 +1624,139 @@ fn combat_test_spawns_its_waves_on_the_clock_in_a_real_run() {
     }
 }
 
+/// Issue #960: `after_secs` is an offset from MISSION START, not from app boot.
+///
+/// The sibling test above starts the mission on frame one, and so does every
+/// other automated driver of this scenario: headless auto-starts with nobody
+/// connected, which is precisely why the boot anchor survived from #475 to here
+/// without a single test noticing. The two anchors only disagree once something
+/// sits between loading the world and starting the mission — a lobby.
+///
+/// So this run supplies one. The app is parked in `Loading` for 90 simulated
+/// seconds before the mission starts. `Loading` is the phase a browser host sits
+/// in while assets stream, `headless_auto_start` only fires from `Lobby`, and
+/// headless registers no asset preloader (`SimPluginOptions::render` is false),
+/// so nothing leaves that phase until this test writes `NextState` — from
+/// outside the fixed schedule, which is also how `auto_transition_from_loading`
+/// does it in the browser. The `SimSet` chain is gated on `InProgress`, so no
+/// trigger is evaluated for those 90 seconds; `Time<Virtual>` and `Time<Fixed>`
+/// advance through them regardless, and that gap is the whole bug.
+///
+/// Two observables, and the first is the one that fails against the boot anchor:
+///
+///   1. The first mission tick releases wave 1 and NOTHING ELSE. Anchored at
+///      boot, that tick reads `elapsed_secs = 90`, which satisfies the triggers
+///      authored at 0, 45 AND 90 in one dispatch batch — three waves and four
+///      comms bursts landing together, `waves_spawned = 3`. At a five-minute
+///      lobby the whole eight-wave raid arrives on tick one.
+///   2. Wave 2 still arrives 45 s later, measured from the START, not from boot.
+///      Without this the fix could "pass" by never firing anything at all.
+///
+/// The budget stops well short of wave 3 (t=90): what is under test is the
+/// origin of the clock, and the full cadence is the sibling test's job.
+#[test]
+fn combat_test_wave_clock_measures_from_mission_start_not_app_boot() {
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    /// Simulated seconds spent waiting to start. Chosen to sit exactly on the
+    /// authored time of wave 3, so a boot-anchored run trips two thresholds
+    /// rather than one.
+    const LOBBY_SECS: f64 = 90.0;
+    /// Mission seconds to fly after the start. Long enough to cover wave 2's
+    /// authored t=45 with room to prove it was not early.
+    const MISSION_SECS: f64 = 60.0;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/combat_test.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(LOBBY_SECS + MISSION_SECS, dt),
+        seed: Some(2),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    let waves_spawned = |app: &App| {
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("waves_spawned")
+    };
+
+    // Park the app short of the mission, and burn the lobby.
+    app.world_mut()
+        .insert_resource(State::new(GamePhase::Loading));
+    run(&mut app, ticks_for_sim_seconds(LOBBY_SECS, dt));
+
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::Loading,
+        "precondition: nothing in a headless app may leave `Loading` on its own \
+         - if something does, this test is no longer holding a lobby open and \
+         proves nothing"
+    );
+    assert_eq!(
+        waves_spawned(&app),
+        0,
+        "precondition: the `SimSet` chain is gated on `InProgress`, so no wave \
+         may spawn before the mission starts"
+    );
+
+    // Start the mission the way the browser host does: `NextState` written
+    // outside the fixed schedule, applied at the frame-level `StateTransition`.
+    app.world_mut()
+        .resource_mut::<NextState<GamePhase>>()
+        .set(GamePhase::InProgress);
+
+    // `first_seen[n]` is the MISSION-second at which `waves_spawned` first read
+    // n. The first frame crosses the phase boundary, so mission time starts
+    // there.
+    let mut first_seen: std::collections::BTreeMap<i64, f64> = std::collections::BTreeMap::new();
+    let mission_frames = ticks_for_sim_seconds(MISSION_SECS, dt);
+    for frame in 0..mission_frames {
+        run(&mut app, 1);
+        first_seen
+            .entry(waves_spawned(&app))
+            .or_insert((frame + 1) as f64 * dt);
+
+        if frame == 0 {
+            assert_eq!(
+                app.world().resource::<State<GamePhase>>().get(),
+                &GamePhase::InProgress,
+                "precondition: the mission must have started on the first frame \
+                 after the `NextState` write"
+            );
+            assert_eq!(
+                waves_spawned(&app),
+                1,
+                "the first mission tick released {} waves. Only wave 1 is \
+                 authored at `after_secs = 0`; waves 2 and 3 are authored at 45 \
+                 and 90. Releasing more than one means `on_timer` is still being \
+                 measured from an anchor stamped at `Startup`, so a {LOBBY_SECS} \
+                 s lobby retired {LOBBY_SECS} s of the schedule before the crew \
+                 could move.",
+                waves_spawned(&app)
+            );
+        }
+    }
+
+    let wave_2_at = first_seen.get(&2).copied().unwrap_or_else(|| {
+        panic!(
+            "wave 2 never arrived in {MISSION_SECS} mission-seconds, though \
+             combat_test.toml authors it at 45 s. Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        (wave_2_at - 45.0).abs() < 1.0,
+        "wave 2 arrived {wave_2_at:.2} mission-seconds in, but combat_test.toml \
+         authors it at 45 s. The clock has to start at mission start and then \
+         run at one second per second: an anchor taken anywhere else moves this \
+         reading by exactly the length of the lobby. All: {first_seen:?}"
+    );
+}
+
 /// Issue #943 acceptance: the player's destroyer does NOT dump its magazine
 /// into the opening of `combat_test`, and what stops it is the world's own count
 /// of the threat still ahead.

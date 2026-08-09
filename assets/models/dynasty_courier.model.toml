@@ -52,7 +52,11 @@ texture_size = 256
 remesh_voxel_size = 0.0211
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.264, 0.214, 0.2034 ]
-radius = 0.7125
-scale = [ 1.0, 0.2397, 0.9907 ]
+billboard = "assets/models/dynasty_courier_lod3.png"
+scale = [ 1.4249, 0.3416, 1.0 ]
+
+[lod.capture]
+source = "assets/models/dynasty_courier.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

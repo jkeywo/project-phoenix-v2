@@ -96,15 +96,16 @@ const json = (res, status, body) => {
   res.end(text);
 };
 
-const readBody = (req) =>
+const readBody = (req, maxBytes = 1_000_000) =>
   new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     req.on('data', (chunk) => {
       size += chunk.length;
-      // A ladder is a few hundred bytes; anything near a megabyte is a bug or
-      // a mistake, and buffering it would be this process's problem either way.
-      if (size > 1_000_000) reject(new Error('request body too large'));
+      // A ladder is a few hundred bytes; anything near the cap is a bug or a
+      // mistake, and buffering it would be this process's problem either way.
+      // The capture route raises the cap: a billboard atlas is a real PNG.
+      if (size > maxBytes) reject(new Error('request body too large'));
       else chunks.push(chunk);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
@@ -313,6 +314,56 @@ async function saveLadder(stem, levels) {
 }
 
 /**
+ * Swap the ladder's final level for a billboard pointing at `pngPath` in every
+ * sidecar of the stem. The billboard PNG is shared, but its world `scale` comes
+ * from each sidecar's own `[extents]` — the per-variant sizing the sphere it
+ * replaces used, so a "huge" rock's stand-in is huge and a "small" one small.
+ */
+async function saveBillboardLevel(stem, pngPath, meta) {
+  const files = await readdir(MODELS_DIR);
+  const sidecars = sidecarsForStem(files, stem);
+  if (!sidecars.length) {
+    return { ok: false, problems: [`${stem} has no rig sidecar to attach a billboard to`] };
+  }
+  const round = (x) => Math.round(x * 1e4) / 1e4;
+  const proposed = [];
+  for (const file of sidecars) {
+    const current = await readFile(path.join(MODELS_DIR, file), 'utf8');
+    const doc = parseToml(current);
+    const levels = ladderFromDoc(doc);
+    if (!levels.length) {
+      return { ok: false, problems: [`${file} has no ladder; capture a ladder before a billboard`] };
+    }
+    const size = doc?.extents?.size;
+    const w = Array.isArray(size) ? Math.max(Number(size[0]), Number(size[2])) : meta.world_w ?? 1;
+    const h = Array.isArray(size) ? Number(size[1]) : meta.world_h ?? 1;
+    // Replace the final (far) level — the sphere — with the billboard.
+    levels[levels.length - 1] = {
+      billboard: pngPath,
+      scale: [round(w), round(h), 1],
+      capture: {
+        source: meta.source,
+        yaw_views: meta.views,
+        resolution: meta.resolution,
+        pitch: meta.pitch,
+      },
+    };
+    proposed.push({ path: `assets/models/${file}`, text: replaceLadder(current, levels), current });
+  }
+
+  const declared = validateProposal(proposed.map(({ path: p, text }) => ({ path: p, text })));
+  if (declared.length) return { ok: false, problems: declared };
+
+  const written = [];
+  for (const item of proposed) {
+    if (item.text === item.current) continue;
+    await writeFile(path.join(ROOT, item.path), item.text);
+    written.push(item.path);
+  }
+  return { ok: true, written, sidecars: proposed.map((p) => p.path) };
+}
+
+/**
  * Start a generator run. `filter` is what the generator matches targets on — a
  * model stem for the whole ladder, or one level's output path for that level
  * alone. Returns false when a run is already in flight.
@@ -409,6 +460,25 @@ async function handleApi(req, res, url) {
     const result = await saveLadder(stem, levels);
     if (!result.ok) return json(res, 400, result);
     return json(res, 200, { ...result, state: await ladderState(stem, variantOf(url, body)) });
+  }
+
+  if (req.method === 'POST' && route === 'lod/capture') {
+    // The viewer baked a yaw-ring atlas and PNG-encoded it on a canvas; write it
+    // beside the model and swap the ladder's far level for a billboard. A larger
+    // body cap than a ladder edit: this one carries a real PNG (base64).
+    const body = JSON.parse(await readBody(req, 8_000_000));
+    const stem = await resolveModel(body.model);
+    const png = Buffer.from(body.png ?? '', 'base64');
+    if (!png.length) return json(res, 400, { problems: ['no atlas PNG in the request'] });
+    const atlas = `assets/models/${stem}_lod3.png`;
+    await writeFile(path.join(ROOT, atlas), png);
+    const meta = body.meta ?? {};
+    const result = await saveBillboardLevel(stem, atlas, {
+      ...meta,
+      source: `assets/models/${stem}.glb`,
+    });
+    if (!result.ok) return json(res, 400, result);
+    return json(res, 200, { ...result, atlas, state: await ladderState(stem, variantOf(url, body)) });
   }
 
   if (req.method === 'POST' && route === 'lod/generate') {

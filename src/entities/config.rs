@@ -567,6 +567,19 @@ pub struct LodLevel {
     /// Optional rig-sidecar variant name for the GLB (see [`MeshConfig::variant`]).
     #[serde(default)]
     pub variant: Option<String>,
+    /// Path to a billboard atlas `.png` for this band. When set, this is a
+    /// **billboard level**: the renderer draws a single camera-facing quad
+    /// textured from the atlas (a yaw ring of pre-rendered views of the model),
+    /// picking the tile nearest the camera's heading relative to the entity.
+    ///
+    /// It is the far replacement for a procedural `shape` stand-in — a captured
+    /// silhouette of the actual hull reads far better at 400+ than a coloured
+    /// sphere — and, because the PNG loads long before a multi-MB GLB, it is
+    /// also what shows while the near levels are still streaming in. Mutually
+    /// exclusive with `model` and `shape`; the atlas is baked by the model
+    /// viewer's capture tool (see `[lod.capture]`).
+    #[serde(default)]
+    pub billboard: Option<String>,
     /// Procedural shape for this band. Used only when `model` is `None`.
     #[serde(default)]
     pub shape: Option<MeshShape>,
@@ -620,6 +633,11 @@ pub struct LodLevel {
     /// see [`LodGeneration`]; the renderer never reads it.
     #[serde(default)]
     pub generate: Option<LodGeneration>,
+    /// How this level's `billboard` atlas was captured. Authored as a
+    /// `[lod.capture]` sub-table. Build-time provenance only — see
+    /// [`LodCapture`]; the renderer never reads it.
+    #[serde(default)]
+    pub capture: Option<LodCapture>,
 }
 
 /// Decimation parameters that produced a generated LOD level's `.glb`
@@ -686,6 +704,48 @@ pub struct LodGeneration {
     /// fraction of that (a sixty-fourth is a reasonable start).
     #[serde(default)]
     pub remesh_voxel_size: Option<f32>,
+}
+
+/// Capture parameters that produced a billboard level's atlas `.png`, authored
+/// as a `[lod.capture]` sub-table on the level.
+///
+/// **Ignored at runtime**, exactly like [`LodGeneration`]: once the atlas is on
+/// disk the renderer only needs the file. It lives in the sidecar so the ladder
+/// *fully* declares how the atlas comes back — the model viewer's capture tool
+/// (`src/viewer/capture.rs`, reached from the LOD panel) is the one reader, and
+/// re-baking needs a GPU + the browser viewer, so like the Blender voxel pre-pass
+/// this is a local step CI only re-hashes (`scripts/lod-manifest.toml`).
+///
+/// ```toml
+/// [[lod]]
+/// billboard = "assets/models/alliance_battleship_lod3.png"
+/// scale = [11.3, 12.0, 1.0]   # world width/height of the quad
+///
+/// [lod.capture]
+/// source = "assets/models/alliance_battleship.glb"
+/// yaw_views = 8       # tiles around a horizontal ring, packed left→right
+/// resolution = 256    # per-tile pixels (square)
+/// pitch = 20.0        # camera pitch in degrees above the ring plane
+/// ```
+///
+/// Optional throughout for the same reason [`LodGeneration`] is: the engine must
+/// never reject a sidecar over a build-time key it does not use. `deny_unknown_fields`
+/// still applies, so a misspelled key fails the build rather than being dropped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct LodCapture {
+    /// The `.glb` the atlas was rendered from — the ladder's near level.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Number of yaw views packed into the atlas, left→right (a horizontal ring).
+    #[serde(default)]
+    pub yaw_views: Option<u32>,
+    /// Per-tile resolution in pixels (square tiles).
+    #[serde(default)]
+    pub resolution: Option<u32>,
+    /// Camera pitch in degrees above the ring plane the views were rendered at.
+    #[serde(default)]
+    pub pitch: Option<f32>,
 }
 
 /// Upper bound (exclusive) of level `i`'s distance band. A missing

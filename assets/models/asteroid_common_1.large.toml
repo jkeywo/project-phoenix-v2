@@ -47,7 +47,11 @@ error = 0.01
 texture_size = 256
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.3626, 0.3418, 0.3161 ]
-radius = 3.9922
-scale = [ 1.0, 0.6124, 0.8843 ]
+billboard = "assets/models/asteroid_common_1_lod3.png"
+scale = [ 7.9615, 4.8775, 1.0 ]
+
+[lod.capture]
+source = "assets/models/asteroid_common_1.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

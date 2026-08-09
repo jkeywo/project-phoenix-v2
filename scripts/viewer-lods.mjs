@@ -35,6 +35,7 @@ const LEVEL_KEYS = [
   'max_distance',
   'model',
   'variant',
+  'billboard',
   'shape',
   'colour',
   'radius',
@@ -48,8 +49,11 @@ const LEVEL_KEYS = [
 /** Keys of the `[lod.generate]` sub-table, in written order. */
 const GENERATE_KEYS = ['source', 'ratio', 'error', 'texture_size', 'remesh_voxel_size'];
 
-/** `texture_size` is a pixel count; every other generate key is a float. */
-const INTEGER_KEYS = new Set(['texture_size']);
+/** Keys of the `[lod.capture]` sub-table, in written order. */
+const CAPTURE_KEYS = ['source', 'yaw_views', 'resolution', 'pitch'];
+
+/** Pixel counts / view counts are integers; every other generate/capture key is a float. */
+const INTEGER_KEYS = new Set(['texture_size', 'yaw_views', 'resolution']);
 
 /**
  * The `<stem>` of a model path: `assets/models/x.glb` → `x`.
@@ -102,6 +106,13 @@ export function ladderFromDoc(doc) {
       }
       out.generate = generate;
     }
+    if (level?.capture) {
+      const capture = {};
+      for (const key of CAPTURE_KEYS) {
+        if (level.capture[key] !== undefined) capture[key] = level.capture[key];
+      }
+      out.capture = capture;
+    }
     return out;
   });
 }
@@ -136,6 +147,14 @@ export function renderLadder(levels) {
       for (const key of GENERATE_KEYS) {
         if (generate[key] === undefined || generate[key] === null) continue;
         lines.push(`${key} = ${tomlValue(key, generate[key])}`);
+      }
+    }
+    const capture = level.capture;
+    if (capture && Object.keys(capture).length) {
+      lines.push('', '[lod.capture]');
+      for (const key of CAPTURE_KEYS) {
+        if (capture[key] === undefined || capture[key] === null) continue;
+        lines.push(`${key} = ${tomlValue(key, capture[key])}`);
       }
     }
     return lines.join('\n');

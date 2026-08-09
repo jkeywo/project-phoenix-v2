@@ -56,7 +56,11 @@ texture_size = 256
 remesh_voxel_size = 0.0211
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.2321, 0.1914, 0.1691 ]
-radius = 0.9516
-scale = [ 1.0, 0.2739, 1.8431 ]
+billboard = "assets/models/dynasty_destroyer_lod3.png"
+scale = [ 1.9031, 0.4212, 1.0 ]
+
+[lod.capture]
+source = "assets/models/dynasty_destroyer.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

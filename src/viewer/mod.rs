@@ -32,6 +32,7 @@ use crate::render_setup::{
 };
 
 mod camera;
+mod capture;
 mod gizmos;
 mod lighting;
 mod lod;
@@ -94,6 +95,13 @@ pub enum ViewerCommand {
     /// Re-fetch every asset this ladder names, then rebuild the subject from
     /// what came back.
     ReloadAssets,
+    /// Bake the far-LOD billboard: render the subject to a transparent yaw-ring
+    /// atlas the panel then saves. See [`capture`].
+    CaptureBillboard {
+        views: u32,
+        resolution: u32,
+        pitch_deg: f32,
+    },
 }
 
 // The panel builds a ladder one level at a time rather than handing over a
@@ -171,6 +179,8 @@ impl Plugin for ViewerPlugin {
             .init_resource::<lod::LadderState>()
             .init_resource::<lod::LodMode>()
             .init_resource::<stats::SubjectStats>()
+            .init_resource::<capture::CaptureRequest>()
+            .init_resource::<capture::CaptureState>()
             .init_resource::<crate::server_app::ProceduralMeshCache>()
             .add_systems(Startup, (setup_camera, subject::spawn_subject).chain())
             .add_systems(
@@ -186,6 +196,10 @@ impl Plugin for ViewerPlugin {
                     subject::respawn_on_asset_reload,
                     stats::measure_subject,
                     stats::publish_stats,
+                    // After `measure_subject` so the framing extents are known.
+                    capture::start_capture,
+                    capture::drive_capture,
+                    capture::publish_capture,
                 )
                     .chain(),
             )
@@ -222,6 +236,7 @@ fn apply_commands(
     asset_server: Res<AssetServer>,
     mut skyboxes: Query<&mut bevy::core_pipeline::Skybox>,
     mut cameras: Query<&mut OrbitCamera>,
+    mut capture_request: ResMut<capture::CaptureRequest>,
     mut commands: Commands,
 ) {
     for cmd in drain_commands() {
@@ -302,6 +317,19 @@ fn apply_commands(
                 // `respawn_on_asset_reload`. Respawning now would rebuild from
                 // the very assets being replaced.
                 subject_state.reloading = true;
+            }
+            ViewerCommand::CaptureBillboard {
+                views,
+                resolution,
+                pitch_deg,
+            } => {
+                // Handed to `capture::start_capture`, which waits for the
+                // subject's extents before it begins.
+                capture_request.0 = Some(capture::CaptureParams {
+                    views,
+                    resolution,
+                    pitch_deg,
+                });
             }
         }
         lighting.set_changed();
@@ -540,6 +568,49 @@ pub fn viewer_reload_assets() {
 #[wasm_bindgen]
 pub fn viewer_stats() -> String {
     stats::stats_json()
+}
+
+// ── Billboard capture bridge ─────────────────────────────────────────────────
+
+/// Bake the far-LOD billboard atlas from the loaded subject. The result is
+/// polled out with the getters below (readback is asynchronous).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_capture_billboard(views: u32, resolution: u32, pitch_deg: f32) {
+    push_command(ViewerCommand::CaptureBillboard {
+        views,
+        resolution,
+        pitch_deg,
+    });
+}
+
+/// True once a baked atlas is waiting. Poll after `viewer_capture_billboard`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_capture_ready() -> bool {
+    capture::capture_ready()
+}
+
+/// The baked atlas metadata as JSON (`width`, `height`, `source`, `views`,
+/// `resolution`, `pitch`, `world_w`, `world_h`).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_capture_meta() -> String {
+    capture::capture_meta()
+}
+
+/// Take the baked atlas RGBA bytes (row-major, `width`×`height`×4).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_capture_rgba() -> Vec<u8> {
+    capture::capture_take_rgba()
+}
+
+/// Clear the parked atlas once the panel has saved it.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_capture_clear() {
+    capture::capture_clear();
 }
 
 #[cfg(test)]

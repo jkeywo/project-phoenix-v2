@@ -79,7 +79,11 @@ texture_size = 256
 remesh_voxel_size = 0.0211
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.4946, 0.5929, 0.6797 ]
-radius = 4.0001
-scale = [ 1.0, 0.0977, 1.0 ]
+billboard = "assets/models/alliance_cruiser_lod3.png"
+scale = [ 1.9019, 0.4357, 1.0 ]
+
+[lod.capture]
+source = "assets/models/alliance_cruiser.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

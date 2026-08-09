@@ -45,7 +45,11 @@ error = 0.01
 texture_size = 256
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.1372, 0.1199, 0.0968 ]
-radius = 3.996
-scale = [ 1.0, 0.6075, 0.7612 ]
+billboard = "assets/models/asteroid_rare_2_lod3.png"
+scale = [ 7.9672, 4.838, 1.0 ]
+
+[lod.capture]
+source = "assets/models/asteroid_rare_2.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

@@ -235,6 +235,7 @@
         <button id="addLevel">+ level</button>
         <button id="revertLadder">Revert</button>
         <button id="saveLadder">Save</button>
+        <button id="captureBillboard" title="Render the far-LOD billboard atlas from this model">Capture billboard</button>
       </div>
       <label for="copyFrom">Copy ladder from</label>
       <select id="copyFrom"><option value="">—</option></select>
@@ -551,6 +552,65 @@
         setNote(ladderNote, err.message, 'bad');
       }
     }
+
+    // ── Billboard capture ────────────────────────────────────────────────────
+    // Ask the engine to bake a yaw-ring atlas from the loaded subject, poll for
+    // the RGBA it read back, PNG-encode it on a canvas, and POST it to the dev
+    // server, which writes the .png and swaps the ladder's far level for a
+    // billboard. Defaults: 8 views, 256px tiles, 20° pitch.
+    const captureButton = document.getElementById('captureBillboard');
+
+    async function rgbaToPngBase64(rgba, width, height) {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(width, height);
+      img.data.set(rgba);
+      ctx.putImageData(img, 0, 0);
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
+
+    captureButton.addEventListener('click', async () => {
+      captureButton.disabled = true;
+      setNote(ladderNote, 'Capturing billboard…');
+      try {
+        wasm.viewer_capture_billboard(8, 256, 20);
+        const meta = await new Promise((resolve, reject) => {
+          let tries = 0;
+          const poll = setInterval(() => {
+            if (wasm.viewer_capture_ready()) {
+              clearInterval(poll);
+              resolve(JSON.parse(wasm.viewer_capture_meta()));
+            } else if ((tries += 1) > 600) {
+              clearInterval(poll);
+              reject(new Error('capture timed out'));
+            }
+          }, 50);
+        });
+        const rgba = wasm.viewer_capture_rgba();
+        wasm.viewer_capture_clear();
+        const png = await rgbaToPngBase64(rgba, meta.width, meta.height);
+        const result = await postJson(
+          `lod/capture?variant=${encodeURIComponent(variantSelect.value)}`,
+          { model: modelSelect.value, png, meta },
+        );
+        ladder.state = result.state;
+        ladder.saved = result.state.levels;
+        ladder.levels = structuredClone(ladder.saved);
+        ladder.dirty = false;
+        await loadLadder();
+        setNote(ladderNote, `Captured ${result.atlas}`, 'good');
+      } catch (err) {
+        setNote(ladderNote, err.message, 'bad');
+      } finally {
+        captureButton.disabled = false;
+      }
+    });
 
     /** The band a level covers, as text. */
     function bandLabel(index) {

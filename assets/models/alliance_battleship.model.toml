@@ -99,7 +99,11 @@ texture_size = 256
 remesh_voxel_size = 0.0211
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.411, 0.4768, 0.5702 ]
-radius = 5.6352
-scale = [ 1.0, 0.1334, 1.0649 ]
+billboard = "assets/models/alliance_battleship_lod3.png"
+scale = [ 2.8536, 0.9019, 1.0 ]
+
+[lod.capture]
+source = "assets/models/alliance_battleship.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

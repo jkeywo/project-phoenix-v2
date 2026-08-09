@@ -23,6 +23,11 @@ required-features = ["headless"]
 # it. Any native-only bin added here needs a `required-features` for the same
 # reason.
 [[bin]]
+name = "capture-billboard"
+path = "src/bin/capture_billboard.rs"
+required-features = ["capture"]
+
+[[bin]]
 name = "phoenix-perf"
 path = "src/bin/phoenix_perf.rs"
 required-features = ["perf"]
@@ -63,9 +68,20 @@ headless = []
 # exists to keep that binary out of the wasm target list rather than to gate any
 # code — see the `[[bin]]` note above.
 perf = []
+# Capture feature: builds the `capture-billboard` tool, a native headless
+# renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
+# the `image` crate for PNG encoding; kept out of the default/wasm builds because
+# it renders offscreen with a native GPU adapter.
+capture = ["server", "dep:image", "dep:crossbeam-channel"]
 
 [dependencies]
 bevy = { version = "0.18.1", features = ["webgl2", "webp"] }
+# PNG encoding for the `capture-billboard` tool (optional; enabled by the
+# `capture` feature). Matches the version Bevy already resolves.
+image = { version = "0.25", optional = true }
+# Main-world ↔ render-world channel for the headless capture readback, as in
+# Bevy's headless_renderer example (optional; `capture` feature).
+crossbeam-channel = { version = "0.5", optional = true }
 # `libm` feature: glam's own `f32`/`f64` math module (see `math.rs` in the
 # glam source) cfg's its libm-backed block on bare `feature = "libm"`, with
 # no `not(feature = "std")` guard — so this alone genuinely swaps glam's

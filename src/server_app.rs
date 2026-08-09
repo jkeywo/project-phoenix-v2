@@ -932,6 +932,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .init_resource::<ProceduralMeshCache>()
             .add_systems(Update, render_spawned_entities)
             .add_systems(Update, update_mesh_lod.after(render_spawned_entities))
+            .add_systems(
+                Update,
+                crate::entities::billboard::orient_lod_billboards.after(update_mesh_lod),
+            )
             .add_systems(Update, face_player_lights.after(render_spawned_entities));
     }
 
@@ -4541,10 +4545,45 @@ fn update_mesh_lod(
             commands.entity(entity).add_child(child);
             lods.scene_child = Some(child);
             lods.current = Some(target);
+        } else if let Some(atlas) = level.billboard.as_deref() {
+            // Billboard level: a camera-facing quad textured from a yaw-ring
+            // atlas. Width/height (world units) come from the level's `scale`;
+            // the ENTITY is forced back to a UNIFORM scale here — the earlier
+            // `transform.scale` line multiplied in this level's `[w, h, 1]`,
+            // which on a quad that rotates to face the camera would shear it.
+            // The width/height instead ride the child's own scale (see
+            // `spawn_billboard_child`), leaving the parent uniform.
+            transform.scale = Vec3::splat(lods.base.scale);
+            let [w, h] = level
+                .scale
+                .map(|s| [s[0], s[1]])
+                .unwrap_or([1.0, 1.0]);
+            let views = level
+                .capture
+                .as_ref()
+                .and_then(|c| c.yaw_views)
+                .unwrap_or(1);
+            teardown_lod_visual(&mut commands, &mut lods);
+            commands
+                .entity(entity)
+                .remove::<crate::model_rig::ModelMarkers>();
+            let child = crate::entities::billboard::spawn_billboard_child(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &asset_server,
+                atlas,
+                w,
+                h,
+                views,
+            );
+            commands.entity(entity).add_child(child);
+            lods.scene_child = Some(child);
+            lods.current = Some(target);
         } else {
-            // Neither model nor shape — invalid level. Settle so we don't spin.
+            // No model, shape, or billboard — invalid level. Settle so we don't spin.
             bevy::log::warn!(
-                "update_mesh_lod: LOD level {target} on {entity:?} has neither model nor shape — skipping"
+                "update_mesh_lod: LOD level {target} on {entity:?} has no model, shape, or billboard — skipping"
             );
             lods.current = Some(target);
         }

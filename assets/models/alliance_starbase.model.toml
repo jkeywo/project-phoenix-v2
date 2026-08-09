@@ -37,7 +37,11 @@ texture_size = 256
 remesh_voxel_size = 0.0211
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.4713, 0.5171, 0.5851 ]
-radius = 4.7431
-scale = [ 1.0, 0.5034, 1.1977 ]
+billboard = "assets/models/alliance_starbase_lod3.png"
+scale = [ 11.3616, 4.775, 1.0 ]
+
+[lod.capture]
+source = "assets/models/alliance_starbase.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

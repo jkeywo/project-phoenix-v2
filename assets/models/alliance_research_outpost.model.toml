@@ -37,7 +37,11 @@ texture_size = 128
 remesh_voxel_size = 0.0211
 
 [[lod]]
-shape = "sphere"
-colour = [ 0.5764, 0.6091, 0.6508 ]
-radius = 3.7809
-scale = [ 1.0, 0.4452, 1.0043 ]
+billboard = "assets/models/alliance_research_outpost_lod3.png"
+scale = [ 7.5944, 3.3662, 1.0 ]
+
+[lod.capture]
+source = "assets/models/alliance_research_outpost.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

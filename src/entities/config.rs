@@ -5120,7 +5120,7 @@ impl EntityConfig {
     ///
     /// # Why this exists (issue #838)
     ///
-    /// The override-merge path (`entity_loader::resolve_entity` and
+    /// The override-merge path (`entity_loader::resolve_entity_via` and
     /// `world::dispatch::dispatch_spawn_entity`) resolves a `spawn_entity` /
     /// `[[entity]]` override by round-tripping the template through TOML:
     /// `template → toml::Value → merge(overrides) → EntityConfig::from_toml`.

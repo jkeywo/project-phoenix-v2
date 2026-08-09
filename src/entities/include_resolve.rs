@@ -15,7 +15,7 @@
 //                                    entity_loader::apply_overrides (once per INSTANCE)
 // ```
 //
-// ## Why include resolution is UPSTREAM of `resolve_entity`, not inside it
+// ## Why include resolution is UPSTREAM of `resolve_entity_via`, not inside it
 //
 // The PRD left this open. It stays upstream, for three reasons that are not
 // preference:
@@ -36,7 +36,8 @@
 //    end. Conflating them would multiply that round trip by every spawned
 //    instance for no gain.
 // 3. **`67c31b9e` already split the two concerns** — `apply_overrides` came out
-//    of `resolve_entity` so that the instance merge could be reused on its own.
+//    of the entity-instance resolver (`resolve_entity` then, `resolve_entity_via`
+//    since #973) so that the instance merge could be reused on its own.
 //    Pushing a second, per-template concern back in would re-fuse them.
 //
 // Both layers share the same merge FUNCTION

@@ -60,9 +60,19 @@ fn read_toml(path: &str, what: &str) -> Result<String, BuildError> {
 /// to `assets/entities/test/rng_coverage_lancer.toml` so that no *shipped fleet*
 /// hull carries all three weapon kinds. That relocation is invisible to the
 /// fleet walks, which read the top level only — but it must NOT be invisible
-/// here, because `entity_loader::resolve_entity` is cache-only with no
-/// filesystem fallback of its own: a world naming a template this walk skipped
-/// logs "entity template not found in cache" and silently spawns nothing.
+/// here.
+///
+/// **The reason has changed since #973, and the old one is no longer true.** It
+/// used to be that the spawn path was cache-only, so a world naming a template
+/// this walk skipped logged "entity template not found in cache" and silently
+/// spawned nothing. `entity_loader::resolve_entity_via` now falls back to
+/// `WasmTemplateLoader`, which on native reads the filesystem, so that
+/// particular hole is closed at the spawn rather than here. What the recursive
+/// walk still buys is the model-marker contract gate below, which is scoped to
+/// exactly the templates this walk discovers and validates them *before*
+/// `App::new()` — a template it skips is a template whose markers nobody
+/// checks. Keeping the cache complete is a second, smaller benefit: it is what
+/// stops the spawn depending on that filesystem fallback in the first place.
 ///
 /// `fragments/` is the one subdirectory excluded, and it is excluded for a
 /// reason that is a property of its contents rather than of its name: nothing in
@@ -452,6 +462,11 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // `extra_worlds`) BEFORE the world config is inserted and anything spawns.
     // Any error finding aborts the whole build, so a broken composition leaves
     // zero partial root-world content active.
+    //
+    // This runs AFTER the template preload above, deliberately: headless is an
+    // authoritative host, so `validate_composition` hard-fails a `template_path`
+    // that does not resolve (issue #973), and the loader it asks is the same one
+    // the spawn will ask — the preloaded cache, then the filesystem.
     {
         use crate::world::validate::{has_error, validate_composition, WorldSource};
         // Own the child TOML sources + parsed configs so the borrowed

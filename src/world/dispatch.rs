@@ -1133,6 +1133,11 @@ mod tests {
         fn load_template(&self, path: &str) -> Option<EntityConfig> {
             self.templates.get(path).cloned()
         }
+
+        /// A fixture map holds everything it will ever hold.
+        fn absence_is_final(&self) -> bool {
+            true
+        }
     }
 
     /// A minimal template config with a display name, so tests can observe

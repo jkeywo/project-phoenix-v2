@@ -4,37 +4,23 @@
 use crate::entity_config::EntityConfig;
 use crate::world::config::WorldEntity;
 
-/// Resolve an `WorldEntity` to a concrete `EntityConfig` by:
-/// 1. Looking up `entity_inst.template_path` in the config cache.
-/// 2. Optionally merging `entity_inst.overrides` on top of the template TOML.
-///
-/// Returns `Err` if the template is not found in the cache.
-pub fn resolve_entity(
-    entity_inst: &WorldEntity,
-    config_cache: &crate::config_cache::ConfigCache,
-) -> Result<EntityConfig, String> {
-    let template = config_cache
-        .get(&entity_inst.template_path)
-        .ok_or_else(|| {
-            format!(
-                "entity template not found in cache: '{}'",
-                entity_inst.template_path
-            )
-        })?;
-
-    let config = match &entity_inst.overrides {
-        None => template.clone(),
-        Some(overrides) => apply_overrides(template, overrides)?,
-    };
-
-    Ok(config)
-}
+// A cache-only `resolve_entity(&WorldEntity, &ConfigCache)` lived here. It is
+// gone (issue #973 review, F5): after #973 routed all four spawn sites through
+// `resolve_entity_via`, every remaining caller was a test, so it pinned
+// behaviour nothing performed — and it was the *narrower* of the two lookups,
+// the very narrowness that let a spawn silently drop an entity the world
+// validator had passed. Leaving a `pub fn` around whose own doc warns callers
+// off it is an invitation for the next spawn site to reach for the wrong one.
+// Its tests now exercise `resolve_entity_via` behind a host that can serve
+// nothing, which is the same "cache alone" question asked of the function
+// production actually calls.
 
 /// Merge an authored `overrides` table on top of a resolved template.
 ///
 /// Shared by every path that resolves an entity instance against its template:
-/// the `[[entity]]` loader above, and the world-composition validator's
-/// doctrine read (issue #888), which has to see the *effective* doctrine —
+/// [`resolve_entity_via`] below, the world validator's template-resolution
+/// check (issue #973), and its doctrine read (issue #888), which has to see the
+/// *effective* doctrine —
 /// `assets/worlds/probe_artillery_standoff.toml` adds a doctrine entry by
 /// override, and a validator reading the raw template would be judging content
 /// no scenario ever runs.
@@ -95,6 +81,38 @@ pub trait TemplateLoader {
     /// Load and parse the template at `path`, or `None` if it cannot be found
     /// or parsed.
     fn load_template(&self, path: &str) -> Option<EntityConfig>;
+
+    /// Whether a `None` from [`TemplateLoader::load_template`] is the FINAL
+    /// answer — "this template does not exist" rather than "I cannot see it
+    /// from here" (issue #973).
+    ///
+    /// This is the named authority condition
+    /// [`crate::world::validate`] gates its `unresolvable-template` error on,
+    /// and the direct twin of
+    /// [`crate::entity_includes::FragmentSource::absence_is_final`] one layer
+    /// down (parsed configs rather than raw fragment text).
+    ///
+    /// # Which hosts are authoritative, and why
+    ///
+    /// * **Native** ([`FsTemplateLoader`], and [`WasmTemplateLoader`] via its
+    ///   filesystem fallback): yes. The filesystem holds everything the run
+    ///   will ever have, so absence is a fact about the content.
+    /// * **Browser** ([`WasmTemplateLoader`] on `wasm32`): no. The preloaded
+    ///   config cache fills one delivery at a time and the runtime layer load
+    ///   spawns the moment a layer's TOML arrives, while that layer's entity
+    ///   templates were only just queued. Reading that race as "the template
+    ///   does not exist" would fail validation for the whole world and blank
+    ///   it permanently, since the layer is marked loaded and never retried.
+    ///
+    /// # Why there is no default
+    ///
+    /// For the same reason `FragmentSource` has none: the dangerous answer is
+    /// the *permissive* one, and the dangerous case — someone deletes
+    /// [`WasmTemplateLoader`]'s override — is invisible to a native suite,
+    /// because `true` IS the native answer. With no default, that deletion is
+    /// a build error on both targets instead of a browser-only regression CI
+    /// stays green through.
+    fn absence_is_final(&self) -> bool;
 }
 
 /// Native loader: reads the template TOML straight off the filesystem.
@@ -125,6 +143,11 @@ impl TemplateLoader for FsTemplateLoader {
         crate::content_ledger::record(&resolved.path, &resolved.toml);
         resolved.parse().ok()
     }
+
+    /// The filesystem is authoritative: what it cannot serve does not exist.
+    fn absence_is_final(&self) -> bool {
+        true
+    }
 }
 
 /// WASM loader: serves templates out of the preloaded config cache, falling
@@ -154,6 +177,101 @@ impl TemplateLoader for WasmTemplateLoader {
             None
         }
     }
+
+    /// Native: the filesystem fallback above makes absence a fact.
+    ///
+    /// Browser: it does not. See [`TemplateLoader::absence_is_final`] — the
+    /// cache fills one delivery at a time, so an uncached template may simply
+    /// be still in flight.
+    fn absence_is_final(&self) -> bool {
+        !cfg!(target_arch = "wasm32")
+    }
+}
+
+/// The template lookup a `[[entity]]` spawn actually performs: one caller-held
+/// [`crate::config_cache::ConfigCache`] first, then the host loader behind it
+/// (issue #973).
+///
+/// # Why this type exists rather than two ad-hoc lookups
+///
+/// Before #973 the spawn path and the validator asked different questions.
+/// Spawning went through a cache-only `resolve_entity` (since removed);
+/// validation went through
+/// [`WasmTemplateLoader`], which falls back to the filesystem on native. On
+/// native, validation could therefore see a template the spawn path could not —
+/// validation passed, the spawn logged and `continue`d, and the world came up
+/// one entity short. That is the same silent-drop defect one layer up from the
+/// one #973 is about.
+///
+/// Both sides now hold *this* loader, built from the very cache the spawn will
+/// read, so "validation passed" and "the spawn will find it" are the same
+/// sentence rather than two that happen to usually agree. Note the deliberate
+/// ordering: the caller's cache wins, because a world layer's scoped cache
+/// (`world::server::build_layer_config_cache`) is the authority for the layer
+/// it was built for.
+pub struct SpawnTemplateLoader<'a> {
+    /// The cache the spawn will read — the global one at `Startup`, a layer's
+    /// own when a layer is spawning.
+    pub cache: &'a crate::config_cache::ConfigCache,
+    /// What the host can serve behind that cache. Production passes
+    /// [`WasmTemplateLoader`].
+    pub host: &'a dyn TemplateLoader,
+}
+
+impl TemplateLoader for SpawnTemplateLoader<'_> {
+    fn load_template(&self, path: &str) -> Option<EntityConfig> {
+        match self.cache.get(path) {
+            Some(config) => Some(config.clone()),
+            None => self.host.load_template(path),
+        }
+    }
+
+    /// The cache only ever ADDS to what the host can serve, so the host's
+    /// answer is the binding one: a cache hit cannot make a blind host
+    /// authoritative about everything it is still missing.
+    fn absence_is_final(&self) -> bool {
+        self.host.absence_is_final()
+    }
+}
+
+/// Resolve a `WorldEntity` to a concrete `EntityConfig`:
+/// 1. Look `entity_inst.template_path` up in `config_cache`, then — on a miss —
+///    in the `host` loader behind it (issue #973).
+/// 2. Optionally merge `entity_inst.overrides` on top of the template.
+///
+/// The **only** entity-instance resolver; all four `[[entity]]` spawn sites use
+/// it, and it is the lookup [`crate::world::validate`]'s `unresolvable-template`
+/// gate is handed, so "validation passed" and "the spawn will find it" are one
+/// sentence.
+///
+/// # Errors
+///
+/// Two shapes, and both are silent drops at the call sites, which log and
+/// `continue`: the template did not resolve at all, or `overrides` did not
+/// merge (see [`apply_overrides`]). The activation gate refuses a world for
+/// either before anything spawns.
+pub fn resolve_entity_via(
+    entity_inst: &WorldEntity,
+    config_cache: &crate::config_cache::ConfigCache,
+    host: &dyn TemplateLoader,
+) -> Result<EntityConfig, String> {
+    let loader = SpawnTemplateLoader {
+        cache: config_cache,
+        host,
+    };
+    let template = loader
+        .load_template(&entity_inst.template_path)
+        .ok_or_else(|| {
+            format!(
+                "entity template not found in cache: '{}'",
+                entity_inst.template_path
+            )
+        })?;
+
+    match &entity_inst.overrides {
+        None => Ok(template),
+        Some(overrides) => apply_overrides(&template, overrides),
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +299,26 @@ mod tests {
         ConfigCache::from(m)
     }
 
+    /// A host that can serve nothing, so [`resolve_entity_via`] answers the
+    /// "cache and nothing else" question the removed `resolve_entity` used to
+    /// (issue #973 review, F5). Using it rather than `WasmTemplateLoader` keeps
+    /// these fixtures off the filesystem, which is what they were written
+    /// against; using `resolve_entity_via` rather than a second resolver keeps
+    /// them pinning the function production actually calls.
+    struct NoHost;
+
+    impl TemplateLoader for NoHost {
+        fn load_template(&self, _path: &str) -> Option<EntityConfig> {
+            None
+        }
+
+        /// Irrelevant to `resolve_entity_via`, which never asks — pinned to the
+        /// browser's answer so nothing here can accidentally depend on it.
+        fn absence_is_final(&self) -> bool {
+            false
+        }
+    }
+
     #[test]
     fn resolve_missing_template_returns_err() {
         let cache = ConfigCache::from(HashMap::new());
@@ -188,7 +326,7 @@ mod tests {
             template_path: "assets/entities/missing.toml".to_string(),
             ..Default::default()
         };
-        let result = resolve_entity(&inst, &cache);
+        let result = resolve_entity_via(&inst, &cache, &NoHost);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found in cache"));
     }
@@ -201,7 +339,7 @@ mod tests {
             overrides: None,
             ..Default::default()
         };
-        let config = resolve_entity(&inst, &cache).unwrap();
+        let config = resolve_entity_via(&inst, &cache, &NoHost).unwrap();
         assert_eq!(config.tags, vec!["asteroid"]);
     }
 
@@ -227,7 +365,7 @@ waypoint_arrival_radius = 99.0
             overrides: Some(override_value),
             ..Default::default()
         };
-        let config = resolve_entity(&inst, &cache).unwrap();
+        let config = resolve_entity_via(&inst, &cache, &NoHost).unwrap();
         let beh = config
             .behaviour
             .expect("raider must keep [behaviour] section");
@@ -242,7 +380,7 @@ waypoint_arrival_radius = 99.0
     }
 
     /// End-to-end check that an inline-table `overrides` block parses through
-    /// `parse_world` → `resolve_entity` and merges correctly.
+    /// `parse_world` → `resolve_entity_via` and merges correctly.
     /// (#572) FSM dissolved — override now targets `waypoint_arrival_radius`.
     #[test]
     fn world_inline_override_round_trips_behaviour_merge() {
@@ -269,7 +407,7 @@ overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }
             "overrides must round-trip through parse_world"
         );
 
-        let config = resolve_entity(inst, &cache).unwrap();
+        let config = resolve_entity_via(inst, &cache, &NoHost).unwrap();
         let beh = config
             .behaviour
             .expect("raider keeps behaviour section after merge");
@@ -324,7 +462,7 @@ base_priority = 80.0
             overrides: Some(override_value),
             ..Default::default()
         };
-        let config = resolve_entity(&inst, &cache).expect("override must resolve");
+        let config = resolve_entity_via(&inst, &cache, &NoHost).expect("override must resolve");
 
         // Faction scalar overridden.
         assert_eq!(config.faction, Some(harrow), "faction override must apply");
@@ -440,6 +578,11 @@ size_max = 2.0
         fn load_template(&self, path: &str) -> Option<EntityConfig> {
             EntityConfig::from_toml(self.templates.get(path)?).ok()
         }
+
+        /// A fixture map holds everything it will ever hold.
+        fn absence_is_final(&self) -> bool {
+            true
+        }
     }
 
     /// Stand-in for #715's applier: takes the loader as a trait object.
@@ -545,7 +688,7 @@ size_max = 2.0
             ),
             ..Default::default()
         };
-        let config = resolve_entity(&inst, &cache).expect("override must resolve");
+        let config = resolve_entity_via(&inst, &cache, &NoHost).expect("override must resolve");
         let beh = config.behaviour.expect("composed hull keeps [behaviour]");
         assert!(
             (beh.waypoint_arrival_radius - 77.0).abs() < 1e-6,
@@ -742,6 +885,113 @@ size_max = 2.0
                 panic!("{world} overriding {template_path} no longer resolves: {e}")
             });
         }
+    }
+
+    // ── Authority over absence (issue #973) ──────────────────────────────────
+
+    /// The values behind the `unresolvable-template` gate. The browser answer
+    /// is the one that matters and the one `cargo test` can never observe, so
+    /// the structural guard is that
+    /// [`TemplateLoader::absence_is_final`] has no default — delete
+    /// `WasmTemplateLoader`'s override and the crate stops compiling on both
+    /// targets. This pins the values on top of that.
+    ///
+    /// # Only the native arm is coverage
+    ///
+    /// Said plainly rather than left to be inferred: **the `wasm32` arm below
+    /// is compiled by nothing.** CI builds wasm through `trunk build --release`,
+    /// which does not compile `#[cfg(test)]`, and no job runs
+    /// `cargo check --target wasm32-unknown-unknown --tests`. So the browser
+    /// assertion adds nothing beyond the missing-default guard above; it is
+    /// written as an assertion rather than a comment purely so that the claim
+    /// is already being checked if this crate ever grows a wasm test runner.
+    /// The same is true of its twin,
+    /// `entity_includes::tests::the_host_source_answers_absence_by_target` —
+    /// consistent precedent, not new coverage.
+    #[test]
+    fn the_host_loaders_answer_absence_by_target() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            assert!(
+                FsTemplateLoader.absence_is_final(),
+                "the filesystem is authoritative"
+            );
+            assert!(
+                WasmTemplateLoader.absence_is_final(),
+                "on native the filesystem fallback makes absence a fact, so \
+                 validation may hard-fail an unresolvable template"
+            );
+        }
+        #[cfg(target_arch = "wasm32")]
+        assert!(
+            !WasmTemplateLoader.absence_is_final(),
+            "in the browser an uncached template may still be in flight; calling \
+             that final blanks the world permanently"
+        );
+    }
+
+    /// The spawn-side half of #973's asymmetry fix: the lookup a `[[entity]]`
+    /// spawn performs is the cache PLUS the host loader, which is exactly what
+    /// the validator is handed. A template on disk but absent from the cache
+    /// used to resolve for the validator and not for the spawn.
+    #[test]
+    fn resolve_entity_via_falls_back_to_the_host_loader_behind_the_cache() {
+        let path = write_template_fixture(VALID_TEMPLATE);
+        let empty = ConfigCache::from(HashMap::new());
+        let inst = WorldEntity {
+            template_path: path.clone(),
+            ..Default::default()
+        };
+
+        assert!(
+            resolve_entity_via(&inst, &empty, &NoHost).is_err(),
+            "precondition: the cache-only lookup cannot see it"
+        );
+        let config = resolve_entity_via(&inst, &empty, &WasmTemplateLoader)
+            .expect("the host loader resolves it behind the empty cache");
+        assert_eq!(config.tags, vec!["npc"]);
+    }
+
+    /// …and the caller's cache still wins over the host, so a layer's scoped
+    /// cache stays the authority for the layer it was built for.
+    #[test]
+    fn the_callers_cache_wins_over_the_host_loader() {
+        let path = write_template_fixture(VALID_TEMPLATE);
+        let cache = make_cache(&path, r#"tags = ["from-cache"]"#);
+        let inst = WorldEntity {
+            template_path: path,
+            ..Default::default()
+        };
+        let config = resolve_entity_via(&inst, &cache, &WasmTemplateLoader).expect("resolves");
+        assert_eq!(config.tags, vec!["from-cache"]);
+    }
+
+    /// A spawn loader is no more authoritative than the host behind it: a cache
+    /// hit says nothing about the templates the host still cannot see. Pinned
+    /// against a host that answers `false`, which is the browser's answer and
+    /// the one a native suite cannot otherwise reach.
+    #[test]
+    fn the_spawn_loader_inherits_the_hosts_authority() {
+        struct StillFilling;
+        impl TemplateLoader for StillFilling {
+            fn load_template(&self, _path: &str) -> Option<EntityConfig> {
+                None
+            }
+            fn absence_is_final(&self) -> bool {
+                false
+            }
+        }
+
+        let cache = make_cache("assets/entities/rock.toml", r#"tags = ["asteroid"]"#);
+        let loader = SpawnTemplateLoader {
+            cache: &cache,
+            host: &StillFilling,
+        };
+        assert!(
+            !loader.absence_is_final(),
+            "a cache hit must not promote a host that is still filling"
+        );
+        assert!(loader.load_template("assets/entities/rock.toml").is_some());
     }
 
     /// The real impls must also be usable as `&dyn TemplateLoader`, not just

@@ -2264,6 +2264,57 @@ fn missing_world_file_is_a_clean_error() {
     assert!(err.contains("could not read world"), "got: {err}");
 }
 
+/// Issue #973, end to end: a world naming a `template_path` that does not
+/// resolve must ABORT THE BUILD, not build happily and spawn one entity fewer.
+///
+/// The old behaviour is what made #954's hull relocation so hard to see — the
+/// scenario ran to completion, spawned no hostiles, and the only signal was an
+/// `entity template not found in cache` log line. Headless is the authoritative
+/// host (its loader reaches the filesystem, so absence is a fact), so the
+/// composition gate that already runs before anything spawns now refuses.
+#[test]
+fn a_world_naming_an_unresolvable_template_fails_the_build() {
+    let world = std::env::temp_dir().join("phoenix_973_unresolvable_template_world.toml");
+    std::fs::write(
+        &world,
+        "[[entity]]\n\
+         template_path = \"assets/entities/definitely_not_a_hull.toml\"\n\
+         name = \"ghost\"\n\
+         transform = { position = [0.0, 0.0, 0.0] }\n",
+    )
+    .expect("write world fixture");
+
+    let args = HeadlessArgs {
+        world_path: world.to_string_lossy().into_owned(),
+        ..test_args()
+    };
+    let err = build_headless_app(&args)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| {
+            panic!(
+                "a world whose template does not resolve must not build: it would \
+                 run to completion with the entity silently missing"
+            )
+        });
+
+    assert!(
+        err.contains("unresolvable-template"),
+        "the abort must name the category so the log says what to fix, got: {err}"
+    );
+    assert!(
+        err.contains("definitely_not_a_hull.toml") && err.contains("ghost"),
+        "and must name the template and the entity, got: {err}"
+    );
+    assert!(
+        err.contains("activation blocked"),
+        "it goes through the same atomic-activation gate as every other \
+         composition error, got: {err}"
+    );
+
+    std::fs::remove_file(&world).ok();
+}
+
 // ── `ShipPhysics` writer disjointness (issues #699, #886) ────────────────────
 //
 // `simulate_low_lod_ships` (`src/ai/server.rs`) writes `ShipPhysics.x/z/yaw`
@@ -4707,15 +4758,20 @@ fn a_second_round_starts_a_fresh_command_log() {
 ///
 /// Both halves are load-bearing and neither is obvious from the code:
 ///
-/// * **Subdirectories are in.** `entity_loader::resolve_entity` is cache-only —
-///   it has no filesystem fallback, unlike `WasmTemplateLoader` — so a world
-///   naming a template the preload skipped does not fail the build. It logs
-///   `entity template not found in cache` and spawns nothing, and the run
-///   continues with a quietly emptier world. That is exactly what happened when
-///   #954 first moved the three-weapon escort to
-///   `assets/entities/test/rng_coverage_lancer.toml`: `rng_coverage.toml` lost
-///   both hostiles, and the only symptom was three of the five RNG chokepoints
-///   silently going quiet.
+/// * **Subdirectories are in.** A world naming a template the preload skipped
+///   used to spawn nothing and not fail the build: it logged `entity template
+///   not found in cache` and the run continued with a quietly emptier world.
+///   That is exactly what happened when #954 first moved the three-weapon
+///   escort to `assets/entities/test/rng_coverage_lancer.toml`:
+///   `rng_coverage.toml` lost both hostiles, and the only symptom was three of
+///   the five RNG chokepoints silently going quiet.
+///
+///   Issue #973 closed both halves of that — the build now fails validation on
+///   an unresolvable `template_path`, and the spawn path resolves through
+///   `resolve_entity_via` (cache, then the host loader) so it can no longer see
+///   less than the validator did. This walk still decides what the *cache*
+///   holds, which is what the AI-declaration manifest, marker validation and
+///   the strict-parse gate all read, and what a browser preload has to mirror.
 /// * **`fragments/` is out.** Nothing under it is spawnable — they are the
 ///   partial documents hulls compose FROM. Caching them would offer the world
 ///   loader entities that are not entities.

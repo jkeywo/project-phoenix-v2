@@ -606,11 +606,17 @@ fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
 ///   A third copy of that table is how the courier's `directive_anchors`-on-a-
 ///   `Reach` survived in the first place.
 ///
-/// A template that cannot be loaded or whose merge fails yields nothing: a
-/// missing template is a different defect with its own diagnostics (dispatch
-/// warns, the `[[entity]]` loader errors), and this validator must not turn it
-/// into a spurious anchor complaint — nor block a world whose templates simply
-/// are not reachable from wherever validation happens to run.
+/// A template that cannot be loaded or whose merge fails yields nothing: those
+/// are *different* defects, and this validator must not turn either into a
+/// spurious anchor complaint — nor block a world whose templates simply are not
+/// reachable from wherever validation happens to run.
+///
+/// Since issue #973 both have an owner in the code rather than only in this
+/// comment: [`validate_template_resolution_in`] reports them, as
+/// `unresolvable-template` (on hosts whose loader can be authoritative about
+/// absence) and `unmergeable-override` (on every host). So the `Err(_)` arm
+/// below is now genuinely "somebody else's finding", not a swallowed failure.
+/// This function's silence is unchanged — it is about anchors.
 fn doctrine_anchor_refs(
     inst: &SpawnedInstance,
     loader: &dyn TemplateLoader,
@@ -772,6 +778,174 @@ fn validate_template_composition_in(
     findings
 }
 
+/// Reject an `[[entity]]` (or `spawn_entity` action) that
+/// [`crate::entity_loader::resolve_entity_via`] would return `Err` for — the
+/// template does not resolve, or its `overrides` do not merge (issue #973).
+///
+/// # Why this is an ERROR and never a warning
+///
+/// `resolve_entity_via` returns `Err` for both, and **every spawn caller logs
+/// and `continue`s** — `world::server::spawn_immediate_entities_internal`
+/// twice, `setup_world` and `spawn_game_start_entities` in `server_app` once
+/// each. So a world naming a template that does not resolve loads
+/// "successfully" and is simply missing entities. That is how #954's hull
+/// relocation surfaced: the scenario ran, spawned no hostiles, and the only
+/// signal was a log line the determinism guard happened to catch. An author who
+/// wrote a `template_path` asked for that entity; a world without it is a
+/// different world, not a degraded one.
+///
+/// # The two failure shapes, and why both live here
+///
+/// This validator's contract is "everything `resolve_entity_via` can refuse",
+/// not "the lookup". The lookup was the only half #973 first covered, which
+/// left the override half producing the very silent drop the issue condemns:
+/// an `overrides` table that fails the strict re-parse of the merged document
+/// (`entity_loader::apply_overrides`) or carries a `_remove` tombstone
+/// (issue #911, rejected outright by `reject_unhonoured_removals`) still cost
+/// exactly one entity, with the rest of the world spawning around the hole.
+///
+/// 1. **`unresolvable-template`** — the loader cannot serve the template.
+///    `missing` and `malformed` are deliberately one finding, because
+///    `load_template` collapses them and because the *world* consequence is
+///    identical. That is a narrower policy than the preload's warn-and-skip for
+///    an unparseable template, and deliberately so: the preload walks a whole
+///    directory, where one bad cosmetic asteroid must not stop a combat test,
+///    whereas this walks only templates a world explicitly named.
+/// 2. **`unmergeable-override`** — the template resolved, but this instance's
+///    `overrides` do not apply to it.
+///
+/// # What the merge finding costs a TRIGGER spawn, stated exactly
+///
+/// The two shapes reach the two spawn origins differently, and conflating them
+/// would be the kind of "this is covered" claim that stops the next reader
+/// looking. For a static `[[entity]]`, both shapes are the same silent drop:
+/// `resolve_entity_via` returns `Err` and the caller logs and `continue`s.
+/// For a `spawn_entity` **trigger action**, only the lookup drops the entity.
+/// `world::dispatch::dispatch_spawn_entity` runs its own merge — the same
+/// `merge_entity_config_toml` + strict re-parse, so it reaches the same verdict
+/// — but answers a failure by keeping the template and pushing a warning, so
+/// the entity does spawn, wearing none of the override.
+///
+/// It is still an error here, deliberately. The consequence differs; the
+/// authoring defect does not, and neither does the signal. A hull that flies
+/// the doctrine its author meant to replace is not a degraded version of the
+/// authored world, it is a different one, and today the only thing that says so
+/// is a log line that fails nothing — which is the whole complaint #973 is
+/// about. Nothing can make the merge succeed later, on any host, so there is
+/// nothing for a warning to be tentative about.
+///
+/// # Host gating applies to the FIRST shape only
+///
+/// `relative_to` resolves entirely within the parsed [`WorldConfig`] in hand,
+/// so every host can decide it completely (see [`validate_relative_to_in`]).
+/// A template *path* cannot be decided without asking somebody for the
+/// template, and not every host can answer; the condition is named rather than
+/// implied by a `cfg`: [`TemplateLoader::absence_is_final`], the exact twin of
+/// [`crate::entity_includes::FragmentSource::absence_is_final`] one layer down.
+///
+/// * **Hard-fails**: native hosts — headless (`FsTemplateLoader`, and
+///   `WasmTemplateLoader` through its filesystem fallback) and every fixture
+///   loader, all of which hold everything they will ever hold.
+/// * **Stays silent**: the browser. `WasmTemplateLoader` on `wasm32` serves the
+///   preloaded config cache, which fills one delivery at a time while the
+///   runtime layer load spawns the moment a layer's TOML arrives. Reading that
+///   race as "the template does not exist" would blank the whole world, and
+///   permanently, since the layer is marked loaded and never retried.
+///
+/// A failed **merge** is not host-gated, and must not be: once the template is
+/// in hand the merge is decided entirely from content in hand, on any target.
+/// There is no "not yet" to confuse it with — a later delivery cannot change
+/// the answer, because the template it would deliver is the one already merged
+/// against. Gating it on `absence_is_final` would leave the browser running the
+/// exact silent drop this validator exists to refuse.
+///
+/// # Why "validation passed" means "the spawn will resolve it"
+///
+/// The loader handed here is the one the spawn will consult —
+/// [`crate::entity_loader::SpawnTemplateLoader`] over the very
+/// `ConfigCache` the spawn reads (see `world::server::world_activation_blocked`).
+/// Before #973 the two disagreed: validation asked `WasmTemplateLoader`
+/// (filesystem fallback on native) while spawning asked the cache alone, so on
+/// native validation could pass on a template the spawn could not find.
+///
+/// # Deduplication
+///
+/// The two shapes dedupe differently, because their defects live at different
+/// cardinalities. A missing template is a property of the *hull*, deduped by
+/// canonical path across the whole composition (`seen`) — `./assets/x.toml` and
+/// `assets/x.toml` are one hull, and one hull is one finding, matching
+/// [`validate_template_composition_in`]. A failed merge is a property of the
+/// *instance*: two `[[entity]]` blocks on the same hull carry different
+/// `overrides` tables, so each is reported on its own.
+fn validate_template_resolution_in(
+    src: &WorldSource,
+    loader: &dyn TemplateLoader,
+    seen: &mut HashSet<String>,
+) -> Vec<WorldFinding> {
+    // The authority condition, read once for the whole world rather than per
+    // entity: a host that cannot distinguish "absent" from "not yet" reports no
+    // *presence* finding at all. It does not gate the merge check below.
+    let absence_is_final = loader.absence_is_final();
+
+    let mut findings = Vec::new();
+    for inst in collect_spawned_instances(src.config) {
+        let Some(template) = loader.load_template(inst.template_path) else {
+            if !absence_is_final {
+                continue;
+            }
+            if !seen.insert(crate::entity_includes::canonical_template_path(
+                inst.template_path,
+            )) {
+                continue;
+            }
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: "unresolvable-template",
+                message: format!(
+                    "entity '{}' names template '{}', which this host cannot resolve \
+                     (missing, unreadable, or invalid), in '{}'; every spawn caller \
+                     would log and skip it, leaving the world silently short of that \
+                     entity",
+                    inst.label, inst.template_path, src.path
+                ),
+                source: SourceLocation {
+                    file: src.path.clone(),
+                    line: line_of(src.toml, inst.template_path)
+                        .or_else(|| line_of(src.toml, &inst.label)),
+                    reference: inst.template_path.to_string(),
+                },
+            });
+            continue;
+        };
+
+        // The template resolved. The other half of what the spawn does with it
+        // is the instance merge — the same call, through the same function.
+        let Some(overrides) = inst.overrides else {
+            continue;
+        };
+        let Err(e) = crate::entity_loader::apply_overrides(&template, overrides) else {
+            continue;
+        };
+        findings.push(WorldFinding {
+            severity: Severity::Error,
+            category: "unmergeable-override",
+            message: format!(
+                "entity '{}' carries an 'overrides' table that does not apply to its \
+                 template '{}', in '{}': {e}; every spawn caller would log and skip \
+                 it, leaving the world silently short of that entity",
+                inst.label, inst.template_path, src.path
+            ),
+            source: SourceLocation {
+                file: src.path.clone(),
+                line: line_of(src.toml, &inst.label)
+                    .or_else(|| line_of(src.toml, inst.template_path)),
+                reference: inst.template_path.to_string(),
+            },
+        });
+    }
+    findings
+}
+
 /// Composition findings for one world's entity templates, for callers that hold
 /// a single [`WorldConfig`] rather than a whole effective composition — the
 /// Bevy `Startup` spawn gate in `world::server`.
@@ -922,9 +1096,15 @@ pub fn validate_relative_to(path: &str, toml: &str, config: &WorldConfig) -> Vec
 /// `fragments` is the include-fragment source; every caller in the Bevy app
 /// passes [`crate::entity_includes::HostFragmentSource`], and tests pass a
 /// fixture.
+///
+/// `templates` is the parsed-template source (issue #973). The Bevy caller
+/// passes [`crate::entity_loader::SpawnTemplateLoader`] built over the exact
+/// `ConfigCache` the spawn about to be gated will read, so this gate answers
+/// the question that spawn will ask rather than a similar one.
 pub fn activation_findings(
     config: &WorldConfig,
     fragments: &dyn FragmentSource,
+    templates: &dyn TemplateLoader,
 ) -> Vec<WorldFinding> {
     // Entity identity (issue #750): duplicate reference names.
     let mut findings = validate_entity_identity("", "", &config.entities);
@@ -939,6 +1119,13 @@ pub fn activation_findings(
     // Positioning references (issue #969): a `relative_to` naming nothing this
     // world can position the entity against.
     findings.extend(validate_relative_to("", "", config));
+    // Template resolution (issue #973): anything `resolve_entity_via` would
+    // refuse — a `template_path` the spawn's own loader cannot resolve (on a
+    // host whose loader can be authoritative about that), or an `overrides`
+    // table that does not merge onto the template it names (on every host).
+    let src = WorldSource::new("", "", config);
+    let mut seen = HashSet::new();
+    findings.extend(validate_template_resolution_in(&src, templates, &mut seen));
     findings
 }
 
@@ -1202,6 +1389,26 @@ pub fn validate_composition_with_fragments(
         ));
     }
 
+    // Entity-template RESOLUTION (issue #973): a `template_path` the host's
+    // loader cannot resolve at all, or an `overrides` table that will not merge
+    // onto it. The presence half is deduplicated across the composition on the
+    // same reasoning as above, and with its own set — one hull can be both
+    // absent from the template loader and reachable in the fragment source, or
+    // vice versa. The merge half is per instance and not deduplicated.
+    let mut resolve_seen: HashSet<String> = HashSet::new();
+    findings.extend(validate_template_resolution_in(
+        root,
+        template_loader,
+        &mut resolve_seen,
+    ));
+    for child in children {
+        findings.extend(validate_template_resolution_in(
+            child,
+            template_loader,
+            &mut resolve_seen,
+        ));
+    }
+
     // Root references: ancestor chain is just [root].
     let root_ancestors: Vec<&[String]> = vec![root_names.as_slice()];
     findings.extend(resolve_all(&root_names, &root_ancestors, root));
@@ -1331,17 +1538,22 @@ name = "outpost"
 
     // ── parent.<name> resolution (AC3) ───────────────────────────────────────
 
+    // Fixtures below that assert on the ABSENCE of errors name templates that
+    // are really on disk (issue #973): a `template_path` that resolves nowhere
+    // is itself an error now, on any host whose loader is authoritative, and
+    // `validate_composition`'s default loader is authoritative on native.
+
     #[test]
     fn parent_reference_resolves_to_root_entity() {
         let root = cfg(r#"
 [[entity]]
-template_path = "assets/entities/a.toml"
+template_path = "assets/entities/planet_earth.toml"
 name = "axiom"
 "#);
         // Child references parent.axiom in a trigger target — resolves to root.
         let child = cfg(r#"
 [[entity]]
-template_path = "assets/entities/b.toml"
+template_path = "assets/entities/moon_luna.toml"
 name = "child_ship"
 
 [[trigger]]
@@ -1385,7 +1597,7 @@ entity = "parent.parent.axiom"
     fn child_world_reference_resolves_and_detects_unknown() {
         let root = cfg(r#"
 [[entity]]
-template_path = "assets/entities/a.toml"
+template_path = "assets/entities/planet_earth.toml"
 name = "flagship"
 
 [[trigger]]
@@ -1398,7 +1610,7 @@ entity = "child_a.ghost"
 "#);
         let child = cfg(r#"
 [[entity]]
-template_path = "assets/entities/b.toml"
+template_path = "assets/entities/moon_luna.toml"
 name = "ironveil"
 "#);
         let root_toml = "entity = \"child_a.ironveil\"\nentity = \"child_a.ghost\"".to_string();
@@ -1427,12 +1639,12 @@ entity = "raider"
 "#);
         let a = cfg(r#"
 [[entity]]
-template_path = "assets/entities/x.toml"
+template_path = "assets/entities/planet_earth.toml"
 name = "raider"
 "#);
         let b = cfg(r#"
 [[entity]]
-template_path = "assets/entities/y.toml"
+template_path = "assets/entities/moon_luna.toml"
 name = "raider"
 "#);
         let root_src = WorldSource::new("root.toml", "entity = \"raider\"", &root);
@@ -1647,6 +1859,52 @@ condition = "on_world_loaded"
     impl TemplateLoader for FakeTemplates {
         fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
             crate::entity_config::EntityConfig::from_toml(self.0.get(path)?).ok()
+        }
+
+        /// A fixture map holds everything it will ever hold, so it is
+        /// authoritative about absence (issue #973) — the same answer the
+        /// `HashMap` [`FragmentSource`] gives one layer down.
+        fn absence_is_final(&self) -> bool {
+            true
+        }
+    }
+
+    /// A loader that has DELIVERED its templates but is still filling — the
+    /// browser mid-preload, holding the hull in hand while other paths are in
+    /// flight (issue #973 review, F6).
+    ///
+    /// The one fixture that can tell the two halves of
+    /// [`validate_template_resolution_in`] apart: absence is *not* final here,
+    /// so the presence check stays silent, but the merge check must not, since
+    /// a template in hand decides its own merge on any target.
+    struct StillFilling(FakeTemplates);
+
+    impl TemplateLoader for StillFilling {
+        fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
+            self.0.load_template(path)
+        }
+
+        fn absence_is_final(&self) -> bool {
+            false
+        }
+    }
+
+    /// A loader that can serve nothing AND knows it cannot: the browser's
+    /// answer, which a native suite cannot otherwise reach (issue #973).
+    ///
+    /// Used by the fixtures below that are about some *other* check and whose
+    /// worlds name templates no source in the test holds. Before #973 every
+    /// loader was implicitly blind in this way, which is why those fixtures
+    /// were written with paths that resolve nowhere.
+    struct BlindTemplates;
+
+    impl TemplateLoader for BlindTemplates {
+        fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
+            None
+        }
+
+        fn absence_is_final(&self) -> bool {
+            false
         }
     }
 
@@ -1863,9 +2121,14 @@ overrides = { behaviour = { doctrine = [
         assert!(err.message.contains("Reach"), "{}", err.message);
     }
 
-    /// A template the loader cannot serve is somebody else's diagnostic (the
-    /// spawn path warns, the `[[entity]]` loader errors). It must not turn into
-    /// an anchor complaint, and must not block a world.
+    /// A template the loader cannot serve must not turn into an ANCHOR
+    /// complaint — the validator cannot know what doctrine a template it never
+    /// read declares, and inventing one would send an author hunting for an
+    /// anchor bug that is really a path bug.
+    ///
+    /// Since #973 it is not silent either: the same world now carries an
+    /// `unresolvable-template` error, which is the finding that actually names
+    /// the defect. This test pins the split, not the silence.
     #[test]
     fn unloadable_template_produces_no_anchor_finding() {
         let root = cfg(r#"
@@ -1878,6 +2141,13 @@ name = "ghost"
         assert!(
             !findings.iter().any(|f| f.category == "unresolved-anchor"),
             "{findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unresolvable-template" && f.is_error()),
+            "the defect is reported as what it is, by the check that owns it \
+             (issue #973): {findings:?}"
         );
     }
 
@@ -2124,7 +2394,11 @@ template_path = "assets/entities/moon_luna.toml"
 id = "luna"
 transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
 "#);
-        let findings = activation_findings(&config, &crate::entity_includes::HostFragmentSource);
+        let findings = activation_findings(
+            &config,
+            &crate::entity_includes::HostFragmentSource,
+            &crate::entity_loader::WasmTemplateLoader,
+        );
         assert!(
             findings
                 .iter()
@@ -2317,9 +2591,13 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
     }
 
     /// A template the fragment source cannot see is NOT a composition error —
-    /// a validator must not manufacture one out of its own blindness. This is
-    /// what keeps every fixture world in this file (whose template paths are
-    /// not on disk) validating exactly as it did before #906.
+    /// a validator must not manufacture one out of its own blindness.
+    ///
+    /// The template loader is [`BlindTemplates`] rather than the fixture map
+    /// so the claim stays about *composition*: an authoritative loader would
+    /// (correctly, since #973) report the same world as
+    /// `unresolvable-template`, and this test would then be asserting two
+    /// things at once.
     #[test]
     fn a_template_the_source_cannot_see_produces_no_composition_finding() {
         let world_toml = one_entity_world("assets/entities/nowhere.toml", "ghost");
@@ -2327,8 +2605,7 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
         let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
         let source = fragments(&[]);
 
-        let findings =
-            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+        let findings = validate_composition_with_fragments(&src, &[], &BlindTemplates, &source);
         assert!(!findings.iter().any(|f| f.category.starts_with("include-")));
         assert!(!has_error(&findings), "{findings:?}");
     }
@@ -2346,9 +2623,419 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
             ),
         ]);
 
-        let findings =
-            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+        // Blind loader for the same reason as the test above: `good.toml` is a
+        // fragment-source fixture, not a template the loader holds.
+        let findings = validate_composition_with_fragments(&src, &[], &BlindTemplates, &source);
         assert!(!findings.iter().any(|f| f.category.starts_with("include-")));
         assert!(!has_error(&findings), "{findings:?}");
+    }
+
+    // ── Template presence (issue #973) ───────────────────────────────────────
+
+    /// The defect the issue is about: a world naming a template that does not
+    /// resolve used to load "successfully" and simply spawn nothing, because
+    /// every spawn caller logs the resolve failure and `continue`s. On a host
+    /// whose loader is authoritative it now FAILS VALIDATION, loudly, before
+    /// anything spawns.
+    #[test]
+    fn an_unresolvable_template_blocks_activation_on_an_authoritative_host() {
+        let world_toml = one_entity_world("assets/entities/nowhere.toml", "ghost");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        // `patroller_templates()` holds one template and knows it holds
+        // everything it will ever hold — a fixture map, like the filesystem, is
+        // authoritative about absence.
+        let templates = patroller_templates();
+        assert!(templates.absence_is_final(), "precondition");
+
+        let findings = validate_composition_with(&src, &[], &templates);
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolvable-template")
+            .unwrap_or_else(|| panic!("expected an unresolvable-template finding: {findings:?}"));
+        assert!(err.is_error(), "it must block activation, not warn");
+        assert!(has_error(&findings));
+        assert_eq!(err.source.reference, "assets/entities/nowhere.toml");
+        assert_eq!(err.source.file, "assets/worlds/w.toml");
+        assert_eq!(
+            err.source.line,
+            Some(2),
+            "the finding points at the authored template_path"
+        );
+        // The message has to name the entity and the world, so an author can
+        // act on it without opening every world file.
+        assert!(err.message.contains("ghost"), "{}", err.message);
+        assert!(
+            err.message.contains("assets/entities/nowhere.toml"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("assets/worlds/w.toml"),
+            "{}",
+            err.message
+        );
+    }
+
+    /// The other half, and the half that keeps the shipped client working: a
+    /// host that cannot tell "absent" from "not yet" reports NOTHING.
+    ///
+    /// This is the browser. Its preloaded config cache fills one delivery at a
+    /// time while the runtime layer load spawns the moment a layer's TOML
+    /// arrives, so a template the loader cannot serve at validation time
+    /// routinely resolves fine a moment later. Erroring there would blank the
+    /// whole world, permanently — the layer is marked loaded and never retried.
+    #[test]
+    fn an_unresolvable_template_is_silent_on_a_host_that_cannot_be_authoritative() {
+        let world_toml = one_entity_world("assets/entities/nowhere.toml", "ghost");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        assert!(!BlindTemplates.absence_is_final(), "precondition");
+
+        let findings = validate_composition_with(&src, &[], &BlindTemplates);
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.category == "unresolvable-template"),
+            "a host that cannot see the template must not manufacture an error \
+             out of its own blindness: {findings:?}"
+        );
+        assert!(!has_error(&findings), "{findings:?}");
+    }
+
+    /// A template a `spawn_entity` TRIGGER names is checked too — it reaches
+    /// the same spawn path, through `dispatch`, and fails the same silent way.
+    #[test]
+    fn a_trigger_spawned_template_is_checked_as_well() {
+        let world_toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/nowhere.toml"
+  name          = "ambusher"
+  position      = [0.0, 0.0, 0.0]
+"#;
+        let config = cfg(world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", world_toml, &config);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolvable-template")
+            .unwrap_or_else(|| panic!("expected an unresolvable-template finding: {findings:?}"));
+        assert!(err.message.contains("ambusher"), "{}", err.message);
+    }
+
+    /// One hull, spelled two ways, is one finding — the same canonicalisation
+    /// `two_spellings_of_one_template_are_reported_once` pins for composition.
+    #[test]
+    fn two_spellings_of_one_absent_template_are_reported_once() {
+        let world_toml = format!(
+            "{}{}",
+            one_entity_world("assets/entities/nowhere.toml", "plain"),
+            one_entity_world("./assets/entities/nowhere.toml", "dotted"),
+        );
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.category == "unresolvable-template")
+                .count(),
+            1,
+            "{findings:?}"
+        );
+    }
+
+    /// The gate the Bevy `Startup` spawn consults must carry it too, not only
+    /// `validate_composition` — the browser host never calls the latter, and
+    /// on native the two immediate-spawn systems are what actually drop the
+    /// entity. (Same reasoning as
+    /// `activation_findings_carries_the_relative_to_error`.)
+    #[test]
+    fn activation_findings_carries_the_unresolvable_template_error() {
+        let config = cfg(r#"
+[[entity]]
+template_path = "assets/entities/nowhere.toml"
+name = "ghost"
+"#);
+        let findings = activation_findings(
+            &config,
+            &crate::entity_includes::HostFragmentSource,
+            &patroller_templates(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unresolvable-template" && f.is_error()),
+            "{findings:?}"
+        );
+
+        // …and stays silent through the same gate on a blind host.
+        let findings = activation_findings(
+            &config,
+            &crate::entity_includes::HostFragmentSource,
+            &BlindTemplates,
+        );
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.category == "unresolvable-template"),
+            "{findings:?}"
+        );
+    }
+
+    // ── Override resolution (issue #973 review, F6) ──────────────────────────
+
+    /// A world file for one entity on the patroller hull, carrying `overrides`.
+    fn overridden_entity_world(name: &str, overrides: &str) -> String {
+        format!(
+            "[[entity]]\ntemplate_path = \"assets/entities/patroller.toml\"\n\
+             name = \"{name}\"\noverrides = {overrides}\n"
+        )
+    }
+
+    /// The other half of the silent drop #973 is about, and the half its first
+    /// pass missed. `resolve_entity_via` returns `Err` for a failed
+    /// `apply_overrides` exactly as it does for a template it cannot find, and
+    /// every spawn caller answers `Err` the same way: log and `continue`. So an
+    /// `overrides` table that does not merge cost precisely one entity, with
+    /// the rest of the world spawning around the hole.
+    ///
+    /// The `_remove` tombstone is issue #911's case: subtractive at a layer
+    /// that does not honour subtraction, so `reject_unhonoured_removals`
+    /// refuses it outright rather than letting it look like it worked.
+    #[test]
+    fn an_override_that_does_not_merge_blocks_activation() {
+        let world_toml = overridden_entity_world(
+            "ghost",
+            "{ behaviour = { doctrine = [{ id = \"patrol\", _remove = true }] } }",
+        );
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unmergeable-override")
+            .unwrap_or_else(|| panic!("expected an unmergeable-override finding: {findings:?}"));
+        assert!(err.is_error(), "it must block activation, not warn");
+        assert!(has_error(&findings));
+        assert!(err.message.contains("ghost"), "{}", err.message);
+        assert!(
+            err.message.contains("assets/entities/patroller.toml"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("assets/worlds/w.toml"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("_remove"),
+            "the merge's own reason has to reach the author: {}",
+            err.message
+        );
+    }
+
+    /// The other failure shape of the same call: the merged document is
+    /// well-formed TOML but no longer a valid `EntityConfig`, so the strict
+    /// re-parse in `apply_overrides` refuses it.
+    #[test]
+    fn an_override_that_breaks_the_merged_documents_types_blocks_activation() {
+        let world_toml = overridden_entity_world("ghost", "{ tags = \"not-an-array\" }");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unmergeable-override" && f.is_error()),
+            "{findings:?}"
+        );
+    }
+
+    /// **Not** host-gated, unlike the presence half — and this is the test that
+    /// says so.
+    ///
+    /// A host that cannot be authoritative about absence can still be
+    /// authoritative about a merge: once the template is in hand, no later
+    /// delivery can change the answer, because the template a delivery would
+    /// bring is the one already merged against. Gating this on
+    /// `absence_is_final` would leave the browser running the exact silent drop
+    /// the validator exists to refuse.
+    #[test]
+    fn an_unmergeable_override_is_reported_even_where_absence_is_not_final() {
+        let world_toml = overridden_entity_world(
+            "ghost",
+            "{ behaviour = { doctrine = [{ id = \"patrol\", _remove = true }] } }",
+        );
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        let loader = StillFilling(patroller_templates());
+        assert!(!loader.absence_is_final(), "precondition");
+        assert!(
+            loader
+                .load_template("assets/entities/patroller.toml")
+                .is_some(),
+            "precondition: this host HAS the hull, it is merely still filling"
+        );
+
+        let findings = validate_composition_with(&src, &[], &loader);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unmergeable-override" && f.is_error()),
+            "a merge decided entirely from content in hand must be decided: {findings:?}"
+        );
+        // …while the presence half stays silent on the same host, which is what
+        // keeps the browser's world from being blanked by a template in flight.
+        let absent = one_entity_world("assets/entities/nowhere.toml", "not-yet");
+        let absent_cfg = cfg(&absent);
+        let absent_src = WorldSource::new("assets/worlds/w.toml", &absent, &absent_cfg);
+        let findings = validate_composition_with(&absent_src, &[], &loader);
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.category == "unresolvable-template"),
+            "{findings:?}"
+        );
+    }
+
+    /// A `spawn_entity` TRIGGER's override is checked too — and this is the one
+    /// place the finding is stricter than the runtime, so it is pinned rather
+    /// than assumed.
+    ///
+    /// `world::dispatch::dispatch_spawn_entity` reaches the same verdict by the
+    /// same merge, but answers a failure by keeping the template and warning, so
+    /// the entity spawns wearing none of its override instead of not spawning at
+    /// all. Blocking activation is still right: the defect and the
+    /// only-a-log-line signal are identical, and no host can make the merge
+    /// succeed later. See the note on `validate_template_resolution_in`.
+    #[test]
+    fn a_trigger_spawns_override_is_checked_as_well() {
+        let world_toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/patroller.toml"
+  name          = "ambusher"
+  position      = [0.0, 0.0, 0.0]
+  overrides     = { tags = "not-an-array" }
+"#;
+        let config = cfg(world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", world_toml, &config);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unmergeable-override")
+            .unwrap_or_else(|| panic!("expected an unmergeable-override finding: {findings:?}"));
+        assert!(err.message.contains("ambusher"), "{}", err.message);
+    }
+
+    /// A failed merge is a property of the INSTANCE, not the hull, so two
+    /// entries on one template each get their own finding — the deliberate
+    /// difference from `unresolvable-template`, which is deduped by canonical
+    /// path (`two_spellings_of_one_absent_template_are_reported_once`).
+    #[test]
+    fn two_instances_of_one_hull_each_report_their_own_broken_override() {
+        let world_toml = format!(
+            "{}{}",
+            overridden_entity_world("first", "{ tags = \"not-an-array\" }"),
+            overridden_entity_world("second", "{ tags = 7 }"),
+        );
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.category == "unmergeable-override")
+                .count(),
+            2,
+            "one finding per instance, because each carries its own table: {findings:?}"
+        );
+    }
+
+    /// The Bevy `Startup` gate carries the merge half too, for the same reason
+    /// it carries the presence half: the browser never calls
+    /// `validate_composition`, and on native the two immediate-spawn systems
+    /// are what actually drop the entity.
+    #[test]
+    fn activation_findings_carries_the_unmergeable_override_error() {
+        let config = cfg(&overridden_entity_world(
+            "ghost",
+            "{ behaviour = { doctrine = [{ id = \"patrol\", _remove = true }] } }",
+        ));
+        let findings = activation_findings(
+            &config,
+            &crate::entity_includes::HostFragmentSource,
+            &patroller_templates(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unmergeable-override" && f.is_error()),
+            "{findings:?}"
+        );
+    }
+
+    /// Every template every shipped world names resolves through the loader
+    /// headless validates with, **and** every `overrides` table those worlds
+    /// carry merges onto the hull it names — so a hull that is deleted,
+    /// renamed, or mistyped in a world file, or an override that no longer
+    /// applies to the template it targets, fails the build instead of costing a
+    /// scenario its entities at runtime.
+    ///
+    /// # What this does NOT catch, stated so nobody reads it as more
+    ///
+    /// **It would not have failed the build on #954.** That hull was on disk
+    /// the whole time; it had merely moved into a subdirectory the headless
+    /// preload's non-recursive walk missed, and the spawn path was cache-only.
+    /// The loader here is [`crate::entity_loader::WasmTemplateLoader`], whose
+    /// native filesystem fallback finds a template anywhere under the repo with
+    /// a completely empty cache — so this walk was green throughout #954 and is
+    /// green today against the subdirectory path.
+    ///
+    /// What closes that class is the spawn-side widening
+    /// ([`crate::entity_loader::resolve_entity_via`]) plus the gate holding the
+    /// spawn's own `ConfigCache`, not this walk. Keep the two claims apart: a
+    /// test advertising coverage it does not have is worse than no test at all,
+    /// because the next reader stops looking.
+    #[test]
+    fn every_shipped_world_names_a_template_that_resolves() {
+        let loader = crate::entity_loader::WasmTemplateLoader;
+        assert!(
+            loader.absence_is_final(),
+            "this walk is only meaningful on an authoritative host"
+        );
+        let mut checked = 0;
+        for entry in std::fs::read_dir("assets/worlds").expect("worlds dir readable") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let path_str = path.to_string_lossy().replace('\\', "/");
+            let toml = std::fs::read_to_string(&path).expect("shipped world readable");
+            let config = parse_world(&toml).expect("shipped world parses");
+            let src = WorldSource::new(&path_str, &toml, &config);
+            let mut seen = HashSet::new();
+            let findings = validate_template_resolution_in(&src, &loader, &mut seen);
+            assert!(
+                findings.is_empty(),
+                "shipped world {path_str} names a template that does not resolve: {findings:?}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "expected at least one shipped world");
     }
 }

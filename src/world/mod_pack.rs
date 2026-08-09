@@ -251,6 +251,62 @@ impl<F: Fn(&str) -> Option<String>> FragmentSource for PackFragments<'_, F> {
     }
 }
 
+/// The PARSED entity templates an uploaded pack validates against: the pack's
+/// OWN `assets/entities/*.toml` first, then the caller's loader (issue #973
+/// review, F3).
+///
+/// # Why this exists rather than a note telling callers to be careful
+///
+/// The pack's session overlay is deliberately NOT installed while the pack is
+/// being judged — that is what atomic validation means — so a host loader
+/// cannot see the hulls the pack carries. [`validate_mod_pack`] used to document
+/// that as an obligation on its callers: do not pass a loader claiming
+/// [`TemplateLoader::absence_is_final`] unless it can serve the pack's own
+/// hulls. A future native caller writing the obvious thing —
+/// [`crate::entity_loader::WasmTemplateLoader`], the same type the documented
+/// wasm caller passes — gets `true` on native and would reject **every valid
+/// pack** with bogus `unresolvable-template` errors. Prose on a `pub fn` is the
+/// weakest possible guard against that, and this module's own tests could never
+/// catch it: they all pass a loader answering `false`, so the native suite only
+/// ever exercised the safe arm.
+///
+/// So the obligation is discharged here instead of asked for: whatever loader
+/// arrives, the pack's own files are served in front of it.
+///
+/// Composition matches [`PackFragments`] exactly — pack first, then base — and
+/// resolves *through* it, so a pack hull including a fragment the pack also
+/// carries composes from the pack's copy. When the pack holds the path its
+/// answer is final: falling through to the host on a composition failure would
+/// mask a broken pack hull behind a shipped one of the same name.
+struct PackTemplates<'a, F: Fn(&str) -> Option<String>> {
+    files: &'a BTreeMap<String, String>,
+    fragments: &'a PackFragments<'a, F>,
+    host: &'a dyn TemplateLoader,
+}
+
+impl<F: Fn(&str) -> Option<String>> TemplateLoader for PackTemplates<'_, F> {
+    fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
+        // Both spellings, because a world may name `./assets/entities/x.toml`
+        // for a pack entry keyed `assets/entities/x.toml`.
+        let canonical = crate::entity_includes::canonical_template_path(path);
+        if self.files.contains_key(path) || self.files.contains_key(&canonical) {
+            return crate::entity_includes::resolve_template(path, self.fragments)
+                .ok()?
+                .parse()
+                .ok();
+        }
+        self.host.load_template(path)
+    }
+
+    /// The host's answer, for the same reason
+    /// [`crate::entity_loader::SpawnTemplateLoader`]'s is: serving the pack's
+    /// files ADDS to what the host can see, and adding cannot make a blind host
+    /// authoritative about everything it is still missing.
+    fn absence_is_final(&self) -> bool {
+        self.host.absence_is_final()
+    }
+}
+
 /// Validate an uploaded mod-pack ZIP atomically (issue #760, AC1).
 ///
 /// `zip_bytes` is the raw uploaded archive. `resolve_base` resolves an authored
@@ -259,8 +315,21 @@ impl<F: Fn(&str) -> Option<String>> FragmentSource for PackFragments<'_, F> {
 /// resolution — so a manifest root world may resolve either inside the pack or
 /// against shipped content, and a pack hull may include a shipped fragment.
 /// `template_loader` supplies PARSED entity templates for the reference checks
-/// that need them (doctrine anchors); it is injected rather than defaulted so
-/// this module keeps no host dependency of its own.
+/// that need them (doctrine anchors, and issue #973's template-resolution
+/// check); it is injected rather than defaulted so this module keeps no host
+/// dependency of its own.
+///
+/// **Any loader is safe to pass, including an authoritative one** (issue #973
+/// review, F3). It is wrapped in [`PackTemplates`], which serves the pack's own
+/// hulls in front of it — see that type for why the constraint is structural
+/// rather than a note asking callers to be careful. The only production caller
+/// is `bridge::wasm_validate_mod_pack`, which is `wasm32`-only and passes
+/// `WasmTemplateLoader` (`false` in the browser, so the presence check is inert
+/// there); a native caller may now pass the same type and get the answer it
+/// expects. The residual gap that leaves is stated on
+/// [`crate::world::validate::activation_findings`]'s presence check: on a host
+/// that is *not* authoritative, a pack naming a hull it does not carry is
+/// caught at spawn, not at upload.
 ///
 /// Composition references are validated per manifest-listed world against the
 /// pack + base worlds, and each spawned template's `includes` closure against
@@ -355,6 +424,19 @@ pub fn validate_mod_pack(
     let resolve = &resolve;
     findings.extend(validate_manifest(&manifest, &manifest_toml, resolve));
 
+    // Raw fragment text and parsed templates, both pack-first (issue #906 and
+    // #973 review F3). Built once, outside the per-world loop: they depend only
+    // on the archive, and `PackTemplates` borrows the fragment source.
+    let pack_fragments = PackFragments {
+        files: &files,
+        resolve_base: &resolve_base,
+    };
+    let pack_templates = PackTemplates {
+        files: &files,
+        fragments: &pack_fragments,
+        host: template_loader,
+    };
+
     // 6. Composition references for every manifest-listed root world that
     //    resolves + parses (unresolved / unparseable worlds are already
     //    reported by validate_manifest above).
@@ -390,11 +472,8 @@ pub fn validate_mod_pack(
         findings.extend(validate_composition_with_fragments(
             &root_src,
             &child_srcs,
-            template_loader,
-            &PackFragments {
-                files: &files,
-                resolve_base: &resolve_base,
-            },
+            &pack_templates,
+            &pack_fragments,
         ));
     }
 
@@ -512,6 +591,15 @@ mod tests {
     impl TemplateLoader for NoTemplates {
         fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
             None
+        }
+
+        /// NOT authoritative (issue #973). A loader that serves nothing knows
+        /// nothing; claiming authority here would have it reject every hull a
+        /// pack carries as `unresolvable-template`, which is precisely the
+        /// blindness that check is gated to avoid. See the note on
+        /// [`validate_mod_pack`].
+        fn absence_is_final(&self) -> bool {
+            false
         }
     }
 
@@ -860,5 +948,81 @@ entity = "raider"
         };
         let result = validate_mod_pack(&zip, base, &NoTemplates);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
+    }
+
+    // ── Authoritative loaders (issue #973 review, F3) ────────────────────────
+
+    /// A loader that serves nothing AND claims authority over absence.
+    ///
+    /// Exactly what a future NATIVE caller gets from
+    /// [`crate::entity_loader::WasmTemplateLoader`] with an empty cache and no
+    /// pack file on disk — the same type the documented wasm caller passes, so
+    /// it is the obvious thing to write and answers `true` on native. Every
+    /// other fixture in this module answers `false`, which is why the dangerous
+    /// arm went unexercised while the constraint lived in a doc comment.
+    struct AuthoritativeNoTemplates;
+
+    impl TemplateLoader for AuthoritativeNoTemplates {
+        fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
+            None
+        }
+
+        fn absence_is_final(&self) -> bool {
+            true
+        }
+    }
+
+    /// A pack's own hulls are served in front of the caller's loader, so an
+    /// authoritative loader that can see none of them still accepts the pack.
+    ///
+    /// Before F3 this rejected every valid pack with one bogus
+    /// `unresolvable-template` per hull.
+    #[test]
+    fn a_pack_carrying_its_own_hull_is_accepted_by_an_authoritative_loader() {
+        assert!(AuthoritativeNoTemplates.absence_is_final(), "precondition");
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("modf", "assets/worlds/modf.toml"),
+            ),
+            (
+                "assets/worlds/modf.toml",
+                &world_spawning("assets/entities/pack_hull.toml", "pack_one"),
+            ),
+            ("assets/entities/pack_hull.toml", "name = \"Pack Hull\"\n"),
+        ]);
+        let result = validate_mod_pack(&zip, no_base, &AuthoritativeNoTemplates);
+        assert!(
+            result.is_accepted(),
+            "a hull the pack itself carries must not read as absent: {:?}",
+            result.findings
+        );
+    }
+
+    /// …and the wrapping does not blanket-suppress the check: a pack naming a
+    /// hull that exists neither in the archive nor anywhere the loader can see
+    /// is still rejected, on a host authoritative enough to say so.
+    #[test]
+    fn a_pack_naming_a_hull_it_does_not_carry_is_rejected_by_an_authoritative_loader() {
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("modg", "assets/worlds/modg.toml"),
+            ),
+            (
+                "assets/worlds/modg.toml",
+                &world_spawning("assets/entities/absent_hull.toml", "pack_one"),
+            ),
+        ]);
+        let result = validate_mod_pack(&zip, no_base, &AuthoritativeNoTemplates);
+        assert!(!result.is_accepted(), "findings: {:?}", result.findings);
+        assert!(
+            result
+                .findings
+                .iter()
+                .any(|f| f.category == "unresolvable-template"),
+            "expected an unresolvable-template finding: {:?}",
+            result.findings
+        );
     }
 }

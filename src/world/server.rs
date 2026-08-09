@@ -527,13 +527,40 @@ fn spawn_world_entities(
 /// failure than the one being fixed and breaks the atomicity
 /// `world-content-lifecycle-state` promises. See
 /// [`crate::world::validate::activation_findings`] for what is checked.
+///
+/// `config_cache` is the cache the gated spawn will resolve templates from —
+/// the global one at `Startup`, a layer's own when a layer is spawning. It is
+/// threaded in (issue #973) so the template-resolution check asks the *same*
+/// question the spawn is about to ask, rather than a filesystem-backed
+/// approximation of it that can pass where the spawn then fails.
+///
+/// # A note for whoever writes the next bare-`App` fixture
+///
+/// [`crate::entity_loader::SpawnTemplateLoader`] takes its authority from the
+/// host behind the cache, so on native this gate is authoritative about paths
+/// like `"fixture/station.toml"` that no filesystem holds. That is right — the
+/// host really can decide them, and the answer really is "absent" — but it
+/// means **a fixture that adds an `[[entity]]` and forgets the matching
+/// `ConfigCache` entry gets zero spawns, not one.** The diagnostic naming the
+/// entity and its template goes through `bevy::log::error!`, and a bare `App`
+/// installs no `tracing` subscriber, so without help that failure reads as
+/// "spawning is broken" rather than "your fixture is incomplete". The
+/// `cfg(test)` mirror below is that help: unit tests, the only population at
+/// risk, see the findings on stderr. Production keeps the single `bevy::log`
+/// channel.
 pub fn world_activation_blocked(
     world_config: &crate::world::config::WorldConfig,
+    config_cache: &crate::config_cache::ConfigCache,
     system: &str,
 ) -> bool {
+    let templates = crate::entity_loader::SpawnTemplateLoader {
+        cache: config_cache,
+        host: &crate::entity_loader::WasmTemplateLoader,
+    };
     let findings = crate::world::validate::activation_findings(
         world_config,
         &crate::entity_includes::HostFragmentSource,
+        &templates,
     );
     let errors = findings.iter().filter(|f| f.is_error()).count();
     if errors == 0 {
@@ -546,6 +573,20 @@ pub fn world_activation_blocked(
         target: "world",
         "{system}: spawn blocked: world composition invalid ({errors} error(s)); spawning zero entities"
     );
+    // See the doc above: a bare `App` has no `tracing` subscriber, so every
+    // line emitted above is dropped and a fixture with an incomplete
+    // `ConfigCache` looks like a broken spawner. Test builds only — integration
+    // tests under `tests/` link the lib without `cfg(test)` and run a real app
+    // with `LogPlugin`, so they already see the lines above.
+    #[cfg(test)]
+    {
+        for f in findings.iter().filter(|f| f.is_error()) {
+            eprintln!(
+                "{system}: world validation [error] {}: {}",
+                f.category, f.message
+            );
+        }
+    }
     true
 }
 
@@ -571,14 +612,14 @@ pub fn spawn_immediate_entities_internal(
     flags: Option<&crate::world::flags::FlagStore>,
     id_mint: Option<&crate::world_id::WorldIdMint>,
 ) -> Vec<Entity> {
-    // Atomic-activation guard (issues #750/#752/#906/#969): if this world's
+    // Atomic-activation guard (issues #750/#752/#906/#969/#973): if this world's
     // composition is invalid, spawn NOTHING — a composition error must never
     // leave partial root-world content active. The headless build path aborts
     // earlier on the full composition; this seam is the last-resort gate for
     // the Bevy `Startup` spawn. `setup_world` in `server_app.rs` owns the OTHER
     // half of that spawn and consults the same gate, so a rejected world loses
     // both halves together.
-    if world_activation_blocked(world_config, "spawn_world_entities") {
+    if world_activation_blocked(world_config, config_cache, "spawn_world_entities") {
         return Vec::new();
     }
 
@@ -613,7 +654,11 @@ pub fn spawn_immediate_entities_internal(
         if !predicate_allows(entity_inst) {
             continue;
         }
-        let mut config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
+        let mut config = match crate::entity_loader::resolve_entity_via(
+            entity_inst,
+            config_cache,
+            &crate::entity_loader::WasmTemplateLoader,
+        ) {
             Ok(c) => c,
             Err(e) => {
                 bevy::log::error!(
@@ -681,7 +726,11 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
-        let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
+        let config = match crate::entity_loader::resolve_entity_via(
+            entity_inst,
+            config_cache,
+            &crate::entity_loader::WasmTemplateLoader,
+        ) {
             Ok(c) => c,
             Err(e) => {
                 bevy::log::error!(
@@ -1986,6 +2035,24 @@ fn apply_pending_scenario_loads(
 /// unchanged.  On native the global cache is always empty (no WASM pre-load
 /// step), so we fall back to reading each template file from disk so that
 /// `spawn_immediate_entities_internal` can resolve them.
+///
+/// # What this walk does NOT cover, and the I/O that leaves (issue #973)
+///
+/// It walks `_world_config.entities` — the layer's static `[[entity]]` blocks —
+/// and nothing else. A `spawn_entity` **trigger action**'s `template_path` is
+/// therefore not in the cache this returns, while
+/// [`crate::world::validate::activation_findings`] checks every spawned
+/// instance, triggers included. So on native, the activation gate resolves each
+/// distinct trigger template through the filesystem at layer load.
+///
+/// That is real I/O on a runtime transition that previously did none. It is
+/// bounded — once per distinct template per layer load, never per frame, and
+/// `#[cfg(target_arch = "wasm32")]` builds never touch a filesystem at all —
+/// and it does not move the content digest, because
+/// [`crate::content_ledger`] is keyed by canonical path and records the same
+/// bytes the eager walk already recorded. Widening this walk to trigger
+/// templates would trade the I/O here for the same I/O one step earlier, so it
+/// is recorded rather than pre-emptively "fixed".
 fn build_layer_config_cache(
     _world_config: &crate::world::config::WorldConfig,
 ) -> crate::config_cache::ConfigCache {

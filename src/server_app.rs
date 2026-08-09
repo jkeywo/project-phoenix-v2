@@ -2816,7 +2816,7 @@ pub(crate) fn spawn_anonymous_entities_internal(
     config_cache: &crate::config_cache::ConfigCache,
     id_mint: Option<&crate::world_id::WorldIdMint>,
 ) -> usize {
-    // Atomic-activation guard (issues #750/#752/#906/#969). This system owns one
+    // Atomic-activation guard (issues #750/#752/#906/#969/#973). This system owns one
     // half of the immediate spawn; `spawn_world_entities` owns the other, and
     // the two carry no ordering relationship. The loop below answers a failed
     // resolve by logging and `continue`ing, so without this gate an invalid
@@ -2825,7 +2825,7 @@ pub(crate) fn spawn_anonymous_entities_internal(
     // single missing entity the gate exists to prevent, and a direct
     // contradiction of `world-content-lifecycle-state`. Same function, same
     // parsed config, so both halves always agree.
-    if crate::world::server::world_activation_blocked(world_config, "setup_world") {
+    if crate::world::server::world_activation_blocked(world_config, config_cache, "setup_world") {
         return 0;
     }
 
@@ -2851,7 +2851,11 @@ pub(crate) fn spawn_anonymous_entities_internal(
             continue;
         }
 
-        let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
+        let config = match crate::entity_loader::resolve_entity_via(
+            entity_inst,
+            config_cache,
+            &crate::entity_loader::WasmTemplateLoader,
+        ) {
             Ok(c) => c,
             Err(e) => {
                 bevy::log::error!(
@@ -2973,7 +2977,11 @@ fn spawn_game_start_entities(
                 continue;
             }
         }
-        let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
+        let config = match crate::entity_loader::resolve_entity_via(
+            entity_inst,
+            &config_cache,
+            &crate::entity_loader::WasmTemplateLoader,
+        ) {
             Ok(c) => c,
             Err(e) => {
                 bevy::log::error!(

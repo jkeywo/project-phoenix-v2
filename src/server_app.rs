@@ -2841,11 +2841,17 @@ pub(crate) fn spawn_anonymous_entities_internal(
         // Asteroid-field entries and named entries are owned by the unified
         // spawn pass in `world::server::spawn_world_entities`. Skip them to
         // avoid double-spawning.
+        // Same lookup the unified half routes with, and the same one the spawn
+        // below performs (issue #973 review): cache, then the host loader.
+        // These two ownership predicates must never disagree — one that is
+        // narrower than the spawn double-spawns or mis-routes an entry rather
+        // than dropping it. See `entity_loader::template_is_asteroid_field`.
         let is_unified = crate::world::config::is_owned_by_unified_pipeline(entity_inst, |path| {
-            config_cache
-                .get(path)
-                .and_then(|c| c.asteroid_field.as_ref())
-                .is_some()
+            crate::entity_loader::template_is_asteroid_field(
+                path,
+                config_cache,
+                &crate::entity_loader::WasmTemplateLoader,
+            )
         });
         if is_unified {
             continue;

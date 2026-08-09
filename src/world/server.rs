@@ -623,12 +623,20 @@ pub fn spawn_immediate_entities_internal(
         return Vec::new();
     }
 
+    // The routing predicate asks the SAME lookup the spawn below performs
+    // (issue #973 review): cache first, then the host loader. A cache-only
+    // predicate answering `false` for a field template that is on disk but
+    // uncached would push the entry into `setup_world`'s anonymous bucket,
+    // where it spawns without its `[asteroid_field] anchor` resolved — a belt
+    // silently sitting at the world origin. See
+    // `entity_loader::template_is_asteroid_field`.
     let (fields, named, _anon) =
         crate::world::config::partition_immediate_entities_three_way(world_config, |path| {
-            config_cache
-                .get(path)
-                .and_then(|c| c.asteroid_field.as_ref())
-                .is_some()
+            crate::entity_loader::template_is_asteroid_field(
+                path,
+                config_cache,
+                &crate::entity_loader::WasmTemplateLoader,
+            )
         });
 
     // Pre-resolve named-entity positions so `relative_to` references can be
@@ -5059,6 +5067,108 @@ base_priority = 35.0
             Some("belt_origin"),
             "anchor name must be preserved alongside the resolved offset"
         );
+    }
+
+    /// Issue #973 review (F1): the ownership predicate must ask the same
+    /// question the spawn asks.
+    ///
+    /// #973 widened spawning from cache-only to cache-then-host. While the
+    /// three-way partition stayed cache-only, an asteroid-field template that
+    /// was on disk but absent from the `ConfigCache` answered "not a field",
+    /// fell into the anonymous bucket, and spawned through `setup_world` —
+    /// which never runs the `[asteroid_field] anchor -> anchor_offset` block
+    /// and *does* `upsert_world_entity`, which the field path deliberately
+    /// omits. The world then comes up almost right, with its belts quietly at
+    /// the world origin: a quieter failure than the blank world #973 replaced,
+    /// which is the wrong direction.
+    ///
+    /// Reachable today, not theoretical: `headless::app::build_headless_app`
+    /// derives the preload directory from `--ship`'s parent, so
+    /// `--ship assets/entities/test/rng_coverage_lancer.toml
+    /// --world assets/worlds/combat_test.toml` preloads only
+    /// `assets/entities/test/` and both of `combat_test.toml`'s
+    /// `asteroid_field_main.toml` belts miss the cache.
+    #[test]
+    fn a_disk_only_asteroid_field_still_routes_to_the_field_spawn_path() {
+        use crate::entity_spawner::AsteroidFieldSection;
+        use crate::lobby::server::WorldResource;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        // On disk and deliberately NOT in the cache — the exact shape the
+        // headless preload leaves behind when the world's belts live outside
+        // `--ship`'s directory.
+        static C: AtomicU32 = AtomicU32::new(0);
+        let tag = C.fetch_add(1, Ordering::Relaxed);
+        let path_buf = std::env::temp_dir().join(format!("disk_only_belt_{tag}.toml"));
+        std::fs::write(
+            &path_buf,
+            "[asteroid_field]\n\
+             inner_radius = 100.0\n\
+             outer_radius = 200.0\n\
+             density = 0.005\n\
+             anchor = \"belt_origin\"\n",
+        )
+        .expect("write the disk-only belt fixture");
+        let path = path_buf.to_string_lossy().into_owned();
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg
+            .anchors
+            .insert("belt_origin".into(), [500.0, 0.0, -250.0]);
+        // An `id` but no `name` — exactly how `combat_test.toml` authors its
+        // two belts, so `name` cannot be what routes this entry.
+        world_cfg.entities.push(WorldEntity {
+            template_path: path.clone(),
+            id: Some("inner-belt".into()),
+            ..Default::default()
+        });
+
+        let cache = crate::config_cache::ConfigCache::from(HashMap::new());
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+
+        let spawned: Vec<Entity> = {
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None, None)
+        };
+        let mut world_res = WorldResource::default();
+        let anonymous = {
+            let mut commands = app.world_mut().commands();
+            crate::server_app::spawn_anonymous_entities_internal(
+                &mut commands,
+                &mut world_res,
+                &world_cfg,
+                &cache,
+                None,
+            )
+        };
+        app.update();
+
+        assert_eq!(
+            spawned.len(),
+            1,
+            "the unified half owns asteroid fields, and a field it can spawn is \
+             a field it must claim"
+        );
+        assert_eq!(
+            anonymous, 0,
+            "…and the `setup_world` half must not claim it as well"
+        );
+        let section = app
+            .world()
+            .get::<AsteroidFieldSection>(spawned[0])
+            .expect("a field entry must carry an AsteroidFieldSection");
+        assert_eq!(
+            section.0.anchor_offset,
+            [500.0, 0.0, -250.0],
+            "only the field path resolves `[asteroid_field] anchor`; a mis-routed \
+             belt sits silently at the world origin"
+        );
+
+        let _ = std::fs::remove_file(&path_buf);
     }
 
     #[test]

@@ -1,5 +1,6 @@
-//! tune-lods — place each LOD switch boundary at the knee of the
-//! difference-vs-distance curve, headless.
+//! tune-lods — two headless perceptual tuners for a model's LOD ladder.
+//!
+//! ## Range mode (default) — place each switch boundary at a diff knee
 //!
 //!   cargo run --features capture --bin tune-lods -- \
 //!       assets/models/alliance_cruiser.glb \
@@ -17,6 +18,28 @@
 //! It prints the proposed boundaries as JSON on stdout (the node driver
 //! `scripts/tune-lods.mjs` reads them and writes the sidecars) and writes review
 //! artifacts — an A-vs-B montage and a diff-curve plot per pair — to `--out`.
+//!
+//! ## Decimate mode — fix the ranges, tune the mesh simplification
+//!
+//!   cargo run --features capture --bin tune-lods -- \
+//!       assets/models/alliance_cruiser.glb --variant model \
+//!       --decimate --candidates c0.glb,c1.glb,… --distance 15 \
+//!       [--ref base.glb] [--label lod1] [--yaws 4] [--resolution WxH] [--out <dir>]
+//!
+//! The inverse tuner (see the goal of issue-tracked "invert the LOD tuner"): the
+//! band edges stay fixed and the *simplification* of each generated level is what
+//! moves. The node driver `scripts/tune-decimation.mjs` decimates a grid of
+//! candidate meshes (light→heavy) for one generated level, then calls this bin
+//! ONCE for that level: it renders the reference (the base GLB — ground truth, so
+//! error never accumulates) and every candidate at the ONE distance that level is
+//! ever shown closest — its band's near edge — multi-yaw, worst-case across yaws,
+//! and computes the alpha-aware diff of each candidate against the reference. The
+//! diff rises monotonically with decimation, so the curve is convex and has a
+//! clean elbow; [`find_knee_increasing`] picks it — the most aggressively
+//! decimated candidate still perceptually close to the base. The bin prints the
+//! per-candidate diffs + the knee index as JSON (the driver applies the byte-size
+//! ceiling on top, where it knows each candidate's size) and writes a
+//! diff-vs-decimation curve and a ref-vs-knee montage to `--out`.
 //!
 //! The offscreen-render plumbing and framing maths are shared with
 //! `capture-billboard` via [`project_phoenix::render_capture`]; the diff metric
@@ -58,7 +81,7 @@ use bevy::{
 
 use project_phoenix::entities::billboard::{orient_lod_billboards, spawn_billboard_child};
 use project_phoenix::entity_config::LodLevel;
-use project_phoenix::lod_tune::{find_knee, image_diff_rms};
+use project_phoenix::lod_tune::{find_knee, find_knee_increasing, image_diff_rms};
 use project_phoenix::model_rig::{sidecar_path, ModelRig, DEFAULT_VARIANT};
 use project_phoenix::render_capture::{
     create_render_target, frame_distance, measure_world_bounds, orbit_transform, unpad_rows,
@@ -67,6 +90,24 @@ use project_phoenix::render_capture::{
 use project_phoenix::renderer::GameCamera;
 
 // ── Config from argv ────────────────────────────────────────────────────────
+
+/// Which tuner this run is: sweep switch distances for a fixed ladder (`Range`),
+/// or diff a grid of decimation candidates against the base at one fixed
+/// distance (`Decimate`). The two share the scene setup and the settle
+/// discipline; only the [`drive`] state machine differs.
+#[derive(Clone, PartialEq)]
+enum TuneMode {
+    Range,
+    Decimate {
+        /// The single distance every candidate is rendered at — the tuned
+        /// level's band near edge (the previous level's `max_distance`).
+        distance: f32,
+        /// Number of candidate meshes (the subjects after index 0, the ref).
+        candidates: usize,
+        /// Filename tag for the review artifacts (e.g. `alliance_cruiser_model_lod1`).
+        label: String,
+    },
+}
 
 #[derive(Resource, Clone)]
 struct TuneConfig {
@@ -81,8 +122,11 @@ struct TuneConfig {
     /// Framing (world centre, radius) from the near model's `[extents]`, or
     /// `None` to fall back to the live-measured AABB union.
     framing: Option<(Vec3, f32)>,
-    /// The ladder from the model's rig sidecar, near→far.
+    /// The subjects to spawn as co-oriented GLB levels, near→far. In `Range`
+    /// mode this is the model's ladder from its rig sidecar; in `Decimate` mode
+    /// it is `[reference, candidate0, candidate1, …]`, all GLB.
     levels: Vec<LodLevel>,
+    mode: TuneMode,
 }
 
 fn parse_config() -> TuneConfig {
@@ -119,8 +163,11 @@ fn parse_config() -> TuneConfig {
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
 
+    let decimate = args.iter().any(|a| a == "--decimate");
+
     // The ladder is authored in the rig sidecar (issue #914), at the requested
-    // variant. Its `[base]` also orients the yaw ring.
+    // variant. Its `[base]` also orients the yaw ring, and its `[extents]` frame
+    // the shot — both modes need it.
     let sidecar = sidecar_path(&model, Some(&variant));
     let rig = std::fs::read_to_string(&sidecar)
         .ok()
@@ -129,7 +176,7 @@ fn parse_config() -> TuneConfig {
             eprintln!("[tune-lods] no readable rig sidecar at {sidecar}");
             std::process::exit(2);
         });
-    if rig.lod.len() < 2 {
+    if !decimate && rig.lod.len() < 2 {
         eprintln!("[tune-lods] {sidecar}: ladder has < 2 levels, nothing to tune");
         std::process::exit(2);
     }
@@ -146,6 +193,51 @@ fn parse_config() -> TuneConfig {
         (center, radius)
     });
 
+    // In decimate mode the subjects are the reference + the candidate meshes,
+    // spawned as co-oriented GLB levels exactly like a ladder's levels are; the
+    // reference defaults to the near GLB (the model itself — ground truth). This
+    // lets `setup`/`spawn_level`/`resolve_near_base` stay identical: they read a
+    // list of GLB `LodLevel`s and co-orient them on the first one's base rig,
+    // which for the reference IS this sidecar.
+    let (levels, mode) = if decimate {
+        let ref_path = str_flag("--ref").unwrap_or_else(|| model.clone());
+        let candidates: Vec<String> = str_flag("--candidates")
+            .map(|s| {
+                s.split(',')
+                    .filter(|c| !c.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if candidates.is_empty() {
+            eprintln!("[tune-lods] --decimate needs --candidates <c0.glb,c1.glb,…>");
+            std::process::exit(2);
+        }
+        let distance = str_flag("--distance")
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or_else(|| {
+                eprintln!("[tune-lods] --decimate needs --distance <near-edge>");
+                std::process::exit(2);
+            });
+        let label = str_flag("--label").unwrap_or_else(|| model_stem(&model));
+        let glb = |p: &str| LodLevel {
+            model: Some(p.to_string()),
+            ..Default::default()
+        };
+        let mut levels = vec![glb(&ref_path)];
+        levels.extend(candidates.iter().map(|c| glb(c)));
+        (
+            levels,
+            TuneMode::Decimate {
+                distance,
+                candidates: candidates.len(),
+                label,
+            },
+        )
+    } else {
+        (rig.lod, TuneMode::Range)
+    };
+
     TuneConfig {
         model,
         variant,
@@ -156,7 +248,8 @@ fn parse_config() -> TuneConfig {
         pitch_deg: num_flag("--pitch", 20.0),
         out_dir,
         framing,
-        levels: rig.lod,
+        levels,
+        mode,
     }
 }
 
@@ -435,6 +528,20 @@ struct Tune {
     m_pair: usize,
     m_which: u8,
     m_tile_a: Vec<u8>,
+
+    // ── Decimate mode ────────────────────────────────────────────────────────
+    /// Worst-case (max over yaw) diff of each candidate against the reference,
+    /// at the one near-edge distance. `d_diffs[c]` is candidate `c`.
+    d_diffs: Vec<f64>,
+    /// The current yaw's reference render, held while each candidate is diffed
+    /// against it.
+    d_ref_tile: Vec<u8>,
+    /// Subject cursor: 0 = the reference, `1..=candidates` = candidate `n-1`.
+    d_ci: usize,
+    d_yi: usize,
+    /// The chosen candidate index (0-based into the candidates), or `None` when
+    /// the curve has no elbow — the driver then keeps the authored parameters.
+    d_knee: Option<usize>,
 }
 
 const WARMUP_FRAMES: u32 = 90;
@@ -470,6 +577,18 @@ fn drive(
     bounds_q: Query<(&GlobalTransform, &bevy::camera::primitives::Aabb)>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    if matches!(config.mode, TuneMode::Decimate { .. }) {
+        drive_decimate(
+            &mut tune,
+            &config,
+            &receiver,
+            &mut cameras,
+            &mut visibilities,
+            bounds_q,
+            &mut exit,
+        );
+        return;
+    }
     match tune.phase {
         Phase::Warmup => {
             tune.warmup += 1;
@@ -613,6 +732,325 @@ fn drive(
             exit.write(AppExit::Success);
         }
     }
+}
+
+// ── Decimate mode state machine ──────────────────────────────────────────────
+
+/// The `(distance, candidates, label)` of a decimate run — the mode is known to
+/// be `Decimate` by the time this is called.
+fn decimate_params(config: &TuneConfig) -> (f32, usize, &str) {
+    match &config.mode {
+        TuneMode::Decimate {
+            distance,
+            candidates,
+            label,
+        } => (*distance, *candidates, label.as_str()),
+        TuneMode::Range => unreachable!("decimate_params called in range mode"),
+    }
+}
+
+/// Render the reference + every candidate at the ONE near-edge distance, from
+/// several yaws, and diff each candidate against the reference — mirroring the
+/// range sweep's settle/non-blank/stability discipline so a not-yet-uploaded
+/// mesh can never be accepted. `find_knee_increasing` then picks the most
+/// aggressive candidate still close to the base.
+fn drive_decimate(
+    tune: &mut Tune,
+    config: &TuneConfig,
+    receiver: &MainWorldReceiver,
+    cameras: &mut Query<&mut Transform, With<CaptureCamera>>,
+    visibilities: &mut Query<&mut Visibility>,
+    bounds_q: Query<(&GlobalTransform, &bevy::camera::primitives::Aabb)>,
+    exit: &mut MessageWriter<AppExit>,
+) {
+    let (distance, ncandidates, _label) = decimate_params(config);
+    match tune.phase {
+        Phase::Warmup => {
+            tune.warmup += 1;
+            while receiver.try_recv().is_ok() {}
+            if tune.warmup < WARMUP_FRAMES {
+                return;
+            }
+            let (center, radius) = match config.framing {
+                Some(f) => f,
+                None => {
+                    let Some((center, radius, _size)) = measure_world_bounds(bounds_q.iter())
+                    else {
+                        return; // geometry not measurable yet — wait
+                    };
+                    (center, radius)
+                }
+            };
+            tune.center = center;
+            tune.radius = radius;
+            tune.d_diffs = vec![0.0; ncandidates];
+            eprintln!(
+                "[tune-lods] {} ({}) DECIMATE: ref + {} candidates @ d={:.1}, {} yaws @ {}×{}",
+                config.model,
+                config.variant,
+                ncandidates,
+                distance,
+                config.yaws,
+                config.width,
+                config.height,
+            );
+            tune.phase = Phase::Sweep;
+            tune.shown = None;
+            tune.settle = 0;
+            tune.d_ci = 0;
+            tune.d_yi = 0;
+            return;
+        }
+
+        Phase::Sweep => {
+            let yaw = tune.d_yi as f32 * std::f32::consts::TAU / config.yaws.max(1) as f32;
+            aim_camera(cameras, tune.center, distance, yaw, config.pitch_deg);
+
+            // Subject 0 is the reference; subject `n` is candidate `n-1`.
+            let want = tune.d_ci;
+            if tune.shown != Some(want) {
+                show_only(visibilities, &tune.level_ents, want);
+                tune.shown = Some(want);
+                tune.settle = 0;
+                tune.pending_tile.clear();
+                tune.confirm_frames = 0;
+                while receiver.try_recv().is_ok() {}
+                return;
+            }
+
+            // The near edge is the closest this level is ever shown, so every
+            // subject fills a real footprint there — require a non-blank frame so
+            // a still-streaming mesh cannot diff empty-vs-ref as a false spike.
+            let Some(tile) = settle_and_capture(tune, receiver, config, true) else {
+                return;
+            };
+
+            if tune.d_ci == 0 {
+                tune.d_ref_tile = tile;
+            } else {
+                let cand = tune.d_ci - 1;
+                let diff = image_diff_rms(&tune.d_ref_tile, &tile);
+                if diff > tune.d_diffs[cand] {
+                    tune.d_diffs[cand] = diff;
+                }
+            }
+
+            tune.shown = None;
+            tune.d_ci += 1;
+            if tune.d_ci > ncandidates {
+                // Finished this yaw ring — next yaw, or finish.
+                tune.d_ci = 0;
+                tune.d_yi += 1;
+                if tune.d_yi >= config.yaws.max(1) as usize {
+                    finish_decimate(tune, config);
+                    tune.phase = Phase::Montage;
+                    tune.m_which = 0;
+                    tune.shown = None;
+                }
+            }
+            return;
+        }
+
+        Phase::Montage => {
+            // Montage the reference against the chosen candidate (the knee, or the
+            // most aggressive candidate when the curve had no elbow) at yaw 0.
+            let chosen = tune.d_knee.unwrap_or(ncandidates - 1);
+            let want = if tune.m_which == 0 { 0 } else { chosen + 1 };
+            aim_camera(cameras, tune.center, distance, 0.0, config.pitch_deg);
+            if tune.shown != Some(want) {
+                show_only(visibilities, &tune.level_ents, want);
+                tune.shown = Some(want);
+                tune.settle = 0;
+                tune.pending_tile.clear();
+                tune.confirm_frames = 0;
+                while receiver.try_recv().is_ok() {}
+                return;
+            }
+            let Some(tile) = settle_and_capture(tune, receiver, config, true) else {
+                return;
+            };
+            if tune.m_which == 0 {
+                tune.m_tile_a = tile;
+                tune.m_which = 1;
+                tune.shown = None;
+                return;
+            }
+            write_decimate_montage(config, chosen, &tune.m_tile_a.clone(), &tile);
+            tune.phase = Phase::Done;
+            return;
+        }
+
+        Phase::Done => {
+            print_decimate_json(config, tune);
+            exit.write(AppExit::Success);
+        }
+    }
+}
+
+/// Pick the knee over the candidate diff curve and write the curve PNG.
+///
+/// The x-axis is candidate index — the driver hands the candidates in light→heavy
+/// order, so index is a valid ascending decimation axis and the plot reads
+/// left (light) → right (heavy). The knee is the most aggressive candidate still
+/// perceptually close to the base; a curve with no convex elbow leaves
+/// `d_knee` `None` and the driver keeps the authored parameters.
+fn finish_decimate(tune: &mut Tune, config: &TuneConfig) {
+    let (distance, _ncandidates, label) = decimate_params(config);
+    let xs: Vec<f64> = (0..tune.d_diffs.len()).map(|i| i as f64).collect();
+    let samples: Vec<String> = tune
+        .d_diffs
+        .iter()
+        .enumerate()
+        .map(|(i, v)| format!("c{i}:{v:.4}"))
+        .collect();
+    eprintln!(
+        "[tune-lods] decimate diff-vs-candidate  {}",
+        samples.join("  ")
+    );
+    tune.d_knee = find_knee_increasing(&xs, &tune.d_diffs);
+
+    let _ = std::fs::create_dir_all(&config.out_dir);
+    let curve = plot_decimation_curve(&tune.d_diffs, tune.d_knee);
+    let path = config
+        .out_dir
+        .join(format!("{label}_d{:.0}_decimate_curve.png", distance));
+    let _ = curve.save(&path);
+    eprintln!("[tune-lods] wrote {}", path.display());
+}
+
+/// Ref | chosen-candidate side by side at the near-edge distance.
+fn write_decimate_montage(config: &TuneConfig, chosen: usize, tile_ref: &[u8], tile_cand: &[u8]) {
+    let (distance, _n, label) = decimate_params(config);
+    let (w, h) = (config.width, config.height);
+    if tile_ref.len() != (w * h * 4) as usize || tile_cand.len() != tile_ref.len() {
+        return;
+    }
+    let mut montage = vec![0u8; (w * 2 * h * 4) as usize];
+    let row = (w * 4) as usize;
+    let mrow = (w * 2 * 4) as usize;
+    for y in 0..h as usize {
+        montage[y * mrow..y * mrow + row].copy_from_slice(&tile_ref[y * row..y * row + row]);
+        montage[y * mrow + row..y * mrow + 2 * row]
+            .copy_from_slice(&tile_cand[y * row..y * row + row]);
+    }
+    if let Some(img) = image::RgbaImage::from_raw(w * 2, h, montage) {
+        let path = config.out_dir.join(format!(
+            "{label}_d{:.0}_ref_vs_c{chosen}_montage.png",
+            distance
+        ));
+        let _ = img.save(&path);
+        eprintln!("[tune-lods] wrote {}", path.display());
+    }
+}
+
+/// The per-candidate diffs + chosen knee as one JSON object on stdout. The
+/// driver reads it, maps candidate index → ratio/texture/bytes, and applies the
+/// byte-size ceiling to land on the final proposal.
+fn print_decimate_json(config: &TuneConfig, tune: &Tune) {
+    let (distance, _n, label) = decimate_params(config);
+    let cands: Vec<String> = tune
+        .d_diffs
+        .iter()
+        .enumerate()
+        .map(|(i, v)| format!("{{\"index\":{i},\"diff\":{v:.6}}}"))
+        .collect();
+    let knee = tune.d_knee.map(|k| k as i64).unwrap_or(-1);
+    println!(
+        "{{\"model\":{:?},\"variant\":{:?},\"label\":{:?},\"distance\":{:.3},\
+         \"resolution\":\"{}x{}\",\"knee_index\":{},\"knee_found\":{},\"candidates\":[{}]}}",
+        config.model,
+        config.variant,
+        label,
+        distance,
+        config.width,
+        config.height,
+        knee,
+        tune.d_knee.is_some(),
+        cands.join(",")
+    );
+}
+
+/// A small dark line plot of diff vs. candidate index (light→heavy), with the
+/// chosen knee marked. The companion of [`plot_curve`] for the decimate tuner,
+/// on a linear index x-axis rather than a log-distance one.
+fn plot_decimation_curve(diffs: &[f64], knee: Option<usize>) -> image::RgbaImage {
+    const W: u32 = 640;
+    const H: u32 = 400;
+    const PAD: u32 = 40;
+    let mut img = image::RgbaImage::from_pixel(W, H, image::Rgba([24, 26, 30, 255]));
+    if diffs.is_empty() {
+        return img;
+    }
+    let n = diffs.len();
+    let x_of = |i: usize| -> i64 {
+        let t = if n > 1 {
+            i as f64 / (n - 1) as f64
+        } else {
+            0.0
+        };
+        (PAD as f64 + t * (W - 2 * PAD) as f64) as i64
+    };
+    let y_max = diffs.iter().cloned().fold(1e-9, f64::max);
+    let y_of = |v: f64| -> i64 {
+        let t = v / y_max;
+        ((H - PAD) as f64 - t * (H - 2 * PAD) as f64) as i64
+    };
+
+    let axis = image::Rgba([90, 96, 104, 255]);
+    draw_line(
+        &mut img,
+        PAD as i64,
+        (H - PAD) as i64,
+        (W - PAD) as i64,
+        (H - PAD) as i64,
+        axis,
+    );
+    draw_line(
+        &mut img,
+        PAD as i64,
+        PAD as i64,
+        PAD as i64,
+        (H - PAD) as i64,
+        axis,
+    );
+
+    if let Some(k) = knee {
+        let kx = x_of(k);
+        draw_line(
+            &mut img,
+            kx,
+            PAD as i64,
+            kx,
+            (H - PAD) as i64,
+            image::Rgba([230, 170, 60, 255]),
+        );
+    }
+
+    let line = image::Rgba([90, 200, 250, 255]);
+    for i in 1..n {
+        draw_line(
+            &mut img,
+            x_of(i - 1),
+            y_of(diffs[i - 1]),
+            x_of(i),
+            y_of(diffs[i]),
+            line,
+        );
+    }
+    for (i, &d) in diffs.iter().enumerate().take(n) {
+        let (px, py) = (x_of(i), y_of(d));
+        for dy in -2..=2 {
+            for dx in -2..=2 {
+                put(
+                    &mut img,
+                    px + dx,
+                    py + dy,
+                    image::Rgba([240, 240, 240, 255]),
+                );
+            }
+        }
+    }
+    img
 }
 
 /// Advance the settle counter and return a tile only once the render has proven

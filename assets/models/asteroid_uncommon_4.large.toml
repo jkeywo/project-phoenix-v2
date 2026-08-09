@@ -30,9 +30,9 @@ model = "assets/models/asteroid_uncommon_4_lod1.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_uncommon_4.glb"
-ratio = 0.18
+ratio = 0.067
 error = 0.01
-texture_size = 512
+texture_size = 128
 
 [[lod]]
 max_distance = 400.0
@@ -40,7 +40,7 @@ model = "assets/models/asteroid_uncommon_4_lod2.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_uncommon_4.glb"
-ratio = 0.05
+ratio = 0.067
 error = 0.01
 texture_size = 128
 

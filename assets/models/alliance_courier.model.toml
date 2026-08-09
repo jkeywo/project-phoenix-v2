@@ -44,3 +44,35 @@ direction = [ 0, 0, 1 ]
 [markers.camera_fore]
 position = [ 0, 0.15, 0.99 ]
 direction = [ 0, 0, 1 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/alliance_courier.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/alliance_courier_lod1.glb"
+
+[lod.generate]
+source = "assets/models/alliance_courier.glb"
+ratio = 0.95
+error = 0.01
+texture_size = 512
+remesh_voxel_size = 0.021
+
+[[lod]]
+max_distance = 400.0
+model = "assets/models/alliance_courier_lod2.glb"
+
+[lod.generate]
+source = "assets/models/alliance_courier.glb"
+ratio = 0.25
+error = 0.01
+texture_size = 256
+remesh_voxel_size = 0.021
+
+[[lod]]
+shape = "sphere"
+colour = [ 0.2045, 0.3031, 0.3953 ]
+radius = 0.2223
+scale = [ 1.0, 0.2804, 1.7023 ]

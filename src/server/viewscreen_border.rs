@@ -451,7 +451,9 @@ fn spawn_hud_state_entity(mut commands: Commands) {
     commands.spawn(ViewscreenHud(ViewscreenHudState {
         heading: 0,
         hull_pct: 100,
-        condition: "NOMINAL".to_string(),
+        // Display-string id (issue #975); `localiseTree` resolves it on the
+        // client. Rust never sends the English condition word.
+        condition: "server.hud_nominal".to_string(),
         red_alert: false,
         engine_thrust: 0.0,
         phaser_firing: false,
@@ -493,7 +495,14 @@ fn compute_hud_state(
     ViewscreenHudState {
         heading: yaw_to_compass_bearing(physics.yaw),
         hull_pct: hull_pct.round() as i32,
-        condition: if alert { "ALERT" } else { "NOMINAL" }.to_string(),
+        // Display-string ids (issue #975); the client resolves them through
+        // `localiseTree`. No player-visible English is composed here.
+        condition: if alert {
+            "server.hud_alert"
+        } else {
+            "server.hud_nominal"
+        }
+        .to_string(),
         red_alert: alert,
         engine_thrust,
         phaser_firing,
@@ -622,7 +631,9 @@ mod tests {
         );
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
-        assert_eq!(state.condition, "NOMINAL");
+        // The condition rides the wire as a string id (issue #975), resolved on
+        // the client; Rust's contract is the id, not the English word.
+        assert_eq!(state.condition, "server.hud_nominal");
         assert!(!state.red_alert);
         assert_eq!(state.engine_thrust, 0.0);
         assert!(!state.phaser_firing);
@@ -647,7 +658,7 @@ mod tests {
         );
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
-        assert_eq!(state.condition, "ALERT");
+        assert_eq!(state.condition, "server.hud_alert");
         assert!(state.red_alert);
         assert!((state.engine_thrust - 0.75).abs() < f32::EPSILON);
         assert!(state.phaser_firing);

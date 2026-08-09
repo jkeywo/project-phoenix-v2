@@ -873,7 +873,7 @@ fn tick_weapons_arc_request(
                         payload: CoordinationPayload::ArcBearingWithdraw {
                             family: withdrawn_family,
                         },
-                        sender_label: "Weapons".to_string(),
+                        sender_label: crate::ship::coordination::CHATTER_SENDER_WEAPONS.to_string(),
                     });
                 }
             }
@@ -909,7 +909,7 @@ fn tick_weapons_arc_request(
                 family,
                 arcs,
             },
-            sender_label: "Weapons".to_string(),
+            sender_label: crate::ship::coordination::CHATTER_SENDER_WEAPONS.to_string(),
         });
     }
 }

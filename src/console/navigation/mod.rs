@@ -350,7 +350,7 @@ fn issue_navigate_to_clearance(
                     generation,
                     label: format!("waypoint ({:.0}, {:.0})", snapshot.x, snapshot.z),
                 },
-                sender_label: "Navigation".into(),
+                sender_label: crate::ship::coordination::CHATTER_SENDER_NAVIGATION.to_string(),
             });
             state.issued_generation = Some(generation);
         }

@@ -208,7 +208,7 @@ pub fn handle_sensors_messages(
                     uuid: uuid.clone(),
                     label,
                 },
-                sender_label: "Sensors".to_string(),
+                sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
             });
         }
     }
@@ -311,7 +311,7 @@ pub fn tick_sensors_frequency_hint(
             sender_origin,
             target: crate::system_registry::tactical_station_key(),
             payload: CoordinationPayload::FrequencyHint { frequency },
-            sender_label: "Sensors".to_string(),
+            sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
         });
     }
 }
@@ -497,7 +497,7 @@ pub fn tick_sensors_threat_warning(
                 bearing_rad: relative_bearing,
                 label,
             },
-            sender_label: "Sensors".to_string(),
+            sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
         });
     }
 }

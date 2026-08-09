@@ -79,94 +79,6 @@ pub fn handle_coordination_enqueue(
     }
 }
 
-/// Format a `CoordinationPayload` into a short text string for viewscreen chatter.
-fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
-    match payload {
-        CoordinationPayload::Advisory { message } => message.clone(),
-        CoordinationPayload::Alert { title, body } => {
-            if body.is_empty() {
-                title.clone()
-            } else {
-                format!("{title}: {body}")
-            }
-        }
-        CoordinationPayload::FrequencyHint { frequency } => {
-            format!("Frequency hint: {frequency:.1}")
-        }
-        CoordinationPayload::ShieldFacingDown {
-            label,
-            offline_remaining,
-        } => {
-            format!("{label} offline ({offline_remaining:.0}s)")
-        }
-        CoordinationPayload::ShieldFacingRestored { label } => {
-            format!("{label} restored")
-        }
-        CoordinationPayload::TargetDesignation { label, .. } => {
-            format!("Designating target: {label}")
-        }
-        CoordinationPayload::ArcBearingRequest { label, family, .. } => {
-            // Family-aware (issue #767): name the weapon family that needs the
-            // bearing. This is server-side AI-to-AI viewscreen flavour text
-            // (there is no host-side string table); the player-facing popup
-            // label is built family-aware in coordination-popup.js, following
-            // that file's existing inline-English chatter pattern.
-            let weapons = match family {
-                crate::messages::WeaponFamily::Phasers => "phasers",
-                crate::messages::WeaponFamily::Blasters => "blasters",
-                crate::messages::WeaponFamily::Torpedoes => "torpedoes",
-            };
-            format!("Come about, bring {weapons} to bear on {label}")
-        }
-        CoordinationPayload::ArcBearingWithdraw { family } => {
-            // Issue #932: the standing request above this one is being pulled
-            // because its family went unusable, not because anyone changed
-            // their mind about the bearing.
-            let weapons = match family {
-                crate::messages::WeaponFamily::Phasers => "phasers",
-                crate::messages::WeaponFamily::Blasters => "blasters",
-                crate::messages::WeaponFamily::Torpedoes => "torpedoes",
-            };
-            format!("Belay that — {weapons} no longer able to bear")
-        }
-        CoordinationPayload::PowerBrownout {
-            label,
-            allocated_level,
-            ..
-        } => {
-            format!("{label} brownout (level {allocated_level})")
-        }
-        CoordinationPayload::NavigateTo { label, .. } => {
-            // The generation is an internal handle, not something a bridge
-            // officer would say out loud; the label is the human-facing part.
-            format!("Navigation: steer toward {label}")
-        }
-        CoordinationPayload::RepairRequest {
-            station_label,
-            tier,
-            ..
-        } => {
-            format!("Repair requested for {station_label} ({tier:?})")
-        }
-        CoordinationPayload::ThreatBearing {
-            bearing_rad, label, ..
-        } => {
-            let bearing_deg = (bearing_rad.to_degrees() + 360.0) % 360.0;
-            format!("Sensors: threat bearing {bearing_deg:.0}° - {label}")
-        }
-        CoordinationPayload::IntentAdvisory { kind, subject, .. } => {
-            // Server-side viewscreen flavour text only, like the arc-bearing
-            // arm above: the player-facing sentence is built in
-            // `gui/coordination-popup.js`. The generation is an ordering
-            // handle, not something a bridge officer says out loud.
-            match subject {
-                Some(s) => format!("{kind:?}: {s}"),
-                None => format!("{kind:?}"),
-            }
-        }
-    }
-}
-
 /// Strip exact damage numbers from an outbound `CoordinationPopup` payload that
 /// `viewer` is not entitled to (issue #737).
 ///
@@ -327,7 +239,7 @@ pub fn process_coordination_lag(
                     continue;
                 }
                 let label = if msg.sender_label.is_empty() {
-                    "AI".to_string()
+                    coordination::CHATTER_SENDER_AI.to_string()
                 } else {
                     msg.sender_label.clone()
                 };
@@ -515,18 +427,23 @@ pub fn process_coordination_lag(
                         }
                     }
                     // AI→AI: emit viewscreen chatter for the LocalShip only.
+                    // The typed payload crosses to the client, which turns it
+                    // into words through the same `gui/coordination-popup.js`
+                    // normaliser the phone popup uses (issue #975) — no sentence
+                    // is composed here. `from_label` is a `chatter.sender.*`
+                    // string id (or a player name) resolved on the client;
+                    // `to_label` is the raw target key, shown as-is so the
+                    // viewscreen and the popup agree.
                     if is_local {
                         let from_label = if msg.sender_label.is_empty() {
-                            "AI".to_string()
+                            coordination::CHATTER_SENDER_AI.to_string()
                         } else {
                             msg.sender_label.clone()
                         };
-                        let to_label = msg.target.0.clone();
-                        let text = format_coordination_chatter(&msg.payload);
                         chatter_writer.write(AiChatterEvent {
                             from_label,
-                            to_label,
-                            text,
+                            to_label: msg.target.0.clone(),
+                            payload: msg.payload.clone(),
                         });
                     }
                 }
@@ -560,7 +477,7 @@ pub fn process_coordination_lag(
                     }
 
                     let label = if msg.sender_label.is_empty() {
-                        "AI".to_string()
+                        coordination::CHATTER_SENDER_AI.to_string()
                     } else {
                         msg.sender_label
                     };

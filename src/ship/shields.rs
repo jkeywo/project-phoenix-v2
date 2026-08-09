@@ -451,7 +451,7 @@ pub fn emit_shields_coordination(
                         sender_origin,
                         target: crate::system_registry::helm_station_key(),
                         payload,
-                        sender_label: "Shields".to_string(),
+                        sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                     });
                 }
             } else {
@@ -472,7 +472,7 @@ pub fn emit_shields_coordination(
                         sender_origin,
                         target: crate::system_registry::helm_station_key(),
                         payload,
-                        sender_label: "Shields".to_string(),
+                        sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                     });
                 }
 

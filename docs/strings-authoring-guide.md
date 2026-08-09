@@ -145,13 +145,15 @@ Rule 11 is only as real as the scan behind it, so this is the honest inventory.
 Assume anything not on the *checked* list will ship untranslated and nothing
 will tell you.
 
-**Checked** — three scans over `gui/**`, `client.html` and `server.html`:
+**Checked** — three scans over `gui/**`, `client.html` and `server.html`, plus
+one over an allowlist of wire-visible `src/` modules:
 
 | Shape | Example | Rule |
 | --- | --- | --- |
 | `.textContent =` — including ternaries, `\|\|` fallbacks and template literals | `el.textContent = s.title \|\| 'Unknown Scenario'` | `scripts/strings-literals.mjs` |
 | a text node in markup, whether in an `.html` file or a component's template literal | `<span class="bar-label">Station</span>` | `scripts/strings-markup.mjs` |
 | a text-bearing attribute | `<ph-station-damage label="Core">` | `scripts/strings-markup.mjs` |
+| prose composed in Rust in a wire-visible module (production region only) | `format!("Designating target: {label}")` | `scripts/strings-rust.mjs` |
 
 The attribute allowlist is `alt`, `aria-label`, `data-screen-label`, `label`,
 `placeholder`, `title`. It is an **allowlist by design**: a denylist would
@@ -178,22 +180,29 @@ The gate reports the tag itself; write `${t('id')}` in the template.
   spacing, because that is the only signal English markup actually gives:
   `title="Close"` is a tooltip, `title="close"` is a DOM hook. Capitalise
   display text and the gate sees it.
-- **Text composed in Rust.** Repair-request comms, game-over reasons, AI sender
-  labels and the HUD condition token are `format!`-ed server-side and cross the
-  wire as English, not as ids. Nothing scans `src/`. **Issue #975** replaces
-  those payloads with id + params; a `TODO(#975)` sits beside the client rules
-  in `scripts/check-strings.mjs`.
+- **Text composed in Rust — mostly closed now (issue #975).** The coordination
+  chatter/popup payloads and the HUD condition token no longer compose English
+  server-side: Rust emits string ids (and typed payloads + params), the client
+  resolves them, and `scripts/strings-rust.mjs` (wired in as check-strings
+  section 5) now scans an allowlist of wire-visible `src/` modules —
+  `src/ship/coordination_systems.rs` today — and fails on prose composed there.
+  It is narrow on purpose: a blanket `format!` scan of `src/` would drown in log
+  lines and machine tokens. **Still open**, and *not* on that allowlist: the
+  game-over reason strings (`ServerMessage::GameOver { reason }`, and the
+  `"Ship Destroyed"` override in `viewscreen_border::compute_hud_state`), which
+  are composed at several weapon death sites and cross the wire as English. That
+  is a separate surface #975 does not own.
 - **English composed in JS and assigned to a DOM property.** The scanned shape
   is a literal sitting lexically on the right-hand side — `el.textContent =
   'Standing by'`. A string built anywhere else and assigned through a variable
   is invisible: `el.textContent = norm.title`, where `norm.title` was
-  concatenated in a helper, matches no rule in either scanner. This is live and
-  large today — `gui/coordination-popup.js` composes about two dozen
-  player-visible strings (`'Frequency Hint'`, `'Tune to: '`, `'Sensors
-  designates: '`, `'Tactical: come about, bring '`, the `INTENT_TITLES` map) and
-  `client.html`'s `showCoordinationPopup` writes them straight to `.textContent`.
-  It is the client half of the same wire payload **issue #975** is restructuring
-  server-side, and is fixed there, not by widening this scan.
+  concatenated in a helper, matches no rule in either scanner. `gui/coordination-popup.js`
+  used to be the live example — about two dozen composed strings — but as of
+  #975 it resolves every sentence through `t('coordination.…', params)`, so the
+  words live only in `strings.csv`; check-strings validates each of those ids
+  has a row. The scanner hole itself remains, so a *future* helper that
+  concatenates English into `norm.title` would still slip through — prefer
+  `t(id)` at the composition site.
 - **Any DOM property or attribute other than `textContent` set from JS**
   (`el.title = 'Close'`, `el.setAttribute('placeholder', 'Your name')`), and
   `.innerHTML` built by concatenation rather than by a template literal.
@@ -230,10 +239,16 @@ Test assertions resolve through the table too, so they survive copy edits:
 
 ## Known gaps
 
-A few strings are still composed in Rust and reach the screen as plain
-English (repair-request comms text, game-over reasons, AI sender labels, the
-HUD condition token). They need structured id+params payloads rather than a
-CSV row — that is **issue #975**, which also owns the client half in
-`gui/coordination-popup.js`; see the wire-boundary notes in `gui/strings.js`.
-Nothing scans `src/` for them, so they will not turn CI red; see the inventory
-above.
+Issue #975 closed most of the "composed in Rust" class: the coordination
+chatter/popup payloads (AI sender labels, the sentence templates) and the HUD
+condition token are now string ids + typed payloads, resolved on the client
+through `gui/coordination-popup.js` and `localiseTree`, and `scripts/strings-rust.mjs`
+keeps `src/ship/coordination_systems.rs` from regressing (check-strings section
+5). What remains is the **game-over reason** surface — `ServerMessage::GameOver
+{ reason }` and the `"Ship Destroyed"` override in `viewscreen_border` — which
+is composed at several weapon death sites and still crosses the wire as English.
+That is *not* on the `WIRE_VISIBLE_RUST` allowlist (it would demand fixing the
+death-site reasons too), so it will not turn CI red; it wants its own issue. The
+dynamic label *values* a payload carries (a shield facing, a power-group name, a
+`"waypoint (x, z)"`) are also still English composed in Rust — they ride as
+`{label}` params, a separate surface from the sentence templates #975 owns.

@@ -46,6 +46,7 @@ import { rowLineNumbers } from './strings-csv.mjs';
 import { untranslatedTextContent } from './strings-literals.mjs';
 import { lineOf, untranslatedMarkup } from './strings-markup.mjs';
 import { isLocalisable } from './strings-rules.mjs';
+import { proseLiterals } from './strings-rust.mjs';
 import { resolveThroughIncludes } from './toml-includes.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -324,12 +325,7 @@ const DEV_FACING = new Map([
   ]],
 ]);
 
-// TODO(#975): English composed in Rust (`format!`) and sent over the wire as
-// prose — repair-request comms, game-over reasons, AI sender labels, the HUD
-// condition token — is scanned by nothing here, because nothing here reads
-// `src/`. Issue #975 replaces those payloads with id + params; when it lands,
-// add the `src/` rule beside the client ones above and strike the matching
-// bullet from docs/strings-authoring-guide.md.
+// The `src/` half of the same rule lives in section 5 below (issue #975).
 
 // Files whose English is not worth a lookup. Kept as a list of exact paths, not
 // a pattern, so adding one is a visible decision in the diff.
@@ -388,6 +384,42 @@ for (const file of codeFiles) {
       ? `hardcoded ${found.attr}="${shown}"`
       : `hardcoded markup text "${shown}"`;
     warnings.push(`${where}: ${what} — not localised`);
+  }
+}
+
+// ── 5. English composed in Rust on a wire-visible path (issue #975) ─────────
+
+// AGENTS.md rule 11 forbids hardcoded player-visible English; until #975 nothing
+// here read `src/`, so a `format!`/`.to_string()` that built display text and
+// crossed a host channel shipped as English with this gate green. The rule that
+// catches it lives in scripts/strings-rust.mjs and is deliberately NARROW: it
+// runs over a short allowlist of modules known to compose wire-visible text —
+// not all of `src/`, which would be a false-positive mine of log lines and
+// machine tokens — and within each file reads only the production region and
+// flags only prose (see that file for the exact signal). An ERROR, not a
+// warning: these modules are fully migrated, so any prose here is a regression.
+//
+// Scope note: `src/server/viewscreen_border.rs` also feeds the hud channel and
+// #975 fixed its `condition` token, but it is NOT on this list because its
+// `game_over_message` still composes an English override ("Ship Destroyed") —
+// part of the separate game-over-reason surface #975 does not own. Adding it
+// here would demand fixing that too; it stays a documented known gap.
+const WIRE_VISIBLE_RUST = ['src/ship/coordination_systems.rs'];
+
+for (const relPath of WIRE_VISIBLE_RUST) {
+  let src;
+  try {
+    src = await readFile(path.join(root, ...relPath.split('/')), 'utf8');
+  } catch {
+    errors.push(`${relPath}: listed in WIRE_VISIBLE_RUST but could not be read`);
+    continue;
+  }
+  for (const { line, text } of proseLiterals(src)) {
+    errors.push(
+      `${relPath}:${line}: player-visible English composed in Rust: "${text}" — ` +
+      'emit a string id (and params) the client resolves through strings.csv, ' +
+      'not a composed sentence (AGENTS.md rule 11)',
+    );
   }
 }
 

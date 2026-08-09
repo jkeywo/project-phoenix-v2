@@ -910,40 +910,45 @@ mod tests {
     // JS-side compatibility), which the table-driven harness above does not
     // inherently cover.
 
-    /// `encode_chatter` wire shape pin (issue #818): the `"chatter"` host
-    /// channel's JSON must expose exactly `from_label` / `to_label` / `text` —
-    /// `__updateChatter` in `server.html` reads these keys.
+    /// `encode_chatter` wire shape pin (issues #818, #975): the `"chatter"`
+    /// host channel's JSON must expose exactly `from_label` / `to_label` and the
+    /// TYPED `payload` — `__updateChatter` in `server.html` reads these keys and
+    /// renders the payload through the shared coordination-popup normaliser. The
+    /// host no longer receives a pre-composed sentence.
     #[test]
     fn encode_chatter_wire_shape_matches_js_handler() {
         let ev = crate::console_bridge::AiChatterEvent {
-            from_label: "Shields".into(),
-            to_label: "Helm".into(),
-            text: "Fore shield offline (12s)".into(),
+            from_label: "chatter.sender.sensors".into(),
+            to_label: "tactical".into(),
+            payload: crate::messages::CoordinationPayload::FrequencyHint { frequency: 0.5 },
         };
         let encoded = encode_chatter(&ev).unwrap();
         assert_eq!(
             encoded,
-            r#"{"from_label":"Shields","to_label":"Helm","text":"Fore shield offline (12s)"}"#,
-            "chatter wire shape must match what __updateChatter parses"
+            r#"{"from_label":"chatter.sender.sensors","to_label":"tactical","payload":{"type":"FrequencyHint","data":{"frequency":0.5}}}"#,
+            "chatter wire shape must match what __updateChatter parses: from_label / to_label / typed payload"
         );
     }
 
-    /// `encode_chatter` must JSON-escape quotes/backslashes in display text —
-    /// the pre-#818 hand-rolled `format!` encoder did this by hand; serde now
-    /// owns it. Round-trips through `serde_json::Value` to prove the output
-    /// is valid JSON with the original strings intact.
+    /// `encode_chatter` must JSON-escape quotes/backslashes in the labels and in
+    /// any text carried inside the payload — the pre-#818 hand-rolled `format!`
+    /// encoder did this by hand; serde now owns it. Round-trips through
+    /// `serde_json::Value` to prove the output is valid JSON with the original
+    /// strings intact.
     #[test]
     fn encode_chatter_escapes_special_characters() {
         let ev = crate::console_bridge::AiChatterEvent {
             from_label: r#"AI "Sensors""#.into(),
             to_label: r"helm\aux".into(),
-            text: "line1\nline2".into(),
+            payload: crate::messages::CoordinationPayload::Advisory {
+                message: "line1\nline2".into(),
+            },
         };
         let encoded = encode_chatter(&ev).unwrap();
         let v: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
         assert_eq!(v["from_label"], r#"AI "Sensors""#);
         assert_eq!(v["to_label"], r"helm\aux");
-        assert_eq!(v["text"], "line1\nline2");
+        assert_eq!(v["payload"]["data"]["message"], "line1\nline2");
     }
 
     #[test]

@@ -1459,7 +1459,7 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
                 sender_origin,
                 target: crate::system_registry::tactical_station_key(),
                 payload: crate::messages::CoordinationPayload::FrequencyHint { frequency },
-                sender_label: "Sensors".to_string(),
+                sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
             });
         }
     }

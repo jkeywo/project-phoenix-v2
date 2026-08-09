@@ -769,7 +769,8 @@ pub fn tick_power_brownout_advisory(
                                 label: power_group_label(&group_id.0).to_string(),
                                 allocated_level: level,
                             },
-                            sender_label: "Power".into(),
+                            sender_label: crate::ship::coordination::CHATTER_SENDER_POWER
+                                .to_string(),
                         });
                     }
                 }

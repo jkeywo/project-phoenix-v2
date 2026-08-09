@@ -4,6 +4,21 @@ use crate::messages::{StationId, SystemId};
 use crate::ship::control_source::ControlSourceResolver;
 use crate::ship::control_source::{ControlSource, ControlTickPolicy};
 
+// ── Coordination sender-label ids (issue #975) ────────────────────────────────
+//
+// The sender label rides the wire as one of these string ids, never as English
+// prose. `localiseTree` resolves it on the client, so the host viewscreen
+// chatter and the phone popup render the same origin name from the same CSV row
+// (`assets/strings/strings.csv`). An emitter stamps the id for the system it
+// speaks for; nothing downstream composes the word. Rule 11: no player-visible
+// English in Rust.
+pub const CHATTER_SENDER_AI: &str = "chatter.sender.ai";
+pub const CHATTER_SENDER_SENSORS: &str = "chatter.sender.sensors";
+pub const CHATTER_SENDER_WEAPONS: &str = "chatter.sender.weapons";
+pub const CHATTER_SENDER_NAVIGATION: &str = "chatter.sender.navigation";
+pub const CHATTER_SENDER_POWER: &str = "chatter.sender.power";
+pub const CHATTER_SENDER_SHIELDS: &str = "chatter.sender.shields";
+
 /// What to do with a delivered coordination message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliverAction {

@@ -190,12 +190,12 @@ pub fn tick_intent_narration(
             let Some(station_id) = seat_station(config, seat) else {
                 continue;
             };
-            let Some(station) = config.station(&station_id) else {
+            if config.station(&station_id).is_none() {
                 // The hull does not crew this seat at all (an NPC-shaped hull,
                 // or a two-station courier). Nothing to narrate to and nobody
                 // to narrate for.
                 continue;
-            };
+            }
 
             let next = match seat {
                 NarratingSeat::Tactical => IntentSnapshot {
@@ -266,7 +266,9 @@ pub fn tick_intent_narration(
                     subject: change.subject,
                     generation,
                 },
-                sender_label: station.name.clone(),
+                // Emit the station's derived display-name id (issue #975), not
+                // the English `name` — `localiseTree` resolves it on the client.
+                sender_label: format!("station.{}.name", station_id.0),
             });
         }
     }

@@ -23,6 +23,11 @@
 //! views, how long to settle, what to do with the pixels). That stays in each
 //! `bin`, because the two tools capture for entirely different reasons.
 
+// Dev-only offscreen-render core for the capture tools, never part of the shipped
+// simulation: platform-varying std transcendentals are fine here (issue #908,
+// simmath.rs; same opt-out as src/viewer/camera.rs).
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -164,14 +169,19 @@ pub struct ImageCopyPlugin;
 impl Plugin for ImageCopyPlugin {
     fn build(&self, app: &mut App) {
         let (s, r) = crossbeam_channel::unbounded();
-        let render_app = app.insert_resource(MainWorldReceiver(r)).sub_app_mut(RenderApp);
+        let render_app = app
+            .insert_resource(MainWorldReceiver(r))
+            .sub_app_mut(RenderApp);
         let mut graph = render_app.world_mut().resource_mut::<RenderGraph>();
         graph.add_node(ImageCopyLabel, ImageCopyDriver);
         graph.add_node_edge(bevy::render::graph::CameraDriverLabel, ImageCopyLabel);
         render_app
             .insert_resource(RenderWorldSender(s))
             .add_systems(ExtractSchedule, image_copy_extract)
-            .add_systems(Render, receive_image_from_buffer.after(RenderSystems::Render));
+            .add_systems(
+                Render,
+                receive_image_from_buffer.after(RenderSystems::Render),
+            );
     }
 }
 

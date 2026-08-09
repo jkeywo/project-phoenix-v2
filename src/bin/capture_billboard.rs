@@ -118,7 +118,9 @@ fn main() {
                 .disable::<WinitPlugin>(),
         )
         .add_plugins(ImageCopyPlugin)
-        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(1.0 / 60.0)))
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
+            1.0 / 60.0,
+        )))
         .insert_resource(CaptureProgress::default())
         .insert_resource(TargetSize(res))
         .add_systems(Startup, setup)
@@ -151,7 +153,10 @@ fn setup(
 
     // The model, under a parent carrying the rig's base transform, so the yaw
     // ring lines up with the game's forward (its local -Z).
-    let rel = config.model.strip_prefix("assets/").unwrap_or(&config.model);
+    let rel = config
+        .model
+        .strip_prefix("assets/")
+        .unwrap_or(&config.model);
     let scene = asset_server.load(format!("{rel}#Scene0"));
     commands
         .spawn((config.base, Visibility::default()))
@@ -246,7 +251,11 @@ fn drive(
         progress.started = true;
         eprintln!(
             "[capture-billboard] {}: world {:.2}×{:.2}, {} views @ {}px",
-            config.model, progress.world_size[0], progress.world_size[1], config.views, config.resolution
+            config.model,
+            progress.world_size[0],
+            progress.world_size[1],
+            config.views,
+            config.resolution
         );
         let (center, dist) = frame(&progress);
         position_camera(&config, &mut cameras, 0, center, dist);
@@ -267,7 +276,10 @@ fn drive(
     // actually has a silhouette before accepting it; a genuinely empty view
     // still advances at the cap rather than hanging.
     let tile = unpad_rows(&bytes, config.resolution, config.resolution);
-    let opaque = tile.chunks(4).filter(|p| p.get(3).is_some_and(|&a| a > 8)).count();
+    let opaque = tile
+        .chunks(4)
+        .filter(|p| p.get(3).is_some_and(|&a| a > 8))
+        .count();
     if opaque < MIN_OPAQUE_PX && progress.settle < MAX_SETTLE_FRAMES {
         return;
     }

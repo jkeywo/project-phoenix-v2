@@ -35,6 +35,14 @@
 //! identical. A missing `_lodN` sidecar is a real content gap the mass-apply
 //! step should close; see the report.
 
+// Dev-only batch tuning CLI, run offline — never the shipped sim (issue #908; the
+// tested pure core is src/lod_tune.rs). Opt out of the transcendental ban, and of
+// two style lints that don't earn a refactor in a one-shot tool: Bevy systems
+// carry many params, and this tool's state machine uses early `return`s.
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_return)]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -109,7 +117,7 @@ fn parse_config() -> TuneConfig {
         .unwrap_or((1920, 1080));
     let out_dir = str_flag("--out")
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir());
+        .unwrap_or_else(std::env::temp_dir);
 
     // The ladder is authored in the rig sidecar (issue #914), at the requested
     // variant. Its `[base]` also orients the yaw ring.
@@ -174,7 +182,9 @@ fn main() {
                 .disable::<WinitPlugin>(),
         )
         .add_plugins(ImageCopyPlugin)
-        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(1.0 / 60.0)))
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
+            1.0 / 60.0,
+        )))
         .insert_resource(Tune::default())
         .add_systems(Startup, setup)
         // Billboard facing/tile is the game's own system, reused verbatim — the
@@ -210,7 +220,8 @@ fn setup(
     config: Res<TuneConfig>,
     mut tune: ResMut<Tune>,
 ) {
-    let (target, copier) = create_render_target(&mut images, &render_device, config.width, config.height);
+    let (target, copier) =
+        create_render_target(&mut images, &render_device, config.width, config.height);
     commands.spawn(copier);
 
     // Every GLB level of the ladder is co-oriented on ONE base rig — the near
@@ -276,7 +287,10 @@ fn setup(
 fn resolve_near_base(config: &TuneConfig) -> Transform {
     for level in &config.levels {
         if let Some(model_path) = level.model.as_deref() {
-            let variant = level.variant.clone().unwrap_or_else(|| config.variant.clone());
+            let variant = level
+                .variant
+                .clone()
+                .unwrap_or_else(|| config.variant.clone());
             return std::fs::read_to_string(sidecar_path(model_path, Some(&variant)))
                 .ok()
                 .and_then(|t| ModelRig::from_toml(&t).ok())
@@ -318,12 +332,24 @@ fn spawn_level(
         // Uniform parent scale; the quad's world w/h ride the child, as in the
         // billboard branch of `update_mesh_lod`.
         let [w, h] = level.scale.map(|s| [s[0], s[1]]).unwrap_or([1.0, 1.0]);
-        let views = level.capture.as_ref().and_then(|c| c.yaw_views).unwrap_or(1);
+        let views = level
+            .capture
+            .as_ref()
+            .and_then(|c| c.yaw_views)
+            .unwrap_or(1);
         let entity = commands
             .spawn((Transform::default(), Visibility::Hidden))
             .id();
-        let child =
-            spawn_billboard_child(commands, meshes, materials, asset_server, atlas, w, h, views);
+        let child = spawn_billboard_child(
+            commands,
+            meshes,
+            materials,
+            asset_server,
+            atlas,
+            w,
+            h,
+            views,
+        );
         commands.entity(entity).add_child(child);
         (entity, LevelKind::Billboard)
     } else if let Some(shape) = level.shape {
@@ -341,9 +367,10 @@ fn spawn_level(
                 let s = level.size.unwrap_or([radius * 2.0; 3]);
                 meshes.add(Cuboid::new(s[0], s[1], s[2]))
             }
-            project_phoenix::entity_config::MeshShape::Torus => {
-                meshes.add(Torus::new(radius, radius + level.minor_radius.unwrap_or(0.3)))
-            }
+            project_phoenix::entity_config::MeshShape::Torus => meshes.add(Torus::new(
+                radius,
+                radius + level.minor_radius.unwrap_or(0.3),
+            )),
         };
         let mat = materials.add(StandardMaterial {
             base_color: colour,
@@ -453,7 +480,8 @@ fn drive(
             let (center, radius) = match config.framing {
                 Some(f) => f,
                 None => {
-                    let Some((center, radius, _size)) = measure_world_bounds(bounds_q.iter()) else {
+                    let Some((center, radius, _size)) = measure_world_bounds(bounds_q.iter())
+                    else {
                         return; // geometry not measurable yet — wait
                     };
                     (center, radius)
@@ -704,7 +732,10 @@ fn finish_sweep(tune: &mut Tune) {
             .zip(ys.iter())
             .map(|(d, v)| format!("{:.1}:{:.4}", d, v))
             .collect();
-        eprintln!("[tune-lods] pair {p} diff-vs-distance  {}", samples.join("  "));
+        eprintln!(
+            "[tune-lods] pair {p} diff-vs-distance  {}",
+            samples.join("  ")
+        );
         match find_knee(&xs, ys) {
             Some(idx) => {
                 tune.knee_dist[p] = tune.distances[idx];
@@ -824,13 +855,34 @@ fn plot_curve(distances: &[f32], diffs: &[f64], knee: f32) -> image::RgbaImage {
 
     // Axes.
     let axis = image::Rgba([90, 96, 104, 255]);
-    draw_line(&mut img, PAD as i64, (H - PAD) as i64, (W - PAD) as i64, (H - PAD) as i64, axis);
-    draw_line(&mut img, PAD as i64, PAD as i64, PAD as i64, (H - PAD) as i64, axis);
+    draw_line(
+        &mut img,
+        PAD as i64,
+        (H - PAD) as i64,
+        (W - PAD) as i64,
+        (H - PAD) as i64,
+        axis,
+    );
+    draw_line(
+        &mut img,
+        PAD as i64,
+        PAD as i64,
+        PAD as i64,
+        (H - PAD) as i64,
+        axis,
+    );
 
     // Knee marker.
     if knee > 0.0 {
         let kx = x_of(knee);
-        draw_line(&mut img, kx, PAD as i64, kx, (H - PAD) as i64, image::Rgba([230, 170, 60, 255]));
+        draw_line(
+            &mut img,
+            kx,
+            PAD as i64,
+            kx,
+            (H - PAD) as i64,
+            image::Rgba([230, 170, 60, 255]),
+        );
     }
 
     // The curve.
@@ -850,7 +902,12 @@ fn plot_curve(distances: &[f32], diffs: &[f64], knee: f32) -> image::RgbaImage {
         let (px, py) = (x_of(distances[i]), y_of(diffs[i]));
         for dy in -2..=2 {
             for dx in -2..=2 {
-                put(&mut img, px + dx, py + dy, image::Rgba([240, 240, 240, 255]));
+                put(
+                    &mut img,
+                    px + dx,
+                    py + dy,
+                    image::Rgba([240, 240, 240, 255]),
+                );
             }
         }
     }

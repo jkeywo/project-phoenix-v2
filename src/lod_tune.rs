@@ -20,6 +20,11 @@
 //! Both are deliberately small and swappable: the metric is one function and the
 //! knee rule is another, so a better one drops in without touching the render
 //! plumbing.
+//!
+//! Offline tuning math, run at build time by the `tune-lods` bin, never in the
+//! shipped simulation — so platform-varying std transcendentals are fine here
+//! (issue #908, simmath.rs; same opt-out as src/viewer/camera.rs).
+#![allow(clippy::disallowed_methods)]
 
 /// Alpha-aware RMS difference between two RGBA8 images of the same dimensions,
 /// normalised to `0.0..=1.0`.
@@ -39,7 +44,7 @@
 /// unmeasurable pair as "no difference", which for tuning means "safe to
 /// switch").
 pub fn image_diff_rms(a: &[u8], b: &[u8]) -> f64 {
-    if a.is_empty() || a.len() != b.len() || a.len() % 4 != 0 {
+    if a.is_empty() || a.len() != b.len() || !a.len().is_multiple_of(4) {
         return 0.0;
     }
     let mut sum_sq = 0.0f64;
@@ -145,7 +150,10 @@ mod tests {
         let a = vec![255u8, 255, 255, 255];
         let b = vec![0u8, 0, 0, 0];
         let d = image_diff_rms(&a, &b);
-        assert!(d > 0.99, "a full silhouette mismatch should score ~1.0, got {d}");
+        assert!(
+            d > 0.99,
+            "a full silhouette mismatch should score ~1.0, got {d}"
+        );
     }
 
     #[test]

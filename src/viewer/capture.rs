@@ -15,6 +15,7 @@
 //!   2. **WaitRender** one frame so that camera renders the image target.
 //!   3. **WaitShot** — a [`Screenshot`] of the target; its observer stores the
 //!      tile when the readback lands.
+//!
 //! After the last view the tiles are packed left→right into one RGBA atlas and
 //! parked in [`CaptureState::result`], which the JS panel polls, PNG-encodes on
 //! a canvas, and POSTs to `dev-viewer.mjs` (`/api/lod/capture`).
@@ -24,13 +25,18 @@
 //! game's projection, and the scene's own lights light the subject, so a tile is
 //! the ship as the game would show it, seen from that heading.
 
+// Dev-only capture tool, never part of the shipped simulation: platform-varying
+// std transcendentals are fine here (issue #908, simmath.rs; same opt-out as
+// src/viewer/camera.rs).
+#![allow(clippy::disallowed_methods)]
+
 use std::cell::RefCell;
 use std::f32::consts::TAU;
 
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, RenderTarget};
 use bevy::image::Image;
+use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 
@@ -131,9 +137,8 @@ pub(crate) fn start_capture(
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
-    image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING
-        | TextureUsages::COPY_SRC
-        | TextureUsages::RENDER_ATTACHMENT;
+    image.texture_descriptor.usage =
+        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC | TextureUsages::RENDER_ATTACHMENT;
     let image = images.add(image);
 
     // Framing: subject sits at the origin (see `frame_subject_once`). Distance
@@ -218,16 +223,18 @@ pub(crate) fn drive_capture(
                 return;
             }
             job.captured = false;
-            commands.spawn(Screenshot::image(job.image.clone())).observe(
-                |trigger: On<ScreenshotCaptured>, mut state: ResMut<CaptureState>| {
-                    if let Some(job) = state.job.as_mut() {
-                        if let Some(data) = trigger.image.data.clone() {
-                            job.tiles.push(data);
+            commands
+                .spawn(Screenshot::image(job.image.clone()))
+                .observe(
+                    |trigger: On<ScreenshotCaptured>, mut state: ResMut<CaptureState>| {
+                        if let Some(job) = state.job.as_mut() {
+                            if let Some(data) = trigger.image.data.clone() {
+                                job.tiles.push(data);
+                            }
+                            job.captured = true;
                         }
-                        job.captured = true;
-                    }
-                },
-            );
+                    },
+                );
             job.step = Step::WaitShot;
         }
         Step::WaitShot => {
@@ -262,7 +269,7 @@ fn finish_capture(commands: &mut Commands, state: &mut CaptureState) {
         if tile.len() < (row * res as usize) {
             continue; // a tile that didn't read back cleanly — leave it blank
         }
-        let x_off = t as usize * row;
+        let x_off = t * row;
         for y in 0..res as usize {
             let src = y * row;
             let dst = y * atlas_row + x_off;
@@ -318,21 +325,25 @@ pub(crate) fn publish_capture(mut state: ResMut<CaptureState>) {
 }
 
 /// True once a baked atlas is waiting to be read.
+#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
 pub fn capture_ready() -> bool {
     CAPTURE_META.with(|c| !c.borrow().is_empty())
 }
 
 /// The finished atlas metadata as JSON.
+#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
 pub fn capture_meta() -> String {
     CAPTURE_META.with(|c| c.borrow().clone())
 }
 
 /// Take the finished atlas RGBA bytes (row-major, `width`×`height`×4).
+#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
 pub fn capture_take_rgba() -> Vec<u8> {
     CAPTURE_RGBA.with(|c| c.borrow_mut().take().unwrap_or_default())
 }
 
 /// Clear the parked result after the panel has consumed it.
+#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
 pub fn capture_clear() {
     CAPTURE_RGBA.with(|c| *c.borrow_mut() = None);
     CAPTURE_META.with(|c| c.borrow_mut().clear());

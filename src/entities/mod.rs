@@ -5,13 +5,13 @@ pub mod ai_declaration_manifest;
 /// Which fine-system AI hosts can evaluate `flag()`/`counter()` guards, and the
 /// load-time rejection for the ones that cannot (issue #891 stage 1).
 pub mod ai_flag_hosts;
-pub mod billboard;
 /// Behavioural pins for the AUTHORED fine-system AI declarations: the fleet
 /// baseline the bespoke doctrines are measured against, the guard truth tables,
 /// and the selector ordering invariants (issue #885b stage 5d). Test-only, and
 /// the successor to the deleted `default_ai_policy_pins`.
 #[cfg(test)]
 pub(crate) mod authored_ai_pins;
+pub mod billboard;
 pub mod celestial_visual;
 pub mod config;
 pub mod config_cache;

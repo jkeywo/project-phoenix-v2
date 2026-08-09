@@ -4554,10 +4554,7 @@ fn update_mesh_lod(
             // The width/height instead ride the child's own scale (see
             // `spawn_billboard_child`), leaving the parent uniform.
             transform.scale = Vec3::splat(lods.base.scale);
-            let [w, h] = level
-                .scale
-                .map(|s| [s[0], s[1]])
-                .unwrap_or([1.0, 1.0]);
+            let [w, h] = level.scale.map(|s| [s[0], s[1]]).unwrap_or([1.0, 1.0]);
             let views = level
                 .capture
                 .as_ref()

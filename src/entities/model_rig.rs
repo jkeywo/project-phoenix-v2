@@ -809,7 +809,10 @@ shape = "sphere"
         // (scripts/capture-billboards.mjs). It is a billboard, not a shape, and
         // records how it was baked in `[lod.capture]`.
         let last = rig.lod.last().unwrap();
-        assert_eq!(last.shape, None, "the far level is a billboard, not a shape");
+        assert_eq!(
+            last.shape, None,
+            "the far level is a billboard, not a shape"
+        );
         assert_eq!(
             last.billboard.as_deref(),
             Some("assets/models/asteroid_common_1_lod3.png")

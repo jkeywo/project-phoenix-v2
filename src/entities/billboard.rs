@@ -22,6 +22,11 @@
 //! world width/height live on the child's own scale, so rotating it to face the
 //! camera never shears it.
 
+// Presentation-only: billboards face the camera and pick their yaw tile at render
+// time, never in the deterministic sim, so platform-varying std transcendentals
+// are fine here (issue #908, simmath.rs; same opt-out as src/viewer/camera.rs).
+#![allow(clippy::disallowed_methods)]
+
 use bevy::prelude::*;
 
 use crate::server::renderer::GameCamera;

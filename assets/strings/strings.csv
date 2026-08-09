@@ -318,8 +318,8 @@ world.btf_path_c.comms.path_c_internal.message_2,assets/worlds/btf_path_c.toml �
 world.combat_test.global.title,assets/worlds/combat_test.toml → [global] title,[Combat Test: Defend Starbase Alpha]
 world.combat_test.global.description,assets/worlds/combat_test.toml → [global] description,"[Eight waves of Harrow attackers, launched on a clock and all of them aimed at Starbase Alpha. They will not wait for you.]"
 world.entity.earth.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),earth
-world.entity.gas_giant.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[gas-giant]
-world.entity.ice_moon.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[ice-moon]
+world.entity.gas_giant.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),Gas Giant
+world.entity.ice_moon.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),Ice Moon
 world.combat_test.available_ships.0.label,assets/worlds/combat_test.toml → [available_ships] label,Alliance Destroyer
 world.combat_test.available_ships.1.label,assets/worlds/combat_test.toml → [available_ships] label,Alliance Cruiser
 world.combat_test.available_ships.2.label,assets/worlds/combat_test.toml → [available_ships] label,Alliance Battleship
@@ -357,7 +357,7 @@ world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] mes
 world.default.global.title,assets/worlds/default.toml → [global] title,Starbase Alpha
 world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
 world.entity.luna.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),luna
-world.entity.lava_planet.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[lava-planet]
+world.entity.lava_planet.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),Lava Planet
 world.entity.raider_alpha.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),raider_alpha
 world.default.trigger.action.obj_raider_destroyed.text,assets/worlds/default.toml → [trigger.action] text,[Pirate raider eliminated.]
 world.default.available_ships.0.label,assets/worlds/default.toml → [available_ships] label,Alliance Cruiser
@@ -858,7 +858,7 @@ client.pill_connecting,"Lobby ready-pill while the WebRTC connection is being es
 client.no_station,"Lobby — station detail panel when the player holds no station","[No station assigned]"
 client.connecting_host,"Lobby status line while connecting to the host","[Connecting to host…]"
 client.ready,"Lobby READY button (also cancels a launch countdown)","READY"
-client.ready_confirmed,"Lobby READY button after the player has readied up","[? READY]"
+client.ready_confirmed,"Lobby READY button after the player has readied up","✓ READY"
 client.connecting,"Connection status overlay while connecting","Connecting…"
 client.retry_now,"Connection overlay — button that retries immediately","Retry now"
 client.retry_now_tip,"Tooltip on the retry button","[Retry connection now]"

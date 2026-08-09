@@ -743,7 +743,7 @@ shape = "sphere"
         let bounds: Vec<Option<f32>> = rig.lod.iter().map(|l| l.max_distance).collect();
         assert_eq!(
             bounds,
-            vec![Some(25.0), Some(150.0), Some(300.0), None],
+            vec![Some(15.0), Some(100.0), Some(400.0), None],
             "bands ported from asteroid_common_4's tuned ladder so all four \
              common asteroids share one visual LOD profile"
         );
@@ -752,12 +752,12 @@ shape = "sphere"
         use crate::entity_config::select_lod;
         for (distance, expected) in [
             (0.0, 0),
-            (24.9, 0),
-            (25.0, 1),
-            (149.9, 1),
-            (150.0, 2),
-            (299.9, 2),
-            (300.0, 3),
+            (14.9, 0),
+            (15.0, 1),
+            (99.9, 1),
+            (100.0, 2),
+            (399.9, 2),
+            (400.0, 3),
             (10_000.0, 3),
         ] {
             assert_eq!(
@@ -767,8 +767,8 @@ shape = "sphere"
             );
         }
         // …and hysteresis still holds each band across its boundary.
-        assert_eq!(select_lod(&rig.lod, 27.0, Some(0)), 0);
-        assert_eq!(select_lod(&rig.lod, 23.0, Some(1)), 1);
+        assert_eq!(select_lod(&rig.lod, 17.0, Some(0)), 0);
+        assert_eq!(select_lod(&rig.lod, 13.0, Some(1)), 1);
 
         // Every GLB level names a file that exists, at the entity's variant.
         for level in rig.lod.iter().filter(|l| l.model.is_some()) {
@@ -803,12 +803,15 @@ shape = "sphere"
             assert!(gen.texture_size.is_some());
         }
 
-        // The last level is the shared procedural sphere, inheriting the
-        // entity's radius/colour rather than restating them.
+        // The last level is the shared procedural sphere. The authoring tool
+        // (author-ladders.mjs `sphereFromExtents`) sizes and colours it per
+        // variant from the sidecar's own `[extents]` and averaged hull colour, so
+        // a large rock's stand-in restates a radius of ~4 — its collider
+        // half-width — and the hull grey, rather than leaving them to inherit.
         let last = rig.lod.last().unwrap();
         assert_eq!(last.shape, Some(crate::entity_config::MeshShape::Sphere));
-        assert_eq!(last.radius, None);
-        assert_eq!(last.colour, None);
+        assert_eq!(last.radius, Some(3.9922));
+        assert_eq!(last.colour, Some(vec![0.3626, 0.3418, 0.3161]));
     }
 
     /// The huge size class's ladder (issue #947), which is the same four
@@ -843,12 +846,12 @@ shape = "sphere"
             };
             assert_eq!(
                 bounds(&large),
-                vec![Some(25.0), Some(150.0), Some(300.0), None],
+                vec![Some(15.0), Some(100.0), Some(400.0), None],
                 "the large bands this test is relative to"
             );
             assert_eq!(
                 bounds(&huge),
-                vec![Some(75.0), Some(450.0), Some(900.0), None],
+                vec![Some(45.0), Some(300.0), Some(1200.0), None],
                 "asteroid_common_{n}: the huge bands are large's, x3"
             );
 

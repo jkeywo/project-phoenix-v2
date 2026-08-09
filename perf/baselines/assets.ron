@@ -51,6 +51,31 @@
 // to the byte. A size class that moved the download total would be one that
 // added geometry; this gate staying green is the evidence it did not.
 //
+// Re-recorded for commit b78bf9ff, which rebuilt all 22 shipped models on a
+// 15/100/400 LOD ladder and re-optimised every base to <=8 MB. That rebuild —
+// not any change in how the collector reads the tree — moves four of the five
+// tracked numbers:
+//
+//   .glb files                  52 -> 75
+//   assets.glb.bytes (largest)  17,298,572 (alliance_destroyer) -> 8,319,504 (dynasty_cruiser)
+//   assets.glb.total.bytes      228,463,236 -> 232,630,348
+//   assets.glb.without_lod      9 -> 0
+//   assets.lod.levels           4 -> 4  (unchanged)
+//
+// The single largest model more than halved and every shipped model now carries
+// a ladder (`without_lod` fell to zero), even as the file count and the download
+// total edged up: the rebuild spread the same content across more, smaller
+// levels, and no base now exceeds 8 MB. This re-record is captured locally under
+// the same rule the header already invokes below — every number is `stat` on the
+// committed tree, not a runner timing.
+//
+// The huge asteroid x3 band restore (issue #947: 45/300/1200) committed
+// ALONGSIDE this re-record changes no `.glb` — it rewrites only `max_distance`
+// switch metadata in the four `.huge.toml` sidecars — so this capture is
+// byte-identical whether or not that restore is applied. The "#947 moved no
+// gated number" note above still holds: b78bf9ff moved them, the band restore
+// did not.
+//
 // These are a record, not a target. 228 MB of models is a great deal for a
 // browser game to fetch — considerably worse than the 156 MB the first record
 // already called a great deal — and the point of committing it is that the
@@ -92,7 +117,7 @@
 //
 // ── Recorded from a capture ─────────────────────────────────
 // Written by `phoenix-perf adopt` from a static-inventory capture of scenario "assets".
-// build: release   device: Windows
+// build: release   device: (unrecorded)
 // rev:   (unrecorded)
 //
 // Edit the prose ABOVE this block; re-recording rewrites from here down, and
@@ -104,7 +129,7 @@
         "assets.glb.bytes": (
             unit: bytes,
             statistic: max,
-            expected: 17298572.0,
+            expected: 8319504.0,
             tolerance: (
                 warn: 0.1,
                 fail: 0.5,
@@ -113,7 +138,7 @@
         "assets.glb.total.bytes": (
             unit: bytes,
             statistic: max,
-            expected: 228463236.0,
+            expected: 232630348.0,
             tolerance: (
                 warn: 0.05,
                 fail: 0.25,
@@ -122,7 +147,7 @@
         "assets.glb.without_lod": (
             unit: count,
             statistic: max,
-            expected: 9.0,
+            expected: 0.0,
             tolerance: (
                 warn: 0.25,
                 fail: 1.0,

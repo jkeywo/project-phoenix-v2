@@ -21,15 +21,18 @@
 // rebuilds the files and the manifest from what was authored — the same path a
 // hand-edit through the viewer's LOD panel would take.
 //
-// ── The sphere is per-variant, the decimated levels are shared ───────────────
+// ── The geometry is shared; the sphere and the bands are per-variant ─────────
 //
 // One model can carry several rig sidecars (asteroids: small/large/huge/
 // cosmetic), and generate-lods requires them to AGREE on any generated file. So
 // the near-model reference and both `[lod.generate]` blocks are written
-// identically to every sidecar of the stem. The sphere is the exception: its
-// radius and scale come from each sidecar's own `[extents]`, so a "large" rock
-// gets a large stand-in and a "small" one a small — the one level that is
-// allowed to, and must, differ between variants.
+// identically to every sidecar of the stem. Two things are allowed to — and
+// must — differ between variants: the sphere, whose radius and scale come from
+// each sidecar's own `[extents]` (a "large" rock gets a large stand-in and a
+// "small" one a small); and the switch bands, which a bigger size class pushes
+// proportionally further out (`bandMultiplier`, issue #947) because a LOD swap
+// is an angular threshold and a huge rock reaches that on-screen size that much
+// further away. The shared geometry never moves with either.
 
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { statSync, existsSync } from 'node:fs';
@@ -42,7 +45,7 @@ import { pathToFileURL } from 'node:url';
 import { parse as parseToml } from 'smol-toml';
 import { NodeIO } from '@gltf-transform/core';
 import { getBounds } from '@gltf-transform/core';
-import { replaceLadder, sidecarsForStem } from './viewer-lods.mjs';
+import { replaceLadder, sidecarsForStem, variantOfSidecar } from './viewer-lods.mjs';
 import { averageBaseColour, sharpMean } from './average-texture-colour.mjs';
 import { remeshPath, blenderCandidates, BLENDER_SCRIPT } from './generate-lods.mjs';
 
@@ -100,6 +103,24 @@ export function sphereFromExtents(size) {
     radius: round(width / 2),
     scale: [1, round((sy || width) / width), round((sz || width) / width)],
   };
+}
+
+/**
+ * How far a size variant's switch bands are pushed out, relative to the base
+ * ladder. A LOD switch is really an angular threshold — "swap detail when this
+ * thing gets small on screen" — so a variant authored at N× the scale reaches
+ * that same on-screen size N× further away and must switch N× further out, or a
+ * huge rock drops to its procedural far sphere while still filling a fifth of
+ * the viewscreen (issue #947). Only the `huge` size class scales its bands; the
+ * shared `.glb` geometry and its decimation ratios never move with it. Any
+ * variant not listed here — small, large, cosmetic, the base rig — keeps the
+ * base ladder.
+ */
+export const BAND_MULTIPLIERS = { huge: 3 };
+
+/** The band multiplier for a variant name (`""` is the base rig), 1 if unlisted. */
+export function bandMultiplier(variant) {
+  return BAND_MULTIPLIERS[variant] ?? 1;
 }
 
 /**
@@ -246,8 +267,13 @@ export async function authorLadders(stem, opts) {
     const text = await readFile(rel, 'utf8');
     const doc = parseToml(text);
     const sphere = sphereFromExtents(doc?.extents?.size);
+    // The bands are the one thing that DOES differ per variant besides the
+    // sphere: a bigger size class switches proportionally further out. Derive
+    // them as base × the variant's multiplier so a huge sidecar reads 45/300/
+    // 1200 without any variant hardcoding a distance (issue #947).
+    const mult = bandMultiplier(variantOfSidecar(path.basename(rel), stem));
     const ladder = buildLadder({
-      stem, near, mid, far, colour, sphere,
+      stem, near: near * mult, mid: mid * mult, far: far * mult, colour, sphere,
       lod1Gen: genOf(lod1),
       lod2Gen: genOf(lod2),
     });

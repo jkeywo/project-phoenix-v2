@@ -22,7 +22,20 @@
  * Warnings (fail only under --strict):
  *   - untranslated literals still in the client. These are reported rather
  *     than enforced while the client migration is in progress; flip this to
- *     an error once gui/ is fully migrated.
+ *     an error once gui/ is fully migrated. Three shapes are scanned:
+ *     `.textContent =` assignments, text nodes in markup, and text-bearing
+ *     attributes — the last two both in `.html` files and in the template
+ *     literals a web component builds its shadow DOM from, which rendered
+ *     hardcoded English with this gate green until issue #976.
+ *   - a `data-i18n` in a JS-built template. `applyToDom` runs over `document`
+ *     at boot and never on a shadowRoot, so the tag resolves nothing while
+ *     still exempting its subtree from the scan above.
+ *   - a region of JS the markup scanner could not lex. Reported, never
+ *     swallowed: "I stopped reading" must not look like "I read it and it was
+ *     clean", which is the failure mode #976 was filed about.
+ *
+ * `docs/strings-authoring-guide.md` carries the inventory of what these scans
+ * do and do not see. Keep it in step with any rule change here.
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises';
@@ -31,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { buildTable, parseCsv } from '../gui/strings.js';
 import { rowLineNumbers } from './strings-csv.mjs';
 import { untranslatedTextContent } from './strings-literals.mjs';
+import { lineOf, untranslatedMarkup } from './strings-markup.mjs';
 import { isLocalisable } from './strings-rules.mjs';
 import { resolveThroughIncludes } from './toml-includes.mjs';
 
@@ -118,8 +132,12 @@ const codeFiles = [
 // `t('some.id')` / `t("some.id")` — the trailing [,)] excludes computed ids
 // like t('console.stance.' + stance), which cannot be checked statically.
 const T_CALL = /\bt\(\s*(['"])([A-Za-z0-9_.-]+)\1\s*[,)]/g;
-const DATA_I18N = /data-i18n\s*=\s*"([^"]+)"/g;
-const DATA_I18N_ATTR = /data-i18n-attr\s*=\s*"([^"]+)"/g;
+// Both quote styles, because the markup scan exempts both: `parseAttributes`
+// in strings-markup.mjs reads `data-i18n='…'` and falls silent over the text
+// under it. A double-quote-only id check here would leave a single-quoted typo
+// exempt from BOTH scans — gate green, console rendering ⟨typo.id⟩.
+const DATA_I18N = /data-i18n\s*=\s*(?:"([^"]+)"|'([^']+)')/g;
+const DATA_I18N_ATTR = /data-i18n-attr\s*=\s*(?:"([^"]+)"|'([^']+)')/g;
 
 for (const file of codeFiles) {
   let src;
@@ -129,10 +147,11 @@ for (const file of codeFiles) {
     if (!table.has(m[2])) errors.push(`${rel(file)}: t('${m[2]}') has no CSV row`);
   }
   for (const m of src.matchAll(DATA_I18N)) {
-    if (!table.has(m[1])) errors.push(`${rel(file)}: data-i18n="${m[1]}" has no CSV row`);
+    const id = m[1] ?? m[2];
+    if (!table.has(id)) errors.push(`${rel(file)}: data-i18n="${id}" has no CSV row`);
   }
   for (const m of src.matchAll(DATA_I18N_ATTR)) {
-    for (const pair of m[1].split(',')) {
+    for (const pair of (m[1] ?? m[2]).split(',')) {
       const id = pair.slice(pair.indexOf(':') + 1).trim();
       if (id && !table.has(id)) {
         errors.push(`${rel(file)}: data-i18n-attr id "${id}" has no CSV row`);
@@ -288,19 +307,87 @@ for (const template of [...offeredHulls].sort()) {
 
 // Developer/operator-facing prose that deliberately stays English: crash
 // guidance pointing at DevTools, and the host debug panel. Not player text.
-const DEV_FACING = [
-  'WASM trap (RuntimeError)',
-];
+//
+// Keyed BY FILE, not global. A bare substring list applies to every file in the
+// sweep, so a future console rendering the words "WASM PANIC" to a player would
+// be exempted by an allowance written for the server's crash overlay. An
+// exemption should only reach the surface it was argued for.
+const DEV_FACING = new Map([
+  ['server.html', [
+    'WASM trap (RuntimeError)',
+    // The rest of the same panic overlay: the banner above the trace and the
+    // "open DevTools, then reload" instruction under it. An operator reads this
+    // after the server process has died; a player never sees it, because there
+    // is nothing left rendering a console.
+    'WASM PANIC',
+    'The full stack trace is in the browser DevTools console',
+  ]],
+]);
 
-// The rule itself lives in scripts/strings-literals.mjs so its edge cases
-// (ternaries, fallbacks, template segments, `===` token tests) are unit-tested
-// rather than only exercised by whatever happens to be in the client today.
+// TODO(#975): English composed in Rust (`format!`) and sent over the wire as
+// prose — repair-request comms, game-over reasons, AI sender labels, the HUD
+// condition token — is scanned by nothing here, because nothing here reads
+// `src/`. Issue #975 replaces those payloads with id + params; when it lands,
+// add the `src/` rule beside the client ones above and strike the matching
+// bullet from docs/strings-authoring-guide.md.
+
+// Files whose English is not worth a lookup. Kept as a list of exact paths, not
+// a pattern, so adding one is a visible decision in the diff.
+const UNLOCALISED_FILES = new Set([
+  // A four-line stub whose only job is `location.replace` for stale bookmarks.
+  // Its <title> shows for the duration of one redirect; wiring the string table
+  // into it would cost a fetch to translate a flicker.
+  'gui/lobby-client.html',
+]);
+
+// The rules live in scripts/strings-literals.mjs and scripts/strings-markup.mjs
+// so their edge cases (ternaries, fallbacks, template segments, `===` token
+// tests, machine tokens in attributes) are unit-tested rather than only
+// exercised by whatever happens to be in the client today.
 for (const file of codeFiles) {
   let src;
   try { src = await readFile(file, 'utf8'); } catch { continue; }
+  if (UNLOCALISED_FILES.has(rel(file))) continue;
+
+  const devFacing = DEV_FACING.get(rel(file)) ?? [];
+
   for (const text of untranslatedTextContent(src)) {
-    if (DEV_FACING.some((d) => text.includes(d))) continue;
+    if (devFacing.some((d) => text.includes(d))) continue;
     warnings.push(`${rel(file)}: hardcoded textContent "${text}" — not localised`);
+  }
+
+  for (const found of untranslatedMarkup(src, file.endsWith('.html'))) {
+    const where = `${rel(file)}:${lineOf(src, found.index)}`;
+
+    // A region the JS lexer could not read is reported like any other finding.
+    // Silence here would be indistinguishable from a clean file, and the whole
+    // value of this gate is that its green means something.
+    if (found.kind === 'unscannable') {
+      warnings.push(
+        `${where}: ${found.text} — the markup scan gave up here, so this region is UNCHECKED`,
+      );
+      continue;
+    }
+
+    if (devFacing.some((d) => found.text.includes(d))) continue;
+
+    // `text` may carry the blanked width of an interpolation; a translator
+    // reading a CI log wants the words, not the padding.
+    const shown = found.text.replace(/\s+/g, ' ');
+
+    if (found.kind === 'inert-i18n') {
+      warnings.push(
+        `${where}: ${found.attr}="${shown}" sits in a JS-built template, where nothing ` +
+        'applies it — applyToDom runs over `document` at boot only, never on a shadowRoot ' +
+        "or on markup built later. Use ${t('id')} in the template instead",
+      );
+      continue;
+    }
+
+    const what = found.kind === 'attr'
+      ? `hardcoded ${found.attr}="${shown}"`
+      : `hardcoded markup text "${shown}"`;
+    warnings.push(`${where}: ${what} — not localised`);
   }
 }
 

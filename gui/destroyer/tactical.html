@@ -45,8 +45,8 @@
         <h1><span data-i18n="console.tactical.title">TACTICAL</span><span class="sub" data-i18n="console.cruiser_tactical.subtitle">WEAPONS</span></h1>
         <div class="hero-controls">
           <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-          <button class="overlay-toggle" id="nav-toggle" data-active="false">Nav</button>
-          <button class="overlay-toggle" id="comms-toggle" data-active="false">Comms<span class="unread-badge" id="comms-unread">!</span></button>
+          <button class="overlay-toggle" id="nav-toggle" data-active="false" data-i18n="console.common.nav_toggle">Nav</button>
+          <button class="overlay-toggle" id="comms-toggle" data-active="false"><span data-i18n="console.common.comms_toggle">Comms</span><span class="unread-badge" id="comms-unread">!</span></button>
         </div>
       </div>
       <div class="console-body">
@@ -69,12 +69,12 @@
       </footer>
     </div>
     <div class="overlay-panel" id="nav-overlay">
-      <button class="overlay-back" id="nav-back">&#8592; Back</button>
+      <button class="overlay-back" id="nav-back" data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.navigation">Navigation</h2>
       <ph-navigation-map id="navigation-map"></ph-navigation-map>
     </div>
     <div class="overlay-panel" id="comms-overlay">
-      <button class="overlay-back" id="comms-back">&#8592; Back</button>
+      <button class="overlay-back" id="comms-back" data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.comms">Comms</h2>
       <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
       <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>

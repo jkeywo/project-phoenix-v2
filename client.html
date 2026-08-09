@@ -835,8 +835,8 @@
 
       <!-- Name input -->
       <div id="lobby-name-row">
-        <label>Name
-          <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
+        <label><span data-i18n="client.name_label">Name</span>
+          <input id="name-input" type="text" placeholder="Your name" data-i18n-attr="placeholder:client.name_placeholder" autocomplete="off" />
         </label>
       </div>
 
@@ -881,7 +881,7 @@
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
     <button id="retry-now-btn" title="Retry connection now" data-i18n="client.retry_now" data-i18n-attr="title:client.retry_now_tip">Retry now</button>
-    <button id="fullscreen-btn" title="Toggle fullscreen">?</button>
+    <button id="fullscreen-btn" title="Toggle fullscreen" data-i18n-attr="title:client.fullscreen_tip">?</button>
   </div>
 
   <!-- Asset loading overlay: shown during GamePhase::Loading while the

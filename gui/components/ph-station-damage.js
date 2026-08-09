@@ -17,6 +17,16 @@ import './ph-damage-detail.js';
  *
  * Read-only: dispatching repair teams stays on the repair console (issue #12).
  */
+
+/**
+ * The label shown when the host console does not name the station.
+ *
+ * A function, not a constant: the template is built in the constructor, and
+ * `t()` must be called after strings-boot has installed the table rather than
+ * at module-evaluation time.
+ */
+const defaultLabel = () => t('component.station_damage.default_label');
+
 export class PhStationDamage extends HTMLElement {
   #state = null;
   #open = false;
@@ -25,6 +35,7 @@ export class PhStationDamage extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    const label = defaultLabel();
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
@@ -51,14 +62,14 @@ export class PhStationDamage extends HTMLElement {
     .popup.open { display: block; }
     .popup-title { font-size: 0.6rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--line-faint); }
   </style>
-  <button class="bar" id="bar" type="button" aria-haspopup="true" aria-expanded="false" title="Station systems">
-    <span class="bar-label" id="bar-label">Station</span>
+  <button class="bar" id="bar" type="button" aria-haspopup="true" aria-expanded="false" title="${t('component.station_damage.bar_title', { name: label })}">
+    <span class="bar-label" id="bar-label">${label}</span>
     <span class="bar-wrap"><span class="fill" id="fill" style="width:100%"></span></span>
     <span class="pct" id="pct">—</span>
     <span class="caret">▲</span>
   </button>
   <div class="popup" id="popup">
-    <div class="popup-title" id="popup-title">Station Systems</div>
+    <div class="popup-title" id="popup-title">${t('component.station_damage.popup_title', { name: label })}</div>
     <ph-damage-detail id="detail"></ph-damage-detail>
   </div>
 `;
@@ -68,7 +79,7 @@ export class PhStationDamage extends HTMLElement {
   static get observedAttributes() { return ['label']; }
 
   attributeChangedCallback(name, oldVal, newVal) {
-    if (name === 'label') this.#applyLabel(newVal || 'Station');
+    if (name === 'label') this.#applyLabel(newVal || defaultLabel());
   }
 
   #applyLabel(label) {
@@ -84,7 +95,7 @@ export class PhStationDamage extends HTMLElement {
     // Close when clicking anywhere outside the popup.
     this.#onDocClick = () => { if (this.#open) this.#toggle(false); };
     document.addEventListener('click', this.#onDocClick);
-    this.#applyLabel(this.getAttribute('label') || 'Station');
+    this.#applyLabel(this.getAttribute('label') || defaultLabel());
   }
 
   disconnectedCallback() {

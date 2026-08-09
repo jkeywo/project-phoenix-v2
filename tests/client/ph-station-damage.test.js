@@ -16,6 +16,46 @@ describe('PhStationDamage', () => {
     expect(customElements.get('ph-station-damage')).toBeDefined();
   });
 
+  // ── Issue #976: the shadow-DOM template and the JS default both held
+  // hardcoded English ('Station', 'Station Systems', title="Station systems").
+  // None was a `.textContent =` assignment, so check-strings could not see any
+  // of them and they rendered in English in every locale. ──
+
+  it('builds its template from the string table, before it is ever connected', () => {
+    // Constructed but not appended: nothing has run except the constructor, so
+    // this asserts on the TEMPLATE alone rather than on #applyLabel's output.
+    const el = document.createElement('ph-station-damage');
+    const label = t('component.station_damage.default_label');
+    expect(el.shadowRoot.getElementById('bar-label').textContent).toBe(label);
+    expect(el.shadowRoot.getElementById('popup-title').textContent)
+      .toBe(t('component.station_damage.popup_title', { name: label }));
+    expect(el.shadowRoot.getElementById('bar').getAttribute('title'))
+      .toBe(t('component.station_damage.bar_title', { name: label }));
+  });
+
+  it('falls back to the string table, not to English, when given no label', () => {
+    const { el } = setup();
+    expect(el.shadowRoot.getElementById('bar-label').textContent)
+      .toBe(t('component.station_damage.default_label'));
+  });
+
+  it('shows the label the console gives it', () => {
+    document.body.innerHTML = '<ph-station-damage id="test-el" label="Ops"></ph-station-damage>';
+    const el = document.getElementById('test-el');
+    expect(el.shadowRoot.getElementById('bar-label').textContent).toBe('Ops');
+    expect(el.shadowRoot.getElementById('popup-title').textContent)
+      .toBe(t('component.station_damage.popup_title', { name: 'Ops' }));
+  });
+
+  it('re-labels when data-i18n-attr resolves the label attribute at runtime', () => {
+    // How the repair and engineering consoles now localise label="Core":
+    // applyToDom does setAttribute('label', t(id)), which must reach the bar.
+    const { el } = setup();
+    el.setAttribute('label', t('console.repair.core'));
+    expect(el.shadowRoot.getElementById('bar-label').textContent)
+      .toBe(t('console.repair.core'));
+  });
+
   it('hides itself when the station has no damageable systems', () => {
     const { el } = setup();
     el.state = { entries: [], pct: 1 };

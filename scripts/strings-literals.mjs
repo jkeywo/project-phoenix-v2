@@ -117,9 +117,12 @@ export function isTokenTest({ before, after }) {
  * worse: the capture stops mid-quote and the resulting unterminated run
  * silently fails `isDisplayText` (no trailing all-caps run, no space before
  * the cut), so `el.textContent = 'Warning; check the grid';` is reported as
- * `[]` — no warning, no error. A depth-tracking scanner is the real fix;
- * tracked as the scanner gap on issue #976 alongside the gate's other blind
- * spots (component templates, attributes).
+ * `[]` — no warning, no error. A depth-tracking scanner is the real fix.
+ *
+ * This is the last of the blind spots issue #976 catalogued: the other two —
+ * component template strings and text-bearing attributes — are now scanned by
+ * `strings-markup.mjs`. The remaining hole is listed in
+ * `docs/strings-authoring-guide.md`.
  *
  * Stateful (`g`) — take a fresh copy per scan rather than sharing one.
  */

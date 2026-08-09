@@ -400,6 +400,7 @@ console.common.unknown,"Fallback label for an unidentified contact or stance","U
 console.common.port,"Port (left) direction label","PORT"
 console.common.stbd,"Starboard (right) direction label","STBD"
 console.common.omni,"Shield focus readout when no single facing is focused","OMNI"
+console.common.back,"Button that closes a full-screen overlay panel and returns to the console",← Back
 console.stance.hostile,"Contact stance label on sensor readouts","HOSTILE"
 console.stance.allied,"Contact stance label on sensor readouts","ALLIED"
 console.stance.neutral,"Contact stance label on sensor readouts","NEUTRAL"
@@ -465,6 +466,7 @@ component.sensor_panel.rng,"Sensor readout key: range to target","RNG"
 component.sensor_panel.class,"Sensor readout key: target ship class","CLASS"
 component.sensor_panel.hull,"Sensor readout key: target hull percentage","HULL"
 component.sensor_panel.heading,"Sensor readout key: target heading","HEADING"
+component.sensor_panel.au,"Sensor readout unit: astronomical units, shown after the range value",AU
 component.shield_facings.title,"Shield facings panel heading","SHIELD FACINGS"
 component.shield_facings.empty,"Shield facings panel when no facing telemetry is available","[NO FACING DATA]"
 component.shield_facings.off,"Shield facing readout when that facing is offline","OFF"
@@ -508,6 +510,7 @@ component.ship_picker.power,Lobby ship picker — stat label above a hull's powe
 component.ship_picker.stations,Lobby ship picker — stat label above a hull's station count,[Stations]
 component.station_damage.popup_title,"Station-damage popup heading. {name} is the owning station (or the ship core)","[{name} Systems]"
 component.station_damage.bar_title,"Station-damage bar tooltip. {name} is the owning station (or the ship core)","[{name} systems]"
+component.station_damage.default_label,"Station-damage bar label before the console names the station it belongs to",Station
 console.comms.doc_title,Browser-tab title of the comms console page,[Project Phoenix - Comms Console]
 console.comms.screen_label,Phone-frame screen label of the comms console,Comms Console
 console.comms.title,comms console — main hero heading,COMMS
@@ -645,7 +648,7 @@ console.sensors.shield_status,"sensors console — target shield status metric l
 console.sensors.station_footer,"sensors console — footer station name","SENSORS STATION"
 console.common.cancel_impulse,"Button that aborts an active impulse-drive charge","Cancel Impulse"
 console.common.target,"Fallback name for an unnamed locked target","TARGET"
-console.repair.core,"Repair target for the ship's core (systems owned by no station)","Core"
+console.repair.core,"The ship's core — the systems owned by no station. Names both the repair-target row and the core damage bar beside the station bars, on repair and engineering","Core"
 console.repair.footer_status,"repair console footer — hull percent and repair-team activity. {pct} is hull percent; {active} of {total} teams are working","[{pct}% HULL · {active}/{total} ACTIVE]"
 console.radar.science_target,"Radar blip label for the science-locked target","SCIENCE TARGET"
 console.radar.tactical_target,"Radar blip label for the tactical-locked target","TACTICAL TARGET"
@@ -859,7 +862,10 @@ client.ready_confirmed,"Lobby READY button after the player has readied up","[? 
 client.connecting,"Connection status overlay while connecting","Connecting…"
 client.retry_now,"Connection overlay — button that retries immediately","Retry now"
 client.retry_now_tip,"Tooltip on the retry button","[Retry connection now]"
-client.preparing_scenario,"Asset-loading overlay while models and icons pre-cache","Preparing scenario…"
+client.fullscreen_tip,"Tooltip on the fullscreen toggle, on both the phone client and the host viewscreen",Toggle fullscreen
+client.name_label,"Lobby name field — the label beside the text input",Name
+client.name_placeholder,"Lobby name field — greyed-out hint inside the empty text input",Your name
+client.preparing_scenario,"Asset-loading overlay while models and icons pre-cache. Shown on the phone client and on both host viewscreen overlays","Preparing scenario…"
 client.return_to_lobby,"Game-over overlay — button back to the lobby","[Return to Lobby]"
 client.waiting_scenario,"Overlay shown while the host picks the next scenario","[Waiting for host to select a scenario…]"
 client.select_scenario,"Phone scenario picker — heading over the scenario list","[Select a scenario]"
@@ -900,6 +906,9 @@ server.launching_in,"Host lobby badge during countdown. {secs} is seconds remain
 server.hint_launching,"Host lobby hint during countdown. {secs} is seconds remaining","[Launching in {secs}s — anyone can unready to cancel]"
 server.conn_error_refresh,"Host connection banner on unrecoverable error","[Error — refresh to retry]"
 server.upload_mod_pack,"Host scenario picker — button that opens the mod-pack ZIP file chooser","[Upload mod pack]"
+server.launch_ai_ship,"Host lobby button that starts the scenario with no human crew. The glyph is part of the label",⬡ Launch AI Ship
+server.launch_ai_ship_tip,"Tooltip on the host lobby AI-only launch button",Launch with fully AI-controlled crew
+server.qr_toggle_tip,"Tooltip on the host viewscreen corner target that shows or hides the join QR code",Toggle QR code
 server.mod_pack_reading,"Host scenario picker — status while an uploaded mod pack is being read and validated","[Validating mod pack…]"
 server.mod_pack_applied,"Host scenario picker — status when an uploaded mod pack passed validation and its scenarios were added","[Mod pack applied]"
 server.mod_pack_rejected,"Host scenario picker — status heading when an uploaded mod pack failed validation and nothing was applied","[Mod pack rejected — nothing applied]"

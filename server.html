@@ -1146,7 +1146,7 @@
     <div class="lobby-bg"></div>
 
     <!-- AI-only launch: visible only when no players are connected -->
-    <button id="ai-launch-btn" style="display:none;" title="Launch with fully AI-controlled crew">
+    <button id="ai-launch-btn" style="display:none;" title="Launch with fully AI-controlled crew" data-i18n="server.launch_ai_ship" data-i18n-attr="title:server.launch_ai_ship_tip">
       ⬡ Launch AI Ship
     </button>
 
@@ -1203,7 +1203,7 @@
       <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
       <div id="asset-loading" style="display:none;position:absolute;inset:0;z-index:90;background:#000 url('assets/logo.png') center 40% / min(55vw,55vh) auto no-repeat;flex-direction:column;align-items:center;justify-content:center;color:#aae;font-family:monospace;font-size:0.9rem;gap:1rem;padding-bottom:15vh;">
         <div class="spinner-ring"></div>
-        <span>Preparing scenario&hellip; <span id="asset-loading-pct">0</span>%</span>
+        <span><span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span id="asset-loading-pct">0</span>%</span>
       </div>
 
       <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
@@ -1263,18 +1263,18 @@
           <canvas id="qr"></canvas>
         </a>
         <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
-          Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
+          <span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span id="loading-progress-pct">0</span>%
         </div>
       </div>
 
       <!-- Invisible click-target in bottom-left corner to toggle QR mid-game -->
-      <button id="qr-toggle-btn" title="Toggle QR code"></button>
+      <button id="qr-toggle-btn" title="Toggle QR code" data-i18n-attr="title:server.qr_toggle_tip"></button>
 
       <div id="top-bar">
         <div id="top-bar-row">
           <span id="conn-label"></span>
           <span id="conn-dot"></span>
-          <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+          <button id="fullscreen-btn" title="Toggle fullscreen" data-i18n-attr="title:client.fullscreen_tip">⛶</button>
         </div>
       </div>
     </div>

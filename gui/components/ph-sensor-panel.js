@@ -77,7 +77,7 @@ export class PhSensorPanel extends HTMLElement {
       <div class="badges" id="badges"></div>
       <div class="pos-row">
         <div><span class="k">${t('component.sensor_panel.brg')}</span> <span class="v" id="brg-val">—</span><span class="u">°</span></div>
-        <div><span class="k">${t('component.sensor_panel.rng')}</span> <span class="v" id="rng-val">—</span><span class="u">AU</span></div>
+        <div><span class="k">${t('component.sensor_panel.rng')}</span> <span class="v" id="rng-val">—</span><span class="u">${t('component.sensor_panel.au')}</span></div>
       </div>
     </div>
   </div>

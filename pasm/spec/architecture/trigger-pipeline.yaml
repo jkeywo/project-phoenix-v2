@@ -29,12 +29,13 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Event Collector
-      summary: Collects each tick's externally-sourced world events into the per-tick event buffer from three sources, in order - bridged AI combat and waypoint messages, events queued by world loads, region observers, and the previous tick's delayed actions, and one synthesised timer event once a world is loaded.
+      summary: Collects each tick's externally-sourced world events into the per-tick event buffer from three sources, in order - bridged AI combat and waypoint messages, events queued by world loads, region observers, and the previous tick's delayed actions, and one synthesised timer event once the mission clock is anchored (the first simulation tick of GamePhase::InProgress, not world load).
       goals:
         - every consumer of world events reads one buffer filled by one producer
         - stale events cannot leak between ticks because the buffer is rebuilt every run
       rationale:
         - a single collection point keeps the trigger pipeline's inputs inspectable and keeps event-free ticks from marking runtime state changed
+        - "Issue #960 (the wave clock starts at mission start, not app boot): the synthesised timer event measures elapsed time from WorldContentRuntime::mission_clock_anchor_secs — the Time::elapsed_secs() reading anchor_mission_clock stamps on the FIRST simulation tick of GamePhase::InProgress — so on_timer triggers fire after_secs into the MISSION and combat_test's wave clock starts when the mission does. The anchor was previously stamped at world load (world_loaded_at_secs, since #475), but GamePhase defaults to Lobby and the SimSet::Physics chain is gated on InProgress, so after a lobby the first InProgress tick emitted TimerElapsed with the whole lobby duration as elapsed_secs and every timed wave fired at once. arm_mission_clock clears the anchor OnEnter(InProgress) so a second round (ReturnToLobby then a fresh start) re-measures from its own start; anchor_mission_clock only re-stamps when the anchor is None."
       references:
         - world-trigger-chaining-loop
     architecture:
@@ -46,7 +47,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/server.rs]
-      symbols: [collect_world_events, AiEventReaders]
+      symbols: [collect_world_events, AiEventReaders, anchor_mission_clock, arm_mission_clock]
       tests: [cargo test]
     evidence:
       - kind: test
@@ -197,6 +198,7 @@ entities:
       summary: Holds trigger actions whose authored per-action delay has not yet elapsed and dispatches due ones through the same pure dispatch table as immediate actions. Its produced events queue for the next tick's buffer, because it runs after the chaining loop has already drained this tick's.
       rationale:
         - sharing the dispatch table with the immediate path means delayed actions gain every dispatch behaviour (including AI target revalidation) instead of drifting on a duplicated table
+        - "Issue #960: a DelayedAction's fire_at_elapsed and the due check both measure against WorldContentRuntime::mission_clock_anchor_secs — the same mission-start anchor on_timer triggers use (see world-event-collector) — so an action authored with a delay fires that many seconds into the MISSION rather than from app boot. partition_delayed_actions compares plain floats against that clock and this module reads no Bevy resource of its own."
     architecture:
       kind: scheduler
       authority: authoritative

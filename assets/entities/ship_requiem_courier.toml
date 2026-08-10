@@ -62,7 +62,7 @@ sensor_range = 80.0
 # (`src/entities/config.rs`) now fails the entity load on that mismatch.
 #
 # The anchor names a position in the world that spawns this hull:
-# `requiem_courier_destination` in `assets/worlds/before_the_fire.toml`.
+# `requiem_courier_destination` in `assets/worlds/probe_reach_anchor.toml`.
 
 [behaviour]
 

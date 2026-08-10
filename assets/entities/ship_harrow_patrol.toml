@@ -212,9 +212,9 @@ sensor_range = 110.0
 # round. The hull's own `[ai_profile] sensor_range = 110` bounds the radius it
 # can see into at all, so the line it holds is a real one.
 #
-# Blast radius: `default.toml`, `patrol.toml`, `reinforcements.toml` and
-# `before_the_fire.toml` all field this hull as the ambient patrol the player
-# goes looking for, which is exactly the posture above. `duel.toml` and the
+# Blast radius: `default.toml`, `patrol.toml` and `reinforcements.toml` all
+# field this hull as the ambient patrol the player goes looking for, which is
+# exactly the posture above. `duel.toml` and the
 # probe worlds field it as a combatant, and are unaffected for a different
 # reason: `duel.toml` injects its own `{ id = "kill", base_priority = 80 }`
 # Destroy entry into the slot override, and the by-id doctrine merge

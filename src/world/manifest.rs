@@ -985,29 +985,21 @@ world = "assets/worlds/mod_skirmish.toml"
 
     // -- shipped manifest ----------------------------------------------------
 
-    /// The real shipped manifest must parse, list exactly the three selectable
-    /// roots, and validate cleanly against the shipped world files — the
-    /// pre-load catalog is authoritative, so a broken manifest must fail in CI
-    /// rather than at host startup.
+    /// The real shipped manifest must parse, list exactly the one selectable
+    /// root (`combat_test`), and validate cleanly against the shipped world
+    /// files — the pre-load catalog is authoritative, so a broken manifest must
+    /// fail in CI rather than at host startup.
     #[test]
     fn shipped_manifest_parses_and_validates() {
         let manifest_toml = include_str!("../../assets/scenarios.toml");
         let m = parse_manifest(manifest_toml).expect("scenarios.toml must parse");
         let ids: Vec<&str> = m.scenarios.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, ["default", "combat_test", "before_the_fire"]);
+        assert_eq!(ids, ["combat_test"]);
 
         let mut map = HashMap::new();
         map.insert(
-            "assets/worlds/default.toml".to_string(),
-            include_str!("../../assets/worlds/default.toml").to_string(),
-        );
-        map.insert(
             "assets/worlds/combat_test.toml".to_string(),
             include_str!("../../assets/worlds/combat_test.toml").to_string(),
-        );
-        map.insert(
-            "assets/worlds/before_the_fire.toml".to_string(),
-            include_str!("../../assets/worlds/before_the_fire.toml").to_string(),
         );
 
         let findings = validate_manifest(&m, manifest_toml, resolver(map.clone()));
@@ -1018,13 +1010,7 @@ world = "assets/worlds/mod_skirmish.toml"
 
         // The catalog exposes each scenario's own ships, drawn from its world.
         let catalog = build_catalog(&m, resolver(map));
-        assert_eq!(catalog.scenarios.len(), 3);
-        let default = catalog
-            .scenarios
-            .iter()
-            .find(|s| s.id == "default")
-            .unwrap();
-        assert_eq!(default.ships.len(), 2);
+        assert_eq!(catalog.scenarios.len(), 1);
     }
 
     /// The demo curation manifest (issue #917): must parse, curate the

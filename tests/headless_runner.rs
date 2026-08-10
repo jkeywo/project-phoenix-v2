@@ -1247,16 +1247,20 @@ fn same_hull_duel_is_behaviourally_symmetric_across_seeds() {
 /// no travel decision, and the courier sat on its spawn anchor for the whole
 /// scenario. Nothing failed and nothing logged.
 ///
-/// This boots the real `before_the_fire.toml`, so it covers the whole chain the
-/// bug ran through: the template's directive fields, the world's anchor table,
-/// `plan_helm_travel`'s `Reach` arm, and the per-axis helm actuators.
+/// This boots `probe_reach_anchor.toml` — the dedicated test-infra world this
+/// regression was re-homed onto when the `before_the_fire` world tree was
+/// retired — so it still covers the whole chain the bug ran through: the
+/// template's directive fields, the world's anchor table, `plan_helm_travel`'s
+/// `Reach` arm, and the per-axis helm actuators. The probe carries the courier's
+/// spawn and destination anchors over unchanged, so the leg and timings the
+/// assertions below are tuned against are identical.
 #[test]
 fn requiem_courier_reaches_its_destination_anchor() {
     use project_phoenix::entity_spawner::EntityName;
 
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
-        world_path: "assets/worlds/before_the_fire.toml".into(),
+        world_path: "assets/worlds/probe_reach_anchor.toml".into(),
         dt,
         max_ticks: ticks_for_sim_seconds(90.0, dt),
         deterministic: true,
@@ -1277,10 +1281,9 @@ fn requiem_courier_reaches_its_destination_anchor() {
             .world()
             .resource::<project_phoenix::world::config::WorldConfig>();
         let anchor_xz = |name: &str| {
-            let a = world_config
-                .anchors
-                .get(name)
-                .unwrap_or_else(|| panic!("before_the_fire.toml must declare the `{name}` anchor"));
+            let a = world_config.anchors.get(name).unwrap_or_else(|| {
+                panic!("probe_reach_anchor.toml must declare the `{name}` anchor")
+            });
             [a[0], a[2]]
         };
         (
@@ -1294,9 +1297,9 @@ fn requiem_courier_reaches_its_destination_anchor() {
     let mut q = app.world_mut().query::<(&EntityName, &ShipPhysics)>();
     let (x, z, forward_speed) = q
         .iter(app.world())
-        .find(|(name, _)| name.0 == "world.entity.requiem_courier.name")
+        .find(|(name, _)| name.0 == "entity.ship_requiem_courier.name")
         .map(|(_, physics)| (physics.x, physics.z, physics.forward_speed))
-        .expect("before_the_fire.toml spawns the Requiem Courier");
+        .expect("probe_reach_anchor.toml spawns the Requiem Courier");
 
     let distance = ((destination[0] - x).powi(2) + (destination[1] - z).powi(2)).sqrt();
     assert!(

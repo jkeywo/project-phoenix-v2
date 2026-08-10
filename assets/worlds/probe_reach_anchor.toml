@@ -1,0 +1,54 @@
+# Probe world for the Reach-anchor regression (Rhai M6 / #984 content triage).
+#
+# Re-homes the Requiem Courier `Reach`-directive coverage that used to live on
+# `before_the_fire.toml` (deleted with the BTF world tree). The courier hull
+# (`assets/entities/ship_requiem_courier.toml`) has a single `Reach` directive
+# whose `directive_anchor` names `requiem_courier_destination`. A plural/singular
+# field mix-up once made that anchor resolve to `""`, so `anchors.get("")` missed,
+# the objective produced no travel decision, and the hull sat on its spawn anchor
+# for the whole run — nothing failed and nothing logged.
+#
+# This world reproduces exactly the chain that bug ran through — the template's
+# directive fields, this world's anchor table, `plan_helm_travel`'s `Reach` arm,
+# and the per-axis helm actuators — and nothing else. Declarative, single-purpose,
+# `template_path` composition, like the other `probe_*` test-infra worlds.
+#
+# Anchor positions are carried over unchanged from the retired
+# `before_the_fire.toml` so the re-homed headless test keeps its tuned leg length
+# (~350 u) and timings.
+
+[global]
+seed = 984
+ai_helm_tick_hz = 30.0
+
+[anchors]
+# The courier's spawn point and the destination its `Reach` directive names —
+# both carried over from the retired before_the_fire.toml. The destination sits
+# well clear of the spawn so a resolved route is a visible traverse rather than a
+# nudge.
+requiem_courier             = [-230.0, 0.0, -80.0]
+requiem_courier_destination = [-320.0, 0.0, 260.0]
+
+# Player spawn kept far from the courier's leg and well outside AI sensor range,
+# so the AI-backfilled player never detects or interferes with the courier. The
+# courier's faction (Requiem) is neutral to everyone and the hull is unarmed with
+# no Destroy doctrine, so the two never engage regardless — this only keeps the
+# radar/sim surfaces apart.
+[player_spawn]
+position = [1500.0, 0.0, 1500.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts, so the
+# world reaches InProgress and the low-LOD NPC simulation runs.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [1500.0, 0.0, 1500.0] }
+spawn_on = "game_start"
+
+# The Requiem Courier — the hull under test. No world-level `name` override, so it
+# keeps the template's own `entity.ship_requiem_courier.name`; the headless test
+# finds it by that id. Its template `[behaviour]` `Reach` doctrine drives it to
+# the `requiem_courier_destination` anchor above.
+[[entity]]
+template_path = "assets/entities/ship_requiem_courier.toml"
+transform = { anchor = "requiem_courier" }

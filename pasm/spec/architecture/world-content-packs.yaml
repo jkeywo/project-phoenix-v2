@@ -14,7 +14,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [assets/scenarios.toml, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/before_the_fire.toml]
+      paths: [assets/scenarios.toml, assets/worlds/default.toml, assets/worlds/combat_test.toml]
 
   - component: base-scenario-manifest
     core:
@@ -38,7 +38,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Content Pack State
-      summary: "The authored catalog: default, combat_test, and before_the_fire are selectable root worlds; patrol, reinforcements, btf_path_a, btf_path_b, btf_path_c, and btf_aphelion_protocol are composition content loaded by worlds or their triggers."
+      summary: "The authored catalog: combat_test is the selectable root world; default, patrol, and reinforcements are composition / test-fixture content loaded additively by worlds, their triggers, or the headless harness."
     architecture:
       classification: authoritative
       owner: world-content-pack-catalog
@@ -88,28 +88,12 @@ entities:
       status: declared
       paths: [assets/worlds/combat_test.toml]
 
-  - component: before-the-fire-world-content
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Before the Fire World Content
-      summary: Selectable Axiom System investigation content whose narrative progression loads the BTF path and protocol sub-worlds.
-    architecture:
-      kind: content-pack
-      authority: authoritative
-      reads: [world-content-pack-state]
-      coordinates: [world-file-parser, world-layer-runtime]
-      runs_in: [host-browser-runtime]
-    implementation:
-      status: declared
-      paths: [assets/worlds/before_the_fire.toml]
-
   - component: loadable-world-content-library
     core:
       status: implemented
       confidence: confirmed
       title: Loadable World Content Library
-      summary: Supporting patrol, reinforcements, BTF path, and Aphelion Protocol worlds that are loaded additively through extra_worlds or trigger actions instead of becoming selectable roots.
+      summary: Supporting patrol and reinforcements worlds that are loaded additively through extra_worlds or trigger actions instead of becoming selectable roots.
     architecture:
       kind: content-pack
       authority: authoritative
@@ -118,4 +102,4 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [assets/worlds/patrol.toml, assets/worlds/reinforcements.toml, assets/worlds/btf_path_a.toml, assets/worlds/btf_path_b.toml, assets/worlds/btf_path_c.toml, assets/worlds/btf_aphelion_protocol.toml]
+      paths: [assets/worlds/patrol.toml, assets/worlds/reinforcements.toml]

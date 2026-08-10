@@ -6,10 +6,10 @@ tags = [ "station", "comms_contact", "allied" ]
 # never `hostile` to anything and never `friendly` to anything either, so
 # "Starbase Alpha" in `assets/worlds/combat_test.toml` was a defence objective
 # the defenders had no relationship with. Authoring the faction here rather than
-# as a per-world override is deliberate — an allied station is allied in all
-# three worlds that spawn it (`combat_test`, `default`, `before_the_fire`), and
-# the Harrow are neutral to the Federation in the other two, so nothing outside
-# the combat scenario changes hostility as a result.
+# as a per-world override is deliberate — an allied station is allied in both
+# worlds that spawn it (`combat_test`, `default`), and the Harrow are neutral to
+# the Federation in the other one, so nothing outside the combat scenario changes
+# hostility as a result.
 #
 # It does NOT, by itself, make the station auto-acquirable as an enemy target:
 # `ai_target_selection` reads faction off the `With<Ship>` scan surface, so a

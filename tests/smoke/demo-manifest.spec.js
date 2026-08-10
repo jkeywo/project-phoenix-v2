@@ -152,13 +152,24 @@ test('dev/default (no ?manifest param): host still offers the full base catalogu
   );
   expect(ids.slice().sort()).toEqual(BASE_SCENARIO_IDS.slice().sort());
 
-  // And the base catalogue is genuinely the *uncurated* one: it still offers
-  // scenarios the demo manifest filters out, so this is not silently
-  // re-asserting the previous test.
-  expect(
-    BASE_SCENARIO_IDS.filter((id) => !DEMO_SCENARIO_IDS.includes(id)).length,
-    'the base manifest offers nothing the demo manifest curates away',
-  ).toBeGreaterThan(0);
+  // The demo manifest curates a valid SUBSET of (or equal to) the base
+  // catalogue: every scenario it offers is one the base offers too, and
+  // `combat_test` is present in both. The two rosters currently coincide — the
+  // demo build offers the whole base catalogue — so this no longer asserts a
+  // divergence, only that curation never widens past the base. If the base
+  // roster grows again the subset relation still holds without a rewrite.
+  for (const id of DEMO_SCENARIO_IDS) {
+    expect(
+      BASE_SCENARIO_IDS,
+      `demo scenario ${id} must also be offered by the base catalogue`,
+    ).toContain(id);
+  }
+  expect(BASE_SCENARIO_IDS, 'combat_test must be offered by the base catalogue').toContain(
+    'combat_test',
+  );
+  expect(DEMO_SCENARIO_IDS, 'combat_test must be offered by the demo catalogue').toContain(
+    'combat_test',
+  );
   for (const id of DEMO_SCENARIO_IDS) {
     expect(ids, `${id} must still be offered when no manifest is curated`).toContain(id);
   }

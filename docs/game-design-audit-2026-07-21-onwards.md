@@ -339,7 +339,7 @@ Records live in-repo in:
 ### Pre-scenario lobby & first-valid selection
 | Field | Value |
 |---|---|
-| **Decision** | Players join a pre-scenario lobby before any world loads; scenario/ship selection is first-valid-request-wins (no captain gate). Selectable roots: `default`, `combat_test`, `before_the_fire`. |
+| **Decision** | Players join a pre-scenario lobby before any world loads; scenario/ship selection is first-valid-request-wins (no captain gate). Selectable roots: `combat_test`. |
 | **File** | `pasm/spec/architecture/game-flow.yaml`, `assets/scenarios.toml` |
 | **Date** | 2026-07-23 |
 

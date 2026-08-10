@@ -27,8 +27,10 @@ use std::sync::{Arc, Mutex};
 use rhai::AST;
 use vellum_script::ScriptSource;
 
-use crate::world::script::engine::{loading_engine, BuilderState, Registration};
-use crate::world::script::validate::validate_registrations;
+use crate::world::script::engine::{loading_engine, BuilderState, Registration, ScriptTrigger};
+use crate::world::script::validate::{
+    validate_registrations, validate_script_triggers, validate_toml_script_triggers,
+};
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
 
 /// Reads the source of a sibling script path (already resolved relative to the
@@ -48,6 +50,10 @@ pub struct CompiledScripts {
     pub defined_fns: BTreeSet<String>,
     /// Registrations collected while running each unit's top level.
     pub registrations: Vec<Registration>,
+    /// Triggers built by the Rhai front-end (`on_destroyed`, …) while running
+    /// each unit's top level (issue #980, M2). Feed the existing pipeline exactly
+    /// as TOML-authored triggers do.
+    pub script_triggers: Vec<ScriptTrigger>,
     /// Content hash binding a save to the exact scripts it was recorded against.
     pub content_hash: u64,
     /// All findings: source lifting, compilation, and cross-reference. Any
@@ -210,9 +216,11 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
     // Drop the engine so it releases its clone of the builder-state handle,
     // leaving `state` as the sole owner.
     drop(engine);
-    let registrations = Arc::try_unwrap(state)
-        .map(|m| m.into_inner().expect("builder state lock").registrations)
+    let builder = Arc::try_unwrap(state)
+        .map(|m| m.into_inner().expect("builder state lock"))
         .unwrap_or_default();
+    let registrations = builder.registrations;
+    let script_triggers = builder.script_triggers;
 
     let content_hash = vellum_script::content_hash(&sorted);
 
@@ -220,6 +228,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
         asts,
         defined_fns,
         registrations,
+        script_triggers,
         content_hash,
         findings,
     }
@@ -237,8 +246,25 @@ pub fn load_world_scripts(
     let (sources, lift_findings) = lift_world_scripts(world_path, world_toml, resolver);
     let mut compiled = compile_scripts(&sources);
     compiled.findings.extend(lift_findings);
-    let cross = validate_registrations(&compiled.registrations, &compiled.defined_fns);
-    compiled.findings.extend(cross);
+    // Cross-reference every handler name against the defined-function set: the
+    // generic `on(..)` registrations, the Rhai trigger front-end
+    // (`on_destroyed`, …), and the TOML `[[trigger]] script = "fn"` front-end.
+    // Every unresolved name — and any `[[trigger]]` that carries both front-ends
+    // at once — is an error finding, so the atomic activation gate keeps working
+    // (issue #980, M2).
+    compiled.findings.extend(validate_registrations(
+        &compiled.registrations,
+        &compiled.defined_fns,
+    ));
+    compiled.findings.extend(validate_script_triggers(
+        &compiled.script_triggers,
+        &compiled.defined_fns,
+    ));
+    compiled.findings.extend(validate_toml_script_triggers(
+        world_path,
+        world_toml,
+        &compiled.defined_fns,
+    ));
     compiled
 }
 

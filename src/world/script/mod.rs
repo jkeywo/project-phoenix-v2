@@ -23,8 +23,13 @@
 //!   there is one loader, one AST map, and one span-offset mapping. ASTs land
 //!   in a `BTreeMap<String, AST>` in sorted path order and feed
 //!   `vellum_script::content_hash`.
+//! * [`triggers`] — the Rhai trigger front-end (issue #980, M2): one loading-
+//!   engine host fn per `TriggerCondition` variant (`on_destroyed`, `on_timer`,
+//!   …), each building the *same* [`Trigger`](crate::world::config::Trigger) the
+//!   TOML `[[trigger]]` front-end builds. One evaluator, two front-ends.
 //! * [`validate`] — a cross-reference pass over `AST::iter_functions()` proving
-//!   every registered handler name resolves at load, emitting the existing
+//!   every registered handler name (and every TOML `script = "fn"` reference)
+//!   resolves at load, emitting the existing
 //!   [`WorldFinding`](crate::world::validate::WorldFinding)s so the atomic
 //!   activation gate keeps working.
 //!
@@ -61,6 +66,7 @@ pub mod effects;
 pub mod engine;
 pub mod flags;
 pub mod load;
+pub mod triggers;
 pub mod validate;
 
 use std::sync::Once;

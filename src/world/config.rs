@@ -359,6 +359,14 @@ struct RawTriggerEntry {
     /// Minimum seconds between repeatable-trigger fires (issue #751).
     #[serde(default)]
     cooldown_secs: Option<f32>,
+    /// Rhai front-end (issue #980, milestone M2): the name of a script function
+    /// that supplies this trigger's effects, as an ALTERNATIVE to the declarative
+    /// `[[trigger.action]]` array. When present the trigger is built with an empty
+    /// action list (the handler produces the `ActionCmd`s at runtime); the
+    /// script-side cross-reference pass resolves the name and rejects a trigger
+    /// that lists both `script` and an action array.
+    #[serde(default)]
+    script: Option<String>,
     #[serde(default, rename = "action")]
     actions: Vec<RawActionEntry>,
 }
@@ -1561,6 +1569,30 @@ fn parse_trigger_condition_from_string(
     }
 }
 
+/// Build the [`Trigger`] a *scripted* front-end produces (issue #980, M2): the
+/// given `condition` with an EMPTY declarative action list — the runtime handler
+/// fn supplies the effects — and every lifecycle field at its default.
+///
+/// This is the single canonical constructor the two scripted front-ends share:
+/// the TOML `[[trigger]] script = "fn"` path (in [`parse_world`]) and the Rhai
+/// registration fns (`on_destroyed`, … in [`crate::world::script::triggers`]).
+/// Routing both through it is what makes "one evaluator, two front-ends" hold by
+/// construction — a scripted trigger is byte-for-byte the same struct whichever
+/// front-end authored it. The TOML path additionally carries over any authored
+/// `when` / `id` / `repeat` / `cooldown_secs`; the Rhai path leaves the defaults.
+pub(crate) fn scripted_trigger(condition: TriggerCondition) -> Trigger {
+    Trigger {
+        condition,
+        actions: Vec::new(),
+        when: None,
+        action_predicates: Vec::new(),
+        action_delays: Vec::new(),
+        id: None,
+        repeat: false,
+        cooldown_secs: None,
+    }
+}
+
 // -- Public typed config ----------------------------------------------------
 
 /// Parsed unified world configuration.
@@ -1760,15 +1792,6 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             raw_trigger.waypoint,
             "Trigger",
         )?;
-        let (actions, raw_predicates, delay_secs) = parse_raw_actions(&raw_trigger.actions)?;
-        let action_predicates: Vec<Option<crate::world::flags::Predicate>> = raw_predicates
-            .into_iter()
-            .map(|s| s.and_then(|src| crate::world::flags::parse_predicate(&src).ok()))
-            .collect();
-        for pred in action_predicates.iter().flatten() {
-            reject_world_history(pred, "Trigger action 'when' predicate")?;
-        }
-        let action_delays: Vec<f32> = delay_secs;
         let when = match raw_trigger.when {
             Some(src) => Some(
                 crate::world::flags::parse_predicate(&src)
@@ -1779,6 +1802,33 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         if let Some(pred) = when.as_ref() {
             reject_world_history(pred, "Trigger 'when' predicate")?;
         }
+
+        if raw_trigger.script.is_some() {
+            // Rhai front-end (issue #980, M2): the named handler supplies the
+            // effects, so the declarative action list is empty. Built through the
+            // shared `scripted_trigger` constructor so it is identical to the same
+            // trigger authored via a Rhai registration fn. The declarative action
+            // array is deliberately ignored here — a trigger that specifies both
+            // is rejected as a `WorldFinding` by the script cross-reference pass
+            // (`crate::world::script::validate`), which is what blocks activation.
+            let mut trigger = scripted_trigger(condition);
+            trigger.when = when;
+            trigger.id = raw_trigger.id;
+            trigger.repeat = raw_trigger.repeat;
+            trigger.cooldown_secs = raw_trigger.cooldown_secs;
+            triggers.push(trigger);
+            continue;
+        }
+
+        let (actions, raw_predicates, delay_secs) = parse_raw_actions(&raw_trigger.actions)?;
+        let action_predicates: Vec<Option<crate::world::flags::Predicate>> = raw_predicates
+            .into_iter()
+            .map(|s| s.and_then(|src| crate::world::flags::parse_predicate(&src).ok()))
+            .collect();
+        for pred in action_predicates.iter().flatten() {
+            reject_world_history(pred, "Trigger action 'when' predicate")?;
+        }
+        let action_delays: Vec<f32> = delay_secs;
         triggers.push(Trigger {
             condition,
             actions,
@@ -4284,6 +4334,61 @@ name      = "shields_up"
                 name: "shields_up".into()
             }
         );
+    }
+
+    // -- Rhai front-end: `[[trigger]] script = "fn"` (issue #980, M2) --------
+
+    #[test]
+    fn parse_world_reads_a_scripted_trigger_as_an_empty_action_trigger() {
+        // `script = "fn"` is the alternative to the declarative action array:
+        // the trigger keeps its condition but carries no actions (the runtime
+        // handler supplies the effects). Cross-reference validation lives in the
+        // script module; parsing just builds the struct.
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+script    = "on_raider_dead"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let t = &cfg.triggers[0];
+        assert_eq!(
+            t.condition,
+            TriggerCondition::OnDestroyed {
+                entity_name: "raider".into()
+            }
+        );
+        assert!(t.actions.is_empty(), "the handler supplies the effects");
+        assert!(t.action_predicates.is_empty());
+        assert!(t.action_delays.is_empty());
+        // Built through the shared `scripted_trigger` constructor, so it is
+        // byte-for-byte a bare scripted trigger of this condition.
+        assert_eq!(
+            *t,
+            scripted_trigger(TriggerCondition::OnDestroyed {
+                entity_name: "raider".into()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_world_scripted_trigger_keeps_lifecycle_fields() {
+        let toml = r#"
+[[trigger]]
+condition     = "on_timer"
+after_secs    = 30.0
+script        = "tick"
+id            = "hb"
+repeat        = true
+cooldown_secs = 5.0
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let t = &cfg.triggers[0];
+        assert_eq!(t.condition, TriggerCondition::OnTimer { after_secs: 30.0 });
+        assert!(t.actions.is_empty());
+        assert_eq!(t.id.as_deref(), Some("hb"));
+        assert!(t.repeat);
+        assert_eq!(t.cooldown_secs, Some(5.0));
     }
 
     // -- on_world_loaded (issue #415) ------------------------------------

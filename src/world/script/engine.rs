@@ -48,6 +48,29 @@ pub struct Registration {
     pub source_path: String,
 }
 
+/// One trigger authored through the Rhai front-end (issue #980, milestone M2).
+///
+/// A top-level call to a registration fn (`on_destroyed`, `on_flag_set`, … —
+/// one per [`TriggerCondition`](crate::world::config::TriggerCondition) variant,
+/// registered by [`crate::world::script::triggers`]) builds a real
+/// [`Trigger`](crate::world::config::Trigger) — the *same* struct the TOML
+/// `[[trigger]]` front-end builds, through the shared
+/// [`scripted_trigger`](crate::world::config::scripted_trigger) constructor — and
+/// records the named handler fn that supplies its effects at runtime. That is
+/// the "one evaluator, two front-ends" convergence: the built `trigger` feeds the
+/// existing pipeline exactly as a TOML-authored one does, and `handler` is what
+/// the cross-reference pass ([`validate`](super::validate)) proves resolves.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptTrigger {
+    /// The trigger this registration built — identical to its TOML equivalent.
+    pub trigger: crate::world::config::Trigger,
+    /// Name of the script fn that supplies the trigger's effects at runtime.
+    pub handler: String,
+    /// Content-relative path of the unit that registered it (for findings and
+    /// for a deferred-work key; anon names are not unique across files, M0 spike).
+    pub source_path: String,
+}
+
 /// Mutable state the loading engine accumulates as it runs each unit's top
 /// level. Held behind an `Arc<Mutex<_>>` because the builder host-fns are
 /// closures registered on the engine.
@@ -58,6 +81,9 @@ pub struct BuilderState {
     pub current_path: String,
     /// Registrations collected from top-level `on(..)` calls.
     pub registrations: Vec<Registration>,
+    /// Triggers built by the typed registration fns (`on_destroyed`, …), one per
+    /// `TriggerCondition` variant (issue #980, M2).
+    pub script_triggers: Vec<ScriptTrigger>,
 }
 
 /// Build the loading engine, registering the builder vocabulary against
@@ -69,10 +95,11 @@ pub fn loading_engine(state: Arc<Mutex<BuilderState>>) -> Engine {
 
     // `on("event", "handler")` — records that `handler` handles `event`,
     // attributed to the unit currently running.
+    let on_state = state.clone();
     engine.register_fn(
         "on",
         move |event: rhai::ImmutableString, handler: rhai::ImmutableString| {
-            let mut s = state.lock().expect("builder state lock");
+            let mut s = on_state.lock().expect("builder state lock");
             let source_path = s.current_path.clone();
             s.registrations.push(Registration {
                 event: event.to_string(),
@@ -81,6 +108,10 @@ pub fn loading_engine(state: Arc<Mutex<BuilderState>>) -> Engine {
             });
         },
     );
+
+    // The typed trigger-builder vocabulary (issue #980, M2): one registration fn
+    // per `TriggerCondition` variant, each building a `Trigger` into `state`.
+    super::triggers::register_trigger_builders(&mut engine, state);
 
     engine
 }

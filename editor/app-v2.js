@@ -11,9 +11,10 @@ import { mountScenarioMode } from './scenario-mode.js';
 import { mountEntityMode } from './entity-mode-view.js';
 import { mountDefinitionsMode } from './definitions-mode-view.js';
 import { mountModelsMode } from './models-mode-view.js';
+import { mountModMode } from './mod-mode-view.js';
 import { RigIndex } from './marker-validate.js';
 import { parseRigToml, wireRigIndexToSaves } from './models-rig.js';
-import { resolveEntityConfigFromText } from './entity-cache.js';
+import { resolveEntityConfigFromText, resolveEntityConfig } from './entity-cache.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -166,6 +167,20 @@ async function init() {
     });
   }
 
+  // MOD Mode (issue #989) — a mod-pack workspace that emits the host-consumed
+  // ZIP. Shares the rig index so a pack's entities are marker-validated exactly
+  // as a save would; resolves composed hulls so fragment members are carried.
+  const modHost = document.getElementById('mod-mode-root');
+  if (modHost) {
+    mountModMode({
+      host: modHost,
+      modeShell,
+      io: { readFile, listDirectory },
+      rigIndex,
+      resolveEntityConfig,
+    });
+  }
+
   // Make the persisted root handle available for FSA reads/writes.
   await getProjectRoot();
 
@@ -183,6 +198,7 @@ const MODE_PANE_IDS = {
   Entity: 'entity-mode-root',
   Definitions: 'definitions-mode-root',
   Models: 'models-mode-root',
+  MOD: 'mod-mode-root',
 };
 
 function setupModeSwitcher() {
@@ -204,7 +220,7 @@ function setupModeSwitcher() {
 }
 
 // Trigger the browser's native "unsaved changes" prompt on tab close /
-// reload whenever ANY mode (World/Entity/Definitions/Models) has a dirty
+// reload whenever ANY mode (World/Entity/Definitions/Models/MOD) has a dirty
 // file tracked in modeShell. Per the platform contract, calling
 // preventDefault and setting returnValue is what shows the prompt.
 function setupUnsavedGuard() {

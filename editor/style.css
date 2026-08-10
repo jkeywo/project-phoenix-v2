@@ -1745,3 +1745,77 @@ form {
 .script-diagnostic { display: flex; gap: 8px; padding: 2px 0; }
 .script-diagnostic.sev-error { color: #ffb4b4; }
 .script-diagnostic-loc { color: #9da5b4; flex-shrink: 0; }
+
+/* ── MOD mode — mod-pack workspace (issue #989) ───────────────────────────── */
+.mod-mode {
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0; overflow: hidden;
+}
+.mod-mode-header {
+  padding: 6px 10px; background: #23262c; border-bottom: 1px solid #2f323a;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #aaa;
+  flex-shrink: 0;
+}
+.mod-mode-body {
+  display: flex; flex-direction: column; gap: 8px;
+  flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px;
+}
+.mod-section {
+  background: #1a1c20; border: 1px solid #2f323a; border-radius: 4px;
+  padding: 10px; flex-shrink: 0;
+}
+.mod-section > h3 {
+  margin: 0 0 8px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #aaa;
+}
+.mod-meta-form {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.mod-field { display: flex; flex-direction: column; gap: 3px; }
+.mod-field-label { color: #9da5b4; font-size: 11px; }
+.mod-input {
+  background: #15171a; border: 1px solid #2f323a; color: #ddd;
+  padding: 4px 6px; border-radius: 3px; font-size: 12px;
+}
+.mod-add-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.mod-add-row .mod-input { flex: 1 1 140px; }
+.mod-add-row button,
+.mod-export-btn {
+  background: #2a2d34; border: 1px solid #3a4a66; color: #cfe0ff;
+  padding: 4px 12px; border-radius: 3px; font-size: 12px; cursor: pointer;
+}
+.mod-add-row button:hover,
+.mod-export-btn:hover { background: #34435f; }
+.mod-scenario-list, .mod-member-list {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.mod-scenario-row, .mod-member-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; border-radius: 3px; background: #1e2126;
+  font-size: 12px; color: #ccc;
+}
+.mod-scenario-row-id { font-weight: 600; color: #ddd; }
+.mod-scenario-row-world, .mod-member-path {
+  flex: 1; font-family: monospace; color: #9da5b4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mod-scenario-row-label { color: #6a9955; font-style: italic; }
+.mod-scenario-remove, .mod-member-remove {
+  background: transparent; border: none; color: #d68a8a;
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px;
+}
+.mod-member-badge {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+}
+.mod-member-badge-new { background: #23402a; color: #8fd6a0; }
+.mod-member-badge-patch { background: #3a3320; color: #d6c078; }
+.mod-placeholder { color: #666; font-style: italic; font-size: 12px; margin: 4px 0; }
+.mod-actions { display: flex; flex-direction: column; gap: 8px; }
+.mod-import-label { color: #9da5b4; font-size: 12px; }
+.mod-messages { margin-top: 4px; font-size: 12px; }
+.mod-messages-errors { color: #ffb4b4; }
+.mod-messages-warnings { color: #d7ba7d; }
+.mod-messages-ok { color: #6a9955; }
+.mod-messages ul { margin: 4px 0 0; padding-left: 18px; }

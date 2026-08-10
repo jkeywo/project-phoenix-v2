@@ -329,6 +329,50 @@ export function buildManifestToml(scenarios, pack) {
 }
 
 /**
+ * Inverse of {@link buildManifestToml} — parse a pack manifest's TOML back into
+ * `{ pack, scenarios }` (issue #989). `pack` is `null` for a base manifest with
+ * no `[pack]` header. Optional `author`/`description` are carried only when the
+ * manifest declared them, and `format` defaults to {@link PACK_FORMAT}, so
+ * `buildManifestToml(scenarios, pack)` of the result reproduces the SAME
+ * manifest text — the byte-identity the MOD-mode round trip relies on.
+ */
+export function parsePackManifest(manifestToml) {
+  const doc = tomlParse(manifestToml);
+  const rawPack = doc && typeof doc === 'object' ? doc.pack : null;
+  let pack = null;
+  if (rawPack && typeof rawPack === 'object') {
+    const req = rawPack.requires && typeof rawPack.requires === 'object' ? rawPack.requires : {};
+    pack = {
+      format: Number.isInteger(rawPack.format) ? rawPack.format : PACK_FORMAT,
+      id: typeof rawPack.id === 'string' ? rawPack.id : '',
+      version: typeof rawPack.version === 'string' ? rawPack.version : '',
+      name: typeof rawPack.name === 'string' ? rawPack.name : '',
+      requires: {
+        content_id: typeof req.content_id === 'string' ? req.content_id : '',
+        content_epoch: Number(req.content_epoch ?? 0),
+      },
+    };
+    if (typeof rawPack.author === 'string' && rawPack.author.length > 0) {
+      pack.author = rawPack.author;
+    }
+    if (typeof rawPack.description === 'string' && rawPack.description.length > 0) {
+      pack.description = rawPack.description;
+    }
+  }
+  const scenarios = Array.isArray(doc?.scenario)
+    ? doc.scenario.map((s) => {
+        const entry = {
+          id: typeof s?.id === 'string' ? s.id : '',
+          world: typeof s?.world === 'string' ? s.world : '',
+        };
+        if (typeof s?.label === 'string' && s.label.length > 0) entry.label = s.label;
+        return entry;
+      })
+    : [];
+  return { pack, scenarios };
+}
+
+/**
  * The findings that block export of a pack with missing/invalid `[pack]`
  * metadata (issue #986). Returned as message strings so `exportModPack` can
  * fold them into its error list. A pack MUST declare an id, version, name, and a

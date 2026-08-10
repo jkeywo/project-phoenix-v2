@@ -49,7 +49,25 @@ describe('mode-shell', () => {
   describe('getModes', () => {
     it('returns the list of registered modes', () => {
       const shell = new ModeShell();
-      expect(shell.getModes()).toEqual(['World', 'Entity', 'Definitions', 'Models']);
+      expect(shell.getModes()).toEqual(['World', 'Entity', 'Definitions', 'Models', 'MOD']);
+    });
+  });
+
+  describe('MOD mode (issue #989)', () => {
+    it('MOD is a registered, switchable mode', () => {
+      const shell = new ModeShell();
+      expect(shell.getModes()).toContain('MOD');
+      expect(shell.switchMode('MOD')).toBe(true);
+      expect(shell.getCurrentMode()).toBe('MOD');
+    });
+
+    it('a dirty MOD-mode workspace participates in hasAnyDirty()', () => {
+      const shell = new ModeShell();
+      expect(shell.hasAnyDirty()).toBe(false);
+      shell.markDirty('MOD', 'mod-pack', true);
+      expect(shell.hasAnyDirty()).toBe(true);
+      shell.markDirty('MOD', 'mod-pack', false);
+      expect(shell.hasAnyDirty()).toBe(false);
     });
   });
 

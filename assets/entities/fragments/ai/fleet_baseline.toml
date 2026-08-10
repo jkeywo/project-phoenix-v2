@@ -4,12 +4,13 @@
 # Every AI-capable fine system must declare a policy or an explicit idle state
 # (PRD #774 US7), and since stage 5d strict AI-declaration mode makes omitting
 # one a LOAD ERROR — there is no Rust-side synthesiser left to fill the gap.
-# This fragment carries the fourteen ship-level declarations a small NPC hull
-# owes but has no reason to specialise — NINE AI policies (the six helm axes,
-# Shields, Power, Comms) and the FIVE target selectors — transcribed verbatim
-# from `alliance_battleship.toml`. That is the count every other comment in the
-# tree quotes; it is the number of `[…_ai]` / `[….ai_policy]` / `[….selector]`
-# blocks in this file and nothing else.
+# This fragment carries the fifteen ship-level declarations a small NPC hull
+# owes but has no reason to specialise — TEN AI policies (the six helm axes,
+# Shields, Power, Comms, and the weapons doctrine issue #956 added) and the FIVE
+# target selectors — transcribed verbatim from `alliance_battleship.toml`. That
+# is the count every other comment in the tree quotes; it is the number of
+# `[…_ai]` / `[….ai_policy]` / `[….selector]` blocks in this file and nothing
+# else.
 #
 # Deliberately does NOT carry `[captain_console.ai]`: the composition fixture
 # gets that from `ai/captain_red_alert_aggressive.toml`, whose whole point is
@@ -21,14 +22,14 @@
 #
 # This was a #869/#885b mechanism fixture. It is now the ship-level spine of the
 # backfill fragment library. `assets/entities/alliance_destroyer.toml` — the
-# first composed shipped hull — takes ELEVEN of those fourteen from here: all
+# first composed shipped hull — takes TWELVE of those fifteen from here: all
 # but the three travel axes, which `ai/movement_attack_pass.toml` replaces
 # wholesale (see the contract below).
 #
 # Issue #876 added the other two player hulls. `alliance_battleship.toml` takes
-# eleven — all but Engines, Steering and Impulse, which
+# twelve — all but Engines, Steering and Impulse, which
 # `ai/movement_artillery.toml` replaces — and `alliance_cruiser.toml` takes all
-# FOURTEEN, because it composes no class movement fragment at all (see the note
+# FIFTEEN, because it composes no class movement fragment at all (see the note
 # on `includes` in that hull). Nothing about the file changed; what changed is
 # that three shipped hulls now depend on it, so a retune here retunes all three.
 # #878 moves the rest of the fleet onto it.
@@ -269,25 +270,32 @@ shields = 5.0
 #
 # ── The eight-point budget, and why `shields` has no channel here ────────────
 #
-# `PowerSystem::increase` refuses past a COMMANDED TOTAL of 8 across all groups,
-# SILENTLY, and a refused level is dropped with no error while `emit_level` goes
-# on re-emitting it every tick. An Alliance hull authors four groups, so combat
-# stations has to fit inside
+# The reactor holds a COMMANDED TOTAL of 8 across all groups. An Alliance hull
+# authors four groups, so combat stations has to fit inside
 #
 #     ops 1  +  helm  +  weapons  +  shields  <=  8
 #
 # which the red-alert allocation below spends exactly: ops 1, helm 3, weapons 3,
-# shields 1 (its resting seed). There is deliberately NO `shields` channel in
-# this policy, and that is a budget decision rather than an oversight: every
-# point is already committed at combat stations, so a rule asking for shields 2
-# would be refused in silence and re-asked for ever. Raising shields is a HUMAN
-# Power officer's trade — take a point off helm or weapons and buy regen with it
-# — and, in the other direction, the `[power.battery_floor]` ladder gives the
-# group the protection an AI rule would have: on a failing battery shields is
-# the last thing cut and the first thing back.
+# shields 1 (its resting seed).
 #
-# A hull that wants an AI shields elevation has to find the point from one of the
-# three, not from the cap.
+# Since issue #959 the cap is spent, not merely hit. `ai_power_allocation` plans
+# every group's level together against the budget and hands the discretionary
+# points out in AUTHORED `priority` order (ties broken by the
+# `[power.battery_floor]` ladder above — a lower floor is a group this hull
+# keeps longer, so it is served first). A policy that asks for more than 8 no
+# longer has the surplus dropped in silence and re-asked for on every tick; it
+# is rationed, and the groups that lose out land as high as the budget reaches.
+# What that costs is still real, and it is the reason there is deliberately no
+# `shields` channel here: a rule asking for shields 2 would now take its point
+# OFF helm or weapons, at combat stations, on every hull that composes this
+# fragment. Raising shields stays a HUMAN Power officer's trade — take a point
+# off helm or weapons and buy regen with it — and, in the other direction, the
+# `[power.battery_floor]` ladder gives the group the protection an AI rule would
+# have: on a failing battery shields is the last thing cut.
+#
+# A hull that wants an AI shields elevation still has to find the point from one
+# of the three. It just no longer has to notice: the planner will take it, from
+# whichever group this file ranked lowest.
 [power.ai_policy.param]
 thrust_threshold = 0.7
 min_reserve_helm = 50.0
@@ -366,6 +374,56 @@ weight = 100.0
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_radar) > 0"
 weight = 1.0
+
+# ── The WEAPONS DOCTRINE: which gun the ship turns to present (issue #956) ────
+#
+# Weapons asks Helm to turn — a channel-3 `ArcBearingRequest` — when the target
+# is in reach of a weapon family but outside every one of that family's arcs.
+# Exactly one such request may be active, so *which* family is worth turning for
+# has to be decided, and until #956 that decision was a Rust array in
+# `tick_weapons_arc_request`: `[Phasers, Blasters, Torpedoes]`, with a doc
+# comment calling it "structural, not a gameplay value". It is nothing of the
+# kind. Which gun a ship manoeuvres to present is the shape of the fight it
+# intends to have, and a fleet that always turns for its beams can never fly a
+# doctrine built on fixed bow tubes.
+#
+# The CHANNEL is the rank and the VERB is the family. Three ranks, each an
+# ordinary channel decision with its own guards, so a hull can reorder itself
+# mid-engagement; the host resolves them in order, drops repeats, and walks the
+# result until a family actually qualifies. A rank nobody authors simply
+# shortens the order — there is no Rust default behind it.
+#
+# This block is the FLEET BASELINE and it is deliberately unconditional: beams
+# first, then blasters, then tubes — byte for byte the behaviour the deleted
+# array gave, so nothing about how the fleet flies changed on the day the
+# decision became content. A hull that wants something else says so on top of
+# it; `ship_harrow_cruiser.toml` is the worked example, and it is the issue's
+# own: it leads with its tubes while the target's striking arc is down.
+#
+# Note what the ranks do NOT decide: whether a family is capable at all. Its
+# emitters' arcs, ranges, ammunition and online state are host readings taken
+# after this order comes back, because a policy that could contradict the
+# geometry would ask Helm to turn for a gun that is not there.
+
+[weapons_console.ai]
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_first"
+when = "true"
+verb = "bring_phasers_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_second"
+when = "true"
+verb = "bring_blasters_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_third"
+when = "true"
+verb = "bring_torpedoes_to_bear"
 
 # Tactical — the ship's firing target. `combat-lock` is deliberately ABSENT from
 # the sources: it is Tactical's own output, so unioning it would be circular.

@@ -41,7 +41,7 @@
         <h1><span data-i18n="console.comms.title">COMMS</span><span class="sub" data-i18n="console.cruiser_comms.subtitle">COMMUNICATIONS &amp; NAV</span></h1>
         <div class="hero-controls">
           <span class="auto-badge" id="comms-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-          <button class="overlay-toggle" id="nav-toggle" data-active="false">Nav</button>
+          <button class="overlay-toggle" id="nav-toggle" data-active="false" data-i18n="console.common.nav_toggle">Nav</button>
         </div>
       </div>
       <div class="console-body">
@@ -67,7 +67,7 @@
       </footer>
     </div>
     <div class="overlay-panel" id="nav-overlay">
-      <button class="overlay-back" id="nav-back">&#8592; Back</button>
+      <button class="overlay-back" id="nav-back" data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.comms.navigation">Navigation</h2>
       <ph-navigation-map id="nav-overlay-map"></ph-navigation-map>
     </div>
@@ -130,7 +130,9 @@
         var wp = nav.waypoint;
         document.getElementById('footer-target').textContent = wp ? wp.name || t('console.common.waypoint') : t('console.common.no_waypoint');
         var msgCount = msgs.length;
-        document.getElementById('footer-right').textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
+        document.getElementById('footer-right').textContent = msgCount === 1
+          ? t('console.comms.messages.one', { n: 1 })
+          : t('console.comms.messages.other', { n: msgCount });
         // Station badge: the retired composite's comms_auto meant "station is
         // Backfill-rated". The per-system equivalent is every owned system
         // AI-run — the conjunction of the resolved views' *_auto flags. Both

@@ -26,31 +26,35 @@ size = [ 23.98402081054998, 12.368079775946125, 21.535700992270257 ]
 # growth gate refuses it. See scripts/blender-voxel-remesh.py, and run
 # `npm run lods -- --remesh` when regenerating.
 [[lod]]
-max_distance = 75.0
+max_distance = 45.0
 model = "assets/models/asteroid_common_3.glb"
 
 [[lod]]
-max_distance = 450.0
+max_distance = 300.0
 model = "assets/models/asteroid_common_3_lod1.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_common_3.glb"
-ratio = 0.15
+ratio = 0.319
 error = 0.01
-texture_size = 512
-remesh_voxel_size = 0.03
+texture_size = 256
 
 [[lod]]
-max_distance = 900.0
+max_distance = 1200.0
 model = "assets/models/asteroid_common_3_lod2.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_common_3.glb"
-ratio = 0.1
-error = 0.1
+ratio = 0.08
+error = 0.01
 texture_size = 256
-remesh_voxel_size = 0.03
 
 [[lod]]
-shape = "sphere"
-scale = [ 1.0, 0.5, 1.0 ]
+billboard = "assets/models/asteroid_common_3_lod3.png"
+scale = [ 23.9619, 12.3335, 1.0 ]
+
+[lod.capture]
+source = "assets/models/asteroid_common_3.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

@@ -66,7 +66,7 @@ hull_integrity = 300.0
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
 [[shield_arc]]
 id = "all"
-label = "entity.ship_harrow_patrol.shield_arc.all.label"
+label = "shield_arc.all.label"
 center_deg = 0
 width_deg = 360
 max_hp = 60

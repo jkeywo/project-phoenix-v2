@@ -1,0 +1,155 @@
+# Probe world for issue #968 — a hull flying a straight lane through a belt
+# whose centre rock is the `huge` class (collider radius 12) added in #947.
+#
+# The reported failure was a ship being TRAPPED by such a rock: seventeen
+# consecutive collisions at the 1 Hz cooldown, the hull as much as 6.5 units
+# INSIDE the collider, and the mission effectively over. This world is the
+# geometry that produces it, held still so the behaviour can be asserted rather
+# than sampled out of a live scenario.
+#
+# ── The lane ─────────────────────────────────────────────────────────────────
+#
+# `lane_far` and `lane_near` sit on the +Z/-Z axis with the belt exactly halfway
+# between them, so the straight line between the two waypoints runs THROUGH the
+# huge rock's centre. A ship that flies its route naively must hit it; a ship
+# with working avoidance goes round and comes back to the line.
+#
+#     z = +40   lane_near   (also the player spawn)
+#     z = -100  the belt
+#     z = -240  lane_far
+#
+# The mission objective loops the two anchors, so a single run is several
+# traversals in alternating directions rather than one — the rock is met from
+# both sides, on both a north- and a south-bound heading.
+#
+# ── The belt ─────────────────────────────────────────────────────────────────
+#
+# One `huge` rock (radius 12) dead on the lane, flanked by two `large` rocks
+# (radius 4) at x = ±40 and two `small` ones (radius 2) staggered fore and aft.
+# The flanking pair leaves a corridor of clear space 24 units wide on either
+# side of the huge rock — comfortably threadable for a 1.2-radius destroyer
+# with its authored 5-unit avoidance buffer, so the probe is testing whether the
+# ship goes AROUND the rock, not whether it can fit through a gap that is too
+# small for it.
+#
+# The rocks are placed as ordinary `[[entity]]` templates rather than through an
+# `[asteroid_field]`: a field is streamed from a density function and a seed, so
+# where its rocks land is not something a test can state. These are.
+#
+# ── Deliberately no combat ───────────────────────────────────────────────────
+#
+# No hostiles, no factions, no weapons. The failure under test is a navigation
+# one, and everything a shooting probe would add — who acquires whom, who dies
+# first, how the run ends — is exactly the seed-sensitive noise that would make
+# the assertion flaky. "Still on the job" is asserted here as "still flying the
+# authored route, in bounds, in both directions", which is the property the
+# reported ship lost when it left the map at a fixed 9 u/s and never came back.
+
+[global]
+seed = 968
+
+[anchors]
+lane_near = [0.0, 0.0, 40.0]
+lane_far = [0.0, 0.0, -240.0]
+
+# The picket's lane, 2 km east of the player's. The names are the ones
+# `ship_harrow_patrol.toml` authors in its own `patrol-ironveil` doctrine, so the
+# hull needs no override to fly this route — and the world-composition validator
+# would refuse the load if this world fielded that hull without declaring them.
+ironveil_patrol_a = [2000.0, 0.0, 200.0]
+ironveil_patrol_b = [2000.0, 0.0, -200.0]
+
+[player_spawn]
+position = [0.0, 0.0, 40.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+# The destroyer is the hull the issue was reported against.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 40.0] }
+spawn_on = "game_start"
+
+# ── The belt ─────────────────────────────────────────────────────────────────
+
+# The rock the issue is about: `huge`, radius 12, sitting on the lane.
+[[entity]]
+template_path = "assets/entities/asteroid_common_1_huge.toml"
+id = "belt-huge"
+transform = { position = [0.0, 0.0, -100.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_common_2_large.toml"
+id = "belt-large-port"
+transform = { position = [-40.0, 0.0, -100.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_common_3_large.toml"
+id = "belt-large-starboard"
+transform = { position = [40.0, 0.0, -100.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_common_4_small.toml"
+id = "belt-small-fore"
+transform = { position = [24.0, 0.0, -136.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_common_1_small.toml"
+id = "belt-small-aft"
+transform = { position = [-24.0, 0.0, -64.0] }
+
+# ── The picket's belt, and why there is a second ship at all ─────────────────
+#
+# The player's leg above tests the HIGH-fidelity helm. The other half of the
+# reported failure was a DEAD-RECKONED one: `combat_test`'s two Harrow pickets
+# are far enough from the player to be LOD-demoted, and a demoted ship steers by
+# `simulate_low_lod_ships`, which ran its hazard assessment as if the hull were a
+# dimensionless point with the parse-default buffer. They ground 3.2 units into
+# radius-4 rocks, were kicked back to the surface once a second by the collision
+# response, and drove straight back in.
+#
+# So this picket flies its own lane 2 km east, through its own huge rock. The
+# distance is the point: its authored `sensor_range` is 110, and LOD promotion
+# needs the player inside that, so it stays demoted for the whole run no matter
+# where the player's own patrol takes it. Harrow and the Federation are left
+# neutral (this world adds no `add_faction_enemy`), so the two ships never fight
+# and the picket's own `patrol-ironveil` doctrine outscores its `destroy-hostiles`
+# entry throughout.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+id = "picket"
+transform = { position = [2000.0, 0.0, 200.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_common_2_huge.toml"
+id = "picket-belt-huge"
+transform = { position = [2000.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_common_1_large.toml"
+id = "picket-belt-large-port"
+transform = { position = [1960.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_common_4_large.toml"
+id = "picket-belt-large-starboard"
+transform = { position = [2040.0, 0.0, 0.0] }
+
+# ── The route ────────────────────────────────────────────────────────────────
+#
+# `base_priority = 80` outranks the destroyer template's own `destroy-hostiles`
+# (45) and `hold-station` (20), so the ship flies this and nothing else. Far
+# anchor first, so the very first leg is the one straight at the rock.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type              = "add_objective"
+  id                = "obj-cross-the-belt"
+  text              = "world.probe_huge_rock.trigger.action.obj_cross_the_belt.text"
+  mandatory         = true
+  source            = "mission"
+  base_priority     = 80.0
+  directive_kind    = "Patrol"
+  directive_anchors = ["lane_far", "lane_near"]
+  directive_loop    = true

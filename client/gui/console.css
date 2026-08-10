@@ -108,6 +108,34 @@ html, body {
   );
 }
 
+/* ── Settings-cog clearance (issue #940) ──────────────────────────
+   Every console is an iframe filling client.html's viewport, and that page
+   mounts a fixed settings cog over the top-left corner: `.settings-btn` is
+   2rem square at a 0.5rem inset, so it reaches 40px in from the top and 40px
+   in from the left of whatever console is showing. A console must therefore
+   start its content past that, or the gear sits on the first glyphs of the
+   station title.
+
+   Reserved here once rather than in 22 per-console <style> blocks, and on the
+   LEFT rather than the top because vertical space is the scarce axis on a
+   phone in landscape. `body .panel-inner` (0,1,1) deliberately outranks the
+   per-console `.panel-inner` padding shorthands (0,1,0) whatever their source
+   order: a console must not be able to reclaim the corner by writing a
+   smaller padding, since the result is invisible until someone looks at that
+   one console in that one orientation.
+
+   The two values are the smallest that clears (44px, portrait) and the gutter
+   20 of the 22 consoles already author for themselves (52px, landscape) — so
+   landscape is unchanged for all but the two courier consoles, whose 32px was
+   8px short of clearing. tests/client/settings-panel.test.js recomputes the
+   cog's reach from client.html and fails if either value stops clearing it. */
+@media (orientation: portrait) {
+  body .panel-inner { padding-left: 44px; }
+}
+@media (orientation: landscape) {
+  body .panel-inner { padding-left: 52px; }
+}
+
 /* tactical tick marks down the side edges (echoes captain_console) */
 .panel-inner::before,
 .panel-inner::after {

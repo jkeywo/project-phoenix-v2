@@ -9,11 +9,19 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title data-i18n="client.doc_title">Project Phoenix � Console</title>
+  <!-- Which build is this? (issue #940.) The client is pure JS — no WASM to
+       bake a flag into, and scripts/build-client.mjs is a deterministic file
+       copy with no compile step — so the meta tag IS the answer here, unlike
+       server.html where it only covers the WASM boot window. deploy-demo.yml
+       flips it to "true" and fails the run if the rewrite did not land.
+       gui/build-flags.js resolves it; the settings cog hides its Debug/Cheat
+       tab when it is true. -->
+  <meta name="phoenix-build-demo" content="false" />
+  <title data-i18n="client.doc_title">Project Phoenix — Console</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico" />
   <!-- Keep rAF-driven UI (scheduleRender, radar sweeps, joystick decay in
        the console iframes) running at full rate even when this tab loses
-       focus � see gui/bg-raf-keepalive.js. Must load before any other
+       focus — see gui/bg-raf-keepalive.js. Must load before any other
        script calls requestAnimationFrame. -->
   <script src="gui/bg-raf-keepalive.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -69,7 +77,11 @@
   <script type="module" src="gui/comms-state.js"></script>
   <!-- Connection manager: PeerJS lifecycle extracted into a tested module (issue #603) -->
   <script type="module" src="gui/connection-manager.js"></script>
-  <!-- Settings panel: gear button + overlay with Rating, Volume, QR toggle, Leave Station -->
+  <!-- Settings panel (issue #940): gear top-left opening the same three tabs
+       as the host cog — Debug/Cheat (hidden in a demo build), Audio (master
+       volume) and Gameplay (rating, QR toggle, leave station, plus pause in a
+       dev build only — see gui/settings-panel.js for why a demo player is not
+       offered a lever that freezes everyone else's mission). -->
   <script type="module" src="gui/settings-panel.js"></script>
   <!-- Ship manual (issue #772): book button + read-only overlay, tab per station -->
   <script type="module" src="gui/manual-panel.js"></script>
@@ -382,7 +394,14 @@
       inset: 0;
       z-index: 5;
       overflow: hidden;
-      padding: 28px 12px 6px;
+      /* Top padding clears the settings cog (issue #940): `.settings-btn` is
+         2rem square at a 0.5rem inset, so it reaches 40px down from the top
+         and the lobby's first row — #lobby-header, holding #ship-name — has to
+         start below that or the gear clips its first characters. Cleared on
+         the top rather than the left so the header stays aligned with the
+         station list beneath it; 4px of slack over the 40px the cog reaches.
+         Pinned by tests/client/settings-panel.test.js. */
+      padding: 44px 12px 6px;
       background: var(--bg);
       color: #d8dde2;
       font-family: 'Chakra Petch', system-ui, sans-serif;
@@ -421,7 +440,7 @@
     /* Station list */
     #station-list { flex: 1; overflow-y: auto; padding: 8px 0; display: flex;
       flex-direction: column; gap: 6px; }
-    /* Tutorial text � replaces station list when player has a station */
+    /* Tutorial text — replaces station list when player has a station */
     #lobby-tutorial { flex: 1; overflow-y: auto; padding: 8px 0; display: none;
       flex-direction: column; gap: 12px; }
     #lobby-tutorial[aria-hidden="false"] { display: flex; }
@@ -520,13 +539,24 @@
     #ready-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
 
     /* ── Settings panel ──────────────────────────────────────────
-       Gear button fixed at bottom-left, overlay modal centered.
-       Mounted by gui/settings-panel.js. */
+       Gear button fixed at top-left, overlay modal centered.
+       Mounted by gui/settings-panel.js.
+
+       Top-left rather than the pre-#940 bottom-left: it mirrors the host
+       page's cog, and bottom-left is already #status's corner.
+
+       z-index 195, not 60. Issue #939 hit exactly this trap on the host page —
+       a cog buried under full-viewport panels is unreachable in most of the
+       states you want it in. On this page those panels are #coordination-popup
+       (180), #waiting-overlay (185), #scenario-picker-overlay (186) and
+       #game-over-overlay (190), so the gear has to clear all four. It stays
+       BELOW #asset-loading (200), which is a genuine "nothing is ready yet"
+       screen. The overlay it opens is 1000, above everything. */
     .settings-btn {
       position: fixed;
-      bottom: 0.5rem;
-      left: 0.75rem;
-      z-index: 60;
+      top: 0.5rem;
+      left: 0.5rem;
+      z-index: 195;
       width: 2rem;
       height: 2rem;
       display: flex;
@@ -567,7 +597,36 @@
       flex-direction: column;
       gap: 1rem;
     }
+    /* Tab bar + body (issue #940), mirroring the host cog's three tabs. */
+    .settings-tabs {
+      display: flex; gap: 0.3rem;
+      border-bottom: 1px solid var(--edge);
+      padding-bottom: 0.5rem;
+    }
+    .settings-tab {
+      display: block; width: auto; margin: 0; flex: 1;
+      padding: 0.35rem 0.4rem;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.7rem; font-weight: 600;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      cursor: pointer;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface2); color: var(--dim);
+      text-align: center;
+      touch-action: manipulation;
+    }
+    .settings-tab.active {
+      background: #0a2830; border-color: var(--signal-cyan);
+      color: var(--signal-cyan);
+    }
+    .settings-body {
+      display: flex; flex-direction: column; gap: 1rem;
+      max-height: 60vh; overflow-y: auto;
+    }
     .settings-section { display: flex; flex-direction: column; gap: 0.4rem; }
+    .settings-section-hint {
+      font-size: 0.7rem; color: var(--dim); line-height: 1.35;
+    }
     .settings-section-heading {
       font-family: 'Chakra Petch', sans-serif;
       font-size: 0.75rem; font-weight: 600;
@@ -634,8 +693,11 @@
     .settings-leave-btn:active { background: rgba(255,51,68,0.1); }
 
     /* ── Ship manual panel (issue #772) ──────────────────────────
-       Book button beside the settings gear; read-only overlay with a
-       tab per authored station. Mounted by gui/manual-panel.js. */
+       Book button in the bottom-left, to the right of #status; read-only
+       overlay with a tab per authored station. Mounted by gui/manual-panel.js.
+       It sat beside the settings gear until issue #940 moved the gear to the
+       top-left to mirror the host page; the book stayed, so the two are now in
+       opposite corners. */
     .manual-btn {
       position: fixed;
       bottom: 0.5rem;
@@ -748,7 +810,7 @@
 
   <!-- This is a pure-JS console (issue #463): no client-side WASM. The page
        and its assets are shipped to dist/client/ by scripts/build-client.mjs
-       (npm run build:client) � a plain file copy, NOT a Trunk build, because
+       (npm run build:client) — a plain file copy, NOT a Trunk build, because
        Trunk would implicitly compile the crate's default (server) lib into a
        WASM bundle and inject a loader even with no `rel="rust"` link.
        All client state lives in the gui/*.js modules loaded in <head>. -->
@@ -773,8 +835,8 @@
 
       <!-- Name input -->
       <div id="lobby-name-row">
-        <label>Name
-          <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
+        <label><span data-i18n="client.name_label">Name</span>
+          <input id="name-input" type="text" placeholder="Your name" data-i18n-attr="placeholder:client.name_placeholder" autocomplete="off" />
         </label>
       </div>
 
@@ -797,7 +859,7 @@
 
       <!-- Footer -->
       <div id="lobby-footer">
-        <span id="status-line" data-i18n="client.connecting_host">Connecting to host�</span>
+        <span id="status-line" data-i18n="client.connecting_host">Connecting to host…</span>
         <button id="ready-btn" data-i18n="client.ready">READY</button>
       </div>
     </section>
@@ -809,7 +871,7 @@
          continue to resolve. -->
   </div>
 
-  <div id="status" data-i18n="client.connecting">Connecting�</div>
+  <div id="status" data-i18n="client.connecting">Connecting…</div>
 
   <!-- Console title strip: fixed at top center in-game; hidden in the lobby
        (render() toggles aria-hidden). -->
@@ -819,7 +881,7 @@
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
     <button id="retry-now-btn" title="Retry connection now" data-i18n="client.retry_now" data-i18n-attr="title:client.retry_now_tip">Retry now</button>
-    <button id="fullscreen-btn" title="Toggle fullscreen">?</button>
+    <button id="fullscreen-btn" title="Toggle fullscreen" data-i18n-attr="title:client.fullscreen_tip">?</button>
   </div>
 
   <!-- Asset loading overlay: shown during GamePhase::Loading while the
@@ -920,7 +982,7 @@
       const retryBtn = document.getElementById('retry-now-btn');
       if (state === 'disconnected') {
         dot.style.background = '#f44';
-        label.textContent = t('client.reconnecting'); // � reconnecting�';
+        label.textContent = t('client.reconnecting'); // — reconnecting…';
         if (retryBtn) retryBtn.classList.add('visible');
       } else if (state === 'error') {
         // No permanent give-up state anymore — connection-manager keeps
@@ -928,7 +990,7 @@
         // shows the retry-now affordance rather than telling the user to
         // refresh the page.
         dot.style.background = '#f44';
-        label.textContent = t('client.conn_error'); // � reconnecting�';
+        label.textContent = t('client.conn_error'); // — reconnecting…';
         if (retryBtn) retryBtn.classList.add('visible');
       } else {
         dot.style.background = '#4c4';
@@ -1002,7 +1064,7 @@
     }
 
     // Session identity is resolved per-tab by gui/session-token.js
-    // (installSessionToken) just before we Identify � see the connection block
+    // (installSessionToken) just before we Identify — see the connection block
     // below. It is not resolved here because that module is deferred and has
     // not executed yet at parse time. Resolving per-tab (sessionStorage) rather
     // than per-origin (localStorage) is what lets several console tabs run on
@@ -1012,7 +1074,7 @@
     // Display name is per-tab (sessionStorage), not per-origin (localStorage):
     // several clients on one desktop must not all default to the same name, or
     // they look like one another in the lobby. Falls back to a fresh random
-    // name per tab. (Identity is the token, not the name � see myToken.)
+    // name per tab. (Identity is the token, not the name — see myToken.)
     let myName = sessionStorage.getItem('player-name') || randomName();
     sessionStorage.setItem('player-name', myName);
 
@@ -1041,6 +1103,9 @@
     /// Console selected in the lobby detail panel. Null until the player picks one.
     /// Resets when the player releases their station.
     let lobbyConsole = null;
+    /// The mounted settings panel (issue #940), or null before the connection
+    /// bootstrap runs. handleMessage repaints it when `DebugState` arrives.
+    let settingsPanel = null;
     let pendingMidGameClaim = false;
     // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
     // ph-comms-current-message). First click arms + swaps the button to a
@@ -1084,7 +1149,7 @@
     /// in-progress game: true spectators, and mid-game claimants who have
     /// picked a station but not yet pressed Ready. Single source of truth for
     /// render()'s vis.lobby override and the SimState/BlackboardUpdate
-    /// render guards below � those messages arrive at ~10Hz and must skip the
+    /// render guards below — those messages arrive at ~10Hz and must skip the
     /// lobby DOM rebuild in this state, or a click on Ready/Leave can land
     /// between the old button being torn down and the new one's listener
     /// being attached.
@@ -1241,7 +1306,7 @@
 
       // Phase ? section visibility (pure JS module, gui/phase-toggle.js).
       // Falls back to a local check if the module hasn't loaded yet so the
-      // first paint isn't blank � module load races init on slow networks.
+      // first paint isn't blank — module load races init on slow networks.
       const vis = (typeof window.sectionVisibility === 'function')
         ? window.sectionVisibility(s.phase)
         : { lobby: s.phase !== 'InProgress' && s.phase !== 'GameOver',
@@ -1255,14 +1320,14 @@
       }
       const inGame = vis.game;
       $('lobby-ui').className = vis.lobby ? 'active' : '';
-      // Phone bezel (issue #439) is part of the game shell only � the lobby
+      // Phone bezel (issue #439) is part of the game shell only — the lobby
       // is borderless. Toggle visibility via aria-hidden so the CSS
       // [aria-hidden="true"] { display: none } rule drives the cascade.
       const bezel = $('phone-bezel');
       if (bezel) bezel.setAttribute('aria-hidden', vis.bezel ? 'false' : 'true');
 
       // Reconcile activeConsole with current consoles list (port of the
-      // deleted Bevy reconcile_active_console � see gui/lobby-state.js).
+      // deleted Bevy reconcile_active_console — see gui/lobby-state.js).
       if (inGame) {
         const next = (typeof window.reconcileActiveConsole === 'function')
           ? window.reconcileActiveConsole(activeConsole, mine)
@@ -1768,7 +1833,7 @@
       }
       // Fallback for the rare race window before module scripts load.
       // Only covers set_sensors_target (mutates local state); other actions
-      // are silently deferred (non-critical � they arrive after module load).
+      // are silently deferred (non-critical — they arrive after module load).
       if (action.action === 'set_sensors_target' && action.uuid) {
         if (window.simState) window.simState.sensorsTarget = action.uuid;
         send('ControlSystem', {
@@ -1808,7 +1873,7 @@
 
     // Engage button, view selector, Red Alert button, and helm joystick all
     // live in the per-console iframe pages (gui/*-console.html); the old
-    // Bevy WASM client console UIs (#47�#49) were retired with the pure-JS
+    // Bevy WASM client console UIs (#47–#49) were retired with the pure-JS
     // client migration.
 
     // Orientation watching (resize + orientationchange ? recompute the
@@ -1828,6 +1893,11 @@
       // The QR-first ScenarioCatalog message (issue #755) is not part of the
       // client-router case table, so force a render to (re)draw the picker.
       if (msg && msg.type === 'ScenarioCatalog') scheduleRender();
+      // The host's debug/session read-back (issue #940) only arrives on change,
+      // and it is the one push that can change what an OPEN settings panel
+      // shows — so repaint here rather than from the render loop, which would
+      // rebuild the volume slider out from under a dragging finger.
+      if (msg && msg.type === 'DebugState' && settingsPanel) settingsPanel.rebuildContent();
       // Declarative iframe fan-out (#823): gui/dirty-consoles.js maps the
       // message to the console names to re-push. Runs after the state applies
       // above so every push carries fresh data. On Welcome the consoles are
@@ -1947,15 +2017,20 @@
         // Mount the settings panel (gear button + overlay) once state is ready.
         // Provide send, a getState closure, and the UI click audio element.
         if (typeof window.mountSettings === 'function') {
-          window.mountSettings({
+          settingsPanel = window.mountSettings({
             send: (type, data) => send(type, data),
-            // Station roster from the lobby mirror; the active rating lives in
-            // the sim store, composed here so the panel sees one object.
+            // Station roster from the lobby mirror; the active rating and the
+            // host's debug read-back (issue #940) live in the sim store,
+            // composed here so the panel sees one object.
             getState: () => ({
               ...uiState,
               stationRatings: window.simState ? window.simState.stationRatings : {},
+              debugFlags: window.simState ? window.simState.debugFlags : null,
             }),
-            audioEl: document.getElementById('ui-click'),
+            // Every audio channel this page owns. Master volume scales each
+            // element's own authored level rather than replacing it, so adding
+            // a channel here needs no other change (issue #940).
+            audioEls: [document.getElementById('ui-click')],
             myToken: myToken,
           });
         }

@@ -1,95 +1,141 @@
 /**
  * gui/coordination-popup.js — Pure payload normaliser for the AI-to-human
- * coordination popup (issues #494, #827).
+ * coordination popup (issues #494, #827) AND the viewscreen chatter bubble
+ * (issue #975).
  *
- * Extracted from client.html's showCoordinationPopup(): maps every
- * CoordinationPopup payload variant onto { sender, title, body }. The DOM
- * show/dismiss (element writes, 8s auto-dismiss timer) stays inline in
- * client.html.
+ * Maps every CoordinationPayload variant onto { sender, title, body }. This is
+ * the ONE place a coordination payload becomes a sentence: both the phone popup
+ * (client.html `showCoordinationPopup`) and the host viewscreen chatter widget
+ * (server.html `__updateChatter`) resolve through it, so the same event renders
+ * identical text on both surfaces (issue #975). The host previously composed a
+ * parallel English sentence in Rust (`format_coordination_chatter`); that is
+ * gone — Rust now emits the typed payload and the ids, and the words live only
+ * in `assets/strings/strings.csv`, resolved here through `t()`.
+ *
+ * The DOM show/dismiss (element writes, auto-dismiss timer) stays inline in the
+ * host pages.
  */
+
+import { t } from './strings.js';
+
+/**
+ * Weapon-family display name (issue #767). Literal `t(...)` calls, one per
+ * family, so scripts/check-strings.mjs can verify each id has a CSV row.
+ * @param {string|undefined} family serialised WeaponFamily variant
+ */
+function weaponFamilyLabel(family) {
+  if (family === 'Blasters') return t('coordination.weapon_family.blasters');
+  if (family === 'Torpedoes') return t('coordination.weapon_family.torpedoes');
+  // Phasers by default, including pre-#767 payloads that omit the field.
+  return t('coordination.weapon_family.phasers');
+}
+
+/**
+ * IntentAdvisory headline (issue #879). A `switch` of literal `t(...)` calls
+ * rather than a map, so check-strings validates every id; an unknown kind
+ * renders its own token, matching the host's closed IntentKind set drifting
+ * ahead of the client.
+ * @param {string|undefined} kind serialised IntentKind variant
+ */
+function intentTitle(kind) {
+  switch (kind) {
+    case 'TargetAcquired': return t('coordination.intent.target_acquired');
+    case 'TargetSwitched': return t('coordination.intent.target_switched');
+    case 'CombatPostureEntered': return t('coordination.intent.combat_posture_entered');
+    case 'CombatPostureLeft': return t('coordination.intent.combat_posture_left');
+    case 'BreakingOff': return t('coordination.intent.breaking_off');
+    case 'ShieldArcFocused': return t('coordination.intent.shield_arc_focused');
+    case 'PowerBrownout': return t('coordination.intent.power_brownout');
+    case 'ManoeuvreBegun': return t('coordination.intent.manoeuvre_begun');
+    default: return kind || t('coordination.advisory.fallback_title');
+  }
+}
 
 /**
  * Normalise a CoordinationPopup payload to display strings.
  *
+ * `senderLabel` and any id-bearing field in `payload` are already resolved by
+ * `localiseTree` at the wire boundary (issue #949) before this runs, so the
+ * only ids this function resolves are the sentence templates it introduces.
+ *
  * @param {{ type?: string, target?: string, data?: object }} payload
- * @param {string|null|undefined} senderLabel  msg.data.sender_label
+ * @param {string|null|undefined} senderLabel  the localised origin label
  * @returns {{ sender: string, title: string, body: string }}
  */
 export function normalizeCoordinationPayload(payload, senderLabel) {
-  const label = senderLabel || 'AI';
+  const label = senderLabel || t('chatter.sender.ai');
   const sender = payload.target ? (label + ' ? ' + payload.target) : label;
+  const data = payload.data || {};
 
-  let title, body;
-  if (payload.type === 'Advisory') {
-    title = label || 'Advisory';
-    body = payload.data?.message || payload.message || '';
-  } else if (payload.type === 'Alert') {
-    title = payload.data?.title || payload.title || 'Alert';
-    body = payload.data?.body || payload.body || '';
-  } else if (payload.type === 'FrequencyHint') {
-    title = 'Frequency Hint';
-    body = 'Tune to: ' + (payload.data?.frequency ?? payload.frequency ?? '?');
-  } else if (payload.type === 'ShieldFacingDown') {
-    title = (payload.data?.label || payload.label || 'Shield') + ' Offline';
-    body = '';
-  } else if (payload.type === 'ShieldFacingRestored') {
-    title = (payload.data?.label || payload.label || 'Shield') + ' Restored';
-    body = '';
-  } else if (payload.type === 'TargetDesignation') {
-    title = 'Sensors designates: ' + (payload.data?.label || payload.label || '?');
-    body = '';
-  } else if (payload.type === 'ArcBearingRequest') {
-    // Family-aware (issue #767): name the weapon family that needs the bearing.
-    // `family` is the serialised WeaponFamily variant; defaults to phasers for
-    // pre-#767 payloads that omit it.
-    const family = payload.data?.family || payload.family;
-    const weapon = family === 'Blasters' ? 'blasters'
-      : family === 'Torpedoes' ? 'torpedoes'
-      : 'phasers';
-    title = 'Tactical: come about, bring ' + weapon + ' to bear';
-    body = payload.data?.label || payload.label || '';
-  } else if (payload.type === 'ArcBearingWithdraw') {
-    // Issue #932: the standing request above is pulled because its family
-    // went unusable, not because the bearing itself changed.
-    const family = payload.data?.family || payload.family;
-    const weapon = family === 'Blasters' ? 'blasters'
-      : family === 'Torpedoes' ? 'torpedoes'
-      : 'phasers';
-    title = 'Belay that — ' + weapon + ' no longer able to bear';
-    body = '';
-  } else if (payload.type === 'IntentAdvisory') {
-    // Issue #879: a backfilled seat telling the rest of the crew what it just
-    // decided. The host sends a typed kind plus at most one label — it never
-    // sends the sentence, and never a figure — so the sentence is built here,
-    // following this file's existing inline-English chatter pattern.
-    const kind = payload.data?.kind || payload.kind;
-    const subject = payload.data?.subject ?? payload.subject ?? '';
-    const INTENT_TITLES = {
-      TargetAcquired: 'Target acquired',
-      TargetSwitched: 'Switching target',
-      CombatPostureEntered: 'Combat posture',
-      CombatPostureLeft: 'Standing down',
-      BreakingOff: 'Breaking off',
-      ShieldArcFocused: 'Focusing shields',
-      PowerBrownout: 'Power brownout',
-      ManoeuvreBegun: 'Manoeuvring',
-    };
-    title = INTENT_TITLES[kind] || kind || 'Advisory';
-    body = subject;
-  } else if (payload.type === 'PowerBrownout') {
-    const sysLabel = payload.data?.label || payload.label || 'System';
-    const level = payload.data?.allocated_level ?? payload.allocated_level ?? '?';
-    title = sysLabel + ' Power Brownout';
-    body = 'Allocation: ' + level;
+  let title;
+  let body = '';
+  const type = payload.type;
+
+  if (type === 'Advisory') {
+    title = label || t('coordination.advisory.fallback_title');
+    body = data.message ?? payload.message ?? '';
+  } else if (type === 'Alert') {
+    title = data.title ?? payload.title ?? t('coordination.alert.fallback_title');
+    body = data.body ?? payload.body ?? '';
+  } else if (type === 'FrequencyHint') {
+    title = t('coordination.frequency_hint.title');
+    body = t('coordination.frequency_hint.body', {
+      frequency: data.frequency ?? payload.frequency ?? '?',
+    });
+  } else if (type === 'ShieldFacingDown') {
+    title = t('coordination.shield_offline.title', {
+      label: data.label || payload.label || t('coordination.shield.fallback_label'),
+    });
+  } else if (type === 'ShieldFacingRestored') {
+    title = t('coordination.shield_restored.title', {
+      label: data.label || payload.label || t('coordination.shield.fallback_label'),
+    });
+  } else if (type === 'TargetDesignation') {
+    title = t('coordination.target_designation.title', {
+      label: data.label || payload.label || '?',
+    });
+  } else if (type === 'ArcBearingRequest') {
+    title = t('coordination.arc_bearing.title', {
+      weapon: weaponFamilyLabel(data.family || payload.family),
+    });
+    body = data.label || payload.label || '';
+  } else if (type === 'ArcBearingWithdraw') {
+    title = t('coordination.arc_withdraw.title', {
+      weapon: weaponFamilyLabel(data.family || payload.family),
+    });
+  } else if (type === 'PowerBrownout') {
+    title = t('coordination.power_brownout.title', {
+      label: data.label || payload.label || t('coordination.system.fallback_label'),
+    });
+    body = t('coordination.power_brownout.body', {
+      level: data.allocated_level ?? payload.allocated_level ?? '?',
+    });
+  } else if (type === 'IntentAdvisory') {
+    title = intentTitle(data.kind || payload.kind);
+    body = data.subject ?? payload.subject ?? '';
+  } else if (type === 'NavigateTo') {
+    title = t('coordination.navigate.title', {
+      label: data.label || payload.label || '?',
+    });
+  } else if (type === 'RepairRequest') {
+    title = t('coordination.repair.title', {
+      label: data.station_label || payload.station_label || '?',
+    });
+  } else if (type === 'ThreatBearing') {
+    const rad = data.bearing_rad ?? payload.bearing_rad ?? 0;
+    const deg = Math.round((((rad * 180) / Math.PI) % 360 + 360) % 360);
+    title = t('coordination.threat_bearing.title', {
+      deg,
+      label: data.label || payload.label || '?',
+    });
   } else {
-    title = payload.type || 'Advisory';
-    body = '';
+    title = payload.type || t('coordination.advisory.fallback_title');
   }
 
   return { sender, title, body };
 }
 
-// Expose for the non-module inline script in client.html.
+// Expose for the non-module inline scripts in client.html and server.html.
 if (typeof window !== 'undefined') {
   window.normalizeCoordinationPayload = normalizeCoordinationPayload;
 }

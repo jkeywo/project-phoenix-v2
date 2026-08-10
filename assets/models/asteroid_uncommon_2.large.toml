@@ -21,29 +21,35 @@ size = [ 7.996352932942781, 4.406569553822523, 4.844579606475971 ]
 # UV-preserving Blender collapse (scripts/blender-decimate.py), which is
 # what the voxel pre-pass was standing in for on the stubborn commons.
 [[lod]]
-max_distance = 25.0
+max_distance = 15.0
 model = "assets/models/asteroid_uncommon_2.glb"
 
 [[lod]]
-max_distance = 150.0
+max_distance = 100.0
 model = "assets/models/asteroid_uncommon_2_lod1.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_uncommon_2.glb"
-ratio = 0.15
+ratio = 0.067
 error = 0.01
-texture_size = 512
+texture_size = 128
 
 [[lod]]
-max_distance = 300.0
+max_distance = 400.0
 model = "assets/models/asteroid_uncommon_2_lod2.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_uncommon_2.glb"
-ratio = 0.1
-error = 0.1
-texture_size = 256
+ratio = 0.067
+error = 0.01
+texture_size = 128
 
 [[lod]]
-shape = "sphere"
-scale = [ 1.0, 0.5, 1.0 ]
+billboard = "assets/models/asteroid_uncommon_2_lod3.png"
+scale = [ 7.9595, 4.3607, 1.0 ]
+
+[lod.capture]
+source = "assets/models/asteroid_uncommon_2.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

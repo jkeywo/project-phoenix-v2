@@ -174,6 +174,24 @@ export class ClientSimState {
      */
     this.shipManual = null;
     /**
+     * Host debug/session state as the server last reported it (issue #940),
+     * or `null` before the first `DebugState` arrives.
+     * `{ flags: { Regions: bool, ... }, paused: bool, godMode: bool }`.
+     * Presentation state ONLY — the settings panel renders from it and never
+     * writes it.
+     *
+     * `paused` and `godMode` sit beside `flags` rather than in it because the
+     * host reports them separately: they are authoritative simulation state,
+     * not diagnostic overlays, and each is reached by its own route.
+     *
+     * PRESERVED across `Welcome` resets, like `tutorialProgress`, for a reason
+     * of its own: these are the HOST's flags, and they do not change because a
+     * world loaded. Clearing them would also race — the host re-announces when
+     * a peer identifies, and that broadcast and the peer's own `Welcome` flush
+     * in the same frame, so a reset could wipe the answer that just arrived.
+     */
+    this.debugFlags = this.debugFlags || null;
+    /**
      * Contextual tutorial overlay definitions per station (issue #916), from
      * Welcome `ship_config.station_tutorials` — TOML-authored `[[station.
      * tutorial]]` blocks carried verbatim. Evaluated per push by
@@ -185,7 +203,8 @@ export class ClientSimState {
      * has dismissed and which console actions they have used. Not server
      * state — hydrated from localStorage by gui/tutorial-state.js and
      * PRESERVED across Welcome resets (a reconnect must not replay dismissed
-     * tips), which is why this is the one field reset() keeps.
+     * tips). One of the two fields `reset()` keeps; `debugFlags` above is the
+     * other, for a different reason of its own.
      */
     this.tutorialProgress = this.tutorialProgress || { dismissed: {}, used: {} };
   }
@@ -384,6 +403,29 @@ export class ClientSimState {
         // The manual panel renders from it; nothing here mutates it or emits
         // any command in response.
         this.shipManual = d.manual || null;
+        break;
+      case 'DebugState':
+        // Authoritative read-back of the host's debug/session flags (#940).
+        // `flags` is a list of `[DebugFlag, bool]` pairs in a fixed order,
+        // folded into a plain object because every consumer asks about one
+        // named flag. Replaced wholesale rather than merged: the host sends the
+        // complete set every time, so merging could only preserve staleness.
+        //
+        // Presentation state only. The settings panel paints its Debug/Cheat
+        // buttons from this instead of from its own click, which is what makes
+        // a refused toggle (a demo build has no route) visible rather than
+        // silently ignored.
+        this.debugFlags = {
+          flags: Object.fromEntries(
+            (d.flags || []).filter((pair) => Array.isArray(pair) && pair.length === 2),
+          ),
+          // Separate wire fields, not entries in `flags`: pause and god mode are
+          // authoritative simulation state reached by their own routes, and
+          // neither is a `DebugFlag` any more. Reported in every build even
+          // though a demo phone can drive neither — a read-back is not a route.
+          paused: !!d.paused,
+          godMode: !!d.god_mode,
+        };
         break;
       case 'BlackboardUpdate':
         for (const [systemId, bb] of (d.updates || [])) {

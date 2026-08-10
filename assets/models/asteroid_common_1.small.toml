@@ -23,31 +23,35 @@ size = [ 3.992168469204823, 2.444663071286272, 3.5302602648597166 ]
 # pre-pass (remesh_voxel_size below + --remesh) before --force — see
 # scripts/blender-voxel-remesh.py and asteroid_common_4's sidecar.
 [[lod]]
-max_distance = 25.0
+max_distance = 15.0
 model = "assets/models/asteroid_common_1.glb"
 
 [[lod]]
-max_distance = 150.0
+max_distance = 100.0
 model = "assets/models/asteroid_common_1_lod1.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_common_1.glb"
-ratio = 0.15
+ratio = 0.319
 error = 0.01
-texture_size = 512
-remesh_voxel_size = 0.03
+texture_size = 256
 
 [[lod]]
-max_distance = 300.0
+max_distance = 400.0
 model = "assets/models/asteroid_common_1_lod2.glb"
 
 [lod.generate]
 source = "assets/models/asteroid_common_1.glb"
-ratio = 0.1
-error = 0.1
-texture_size = 256
-remesh_voxel_size = 0.03
+ratio = 0.113
+error = 0.01
+texture_size = 128
 
 [[lod]]
-shape = "sphere"
-scale = [ 1.0, 0.5, 1.0 ]
+billboard = "assets/models/asteroid_common_1_lod3.png"
+scale = [ 3.9807, 2.4387, 1.0 ]
+
+[lod.capture]
+source = "assets/models/asteroid_common_1.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

@@ -68,7 +68,9 @@
         r.state = { active: !!s.red_alert, auto: s.red_alert_auto || false };
         o.state = { objectives: s.objectives || [], boosted_objective_id: s.boosted_objective_id ?? null };
         var n = (s.blips && s.blips.length) || 0;
-        document.getElementById('footer-target').textContent = n > 0 ? n + ' contacts' : 'NO TARGET';
+        document.getElementById('footer-target').textContent = n > 0
+          ? (n === 1 ? t('console.common.contacts.one', { n: n }) : t('console.common.contacts.other', { n: n }))
+          : t('console.common.no_target');
         document.getElementById('footer-target').style.color = n > 0 ? 'var(--ink-dim)' : 'var(--ink-faint)';
         document.getElementById('station-damage').state = s.own_hull || null;
       }

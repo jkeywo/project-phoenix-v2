@@ -69,7 +69,10 @@
         document.getElementById('impulse-btn').state = { state: s.impulse_charge_progress > 0 ? 'charging' : 'ready', charge_pct: (s.impulse_charge_progress || 0) * 100, auto: !!s.helm_auto };
         document.getElementById('boost-btn').state = { available: !!s.boost_enabled, active: !!s.boost_active, recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100, auto: !!s.helm_auto };
         document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('footer-target').textContent = ((s.blips || []).length) + ' contacts';
+        var blipCount = (s.blips || []).length;
+        document.getElementById('footer-target').textContent = blipCount === 1
+          ? t('console.common.contacts.one', { n: 1 })
+          : t('console.common.contacts.other', { n: blipCount });
         setAutoState(null, document.getElementById('helm-auto-badge'), !!s.helm_auto);
       }
     });

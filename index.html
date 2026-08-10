@@ -939,7 +939,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-1670df43dfa7d846.js" crossorigin="anonymous" integrity="sha384-N3bqLRyH4UoH94W1JPu3Q9q1lTnVoCUDIhzBMq7P40I/jifP8XhfoMQDrtwwp3YW"><link rel="preload" href="./project-phoenix-1670df43dfa7d846_bg.wasm" crossorigin="anonymous" integrity="sha384-4PS2NKjelxbiA9fyg5BD5rTloiRdWiOy/pSckSt8w7aBsx57faXaESDTFebXx/ra" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-f50c8339b035b325.js" crossorigin="anonymous" integrity="sha384-XwgYAHFezQMbULJGpxz+qQIq48k7wxCMfRqe/A01AR5wJlt1pBTeIn/WNpzlWuS+"><link rel="preload" href="./project-phoenix-f50c8339b035b325_bg.wasm" crossorigin="anonymous" integrity="sha384-vFl0O7WhFIOfOoo11O2wXFu+xMdyI914Wi10zCPHM7I4BWVcJ5mRjGW9uu5lPTbu" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1146,7 +1146,7 @@
     <div class="lobby-bg"></div>
 
     <!-- AI-only launch: visible only when no players are connected -->
-    <button id="ai-launch-btn" style="display:none;" title="Launch with fully AI-controlled crew">
+    <button id="ai-launch-btn" style="display:none;" title="Launch with fully AI-controlled crew" data-i18n="server.launch_ai_ship" data-i18n-attr="title:server.launch_ai_ship_tip">
       ⬡ Launch AI Ship
     </button>
 
@@ -1203,7 +1203,7 @@
       <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
       <div id="asset-loading" style="display:none;position:absolute;inset:0;z-index:90;background:#000 url('assets/logo.png') center 40% / min(55vw,55vh) auto no-repeat;flex-direction:column;align-items:center;justify-content:center;color:#aae;font-family:monospace;font-size:0.9rem;gap:1rem;padding-bottom:15vh;">
         <div class="spinner-ring"></div>
-        <span>Preparing scenario&hellip; <span id="asset-loading-pct">0</span>%</span>
+        <span><span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span id="asset-loading-pct">0</span>%</span>
       </div>
 
       <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
@@ -1263,18 +1263,18 @@
           <canvas id="qr"></canvas>
         </a>
         <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
-          Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
+          <span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span id="loading-progress-pct">0</span>%
         </div>
       </div>
 
       <!-- Invisible click-target in bottom-left corner to toggle QR mid-game -->
-      <button id="qr-toggle-btn" title="Toggle QR code"></button>
+      <button id="qr-toggle-btn" title="Toggle QR code" data-i18n-attr="title:server.qr_toggle_tip"></button>
 
       <div id="top-bar">
         <div id="top-bar-row">
           <span id="conn-label"></span>
           <span id="conn-dot"></span>
-          <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+          <button id="fullscreen-btn" title="Toggle fullscreen" data-i18n-attr="title:client.fullscreen_tip">⛶</button>
         </div>
       </div>
     </div>
@@ -1305,8 +1305,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-1670df43dfa7d846.js';
-const wasm = await init({ module_or_path: './project-phoenix-1670df43dfa7d846_bg.wasm' });
+import init, * as bindings from './project-phoenix-f50c8339b035b325.js';
+const wasm = await init({ module_or_path: './project-phoenix-f50c8339b035b325_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1326,8 +1326,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // is classic-script, so publish the strings API on window and substitute
     // the static data-i18n markup once the table loads.
     import './gui/strings-boot.js';
-    import { t, has, applyToDom } from './gui/strings.js';
-    window.phStrings = { t, has, applyToDom };
+    // The viewscreen chatter renders coordination payloads through the same
+    // normaliser the phone popup uses (issue #975); importing it publishes
+    // window.normalizeCoordinationPayload for the classic script below.
+    import './gui/coordination-popup.js';
+    import { t, has, applyToDom, localiseTree } from './gui/strings.js';
+    window.phStrings = { t, has, applyToDom, localiseTree };
     applyToDom(document);
   </script>
   <!-- Console-action dispatch table (issue #822): the host page routes its
@@ -1345,6 +1349,27 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // before modules load. Render loops re-resolve on every state message.
     function t(id, params) {
       return window.phStrings ? window.phStrings.t(id, params) : id;
+    }
+
+    // Resolve a string id that came from authored DATA rather than from this
+    // page's own markup — an `[[available_ships]] label`, a `[[scenario]]
+    // label`. Phones get those already resolved, because every peer message
+    // crosses localiseTree() in gui/connection-manager.js; the host PULLS the
+    // same catalog straight out of wasm_get_scenario_catalog() and so misses
+    // that boundary entirely, which is why its scenario buttons rendered
+    // `world.combat_test.global.title` verbatim (issue #949).
+    //
+    // This is the pull half. The push half — everything Rust sends over a host
+    // channel — crosses the boundary once in __hostChannel below; see the note
+    // there for why the two halves are fixed differently.
+    //
+    // localiseTree IS the rule (substitute only what the table actually holds),
+    // so a mod pack that authored literal prose still reads, and t()'s
+    // ⟨missing.id⟩ marker stays reserved for ids this page names itself.
+    function tData(value) {
+      if (!value) return '';
+      const s = window.phStrings;
+      return s ? s.localiseTree(value) : value;
     }
 
   // ── Ship selection logic (issue #623, inlined from gui/ship-picker.js) ──
@@ -1447,7 +1472,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       vNav.textContent = t('server.hud_heading', { deg: String(s.heading).padStart(3, '0') });
     }
     if (vTac) {
-      vTac.textContent = s.red_alert ? 'WEAPONS HOT' : 'CLEAR';
+      vTac.textContent = s.red_alert ? t('server.hud_weapons_hot') : t('server.hud_clear');
     }
     if (vEng && typeof s.hull_pct === 'number') {
       vEng.textContent = t('server.hud_hull', { pct: s.hull_pct });
@@ -1461,6 +1486,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (desig) desig.textContent = s.ship_name;
     }
     // ── Game-over overlay ───────────────────────────────────────────────────
+    // The message is the scenario's `[[trigger.action]] message`, authored as a
+    // string id; it arrives resolved via localiseHostPayload (issue #949).
     const goOverlay = document.getElementById('game-over-overlay');
     const goMsg     = document.getElementById('game-over-message');
     if (goOverlay && goMsg) {
@@ -1551,9 +1578,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     // ── Title / subtitle ──────────────────────────────────────────────
+    // Both are the world's authored `[global] title` / `description`, which
+    // combat_test.toml holds as string ids. They arrive resolved: every host
+    // channel crosses localiseHostPayload in __hostChannel (issue #949).
     const titleEl = document.getElementById('lobby-title');
     const subEl = document.getElementById('lobby-subtitle');
-    if (titleEl) titleEl.textContent = s.scenario_title || 'Unknown Scenario';
+    if (titleEl) titleEl.textContent = s.scenario_title || t('server.unknown_scenario');
     if (subEl) subEl.textContent = s.scenario_body || '';
 
     // ── Crew count ────────────────────────────────────────────────────
@@ -1671,7 +1701,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           for (const pn of st.preset_names) {
             const pill = document.createElement('span');
             pill.className = 'complexity-pill' + (pn === 'Low' ? ' low' : '');
-            pill.textContent = pn === 'Low' ? 'LOW' : 'NORMAL';
+            pill.textContent = pn === 'Low' ? t('server.complexity_low') : t('server.complexity_normal');
             footer.appendChild(pill);
           }
           card.appendChild(footer);
@@ -1694,7 +1724,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const reservedCount = MAX_SLOTS - stations.length;
       if (reservedCount > 0) {
         aggregate.classList.add('active');
-        aggregate.textContent = `↻ ${reservedCount} station slot${reservedCount === 1 ? '' : 's'} reserved (max ${MAX_SLOTS})`;
+        // Two ids, not one with a JS-side `s`: a language whose plural rule is
+        // not English's cannot be served by suffixing a letter.
+        aggregate.textContent = reservedCount === 1
+          ? t('server.slots_reserved.one', { n: reservedCount, max: MAX_SLOTS })
+          : t('server.slots_reserved.other', { n: reservedCount, max: MAX_SLOTS });
       } else {
         aggregate.classList.remove('active');
         aggregate.textContent = '';
@@ -1719,7 +1753,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         for (const sp of s.spectators) {
           const pill = document.createElement('span');
           pill.className = 'spectator-pill waiting';
-          pill.textContent = `${sp} (waiting)`;
+          pill.textContent = t('server.spectator_waiting', { name: sp });
           specList.appendChild(pill);
         }
       }
@@ -1769,11 +1803,25 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   window.__updateChatter = function(json) {
     let ev;
     try { ev = JSON.parse(json); } catch (e) { return; }
-    const { from_label, to_label, text } = ev;
-    if (!from_label && !text) return;
+    const { from_label, to_label, payload } = ev;
+    if (!payload) return;
+    // The words come from the shared coordination-popup normaliser (issue
+    // #975), so the viewscreen and the phone read identically for one event.
+    // `from_label` and any id-bearing payload field are already resolved by
+    // localiseHostPayload; the normaliser only fills the sentence template.
+    if (typeof window.normalizeCoordinationPayload !== 'function') return;
+    const norm = window.normalizeCoordinationPayload(payload, from_label);
 
     const container = document.getElementById('chatter-container');
     if (!container) return;
+
+    // The bubble already shows sender → target as its own spans, so the text
+    // span carries the sentence. Advisory sets its title to the sender label,
+    // which the from-span already shows — drop a title that merely repeats it.
+    const parts = [];
+    if (norm.title && norm.title !== from_label) parts.push(norm.title);
+    if (norm.body) parts.push(norm.body);
+    const text = parts.join(' — ') || norm.title;
 
     // Create bubble element
     const bubble = document.createElement('div');
@@ -2343,7 +2391,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS;
           btn.dataset.path = sc.world;
           btn.dataset.scenarioId = sc.id;
-          btn.textContent = sc.label || sc.id;
+          btn.textContent = tData(sc.label) || sc.id;
           btn.addEventListener('click', function () {
             // Round 1 and every subsequent round after Game Over route through
             // the same arbiter (issue #756): the second round re-enters
@@ -2932,14 +2980,14 @@ function finishInit() {
   // collector has sampled so far and changes nothing in the running page.
   window.wasm_perf_capture = wasmBindings.wasm_perf_capture;
   // Cross-target libm vector battery (issue #909). Pure computation over
-  // fixed inputs — touches no simulation state; tests/smoke/simmath-vectors.spec.ts
+  // fixed inputs — touches no simulation state; tests/smoke/simmath-vectors.spec.js
   // calls it and compares the digest against the pinned native one.
   window.wasm_simmath_battery = wasmBindings.wasm_simmath_battery;
   // Cross-target determinism probe (issue #904). Builds its OWN minimal seeded
   // Bevy world, drives it for a fixed number of ticks under a deliberately
   // bursty frame pacing, and returns the canonical #901 digest ledger. It
   // never touches the world this page is running — a separate `App`, no
-  // renderer, no assets. tests/smoke/cross-target-determinism.spec.ts calls it
+  // renderer, no assets. tests/smoke/cross-target-determinism.spec.js calls it
   // and compares the ledger against the native pin in
   // tests/fixtures/cross-target-ledger.json.
   window.wasm_cross_target_probe = wasmBindings.wasm_cross_target_probe;
@@ -3073,10 +3121,46 @@ function finishInit() {
     audio_level:  function(p) { window.__audioLevel(p); },
     shake:        function(p) { window.__applyShake(p[0], p[1]); }
   };
+  // Every host-channel payload is built from authored DATA, so — exactly like a
+  // peer message — it can carry string ids: a world's `[global] title` on the
+  // lobby channel, a `game_over` trigger's `message` on the hud channel. A
+  // phone crosses localiseTree() once, in gui/connection-manager.js, at the
+  // point a peer message is decoded. This dispatcher is the host's equivalent
+  // boundary — the single place every channel payload enters the page — so the
+  // ids are resolved HERE rather than at each render site. Fixing it per render
+  // site is what left `world.combat_test.global.title` on #lobby-title after
+  // the scenario buttons were fixed (issue #949): two call sites found, and no
+  // reason to think a third would not appear.
+  //
+  // Same rule as localiseTree: substitute only what the table actually holds.
+  // Machine tokens (`phase`, station-rating names, the audio cue `kind`),
+  // player-typed names and prose a mod pack authored literally all pass through
+  // untouched — every id in strings.csv is dotted, so none of them can collide.
+  //
+  // Before the strings module has evaluated there is nothing to substitute
+  // WITH, so the payload passes through unchanged, exactly as t() does on this
+  // page.
+  function localiseHostPayload(payload) {
+    var s = window.phStrings;
+    if (!s || typeof s.localiseTree !== 'function') return payload;
+    // Channels whose payload is a JSON string (hud/lobby/chatter/audio_config/
+    // audio_cue) are resolved inside the JSON and re-encoded, because each
+    // handler owns its own parse. The numeric taps (audio_level's bare number,
+    // shake's [x, y]) carry no text but still cross the same call, so the rule
+    // holds for every channel without a per-channel list to keep in step.
+    if (typeof payload !== 'string') return s.localiseTree(payload);
+    try {
+      return JSON.stringify(s.localiseTree(JSON.parse(payload)));
+    } catch (e) {
+      // Not JSON: hand the handler exactly what Rust sent and let it report.
+      return payload;
+    }
+  }
+
   window.__hostChannel = function(name, payload) {
     var handler = _hostChannelHandlers[name];
     if (handler) {
-      handler(payload);
+      handler(localiseHostPayload(payload));
     } else {
       console.warn('[Phoenix] unhandled host channel:', name);
     }

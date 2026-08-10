@@ -151,7 +151,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "phaser-fore"
-display_name = "entity.alliance_battleship.hull.system_hull.phaser_fore.display_name"
+display_name = "weapon.phaser_fore.display_name"
 max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -159,7 +159,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-heavy-fore"
-display_name = "entity.alliance_battleship.hull.system_hull.blaster_heavy_fore.display_name"
+display_name = "weapon.blaster_heavy_fore.display_name"
 max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -167,7 +167,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "phaser-aft"
-display_name = "entity.alliance_battleship.hull.system_hull.phaser_aft.display_name"
+display_name = "weapon.phaser_aft.display_name"
 max_hp = 62
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -175,7 +175,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-port"
-display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_port.display_name"
+display_name = "weapon.torpedo_tube_fore_port.display_name"
 max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -183,7 +183,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-starboard"
-display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_starboard.display_name"
+display_name = "weapon.torpedo_tube_fore_starboard.display_name"
 max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -191,7 +191,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-centre"
-display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_centre.display_name"
+display_name = "weapon.torpedo_tube_fore_centre.display_name"
 max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -199,7 +199,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft-port"
-display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_port.display_name"
+display_name = "weapon.torpedo_tube_aft_port.display_name"
 max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -207,7 +207,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft-starboard"
-display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_starboard.display_name"
+display_name = "weapon.torpedo_tube_aft_starboard.display_name"
 max_hp = 61
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -424,11 +424,21 @@ volley_max = 3
 marker = "torpedo_port"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -448,7 +458,7 @@ marker = "torpedo_port"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -460,11 +470,21 @@ volley_max = 3
 marker = "torpedo_starboard"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -484,7 +504,7 @@ marker = "torpedo_starboard"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 # Patterned spinal launcher (issue #766): twin fore barrels with a timed
@@ -517,11 +537,21 @@ barrels = [ 0, 1 ]
 offset_secs = 1.0
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -541,7 +571,7 @@ offset_secs = 1.0
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -552,11 +582,21 @@ load_time = 4
 volley_max = 3
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -576,7 +616,7 @@ volley_max = 3
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -587,11 +627,21 @@ load_time = 4
 volley_max = 3
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
-  # synthesised (#885b). Two unconditional rules on two DIFFERENT channels, so
-  # they never contend: keep the tube loaded, and launch when the host offers
-  # the decision. Loaded state, magazine stock, target validity, range and arc
-  # stay host-side gates. A tube that should hold fire authors a guard here —
-  # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
+  # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
+  # contend: keep the tube loaded, and launch when the alert is up AND the arc
+  # the round would strike is down. Loaded state, magazine stock, target
+  # validity, range and arc stay host-side gates.
+  #
+  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
+  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
+  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
+  # upstream of every policy: no doctrine could authorise a round while the
+  # striking arc was up, and none could retune the threshold. It is an HP
+  # reading rather than a boolean, resolved per-arc through the target's own arc
+  # router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently edits this line;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
+  # and `idle = true` of declining launches altogether.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -611,7 +661,7 @@ volley_max = 3
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire)"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
 [sensors_console]
@@ -697,35 +747,35 @@ offline_duration = 10
 # the relevant directional arc is offline.
 [[shield_arc]]
 id = "fore"
-label = "entity.alliance_battleship.shield_arc.fore.label"
+label = "shield_arc.fore.label"
 center_deg = 0
 width_deg = 90
 hull_max_hp = 10
 
 [[shield_arc]]
 id = "starboard"
-label = "entity.alliance_battleship.shield_arc.starboard.label"
+label = "shield_arc.starboard.label"
 center_deg = 90
 width_deg = 90
 hull_max_hp = 9
 
 [[shield_arc]]
 id = "aft"
-label = "entity.alliance_battleship.shield_arc.aft.label"
+label = "shield_arc.aft.label"
 center_deg = 180
 width_deg = 90
 hull_max_hp = 9
 
 [[shield_arc]]
 id = "port"
-label = "entity.alliance_battleship.shield_arc.port.label"
+label = "shield_arc.port.label"
 center_deg = 270
 width_deg = 90
 hull_max_hp = 9
 
 [[shield_arc]]
 id = "omni"
-label = "entity.alliance_battleship.shield_arc.omni.label"
+label = "shield_arc.omni.label"
 center_deg = 0
 width_deg = 360
 priority = 2
@@ -1299,11 +1349,11 @@ source             = "shield"
 #
 # What it trades away is the front of the mission. The floor at eight published
 # waves is 4 rounds rather than 8, so an engagement lasting as long as the hull
-# is willing to keep shooting may now take 10 of the 12 rounds into wave 1 where
-# 1.0 capped it at 6. That ceiling is a licence rather than a forecast — flown
-# for real the destroyer spends 5 on wave 1 either way, because the engagement
-# ends before the gate does — but it is what 0.5 permits, and it is the price of
-# the margin above.
+# is willing to keep shooting may now take 10 of the 12 rounds while the whole
+# schedule is still published, where 1.0 capped it at 6. That ceiling is a
+# licence rather than a forecast — flown for real the destroyer spends 6 across
+# that stretch either way, because the engagement ends before the gate does —
+# but it is what 0.5 permits, and it is the price of the margin above.
 #
 # The tidy identity is what 1.0 bought (issue #943): the reserve came to exactly
 # one round at the last unit of threat, so on paper nothing could ever be
@@ -1323,10 +1373,16 @@ source             = "shield"
 # the doctrine.
 # `combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat`
 # (`tests/headless_runner.rs`) flies it for real and prints the magazine's
-# shape bucketed by remaining threat: {8: (12, 7), 7: (7, 3),
-# 6: (3, 1), 5: (1, 1)} — 12 aboard entering wave 1 and 7 leaving it, 7 into
-# wave 2 and 3 leaving it, still spending through wave 3. At 1.0 the same run
-# reads {8: (12, 7), 7: (7, 5)} and stops there: wave 2 never dies.
+# shape bucketed by remaining threat, (entered, lowest) per bucket:
+# {8: (12, 6), 7: (6, 2), 6: (2, 2), 5: (2, 2)}. Read a bucket as a STRETCH OF
+# THE MISSION rather than as one engagement — since #960 a wave arrives on its
+# own clock whether or not the last one is dead, so the top bucket spans wave 1
+# and the opening of wave 2, and bottoms lower than the death-gated chain used
+# to show. Ten of the twelve rounds go while six or more waves are still
+# published; the last two then sit under the floor (2/6 and 2/5 are both below
+# 0.5) until the count reaches 4. At 1.0 the same run reads
+# {8: (12, 6), 7: (6, 6)} and stops there: the latch shuts the moment wave 1
+# dies, and wave 2 never does.
 #
 # `sole_objective_count = 1` is the carve-out, and it counts NAMED Destroy
 # targets rather than doctrine entries. A world's `spawn_entity` override

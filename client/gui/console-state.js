@@ -25,6 +25,11 @@
  * science-target) additionally carry `edge`, `world_x`, `world_z` (and the
  * waypoint `source_uuid`).
  *
+ * `torpedo_armed` is the server's authoritative weapon-capability fact for a
+ * hostile contact (issue #957); `torpedo_badge` is the resolved display text
+ * `buildWeaponsConsoleState` folds in from it. The server never sends the badge
+ * text — it sends the capability, and the client decides how to say it.
+ *
  * @typedef {{ uuid: string, radar_x: number, radar_y: number,
  *             scaled_radius: number, kind: string, icon: string,
  *             color: number[]|null, objective_target: boolean,
@@ -32,6 +37,7 @@
  *             threat_level?: string|null, description?: string|null,
  *             target_tags?: string[], edge?: boolean,
  *             world_x?: number, world_z?: number,
+ *             torpedo_armed?: boolean, torpedo_badge?: string,
  *             source_uuid?: string|null }} RadarBlip
  */
 
@@ -483,6 +489,32 @@ export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, ran
   };
 }
 
+/**
+ * Fold the server's torpedo-capability fact into a display badge (issue #957).
+ *
+ * The server decides WHO is torpedo-armed — `RadarBlip.torpedo_armed` is set
+ * from the contact's live torpedo system and its hostility to this ship, and the
+ * client never re-derives it from a hull name, icon or model. This function only
+ * decides HOW to say it, which is why the string id is resolved here rather than
+ * being sent over the wire: the badge is client copy, so it never crosses the
+ * `localiseTree` ingress boundary that resolves server-sent ids, and spelling
+ * the id out in a `t()` call is what lets `scripts/check-strings.mjs` see it.
+ *
+ * Returns a new array; blips are copied rather than mutated, so the caller's
+ * server-owned blip objects stay untouched. A blip with no capability flag is
+ * passed through unchanged and carries no `torpedo_badge` key at all.
+ *
+ * @param {RadarBlip[]} blips
+ * @returns {RadarBlip[]}
+ */
+export function foldTorpedoBadges(blips) {
+  return (blips || []).map(b => (
+    b && b.torpedo_armed
+      ? { ...b, torpedo_badge: t('console.radar.torpedo_armed') }
+      : b
+  ));
+}
+
 // ── Console state builders ──────────────────────────────────────────────────
 
 /**
@@ -599,11 +631,21 @@ export function buildWeaponsConsoleState(state) {
   // Blips: authoritative server blips from the tactical-radar blackboard
   // (issue #829 — moved off the Weapons blackboard), otherwise build from
   // asteroids.
-  let blips = tacRadarBb.blips;
-  if (!blips || blips.length === 0) {
-    blips = state.weaponsBlips || [];
+  //
+  // COPY, never alias. The science marker and waypoint below are `push`ed onto
+  // `blips`, and the first two sources are arrays this builder does not own:
+  // `sim-state.js` replaces `blackboards[systemId]` only when a
+  // `BlackboardUpdate` arrives, and the server's `LastBroadcastBlackboards`
+  // delta cache re-sends a blackboard only when it changes. So on a stationary
+  // ship the store keeps handing back the same array, and pushing into it would
+  // append the same two markers on every build — unbounded growth in the client
+  // store. `buildBlips()` already returns a fresh array, so only the two
+  // borrowed sources need copying.
+  let blips = tacRadarBb.blips ? tacRadarBb.blips.slice() : [];
+  if (blips.length === 0) {
+    blips = (state.weaponsBlips || []).slice();
   }
-  if (!blips || blips.length === 0) {
+  if (blips.length === 0) {
     blips = buildBlips(
       state.asteroids || [],
       state.shipX || 0,
@@ -613,6 +655,11 @@ export function buildWeaponsConsoleState(state) {
       { rotate: true }
     );
   }
+
+  // Torpedo-armed badge (issue #957): fold the server's capability fact into
+  // display text before the marker blips below are appended — a waypoint or
+  // science marker is client-minted and carries no capability to badge.
+  blips = foldTorpedoBadges(blips);
 
   // Derive target_name from the locked server blip when no explicit name is stored.
   const resolvedTargetName = targetName || (targetUuid && blips.find(b => b.uuid === targetUuid)?.name) || null;

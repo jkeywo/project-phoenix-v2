@@ -51,3 +51,39 @@ direction = [ 1, 0, 0 ]
 [markers.camera_starboard]
 position = [ -1, 0, 0 ]
 direction = [ -1, 0, 0 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/alliance_cruiser.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/alliance_cruiser_lod1.glb"
+
+[lod.generate]
+source = "assets/models/alliance_cruiser.glb"
+ratio = 0.19
+error = 0.01
+texture_size = 256
+remesh_voxel_size = 0.0211
+
+[[lod]]
+max_distance = 400.0
+model = "assets/models/alliance_cruiser_lod2.glb"
+
+[lod.generate]
+source = "assets/models/alliance_cruiser.glb"
+ratio = 0.113
+error = 0.01
+texture_size = 128
+remesh_voxel_size = 0.0211
+
+[[lod]]
+billboard = "assets/models/alliance_cruiser_lod3.png"
+scale = [ 1.9019, 0.4357, 1.0 ]
+
+[lod.capture]
+source = "assets/models/alliance_cruiser.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

@@ -20,6 +20,10 @@ size = 12.0
 icon = "station"
 
 [mesh]
+# Uses the Alliance research-outpost hull (with its LOD ladder + billboard);
+# the torus below is the streaming/flat-render fallback, as on the other
+# stations (see station_axiom, station_research_outpost).
+model = "assets/models/alliance_research_outpost.glb"
 shape = "torus"
 radius = 12.0
 minor_radius = 3.0

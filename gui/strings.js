@@ -8,7 +8,9 @@
  *
  * `id` is the stable key code refers to, `context` tells a translator where the
  * string appears and what the placeholders mean, `en` is the English text.
- * Further locale columns (fr, de, ...) append to the right without code changes.
+ * Further locale columns (fr, de, ...) append to the right without code changes
+ * — no code changes, but every row needs the new cell even when it is empty,
+ * because scripts/check-strings.mjs holds every row to the header's field count.
  *
  * Square brackets around an `en` value mark it as agent-drafted placeholder copy
  * that no human has approved yet. They are stored literally in the CSV — this

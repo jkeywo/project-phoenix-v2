@@ -28,3 +28,39 @@ direction = [ 0, 0, 1 ]
 [markers.engine_starboard]
 position = [ 0.35, 0.0, 0.9 ]
 direction = [ 0, 0, 1 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/dynasty_destroyer.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/dynasty_destroyer_lod1.glb"
+
+[lod.generate]
+source = "assets/models/dynasty_destroyer.glb"
+ratio = 0.19
+error = 0.01
+texture_size = 256
+remesh_voxel_size = 0.0211
+
+[[lod]]
+max_distance = 400.0
+model = "assets/models/dynasty_destroyer_lod2.glb"
+
+[lod.generate]
+source = "assets/models/dynasty_destroyer.glb"
+ratio = 0.19
+error = 0.01
+texture_size = 256
+remesh_voxel_size = 0.0211
+
+[[lod]]
+billboard = "assets/models/dynasty_destroyer_lod3.png"
+scale = [ 1.9031, 0.4212, 1.0 ]
+
+[lod.capture]
+source = "assets/models/dynasty_destroyer.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

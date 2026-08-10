@@ -77,7 +77,9 @@
         document.getElementById('objective-list').state = { objectives: s.objectives || [], boosted_objective_id: s.boosted_objective_id ?? null };
         document.getElementById('station-damage').state = s.own_hull || null;
         var contacts = (s.blips && s.blips.length) || 0;
-        document.getElementById('footer-target').textContent = contacts > 0 ? t('console.common.contacts.other', { n: contacts }) : t('console.common.no_target');
+        document.getElementById('footer-target').textContent = contacts > 0
+          ? (contacts === 1 ? t('console.common.contacts.one', { n: 1 }) : t('console.common.contacts.other', { n: contacts }))
+          : t('console.common.no_target');
         setAutoState(null, document.getElementById('captain-auto-badge'), !!s.captain_auto);
 
         var objectivesEl = document.getElementById('objectives');

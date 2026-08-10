@@ -131,7 +131,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-fore"
-display_name = "entity.alliance_courier.hull.system_hull.blaster_fore.display_name"
+display_name = "weapon.blaster_fore.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -321,14 +321,14 @@ offline_duration = 8
 
 [[shield_arc]]
 id = "fore"
-label = "entity.alliance_courier.shield_arc.fore.label"
+label = "shield_arc.fore.label"
 center_deg = 0
 width_deg = 180
 hull_max_hp = 4
 
 [[shield_arc]]
 id = "aft"
-label = "entity.alliance_courier.shield_arc.aft.label"
+label = "shield_arc.aft.label"
 center_deg = 180
 width_deg = 180
 hull_max_hp = 4
@@ -784,6 +784,36 @@ weight = 100.0
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_radar) > 0"
 weight = 1.0
+
+# ── The WEAPONS DOCTRINE: which gun the ship turns to present (issue #956) ────
+#
+# The fleet baseline, authored inline because this hull composes no fragments.
+# The CHANNEL is the rank and the VERB is the family: beams first, then
+# blasters, then tubes — the order that used to be a Rust array in
+# `tick_weapons_arc_request`. The full reasoning lives in
+# `fragments/ai/fleet_baseline.toml`; a courier has no reason to depart from it,
+# and the ranks naming families it does not carry are inert (a family with no
+# emitters never qualifies).
+
+[weapons_console.ai]
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_first"
+when = "true"
+verb = "bring_phasers_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_second"
+when = "true"
+verb = "bring_blasters_to_bear"
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_third"
+when = "true"
+verb = "bring_torpedoes_to_bear"
 
 # Tactical — the ship's firing target. `combat-lock` is deliberately ABSENT from
 # the sources: it is Tactical's own output, so unioning it would be circular.

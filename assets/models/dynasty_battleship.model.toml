@@ -26,22 +26,37 @@ position = [ 1.05, 0.0, 1.85 ]
 direction = [ 0, 0, 1 ]
 
 [[lod]]
-max_distance = 5.0
+max_distance = 15.0
 model = "assets/models/dynasty_battleship.glb"
 
 [[lod]]
-max_distance = 300.0
+max_distance = 100.0
 model = "assets/models/dynasty_battleship_lod1.glb"
-scale = [ 0.75, 0.75, 0.75 ]
 
 [lod.generate]
 source = "assets/models/dynasty_battleship.glb"
-ratio = 0.25
+ratio = 0.536
 error = 0.01
 texture_size = 512
-remesh_voxel_size = 0.03
+remesh_voxel_size = 0.0211
 
 [[lod]]
-shape = "cuboid"
-colour = [ 0.3765, 0.302, 0.302 ]
-scale = [ 0.75, 0.75, 0.75 ]
+max_distance = 400.0
+model = "assets/models/dynasty_battleship_lod2.glb"
+
+[lod.generate]
+source = "assets/models/dynasty_battleship.glb"
+ratio = 0.113
+error = 0.01
+texture_size = 128
+remesh_voxel_size = 0.0211
+
+[[lod]]
+billboard = "assets/models/dynasty_battleship_lod3.png"
+scale = [ 3.8027, 1.3865, 1.0 ]
+
+[lod.capture]
+source = "assets/models/dynasty_battleship.glb"
+yaw_views = 8
+resolution = 256
+pitch = 20.0

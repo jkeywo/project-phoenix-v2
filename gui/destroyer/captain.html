@@ -105,7 +105,7 @@
         sensorRadarEl.state = sensors;
         sensorEl.state = sensors;
         var targetName = sensors.target_name || null;
-        document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : 'NO TARGET';
+        document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : t('console.common.no_target');
         document.getElementById('footer-target').style.color = targetName ? 'var(--tactical)' : 'var(--ink-faint)';
         // Station badge: the retired composite's captain_auto meant "station
         // is Backfill-rated". The per-system equivalent is every owned system

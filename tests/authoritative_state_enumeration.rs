@@ -136,7 +136,8 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "assign_named_entity_uuids", "build_catalog", "build_helm_ai_surfaces_frame",
     "clear_mod_pack_overlay", "encode_local_facing", "encode_local_velocity", "is_instagib",
     "mod_pack_overlay_get", "on_site_systems", "seed_helm_actuator_facts",
-    "set_mod_pack_overlay", "spawn_immediate_entities_internal", "sync_ship_position",
+    "push_mod_pack", "remove_mod_pack", "reorder_mod_packs", "active_packs",
+    "spawn_immediate_entities_internal", "sync_ship_position",
     "tick_boost", "tick_impulse", "visible_entities", "wasm_load_world", "wasm_select_ship",
     // Named directly in `digest-boundary-reviewer-answers` (AC5's verbatim
     // "IN" calls) rather than backed by its own PASM `state` entity's

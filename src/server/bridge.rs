@@ -1620,24 +1620,30 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
     crate::config_cache::set_scenario_manifest_toml(toml_str);
 }
 
-/// Validate an uploaded host mod-pack ZIP and, when accepted, install its
-/// session-scoped content overlay (issue #760).
+/// Validate an uploaded host mod-pack ZIP and, when accepted, PUSH it onto the
+/// session-scoped overlay STACK (issues #760, #987).
 ///
 /// Called by the pre-scenario upload control on the host page with the raw
 /// archive bytes. Validation is atomic (`world::mod_pack::validate_mod_pack`):
 /// on ANY failure nothing is applied and the returned array carries error
-/// findings; on success the exact-path overlay + mod manifest are installed via
-/// `config_cache::set_mod_pack_overlay` and an empty (or warning-only) array is
-/// returned, after which JS re-reads `wasm_get_scenario_catalog`.
+/// findings; on success the pack is appended to the overlay stack (installing
+/// pack B after pack A does NOT evict A) and an empty (or warning-only) array is
+/// returned, after which JS re-reads `wasm_get_scenario_catalog` and
+/// `wasm_active_pack_manifest`.
+///
+/// The pack is validated against the ALREADY-ACTIVE stack (issue #987): a
+/// duplicate pack id is rejected (`duplicate-pack-id`), an authored path shared
+/// with an active pack warns (`overlapping-pack-path`), and the candidate's
+/// composition may resolve a fragment supplied by an earlier active pack.
 ///
 /// Each finding is a JS object `{ severity, category, message, file, line }`.
 /// Manifest root worlds — and the include fragments the pack's entity templates
-/// pull in — resolve against the pack first, then against base content the host
-/// has already fetched (`peek_pending_world_toml` for worlds,
+/// pull in — resolve against the pack first, then the active stack, then base
+/// content the host has already fetched (`peek_pending_world_toml` for worlds,
 /// `raw_template_text` for entity/fragment TOML).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_validate_mod_pack(bytes: &[u8]) -> Array {
+pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
     // The host side of the mod-pack compatibility contract (issue #986): read
     // the base manifest's `[content]` identity and INJECT it, rather than let
     // the pure validator reach for a host default — the same seam discipline as
@@ -1647,20 +1653,22 @@ pub fn wasm_validate_mod_pack(bytes: &[u8]) -> Array {
     let base_content = crate::config_cache::get_scenario_manifest_toml()
         .and_then(|toml| crate::world::manifest::parse_content_identity(&toml))
         .unwrap_or_default();
+    // The already-active overlay stack the candidate is judged against (#987).
+    let active = crate::config_cache::active_packs();
     let result = crate::world::mod_pack::validate_mod_pack(
         bytes,
         &base_content,
         |path| {
             // Base content the host has already fetched, by authored path:
             // world TOML for the manifest, and raw entity/fragment TOML so a
-            // pack hull may include a SHIPPED fragment. The session overlay is
-            // deliberately not consulted — validation is atomic, so the pack
-            // being judged is not installed, and any previously installed pack
-            // has been cleared before this upload.
+            // pack hull may include a SHIPPED fragment. The active overlay stack
+            // is consulted by `validate_mod_pack` itself (via the `active` slice
+            // below), BENEATH the candidate and ABOVE this base resolver.
             crate::config_cache::peek_pending_world_toml(path)
                 .or_else(|| crate::config_cache::raw_template_text(path))
         },
         &crate::entity_loader::WasmTemplateLoader,
+        &active,
     );
 
     let arr = Array::new();
@@ -1705,59 +1713,128 @@ pub fn wasm_validate_mod_pack(bytes: &[u8]) -> Array {
         arr.push(&obj);
     }
 
-    // Atomic: install the overlay only when no finding is an error (AC1).
+    // Atomic: PUSH the pack onto the overlay stack only when no finding is an
+    // error (AC1). The stack is NOT cleared first — installing B after A keeps A
+    // (issue #987); the candidate simply shadows earlier packs for shared paths.
     if result.is_accepted() {
-        crate::config_cache::set_mod_pack_overlay(
-            result.files.into_iter().collect(),
-            result.manifest_toml,
-        );
+        let (id, name, version) =
+            crate::world::manifest::parse_pack_manifest(&result.manifest_toml)
+                .ok()
+                .and_then(|pm| pm.pack)
+                .map(|p| (p.id, p.name, p.version))
+                .unwrap_or_default();
+        crate::config_cache::push_mod_pack(crate::config_cache::ActivePack {
+            id,
+            name,
+            version,
+            files: result.files.into_iter().collect(),
+            manifest_toml: result.manifest_toml,
+        });
     }
     arr
 }
 
-/// Discard the current host mod-pack overlay + manifest (issue #760, AC4).
+/// Discard the WHOLE host mod-pack overlay stack (issues #760 AC4, #987).
 ///
-/// Called on return-to-lobby (before the next scenario stage) and before a new
-/// upload, so uploaded state never leaks into a fresh selection or a same-page
-/// next round. A page reload clears the thread-locals anyway; this covers the
-/// same-page seams.
+/// Called on return-to-lobby (before the next scenario stage), so uploaded state
+/// never leaks into a fresh selection or a same-page next round. A page reload
+/// clears the thread-local anyway; this covers the same-page seams.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_clear_mod_pack() {
     crate::config_cache::clear_mod_pack_overlay();
 }
 
-/// The accepted mod pack's `[pack]` identity, for the host status line (issue
-/// #986). Returns `{ name, version }` for the currently-installed overlay, or
-/// `null` when no valid pack is active (or the installed manifest carries no
-/// `[pack]` header). Read by `server.html` after a successful upload so the
-/// status shows the pack's name and version rather than a bare "applied".
+/// Remove the pack with `id` from the overlay stack (issue #987). Precedence for
+/// every path it owned re-resolves automatically — the next pack down that
+/// carries the path becomes the winner. Returns whether a pack was removed.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_get_mod_pack_meta() -> JsValue {
-    let Some(toml) = crate::config_cache::get_mod_manifest_toml() else {
-        return JsValue::NULL;
-    };
-    let Ok(parsed) = crate::world::manifest::parse_pack_manifest(&toml) else {
-        return JsValue::NULL;
-    };
-    let Some(pack) = parsed.pack else {
-        return JsValue::NULL;
-    };
-    let obj = Object::new();
-    Reflect::set(
-        &obj,
-        &JsValue::from_str("name"),
-        &JsValue::from_str(&pack.name),
-    )
-    .ok();
-    Reflect::set(
-        &obj,
-        &JsValue::from_str("version"),
-        &JsValue::from_str(&pack.version),
-    )
-    .ok();
-    obj.into()
+pub fn wasm_remove_mod_pack(id: String) -> bool {
+    crate::config_cache::remove_mod_pack(&id)
+}
+
+/// Reorder the overlay stack to match `ids` (oldest → newest / lowest → highest
+/// precedence), from the host reorder controls (issue #987). Ids not named keep
+/// their relative order after the named ones; unknown ids are ignored.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_reorder_mod_packs(ids: Vec<String>) {
+    crate::config_cache::reorder_mod_packs(&ids);
+}
+
+/// The active overlay stack + its path conflicts, for the host UI (issue #987).
+///
+/// Returns `{ packs: [{ id, name, version, file_count, scenarios }], conflicts:
+/// [{ path, winner, losers }] }`. `packs` is in load order (oldest → newest);
+/// `scenarios` is the pack manifest's `[[scenario]]` id list. `conflicts` names,
+/// for each authored path carried by two or more packs, the winning pack id and
+/// the shadowed loser ids (load order). `server.html` renders the applied-pack
+/// list with remove/reorder controls and the conflict summary from this.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_active_pack_manifest() -> JsValue {
+    let packs = crate::config_cache::active_packs();
+    let out = Object::new();
+
+    let packs_arr = Array::new();
+    for pack in &packs {
+        let obj = Object::new();
+        Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from_str(&pack.id)).ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("name"),
+            &JsValue::from_str(&pack.name),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("version"),
+            &JsValue::from_str(&pack.version),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("file_count"),
+            &JsValue::from_f64(pack.files.len() as f64),
+        )
+        .ok();
+        let scenarios = Array::new();
+        if let Ok(manifest) = crate::world::manifest::parse_manifest(&pack.manifest_toml) {
+            for s in &manifest.scenarios {
+                scenarios.push(&JsValue::from_str(&s.id));
+            }
+        }
+        Reflect::set(&obj, &JsValue::from_str("scenarios"), &scenarios).ok();
+        packs_arr.push(&obj);
+    }
+    Reflect::set(&out, &JsValue::from_str("packs"), &packs_arr).ok();
+
+    let conflicts_arr = Array::new();
+    for conflict in crate::config_cache::overlay_conflicts(&packs) {
+        let obj = Object::new();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("path"),
+            &JsValue::from_str(&conflict.path),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("winner"),
+            &JsValue::from_str(&conflict.winner),
+        )
+        .ok();
+        let losers = Array::new();
+        for loser in &conflict.losers {
+            losers.push(&JsValue::from_str(loser));
+        }
+        Reflect::set(&obj, &JsValue::from_str("losers"), &losers).ok();
+        conflicts_arr.push(&obj);
+    }
+    Reflect::set(&out, &JsValue::from_str("conflicts"), &conflicts_arr).ok();
+
+    out.into()
 }
 
 /// Return the authoritative pre-load scenario/ship catalog.
@@ -1777,7 +1854,7 @@ pub fn wasm_get_mod_pack_meta() -> JsValue {
 /// logs any findings as browser-console warnings under `LogCat::Config` — a
 /// typo'd `ships` curation entry or similar is otherwise silently invisible,
 /// since (unlike the mod-pack upload flow, which validates atomically at
-/// `wasm_validate_mod_pack`) nothing else ever calls `validate_manifest` on
+/// `wasm_add_mod_pack`) nothing else ever calls `validate_manifest` on
 /// this manifest. Findings are never fatal here, matching the
 /// `missing-scenario-world` precedent below, where `build_merged_catalog`
 /// simply skips an unresolvable entry rather than failing the whole catalog.
@@ -1792,11 +1869,21 @@ pub fn wasm_get_scenario_catalog() -> Array {
     let Ok(manifest) = parse_manifest(&manifest_toml) else {
         return arr;
     };
-    // Merge the base manifest with any validated mod-pack manifest (issue #760,
-    // AC3), resolving every root world through the overlay-aware resolver (pack
-    // content first, then base). Only manifest-listed scenarios appear.
-    let mod_manifest =
-        crate::config_cache::get_mod_manifest_toml().and_then(|t| parse_manifest(&t).ok());
+    // Merge the base manifest with EVERY active mod-pack manifest, in load order
+    // (issue #760 AC3, #987), resolving every root world through the overlay-aware
+    // resolver (the winning pack's content first, then base). Only
+    // manifest-listed scenarios appear.
+    let active = crate::config_cache::active_packs();
+    let parsed_mods: Vec<(String, crate::world::manifest::Manifest)> = active
+        .iter()
+        .filter_map(|p| {
+            parse_manifest(&p.manifest_toml)
+                .ok()
+                .map(|m| (p.id.clone(), m))
+        })
+        .collect();
+    let mods: Vec<(&str, &crate::world::manifest::Manifest)> =
+        parsed_mods.iter().map(|(id, m)| (id.as_str(), m)).collect();
     let resolve_world = |path: &str| {
         crate::config_cache::mod_pack_overlay_get(path)
             .or_else(|| crate::config_cache::peek_pending_world_toml(path))
@@ -1810,7 +1897,19 @@ pub fn wasm_get_scenario_catalog() -> Array {
             f.message
         );
     }
-    let catalog = build_merged_catalog(&manifest, mod_manifest.as_ref(), &resolve_world);
+    let merged = build_merged_catalog(&manifest, &mods, &resolve_world);
+    // Cross-pack duplicate-scenario-id collisions are non-blocking warnings
+    // resolved by load order (issue #987) — surface them the same way.
+    for f in &merged.findings {
+        bevy::log::warn!(
+            target: crate::logging::LogCat::Config.target(),
+            "scenario catalog [{}] {}: {}",
+            f.category,
+            f.source.reference,
+            f.message
+        );
+    }
+    let catalog = merged.catalog;
     for scenario in &catalog.scenarios {
         let obj = Object::new();
         Reflect::set(

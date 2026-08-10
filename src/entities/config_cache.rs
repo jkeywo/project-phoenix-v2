@@ -268,60 +268,197 @@ pub fn clear_template_preload_state() {
     SETTLED_TEMPLATE_PATHS.with(|s| s.borrow_mut().clear());
 }
 
-// ── Session-scoped mod-pack overlay (issue #760) ─────────────────────────────
+// ── Session-scoped mod-pack overlay STACK (issues #760, #987) ────────────────
 //
 // A VALID host mod-pack upload installs an in-memory, exact-path -> TOML map
-// here plus the pack's scenario manifest. Both content-resolution channels
-// (world/catalog fetch and entity/faction config request) consult
-// [`mod_pack_overlay_get`] FIRST, returning pack content for any overridden
-// authored path and falling back to the normal HTTP fetch otherwise (AC2). The
-// overlay only ever ADDS or REPLACES supported authored paths — it never
-// touches disk. It is host-session-scoped: a page reload clears these
-// thread-locals naturally, and [`clear_mod_pack_overlay`] discards them for the
-// same-page return-to-lobby / next-upload seam (AC4).
+// plus the pack's scenario manifest. Issue #987 turns the single overlay slot
+// into an ORDERED STACK ([`ACTIVE_PACKS`]): each accepted pack is PUSHED, and
+// installing pack B after pack A never evicts A — both stay resolvable, and any
+// path only A carries still resolves to A.
 //
-// Ungated (native + wasm) so the overlay resolution is unit-testable on native
-// without dragging in wasm-bindgen, exactly like the sidecar inbox above.
+// ## Precedence policy (deterministic, pure function of load order)
+//
+// The stack is ordered OLDEST → NEWEST: index 0 is the earliest-loaded pack, the
+// last element the most recently loaded. Resolution walks the stack from the
+// LAST-LOADED END FIRST ([`overlay_lookup`]), so a LATER-loaded pack WINS any
+// authored path an earlier pack also carries; base content (the normal HTTP
+// fetch) loses to every pack. Nothing is cached — every lookup walks the live
+// stack — so REMOVING a pack automatically re-resolves precedence (the next pack
+// down that carries the path becomes the winner), and REORDERING the stack is the
+// only other way a path's winner changes. Both are pure functions of the
+// resulting order.
+//
+// Both content-resolution channels (world/catalog fetch and entity/faction
+// config request) consult [`mod_pack_overlay_get`] FIRST, returning the WINNING
+// pack's content for any overridden authored path and falling back to the normal
+// HTTP fetch otherwise (AC2). The overlay only ever ADDS or REPLACES supported
+// authored paths — it never touches disk. It is host-session-scoped: a page
+// reload clears the thread-local naturally, and [`clear_mod_pack_overlay`]
+// discards the WHOLE stack for the same-page return-to-lobby / next-upload seam
+// (AC4).
+//
+// Ungated (native + wasm) so the ordered-stack resolution + conflict computation
+// is unit-testable on native without dragging in wasm-bindgen, exactly like the
+// sidecar inbox above. The resolution and conflict logic are PURE functions over
+// `&[ActivePack]` ([`overlay_lookup`], [`overlay_source_in`],
+// [`overlay_conflicts`]); the thread-local wrappers are a thin session-state
+// layer over them.
+
+/// One installed pack in the ordered overlay stack (issue #987).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ActivePack {
+    /// Stable pack id from the manifest `[pack] id`.
+    pub id: String,
+    /// Display name from `[pack] name`.
+    pub name: String,
+    /// Version string from `[pack] version`.
+    pub version: String,
+    /// Exact authored path -> TOML for every supported file the pack carries.
+    pub files: HashMap<String, String>,
+    /// The pack's raw `scenarios.toml` manifest.
+    pub manifest_toml: String,
+}
+
+/// A single authored path carried by more than one active pack (issue #987).
+///
+/// `winner` is the pack id that wins the path under the precedence policy (the
+/// latest-loaded pack carrying it); `losers` are the shadowed pack ids, in load
+/// order (earliest first).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PathConflict {
+    pub path: String,
+    pub winner: String,
+    pub losers: Vec<String>,
+}
+
+/// Resolve `path` against an ordered pack stack (oldest → newest); later wins.
+///
+/// Pure: the returned content is a function only of the stack contents and their
+/// order, so precedence is deterministic and testable without session state.
+pub fn overlay_lookup<'a>(packs: &'a [ActivePack], path: &str) -> Option<&'a str> {
+    packs
+        .iter()
+        .rev()
+        .find_map(|p| p.files.get(path).map(String::as_str))
+}
+
+/// The id of the pack that wins `path` under the precedence policy, if any
+/// (issue #987 provenance). The pure core behind [`overlay_source`].
+pub fn overlay_source_in<'a>(packs: &'a [ActivePack], path: &str) -> Option<&'a str> {
+    packs
+        .iter()
+        .rev()
+        .find(|p| p.files.contains_key(path))
+        .map(|p| p.id.as_str())
+}
+
+/// Every authored path carried by two or more packs in the stack, with its
+/// winner + shadowed losers (issue #987). Deterministic: paths are reported in
+/// sorted order and each conflict's pack ids follow load order.
+pub fn overlay_conflicts(packs: &[ActivePack]) -> Vec<PathConflict> {
+    use std::collections::BTreeMap;
+    let mut by_path: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for pack in packs {
+        for path in pack.files.keys() {
+            by_path
+                .entry(path.as_str())
+                .or_default()
+                .push(pack.id.as_str());
+        }
+    }
+    let mut conflicts = Vec::new();
+    for (path, ids) in by_path {
+        if ids.len() < 2 {
+            continue;
+        }
+        // Load order is preserved because the outer loop walks `packs` in order;
+        // the last id is the newest carrier (the winner).
+        let (winner, losers) = ids.split_last().expect("len >= 2");
+        conflicts.push(PathConflict {
+            path: path.to_string(),
+            winner: winner.to_string(),
+            losers: losers.iter().map(|s| s.to_string()).collect(),
+        });
+    }
+    conflicts
+}
+
 thread_local! {
-    /// Exact authored path -> uploaded TOML for the current host session.
-    static UPLOADED_PACK_TOML: RefCell<HashMap<String, String>> =
-        RefCell::new(HashMap::new());
-
-    /// The uploaded pack's `scenarios.toml` manifest, if a valid pack is active.
-    static MOD_MANIFEST_TOML: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The ordered mod-pack overlay stack for the current host session
+    /// (oldest → newest). See the precedence policy above.
+    static ACTIVE_PACKS: RefCell<Vec<ActivePack>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Install a validated mod-pack overlay for the current host session (issue
-/// #760). Called only after atomic validation accepts the pack, so nothing
-/// partial is ever installed. Replaces any previously installed overlay.
-pub fn set_mod_pack_overlay(files: HashMap<String, String>, manifest_toml: String) {
-    UPLOADED_PACK_TOML.with(|m| {
-        *m.borrow_mut() = files;
-    });
-    MOD_MANIFEST_TOML.with(|slot| {
-        *slot.borrow_mut() = Some(manifest_toml);
+/// A snapshot of the active pack stack, oldest → newest (issue #987).
+pub fn active_packs() -> Vec<ActivePack> {
+    ACTIVE_PACKS.with(|s| s.borrow().clone())
+}
+
+/// Push a validated pack onto the top (newest end) of the stack (issue #987).
+///
+/// Called only after atomic validation accepts the pack, so nothing partial is
+/// ever installed. Does NOT evict earlier packs — a later pack merely shadows an
+/// earlier one for the paths they share (that is the whole point of the stack).
+pub fn push_mod_pack(pack: ActivePack) {
+    ACTIVE_PACKS.with(|s| s.borrow_mut().push(pack));
+}
+
+/// Remove the pack with `id` from the stack (issue #987). Precedence for every
+/// path it owned re-resolves on the next lookup — the next pack down that carries
+/// the path becomes the winner. Returns whether a pack was removed.
+pub fn remove_mod_pack(id: &str) -> bool {
+    ACTIVE_PACKS.with(|s| {
+        let mut v = s.borrow_mut();
+        let before = v.len();
+        v.retain(|p| p.id != id);
+        v.len() != before
+    })
+}
+
+/// Reorder the stack so it matches `ids` (oldest → newest). Packs whose id is not
+/// named keep their relative order after the named ones; unknown ids are ignored.
+/// Precedence re-resolves on the next lookup (issue #987).
+pub fn reorder_mod_packs(ids: &[String]) {
+    ACTIVE_PACKS.with(|s| {
+        let mut v = s.borrow_mut();
+        let mut reordered: Vec<ActivePack> = Vec::with_capacity(v.len());
+        for id in ids {
+            if let Some(pos) = v.iter().position(|p| &p.id == id) {
+                reordered.push(v.remove(pos));
+            }
+        }
+        // Anything not named by `ids` keeps its (now-compacted) relative order.
+        reordered.append(&mut v);
+        *v = reordered;
     });
 }
 
-/// Look up an overridden authored path in the mod-pack overlay, if any.
+/// Look up an overridden authored path in the mod-pack overlay stack, if any.
 ///
 /// Both content channels consult this before falling back to the normal fetch,
-/// so an uploaded pack's file wins for any exact authored path it carries.
+/// so the WINNING pack's file (the latest loaded carrying the path) is used for
+/// any exact authored path it carries.
 pub fn mod_pack_overlay_get(path: &str) -> Option<String> {
-    UPLOADED_PACK_TOML.with(|m| m.borrow().get(path).cloned())
+    ACTIVE_PACKS.with(|s| overlay_lookup(&s.borrow(), path).map(str::to_string))
 }
 
-/// The active mod-pack scenario manifest TOML, if a valid pack is installed.
-pub fn get_mod_manifest_toml() -> Option<String> {
-    MOD_MANIFEST_TOML.with(|slot| slot.borrow().clone())
+/// The id of the pack that currently owns `path` in the overlay stack, if any
+/// (issue #987 provenance). Lets any consumer name the owning pack — the host
+/// conflict summary, a diagnostic log — without duplicating the walk.
+///
+/// Returns an owned `String` rather than the `&str` the pure [`overlay_source_in`]
+/// yields, because the stack lives behind a thread-local `RefCell` that cannot
+/// hand out a borrow past the `with` closure.
+pub fn overlay_source(path: &str) -> Option<String> {
+    ACTIVE_PACKS.with(|s| overlay_source_in(&s.borrow(), path).map(str::to_string))
 }
 
-/// Discard the mod-pack overlay + manifest for the current session (issue #760,
-/// AC4). Called before a new upload and on return-to-lobby, so uploaded state
-/// never leaks into a fresh selection stage or a same-page next round.
+/// Discard the WHOLE mod-pack overlay stack for the current session (issue #760
+/// AC4, #987). Called before return-to-lobby, so uploaded state never leaks into
+/// a fresh selection stage or a same-page next round. A page reload clears the
+/// thread-local anyway; this covers the same-page seams.
 pub fn clear_mod_pack_overlay() {
-    UPLOADED_PACK_TOML.with(|m| m.borrow_mut().clear());
-    MOD_MANIFEST_TOML.with(|slot| *slot.borrow_mut() = None);
+    ACTIVE_PACKS.with(|s| s.borrow_mut().clear());
 }
 
 // ── Public WASM API ──────────────────────────────────────────────────────────
@@ -1207,36 +1344,146 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         assert!(super::is_pending_sidecar_delivered(&path));
     }
 
-    // ── Mod-pack overlay resolution (issue #760) ─────────────────────────
+    // ── Mod-pack overlay stack: pure precedence (issues #760, #987) ──────
+    //
+    // The resolution + conflict logic is pure over `&[ActivePack]`, so these
+    // exercise it directly without touching the thread-local session state.
+
+    fn pack_with(id: &str, files: &[(&str, &str)]) -> super::ActivePack {
+        let mut map = HashMap::new();
+        for (p, t) in files {
+            map.insert((*p).to_string(), (*t).to_string());
+        }
+        super::ActivePack {
+            id: id.to_string(),
+            name: format!("Pack {id}"),
+            version: "1.0.0".to_string(),
+            files: map,
+            manifest_toml: String::new(),
+        }
+    }
 
     #[test]
-    fn mod_pack_overlay_returns_pack_content_for_overridden_path() {
-        let mut files = HashMap::new();
-        files.insert(
-            "assets/entities/__ovl_ship.toml".to_string(),
-            "tags = [\"pack\"]\n".to_string(),
+    fn later_pack_wins_a_shared_path_and_reorder_flips_it() {
+        // Both A and B carry the SAME path; B is loaded last, so B wins.
+        let a = pack_with("a", &[("assets/entities/x.toml", "id = \"A\"\n")]);
+        let b = pack_with("b", &[("assets/entities/x.toml", "id = \"B\"\n")]);
+        let stack = vec![a.clone(), b.clone()];
+        assert_eq!(
+            super::overlay_lookup(&stack, "assets/entities/x.toml"),
+            Some("id = \"B\"\n")
         );
-        super::set_mod_pack_overlay(files, "manifest".to_string());
+        assert_eq!(
+            super::overlay_source_in(&stack, "assets/entities/x.toml"),
+            Some("b")
+        );
+        // Reordered so A is last → A now wins the same path (pure fn of order).
+        let reordered = vec![b, a];
+        assert_eq!(
+            super::overlay_lookup(&reordered, "assets/entities/x.toml"),
+            Some("id = \"A\"\n")
+        );
+        assert_eq!(
+            super::overlay_source_in(&reordered, "assets/entities/x.toml"),
+            Some("a")
+        );
+    }
 
-        // Overridden path returns pack content; a non-overridden path falls
-        // through (None → caller does the normal HTTP fetch).
+    #[test]
+    fn a_path_only_one_pack_carries_resolves_to_that_pack() {
+        let a = pack_with("a", &[("assets/entities/only_a.toml", "id = \"A\"\n")]);
+        let b = pack_with("b", &[("assets/entities/only_b.toml", "id = \"B\"\n")]);
+        let stack = vec![a, b];
         assert_eq!(
-            super::mod_pack_overlay_get("assets/entities/__ovl_ship.toml"),
-            Some("tags = [\"pack\"]\n".to_string())
+            super::overlay_lookup(&stack, "assets/entities/only_a.toml"),
+            Some("id = \"A\"\n")
         );
         assert_eq!(
-            super::mod_pack_overlay_get("assets/entities/__ovl_other.toml"),
+            super::overlay_lookup(&stack, "assets/entities/only_b.toml"),
+            Some("id = \"B\"\n")
+        );
+        assert_eq!(
+            super::overlay_lookup(&stack, "assets/entities/none.toml"),
             None
         );
-        assert_eq!(super::get_mod_manifest_toml(), Some("manifest".to_string()));
+    }
 
-        // Session end / return-to-lobby discards the overlay (AC4).
+    #[test]
+    fn overlay_conflicts_names_winner_and_losers_in_load_order() {
+        let a = pack_with("a", &[("assets/entities/x.toml", "A")]);
+        let b = pack_with("b", &[("assets/entities/y.toml", "B")]);
+        let c = pack_with("c", &[("assets/entities/x.toml", "C")]);
+        // x is carried by a (oldest) and c (newest); y only by b → no conflict.
+        let conflicts = super::overlay_conflicts(&[a, b, c]);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].path, "assets/entities/x.toml");
+        assert_eq!(conflicts[0].winner, "c");
+        assert_eq!(conflicts[0].losers, vec!["a".to_string()]);
+    }
+
+    // ── Mod-pack overlay stack: session thread-local (issues #760, #987) ─
+    //
+    // Each test uses UNIQUE pack ids + paths and clears the stack at the end so
+    // the process-wide `ACTIVE_PACKS` thread-local stays order-independent.
+
+    #[test]
+    fn pushing_pack_b_after_a_does_not_evict_a() {
         super::clear_mod_pack_overlay();
+        super::push_mod_pack(pack_with(
+            "sess-a",
+            &[("assets/entities/__sess_x.toml", "A")],
+        ));
+        super::push_mod_pack(pack_with(
+            "sess-b",
+            &[("assets/entities/__sess_x.toml", "B")],
+        ));
+        // B wins the shared path, but A is still present (only shadowed).
         assert_eq!(
-            super::mod_pack_overlay_get("assets/entities/__ovl_ship.toml"),
+            super::mod_pack_overlay_get("assets/entities/__sess_x.toml"),
+            Some("B".to_string())
+        );
+        assert_eq!(super::active_packs().len(), 2);
+        assert_eq!(
+            super::overlay_source("assets/entities/__sess_x.toml"),
+            Some("sess-b".to_string())
+        );
+
+        // Removing B re-resolves precedence: A now wins the path (AC).
+        assert!(super::remove_mod_pack("sess-b"));
+        assert_eq!(
+            super::mod_pack_overlay_get("assets/entities/__sess_x.toml"),
+            Some("A".to_string())
+        );
+        assert_eq!(
+            super::overlay_source("assets/entities/__sess_x.toml"),
+            Some("sess-a".to_string())
+        );
+
+        super::clear_mod_pack_overlay();
+        assert!(super::active_packs().is_empty());
+        assert_eq!(
+            super::mod_pack_overlay_get("assets/entities/__sess_x.toml"),
             None
         );
-        assert_eq!(super::get_mod_manifest_toml(), None);
+    }
+
+    #[test]
+    fn reorder_mod_packs_reassigns_the_winner() {
+        super::clear_mod_pack_overlay();
+        super::push_mod_pack(pack_with("ord-a", &[("assets/entities/__ord_x.toml", "A")]));
+        super::push_mod_pack(pack_with("ord-b", &[("assets/entities/__ord_x.toml", "B")]));
+        // Newest (ord-b) wins by default.
+        assert_eq!(
+            super::mod_pack_overlay_get("assets/entities/__ord_x.toml"),
+            Some("B".to_string())
+        );
+        // Reorder so ord-a is last → ord-a wins.
+        super::reorder_mod_packs(&["ord-b".to_string(), "ord-a".to_string()]);
+        assert_eq!(
+            super::mod_pack_overlay_get("assets/entities/__ord_x.toml"),
+            Some("A".to_string())
+        );
+        super::clear_mod_pack_overlay();
     }
 
     // ── Composable-template preload contract (issue #869) ────────────────

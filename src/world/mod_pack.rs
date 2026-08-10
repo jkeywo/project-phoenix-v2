@@ -34,6 +34,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::config_cache::ActivePack;
 use crate::entity_includes::FragmentSource;
 use crate::entity_loader::TemplateLoader;
 use crate::world::config::parse_world;
@@ -201,11 +202,16 @@ impl ValidatedModPack {
     }
 }
 
-/// Build a single archive-scoped error finding (no line lookup — the archive is
-/// not a single source file).
-fn archive_error(category: &'static str, reference: &str, message: String) -> WorldFinding {
+/// Build a single archive-scoped finding (no line lookup — the archive is not a
+/// single source file).
+fn archive_finding(
+    severity: Severity,
+    category: &'static str,
+    reference: &str,
+    message: String,
+) -> WorldFinding {
     WorldFinding {
-        severity: Severity::Error,
+        severity,
         category,
         message,
         source: SourceLocation {
@@ -216,12 +222,20 @@ fn archive_error(category: &'static str, reference: &str, message: String) -> Wo
     }
 }
 
+/// An archive-scoped ERROR finding (blocks acceptance).
+fn archive_error(category: &'static str, reference: &str, message: String) -> WorldFinding {
+    archive_finding(Severity::Error, category, reference, message)
+}
+
 /// The raw-TOML source an uploaded pack's entity composition resolves against
-/// (issue #906).
+/// (issue #906, #987).
 ///
-/// Pack files FIRST, then base content through the caller's resolver — the same
-/// order, and for the same reason, as the world resolution above: a pack that
-/// carries a fragment must be validated against the fragment it carries.
+/// Pack files FIRST, then whatever the injected `resolve_base` closure serves —
+/// which [`validate_mod_pack`] composes as the already-active overlay stack
+/// (newest active first) THEN base content (issue #987). Same order, and for the
+/// same reason, as the world resolution above: a pack that carries a fragment
+/// must be validated against the fragment it carries, and a fragment an EARLIER
+/// active pack supplies must resolve too.
 ///
 /// The alternative — letting the composition check fall back to the host's
 /// default fragment source — reads the session overlay (not installed yet: the
@@ -340,7 +354,7 @@ impl<F: Fn(&str) -> Option<String>> TemplateLoader for PackTemplates<'_, F> {
 /// review, F3). It is wrapped in [`PackTemplates`], which serves the pack's own
 /// hulls in front of it — see that type for why the constraint is structural
 /// rather than a note asking callers to be careful. The only production caller
-/// is `bridge::wasm_validate_mod_pack`, which is `wasm32`-only and passes
+/// is `bridge::wasm_add_mod_pack`, which is `wasm32`-only and passes
 /// `WasmTemplateLoader` (`false` in the browser, so the presence check is inert
 /// there); a native caller may now pass the same type and get the answer it
 /// expects. The residual gap that leaves is stated on
@@ -349,17 +363,28 @@ impl<F: Fn(&str) -> Option<String>> TemplateLoader for PackTemplates<'_, F> {
 /// caught at spawn, not at upload.
 ///
 /// Composition references are validated per manifest-listed world against the
-/// pack + base worlds, and each spawned template's `includes` closure against
-/// the pack's own files + base ([`PackFragments`]).
+/// pack + `active` stack + base worlds, and each spawned template's `includes`
+/// closure against the pack's own files + the active stack + base
+/// ([`PackFragments`]).
+///
+/// `active` is the ALREADY-INSTALLED overlay stack (oldest → newest), so a new
+/// pack's composition resolves against packs loaded before it: the ordered
+/// precedence is CANDIDATE pack → `active` stack (newest active first) → base
+/// (issue #987). It also drives two multi-pack findings: a `duplicate-pack-id`
+/// error when the candidate's `[pack] id` is already active (the stack keys packs
+/// by id), and a non-blocking `overlapping-pack-path` WARNING naming the winner
+/// (this candidate, loaded latest) and the shadowed loser for each authored path
+/// the candidate shares with an active pack.
 ///
 /// The returned [`ValidatedModPack`] carries error findings on any failure and
-/// the overlay files + manifest on success; the caller applies the overlay only
-/// when [`ValidatedModPack::is_accepted`] holds.
+/// the overlay files + manifest on success; the caller pushes the pack onto the
+/// overlay stack only when [`ValidatedModPack::is_accepted`] holds.
 pub fn validate_mod_pack(
     zip_bytes: &[u8],
     base_content: &ContentIdentity,
     resolve_base: impl Fn(&str) -> Option<String>,
     template_loader: &dyn TemplateLoader,
+    active: &[ActivePack],
 ) -> ValidatedModPack {
     // 1. Parse the store ZIP — a malformed / non-store / CRC-mismatched archive
     //    rejects the whole pack.
@@ -466,6 +491,37 @@ pub fn validate_mod_pack(
         ));
     }
 
+    // 3c. Multi-pack stack findings (issue #987). A duplicate pack id is a hard
+    //     ERROR — the overlay stack keys packs by id, so two packs with the same
+    //     id could never both be addressed. An authored path this candidate
+    //     shares with an already-active pack is a non-blocking WARNING naming the
+    //     winner (this candidate, loaded latest) and the shadowed loser.
+    if !pack.id.trim().is_empty() && active.iter().any(|p| p.id == pack.id) {
+        findings.push(archive_error(
+            "duplicate-pack-id",
+            MANIFEST_PATH,
+            format!("a mod pack with id {:?} is already active", pack.id),
+        ));
+    }
+    for path in files.keys() {
+        if path == MANIFEST_PATH {
+            continue;
+        }
+        for active_pack in active {
+            if active_pack.files.contains_key(path) {
+                findings.push(archive_finding(
+                    Severity::Warning,
+                    "overlapping-pack-path",
+                    path,
+                    format!(
+                        "mod pack {:?} overrides path {path:?} also provided by active pack {:?} — {:?} wins",
+                        pack.id, active_pack.id, pack.id
+                    ),
+                ));
+            }
+        }
+    }
+
     // 4. Path whitelist — any file outside the supported authored paths (or a
     //    traversal attempt) rejects the whole pack.
     for path in files.keys() {
@@ -493,21 +549,34 @@ pub fn validate_mod_pack(
         }
     }
 
-    // 6. Validate the manifest, resolving worlds against pack THEN base.
+    // 6. Validate the manifest, resolving worlds against pack THEN the active
+    //    stack THEN base (issue #987 precedence: candidate → active → base).
     let manifest = pack_manifest.manifest;
-    let resolve = |path: &str| files.get(path).cloned().or_else(|| resolve_base(path));
+    // The active stack, newest active first, falling through to base content.
+    // This is what a NEW pack composes against for anything it does not carry
+    // itself, so a fragment an EARLIER active pack supplies resolves here.
+    let resolve_beneath = |path: &str| -> Option<String> {
+        active
+            .iter()
+            .rev()
+            .find_map(|p| p.files.get(path).cloned())
+            .or_else(|| resolve_base(path))
+    };
+    let resolve_beneath = &resolve_beneath;
+    let resolve = |path: &str| files.get(path).cloned().or_else(|| resolve_beneath(path));
     // Bind a shared reference so the same resolver serves both the manifest
     // validation here and the per-world composition checks below (`&F: Fn` is
     // Copy, so this passes by value without moving the closure).
     let resolve = &resolve;
     findings.extend(validate_manifest(&manifest, &manifest_toml, resolve));
 
-    // Raw fragment text and parsed templates, both pack-first (issue #906 and
-    // #973 review F3). Built once, outside the per-world loop: they depend only
-    // on the archive, and `PackTemplates` borrows the fragment source.
+    // Raw fragment text and parsed templates, candidate-first then the active
+    // stack then base (issue #906, #973 review F3, #987). Built once, outside the
+    // per-world loop: they depend only on the archive + active stack, and
+    // `PackTemplates` borrows the fragment source.
     let pack_fragments = PackFragments {
         files: &files,
-        resolve_base: &resolve_base,
+        resolve_base: resolve_beneath,
     };
     let pack_templates = PackTemplates {
         files: &files,
@@ -783,7 +852,7 @@ mod tests {
             ),
             ("assets/worlds/modx.toml", &simple_world("world.modx.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(
             result.is_accepted(),
             "unexpected findings: {:?}",
@@ -805,7 +874,7 @@ mod tests {
         // nothing (AC1).
         let mut zip = create_store_zip(&[("scenarios.toml", "manifest")]);
         zip.truncate(20); // cut off inside the first local header
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(result.files.is_empty());
         assert_eq!(result.findings[0].category, "invalid-archive");
@@ -816,8 +885,13 @@ mod tests {
         // Bytes with no local-file-header signature parse as an empty archive,
         // so the required manifest is absent — still an atomic rejection with
         // nothing applied.
-        let result =
-            validate_mod_pack(b"not a zip at all", &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(
+            b"not a zip at all",
+            &base_identity(),
+            no_base,
+            &NoTemplates,
+            &[],
+        );
         assert!(!result.is_accepted());
         assert!(result.files.is_empty());
         assert!(result
@@ -829,7 +903,7 @@ mod tests {
     #[test]
     fn missing_manifest_rejects_whole_pack() {
         let zip = create_store_zip(&[("assets/worlds/x.toml", &simple_world("t"))]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -845,7 +919,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/secret/keys.toml", "danger = true"),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -860,7 +934,7 @@ mod tests {
             "scenarios.toml",
             &manifest_for("ghost", "assets/worlds/ghost.toml"),
         )]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -875,7 +949,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/entities/broken.toml", "not valid ["),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -906,7 +980,7 @@ entity = "raider"
             ),
             ("assets/worlds/bad.toml", bad_world),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -929,7 +1003,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates, &[]);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
@@ -986,7 +1060,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates, &[]);
         assert!(
             result.is_accepted(),
             "a pack's hull must compose against the fragment the pack itself \
@@ -1013,7 +1087,7 @@ entity = "raider"
                 "includes = [\"pack_core.toml\"]\nname = \"Pack Hull\"\n",
             ),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted(), "findings: {:?}", result.findings);
         assert!(
             result
@@ -1051,7 +1125,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates, &[]);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
@@ -1096,7 +1170,13 @@ entity = "raider"
             ),
             ("assets/entities/pack_hull.toml", "name = \"Pack Hull\"\n"),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &AuthoritativeNoTemplates);
+        let result = validate_mod_pack(
+            &zip,
+            &base_identity(),
+            no_base,
+            &AuthoritativeNoTemplates,
+            &[],
+        );
         assert!(
             result.is_accepted(),
             "a hull the pack itself carries must not read as absent: {:?}",
@@ -1119,7 +1199,13 @@ entity = "raider"
                 &world_spawning("assets/entities/absent_hull.toml", "pack_one"),
             ),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &AuthoritativeNoTemplates);
+        let result = validate_mod_pack(
+            &zip,
+            &base_identity(),
+            no_base,
+            &AuthoritativeNoTemplates,
+            &[],
+        );
         assert!(!result.is_accepted(), "findings: {:?}", result.findings);
         assert!(
             result
@@ -1148,7 +1234,7 @@ entity = "raider"
             ),
             ("assets/worlds/m.toml", &simple_world("world.m.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "missing-pack-header"));
         assert!(result.files.is_empty());
@@ -1167,7 +1253,7 @@ entity = "raider"
             SUPPORTED_PACK_FORMAT + 1,
         );
         let zip = create_store_zip(&[("scenarios.toml", &manifest)]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "unsupported-pack-format"));
         // No wall of content errors: the missing world is never reached.
@@ -1196,7 +1282,7 @@ entity = "raider"
             ("scenarios.toml", &manifest),
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "invalid-pack-id"));
     }
@@ -1212,7 +1298,7 @@ entity = "raider"
             ("scenarios.toml", manifest),
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "pack-content-mismatch"));
     }
@@ -1231,7 +1317,7 @@ entity = "raider"
             ("scenarios.toml", &manifest),
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "pack-content-mismatch"));
     }
@@ -1255,7 +1341,7 @@ entity = "raider"
     #[test]
     fn fixture_valid_v1_is_accepted() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/valid-v1.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
         assert!(
             result.is_accepted(),
             "valid-v1.zip must be accepted: {:?}",
@@ -1266,7 +1352,7 @@ entity = "raider"
     #[test]
     fn fixture_format_too_new_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/format-too-new.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "unsupported-pack-format"));
     }
@@ -1274,8 +1360,166 @@ entity = "raider"
     #[test]
     fn fixture_content_epoch_mismatch_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/content-epoch-mismatch.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates);
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "pack-content-mismatch"));
+    }
+
+    // ── Multi-pack stack: precedence, conflicts, provenance (issue #987) ─────
+
+    /// Build a minimal already-active pack from a set of `(path, text)` files.
+    fn active_pack(id: &str, files: &[(&str, &str)]) -> ActivePack {
+        let mut map = std::collections::HashMap::new();
+        for (p, t) in files {
+            map.insert((*p).to_string(), (*t).to_string());
+        }
+        ActivePack {
+            id: id.to_string(),
+            name: format!("Pack {id}"),
+            version: "1.0.0".to_string(),
+            files: map,
+            manifest_toml: String::new(),
+        }
+    }
+
+    /// A candidate whose `[pack] id` is already active is rejected — the overlay
+    /// stack keys packs by id, so a collision could never be addressed.
+    #[test]
+    fn a_candidate_whose_pack_id_is_already_active_is_rejected() {
+        // `manifest_for` always sets `[pack] id = "test-pack"`.
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("modx", "assets/worlds/modx.toml"),
+            ),
+            ("assets/worlds/modx.toml", &simple_world("world.modx.title")),
+        ]);
+        let active = [active_pack("test-pack", &[])];
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &active);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "duplicate-pack-id"));
+    }
+
+    /// An authored path the candidate shares with an EARLIER active pack is a
+    /// non-blocking WARNING (winner = candidate, loser = active pack) — the pack
+    /// is still accepted.
+    #[test]
+    fn an_overlapping_path_is_a_non_blocking_warning_naming_winner_and_loser() {
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("modx", "assets/worlds/modx.toml"),
+            ),
+            ("assets/worlds/modx.toml", &simple_world("world.modx.title")),
+        ]);
+        // A different-id active pack that already carries the same world path.
+        let active = [active_pack(
+            "earlier",
+            &[(
+                "assets/worlds/modx.toml",
+                "[global]\ntitle = \"world.other.title\"\n",
+            )],
+        )];
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &active);
+        assert!(
+            result.is_accepted(),
+            "an overlap is a warning, not a rejection: {:?}",
+            result.findings
+        );
+        assert!(
+            result
+                .findings
+                .iter()
+                .any(|f| f.category == "overlapping-pack-path" && f.severity == Severity::Warning),
+            "expected an overlapping-pack-path warning: {:?}",
+            result.findings
+        );
+    }
+
+    /// A pack whose hull includes a fragment carried by an EARLIER ACTIVE PACK
+    /// validates — composition resolves candidate → active stack → base (issue
+    /// #987). Mirrors `pack_hull_may_include_a_base_fragment`, but the fragment
+    /// lives in the active stack rather than in base content.
+    #[test]
+    fn pack_hull_may_include_a_fragment_from_an_earlier_active_pack() {
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("modh", "assets/worlds/modh.toml"),
+            ),
+            (
+                "assets/worlds/modh.toml",
+                &world_spawning("assets/entities/pack_hull.toml", "pack_one"),
+            ),
+            (
+                "assets/entities/pack_hull.toml",
+                "includes = [\"layer_core.toml\"]\nname = \"Pack Hull\"\n",
+            ),
+        ]);
+        // The earlier active pack supplies the fragment the candidate's hull
+        // includes; the candidate does NOT carry it and base knows nothing.
+        let active = [active_pack(
+            "base-layer",
+            &[("assets/entities/layer_core.toml", "class = \"escort\"\n")],
+        )];
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &active);
+        assert!(
+            result.is_accepted(),
+            "a pack hull must compose against a fragment an earlier active pack \
+             carries: {:?}",
+            result.findings
+        );
+    }
+
+    /// The committed overlapping-pair fixtures, validated through the REAL
+    /// archive bytes: both carry `assets/worlds/shared_arena.toml`, so loading
+    /// the second while the first is active warns (winner + loser) yet accepts.
+    #[test]
+    fn fixture_overlapping_pair_warns_but_accepts() {
+        let a_bytes = include_bytes!("../../tests/fixtures/mod-packs/overlap-a.zip");
+        let b_bytes = include_bytes!("../../tests/fixtures/mod-packs/overlap-b.zip");
+
+        // A validates on an empty stack.
+        let ra = validate_mod_pack(
+            a_bytes,
+            &fixture_base_identity(),
+            no_base,
+            &NoTemplates,
+            &[],
+        );
+        assert!(
+            ra.is_accepted(),
+            "overlap-a.zip must accept: {:?}",
+            ra.findings
+        );
+        let active_a = active_pack(
+            "overlap-a",
+            &ra.files
+                .iter()
+                .map(|(p, t)| (p.as_str(), t.as_str()))
+                .collect::<Vec<_>>(),
+        );
+
+        // B validates with A active → accepted, with an overlapping-path warning.
+        let rb = validate_mod_pack(
+            b_bytes,
+            &fixture_base_identity(),
+            no_base,
+            &NoTemplates,
+            &[active_a],
+        );
+        assert!(
+            rb.is_accepted(),
+            "overlap-b.zip must accept over an active overlap-a (overlap warns, \
+             does not block): {:?}",
+            rb.findings
+        );
+        assert!(
+            rb.findings
+                .iter()
+                .any(|f| f.category == "overlapping-pack-path"),
+            "expected an overlapping-pack-path warning: {:?}",
+            rb.findings
+        );
     }
 }

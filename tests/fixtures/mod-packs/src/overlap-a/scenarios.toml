@@ -1,0 +1,23 @@
+# Committed mod-pack fixture (issue #987): the FIRST of an overlapping pair.
+#
+# overlap-a and overlap-b both carry `assets/worlds/shared_arena.toml`. Loading
+# the second while the first is active raises a non-blocking
+# `overlapping-pack-path` warning (winner + loser) yet still accepts — see
+# src/world/mod_pack.rs `fixture_overlapping_pair_warns_but_accepts`.
+#
+# Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
+# (byte-reproducible; gated by `--check`).
+
+[pack]
+format = 1
+id = "overlap-a"
+version = "1.0.0"
+name = "Overlap A"
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "overlap_a"
+world = "assets/worlds/shared_arena.toml"

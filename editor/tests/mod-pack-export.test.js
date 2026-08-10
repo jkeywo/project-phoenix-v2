@@ -477,4 +477,18 @@ describe('committed mod-pack fixtures round-trip through readStoreZip', () => {
     expect(manifest.pack.format).toBe(1);
     expect(manifest.pack.requires.content_epoch).toBe(2);
   });
+
+  // The overlapping pair (issue #987): both packs carry the SAME authored path
+  // with DISTINCT content, which is what drives the Rust-side
+  // `overlapping-pack-path` warning (later loaded wins).
+  it('overlap-a.zip and overlap-b.zip carry the same arena world path with distinct content', () => {
+    const a = readStoreZip(new Uint8Array(readFileSync(path.join(FIXTURE_DIR, 'overlap-a.zip'))));
+    const b = readStoreZip(new Uint8Array(readFileSync(path.join(FIXTURE_DIR, 'overlap-b.zip'))));
+    const shared = 'assets/worlds/shared_arena.toml';
+    expect(a[shared]).toBeDefined();
+    expect(b[shared]).toBeDefined();
+    expect(a[shared]).not.toBe(b[shared]);
+    expect(tomlParse(a[MANIFEST_PATH]).pack.id).toBe('overlap-a');
+    expect(tomlParse(b[MANIFEST_PATH]).pack.id).toBe('overlap-b');
+  });
 });

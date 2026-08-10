@@ -312,6 +312,10 @@ pub struct ScenarioCatalogEntry {
     /// The ships this scenario offers — the referenced world's
     /// `[[available_ships]]` list, and *only* those (issue #754 AC4).
     pub ships: Vec<CatalogShip>,
+    /// Provenance: the pack id this scenario came from, or `None` for a
+    /// base-manifest scenario (issue #987). `build_catalog` always sets `None`;
+    /// [`build_merged_catalog`] stamps each mod scenario with its pack id.
+    pub origin: Option<String>,
 }
 
 /// The authoritative pre-load catalog: the selectable scenarios and their
@@ -366,39 +370,74 @@ pub fn build_catalog(
             label,
             description: world.global.description.clone(),
             ships,
+            origin: None,
         });
     }
     ScenarioCatalog { scenarios }
 }
 
-/// Build the merged scenario catalog from the base manifest PLUS an optional
-/// validated mod-pack manifest (issue #760, AC3).
+/// The merged base+mod scenario catalog plus any warnings raised while merging
+/// (issue #987). Kept as one return value so the caller surfaces both together.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MergedCatalog {
+    pub catalog: ScenarioCatalog,
+    /// Non-blocking findings (currently `duplicate-scenario-id` warnings for
+    /// cross-pack id collisions resolved by load order).
+    pub findings: Vec<WorldFinding>,
+}
+
+/// Build the merged scenario catalog from the base manifest PLUS an ORDERED
+/// slice of validated mod-pack manifests (issue #760 AC3, issue #987).
 ///
-/// Both manifests are resolved through the same overlay-aware `resolve_world`
-/// closure (the caller consults the uploaded-pack overlay first, then base
-/// content), so a mod scenario's root world is read from the pack. The merged
-/// catalog contains regular scenarios and manifest-listed mod scenarios ONLY —
-/// a world present in the overlay but not named by any manifest never appears
-/// as a selectable scenario. A mod entry whose `id` matches a base entry
-/// REPLACES it (exact-path/id override, consistent with the overlay's
-/// add-or-replace contract); otherwise it is appended.
+/// `mods` is `(pack_id, manifest)` pairs in LOAD ORDER (oldest → newest); every
+/// manifest — base and each mod — resolves through the same overlay-aware
+/// `resolve_world` closure (the caller consults the winning pack in the overlay
+/// stack first, then base content), so a mod scenario's root world is read from
+/// the WINNING pack for that path — which can differ from the manifest-listing
+/// pack when a later pack overrides the same world path. The merged catalog contains regular scenarios and
+/// manifest-listed mod scenarios ONLY — a world present in the overlay but not
+/// named by any manifest never appears as a selectable scenario.
+///
+/// Duplicate scenario ids resolve by LOAD ORDER: a later entry REPLACES an
+/// earlier one of the same id. Replacing a BASE scenario is the sanctioned mod
+/// override and stays silent (behaviour unchanged from #760). Replacing a
+/// scenario that came from an EARLIER PACK is a cross-pack collision and raises a
+/// non-blocking `duplicate-scenario-id` warning naming both packs. Each mod
+/// scenario is stamped with its pack id in [`ScenarioCatalogEntry::origin`].
 pub fn build_merged_catalog(
     base: &Manifest,
-    mod_manifest: Option<&Manifest>,
+    mods: &[(&str, &Manifest)],
     resolve_world: impl Fn(&str) -> Option<String>,
-) -> ScenarioCatalog {
+) -> MergedCatalog {
     let mut catalog = build_catalog(base, &resolve_world);
-    if let Some(modm) = mod_manifest {
+    let mut findings = Vec::new();
+    for (pack_id, modm) in mods {
         let mod_catalog = build_catalog(modm, &resolve_world);
-        for entry in mod_catalog.scenarios {
+        for mut entry in mod_catalog.scenarios {
+            entry.origin = Some((*pack_id).to_string());
             if let Some(existing) = catalog.scenarios.iter_mut().find(|s| s.id == entry.id) {
+                if let Some(prev) = existing.origin.clone() {
+                    findings.push(WorldFinding {
+                        severity: Severity::Warning,
+                        category: "duplicate-scenario-id",
+                        message: format!(
+                            "scenario id {:?} from pack {:?} overrides the same id from pack {:?} (load order wins)",
+                            entry.id, pack_id, prev
+                        ),
+                        source: SourceLocation {
+                            file: "assets/scenarios.toml".to_string(),
+                            line: None,
+                            reference: entry.id.clone(),
+                        },
+                    });
+                }
                 *existing = entry;
             } else {
                 catalog.scenarios.push(entry);
             }
         }
     }
-    catalog
+    MergedCatalog { catalog, findings }
 }
 
 /// Build an error [`WorldFinding`] located in the manifest text.
@@ -797,13 +836,26 @@ world = "assets/worlds/mod_skirmish.toml"
             "[global]\ntitle = \"world.unlisted.title\"\n".to_string(),
         );
 
-        let catalog = build_merged_catalog(&base, Some(&mod_manifest), resolver(map));
-        let ids: Vec<&str> = catalog.scenarios.iter().map(|s| s.id.as_str()).collect();
+        let merged = build_merged_catalog(&base, &[("modpack", &mod_manifest)], resolver(map));
+        let ids: Vec<&str> = merged
+            .catalog
+            .scenarios
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
         assert_eq!(ids, ["default", "combat_test", "mod_skirmish"]);
         assert!(
             !ids.contains(&"unlisted_mod"),
             "an overlay world not named by a manifest must not be selectable"
         );
+        // The appended mod scenario is stamped with its pack id (issue #987).
+        let skirmish = merged
+            .catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "mod_skirmish")
+            .unwrap();
+        assert_eq!(skirmish.origin.as_deref(), Some("modpack"));
     }
 
     #[test]
@@ -823,23 +875,71 @@ label = "Modded Default"
             "assets/worlds/mod_default.toml".to_string(),
             "[global]\ntitle = \"world.mod_default.title\"\n".to_string(),
         );
-        let catalog = build_merged_catalog(&base, Some(&mod_manifest), resolver(map));
+        let merged = build_merged_catalog(&base, &[("modpack", &mod_manifest)], resolver(map));
         // Still two ids (default replaced in place, not duplicated).
-        assert_eq!(catalog.scenarios.len(), 2);
-        let default = catalog
+        assert_eq!(merged.catalog.scenarios.len(), 2);
+        let default = merged
+            .catalog
             .scenarios
             .iter()
             .find(|s| s.id == "default")
             .unwrap();
         assert_eq!(default.world, "assets/worlds/mod_default.toml");
         assert_eq!(default.label.as_deref(), Some("Modded Default"));
+        // Replacing a BASE scenario is the sanctioned override — no warning.
+        assert!(
+            merged.findings.is_empty(),
+            "base-vs-mod replacement must not warn: {:?}",
+            merged.findings
+        );
     }
 
     #[test]
-    fn merged_catalog_without_mod_manifest_is_base_only() {
+    fn merged_catalog_without_mods_is_base_only() {
         let base = parse_manifest(MANIFEST).unwrap();
-        let catalog = build_merged_catalog(&base, None, resolver(full_map()));
-        assert_eq!(catalog.scenarios.len(), 2);
+        let merged = build_merged_catalog(&base, &[], resolver(full_map()));
+        assert_eq!(merged.catalog.scenarios.len(), 2);
+        assert!(merged.findings.is_empty());
+    }
+
+    #[test]
+    fn merged_catalog_duplicate_scenario_id_across_packs_resolves_by_load_order() {
+        let base = parse_manifest(MANIFEST).unwrap();
+        let mod_a = parse_manifest(
+            "[[scenario]]\nid = \"shared\"\nworld = \"assets/worlds/shared_a.toml\"\n",
+        )
+        .unwrap();
+        let mod_b = parse_manifest(
+            "[[scenario]]\nid = \"shared\"\nworld = \"assets/worlds/shared_b.toml\"\n",
+        )
+        .unwrap();
+        let mut map = full_map();
+        map.insert(
+            "assets/worlds/shared_a.toml".to_string(),
+            "[global]\ntitle = \"world.shared_a.title\"\n".to_string(),
+        );
+        map.insert(
+            "assets/worlds/shared_b.toml".to_string(),
+            "[global]\ntitle = \"world.shared_b.title\"\n".to_string(),
+        );
+        // packA loaded first, packB last → packB wins the shared id.
+        let merged = build_merged_catalog(
+            &base,
+            &[("packA", &mod_a), ("packB", &mod_b)],
+            resolver(map),
+        );
+        let shared = merged
+            .catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "shared")
+            .unwrap();
+        assert_eq!(shared.world, "assets/worlds/shared_b.toml");
+        assert_eq!(shared.origin.as_deref(), Some("packB"));
+        // The cross-pack collision raised a non-blocking warning naming both.
+        assert_eq!(merged.findings.len(), 1);
+        assert_eq!(merged.findings[0].category, "duplicate-scenario-id");
+        assert!(!merged.findings[0].is_error());
     }
 
     // -- shipped manifest ----------------------------------------------------

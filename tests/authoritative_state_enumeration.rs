@@ -286,15 +286,22 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "TorpedoTargetSnapshot", "TorpedoTubeAiPolicies", "TrackedEntities", "VerticalThrustInput",
     "WeaponFiredThisTick", "WeaponsArcRequestState", "WeaponsConsoleSection",
     "WeaponsUpdateFirstTick", "WorldContentRuntime", "WorldSetupBroadcast",
-    // The Rhai scripting seam (issue #984, Rhai M6 phase 2a). Both are
+    // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are
     // authoritative-but-deferred, exactly like `WorldContentRuntime` above:
     // `RawWorldSource` is the untouched world TOML the script loader reads at
     // `Startup`; `WorldScriptRuntime` holds the compiled handler ASTs, the
-    // per-tick script budget and the content hash. Registered in the census run
-    // even for a script-free world (the systems reference them via `Option<Res>`
-    // / `Option<ResMut>`), but never instantiated there. When
-    // `WorldContentRuntime`'s deferred state is folded into the digest, the
-    // script runtime's future `PendingCallbacks` (2b) belongs in the same fold.
+    // per-tick script budget, the content hash and — since phase 2b — the live
+    // `PendingCallbacks` queue of deferred `after(n, |ctx| …)` callbacks that
+    // `tick_script_callbacks` drains each tick. That `PendingCallbacks` is now
+    // POPULATED authoritative future work (a serialisable `(fire_tick,
+    // script_path, fn_name)` vec inside `WorldScriptRuntime`), so it belongs in
+    // the same digest fold as `WorldContentRuntime`'s own deferred state
+    // (`pending_delayed_actions` / `pending_world_events`). It carries no
+    // `#[derive(Resource)]` of its own — it lives inside `WorldScriptRuntime` —
+    // so it never appears as a distinct registry entry; this one baseline line
+    // covers it. Registered in the census run even for a script-free world (the
+    // systems reference them via `Option<Res>` / `Option<ResMut>`), but never
+    // instantiated there.
     "RawWorldSource", "WorldScriptRuntime",
 ];
 

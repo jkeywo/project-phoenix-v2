@@ -21,7 +21,7 @@ use crate::world::dispatch::{
 use crate::world::layers::{evaluate_layer_load, evaluate_layer_unload, LayerLoadOutcome};
 use crate::world::scenario::evaluate_scenario_load;
 use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
-use crate::world::script::schedule::{SchedClock, TickBudget};
+use crate::world::script::schedule::{PendingCallbacks, SchedClock, TickBudget};
 
 // -- Resources --------------------------------------------------------------
 
@@ -328,8 +328,11 @@ pub struct ScriptHandlerRef {
 /// before scripting existed. Its lifecycle mirrors [`WorldContentRuntime`]:
 /// created at world load, persisting for the session.
 ///
-/// No `pending_callbacks` in this slice — deferred `after(n, |ctx| …)` callbacks
-/// (`drain_due`) are wired in a later slice (2b).
+/// [`pending_callbacks`](Self::pending_callbacks) is the serialisable
+/// future-work queue that deferred `after(n, |ctx| …)` callbacks land on
+/// (issue #984, Rhai M6 phase 2b): [`tick_trigger_pipeline`]'s scripted
+/// handlers and [`tick_script_callbacks`]'s own callbacks EXTEND it, and
+/// [`tick_script_callbacks`] drains the due entries each tick.
 #[derive(Resource)]
 pub struct WorldScriptRuntime {
     /// The runtime host that runs retained handler fns.
@@ -352,6 +355,13 @@ pub struct WorldScriptRuntime {
     pub budget_tick: u64,
     /// Content hash of the compiled script set (the #988 save-binding input).
     pub content_hash: u64,
+    /// Serialisable queue of deferred `after(n, |ctx| …)` callbacks awaiting
+    /// their fire tick (issue #984, Rhai M6 phase 2b). Populated by every
+    /// scripted handler / callback that schedules one, drained in authored
+    /// order by [`tick_script_callbacks`] once `now_tick >= fire_tick`. Live
+    /// authoritative future work — it belongs in the same digest fold as
+    /// [`WorldContentRuntime`]'s own deferred state.
+    pub pending_callbacks: PendingCallbacks,
 }
 
 /// The two script-related reads [`tick_trigger_pipeline`] needs, bundled into a
@@ -479,6 +489,21 @@ impl Plugin for WorldPlugin {
                 FixedUpdate,
                 crate::ai_plugin::advance_objective_cursors
                     .in_set(crate::sim_sets::SimSet::Modifiers),
+            )
+            // The scripted-callback drain (issue #984, Rhai M6 phase 2b):
+            // `after(n, |ctx| …)` callbacks that scripted handlers scheduled are
+            // drained here once due. Ordered AFTER `tick_trigger_pipeline` (so it
+            // shares that system's per-tick budget reset, and sees this tick's
+            // freshly-scheduled callbacks) and BEFORE `tick_delayed_actions` (so a
+            // callback's own `in_seconds` effect reaches the delayed queue in the
+            // same tick a trigger's would). A no-op for every script-free world:
+            // no `WorldScriptRuntime` → early return before any `DerefMut`.
+            .add_systems(
+                FixedUpdate,
+                tick_script_callbacks
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(tick_trigger_pipeline)
+                    .before(tick_delayed_actions),
             )
             .add_systems(
                 FixedUpdate,
@@ -672,6 +697,7 @@ pub(crate) fn compile_world_scripts(mut commands: Commands, raw: Option<Res<RawW
         budget: TickBudget::new(),
         budget_tick: 0,
         content_hash: compiled.content_hash,
+        pending_callbacks: PendingCallbacks::new(),
     });
 }
 
@@ -1716,10 +1742,15 @@ pub(crate) fn tick_trigger_pipeline(
                         // Script-scheduled delayed effects join the SAME queue a
                         // TOML `action_delays` entry uses; dropped when the
                         // mission clock is unanchored, matching the declarative
-                        // path above. Callbacks (`after(..)`) are deferred to 2b.
+                        // path above.
                         if elapsed_secs.is_some() {
                             runtime.pending_delayed_actions.extend(effects.delayed);
                         }
+                        // Deferred `after(..)` callbacks join the runtime's
+                        // serialisable future-work queue (issue #984, phase 2b);
+                        // `tick_script_callbacks` drains the due ones each tick.
+                        // 2a dropped these — now they are retained.
+                        sr.pending_callbacks.extend(effects.callbacks);
                     }
                 }
             }
@@ -2426,6 +2457,186 @@ fn tick_delayed_actions(
             balance_events.as_deref_mut(),
         );
         runtime.pending_world_events.extend(out_events);
+    }
+}
+
+/// Drain the scripted `after(n, |ctx| …)` callbacks that have become due and run
+/// them through the live pipeline (issue #984, Rhai M6 phase 2b).
+///
+/// The completing half of the deferred-work seam M3 stood up: a scripted handler
+/// (or an earlier callback) that calls `ctx.schedule.after(n, |ctx| { … })`
+/// records a serialisable [`ScheduledCall`](crate::world::script::schedule::ScheduledCall)
+/// on [`WorldScriptRuntime::pending_callbacks`]; this system drains the entries
+/// whose `fire_tick` has arrived, resolves each against its unit's retained AST,
+/// and feeds the call's effects through the SAME apply path the trigger handlers
+/// use ([`apply_script_commands`]). Its three effect kinds route identically to
+/// the trigger-handler branch:
+/// * `commands` — applied this tick; their chaining `new_events` queue onto
+///   `pending_world_events` for the NEXT tick, exactly as `tick_delayed_actions`
+///   routes its own (there is no within-tick chaining loop here).
+/// * `delayed` — `in_seconds(..)` effects join `pending_delayed_actions`, dropped
+///   when the mission clock is unanchored (same rule as the trigger path).
+/// * `callbacks` — a callback that scheduled another callback re-queues it on
+///   `pending_callbacks` for a future tick.
+///
+/// # Shared per-tick budget
+/// The [`TickBudget`] on `WorldScriptRuntime` is reset once per tick, keyed on
+/// `SimTick`, and spans trigger-handler calls AND callback calls per the M3
+/// contract. `tick_trigger_pipeline` runs first and normally does the reset; but
+/// on a tick where it early-returned (no buffered events, no delayed actions) it
+/// did not, so this system resets when it observes a new tick. Whichever script
+/// system reaches the guard first this tick resets; the other sees the same tick
+/// and shares the budget.
+///
+/// # Determinism
+/// A no-op for every script-free world: with no `WorldScriptRuntime` the system
+/// returns before any `DerefMut`, so it writes nothing and flips no change-detection
+/// tick; and it is pinned `.after(tick_trigger_pipeline).before(tick_delayed_actions)`
+/// with a conflict set that is a subset of those neighbours', so it introduces no new
+/// ordering ambiguity among the RNG-drawing `Physics` systems. Together those force a
+/// script-free digest to stay byte-identical. `drain_due` returns due calls in
+/// authored order and every peer drains the same calls on the same tick (`fire_tick`
+/// is a deterministic function of the tick a callback was scheduled on).
+fn tick_script_callbacks(
+    mut script: ScriptRuntimeParams,
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut objectives: ResMut<ObjectiveManagerRes>,
+    mut commands: Commands,
+    mut ship_modifiers: ShipModifiersParams,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut world_layers: WorldLayerParams,
+    entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    mut faction_dispatch: FactionDispatchParams,
+    time: Option<Res<bevy::time::Time>>,
+    mut ai_query: Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<BehaviourSection>,
+    >,
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+) {
+    // `now_tick` before the `WorldScriptRuntime` borrow (disjoint `script` field).
+    let now_tick = script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
+    // Script-free world (no `WorldScriptRuntime`) or a bare-`App` fixture: nothing
+    // to do. The `ResMut` params are fetched but never `DerefMut`'d on this arm, so
+    // no change-detection tick flips — byte-identical to before this system existed.
+    let Some(sr) = script.runtime.as_deref_mut() else {
+        return;
+    };
+
+    // Reset the shared budget once per tick (`SimTick`-keyed): whichever script
+    // system runs first this tick resets it, so trigger-handler ops and callback
+    // ops share ONE budget per the M3 contract.
+    if sr.budget_tick != now_tick {
+        sr.budget = TickBudget::new();
+        sr.budget_tick = now_tick;
+    }
+
+    // Split off the due callbacks in authored order; the rest stay queued. Taking
+    // the snapshot first means a callback re-queued this tick (even at delay 0,
+    // `fire_tick == now_tick`) fires on a LATER tick, never re-entrantly here.
+    let due = sr.pending_callbacks.drain_due(now_tick);
+    if due.is_empty() {
+        return;
+    }
+
+    // The clock a callback's OWN deferred work is stamped against — same shape as
+    // `tick_trigger_pipeline`'s `script_clock`. `elapsed_secs` anchors a
+    // callback-scheduled `in_seconds` effect; `tick`/`tick_hz` anchor a
+    // callback-scheduled `after` callback.
+    let elapsed_secs = time.as_ref().and_then(|t| {
+        runtime
+            .mission_clock_anchor_secs
+            .map(|loaded| (t.elapsed_secs() - loaded).max(0.0))
+    });
+    let script_clock = SchedClock {
+        tick: now_tick,
+        elapsed_secs: elapsed_secs.unwrap_or(0.0),
+        tick_hz: world_layers
+            .base_world_config
+            .as_ref()
+            .map(|wc| wc.global.sim_tick_hz)
+            .unwrap_or(SchedClock::ZERO.tick_hz),
+    };
+
+    let uuid_to_entity: std::collections::HashMap<String, Entity> = entity_uuid_query
+        .iter()
+        .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
+        .collect();
+
+    // Reborrow the `WorldContentRuntime` `ResMut` as a plain `&mut` so `runtime.flags`
+    // (the flag overlay base) and `&mut runtime` (the apply path) can be borrowed
+    // in sequence — the same disjoint-field split `tick_trigger_pipeline` uses.
+    let runtime = &mut *runtime;
+
+    for call in due {
+        // Split `WorldScriptRuntime` into disjoint field borrows so the one
+        // `&self` call takes `&mut budget` and `&ast` at once, while
+        // `&runtime.flags` (a DISJOINT resource) is the overlay base. `call`
+        // returns owned `CallEffects`, so no `WorldScriptRuntime` borrow survives
+        // into the apply below.
+        let effects = {
+            let WorldScriptRuntime {
+                host, asts, budget, ..
+            } = &mut *sr;
+            match asts.get(&call.script_path) {
+                Some(ast) => Some(host.call(
+                    budget,
+                    &script_clock,
+                    ast,
+                    &call.script_path,
+                    &call.fn_name,
+                    &runtime.flags,
+                    Map::new(),
+                )),
+                None => {
+                    bevy::log::warn!(
+                        "tick_script_callbacks: callback '{}' names a missing unit '{}'",
+                        call.fn_name,
+                        call.script_path
+                    );
+                    None
+                }
+            }
+        };
+        let Some(effects) = effects else {
+            continue;
+        };
+
+        // A callback's chaining events queue for the NEXT tick, exactly as
+        // `tick_delayed_actions` does — this system runs after
+        // `tick_trigger_pipeline` has already drained `pending_world_events`.
+        let mut out_events: Vec<WorldEvent> = Vec::new();
+        apply_script_commands(
+            effects.commands,
+            "tick_script_callbacks",
+            &mut out_events,
+            &uuid_to_entity,
+            runtime,
+            &mut objectives,
+            &mut commands,
+            &mut ship_modifiers,
+            world_layers.pending_layers.as_deref_mut(),
+            world_layers.layer_map.as_deref_mut(),
+            next_state.as_deref_mut(),
+            game_over_reason.as_deref_mut(),
+            &mut faction_dispatch,
+            &mut ai_query,
+            balance_events.as_deref_mut(),
+        );
+        runtime.pending_world_events.extend(out_events);
+        // A callback-scheduled `in_seconds` effect joins the SAME delayed queue,
+        // dropped when the mission clock is unanchored (matching the trigger path).
+        if elapsed_secs.is_some() {
+            runtime.pending_delayed_actions.extend(effects.delayed);
+        }
+        // A callback that scheduled another callback re-queues it for a future
+        // tick (drained the next time this system observes it due).
+        sr.pending_callbacks.extend(effects.callbacks);
     }
 }
 
@@ -3359,6 +3570,7 @@ pub(crate) mod tests {
             budget: TickBudget::new(),
             budget_tick: 0,
             content_hash: compiled.content_hash,
+            pending_callbacks: PendingCallbacks::new(),
         }
     }
 
@@ -3745,6 +3957,266 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.complete_objective
             TriggerCondition::OnDestroyed {
                 entity_name: "raider".to_string()
             }
+        );
+    }
+
+    /// Whether the objective manager reports `id` as `Completed`.
+    fn objective_is_completed(app: &App, id: &str) -> bool {
+        app.world()
+            .resource::<ObjectiveManagerRes>()
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .any(|o| o.id == id && o.status == ObjectiveStatus::Completed)
+    }
+
+    /// Issue #984 (Rhai M6 phase 2b), scheduled-callback drain proof: a scripted
+    /// `on_destroyed` handler calls `ctx.schedule.after(2, |ctx| …)`, and the
+    /// callback runs through the LIVE pipeline only once its fire tick arrives —
+    /// NOT on the tick it was scheduled. At `sim_tick_hz = 1` the 2-second delay
+    /// is 2 ticks, and `SimTick` is driven by hand so the drain boundary is exact.
+    #[test]
+    fn scripted_callback_fires_after_the_delay_not_immediately() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { ctx.effects.complete_objective("obj"); }); }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        // Drains the callbacks the handler schedules, after the pipeline that
+        // schedules them — the same order production wires.
+        app.add_systems(Update, tick_script_callbacks.after(tick_trigger_pipeline));
+        // sim_tick_hz = 1 → `after(2 s)` == fire_tick + 2 ticks; SimTick is driven
+        // by hand below so the drain lands on an exact, readable tick.
+        let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.global.sim_tick_hz = 1.0;
+        app.world_mut().insert_resource(cfg);
+        app.world_mut().insert_resource(crate::sim_tick::SimTick(0));
+
+        let raider_uuid = "raider-uuid-984-cb1";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "obj",
+            "hold the line",
+            true,
+            vec![],
+        );
+
+        // Tick 0: the raider dies → handler `k` schedules the callback (fire_tick
+        // 0 + 2 = 2). The callback must NOT run on the tick it was scheduled.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+        assert!(
+            !objective_is_completed(&app, "obj"),
+            "the callback must not fire on the tick it was scheduled"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WorldScriptRuntime>()
+                .pending_callbacks
+                .len(),
+            1,
+            "the scheduled callback must be queued, not dropped (2a dropped it)"
+        );
+
+        // Tick 1: still before the fire tick — nothing drains.
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+        app.update();
+        assert!(
+            !objective_is_completed(&app, "obj"),
+            "the callback must not fire before its delay elapses"
+        );
+
+        // Tick 2: now due — drained and run through the live apply path.
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+        app.update();
+        assert!(
+            objective_is_completed(&app, "obj"),
+            "tick_script_callbacks must run the due callback through the live pipeline"
+        );
+        assert!(
+            app.world()
+                .resource::<WorldScriptRuntime>()
+                .pending_callbacks
+                .is_empty(),
+            "the fired callback must be drained out of the queue"
+        );
+    }
+
+    /// Issue #984 (Rhai M6 phase 2b), re-queue proof: a callback that itself calls
+    /// `ctx.schedule.after(..)` re-queues the new callback onto `pending_callbacks`
+    /// for a FUTURE tick. The first callback (2 ticks out) completes "first" and
+    /// schedules a second (2 ticks further); the second completes "second".
+    #[test]
+    fn scripted_callback_can_reschedule_another_callback() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { ctx.effects.complete_objective("first"); ctx.schedule.after(2, |ctx| { ctx.effects.complete_objective("second"); }); }); }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        app.add_systems(Update, tick_script_callbacks.after(tick_trigger_pipeline));
+        let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.global.sim_tick_hz = 1.0;
+        app.world_mut().insert_resource(cfg);
+        app.world_mut().insert_resource(crate::sim_tick::SimTick(0));
+
+        let raider_uuid = "raider-uuid-984-cb2";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+        {
+            let mut objectives = app.world_mut().resource_mut::<ObjectiveManagerRes>();
+            objectives.0.add("first", "first beat", true, vec![]);
+            objectives.0.add("second", "second beat", true, vec![]);
+        }
+
+        // Tick 0: schedule the first callback (fire_tick 2).
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        // Tick 2: the first callback fires, completing "first" and scheduling the
+        // second (fire_tick 2 + 2 = 4). "second" is queued, not yet run.
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+        app.update();
+        assert!(
+            objective_is_completed(&app, "first"),
+            "the first callback must complete its objective on its fire tick"
+        );
+        assert!(
+            !objective_is_completed(&app, "second"),
+            "the re-queued callback must not fire on the tick that scheduled it"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WorldScriptRuntime>()
+                .pending_callbacks
+                .len(),
+            1,
+            "the callback scheduled from inside a callback must be re-queued"
+        );
+
+        // Tick 4: the re-queued callback is now due and completes "second".
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 4;
+        app.update();
+        assert!(
+            objective_is_completed(&app, "second"),
+            "a callback re-queued by a callback must fire on its own later tick"
+        );
+        assert!(
+            app.world()
+                .resource::<WorldScriptRuntime>()
+                .pending_callbacks
+                .is_empty(),
+            "both callbacks must be drained once fired"
+        );
+    }
+
+    /// Issue #984 (Rhai M6 phase 2b), delay-0 re-queue proof (the busy-loop edge):
+    /// a callback that reschedules another at `after(0)` gives the new callback
+    /// `fire_tick == the current tick`. The `mem::take` snapshot `drain_due` takes
+    /// BEFORE iterating means that delay-0 callback lands on `pending_callbacks`
+    /// AFTER the snapshot, so it does NOT fire re-entrantly in the same drain — it
+    /// fires on the NEXT tick. This is what makes an `after(0)` self-reschedule
+    /// impossible to spin within a single tick.
+    #[test]
+    fn scripted_callback_rescheduled_at_delay_zero_defers_to_the_next_tick() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { ctx.effects.complete_objective("first"); ctx.schedule.after(0, |ctx| { ctx.effects.complete_objective("second"); }); }); }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        app.add_systems(Update, tick_script_callbacks.after(tick_trigger_pipeline));
+        let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.global.sim_tick_hz = 1.0;
+        app.world_mut().insert_resource(cfg);
+        app.world_mut().insert_resource(crate::sim_tick::SimTick(0));
+
+        let raider_uuid = "raider-uuid-984-cb0";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+        {
+            let mut objectives = app.world_mut().resource_mut::<ObjectiveManagerRes>();
+            objectives.0.add("first", "first beat", true, vec![]);
+            objectives.0.add("second", "second beat", true, vec![]);
+        }
+
+        // Tick 0: schedule the first callback (fire_tick 2).
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        // Tick 2: the first callback fires and reschedules the second at `after(0)`,
+        // so its fire_tick == 2 == the current tick. The snapshot boundary must keep
+        // it OUT of this same drain — "second" stays queued, unrun, this tick.
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+        app.update();
+        assert!(
+            objective_is_completed(&app, "first"),
+            "the first callback must fire on its own tick"
+        );
+        assert!(
+            !objective_is_completed(&app, "second"),
+            "a delay-0 callback scheduled during the drain must NOT fire re-entrantly this tick"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WorldScriptRuntime>()
+                .pending_callbacks
+                .len(),
+            1,
+            "the delay-0 re-queue must be parked for the next tick, not run now"
+        );
+
+        // Tick 3: the very next tick drains the delay-0 callback (fire_tick 2 <= 3).
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 3;
+        app.update();
+        assert!(
+            objective_is_completed(&app, "second"),
+            "the deferred delay-0 callback must fire on the next tick"
+        );
+        assert!(
+            app.world()
+                .resource::<WorldScriptRuntime>()
+                .pending_callbacks
+                .is_empty(),
+            "both callbacks must be drained once fired"
         );
     }
 

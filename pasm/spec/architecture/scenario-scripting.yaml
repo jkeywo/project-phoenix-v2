@@ -1,0 +1,121 @@
+entities:
+  - component: scenario-scripting-host-spike
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Rhai Scenario Scripting — M0 Spike Findings
+      summary: "The M0 de-risking spike for `roadmap-scenario-scripting` (issue #978): four determinism and cost questions asked of rhai 1.25.1 through vellum-script at rev 08b5fdb7, answered by running the thing rather than reading about it. Nothing was integrated — the spike's experiment code is throwaway — and this record is the deliverable the implementation milestones are held to. The verdict is GO: every question resolved in favour of the design, with one new hard startup requirement (a fixed hashing seed) and one refinement to the roadmap's serialization key."
+      rationale:
+        - "The four questions were chosen because each one, answered wrong late, would cost a rewrite rather than a patch. Anonymous-function naming decides whether deferred work can be serialized at all; wasm decides whether the browser is a target; map ordering decides whether iterating authored data is a divergence source; operation budgets decide whether a bad script is a bug report or a hung game. The roadmap entity already commits to `(tick, fn_name)` pairs, integer-only arithmetic, and fixed budgets, so the spike's job was to find out what those commitments actually cost."
+        - "Everything below was measured on rhai `=1.25.1` reached through `vellum-script`'s own `sandbox()`/`quiet_sandbox()`/`call_fn` seam, not through a bare `Engine::new()`, because the sandbox profile is what phoenix will ship: `Engine::new_raw()` plus eleven explicitly registered packages, a dummy module resolver, `eval` disabled, and the crate's own limits. A number measured against a different engine would not describe the game."
+        - "SCOPE, stated so it is not over-read: no scenario content was written, no host functions were designed, no effect buffer exists, and the spike deliberately did not touch `src/`. The one repository change is this file. The wasm bundle measurement DID temporarily add the dependency to `Cargo.toml` and a `#[wasm_bindgen]` probe to `src/lib.rs`; both were reverted, and the baseline was rebuilt afterwards to the byte-identical size it had before (53,123,733 bytes twice), which is the check that the revert was clean."
+        - "[ai] Verdict and constants below are the spike's recommendation, not a ratified decision. They are marked so `pasm review` surfaces them: a human adopting them should delete the markers, and a human disagreeing has four reproducible experiments to argue with rather than an opinion."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [pasm/spec/architecture/scenario-scripting.yaml]
+    evidence:
+      - kind: benchmark
+        reference: "issue #978 (M0 spike), rhai 1.25.1, vellum-script rev 08b5fdb7608fa732de44885aac8c7af9791e2052"
+        summary: "Four standalone experiment crates run natively on Windows x86_64 (release, opt-level 3) plus one wasm32-unknown-unknown module executed under Node, and two full `trunk build --release` runs of the real application for the bundle delta."
+
+  - component: rhai-anonymous-function-naming
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Anonymous Function Naming and the Fixed Hashing Seed
+      summary: "rhai names every closure `anon$<16 hex>`, hashed from the function's parameters and body AST with ahash seeded — by default — from OS randomness at process start. Measured: the names are stable within one process, DIFFERENT between two runs of the same binary, and stable across runs once `rhai::config::hashing::set_hashing_seed` fixes the seed. Serializing deferred work as a function name is therefore safe only under a startup requirement, and the key needs the script path as well as the name."
+      rationale:
+        - "MECHANISM, read from the source rather than inferred: `rhai-1.25.1/src/parser.rs:3901-3905` hashes the parameter list (which, with closures enabled, is prefixed by the captured externals) and then the body AST, and `make_anonymous_fn` at `:284` formats the result as `anon$` plus sixteen hex digits. The hasher comes from `src/func/hashing.rs:56`, which uses `ahash::RandomState::with_seeds` when a hashing seed is configured and ahash's own `<_>::default()` — OS-seeded — when it is not."
+        - "MEASURED (a) same process: two engines, two compiles of the same source, identical names every time. MEASURED (b) two runs of the same unmodified binary: run one produced `anon$7a36466c272dd89c, anon$d4cfb790c79d8903, anon$fc7c4148aa26efce`; run two produced `anon$1c625e07a9eb581d, anon$89aa10daae32c8b5, anon$db906c230ad7a973`. Same bytes in, different names out — a peer that serialized a scheduled callback by name would resolve it to nothing after a reload. MEASURED (c) with `set_hashing_seed(Some([1,2,3,4]))` called before the first engine: `anon$41a691411dc30a5e, anon$5d34fbdb16381fbd, anon$8379ef4fd6b314d5` on both runs, byte-identical."
+        - "MEASURED (d), and the reason this is a requirement rather than a suggestion: the seed is a `OnceCell` that `get_hashing_seed` reads without populating, so calling `set_hashing_seed` AFTER an engine already compiled something still returns `Ok(())`. There is no error to catch. A run that seeded late produced a process-random `anon$07f4a355e3cd30db` for a script compiled before the call and the correct seeded names for scripts compiled after it — two naming regimes in one process, silently. The call must be the first thing startup does, before any `Engine`, on every peer and in the headless runner alike. vellum-script's `sandbox()` does not interfere: the seed is a global in rhai, read at hash time, and the sandbox only builds an engine."
+        - "NAMES ARE NOT UNIQUE ACROSS FILES. Two separately compiled units containing identical closure text at identical source offsets both produced `anon$97b2dc0dbc163237`. The hash describes the function, not the file it came from, so `roadmap-scenario-scripting`'s `(tick, fn_name)` pair is one field short: the serialized key must be `(tick, script_path, fn_name)`. `vellum_script::call_fn` already takes the content-relative path as a parameter, so the path is in hand at every call site and nothing new has to be threaded."
+        - "Names are also position-sensitive — a single leading space moved `anon$97b2dc0dbc163237` to `anon$1b9f9f608a3b72bd`, and renaming a captured variable moves it too. That is harmless rather than alarming: any edit that moves a closure also changes `vellum_script::content_hash`, which already refuses to replay a save against content it was not recorded against. What it does mean is that a saved schedule is bound to exact content bytes, not merely to a compatible script."
+        - "no_closure DECISION: leave it OFF. The feature was tested with rhai's own engine and does NOT remove anonymous functions — with `no_closure` enabled, both `|x| x > 1` and `|x| x > t` still compile to `anon$…` names, and the only change is that the capturing form fails at RUNTIME with `Variable not found: t`. So the feature buys no determinism whatsoever, and converts a natural authoring idiom into an error that surfaces on the tick the script runs rather than when content loads. The seed is the fix; `no_closure` is not."
+        - "FALLBACK, recorded so it does not have to be rediscovered: if a future rhai release changes the `Hash` implementation of the body AST, seeded names move between rhai versions even for unchanged content. The escape hatch is a load-time rename pass — walk `AST::iter_functions()`, and rewrite each anonymous name to `<sorted-path-index>:<ordinal>` derived from the path-sorted compilation order — which makes names a property of the content set rather than of the parser. It is not needed today and should not be built today."
+    architecture:
+      kind: determinism-source
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [pasm/spec/architecture/scenario-scripting.yaml]
+    evidence:
+      - kind: benchmark
+        reference: "M0 spike, `anon` and `anon2` binaries; rhai-1.25.1/src/parser.rs:284,3901-3905; src/func/hashing.rs:56; src/config/hashing.rs"
+        summary: "Four process runs (two unseeded, two seeded) plus a late-seed run showing the silent split-brain, a cross-file collision, position and capture-name sensitivity, and a separate `no_closure` build proving the feature does not remove `anon$` names."
+
+  - component: rhai-script-operation-budget
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Script Operation Budgets
+      summary: "Measured cost of representative scenario handlers through `vellum_script::call_fn` with an operation-counting `on_progress`, cross-checked by binary-searching `set_max_operations`. Real handlers cost tens of operations and single-digit microseconds; the recommended caps are a per-call limit of 50,000 operations, a per-tick aggregate of 200,000 operations, and — because operations do not price the fixed per-call overhead — a companion per-tick cap of 512 script calls."
+      rationale:
+        - "MEASURED, native x86_64 release, through the vellum sandbox with four host-shaped functions registered. A small trigger handler (two guarded comparisons, four host calls, a returned map) cost 34 operations and 2.1 microseconds per call. A comms dialogue node builder returning `#{speaker, message, responses:[...]}` with four pushed response maps and a loop over context flags cost 56 operations and 4.2 microseconds. A pathological nested loop cost 42,011 operations for 8,000 inner iterations (1.36 ms) and 420,011 for 80,000 (13.0 ms). Binary-searching the smallest `max_operations` that still completes returned exactly 34, 56 and 42,011 — the `on_progress` counter and the engine's own limit agree, so neither number is an artefact of how it was measured."
+        - "Those two rates are the whole basis for the caps: marginal cost is 0.031 microseconds per operation (32.4 ops/µs, from the difference between the two loop sizes), and fixed per-call overhead — scope construction, the context map, the call itself — is about 2 microseconds regardless of what the handler does. The model predicts a 50,000-operation abort at 1.55 ms; the measured abort was 1.55 ms, and the 100,000 abort was 3.12 ms against a predicted 3.10 ms."
+        - "[ai] PER-CALL LIMIT: 50,000 operations. That is roughly 900x the heaviest real handler measured, which is margin enough that authored content will never see it, and it bounds one runaway script to 1.55 ms natively. Choosing 100,000 instead doubles the worst-case stall to 3.1 ms and buys nothing, because nothing between 56 and 50,000 operations is content anybody would write on purpose. The limit is set with `Engine::set_max_operations`, which the vellum sandbox already exposes (it defaults to 5,000,000 — far too generous for a per-frame call, and the reason phoenix must override it rather than accept the default)."
+        - "[ai] PER-TICK AGGREGATE: 200,000 operations, summed across every script call in a tick including all sixteen chaining passes. Natively that is 6.2 ms worst case, about 37% of a 16.7 ms frame at 60 Hz — deliberately a circuit breaker rather than an allowance. It permits four full per-call runaways, or several thousand ordinary handlers, in one tick; a busy tick is expected to make on the order of hundreds of calls costing tens of operations each, so tripping it means content is broken, not busy. When it trips, the remaining chaining passes for that tick are dropped and the tick completes, because every peer sums the same operations in the same order and therefore trips on the same tick — a budget that produced a different outcome per peer would be a divergence source rather than a safety net."
+        - "[ai] PER-TICK CALL CAP: 512 calls. This is the one constant the question did not ask for and the measurements insisted on. Operations do not price the ~2 microseconds of fixed overhead each `call_fn` costs, so 200,000 operations spread over thousands of tiny handlers is roughly 15 ms of wall clock while barely touching the operation budget. Capping calls closes that hole at about 1.1-2.2 ms natively for a full 512, which is the right order for sixteen chaining passes over a fleet-sized scenario."
+        - "WASM CAVEAT, stated rather than hidden: no wall-clock measurement was taken under wasm. Interpreter workloads of this shape typically run 1.5-3x slower in a browser, which would put the 50,000-operation worst case somewhere around 2.3-4.7 ms, but that is an extrapolation from the native rate and not a measurement. Confirming it is cheap once a host exists — the same fixture, timed in the browser — and should be done before the caps are treated as final."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [pasm/spec/architecture/scenario-scripting.yaml]
+    evidence:
+      - kind: benchmark
+        reference: "M0 spike, `ops` binary: on_progress high-water counting, `set_max_operations` bisection, and timed abort measurements"
+        summary: "trigger handler 34 ops / 2.1 us; dialogue node builder 56 ops / 4.2 us; nested loop 42,011 ops / 1.36 ms and 420,011 ops / 13.0 ms; 50k abort at 1.55 ms, 100k abort at 3.12 ms; bisection independently reproduced 34, 56 and 42,011."
+
+  - component: rhai-wasm-target-support
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Rhai on wasm32 — Build Requirements and Bundle Cost
+      summary: "rhai's `sync` feature is wasm-clean and the sandbox produces byte-identical results on wasm and native, but rhai does not build for wasm32-unknown-unknown out of the box: its default features pull getrandom, which needs both a cfg flag and a cargo feature. Phoenix already supplies both, so the real application built unchanged. Measured cost of adding vellum-script to the shipped bundle: +1.43 MiB raw, +442 KiB gzipped, +274 KiB brotli."
+      rationale:
+        - "BUILD REQUIREMENT, found by trying it: `cargo build -p vellum-script --target wasm32-unknown-unknown` FAILS in the vellum checkout. rhai's default feature set enables `ahash/runtime-rng`, which pulls getrandom 0.3, which on this target refuses to compile without BOTH `--cfg getrandom_backend=\"wasm_js\"` and the `getrandom/wasm_js` cargo feature. Each was tested separately and each alone produced its own distinct compile_error — the cfg without the feature fails just as hard as the feature without the cfg. This is a vellum-side gap (its CI has no wasm job yet, which the roadmap already lists as the one contribution back), not a phoenix blocker: phoenix's `.cargo/config.toml` already carries the rustflag and its wasm32 dependency stanza already carries `getrandom = { version = \"0.3\", features = [\"wasm_js\"] }`, both for reasons that predate scripting."
+        - "A CLEANER OPTION, verified to build: `rhai = { default-features = false, features = [\"std\", \"sync\", \"no_float\"] }` compiles for wasm32-unknown-unknown with no rustflag, no feature juggling, and no getrandom in the target dependency graph at all — only ahash's build-time `compile-time-rng`, which runs on the host. Recommending it to vellum-script is worth doing for a second reason: it removes the OS-randomness call that makes anonymous function names unstable in the first place. It is a recommendation about vellum, not a change made here."
+        - "PARITY, actually executed rather than assumed. A fixture exercising integer arithmetic in a loop, map literal construction, `keys()` iteration, string building and splitting, `to_upper`, negative numbers, and `content_hash` was reduced to a single i64 digest and run natively and as a real wasm32 module instantiated under Node. All four inputs produced identical digests (n=1: 6743450302142180186; n=10: 7789141008940179635; n=137: -4432062438793934165; n=1000: -2680795732976015760). The wasm module's imports also gave direct evidence for the naming finding above: it imports `__wbg_getRandomValues_*` and calls it exactly once, at first hash."
+        - "NOT VERIFIED, said plainly. The `#[wasm_bindgen]` probe compiled into the real bundle was linked but never invoked in a browser, so what is proven is that the shipped application builds and links with rhai in it, not that the shipped application runs a script in a browser. No wall-clock timing was taken under wasm. The parity fixture ran under Node's WebAssembly, not in a browser engine, though both are the same wasm semantics and no host imports beyond the six stubs were reachable."
+        - "BUNDLE COST, measured as a real delta on the real pipeline. Baseline `trunk build --release` of the whole application: 53,123,733 bytes of wasm, 13,477,031 gzipped, 8,170,161 brotli. With `vellum-script` added to `Cargo.toml` and a `#[wasm_bindgen]` probe calling `quiet_sandbox`, `compile`, `call_fn` and `content_hash` so the linker could not strip it: 54,621,469 bytes, 13,929,583 gzipped, 8,450,332 brotli. The delta is +1,497,736 bytes raw (+2.82%), +452,552 gzipped (+442 KiB, +3.36%), +280,171 brotli (+274 KiB, +3.43%). Both sides went through the identical pipeline, including the `wasm-opt-fixup` post-build hook, and the baseline was rebuilt after the revert to the same byte count, so the delta is rhai and not build noise."
+        - "The wire-relevant number is the compressed one: about a quarter of a megabyte over brotli, for a scripting language that includes its own parser. That is the honest price of `compile()` being in the shipped binary, which it must be, because content packs (#856) ship script rather than pre-compiled ASTs. It is worth revisiting only if the download budget in `performance-measurement` starts binding."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [pasm/spec/architecture/scenario-scripting.yaml]
+    evidence:
+      - kind: benchmark
+        reference: "M0 spike: two `trunk build --release` runs of project-phoenix (baseline and with vellum-script rev 08b5fdb7), plus a standalone wasm32 parity module run under Node"
+        summary: "Raw 53,123,733 -> 54,621,469 bytes; gzip 13,477,031 -> 13,929,583; brotli 8,170,161 -> 8,450,332. Four fixture digests identical between native and wasm. Both getrandom compile_errors reproduced independently; `default-features = false` build verified clean."
+
+  - component: rhai-map-iteration-order
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Map Iteration Order Is Deterministic
+      summary: "`rhai::Map` is a `BTreeMap<SmartString, Dynamic>`, so iteration is byte-sorted by key on both the Rust and the script side, on every platform, with no dependence on insertion order or on any hash seed. Confirmed by test, and by confirming no feature in vellum's dependency chain swaps the container."
+      rationale:
+        - "MEASURED. Seven keys inserted in deliberately scrambled order iterate as `0nine, Alpha, _under, alpha, bravo, mike, zulu` — exactly ASCII byte order, which is worth writing down because it puts uppercase before underscore before lowercase, and an author who expects case-insensitive alphabetical ordering will be surprised by it. Script-side is the same container: `#{ zulu: 1, alpha: 2, mike: 3, bravo: 4 }.keys()` yields `alpha, bravo, mike, zulu`, and a returned `#{ responses, message, id, actor }` reads back to the host as `actor, id, message, responses`. The runtime type name printed by the test is `BTreeMap<SmartString<LazyCompact>, Dynamic>`, matching the alias at `rhai-1.25.1/src/lib.rs`."
+        - "The feature question was checked rather than assumed: vellum's workspace pins `rhai = { version = \"1.25\", features = [\"sync\", \"no_float\"] }` with default features left on and no `no_object` anywhere in the chain — and `no_object` would remove object maps entirely rather than reorder them, so there is no configuration in reach that turns this into a hash map. The `BasicMapPackage` the sandbox registers operates on the same alias."
+        - "CONSEQUENCE for the design: iterating an authored map is safe as a source of ordered effects, and does NOT need a defensive sort at the host boundary. It also means authors get one free ordering guarantee they may come to rely on — key order in a returned effect map is stable and sorted — which is fine to rely on and should be documented as intentional rather than left as an accident of the container."
+    architecture:
+      kind: determinism-source
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [pasm/spec/architecture/scenario-scripting.yaml]
+    evidence:
+      - kind: test
+        reference: "M0 spike, `mapord` binary; rhai-1.25.1 Map alias; vellum Cargo.toml:51"
+        summary: "Scrambled insertion iterates in ASCII byte order on the Rust side; script-side `keys()` and a returned effect map both iterate sorted; runtime type name confirms BTreeMap; no `no_object` or container-swapping feature in the dependency chain."

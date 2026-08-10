@@ -22,7 +22,7 @@
  *
  * The controller is constructed once in `scenario-mode.js` next to the
  * ModeShell + SaveFlow and threaded as a normal dependency into the
- * leaf views (canvas, sidebar, trigger-view, comms-view, override-view).
+ * leaf views (canvas, sidebar, override-view).
  */
 
 /**

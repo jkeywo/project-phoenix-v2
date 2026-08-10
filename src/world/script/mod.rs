@@ -84,6 +84,7 @@
 //! and, in release, has that one call's effects **discarded whole**, is logged,
 //! and the game continues. See [`engine::RuntimeHost::call`].
 
+pub mod authoring;
 pub mod comms;
 pub mod effects;
 pub mod engine;

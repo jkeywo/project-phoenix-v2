@@ -4,9 +4,9 @@
  * smol-toml parse + validateFile and assert they are clean.
  *
  * Also tests a synthesised broken world to confirm the composed
- * validator surfaces:
- *   - action-schema violations (`trigger[i].action`)
- *   - cross-reference failures (`trigger[i].entity`)
+ * validator surfaces cross-reference failures (`trigger[i].entity`,
+ * `comms.response.action` entity). Per-action schema validation was
+ * removed with the card-based scenario editor (#983).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -56,48 +56,6 @@ describe('validation surfaces composed errors', () => {
     const results = validateFile('assets/worlds/broken.toml', world);
     expect(results.length).toBeGreaterThan(0);
     expect(results.some(r => /unknown entity "phantom_target"/.test(r.message))).toBe(true);
-  });
-
-  it('flags a malformed action-schema entry', () => {
-    const world = {
-      global: { seed: 42 },
-      anchors: { start: [0, 0, 0] },
-      entity: [{ name: 'real_target' }],
-      trigger: [
-        {
-          condition: 'on_destroyed',
-          entity: 'real_target',
-          // Missing required `id` and `text` for add_objective.
-          action: [{ type: 'add_objective' }],
-        },
-      ],
-    };
-    const results = validateFile('assets/worlds/broken.toml', world);
-    expect(results.some(r => r.path.startsWith('trigger[0].action'))).toBe(true);
-    expect(results.some(r => /missing required field/.test(r.message))).toBe(true);
-  });
-
-  it('flags an apply_modifier action with an invalid slot', () => {
-    const world = {
-      global: { seed: 42 },
-      anchors: { start: [0, 0, 0] },
-      entity: [{ name: 'real_target' }],
-      trigger: [
-        {
-          condition: 'on_attacked',
-          entity: 'real_target',
-          action: [{
-            type: 'apply_modifier',
-            entity: 'real_target',
-            tag: 'helm_console',
-            slot: 'NotAValidSlot',
-            bonus: 0.5,
-          }],
-        },
-      ],
-    };
-    const results = validateFile('assets/worlds/broken.toml', world);
-    expect(results.some(r => /invalid value "NotAValidSlot"/.test(r.message))).toBe(true);
   });
 
   it('flags an unknown reference inside comms.response.action target_entity', () => {

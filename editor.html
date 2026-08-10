@@ -81,6 +81,14 @@
             <div id="triggerableWorldsList"></div>
           </div>
 
+          <!-- Scripts Section (Rhai scenario scripts — issue #983) -->
+          <div id="scriptsSection">
+            <h3>SCRIPTS</h3>
+            <div id="scriptList">
+              <p class="placeholder">Open a world to see its scripts</p>
+            </div>
+          </div>
+
           <!-- Layers Section -->
           <div id="layersSection">
             <h3>LAYERS</h3>
@@ -105,13 +113,18 @@
           </div>
         </div>
 
-        <!-- Right Panel (Properties / Text Editor) -->
+        <!-- Right Panel (Properties / Script Text Editor) -->
         <div id="rightPanel">
           <div id="propertiesPanel">
             <h3>PROPERTIES</h3>
             <div id="propertiesPanelContent">
               <p class="placeholder">Select a spawn to edit properties</p>
             </div>
+          </div>
+          <!-- Rhai script editor (issue #983) — shown when a script is open -->
+          <div id="scriptEditorPanel" class="hidden">
+            <h3>SCRIPT</h3>
+            <div id="scriptEditorHost"></div>
           </div>
         </div>
       </div>

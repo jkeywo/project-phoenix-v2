@@ -43,6 +43,9 @@ import {
   listDirectory as defaultListDirectory,
   onRootChanged as defaultOnRootChanged,
 } from './project-root.js';
+import { extractScriptUnits } from './script-editor.js';
+import { renderScriptList, mountScriptEditor } from './script-editor-view.js';
+import { createScriptWasm } from './script-wasm.js';
 
 /**
  * @param {object} opts
@@ -121,6 +124,15 @@ export function mountScenarioMode({
   const renderTriggerableWorlds  = deps?.renderTriggerableWorldsPanel || defaultRenderTriggerableWorlds;
   const mountNewWorldButton      = deps?.mountNewWorldButton      || defaultMountNewWorldButton;
   const mountOpenWorldButton     = deps?.mountOpenWorldButton     || defaultMountOpenWorldButton;
+
+  // Rhai script editor (issue #983). The host-fn registry + diagnostics come
+  // from the phoenix WASM via this adapter; `deps.scriptWasm` overrides it in
+  // tests. Host-fns are fetched once, lazily, on the first script open.
+  const scriptWasm = deps?.scriptWasm || createScriptWasm();
+  let scriptHostFns = null;
+  let openScriptController = null;
+  let selectedScriptId = null;
+  const sessionScriptSources = new Map(); // sibling path → in-memory edited source
 
   const layerManager = new LayerManager();
   const crossRefIndex = new CrossReferenceIndex();
@@ -274,22 +286,18 @@ export function mountScenarioMode({
     canvasManager.renderAll();
 
     const activeLayer = layerManager.getActiveLayer?.();
+    // Triggers/comms are read-only in the World Content tree since #983 — the
+    // card editors are gone and scenario logic is authored as Rhai. A trigger/
+    // comms row now just highlights its associated entity (no card open), so a
+    // declarative-TOML world still opens and is navigable, only degraded.
     renderWorldContentPanel({
       worldState: activeLayer?.toml ?? null,
       crossRefIndex,
       activeLayerPath: activeLayer?.filename ?? null,
       onSelectEntity: (name) => canvasManager.selectByEntityName(name),
-      onSelectTrigger: (triggerIndex) => {
-        const layer = layerManager.getActiveLayer?.();
-        if (!layer) return;
-        propertiesPanel.render({ type: 'trigger', triggerIndex, layer });
-      },
-      onSelectComms: (commsIndex) => {
-        const layer = layerManager.getActiveLayer?.();
-        if (!layer) return;
-        propertiesPanel.render({ type: 'comms', commsIndex, layer });
-      },
     });
+
+    renderScriptPanel();
 
     updateUnsavedIndicator();
 
@@ -320,6 +328,132 @@ export function mountScenarioMode({
         }
       }
     }
+  }
+
+  // ── Script editor (issue #983) ─────────────────────────────────────────
+
+  /** Render the SCRIPTS list for the active world into `#scriptList`. */
+  function renderScriptPanel() {
+    const listHost = findInHost('scriptList');
+    if (!listHost) return; // editor.html without the Scripts section (tests).
+
+    const activeLayer = layerManager.getActiveLayer?.();
+    const units = activeLayer
+      ? extractScriptUnits(activeLayer.toml, activeLayer.filename)
+      : [];
+
+    // Drop a selection that no longer resolves (world switched / block removed).
+    if (selectedScriptId && !units.some((u) => u.id === selectedScriptId)) {
+      selectedScriptId = null;
+      closeScriptEditor();
+    }
+
+    renderScriptList(listHost, units, {
+      selectedId: selectedScriptId,
+      onSelect: (unit) => openScript(unit),
+    });
+  }
+
+  /** Hide the script editor and restore the properties pane. */
+  function closeScriptEditor() {
+    if (openScriptController) {
+      openScriptController.destroy();
+      openScriptController = null;
+    }
+    const panel = findInHost('scriptEditorPanel');
+    const props = findInHost('propertiesPanel');
+    if (panel) panel.classList.add('hidden');
+    if (props) props.classList.remove('hidden');
+  }
+
+  /** Open one script unit in the text editor. */
+  async function openScript(unit) {
+    const editorHost = findInHost('scriptEditorHost');
+    if (!editorHost || !unit) return;
+
+    // Fetch the host-fn registry once, lazily.
+    if (scriptHostFns === null) {
+      try {
+        scriptHostFns = await scriptWasm.getHostFns();
+      } catch (err) {
+        console.warn('[scenario-mode] host-fn registry unavailable:', err?.message || err);
+        scriptHostFns = [];
+      }
+    }
+
+    const activeLayer = layerManager.getActiveLayer?.();
+
+    // Resolve the source: inline blocks live in the layer TOML; sibling files
+    // are read from disk (session edits held in memory until saved).
+    let source = '';
+    if (unit.kind === 'inline') {
+      source = activeLayer?.toml?.script?.[unit.key] ?? '';
+    } else if (unit.kind === 'sibling') {
+      if (sessionScriptSources.has(unit.path)) {
+        source = sessionScriptSources.get(unit.path);
+      } else {
+        try {
+          source = await ioDeps.readFile(unit.path);
+        } catch (err) {
+          console.warn('[scenario-mode] could not read script', unit.path, err?.message || err);
+          source = '';
+        }
+      }
+    }
+
+    selectedScriptId = unit.id;
+
+    if (openScriptController) openScriptController.destroy();
+    openScriptController = mountScriptEditor({
+      host: editorHost,
+      title: unit.label,
+      source,
+      hostFns: scriptHostFns,
+      // Inline blocks are edited as their own buffer (offset 0 is correct); the
+      // span mapping to the host document is available via inlineBlockBaseLine
+      // when a block is shown in-context.
+      lineOffset: 0,
+      getDiagnostics: (src, offset) => scriptWasm.getDiagnostics(src, offset),
+      // Honest deferral (issue #995): the editor page does not serve the wasm
+      // module yet, so the compile pass degrades to []. Tell the view, so an
+      // empty result reads "live checks unavailable" rather than "No problems".
+      isDiagnosticsAvailable: () =>
+        typeof scriptWasm.isAvailable === 'function' ? scriptWasm.isAvailable() : true,
+      onChange: (src) => {
+        if (unit.kind === 'inline') {
+          const layer = layerManager.getActiveLayer?.();
+          if (layer?.toml?.script && typeof layer.toml.script === 'object') {
+            layer.toml.script[unit.key] = src;
+            layer.isDirty = true;
+            updateUnsavedIndicator();
+          }
+        } else if (unit.kind === 'sibling') {
+          sessionScriptSources.set(unit.path, src);
+        }
+      },
+      onSave: async (src) => {
+        if (unit.kind === 'sibling') {
+          try {
+            await ioDeps.writeFile(unit.path, src);
+            sessionScriptSources.delete(unit.path);
+            setStatus(`Saved ${unit.path}`);
+          } catch (err) {
+            setStatus(`Save blocked: ${unit.path} — ${err?.message || err}`);
+          }
+        } else {
+          // Inline blocks persist with the world TOML — route through Save All.
+          setStatus('Inline script — use Save Layer to write the world TOML.');
+        }
+      },
+    });
+
+    const panel = findInHost('scriptEditorPanel');
+    const props = findInHost('propertiesPanel');
+    if (panel) panel.classList.remove('hidden');
+    if (props) props.classList.add('hidden');
+
+    // Reflect selection state in the list.
+    renderScriptPanel();
   }
 
   function updateUnsavedIndicator() {
@@ -432,6 +566,10 @@ export function mountScenarioMode({
     propertiesPanel,
     entityEditor,
     renderAll,
+    // Script editor (issue #983) — exposed for integration tests.
+    renderScriptPanel,
+    openScript,
+    getScriptController: () => openScriptController,
     ready,
   };
 }

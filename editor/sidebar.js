@@ -1,8 +1,6 @@
 import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpawnPosition, getAllAnchors, getSpawnRotation, setSpawnRotation, getSpawnScale, setSpawnScale } from './toml-utils.js';
 import { getRelativeToCandidates, getSpawnReference, matchesSpawnReference } from './toml-utils.js';
 import { renderOverridePanel } from './override-view.js';
-import { renderTriggerPanel } from './trigger-view.js';
-import { renderCommsPanel } from './comms-view.js';
 
 export class PropertiesPanel {
   constructor(canvasManager, layerManager, undoController) {
@@ -33,29 +31,17 @@ export class PropertiesPanel {
       return;
     }
 
-    if (selection.type === 'trigger') {
+    // Scenario logic (triggers, comms dialogues) is authored as Rhai script
+    // since #983 — the card-based `trigger` / `comms` property editors were
+    // removed. A declarative-TOML world still opens (canvas + world-content
+    // tree), but its triggers/comms are shown read-only there rather than
+    // edited here, so a stale selection of that shape degrades to the
+    // placeholder instead of routing to a deleted view.
+    if (selection.type === 'trigger' || selection.type === 'comms') {
       this.currentSpawn = null;
-      this.currentLayer = selection.layer ?? null;
-      this.container.innerHTML = '';
-      renderTriggerPanel(this.container, selection, {
-        allLayers: this.canvasManager.buildV2Layers(),
-        canvasManager: this.canvasManager,
-        layerManager: this.layerManager,
-        undoController: this.undoController,
-      });
-      return;
-    }
-
-    if (selection.type === 'comms') {
-      this.currentSpawn = null;
-      this.currentLayer = selection.layer ?? null;
-      this.container.innerHTML = '';
-      renderCommsPanel(this.container, selection, {
-        allLayers: this.canvasManager.buildV2Layers(),
-        canvasManager: this.canvasManager,
-        layerManager: this.layerManager,
-        undoController: this.undoController,
-      });
+      this.currentLayer = null;
+      this.container.innerHTML =
+        '<p class="placeholder">Scenario logic is authored in the Script editor.</p>';
       return;
     }
 

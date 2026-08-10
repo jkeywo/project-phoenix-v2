@@ -1652,3 +1652,96 @@ form {
 .models-marker-finding { line-height: 1.5; }
 .models-marker-finding-error { background: rgba(120,20,20,0.6); color: #ffb4b4; }
 .models-marker-finding-warning { background: rgba(120,90,20,0.5); color: #ffe0a0; }
+
+/* ── Rhai script editor (issue #983) ─────────────────────────────────────── */
+
+/* Scripts list (left panel). */
+#scriptsSection { padding: 8px 0; }
+.script-list-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; font-size: 12px; cursor: default;
+}
+.script-list-row.clickable { cursor: pointer; }
+.script-list-row.clickable:hover { background: #2a2d2e; }
+.script-list-row.active { background: #094771; color: #fff; }
+.script-list-icon { opacity: 0.8; font-size: 11px; }
+.script-list-label { font-family: monospace; }
+
+/* Script editor panel (right panel). */
+#scriptEditorPanel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#scriptEditorPanel > h3 {
+  padding: 8px 12px; margin: 0; font-size: 11px; letter-spacing: 0.05em;
+  color: #9da5b4; background: #252526; border-bottom: 1px solid #3c3c3c;
+}
+#scriptEditorHost { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+.script-editor { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.script-editor-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 8px; border-bottom: 1px solid #3c3c3c;
+}
+.script-editor-title { font-family: monospace; font-size: 12px; color: #cccccc; }
+.script-editor-save {
+  font-size: 12px; padding: 3px 8px; background: #0e639c; color: #fff;
+  border: none; border-radius: 2px; cursor: pointer;
+}
+.script-editor-save:hover { background: #1177bb; }
+
+/* Highlight layer under a transparent textarea. Both share the exact same
+   metrics so the coloured text lines up under the caret. */
+.script-editor-body { position: relative; flex: 1; min-height: 160px; }
+.script-highlight,
+.script-editor-input {
+  position: absolute; inset: 0; margin: 0; padding: 8px;
+  font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 13px; line-height: 1.5; tab-size: 4;
+  white-space: pre; overflow: auto; border: 0;
+}
+.script-highlight { pointer-events: none; color: #d4d4d4; background: #1e1e1e; }
+.script-highlight code { font: inherit; }
+.script-editor-input {
+  color: transparent; background: transparent; caret-color: #d4d4d4;
+  resize: none; outline: none;
+}
+
+/* Token colours (VS Code dark-ish). */
+.tok-comment { color: #6a9955; font-style: italic; }
+.tok-string  { color: #ce9178; }
+.tok-number  { color: #b5cea8; }
+.tok-keyword { color: #569cd6; }
+.tok-hostfn  { color: #dcdcaa; }
+.tok-ident   { color: #9cdcfe; }
+.tok-punct   { color: #d4d4d4; }
+
+/* Autocomplete popup. */
+.script-autocomplete {
+  position: absolute; z-index: 20; left: 8px; top: 24px;
+  max-height: 220px; overflow: auto; min-width: 240px;
+  list-style: none; margin: 0; padding: 2px;
+  background: #252526; border: 1px solid #454545; border-radius: 3px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.script-autocomplete.hidden { display: none; }
+.script-autocomplete-item {
+  display: flex; flex-direction: column; padding: 3px 6px; cursor: pointer;
+  border-radius: 2px;
+}
+.script-autocomplete-item.active,
+.script-autocomplete-item:hover { background: #094771; }
+.ac-sig { font-family: monospace; font-size: 12px; color: #dcdcaa; }
+.ac-doc { font-size: 11px; color: #9da5b4; }
+
+/* Diagnostics strip. */
+.script-diagnostics {
+  flex-shrink: 0; max-height: 120px; overflow: auto;
+  font-size: 12px; font-family: monospace; border-top: 1px solid #3c3c3c;
+  padding: 4px 8px;
+}
+.script-diagnostics-ok { color: #6a9955; }
+/* Honest-deferral hint (issue #995): the live compile pass is not wired in the
+   editor yet, so an empty result is "unknown", not "clean". Amber + italic to
+   read as a caveat, distinct from the green "No problems". */
+.script-diagnostics-unavailable { color: #d7ba7d; font-style: italic; }
+.script-diagnostic { display: flex; gap: 8px; padding: 2px 0; }
+.script-diagnostic.sev-error { color: #ffb4b4; }
+.script-diagnostic-loc { color: #9da5b4; flex-shrink: 0; }

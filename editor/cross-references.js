@@ -54,8 +54,8 @@ export class CrossReferenceIndex {
             this._addRef(action.target_entity, path, 'action',
               `trigger.action target_entity`);
           }
-          // Some action schemas use `entity` instead of `target_entity`
-          // (e.g. set_ai_state, apply_modifier).  See action-schema.js.
+          // Some declarative-TOML action tables use `entity` instead of
+          // `target_entity` (e.g. set_ai_state, apply_modifier).
           if (action.entity) {
             this._addRef(action.entity, path, 'action',
               `trigger.action entity`);

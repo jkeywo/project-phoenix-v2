@@ -1945,6 +1945,112 @@ pub fn wasm_get_scenario_catalog() -> Array {
     arr
 }
 
+/// Return the Rhai host-fn signature registry for the scenario script editor
+/// (issue #983, Rhai M5).
+///
+/// The vocabulary a scenario author can call — the trigger builders and `on(..)`
+/// the loading engine registers, plus the `ctx.effects` / `ctx.flags` /
+/// `ctx.schedule` methods (and the delay-builder verbs) the runtime engine
+/// registers — enumerated once in `world::script::authoring` so the editor's
+/// autocomplete stays in step with what actually resolves at load and runtime.
+///
+/// Returns a JS array of `{ name, receiver, category, summary, signature,
+/// params: [...] }`. `receiver` is the `ctx` sub-object a method hangs off
+/// (`"effects"` / `"flags"` / `"schedule"`), `"delay"` for the
+/// `in_seconds(n).<verb>` builder verbs, or `""` for a top-level call.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_script_host_fns() -> Array {
+    use crate::world::script::authoring::host_fns;
+    let arr = Array::new();
+    for hf in host_fns() {
+        let obj = Object::new();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("name"),
+            &JsValue::from_str(hf.name),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("receiver"),
+            &JsValue::from_str(hf.receiver),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("category"),
+            &JsValue::from_str(hf.category),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("summary"),
+            &JsValue::from_str(hf.summary),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("signature"),
+            &JsValue::from_str(&hf.signature()),
+        )
+        .ok();
+        let params = Array::new();
+        for p in hf.params {
+            params.push(&JsValue::from_str(p));
+        }
+        Reflect::set(&obj, &JsValue::from_str("params"), &params).ok();
+        arr.push(&obj);
+    }
+    arr
+}
+
+/// Compile a `.rhai` source (a sibling file's whole text, or a lifted inline
+/// `[script.*]` block) under the sandbox and return editor diagnostics (issue
+/// #983, Rhai M5).
+///
+/// `line_offset` is added to every reported line so an inline block edited
+/// inside its host TOML lands on the correct *document* line — the editor passes
+/// the block's start line; a standalone `.rhai` file passes `0`. Returns a JS
+/// array of `{ message, line, column, severity }` (empty when the source loads
+/// clean). Uses the same loading-engine compile + top-level run as the
+/// activation gate, so a source that is clean here is clean there.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_script_diagnostics(source: String, line_offset: u32) -> Array {
+    use crate::world::script::authoring::script_diagnostics;
+    let arr = Array::new();
+    for d in script_diagnostics(&source, line_offset as usize) {
+        let obj = Object::new();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("message"),
+            &JsValue::from_str(&d.message),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("line"),
+            &JsValue::from_f64(d.line as f64),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("column"),
+            &JsValue::from_f64(d.column as f64),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("severity"),
+            &JsValue::from_str(d.severity),
+        )
+        .ok();
+        arr.push(&obj);
+    }
+    arr
+}
+
 /// Store the host's chosen player ship template path.
 ///
 /// Must be called before `wasm_init()`. The path is used by

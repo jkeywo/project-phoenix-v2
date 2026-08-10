@@ -77,6 +77,14 @@ export class LobbyState {
      *  synthesized `ScenarioCatalog` message; cleared on `Welcome` (the world
      *  has loaded and the normal lobby takes over). */
     this.scenarioCatalog = null;
+    /** The active mod packs the host applied (issue #990): an array of
+     *  `{ id, name, version }` read from the host's `wasm_active_pack_manifest()`
+     *  and carried on every synthesized `ScenarioCatalog` message. Empty when no
+     *  packs are applied. Unlike `scenarioCatalog` (the transient picker), this
+     *  is NOT cleared on `Welcome`: it describes the mods the loaded session is
+     *  running, so it must SURVIVE world load — a player mid-round still needs to
+     *  see what they are playing. The locked-catalog broadcast re-affirms it. */
+    this.activePacks = [];
     /** The authoritative first-valid-wins lock reflected to phones:
      *  `{ scenario_id: string|null, template_path: string|null }`. */
     this.selectionLocked = { scenario_id: null, template_path: null };
@@ -109,6 +117,10 @@ export class LobbyState {
         // The world has loaded — the QR-first picker is done; the normal lobby
         // takes over (issue #755).
         this.scenarioCatalog = null;
+        // `activePacks` is deliberately NOT cleared here (issue #990): the mods
+        // describe the session that just loaded, so the "Mods active" list must
+        // survive world load. Welcome carries no pack data of its own, so the
+        // last catalog broadcast's list is the right thing to keep.
         break;
       case 'ScenarioCatalog': {
         // QR-first pre-scenario catalog + current lock state, synthesized by
@@ -117,6 +129,11 @@ export class LobbyState {
           scenario_id: d.locked_scenario != null ? d.locked_scenario : null,
           template_path: d.locked_ship != null ? d.locked_ship : null,
         };
+        // The active mod-pack list (issue #990) rides on EVERY catalog message —
+        // the pre-load picker broadcast AND the locked-catalog "selection done"
+        // broadcast — so it lands whether the phone is still picking or resuming
+        // an already-loaded world. Stored regardless of the lock state below.
+        this.activePacks = Array.isArray(d.active_packs) ? d.active_packs : [];
         const bothLocked =
           this.selectionLocked.scenario_id != null &&
           this.selectionLocked.template_path != null;
@@ -335,6 +352,39 @@ export function nextActiveConsole(current, name) {
   };
 }
 
+/**
+ * Display rows for the client's "Mods active" lobby list (issue #990). One row
+ * per applied pack carrying its display name and version. Packs with neither a
+ * name nor an id are dropped, so the list is empty when nothing is applied and
+ * the lobby renders no empty banner.
+ *
+ * @param {Array<{id?:string,name?:string,version?:string}>} activePacks
+ * @returns {Array<{name:string,version:string}>}
+ */
+export function activePacksView(activePacks) {
+  return (activePacks || [])
+    .filter(p => p && (p.name || p.id))
+    .map(p => ({ name: p.name || p.id, version: p.version || '' }));
+}
+
+/**
+ * The mod-origin badge for one scenario picker button (issue #990). A
+ * base-manifest scenario (`source` absent, empty, or the literal `"base"`) gets
+ * NO badge (returns null); a mod-supplied scenario gets one labelled with the
+ * applied pack's display name when the pack is in `activePacks`, else its raw
+ * source pack id. `origin` is accepted as a fallback field name for robustness.
+ *
+ * @param {{source?:string,origin?:string}} scenario
+ * @param {Array<{id?:string,name?:string}>} activePacks
+ * @returns {{name:string}|null}
+ */
+export function scenarioOriginBadge(scenario, activePacks) {
+  const source = scenario && (scenario.source || scenario.origin);
+  if (!source || source === 'base') return null;
+  const pack = (activePacks || []).find(p => p && p.id === source);
+  return { name: (pack && pack.name) || source };
+}
+
 /** Singleton used by client.html. */
 export const lobbyState = new LobbyState();
 
@@ -344,4 +394,6 @@ if (typeof window !== 'undefined') {
   window.isLoadingPhase = () => lobbyState.isLoading();
   window.playerStationId = playerStationId;
   window.nextActiveConsole = nextActiveConsole;
+  window.activePacksView = activePacksView;
+  window.scenarioOriginBadge = scenarioOriginBadge;
 }

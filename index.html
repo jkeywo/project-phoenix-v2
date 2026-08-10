@@ -213,6 +213,25 @@
     #mod-pack-status {
       font-size: 0.72rem; color: #889; white-space: normal; word-break: break-word;
     }
+    /* ── Applied mod-pack stack + conflicts + findings (issue #987) ───────── */
+    #mod-pack-list, #mod-pack-conflicts, #mod-pack-findings {
+      display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.7rem;
+    }
+    .mod-pack-heading {
+      color: #99a; letter-spacing: 0.05em; margin-top: 0.35rem;
+      text-transform: uppercase; font-size: 0.62rem;
+    }
+    .mod-pack-row { display: flex; align-items: center; gap: 0.3rem; }
+    .mod-pack-name { flex: 1; color: #bcd; white-space: normal; word-break: break-word; }
+    .mod-pack-ctl {
+      background: #111; color: #9ab; border: 1px solid #334; border-radius: 3px;
+      font-family: monospace; font-size: 0.62rem; padding: 0.1rem 0.35rem; cursor: pointer;
+    }
+    .mod-pack-ctl:hover:not(:disabled) { background: #223; border-color: #558; }
+    .mod-pack-ctl:disabled { opacity: 0.4; cursor: default; }
+    .mod-pack-conflict { color: #cb8; word-break: break-word; }
+    .mod-pack-finding { color: #889; word-break: break-word; }
+    .mod-pack-finding.error { color: #d88; }
     /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
     .lobby-panel {
       position: fixed;
@@ -939,7 +958,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-f50c8339b035b325.js" crossorigin="anonymous" integrity="sha384-XwgYAHFezQMbULJGpxz+qQIq48k7wxCMfRqe/A01AR5wJlt1pBTeIn/WNpzlWuS+"><link rel="preload" href="./project-phoenix-f50c8339b035b325_bg.wasm" crossorigin="anonymous" integrity="sha384-vFl0O7WhFIOfOoo11O2wXFu+xMdyI914Wi10zCPHM7I4BWVcJ5mRjGW9uu5lPTbu" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-2d725d7da4024e42.js" crossorigin="anonymous" integrity="sha384-xJHc6IKUuChIYAUJYsOJwhZG4InGDn7raykSXWaHoPwnF8aqvD1WinzoqVUqsvdY"><link rel="preload" href="./project-phoenix-2d725d7da4024e42_bg.wasm" crossorigin="anonymous" integrity="sha384-kRezkdB9+93MbRa+uM6hUKqLZMJbhcCOtD/XZMBlqauToyt27DSfiInSq+J6UhYf" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1136,6 +1155,11 @@
              `.scenario-entry` elements (SCENARIO_ENTRY_SELECTOR, issue #951). -->
         <button id="mod-pack-btn" class="world-btn" data-i18n="server.upload_mod_pack">Upload mod pack</button>
         <div id="mod-pack-status"></div>
+        <!-- Applied-pack stack, path conflicts, and last-upload findings are
+             built in JS from wasm_active_pack_manifest() (issue #987). -->
+        <div id="mod-pack-list"></div>
+        <div id="mod-pack-conflicts"></div>
+        <div id="mod-pack-findings"></div>
       </div>
     </div>
   </div>
@@ -1305,8 +1329,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-f50c8339b035b325.js';
-const wasm = await init({ module_or_path: './project-phoenix-f50c8339b035b325_bg.wasm' });
+import init, * as bindings from './project-phoenix-2d725d7da4024e42.js';
+const wasm = await init({ module_or_path: './project-phoenix-2d725d7da4024e42_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2249,6 +2273,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ScenarioCatalog ServerMessage and delivers it over PeerJS. The wire shape
     // matches serde `{ type, data }` so the phone's lobby-state applies it
     // exactly like a Rust-emitted message.
+    // The applied mod packs, in {id,name,version} form for the phone's "Mods
+    // active" list (issue #990). Read from wasm_active_pack_manifest() — the
+    // SAME call renderModPackList() renders the host's own list from, so host
+    // and phones show one source of truth, not two derivations of it.
+    function activePacksForWire() {
+      let report;
+      try { report = wasmBindings.wasm_active_pack_manifest(); } catch (_) { return []; }
+      const packs = (report && report.packs) ? Array.from(report.packs) : [];
+      return packs.map(function (p) {
+        return { id: p.id, name: p.name, version: p.version };
+      });
+    }
     function scenarioCatalogMessage() {
       return {
         type: 'ScenarioCatalog',
@@ -2256,6 +2292,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           scenarios: _scenarioCatalog,
           locked_scenario: _preSelection.scenario_id,
           locked_ship: _preSelection.template_path,
+          // Rides on both the pre-load broadcast and the locked-catalog
+          // "selection done" broadcast (broadcastSelectionComplete), so the
+          // list survives world load for an already-connected phone (#990).
+          active_packs: activePacksForWire(),
         },
       };
     }
@@ -2486,6 +2526,125 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       broadcastScenarioCatalog();
     }
 
+    // ── Applied mod-pack stack UI (issue #987) ─────────────────────────────
+    // Read the ordered stack + its path conflicts from Rust and render the
+    // applied-pack list (with remove + reorder controls) and a conflict summary.
+    // Later-loaded packs win shared paths, so a pack lower in this list (nearer
+    // the bottom) has HIGHER precedence.
+    function renderModPackList() {
+      const listEl = document.getElementById('mod-pack-list');
+      const conflictsEl = document.getElementById('mod-pack-conflicts');
+      if (!listEl || !conflictsEl) return;
+      listEl.textContent = '';
+      conflictsEl.textContent = '';
+      let report;
+      try { report = wasmBindings.wasm_active_pack_manifest(); } catch (e) { return; }
+      const packs = (report && report.packs) ? Array.from(report.packs) : [];
+      if (packs.length === 0) return;
+
+      const heading = document.createElement('div');
+      heading.className = 'mod-pack-heading';
+      heading.textContent = t('server.mod_pack_applied_packs');
+      listEl.appendChild(heading);
+
+      packs.forEach(function (pack, idx) {
+        const row = document.createElement('div');
+        row.className = 'mod-pack-row';
+
+        const label = document.createElement('span');
+        label.className = 'mod-pack-name';
+        label.textContent = t('server.mod_pack_row', {
+          name: pack.name || pack.id || '',
+          version: pack.version || '',
+          count: (pack.file_count != null ? pack.file_count : 0),
+        });
+        row.appendChild(label);
+
+        const up = document.createElement('button');
+        up.className = 'mod-pack-ctl';
+        up.textContent = t('server.mod_pack_move_up');
+        up.disabled = idx === 0;
+        up.addEventListener('click', function () { reorderModPack(idx, idx - 1); });
+        row.appendChild(up);
+
+        const down = document.createElement('button');
+        down.className = 'mod-pack-ctl';
+        down.textContent = t('server.mod_pack_move_down');
+        down.disabled = idx === packs.length - 1;
+        down.addEventListener('click', function () { reorderModPack(idx, idx + 1); });
+        row.appendChild(down);
+
+        const rm = document.createElement('button');
+        rm.className = 'mod-pack-ctl';
+        rm.textContent = t('server.mod_pack_remove');
+        rm.addEventListener('click', function () { removeModPack(pack.id); });
+        row.appendChild(rm);
+
+        listEl.appendChild(row);
+      });
+
+      const conflicts = (report && report.conflicts) ? Array.from(report.conflicts) : [];
+      if (conflicts.length > 0) {
+        const ch = document.createElement('div');
+        ch.className = 'mod-pack-heading';
+        ch.textContent = t('server.mod_pack_conflicts');
+        conflictsEl.appendChild(ch);
+        conflicts.forEach(function (c) {
+          const line = document.createElement('div');
+          line.className = 'mod-pack-conflict';
+          const losers = c.losers ? Array.from(c.losers).join(', ') : '';
+          line.textContent = t('server.mod_pack_conflict_entry', {
+            path: c.path,
+            winner: c.winner,
+            losers: losers,
+          });
+          conflictsEl.appendChild(line);
+        });
+      }
+    }
+
+    // Render the validation findings from the last upload into the DOM (not only
+    // the console): errors block the pack (atomic), warnings are advisory.
+    function renderModPackFindings(findings) {
+      const el = document.getElementById('mod-pack-findings');
+      if (!el) return;
+      el.textContent = '';
+      if (!findings || findings.length === 0) return;
+      const heading = document.createElement('div');
+      heading.className = 'mod-pack-heading';
+      heading.textContent = t('server.mod_pack_findings');
+      el.appendChild(heading);
+      findings.forEach(function (f) {
+        const line = document.createElement('div');
+        line.className = (f && f.severity === 'error') ? 'mod-pack-finding error' : 'mod-pack-finding';
+        // Diagnostic detail (category + message) is developer-facing text the
+        // Rust validator produces; show it verbatim.
+        line.textContent = (f && f.category ? f.category : '') + ': ' + (f && f.message ? f.message : '');
+        el.appendChild(line);
+      });
+    }
+
+    // Swap the pack at `from` to position `to` in load order and push the new
+    // order to Rust, then re-resolve the catalog (precedence is a pure fn of
+    // order, so removing/reordering re-picks winners).
+    function reorderModPack(from, to) {
+      let report;
+      try { report = wasmBindings.wasm_active_pack_manifest(); } catch (e) { return; }
+      const ids = (report && report.packs) ? Array.from(report.packs).map(function (p) { return p.id; }) : [];
+      if (to < 0 || to >= ids.length) return;
+      const moved = ids.splice(from, 1)[0];
+      ids.splice(to, 0, moved);
+      try { wasmBindings.wasm_reorder_mod_packs(ids); } catch (e) { console.error('[Phoenix] mod pack reorder failed:', e); return; }
+      renderModPackList();
+      refreshMergedCatalog();
+    }
+
+    function removeModPack(id) {
+      try { wasmBindings.wasm_remove_mod_pack(id); } catch (e) { console.error('[Phoenix] mod pack remove failed:', e); return; }
+      renderModPackList();
+      refreshMergedCatalog();
+    }
+
     // Wire the file chooser. Uploads are accepted ONLY in the pre-round
     // scenario stage — once _worldLoadStarted latches (driveWorldLoad) the
     // panel is hidden and any pick is ignored, so an in-progress round is never
@@ -2522,30 +2681,32 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           setStatus('server.mod_pack_read_error');
           return;
         }
-        // A new upload supersedes any previous overlay (AC4): clear first so a
-        // rejected pack cannot leave stale content behind.
-        try { wasmBindings.wasm_clear_mod_pack(); } catch (_) {}
+        // ADD the pack to the overlay stack — installing B after A keeps A
+        // (issue #987). Validation is atomic and runs against the already-active
+        // stack, so a duplicate pack id or a broken pack applies nothing.
         let findings;
         try {
-          findings = Array.from(wasmBindings.wasm_validate_mod_pack(bytes) || []);
+          findings = Array.from(wasmBindings.wasm_add_mod_pack(bytes) || []);
         } catch (e) {
           console.error('[Phoenix] mod pack validation threw:', e);
           setStatus('server.mod_pack_rejected');
           return;
         }
+        renderModPackFindings(findings);
         const errors = findings.filter(function (f) { return f && f.severity === 'error'; });
         if (errors.length > 0) {
-          // Rust applied NOTHING (atomic). Surface the findings; the merged
-          // catalog is unchanged. Refresh so any prior overlay we just cleared
-          // is reflected.
+          // Rust applied NOTHING (atomic). The stack is unchanged; the findings
+          // are already rendered in the DOM.
           setStatus('server.mod_pack_rejected');
           for (const f of errors) {
             console.error('[Phoenix] mod pack finding:', f.category, '-', f.message);
           }
+          renderModPackList();
           refreshMergedCatalog();
           return;
         }
         setStatus('server.mod_pack_applied');
+        renderModPackList();
         refreshMergedCatalog();
       });
     })();
@@ -3077,10 +3238,15 @@ function finishInit() {
     // SAME arbiter flow as round 1 — no legacy confirm bypass.
     _preSelection = { scenario_id: null, template_path: null };
     _worldLoadStarted = false;
-    // Session end / next round discards any uploaded mod-pack overlay (issue
-    // #760, AC4): the next scenario stage starts from base content unless the
-    // host uploads again. Refresh the catalog so the picker drops mod scenarios.
+    // Session end / next round discards the WHOLE uploaded mod-pack stack (issue
+    // #760 AC4, #987): the next scenario stage starts from base content unless
+    // the host uploads again. Refresh the catalog so the picker drops mod
+    // scenarios, and clear the applied-pack list + findings in the DOM.
     try { wasmBindings.wasm_clear_mod_pack(); } catch (_) {}
+    try { renderModPackList(); } catch (_) {}
+    try { renderModPackFindings([]); } catch (_) {}
+    const modStatus = document.getElementById('mod-pack-status');
+    if (modStatus) modStatus.textContent = '';
     try { _scenarioCatalog = Array.from(wasmBindings.wasm_get_scenario_catalog() || []); } catch (_) {}
     renderScenarioLockState();
     // Re-broadcast the (now-unlocked) catalog so already-connected phones

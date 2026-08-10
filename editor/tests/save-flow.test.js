@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
+import { parse as tomlParse } from 'smol-toml';
 import { ModeShell } from '../mode-shell.js';
 import { SaveFlow } from '../save-flow.js';
 import { InvalidationBus } from '../invalidation-bus.js';
+import { resolveTemplate } from '../entity-includes.js';
+import { stringifyEntityToml } from '../entity-toml.js';
 
 const noopWriter = async () => {};
 const noopBus = { fireEntitySaved: () => {}, fireWorldSaved: () => {} };
@@ -461,5 +464,139 @@ describe('SaveFlow', () => {
       expect(result.ok).toBe(true);
       expect(entityStringify).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// ── Composed-entity save gate (issue #910) ───────────────────────────────────
+//
+// A hull that authors ONLY `tags` + `includes` inherits its `[behaviour]` /
+// `[mesh]` from a fragment. Before the fix the interactive save validated the
+// AUTHORED document, whose `behaviour` is undefined, so `validateBehaviourBlock`
+// was skipped and a broken fragment-sourced behaviour reached disk. The save
+// gate now resolves FRESH (from the live authored text) and validates the
+// RESOLVED document, while still WRITING the authored document (`includes`
+// intact — never the flattened doc).
+
+describe('SaveFlow composed-entity validation (issue #910)', () => {
+  const PATH = 'assets/entities/hull.toml';
+  const FRAGMENT_PATH = 'assets/entities/fragments/ai.toml';
+
+  /**
+   * A resolver mirroring production `resolveEntityConfigFromText`: the root is
+   * the LIVE authored text the save is about to write, fragments come from the
+   * in-memory `fragments` map. Proves the save gate sees the RESOLVED shape.
+   */
+  function makeResolver(fragments) {
+    return async (path, rootText) => {
+      const source = (p) => (p === path ? rootText : (fragments[p] ?? null));
+      const result = resolveTemplate(path, source, tomlParse);
+      return result.ok
+        ? { ok: true, value: result.resolved.value, isComposed: result.resolved.isComposed }
+        : { ok: false, error: result.error };
+    };
+  }
+
+  function makeEntityShell() {
+    const modeShell = new ModeShell();
+    modeShell.switchMode('Entity');
+    modeShell.setOpenFiles('Entity', [PATH]);
+    modeShell.setActiveFile('Entity', PATH);
+    modeShell.markDirty('Entity', PATH, true);
+    return modeShell;
+  }
+
+  it('BLOCKS the save when a fragment-sourced [behaviour] is invalid', async () => {
+    const modeShell = makeEntityShell();
+    const writeFile = vi.fn(async () => {});
+    const saveFlow = new SaveFlow(
+      modeShell,
+      { world: () => '', entity: stringifyEntityToml },
+      writeFile,
+      noopBus,
+    );
+    // Fragment authors an invalid doctrine (no id, no directive_kind).
+    saveFlow.setEntityResolver(
+      makeResolver({
+        [FRAGMENT_PATH]: '[behaviour]\n[[behaviour.doctrine]]\nbase_priority = 1.0\n',
+      }),
+    );
+    // The hull authors ONLY tags + includes — its behaviour is inherited.
+    saveFlow.setContent('Entity', PATH, { tags: ['ship'], includes: ['fragments/ai.toml'] });
+
+    const result = await saveFlow.saveActive();
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((m) => /doctrine/i.test(m))).toBe(true);
+    // Nothing written; the file stays dirty.
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(modeShell.isDirty('Entity', PATH)).toBe(true);
+  });
+
+  it('passes when the fragment-sourced [behaviour] is valid, and WRITES the authored doc (includes intact)', async () => {
+    const modeShell = makeEntityShell();
+    const writeFile = vi.fn(async () => {});
+    const saveFlow = new SaveFlow(
+      modeShell,
+      { world: () => '', entity: stringifyEntityToml },
+      writeFile,
+      noopBus,
+    );
+    saveFlow.setEntityResolver(
+      makeResolver({
+        [FRAGMENT_PATH]:
+          '[behaviour]\n[[behaviour.doctrine]]\nid = "engage"\ndirective_kind = "Attack"\nbase_priority = 1.0\n',
+      }),
+    );
+    saveFlow.setContent('Entity', PATH, { tags: ['ship'], includes: ['fragments/ai.toml'] });
+
+    const result = await saveFlow.saveActive();
+
+    expect(result.ok).toBe(true);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const written = writeFile.mock.calls[0][1];
+    // The AUTHORED document is written — `includes` survive, the resolved
+    // `behaviour` is NOT baked flat into the file.
+    expect(written).toContain('includes');
+    expect(written).not.toContain('behaviour');
+    expect(modeShell.isDirty('Entity', PATH)).toBe(false);
+  });
+
+  it('BLOCKS the save with a located error when an include cannot be resolved', async () => {
+    const modeShell = makeEntityShell();
+    const writeFile = vi.fn(async () => {});
+    const saveFlow = new SaveFlow(
+      modeShell,
+      { world: () => '', entity: stringifyEntityToml },
+      writeFile,
+      noopBus,
+    );
+    // No fragment supplied — the include is missing.
+    saveFlow.setEntityResolver(makeResolver({}));
+    saveFlow.setContent('Entity', PATH, { tags: ['ship'], includes: ['fragments/ai.toml'] });
+
+    const result = await saveFlow.saveActive();
+
+    expect(result.ok).toBe(false);
+    expect(result.errors[0]).toMatch(/include-missing/);
+    expect(result.errors[0]).toContain(PATH); // names the declaring hull
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('without a resolver, an entity save validates the authored doc (back-compat)', async () => {
+    const modeShell = makeEntityShell();
+    const writeFile = vi.fn(async () => {});
+    const saveFlow = new SaveFlow(
+      modeShell,
+      { world: () => '', entity: stringifyEntityToml },
+      writeFile,
+      noopBus,
+    );
+    // No setEntityResolver — behaviour is not resolved, authored doc is valid.
+    saveFlow.setContent('Entity', PATH, { tags: ['ship'], includes: ['fragments/ai.toml'] });
+
+    const result = await saveFlow.saveActive();
+
+    expect(result.ok).toBe(true);
+    expect(writeFile).toHaveBeenCalledTimes(1);
   });
 });

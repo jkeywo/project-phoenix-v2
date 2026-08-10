@@ -1,5 +1,6 @@
 import { validateFile, partitionFindings } from './validation.js';
 import { validateRigSidecarText } from './models-rig.js';
+import { INCLUDES_KEY } from './entity-includes.js';
 
 export class SaveFlow {
   /**
@@ -47,6 +48,16 @@ export class SaveFlow {
      * `setRigIndex`.
      */
     this._rigIndex = null;
+    /**
+     * Optional include resolver (issue #910). When set, an Entity save whose
+     * document declares `includes` is validated against its RESOLVED document
+     * (fragment fields merged in) rather than the authored one — so a hull that
+     * authors only `tags` + `includes`, and inherits its `[behaviour]`/`[mesh]`
+     * from a fragment, still has that behaviour/markers validated at the save
+     * gate. The AUTHORED document is still what gets written; only validation
+     * sees the resolved shape. Set via `setEntityResolver`.
+     */
+    this._entityResolver = null;
   }
 
   /**
@@ -55,6 +66,18 @@ export class SaveFlow {
    */
   setRigIndex(rigIndex) {
     this._rigIndex = rigIndex && typeof rigIndex.forEntity === 'function' ? rigIndex : null;
+  }
+
+  /**
+   * Register the include resolver (issue #910) used to validate a composed
+   * entity against its RESOLVED document on save. `fn(path, authoredText)`
+   * resolves the LIVE authored text plus its on-disk fragment closure and
+   * returns `{ ok: true, value }` (the resolved document) or `{ ok: false,
+   * error }` (a located `IncludeError`). Without one, entity saves validate the
+   * authored document alone, exactly as before.
+   */
+  setEntityResolver(fn) {
+    this._entityResolver = typeof fn === 'function' ? fn : null;
   }
 
   /**
@@ -139,6 +162,39 @@ export class SaveFlow {
       return { ok: false, errors: [e.message], warnings: [] };
     }
 
+    // A composed entity (issue #910) is validated against its RESOLVED
+    // document, so a hull that authors only `tags` + `includes` and inherits
+    // its `[behaviour]`/`[mesh]` from a fragment does not slip past
+    // behaviour/marker validation. We resolve FRESH from `content` (the LIVE
+    // authored text about to be written), never a possibly-stale cache, and
+    // still write the AUTHORED document — `includes` stay intact on disk. A
+    // resolution failure (missing fragment, cycle, malformed include) blocks
+    // the save with the located error instead of writing a broken hull.
+    let toValidate = parsedContent;
+    if (
+      mode === 'Entity' &&
+      this._entityResolver &&
+      parsedContent &&
+      typeof parsedContent === 'object' &&
+      !Array.isArray(parsedContent) &&
+      Object.prototype.hasOwnProperty.call(parsedContent, INCLUDES_KEY)
+    ) {
+      let resolution;
+      try {
+        resolution = await this._entityResolver(path, content);
+      } catch (e) {
+        return { ok: false, errors: [`Include resolution failed: ${e.message}`], warnings: [] };
+      }
+      if (!resolution || !resolution.ok) {
+        const err = resolution?.error;
+        const located = err
+          ? `${err.category}: ${err.message}${err.file ? ` (in ${err.file})` : ''}`
+          : 'include resolution failed';
+        return { ok: false, errors: [located], warnings: [] };
+      }
+      toValidate = resolution.value;
+    }
+
     // Models mode caches a ready-made TOML *string* (not a parsed object), so
     // validateFile would emit a junk "Root value must be an object" warning.
     // It gets the rig-sidecar validator instead (issue #758) — a rig that
@@ -149,7 +205,7 @@ export class SaveFlow {
     const validationResults =
       mode === 'Models'
         ? validateRigSidecarText(content)
-        : validateFile(path, parsedContent, { rigIndex: this._rigIndex });
+        : validateFile(path, toValidate, { rigIndex: this._rigIndex });
     // Split findings by severity (issue #757). Warnings stay visible and flow
     // through untouched on every path; definite errors BLOCK the save before
     // anything is written and before any cache/undo/invalidation fires, so a

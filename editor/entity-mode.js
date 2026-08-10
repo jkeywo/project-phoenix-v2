@@ -14,6 +14,7 @@ import { parseEntityToml, stringifyEntityToml, validateEntitySections } from './
 import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from './component-schema.js';
 import { getComboTemplate, getRawSectionDefaults } from './component-templates.js';
 import { computeEntityPreview } from './entity-preview.js';
+import { sectionOrigin as provenanceSectionOrigin } from './entity-includes.js';
 
 /**
  * Deep-clone a default value so subsequent mutations on the returned card
@@ -106,8 +107,18 @@ export class EntityModeShell {
     /** @type {string|null} currently active file path */
     this._activeFile = null;
 
-    /** @type {object|null} parsed TOML of the active file */
+    /** @type {object|null} parsed TOML of the active file — the AUTHORED
+     * document (keeps `includes`); the edit + save target. */
     this._parsedEntity = null;
+
+    /** @type {object|null} the RESOLVED document (fragment fields merged in),
+     * or null when the entity is uncomposed. Preview reads this so a
+     * fragment-sourced hull does not appear to have no systems (issue #910). */
+    this._resolvedEntity = null;
+
+    /** @type {import('./entity-includes.js').Provenance|null} which fragment
+     * authored each field of the resolved document. */
+    this._provenance = null;
 
     /** @type {string|null} raw TOML text of the active file */
     this._rawText = null;
@@ -143,11 +154,17 @@ export class EntityModeShell {
 
   /**
    * Open an entity file: parse it and build component cards.
+   *
    * @param {string} filePath
-   * @param {string} tomlText
+   * @param {string} tomlText  The hull's AUTHORED TOML (with `includes`).
+   * @param {{ resolved?: object, provenance?: object }} [resolution]
+   *   Optional include-resolution (issue #910). When supplied, `resolved` is the
+   *   composed document preview reads, and `provenance` says which fragment
+   *   authored each field. Omit it for an uncomposed entity — behaviour is then
+   *   identical to before.
    * @returns {{ ok: boolean, errors: string[] }}
    */
-  openFile(filePath, tomlText) {
+  openFile(filePath, tomlText, resolution = null) {
     let parsed;
     try {
       parsed = parseEntityToml(tomlText);
@@ -163,6 +180,8 @@ export class EntityModeShell {
     this._activeFile = filePath;
     this._rawText = tomlText;
     this._parsedEntity = parsed;
+    this._resolvedEntity = resolution?.resolved ?? null;
+    this._provenance = resolution?.provenance ?? null;
     this._cards = this._buildCards(parsed);
     return { ok: true, errors: [] };
   }
@@ -195,7 +214,83 @@ export class EntityModeShell {
     if (!this._parsedEntity) {
       return { placeholder: true, activeFile: this._activeFile };
     }
-    return computeEntityPreview(this._parsedEntity, this._factionMap);
+    // Preview the RESOLVED document (issue #910): a hull whose systems, hull or
+    // consoles come from a fragment must not read as having none.
+    return computeEntityPreview(this._resolvedEntity ?? this._parsedEntity, this._factionMap);
+  }
+
+  // ── Composition awareness (issue #910) ────────────────────────────────────
+
+  /** The RESOLVED document (fragment fields merged in), or the authored one
+   * when uncomposed. */
+  getResolvedEntity() {
+    return this._resolvedEntity ?? this._parsedEntity;
+  }
+
+  /** Provenance for the resolved document, or null when uncomposed. */
+  getProvenance() {
+    return this._provenance;
+  }
+
+  /** Whether the active entity is composed from at least one fragment. */
+  isComposed() {
+    return this._resolvedEntity != null && this._provenance != null;
+  }
+
+  /**
+   * Classify a top-level section as authored by the hull, inherited from a
+   * fragment, mixed, or absent — from provenance, not guesswork. Returns
+   * `'authored'` for an uncomposed entity (every field is the hull's own).
+   * @param {string} section
+   * @returns {'authored'|'inherited'|'mixed'|'none'}
+   */
+  getSectionOrigin(section) {
+    if (!this._provenance) {
+      const doc = this._parsedEntity;
+      return doc && doc[section] !== undefined && doc[section] !== null ? 'authored' : 'none';
+    }
+    return provenanceSectionOrigin(this._provenance, section, this._activeFile);
+  }
+
+  /**
+   * Sections the resolved document carries that the hull does NOT author itself
+   * — i.e. purely inherited from a fragment. A view renders these as inherited
+   * (read-only until materialised); {@link materialiseSection} makes one
+   * editable on the hull.
+   * @returns {Array<{ section: string, origin: 'inherited' }>}
+   */
+  getInheritedSections() {
+    if (!this._resolvedEntity || !this._parsedEntity) return [];
+    const out = [];
+    for (const key of Object.keys(this._resolvedEntity)) {
+      const authored = this._parsedEntity[key];
+      if (authored === undefined || authored === null) {
+        out.push({ section: key, origin: 'inherited' });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Materialise an inherited section onto the hull's AUTHORED document so it
+   * becomes an editable card. This is the DELIBERATE materialise-override
+   * decision (issue #910, see entity-includes.js): editing an inherited field
+   * is NOT read-only — it copies the resolved value onto the hull, which is the
+   * same "includer wins" lever the resolver already honours, and the hull keeps
+   * its `includes` so composition is preserved on save.
+   * @param {string} section
+   * @returns {{ ok: boolean, warning?: string }}
+   */
+  materialiseSection(section) {
+    if (!this._parsedEntity) return { ok: false, warning: 'no entity open' };
+    const source = this._resolvedEntity ?? this._parsedEntity;
+    if (source[section] === undefined || source[section] === null) {
+      return { ok: false, warning: `section '${section}' is not present to materialise` };
+    }
+    const value = cloneDefaults(source[section]);
+    this._parsedEntity[section] = value;
+    this._cards = this._buildCards(this._parsedEntity);
+    return { ok: true };
   }
 
   // ── Faction dropdown ──────────────────────────────────────────────────────

@@ -23,7 +23,7 @@ import { discoverFactionsAndComplexity } from './faction-complexity-discovery.js
 import { renderEntityFileListView } from './entity-file-list-view.js';
 import { renderEntityComponentStackView } from './entity-component-stack-view.js';
 import { renderEntityPreviewView } from './entity-preview-view.js';
-import { entityCache, onInvalidate, preloadEntityCache } from './entity-cache.js';
+import { entityCache, onInvalidate, preloadEntityCache, resolveEntityConfig } from './entity-cache.js';
 import { readFile, listDirectory, getProjectRoot } from './project-root.js';
 
 /**
@@ -51,6 +51,7 @@ export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, in
     readFile: io?.readFile || readFile,
     listDirectory: io?.listDirectory || listDirectory,
     preload: io?.preload || preloadEntityCache,
+    resolve: io?.resolve || resolveEntityConfig,
     onCacheInvalidate: io?.onCacheInvalidate || onInvalidate,
     getProjectRoot: io?.getProjectRoot || getProjectRoot,
     discover: io?.discover || discoverFactionsAndComplexity,
@@ -78,6 +79,12 @@ export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, in
   // ── State + render helpers ────────────────────────────────────────────
   let rawTextCache = new Map(); // path → raw TOML (so we can re-open after edits)
 
+  // The located include-resolution error for the active hull (issue #910), or
+  // null when it resolved cleanly. Rendered as an on-screen banner so a broken
+  // include (missing fragment, cycle, malformed declaration) is never a silent
+  // fall-back to an uncomposed view — it names the declaring file.
+  let includeError = null;
+
   function renderLeft() {
     const paths = shell.getFileList();
     renderEntityFileListView(leftPane, {
@@ -94,7 +101,16 @@ export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, in
       centerPane.innerHTML = '<p class="placeholder">Select an entity file from the left.</p>';
       return;
     }
-    renderEntityComponentStackView(centerPane, {
+    centerPane.innerHTML = '';
+    // Surface a broken include (issue #910, AC6) above the component stack.
+    // The hull still opens uncomposed, but the author sees WHY its inherited
+    // sections are missing and WHICH file declared the bad include.
+    if (includeError) {
+      renderIncludeErrorBanner(centerPane, includeError);
+    }
+    const stackHost = document.createElement('div');
+    centerPane.appendChild(stackHost);
+    renderEntityComponentStackView(stackHost, {
       cards: shell.getComponentCards(),
       deps: makeCardDeps(),
       onAddChoice: (choice) => handleAddChoice(choice),
@@ -119,6 +135,52 @@ export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, in
       onEdit: (section, newData) => handleCardEdit(section, newData),
       onDelete: (section) => handleCardDelete(section),
     };
+  }
+
+  /**
+   * Render a located include-resolution error (issue #910) as a banner, in the
+   * same read-only banner idiom as entity-behaviour-view / entity-stations-view.
+   * Names the declaring file and shows the include chain so the author can find
+   * and fix the broken include rather than seeing an unexplained empty hull.
+   * @param {HTMLElement} host
+   * @param {{ category?: string, message?: string, file?: string,
+   *           chain?: string[], chainDisplay?: () => string }} error
+   */
+  function renderIncludeErrorBanner(host, error) {
+    const banner = document.createElement('div');
+    banner.className = 'entity-include-error';
+
+    const heading = document.createElement('div');
+    heading.className = 'entity-include-error-heading';
+    heading.textContent = `Include resolution failed: ${error.category || 'error'}`;
+    banner.appendChild(heading);
+
+    const msg = document.createElement('div');
+    msg.className = 'entity-include-error-message';
+    msg.textContent = error.message || 'This entity could not be composed from its includes.';
+    banner.appendChild(msg);
+
+    if (error.file) {
+      const fileRow = document.createElement('div');
+      fileRow.className = 'entity-include-error-file';
+      fileRow.textContent = `declared in ${error.file}`;
+      banner.appendChild(fileRow);
+    }
+
+    const chain =
+      typeof error.chainDisplay === 'function'
+        ? error.chainDisplay()
+        : Array.isArray(error.chain)
+          ? error.chain.join(' -> ')
+          : '';
+    if (chain) {
+      const chainRow = document.createElement('div');
+      chainRow.className = 'entity-include-error-chain';
+      chainRow.textContent = `include chain: ${chain}`;
+      banner.appendChild(chainRow);
+    }
+
+    host.appendChild(banner);
   }
 
   // ── Edit pipeline ─────────────────────────────────────────────────────
@@ -181,7 +243,34 @@ export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, in
         return;
       }
     }
-    const result = shell.openFile(path, text);
+    // Resolve the include closure (issue #910) so preview reads the composed
+    // document and inherited fields carry provenance. A resolution FAILURE is
+    // surfaced on-screen (AC6): the hull still opens uncomposed, but a banner
+    // names the declaring file — never a silent omission.
+    let resolution = null;
+    includeError = null;
+    try {
+      const res = await ioDeps.resolve(path);
+      if (res && res.ok && res.isComposed) {
+        resolution = { resolved: res.config, provenance: res.provenance };
+      } else if (res && !res.ok && res.error) {
+        includeError = res.error;
+        console.warn(
+          `[entity-mode-view] include resolution failed for ${path}: ` +
+            `${res.error.category}: ${res.error.message}`,
+        );
+      }
+    } catch (err) {
+      includeError = {
+        category: 'resolver-error',
+        message: err?.message || String(err),
+        file: path,
+        chain: [path],
+      };
+      console.warn(`[entity-mode-view] include resolution threw for ${path}: ${err?.message || err}`);
+    }
+
+    const result = shell.openFile(path, text, resolution);
     if (!result.ok) {
       console.warn(`[entity-mode-view] openFile failed for ${path}:`, result.errors);
     }

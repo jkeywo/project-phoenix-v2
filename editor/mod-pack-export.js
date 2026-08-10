@@ -27,6 +27,7 @@
 
 import { stringify as tomlStringify, parse as tomlParse } from 'smol-toml';
 import { validateFile, partitionFindings } from './validation.js';
+import { resolveTemplate, canonicalTemplatePath, INCLUDES_KEY } from './entity-includes.js';
 
 /** The manifest path a mod pack always carries. */
 export const MANIFEST_PATH = 'scenarios.toml';
@@ -348,6 +349,25 @@ export function validateManifestEntries(scenarios, contentByPath) {
   return findings;
 }
 
+/** Normalise the fragment-text source into a `read(path) -> string | null`. */
+function normaliseFragmentSource(fs) {
+  if (!fs) return () => null;
+  if (typeof fs === 'function') return (p) => fs(p) ?? null;
+  if (typeof fs.read === 'function') return (p) => fs.read(p) ?? null;
+  if (fs instanceof Map) return (p) => (fs.has(p) ? fs.get(p) : null);
+  if (typeof fs === 'object') return (p) => (Object.prototype.hasOwnProperty.call(fs, p) ? fs[p] : null);
+  return () => null;
+}
+
+function declaresIncludes(parsed) {
+  return (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    Object.prototype.hasOwnProperty.call(parsed, INCLUDES_KEY)
+  );
+}
+
 /**
  * Export a validated TOML mod pack.
  *
@@ -355,11 +375,15 @@ export function validateManifestEntries(scenarios, contentByPath) {
  *   files: Array<{ path: string, parsed: object, text?: string }>,
  *   scenarios: Array<{ id: string, world: string, label?: string }>,
  *   rigIndex?: import('./marker-validate.js').RigIndex,
+ *   fragmentSource?: Function | {read:Function} | Map | object,
  * }} input
  *   `files` are the selected authored files (parsed TOML plus optional
  *   pre-serialised `text`; when absent the parsed object is serialised with
  *   smol-toml). `scenarios` are the manifest's root-world entries. `rigIndex`,
  *   when supplied, drives cross-file marker validation exactly as a save does.
+ *   `fragmentSource`, when supplied, serves raw TOML text for `includes`
+ *   fragments a composed hull depends on that were not themselves selected — so
+ *   the exporter can carry them into the pack (issue #910).
  *
  * @returns {{ ok: true, zip: Uint8Array, manifestToml: string,
  *             paths: string[], warnings: string[] }
@@ -368,18 +392,28 @@ export function validateManifestEntries(scenarios, contentByPath) {
  * The gate mirrors `SaveFlow._saveOne` (issue #757) but across every selected
  * file AND the manifest: definite errors block the whole export before any
  * archive byte is produced; warnings are surfaced but never block.
+ *
+ * A composed hull (issue #910) is validated as its RESOLVED document — so a
+ * hull whose systems come from a fragment does not read as having none — and
+ * every fragment in its include closure is CARRIED into the pack as a
+ * dependency. An include that cannot be resolved (missing fragment, cycle,
+ * malformed declaration) blocks the export with an error naming the declaring
+ * hull, so an exported pack never references a fragment it lacks.
  */
 export function exportModPack(input) {
   const files = Array.isArray(input?.files) ? input.files : [];
   const scenarios = Array.isArray(input?.scenarios) ? input.scenarios : [];
   const rigIndex = input?.rigIndex ?? null;
+  const fragmentSource = normaliseFragmentSource(input?.fragmentSource);
 
   const errors = [];
   const warnings = [];
 
-  // 1. Path whitelist — a file that escapes the supported authored paths is a
-  //    definite error, never silently dropped.
+  // 1. Path whitelist + serialisation — a file that escapes the supported
+  //    authored paths is a definite error, never silently dropped. Validation
+  //    is deferred to step 2 so composed hulls can be validated RESOLVED.
   const contentByPath = {};
+  const parsedByPath = {};
   const zipEntries = [];
   const seenPaths = new Set();
   for (const file of files) {
@@ -398,10 +432,7 @@ export function exportModPack(input) {
       errors.push(`"${path}" is selected more than once`);
       continue;
     }
-    seenPaths.add(path);
 
-    // 2. Per-file admission — the same validateFile + partitionFindings gate a
-    //    save uses, applied to EVERY selected file.
     let text;
     try {
       text = typeof file.text === 'string' ? file.text : tomlStringify(file.parsed);
@@ -410,13 +441,66 @@ export function exportModPack(input) {
       continue;
     }
 
-    const findings = validateFile(path, file.parsed, { rigIndex });
+    seenPaths.add(path);
+    contentByPath[path] = text;
+    parsedByPath[path] = file.parsed;
+    zipEntries.push({ path, text });
+  }
+
+  // Resolution reads a composed hull's own text and its fragments' text: the
+  // selected files first, then the caller-supplied fragment source.
+  const read = (p) =>
+    Object.prototype.hasOwnProperty.call(contentByPath, p) ? contentByPath[p] : fragmentSource(p);
+
+  // Carry one fragment dependency into the pack (verbatim — a fragment is a
+  // partial and must not be validated standalone, only through the resolved
+  // hull that composes it).
+  const carryFragment = (fragmentPath, declaringHull) => {
+    if (seenPaths.has(fragmentPath)) return; // already in the pack
+    if (!isAllowedContentPath(fragmentPath)) {
+      errors.push(
+        `${declaringHull}: include "${fragmentPath}" is not a supported authored TOML path and cannot be exported`,
+      );
+      return;
+    }
+    const text = read(fragmentPath);
+    if (text == null) {
+      errors.push(`${declaringHull}: fragment "${fragmentPath}" is not included in the pack`);
+      return;
+    }
+    seenPaths.add(fragmentPath);
+    contentByPath[fragmentPath] = text;
+    zipEntries.push({ path: fragmentPath, text });
+  };
+
+  // 2. Per-file admission — the same validateFile + partitionFindings gate a
+  //    save uses, applied to EVERY selected file. A composed hull resolves
+  //    first, so it is validated RESOLVED and its fragments are carried.
+  for (const path of Object.keys(parsedByPath)) {
+    const parsed = parsedByPath[path];
+    let toValidate = parsed;
+
+    if (path.startsWith('assets/entities/') && declaresIncludes(parsed)) {
+      const result = resolveTemplate(path, read, tomlParse);
+      if (!result.ok) {
+        const e = result.error;
+        errors.push(
+          `${e.file}: ${e.category}: ${e.message} [include chain: ${e.chain.join(' -> ')}]`,
+        );
+        continue; // a hull that will not resolve cannot be validated or carried
+      }
+      toValidate = result.resolved.value;
+      const root = canonicalTemplatePath(path);
+      for (const src of result.resolved.sources) {
+        if (src === root) continue;
+        carryFragment(src, path);
+      }
+    }
+
+    const findings = validateFile(path, toValidate, { rigIndex });
     const { errors: fileErrors, warnings: fileWarnings } = partitionFindings(findings);
     for (const r of fileErrors) errors.push(`${path}: ${r.message}`);
     for (const r of fileWarnings) warnings.push(`${path}: ${r.message}`);
-
-    contentByPath[path] = text;
-    zipEntries.push({ path, text });
   }
 
   // 3. Manifest root-world validation against the selected content.

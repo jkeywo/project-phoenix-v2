@@ -367,15 +367,31 @@ export class CanvasManager {
     const pos = getSpawnPosition(spawn, allAnchors);
     const relative = getRelativeInfo(spawn);
 
-    // Merge entity-template fields into spawn if not already set
+    // Merge entity-template fields into spawn if not already set.
+    //
+    // `getEntityConfig` now returns the RESOLVED document (issue #910), whose
+    // objects/arrays are the SHARED cache entries. Assigning them onto the spawn
+    // by reference would alias the cache — a later mutation of `spawn.tags`
+    // (e.g. via the override panel) would then corrupt every other spawn reading
+    // the same template. So each inherited field is deep-cloned before it lands
+    // on the spawn, severing the alias.
+    //
+    // NOTE (follow-up): this still BAKES template/fragment fields onto the spawn
+    // object, which is the layer's persisted data model, so a save freezes a
+    // copy into the world TOML. That predates #910 (it applied to authored
+    // template fields before; #910 merely extended it to fragment data). Moving
+    // the merge onto a throwaway view so the world file stores only
+    // spawn-authored data + template_path + override changes how existing
+    // authored-template fields round-trip, which is beyond #910's scope — left
+    // for a follow-up issue. This change only severs the cache alias.
     const entConfig = spawn.template_path
       ? getEntityConfig(spawn.template_path)
       : null;
     if (entConfig) {
-      if (!spawn.tags && entConfig.tags) spawn.tags = entConfig.tags;
-      if (!spawn.radar_appearance && entConfig.radar_appearance) spawn.radar_appearance = entConfig.radar_appearance;
-      if (!spawn.collider && entConfig.collider) spawn.collider = entConfig.collider;
-      if (!spawn.shape && entConfig.shape) spawn.shape = entConfig.shape;
+      if (!spawn.tags && entConfig.tags) spawn.tags = structuredClone(entConfig.tags);
+      if (!spawn.radar_appearance && entConfig.radar_appearance) spawn.radar_appearance = structuredClone(entConfig.radar_appearance);
+      if (!spawn.collider && entConfig.collider) spawn.collider = structuredClone(entConfig.collider);
+      if (!spawn.shape && entConfig.shape) spawn.shape = structuredClone(entConfig.shape);
       // Synthesize a torus shape from asteroid_field block
       if (!spawn.shape && entConfig.asteroid_field) {
         spawn.shape = {
@@ -385,8 +401,8 @@ export class CanvasManager {
         };
       }
       // Region-entity fields needed by canvas-region renderer
-      if (!spawn.effects && entConfig.effects) spawn.effects = entConfig.effects;
-      if (!spawn.colour && entConfig.colour) spawn.colour = entConfig.colour;
+      if (!spawn.effects && entConfig.effects) spawn.effects = structuredClone(entConfig.effects);
+      if (!spawn.colour && entConfig.colour) spawn.colour = structuredClone(entConfig.colour);
     }
 
     const canvasPos = this.worldToCanvas(pos.x, pos.z);

@@ -258,6 +258,69 @@ describe('exportModPack', () => {
     });
   });
 
+  // ── Composable-template dependencies (issue #910) ─────────────────────────
+
+  const FRAGMENT_PATH = 'assets/entities/base.toml';
+  const HULL_PATH = 'assets/entities/hull.toml';
+  const FRAGMENT_TEXT =
+    'tags = ["ship"]\n[[system]]\nid = "helm-thrust"\nkind = "helm_thrust"\n';
+
+  it('#910: carries a composed hull\'s fragment into the pack as a dependency', () => {
+    const result = exportModPack({
+      files: [
+        { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
+        // The hull authors ONLY its includes — tags + systems come from the
+        // fragment, which is NOT itself a selected file.
+        { path: HULL_PATH, parsed: { includes: ['base.toml'] } },
+      ],
+      scenarios: [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      fragmentSource: { [FRAGMENT_PATH]: FRAGMENT_TEXT },
+    });
+    expect(result.ok).toBe(true);
+    const files = readStoreZip(result.zip);
+    // The fragment is carried so the exported pack does not reference a
+    // fragment it lacks.
+    expect(Object.keys(files)).toContain(FRAGMENT_PATH);
+    expect(Object.keys(files)).toContain(HULL_PATH);
+    // Every archived file (fragment included) is valid TOML.
+    for (const text of Object.values(files)) {
+      expect(() => tomlParse(text)).not.toThrow();
+    }
+  });
+
+  it('#910: validates the RESOLVED hull — tags from the fragment satisfy the check', () => {
+    // Unresolved, the hull has no `tags` and would fail validateEntityToml
+    // ("must have at least one tag"). It exports cleanly ONLY because the
+    // exporter validates the resolved document, whose tags come from the
+    // fragment.
+    const result = exportModPack({
+      files: [
+        { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
+        { path: HULL_PATH, parsed: { includes: ['base.toml'] } },
+      ],
+      scenarios: [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      fragmentSource: { [FRAGMENT_PATH]: FRAGMENT_TEXT },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.errors).toBeUndefined();
+  });
+
+  it('#910: a hull whose fragment is missing blocks the export, naming the hull', () => {
+    const result = exportModPack({
+      files: [
+        { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
+        { path: HULL_PATH, parsed: { includes: ['base.toml'] } },
+      ],
+      scenarios: [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      // No fragmentSource — the fragment cannot be resolved.
+    });
+    expect(result.ok).toBe(false);
+    expect(
+      result.errors.some((e) => e.includes(HULL_PATH) && e.includes('base.toml')),
+    ).toBe(true);
+    expect(result.zip).toBeUndefined();
+  });
+
   it('rejects a caller-supplied scenarios.toml among the selected files', () => {
     const result = exportModPack({
       files: [

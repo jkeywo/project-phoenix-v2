@@ -13,6 +13,7 @@ import { mountDefinitionsMode } from './definitions-mode-view.js';
 import { mountModelsMode } from './models-mode-view.js';
 import { RigIndex } from './marker-validate.js';
 import { parseRigToml, wireRigIndexToSaves } from './models-rig.js';
+import { resolveEntityConfigFromText } from './entity-cache.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -60,6 +61,14 @@ const saveFlow = new SaveFlow(
 // to the very next entity save without reloading the editor.
 const rigIndex = new RigIndex();
 saveFlow.setRigIndex(rigIndex);
+
+// Composed-entity save gate (issue #910). A hull that authors only `tags` +
+// `includes` inherits its `[behaviour]`/`[mesh]` from a fragment; without this
+// the interactive save validates the authored doc and skips those checks. The
+// resolver re-composes the LIVE authored text against its on-disk fragment
+// closure so the save is validated as the RESOLVED document, while the authored
+// document (with `includes` intact) is still what gets written.
+saveFlow.setEntityResolver(resolveEntityConfigFromText);
 
 // Keep the index in step with Models-Mode writes. Both write paths — Models'
 // own Save button and the SaveFlow 'Models' branch — fire `fireModelSaved`

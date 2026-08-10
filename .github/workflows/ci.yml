@@ -42,7 +42,7 @@ jobs:
           path: target/pasm/
           retention-days: 14
 
-  # ── Unit tests (native, fast — fail-fast before expensive WASM build) ─────────
+  # ── Unit tests (native — the suite `deploy`, `perf` and `balance` gate on) ────
   test:
     runs-on: ubuntu-latest
 
@@ -148,8 +148,14 @@ jobs:
         run: cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 
   # ── WASM build ────────────────────────────────────────────────────────────────
+  #
+  # Deliberately NOT gated on `test`: the release WASM build is ~20 minutes and
+  # sat serially behind the whole native suite, which put it on the critical
+  # path for nothing — `deploy` still needs test+build+editor-test+smoke, so a
+  # red suite ships nothing, and the workflow's cancel-in-progress concurrency
+  # group truncates superseded runs. The only cost is runner-minutes spent
+  # building a page a red `test` then discards.
   build:
-    needs: test
     runs-on: ubuntu-latest
 
     steps:

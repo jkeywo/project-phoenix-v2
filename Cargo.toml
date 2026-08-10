@@ -250,6 +250,24 @@ vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "08b5fdb7608fa
 # which the crate cfg's to `wasm32` anyway. Cargo unifies the stanzas into one
 # `vellum-save` per target.
 vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "08b5fdb7608fa732de44885aac8c7af9791e2052", features = ["run"] }
+# The fleet's deterministic Rhai scenario-scripting host behind
+# `crate::world::script` (issue #979, Rhai milestone M1). Same vellum rev as the
+# crates above — one vellum rev in the repo, not two. Phoenix takes the sandbox
+# profile and the context-in/effects-out call seam unchanged; the *vocabulary*
+# (host functions, the per-call effect buffer draining into `world::dispatch`'s
+# ActionCmd boundary, the sugared `flags` type, the loader, and cross-reference
+# validation) stays here (`world/script/`), per vellum's charter.
+vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "08b5fdb7608fa732de44885aac8c7af9791e2052" }
+# The Rhai engine itself, named directly because `world::script` constructs the
+# host-fn vocabulary on the engines vellum-script hands back and must fix the
+# global hashing seed before any engine is built (M0 spike:
+# `rhai-anonymous-function-naming`). Pinned to the SAME version/features as
+# vellum's workspace (`sync` for a shared host, `no_float` for integer-only
+# authored content) so Cargo unifies both edges onto one `rhai` instance and the
+# `Engine` type is identical across the two crates. Its wasm build is why
+# phoenix's `.cargo/config.toml` rustflag + wasm32 `getrandom/wasm_js` stanza
+# already exist — see the M0 spike's `rhai-wasm-target-support` finding.
+rhai = { version = "1.25", features = ["sync", "no_float"] }
 
 [dev-dependencies]
 # The contract checks (`vellum_replay::contract`), which the crate gates behind

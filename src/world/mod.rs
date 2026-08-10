@@ -7,6 +7,7 @@ pub mod layers;
 pub mod manifest;
 pub mod mod_pack;
 pub mod scenario;
+pub mod script;
 pub mod server;
 pub mod validate;
 pub use server::WorldPlugin;

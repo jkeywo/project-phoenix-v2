@@ -563,6 +563,12 @@ pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsV
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
+    // Fix Rhai's global hashing seed FIRST, before anything can build a script
+    // engine (issue #979, M0 spike `rhai-anonymous-function-naming`):
+    // `set_hashing_seed` silently no-ops once a hash has been taken, so it must
+    // be genuinely first on every peer. Idempotent — see `world::script`.
+    crate::world::script::init_hashing_seed();
+
     // Issue #935: the preload sequence (`wasm_load_world` -> N x
     // `wasm_load_config`) is finished by the time JS calls this — that is the
     // whole point of the "preload complete" handshake `config_cache` runs.

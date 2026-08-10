@@ -25,6 +25,12 @@ use project_phoenix::perf::{self, tick::TickSampler};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
+    // Fix Rhai's global hashing seed before anything can build a script engine
+    // (issue #979): the headless runner must seed identically to every browser
+    // peer, or a `(tick, script_path, fn_name)` key recorded on one would not
+    // resolve on the other. Idempotent; see `world::script::init_hashing_seed`.
+    project_phoenix::world::script::init_hashing_seed();
+
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(ParseOutcome::Help) => {
             print!("{HELP}");

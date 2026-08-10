@@ -15,10 +15,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Host Mod Pack Operator
-      summary: Person at the server page who uploads a mod pack before selecting the next scenario.
+      summary: "Person at the server page who assembles an ordered stack of mod packs — uploading, removing, and reordering them — before selecting the next scenario from the composed catalog."
     game_design:
       architecture_links: [host-mod-pack-upload, mod-content-overlay-resolver, mod-aware-scenario-catalog]
-      responsibilities: [upload mod pack, select a scenario from the composed catalog]
+      responsibilities: [upload mod pack, remove or reorder applied packs, select a scenario from the composed catalog]
       player_verbs: [upload-mod-pack]
 
   - verb: save-authored-content
@@ -56,7 +56,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Upload Mod Pack
-      summary: Upload a TOML-only ZIP and its required scenario manifest to the server page before scenario selection, where its files may add content or replace files at the same supported authored path.
+      summary: "Upload a ZIP pack (authored TOML and, since #988, `.rhai` script) and its required scenario manifest to the server page before scenario selection. An accepted pack is PUSHED onto an ordered overlay stack (issue #987); a later pack shadows an earlier one for any authored path they share, and a pack's files may add content or replace files at the same supported authored path. The operator can also remove or reorder applied packs, re-resolving precedence."
     game_design:
       architecture_links: [host-mod-pack-upload, mod-content-overlay-resolver, mod-aware-scenario-catalog]
       owner_role: host-mod-pack-operator
@@ -76,12 +76,12 @@ entities:
       status: accepted
       confidence: confirmed
       title: Mod Pack Content Composition
-      summary: A validated mod pack overlays base authored TOML by exact supported path, replacing matching files and adding new files. Only root worlds explicitly named by its manifest appear in the selectable scenario list.
+      summary: "A validated mod pack overlays base authored content by exact supported path, replacing matching files and adding new files. Packs compose as an ORDERED stack (issue #987): a later-loaded pack wins any authored path an earlier pack also carries, and removing or reordering re-resolves precedence purely from the resulting order. A pack may carry `.rhai` script (issue #988), gated by the deny-by-default sandbox as its trust boundary. Only root worlds explicitly named by a pack manifest appear in the selectable scenario list."
     game_design:
-      enforcement_links: [mod-content-overlay-resolver, mod-aware-scenario-catalog]
+      enforcement_links: [mod-content-overlay-resolver, mod-aware-scenario-catalog, mod-pack-script-trust-boundary]
       owner_role: host-mod-pack-operator
       protected: true
-      must_not_be: [partially applied, allowed to escape supported authored paths, allowed to alter a round already in progress]
+      must_not_be: [partially applied, allowed to escape supported authored paths, allowed to run unsandboxed pack script, allowed to alter a round already in progress]
 
   - mechanic: blocking-authoring-errors
     core:
@@ -128,3 +128,57 @@ entities:
         - src/world/manifest.rs
         - src/server/bridge.rs
       tests: [cargo test]
+
+  - mechanic: mod-scenario-provenance-visible
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Mod Scenario Provenance Is Visible
+      summary: "A player can see that a scenario is mod-supplied (issue #990). Each mod-contributed scenario in the composed catalog reports its originating pack id — including a mod scenario that replaces a base id, which reports the pack, not base — while base scenarios report no origin. The applied-pack list survives world load for an already-connected client."
+    game_design:
+      architecture_links: [mod-pack-scenario-provenance, mod-aware-scenario-catalog]
+      participating_roles: [host-mod-pack-operator]
+      resolution: host-authoritative-content-catalog
+      outputs: [per-scenario pack provenance, visible applied-pack list]
+    implementation:
+      status: confirmed
+      paths:
+        - src/world/manifest.rs
+        - src/server/bridge.rs
+      tests: [cargo test]
+
+  - mechanic: authored-scenario-scripting
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Authored Scenario Scripting
+      summary: "The editor scenario mode is a `.rhai` script editor (issues #983/#995): the previous declarative card views are gone, and an author edits sibling scripts and inline `[script.*]` blocks with host-fn autocomplete and live compile diagnostics served by the phoenix wasm exports. The script seam itself is delivered but DORMANT — no scenario activation runs authored script yet (roadmap-scenario-scripting, deferred to band B) — so this contract covers AUTHORING, not live execution."
+    game_design:
+      architecture_links: [editor-scenario-script-authoring, scenario-script-editor-host]
+      participating_roles: [scenario-author]
+      resolution: local-validation-gate
+      outputs: [authored .rhai scenario script, live compile diagnostics]
+    implementation:
+      status: confirmed
+      paths:
+        - editor/scenario-mode.js
+        - editor/script-wasm.js
+      tests: [npm run test:editor]
+
+  - mechanic: editor-mod-assembly
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor MOD Mode Assembly
+      summary: "A dedicated editor MOD mode (issue #989) for assembling and inspecting a mod pack — selecting the authored files it carries and the root scenarios its manifest names — as a first-class workspace that feeds the existing mod-pack exporter."
+    game_design:
+      architecture_links: [editor-mod-workspace, editor-mod-pack-exporter]
+      participating_roles: [scenario-author]
+      resolution: local-validation-gate
+      outputs: [assembled mod pack, exportable scenario manifest]
+    implementation:
+      status: confirmed
+      paths:
+        - editor/mod-mode-view.js
+        - editor/mod-pack-workspace.js
+      tests: [npm run test:editor]

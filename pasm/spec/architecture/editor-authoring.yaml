@@ -123,7 +123,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Mod Pack Upload
-      summary: Server-page pre-scenario control that accepts one TOML-only ZIP with its required scenario manifest for the next selection session and presents validation failures without starting a round.
+      summary: "Server-page pre-scenario control that accepts TOML-and-`.rhai` ZIP packs, each with its required scenario manifest, and maintains an ORDERED overlay stack for the next selection session (issue #987), presenting validation failures without starting a round. An accepted pack is PUSHED onto the stack (installing pack B after pack A does not evict A); the host can remove or reorder applied packs, and read back the applied-pack list and its path conflicts."
     architecture:
       kind: host-content-input
       authority: authoritative
@@ -135,21 +135,22 @@ entities:
       paths:
         - server.html
         - src/server/bridge.rs
+      symbols: [wasm_add_mod_pack, wasm_remove_mod_pack, wasm_reorder_mod_packs, wasm_active_pack_manifest, wasm_clear_mod_pack]
       tests: [cargo test]
     evidence:
       - kind: code
         reference: pre-scenario upload control gated to the scenario stage
         summary: server.html adds a file input + button inside #scenario-panel and ignores any pick once _worldLoadStarted latches, so an in-progress round is never affected.
       - kind: code
-        reference: wasm_validate_mod_pack bridges the upload to atomic validation
-        summary: The button reads the ZIP bytes and calls the wasm_validate_mod_pack export, which validates atomically and installs the session overlay only on acceptance.
+        reference: "wasm_add_mod_pack bridges the upload to atomic validation and the ordered stack (issue #987)"
+        summary: "The button reads the ZIP bytes and calls the wasm_add_mod_pack export, which validates atomically against the ALREADY-ACTIVE stack (duplicate-pack-id rejects, overlapping-pack-path warns) and PUSHES the pack onto the overlay stack only on acceptance; wasm_remove_mod_pack / wasm_reorder_mod_packs / wasm_active_pack_manifest drive the applied-pack list, and wasm_clear_mod_pack discards the whole stack on return-to-lobby. The removed single-slot exports (wasm_validate_mod_pack, wasm_get_mod_pack_meta) no longer exist."
 
   - state: uploaded-mod-pack-state
     core:
       status: implemented
       confidence: confirmed
       title: Uploaded Mod Pack State
-      summary: Host-session-scoped uploaded archive, required scenario manifest, and parsed candidate files, discarded when the host session ends and never applied to an in-progress round.
+      summary: "Host-session-scoped ORDERED stack of accepted packs (issue #987), each carrying its id/name/version, exact-path -> TOML file map, and scenario manifest, discarded when the host session ends and never applied to an in-progress round. The stack is oldest -> newest; a later pack shadows an earlier one for any authored path they share, and removing or reordering re-resolves precedence purely from the resulting order."
     architecture:
       classification: authoritative
       owner: host-mod-pack-upload
@@ -158,12 +159,14 @@ entities:
       status: confirmed
       paths:
         - src/entities/config_cache.rs
-      # No struct owns this: UPLOADED_PACK_TOML / MOD_MANIFEST_TOML are raw
-      # `thread_local!` statics (a HashMap<String, String> and an
-      # Option<String>), installed by set_mod_pack_overlay and read by
-      # mod_pack_overlay_get. Residual granularity honestly recorded — there
-      # is no typed carrier to name here.
-      symbols: [set_mod_pack_overlay, clear_mod_pack_overlay, mod_pack_overlay_get]
+      # Issue #987 replaced the single-slot UPLOADED_PACK_TOML / MOD_MANIFEST_TOML
+      # thread-locals (and their set_mod_pack_overlay installer) with `ActivePack`
+      # records held in one `thread_local!` `Vec<ActivePack>` (`ACTIVE_PACKS`).
+      # `push_mod_pack` / `remove_mod_pack` / `reorder_mod_packs` mutate the stack;
+      # `active_packs` snapshots it; `mod_pack_overlay_get` / `overlay_source` /
+      # `overlay_conflicts` are the pure resolution + provenance walks; and
+      # `clear_mod_pack_overlay` discards the whole stack for the same-page seam.
+      symbols: [ActivePack, PathConflict, push_mod_pack, remove_mod_pack, reorder_mod_packs, active_packs, mod_pack_overlay_get, overlay_source, overlay_lookup, overlay_conflicts, clear_mod_pack_overlay]
       tests: [cargo test]
 
   - component: mod-content-overlay-resolver
@@ -171,7 +174,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Mod Content Overlay Resolver
-      summary: Validates a TOML-only uploaded archive and required manifest against supported authored paths, composes exact-path replacements and additions over base content, and rejects the entire pack on invalid archive, manifest, path, parse, or reference failure.
+      summary: "Validates an uploaded pack archive (TOML plus, since issue #988, `.rhai` script) and its required manifest against supported authored paths, composes exact-path replacements and additions over the already-active pack stack and base content, and rejects the whole pack on invalid archive, manifest, path, parse, script-sandbox, or reference failure. `validate_mod_pack` is the atomic validator; `validate_pack_scripts` is the deny-by-default script trust gate (see mod-pack-script-trust-boundary). Resolution walks the ordered stack later-wins."
     architecture:
       kind: content-composer
       authority: authoritative
@@ -184,6 +187,7 @@ entities:
       paths:
         - src/world/mod_pack.rs
         - src/entities/config_cache.rs
+      symbols: [validate_mod_pack, validate_pack_scripts]
       tests: [cargo test]
     evidence:
       - kind: test
@@ -193,8 +197,8 @@ entities:
         reference: store_zip_round_trips / store_zip_rejects_non_store_method / store_zip_rejects_crc_mismatch
         summary: The hand-rolled store-only ZIP reader mirrors editor/mod-pack-export.js — it round-trips real archive bytes and rejects non-store method and CRC mismatch.
       - kind: test
-        reference: mod_pack_overlay_returns_pack_content_for_overridden_path
-        summary: Both content channels consult the exact-path overlay first (pack content wins) and fall through to the normal fetch for non-overridden paths (AC2).
+        reference: "later_pack_wins_a_shared_path_and_reorder_flips_it / a_path_only_one_pack_carries_resolves_to_that_pack / pushing_pack_b_after_a_does_not_evict_a (src/entities/config_cache.rs)"
+        summary: "Both content channels consult the ordered overlay stack first — the latest-loaded pack carrying a path wins, a path only one pack carries resolves to that pack, installing B after A does not evict A, and reorder flips the winner — falling through to the normal fetch for non-overridden paths (AC2, issue #987)."
 
   - state: composed-world-content-pack-state
     core:
@@ -210,10 +214,11 @@ entities:
       status: confirmed
       paths:
         - src/entities/config_cache.rs
-      # Also no dedicated storage type: the composed view is produced on
-      # every read by mod_pack_overlay_get layering the session overlay over
-      # the normal fetch path, never materialised as its own struct.
-      symbols: [mod_pack_overlay_get]
+      # Also no dedicated storage type: the composed view is produced on every
+      # read by mod_pack_overlay_get walking the ordered pack stack (later-loaded
+      # wins, via the pure overlay_lookup) over the normal fetch path, never
+      # materialised as its own struct.
+      symbols: [mod_pack_overlay_get, overlay_lookup]
       tests: [cargo test]
 
   - component: mod-aware-scenario-catalog
@@ -309,4 +314,109 @@ entities:
     implementation:
       status: declared
       paths: [editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js]
+      tests: [npm run test:editor]
+
+  - component: mod-pack-manifest-schema
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Mod Pack Manifest Schema v1
+      summary: "Issue #986. The pack-side manifest contract: a `[pack]` header (id, name, version, optional `requires`) declaring pack identity, alongside the `[content]` identity block a host reads to bind a pack to the base content it targets. `parse_pack_manifest` reads the `[pack]` header and `[[scenario]]` list; `parse_content_identity` reads the `[content]` block; `SUPPORTED_PACK_FORMAT` (1) is the format gate rejected before any content validation. Shared with the base scenario manifest (see world-content-packs.yaml base-scenario-manifest), so packs and base content declare selectable scenarios the same way."
+    architecture:
+      kind: content-schema
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/manifest.rs
+      symbols: [parse_pack_manifest, PackManifest, PackMeta, PackRequires, parse_content_identity, ContentIdentity, SUPPORTED_PACK_FORMAT]
+      tests: [cargo test]
+
+  - component: mod-pack-script-trust-boundary
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Mod Pack Script Trust Boundary
+      summary: "Issue #988. A pack may carry `.rhai` as declared content, and the deny-by-default `vellum_script` sandbox profile (no eval, no imports, no module resolver, no wall clock, bounded operations) IS the trust boundary — `validate_pack_scripts` compiles every pack script under that profile at upload, so a pack that would not load is rejected atomically with the rest of the archive. At load a world's sibling `.rhai` resolves through `OverlayScriptResolver`, which reads the mod-pack overlay stack first then a fallback, AND records every script it resolves in `content_ledger` under its exact path — so a scenario loaded WITH a script-carrying pack folds a DIFFERENT content digest than the same scenario without it, and a pack's script can no longer drift under snapshot/replay determinism. `PackScriptFiles` is the resolver over an uploaded pack's own files used during upload validation."
+    architecture:
+      kind: trust-boundary
+      authority: authoritative
+      trust_boundary: deny-by-default-sandbox
+      reads: [uploaded-mod-pack-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/mod_pack.rs
+        - src/entities/config_cache.rs
+        - src/content_ledger.rs
+      symbols: [validate_pack_scripts, PackScriptFiles, OverlayScriptResolver]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: "a_pack_script_resolves_from_the_overlay_not_the_fallback / a_script_carrying_pack_moves_the_content_digest (src/entities/config_cache.rs)"
+        summary: "A pack's sibling script resolves from the overlay stack rather than the HTTP fallback, and a script-carrying pack moves the folded content digest — the determinism guarantee that keeps pack scripts from drifting under replay."
+
+  - component: mod-pack-scenario-provenance
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Mod Pack Scenario Provenance
+      summary: "Issue #990. A player must be able to see that a scenario is mod-supplied. `build_merged_catalog` stamps each mod-contributed scenario with its pack id in `ScenarioCatalogEntry::origin` (a base-manifest scenario carries `None`), including the case where a mod scenario replaces a base id — it then reports its PACK as the origin, not base. The bridge flattens `origin` to a wire `source` field (`\"base\"` or the pack id) on the scenario catalog, and server.html renders the applied-pack list (from wasm_active_pack_manifest) so it survives world load for an already-connected phone."
+    architecture:
+      kind: content-catalog
+      authority: authoritative
+      reads: [composed-world-content-pack-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/manifest.rs
+        - src/server/bridge.rs
+        - server.html
+      symbols: [build_merged_catalog, MergedCatalog, ScenarioCatalogEntry]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: "merged_catalog_base_scenarios_report_no_origin (src/world/manifest.rs)"
+        summary: "A base-manifest scenario carries no origin (None → wire source \"base\"); a mod scenario, including one replacing a base id, reports its pack id, so a player is never mis-badged."
+
+  - component: editor-mod-workspace
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor MOD Mode Workspace
+      summary: "Issue #989. A dedicated editor MOD mode for assembling and inspecting a mod pack — selecting the authored files a pack carries and the root scenarios its manifest names — as a first-class editor workspace alongside World/Entity/Definitions modes, feeding the existing mod-pack exporter."
+    architecture:
+      kind: authoring-interface
+      authority: local
+      reads: [editor-draft-state]
+      coordinates: [editor-mod-pack-exporter]
+    implementation:
+      status: declared
+      paths:
+        - editor/mod-mode-view.js
+        - editor/mod-pack-workspace.js
+      tests: [npm run test:editor]
+
+  - component: editor-scenario-script-authoring
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor Scenario Script Authoring
+      summary: "Issues #983 and #995. The editor scenario mode is rebuilt as a `.rhai` SCRIPT editor — the previous declarative card views are deleted. It edits sibling scripts and inline `[script.*]` blocks with host-fn autocomplete and live compile diagnostics, driven by the phoenix wasm exports `wasm_get_script_host_fns` / `wasm_script_diagnostics` (the host registry is recorded as scenario-script-editor-host). `editor/script-wasm.js` lazily instantiates the same wasm-bindgen module `trunk build` emits for server.html; issue #995's `scripts/wasm-editor-alias.mjs` post-build hook writes a stable `dist/phoenix.js` so the URL survives content-hash churn, and the adapter degrades closed (declaring live checks unavailable) when `dist/` is unbuilt."
+    architecture:
+      kind: authoring-interface
+      authority: local
+      reads: [editor-draft-state]
+      produces: [editor-validation-state]
+      coordinates: [scenario-script-editor-host]
+    implementation:
+      status: declared
+      paths:
+        - editor/scenario-mode.js
+        - editor/script-editor.js
+        - editor/script-editor-view.js
+        - editor/script-wasm.js
       tests: [npm run test:editor]

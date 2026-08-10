@@ -119,3 +119,155 @@ entities:
       - kind: test
         reference: "M0 spike, `mapord` binary; rhai-1.25.1 Map alias; vellum Cargo.toml:51"
         summary: "Scrambled insertion iterates in ASCII byte order on the Rust side; script-side `keys()` and a returned effect map both iterate sorted; runtime type name confirms BTreeMap; no `no_object` or container-swapping feature in the dependency chain."
+
+  # ── DELIVERED SEAM (M1-M5, issues #979-#983/#994) ────────────────────────────
+  # The M0 spike above is the pre-implementation record; the entities below are
+  # the SEAM AS BUILT this batch. Cardinal fact for every one of them: the seam is
+  # DORMANT. The code exists, is unit-tested, and passes `pasm validate`, but no
+  # production caller constructs a `RuntimeHost` or calls `load_world_scripts` to
+  # run a scenario script in the live tick pipeline. The ONLY live wiring is the
+  # startup hashing seed (`init_hashing_seed`, called from `bridge::wasm_init` and
+  # `phoenix-headless`), the upload-time pack-script validation, and the editor
+  # authoring exports. Runtime activation is M6/M7 work — see
+  # `scenario-script-activation-obligations` below and roadmap #984/#985.
+
+  - component: scenario-script-host-seam
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rhai Scenario-Script Host Seam (M1)
+      summary: "Issue #979. The `src/world/script/` host seam over `vellum_script::sandbox()`: two engines (a LOADING engine that runs each unit's top level once to collect registrations, and a RUNTIME engine from `quiet_sandbox` that only calls retained functions), a per-call `EffectSink` that pushes the EXISTING `crate::world::dispatch::ActionCmd`s (script gets no new effect vocabulary), and a `Flags` custom type over `crate::world::flags::FlagStore` as the only mutable state (`flags.increment` composes via `FlagMutation::Increment`; `flags.x = v` is an absolute `SetValue`). The per-call operation budget (`MAX_OPS_PER_CALL` = 50,000) overrides the vellum sandbox's 5,000,000 default; the per-tick aggregate (`MAX_OPS_PER_TICK` = 200,000) and call cap (`MAX_CALLS_PER_TICK` = 512) are defined here and enforced by the scheduler. DORMANT: `RuntimeHost`/`loading_engine`/`runtime_engine` have no production caller yet — only `init_hashing_seed` is wired live at startup."
+      rationale:
+        - "The fixed hashing seed is the one hard startup requirement the M0 spike surfaced (`rhai-anonymous-function-naming`). `init_hashing_seed` sets `HASHING_SEED = [1,2,3,4]` behind a `Once`, and MUST run before any `Engine` is constructed — `set_hashing_seed` silently no-ops once a hash has been taken. It is wired into every startup path (`bridge::wasm_init`, `src/bin/phoenix_headless.rs`) and called defensively at the head of each engine constructor, so serialized `(tick, script_path, fn_name)` callbacks resolve to the same `anon$` names on every peer."
+    architecture:
+      kind: host-runtime-seam
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/script/mod.rs
+        - src/world/script/engine.rs
+        - src/world/script/effects.rs
+        - src/world/script/flags.rs
+        - src/bin/phoenix_headless.rs
+      symbols: [init_hashing_seed, HASHING_SEED, MAX_OPS_PER_CALL, MAX_OPS_PER_TICK, MAX_CALLS_PER_TICK, loading_engine, runtime_engine, RuntimeHost, BuilderState, EffectSink, register_effects, Flags, register_flags]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: "world::script::tests::init_hashing_seed_is_idempotent, budgets_are_ordered_safety_limits (src/world/script/mod.rs)"
+        summary: "The seed initialiser is idempotent under the `Once` guard, and the fixed budgets are ordered safety limits (per-tick aggregate > per-call, positive call cap)."
+
+  - component: scenario-script-trigger-frontend
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rhai Trigger Front-End (M2)
+      summary: "Issue #980. One loading-engine host fn per `TriggerCondition` variant (`on_destroyed`, `on_timer`, …) registered by `register_trigger_builders`, each building the SAME `crate::world::config::Trigger` struct the TOML `[[trigger]]` front-end builds — one evaluator, two front-ends. `content.rs` and the `tick_trigger_pipeline` are untouched: M2 records registrations into `BuilderState` (empty-action + side-record) without changing how triggers evaluate, so the declarative path is unaffected and the script path is not yet activated."
+    architecture:
+      kind: authoring-front-end
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/script/triggers.rs
+        - src/world/script/engine.rs
+      symbols: [register_trigger_builders, BuilderState, ScriptTrigger, Registration]
+      tests: [cargo test]
+
+  - component: scenario-script-scheduling
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rhai Scheduling and Per-Tick Budgets (M3)
+      summary: "Issue #981. `schedule.rs`: `in_seconds(n)` stamps a delay onto a buffered effect and routes it through the EXISTING `crate::world::delayed::DelayedAction` queue, and `after(n, |ctx| …)` defers a callback as a SERIALIZABLE `ScheduledCall { fire_tick, script_path, fn_name }` in the `PendingCallbacks` queue. The three-field key (not the M0 roadmap's two-field `(tick, fn_name)`) is load-bearing: `anon$` names are unique within a file but collide across files, so the script path disambiguates. `TickBudget` enforces the per-tick aggregate (`MAX_OPS_PER_TICK`) and call cap (`MAX_CALLS_PER_TICK`) deterministically — every peer sums the same operations in the same order and trips on the same tick."
+      rationale:
+        - "The two M0 flag hazards are fixed here (roadmap #981). `flags.increment` emits `FlagMutation::Increment` so a script increment and a concurrent TOML `increment_flag` on the same flag in the same tick COMPOSE in either order; and each mutation is pushed onto the call's single shared effect sink at the point it is authored, so flag writes and effects emit in AUTHORED ORDER. `flags.x += n` cannot be made composable (Rhai desugars `+=` on an indexer to get-then-set) and is rejected at load by the lint recorded in `scenario-script-loader-validation`."
+    architecture:
+      kind: scheduling-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/script/schedule.rs
+      symbols: [ScheduledCall, PendingCallbacks, TickBudget, Schedule, ScheduleSink, SchedClock, register_scheduling, seconds_to_ticks]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: "world::server tests::scripted_in_seconds_effect_routes_through_tick_delayed_actions (src/world/server.rs)"
+        summary: "A scripted `in_seconds` effect routes through the existing tick `DelayedAction` queue rather than a parallel timer — proving the schedule seam reuses the declarative delay path."
+
+  - component: scenario-script-comms-frontend
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rhai Comms Dialogue Front-End (M4)
+      summary: "Issue #982. A dialogue node is a named fn returning `#{message, responses:[#{text, on_pick}]}` (`read_dialogue_node`/`enter_node`), and a response's `on_pick` names the next node fn — follow-ups are fn-to-fn references, not nested `[[comms.response.follow_up…]]` tables. Response effects route through the SAME `ActionCmd` boundary the TOML `[[comms.response.action]]` array does. SCRIPT front-end only and DORMANT in M4: the live `handle_respond_to_message` parallel-match collapse is DEFERRED to M7 (#985), so the declarative comms path is unchanged and this front-end is not yet dispatched."
+    architecture:
+      kind: authoring-front-end
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/script/comms.rs
+      symbols: [ScriptDialogueNode, ScriptDialogueResponse, read_dialogue_node, enter_node]
+      tests: [cargo test]
+
+  - component: scenario-script-loader-validation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rhai Script Loader and Cross-Reference Validation (M1, #994)
+      summary: "Issues #979 and #994. `load.rs` resolves `script = \"…\"` sibling `.rhai` files and lifts inline `[script.*]` TOML blocks to virtual paths through a single injected `ScriptResolver`, landing ASTs in a sorted-path `BTreeMap<String, AST>` (`CompiledScripts`) that feeds `vellum_script::content_hash`. `validate.rs` walks `AST::iter_functions()` to prove every registered handler name and every TOML `script = \"fn\"` reference (both `[[trigger]]` and `[[comms]]`) resolves at load, emitting `crate::world::validate::WorldFinding`s so the atomic activation gate keeps working. Issue #994 adds `validate_flag_opassign`: a lexical load-time lint that REJECTS `+=` on the `flags` accessor (`FLAG_OPASSIGN_NOT_COMPOSABLE`), because Rhai silently degrades it to a non-composable absolute set."
+    architecture:
+      kind: content-loader
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/script/load.rs
+        - src/world/script/validate.rs
+      symbols: [ScriptResolver, CompiledScripts, lift_world_scripts, compile_scripts, load_world_scripts, validate_registrations, validate_script_triggers, validate_toml_script_triggers, validate_toml_script_comms, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
+      tests: [cargo test]
+
+  - component: scenario-script-editor-host
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Scenario-Script Editor Authoring Host (M5)
+      summary: "Issue #983. `authoring.rs` enumerates the author-callable vocabulary once — the `HOST_FNS` registry (`HostFn` records with signatures) and `script_diagnostics`, which compiles a `.rhai` source under the SAME loading-engine compile + top-level run the activation gate uses, so a source clean in the editor is clean at load. `bridge.rs` exports `wasm_get_script_host_fns` and `wasm_script_diagnostics` to the editor; issue #995 serves the wasm-bindgen module to the editor (the editor-side consumer is recorded in design/editor-authoring.yaml and architecture/editor-authoring.yaml)."
+    architecture:
+      kind: authoring-support
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/script/authoring.rs
+        - src/server/bridge.rs
+      symbols: [HostFn, HOST_FNS, host_fns, ScriptDiagnostic, script_diagnostics, wasm_get_script_host_fns, wasm_script_diagnostics]
+      tests: [cargo test]
+
+  - component: scenario-script-activation-obligations
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Deferred Activation-Wiring Obligations (M6, #984)
+      summary: "The seam above is built but DORMANT; turning it on is M6 (#984) and carries three obligations recorded here so they are not rediscovered. (1) Wire `load_world_scripts` into scenario activation through `crate::config_cache::OverlayScriptResolver` (#988), so a mod pack's `.rhai` resolves through the overlay stack AND is recorded in `content_ledger` — that is what makes a pack's script FOLD INTO the content digest instead of drifting under snapshot/replay. (2) Add `on_pick` fn-name load-validation (#982): a dialogue response's `on_pick` names a node fn that must resolve, and the M4 front-end does not yet check it at load. (3) Add pipeline-level chaining parity tests proving the script trigger/comms front-ends emit the identical `ActionCmd` sequence the declarative path emits across all chaining passes, before the declarative evaluator is torn down."
+      rationale:
+        - "The seam pieces this obligation wires ALREADY EXIST: `load_world_scripts` (load.rs), `OverlayScriptResolver` (config_cache.rs), and the `content_ledger` recording it performs. What is missing is the ACTIVATION CALLER — nothing in production constructs the runtime host or drives the loader during a scenario load — which is why this is `proposed`, not `implemented`, while everything it depends on is built."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/world/script/load.rs
+        - src/entities/config_cache.rs
+        - src/content_ledger.rs
+      symbols: [load_world_scripts, OverlayScriptResolver]

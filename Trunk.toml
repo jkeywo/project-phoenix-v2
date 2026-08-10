@@ -13,3 +13,13 @@ include = ["*.toml", "*.csv"]
 stage = "post_build"
 command = "node"
 command_arguments = ["scripts/wasm-opt-fixup.mjs", "dist/.stage"]
+
+# Write a stable `dist/phoenix.js` alias re-exporting the content-hashed
+# wasm-bindgen glue, so the world editor's script mode (host-fn autocomplete +
+# Rhai diagnostics, issue #995) can import it under a fixed name that survives
+# content-hash churn. Runs on every build — dev and release — unlike the
+# release-only wasm-opt pass above.
+[[hooks]]
+stage = "post_build"
+command = "node"
+command_arguments = ["scripts/wasm-editor-alias.mjs", "dist/.stage"]

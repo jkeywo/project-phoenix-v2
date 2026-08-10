@@ -4,7 +4,8 @@
  * loader; the actual WASM path is browser-verified separately.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createScriptWasm } from '../script-wasm.js';
+import { fileURLToPath } from 'node:url';
+import { createScriptWasm, DEFAULT_MODULE_URL } from '../script-wasm.js';
 
 describe('createScriptWasm', () => {
   it('marshals the host-fn registry from the module', async () => {
@@ -60,6 +61,12 @@ describe('createScriptWasm', () => {
     expect(await adapter.getDiagnostics('x', 0)).toEqual([]);
   });
 
+  it('exposes the stable dist alias as the default module URL (#995)', () => {
+    // The build's post_build hook (scripts/wasm-editor-alias.mjs) writes exactly
+    // this file; if the two drift, the editor loads nothing. Pin them together.
+    expect(DEFAULT_MODULE_URL).toBe('../dist/phoenix.js');
+  });
+
   it('isAvailable() reports the load outcome (honest deferral, #995)', async () => {
     // Before any load attempt: not yet available.
     const ok = createScriptWasm({
@@ -82,5 +89,39 @@ describe('createScriptWasm', () => {
     const noExport = createScriptWasm({ load: async () => ({}) });
     await noExport.getDiagnostics('x', 0);
     expect(noExport.isAvailable()).toBe(false);
+  });
+});
+
+// Smoke/integration test (#995): exercise the DEFAULT load path — the real
+// `defaultLoad` dynamic-import + `await mod.default()` — against a
+// realistically-shaped ES module (default `init` gating the two named exports),
+// NOT the injected fake used above. This catches a URL/init regression: the
+// fixture's exports throw until init has run, so dropping the init call would
+// make these assertions fail rather than silently pass.
+describe('createScriptWasm — real default-load + init flow (#995 smoke)', () => {
+  // Resolve the fixture to an absolute file URL string so the adapter's own
+  // `import(url)` (with no injected loader) loads it exactly as it would the
+  // built `dist/phoenix.js`.
+  const fixtureUrl = new URL('./fixtures/fake-phoenix-glue.mjs', import.meta.url).href;
+  // Sanity: the fixture is a real on-disk module, not a virtual mock.
+  fileURLToPath(fixtureUrl);
+
+  it('imports the module, runs init once, and returns real host fns', async () => {
+    const adapter = createScriptWasm({ moduleUrl: fixtureUrl }); // no injected load
+    const fns = await adapter.getHostFns();
+    expect(adapter.isAvailable()).toBe(true);
+    expect(fns).toHaveLength(1);
+    expect(fns[0].name).toBe('on_destroyed');
+    expect(fns[0].signature).toBe('on_destroyed(tag)');
+  });
+
+  it('surfaces diagnostics on the offset-adjusted line after init', async () => {
+    const adapter = createScriptWasm({ moduleUrl: fixtureUrl });
+    const diags = await adapter.getDiagnostics('ok\nBAD line', 5);
+    expect(adapter.isAvailable()).toBe(true);
+    expect(diags).toHaveLength(1);
+    // 'BAD' is on source line 2; with lineOffset 5 it reports document line 7.
+    expect(diags[0].line).toBe(7);
+    expect(diags[0].severity).toBe('error');
   });
 });

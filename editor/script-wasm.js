@@ -24,16 +24,20 @@
 /**
  * The wasm-bindgen module URL the loader tries by default.
  *
- * NOTE (issue #995): this alias is NOT served yet. `trunk build` emits a
- * content-hashed filename for `server.html` (e.g. `phoenix-<hash>.js`), and
- * `editor.html` publishes no stable alias for it, so `../dist/phoenix.js` does
- * not resolve in the running editor and the dynamic import fails closed. The URL
- * is the *planned* stable alias (a copied `phoenix-editor.js` or a
- * `<link rel="modulepreload">`) that wiring the real wasm into the editor page
- * will add — tracked in issue #995. Until then host-fn autocomplete and live
- * diagnostics are unavailable, and `isAvailable()` returns `false` so the UI
- * says so rather than pretending the script is clean. Overridable via
- * `createScriptWasm({ moduleUrl })` (tests inject a fake loader instead).
+ * `trunk build` emits a content-hashed glue (`project-phoenix-<hash>.js` +
+ * `_bg.wasm`) whose name changes every build. The `scripts/wasm-editor-alias.mjs`
+ * post_build hook (see `Trunk.toml`, issue #995) writes a stable `dist/phoenix.js`
+ * next to it that re-exports the hashed glue's named exports AND a default
+ * `init` bound to the hashed `_bg.wasm` path — so this URL resolves in the
+ * running editor (served from repo root, `../dist/phoenix.js`) and survives
+ * content-hash churn. `defaultLoad` below imports it and runs that `init` once
+ * before the first export call.
+ *
+ * When `dist/` has NOT been built yet, the dynamic import fails and the adapter
+ * degrades closed: host-fn autocomplete and live diagnostics are unavailable,
+ * `isAvailable()` returns `false`, and the view says so rather than pretending
+ * the script is clean. Overridable via `createScriptWasm({ moduleUrl })` (tests
+ * inject a fake loader instead).
  */
 export const DEFAULT_MODULE_URL = '../dist/phoenix.js';
 
@@ -116,7 +120,11 @@ export function createScriptWasm({ moduleUrl = DEFAULT_MODULE_URL, load } = {}) 
 }
 
 async function defaultLoad(url) {
-  // Dynamic import of the local wasm-bindgen glue, then run its initializer.
+  // Dynamic import of the local wasm-bindgen glue (the stable `dist/phoenix.js`
+  // alias), then run its default `init` — which fetches `_bg.wasm` and must
+  // complete before the two exports are callable. `getModule()` above memoises
+  // this promise, so `init` runs exactly once per adapter regardless of how many
+  // getHostFns()/getDiagnostics() calls follow.
   const mod = await import(/* @vite-ignore */ url);
   if (typeof mod.default === 'function') {
     await mod.default();

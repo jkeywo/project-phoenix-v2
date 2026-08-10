@@ -650,7 +650,16 @@ pub fn wasm_init() {
                 ..default()
             },
             AccessibilityPlugin,
-            AssetPlugin::default(),
+            AssetPlugin {
+                // No .meta sidecars ship with this project. Cloudflare Pages
+                // (the demo host) answers a missing file with its SPA
+                // index.html at HTTP 200 rather than a 404, so the default
+                // `AssetMetaCheck::Always` reads that HTML as a .meta and
+                // fails to deserialize it — killing the asset load. Never
+                // requesting the sidecar sidesteps the whole class.
+                meta_check: bevy::asset::AssetMetaCheck::Never,
+                ..default()
+            },
             ScenePlugin::default(),
             WinitPlugin::default(),
             StatesPlugin,
@@ -683,6 +692,17 @@ pub fn wasm_init() {
                 })
                 .set(LogPlugin {
                     filter: log_filter.clone(),
+                    ..default()
+                })
+                // No .meta sidecars ship with this project. Cloudflare Pages
+                // (the demo host) answers a missing file with its SPA
+                // index.html at HTTP 200 rather than a 404, so the default
+                // `AssetMetaCheck::Always` reads that HTML as a .meta and
+                // fails to deserialize it — the asset load dies and the
+                // preload gate stalls (issue: demo hangs ~77%). Never
+                // requesting the sidecar sidesteps the whole class.
+                .set(bevy::asset::AssetPlugin {
+                    meta_check: bevy::asset::AssetMetaCheck::Never,
                     ..default()
                 }),
         );

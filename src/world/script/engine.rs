@@ -279,6 +279,87 @@ impl RuntimeHost {
         ))
     }
 
+    /// Run a scripted comms dialogue fn (issue #982, M4), returning its buffered
+    /// effects — the M1 [`ActionCmd`](crate::world::dispatch::ActionCmd) boundary —
+    /// AND the `Dynamic` it returned. A dialogue-node fn returns a `#{message,
+    /// responses}` map; a response `on_pick` fn runs `ctx.effects.*`/`ctx.flags.*`
+    /// and returns the follow-up node map (or `()` for a terminal response). Both
+    /// [`call`](RuntimeHost::call) and [`try_call`](RuntimeHost::try_call) discard
+    /// the return value (they collect effects imperatively from the buffer), so a
+    /// dialogue call needs its own entry point to keep the returned node.
+    ///
+    /// Uses a fresh per-tick budget and the zero clock, and applies the
+    /// settled-decision-10 failure policy: on a script error it **panics in dev**
+    /// (`debug_assertions`) and, in release, discards this call's effects whole,
+    /// logs, and returns `(empty, ())` so the game continues. Any deferred work a
+    /// dialogue fn scheduled is dropped (dialogue fns schedule none in M4).
+    pub fn call_dialogue(
+        &self,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        base_flags: &FlagStore,
+        extra: Map,
+    ) -> (Vec<crate::world::dispatch::ActionCmd>, rhai::Dynamic) {
+        match self.try_call_returning(ast, path, fn_name, base_flags, extra) {
+            Ok((commands, value, _ops)) => (commands, value),
+            Err(err) => {
+                if cfg!(debug_assertions) {
+                    panic!("{err}");
+                }
+                // Plain helper with no log config in scope, so a bare `warn!`
+                // per AGENTS.md.
+                bevy::log::warn!(
+                    target: crate::logging::LogCat::World.target(),
+                    "{err}; discarding this dialogue call's effects"
+                );
+                (Vec::new(), rhai::Dynamic::UNIT)
+            }
+        }
+    }
+
+    /// Like [`try_call`](RuntimeHost::try_call) but returns the call's `Dynamic`
+    /// result alongside its immediate effects and operation count — a scripted
+    /// dialogue fn communicates its node through the return value, not the effect
+    /// buffer (issue #982, M4). On error the buffers are dropped whole (never
+    /// returned), exactly as `try_call` does. Deferred/callback work is discarded
+    /// (dialogue fns schedule none in M4).
+    pub fn try_call_returning(
+        &self,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        base_flags: &FlagStore,
+        extra: Map,
+    ) -> Result<
+        (Vec<crate::world::dispatch::ActionCmd>, rhai::Dynamic, u64),
+        vellum_script::CallError,
+    > {
+        let sink = EffectSink::new();
+        // Flags share the one ordered command buffer, so a flag write is emitted
+        // in authored order, interleaved with effects (issue #981 hazard 2).
+        let flags = Flags::new(base_flags, sink.clone());
+
+        let mut ctx = extra;
+        ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
+        ctx.insert("flags".into(), rhai::Dynamic::from(flags));
+        // Inserted for ctx uniformity (a dialogue fn may reference `ctx.schedule`);
+        // it is never drained — dialogue fns schedule no deferred work in M4, so
+        // any `in_seconds`/`after` a dialogue fn buffered is dropped with it.
+        ctx.insert("schedule".into(), rhai::Dynamic::from(ScheduleSink::new()));
+
+        self.ops_counter.store(0, Ordering::Relaxed);
+        // On error we return before draining, so the effect buffer is dropped
+        // whole. Unlike `try_call`, the returned `Dynamic` is KEPT — it carries
+        // the dialogue node the fn returned.
+        let value = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
+        let ops = self.ops_counter.load(Ordering::Relaxed);
+        let commands = sink.take();
+        // Deferred work is dropped on the success path too (dialogue fns schedule
+        // none in M4); `schedule` is simply not drained.
+        Ok((commands, value, ops))
+    }
+
     /// Convenience for callers wanting only a call's immediate effects: a fresh
     /// per-tick budget and a zero clock. Applies the failure policy. Any deferred
     /// work the call scheduled is discarded, so this is for effect-only handlers

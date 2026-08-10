@@ -27,6 +27,12 @@ pub const UNRESOLVED_SCRIPT_FN: &str = "unresolved-script-fn";
 /// never both on one trigger (issue #980, M2).
 pub const TRIGGER_SCRIPT_AND_ACTION: &str = "trigger-script-and-action";
 
+/// Category slug for a `[[comms]]` block that specifies BOTH `script = "fn"` and
+/// an inline `[[comms.response]]` dialogue tree — the two front-ends are
+/// alternatives, never both on one thread (issue #982, M4). The comms analogue of
+/// [`TRIGGER_SCRIPT_AND_ACTION`].
+pub const COMMS_SCRIPT_AND_RESPONSE: &str = "comms-script-and-response";
+
 fn unresolved_finding(handler: &str, source_path: &str, context: &str) -> WorldFinding {
     WorldFinding {
         severity: Severity::Error,
@@ -136,6 +142,65 @@ pub fn validate_toml_script_triggers(
         }
         if !defined_fns.contains(handler) {
             findings.push(unresolved_finding(handler, world_path, "trigger script"));
+        }
+    }
+    findings
+}
+
+/// Cross-reference the TOML `[[comms]] script = "fn"` front-end (issue #982, M4)
+/// against the compiled script's defined-function set.
+///
+/// The comms twin of [`validate_toml_script_triggers`]. Reads the raw world TOML
+/// rather than the parsed `WorldConfig` so this pass owns the whole scripted-comms
+/// contract in the script module, beside the trigger checks, and sees a
+/// `[[comms]]` that carries BOTH front-ends at once (which the parser silently
+/// prefers `script` for, dropping the response tree). Two error rules, both
+/// blocking:
+///
+/// * **both front-ends** — a block with `script = "fn"` AND a non-empty
+///   `[[comms.response]]` array. They are alternatives; specifying both is
+///   ambiguous authoring, reported as [`COMMS_SCRIPT_AND_RESPONSE`].
+/// * **unresolved root fn** — a `script = "fn"` naming no defined function,
+///   reported as [`UNRESOLVED_SCRIPT_FN`], exactly like a scripted trigger.
+///
+/// `world_path` locates the findings; a per-block line is not derived (the loader
+/// does not carry the raw TOML text — the existing `WorldFinding` allows
+/// `line: None`).
+pub fn validate_toml_script_comms(
+    world_path: &str,
+    world_toml: &toml::Value,
+    defined_fns: &BTreeSet<String>,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    let Some(entries) = world_toml.get("comms").and_then(|t| t.as_array()) else {
+        return findings;
+    };
+    for entry in entries {
+        let Some(root_fn) = entry.get("script").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let has_responses = entry
+            .get("response")
+            .and_then(|v| v.as_array())
+            .is_some_and(|a| !a.is_empty());
+        if has_responses {
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: COMMS_SCRIPT_AND_RESPONSE,
+                message: format!(
+                    "comms thread specifies both script = '{root_fn}' and an inline \
+                     [[comms.response]] dialogue tree; the two front-ends are alternatives, \
+                     not both on one thread"
+                ),
+                source: SourceLocation {
+                    file: world_path.to_string(),
+                    line: None,
+                    reference: root_fn.to_string(),
+                },
+            });
+        }
+        if !defined_fns.contains(root_fn) {
+            findings.push(unresolved_finding(root_fn, world_path, "comms script"));
         }
     }
     findings
@@ -290,5 +355,86 @@ mod tests {
             "#,
         );
         assert!(validate_toml_script_triggers("w.toml", &w, &defined(&[])).is_empty());
+    }
+
+    // ── TOML `[[comms]] script = "fn"` front-end (issue #982, M4) ─────────────
+
+    #[test]
+    fn a_resolved_toml_script_comms_is_clean() {
+        let w = world(
+            r#"
+            [[comms]]
+            from = "axiom"
+            trigger = "on_hailed"
+            entity = "axiom"
+            script = "hail_axiom"
+            "#,
+        );
+        let findings = validate_toml_script_comms("w.toml", &w, &defined(&["hail_axiom"]));
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn an_unresolved_toml_script_comms_is_an_error() {
+        let w = world(
+            r#"
+            [[comms]]
+            from = "axiom"
+            trigger = "on_hailed"
+            entity = "axiom"
+            script = "never_defined"
+            "#,
+        );
+        let findings = validate_toml_script_comms("w.toml", &w, &defined(&["other"]));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, UNRESOLVED_SCRIPT_FN);
+        assert_eq!(findings[0].source.reference, "never_defined");
+        assert_eq!(findings[0].source.file, "w.toml");
+        assert!(crate::world::validate::has_error(&findings));
+    }
+
+    #[test]
+    fn a_comms_with_both_script_and_responses_is_rejected() {
+        // The root fn IS defined, so the ONLY finding is the both-front-ends one.
+        let w = world(
+            r#"
+            [[comms]]
+            from = "axiom"
+            trigger = "on_hailed"
+            entity = "axiom"
+            script = "hail_axiom"
+
+            [[comms.response]]
+            text = "Acknowledge"
+            [[comms.response.action]]
+            type = "complete_objective"
+            id = "obj-x"
+            "#,
+        );
+        let findings = validate_toml_script_comms("w.toml", &w, &defined(&["hail_axiom"]));
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].category, COMMS_SCRIPT_AND_RESPONSE);
+        assert!(crate::world::validate::has_error(&findings));
+    }
+
+    #[test]
+    fn a_declarative_comms_yields_no_script_findings() {
+        // No `script` key: this front-end must not touch a plain TOML comms block.
+        let w = world(
+            r#"
+            [[comms]]
+            from = "axiom"
+            trigger = "on_hailed"
+            entity = "axiom"
+            message = "Go ahead."
+
+            [[comms.response]]
+            text = "Acknowledge"
+            [[comms.response.action]]
+            type = "complete_objective"
+            id = "obj-x"
+            "#,
+        );
+        assert!(validate_toml_script_comms("w.toml", &w, &defined(&[])).is_empty());
     }
 }

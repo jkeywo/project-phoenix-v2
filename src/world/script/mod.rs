@@ -41,9 +41,17 @@
 //!   engine host fn per `TriggerCondition` variant (`on_destroyed`, `on_timer`,
 //!   …), each building the *same* [`Trigger`](crate::world::config::Trigger) the
 //!   TOML `[[trigger]]` front-end builds. One evaluator, two front-ends.
+//! * [`comms`] — the Rhai comms dialogue front-end (issue #982, M4): a dialogue
+//!   node is a named fn returning `#{message, responses:[#{text, on_pick}]}`, and
+//!   a response's `on_pick` names the next node fn — so follow-ups are fn-to-fn
+//!   references, not nested `[[comms.response.follow_up…]]` tables. Response
+//!   effects route through the *same* [`ActionCmd`](crate::world::dispatch::ActionCmd)
+//!   boundary the TOML `[[comms.response.action]]` array does, so the two
+//!   front-ends emit identical command sequences. Dormant in M4 — the live
+//!   `handle_respond_to_message` collapse is deferred to M7.
 //! * [`validate`] — a cross-reference pass over `AST::iter_functions()` proving
-//!   every registered handler name (and every TOML `script = "fn"` reference)
-//!   resolves at load, emitting the existing
+//!   every registered handler name (and every TOML `script = "fn"` reference, for
+//!   both `[[trigger]]` and `[[comms]]`) resolves at load, emitting the existing
 //!   [`WorldFinding`](crate::world::validate::WorldFinding)s so the atomic
 //!   activation gate keeps working.
 //!
@@ -76,6 +84,7 @@
 //! and, in release, has that one call's effects **discarded whole**, is logged,
 //! and the game continues. See [`engine::RuntimeHost::call`].
 
+pub mod comms;
 pub mod effects;
 pub mod engine;
 pub mod flags;

@@ -560,7 +560,12 @@ struct RawCommsResponse {
 #[derive(Debug, Deserialize)]
 struct RawCommsEntry {
     from: String,
-    message: String,
+    /// Root message body. Required for a declarative comms thread; OMITTED for a
+    /// scripted thread (issue #982, `script = "fn"`), whose root message lives in
+    /// the script node the root fn returns. The parser enforces presence on the
+    /// declarative path.
+    #[serde(default)]
+    message: Option<String>,
     trigger: String,
     /// Optional display-speaker override for this root message. `from`
     /// remains the physical/synthetic comms endpoint used for hailing,
@@ -600,6 +605,18 @@ struct RawCommsEntry {
     /// warning so the responses path keeps working.
     #[serde(default)]
     follow_up: Option<RawCommsFollowUp>,
+    /// Rhai front-end (issue #982, milestone M4): the name of a script fn that
+    /// returns this thread's ROOT dialogue node (`#{message, responses}`), as an
+    /// ALTERNATIVE to the inline `message` + `[[response]]` tree. When present the
+    /// dialogue tree moves to script and this `[[comms]]` block carries only
+    /// metadata (`from` / `trigger` (+ its `entity` / `group` / `after_secs` /
+    /// `name`) / `thread_id` / `urgent` / `display_name` / `speaker`); the block
+    /// is parsed into a [`ScriptedCommsTemplate`] held apart from
+    /// [`WorldConfig::comms`], so the live TOML comms path never injects it. A
+    /// block that specifies both `script` and a `[[response]]` tree is rejected by
+    /// the script cross-reference pass (`crate::world::script::validate`).
+    #[serde(default)]
+    script: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -992,6 +1009,42 @@ pub struct CommsTemplate {
     /// Mutually exclusive with `node.responses`: when the author supplies
     /// both, the parser drops this field and warns.
     pub root_follow_up: Option<CommsDialogueNode>,
+}
+
+/// A comms thread whose dialogue tree is authored in Rhai (issue #982, M4).
+///
+/// The scripted analogue of [`CommsTemplate`]: the `[[comms]]` block keeps only
+/// its metadata, and `root_fn` names the script fn that returns the thread's
+/// root dialogue node (`#{message, responses}`). Follow-ups are fn-to-fn
+/// references — a response's `on_pick` names the next node fn — so the nested
+/// `[[comms.response.follow_up…]]` tables (and their eight-segment localization
+/// keys) are gone for a scripted thread.
+///
+/// Held in [`WorldConfig::scripted_comms`], SEPARATE from
+/// [`WorldConfig::comms`], so the live TOML comms path
+/// ([`crate::comms::content::comms_template_states_from_world`], `handle_hail`,
+/// `handle_respond_to_message`) never sees a scripted thread. The seam stays
+/// dormant until the M7 collapse routes both front-ends through one shared
+/// response-dispatch path — mirroring how M2's TOML `[[trigger]] script` front-
+/// end builds an inert empty-action [`Trigger`] the evaluator ignores at runtime.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptedCommsTemplate {
+    /// Sender reference id (the same authoring role as [`CommsTemplate::from`]).
+    pub from: String,
+    /// Optional player-facing sender display text ([`CommsTemplate::display_name`]).
+    pub display_name: Option<String>,
+    /// The trigger condition that fires this thread.
+    pub trigger: TriggerCondition,
+    /// Optional root-message speaker override ([`CommsDialogueNode::speaker`]).
+    pub speaker: Option<String>,
+    /// Optional shared thread id ([`CommsTemplate::thread_id`]).
+    pub thread_id: Option<String>,
+    /// Urgency flag ([`CommsTemplate::urgent`]).
+    pub urgent: bool,
+    /// Name of the Rhai fn returning this thread's root dialogue node. Resolved
+    /// against the compiled script's defined-function set by
+    /// [`crate::world::script::validate::validate_toml_script_comms`].
+    pub root_fn: String,
 }
 
 // -- Parser helpers -----------------------------------------------------------
@@ -1610,6 +1663,12 @@ pub struct WorldConfig {
     pub triggers: Vec<Trigger>,
     /// Ordered list of comms dialogue templates declared in the world.
     pub comms: Vec<CommsTemplate>,
+    /// Ordered list of SCRIPTED comms threads (issue #982, M4): `[[comms]]`
+    /// blocks that moved their dialogue tree to a Rhai root-node fn (`script =
+    /// "fn"`), reduced here to metadata. Held apart from [`Self::comms`] so the
+    /// live TOML comms path never injects one — dormant until the M7 collapse
+    /// wires the scripted response dispatch.
+    pub scripted_comms: Vec<ScriptedCommsTemplate>,
     /// Map of `name ? uuid` for entities spawned via `[[entity]] name = "..."`.
     /// Populated by `spawn_world_entities` (PRD #337/#339 slice 2); read by
     /// trigger and comms lookup paths that resolve a name to a live UUID.
@@ -1843,6 +1902,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
 
     // Comms templates.
     let mut comms = Vec::with_capacity(raw.comms.len());
+    let mut scripted_comms = Vec::new();
     for raw_comms in raw.comms {
         let trigger = parse_trigger_condition_from_string(
             &raw_comms.trigger,
@@ -1855,6 +1915,34 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             None,
             "Comms block",
         )?;
+        // Scripted thread (issue #982, M4): the dialogue tree lives in the named
+        // root-node fn, so this block reduces to metadata. Its `[[response]]` /
+        // `follow_up` tables (if any) are ignored here — a block carrying both a
+        // `script` and a response tree is rejected by the script cross-reference
+        // pass (`validate_toml_script_comms`), mirroring how M2 handles a
+        // `[[trigger]]` that carries both front-ends. Pushed to `scripted_comms`,
+        // NOT `comms`, so the live TOML path never injects a scripted thread.
+        if let Some(root_fn) = raw_comms.script {
+            scripted_comms.push(ScriptedCommsTemplate {
+                from: raw_comms.from,
+                display_name: raw_comms.display_name,
+                trigger,
+                speaker: raw_comms.speaker,
+                thread_id: raw_comms.thread_id,
+                urgent: raw_comms.urgent,
+                root_fn,
+            });
+            continue;
+        }
+        // Declarative thread: a root `message` is required (a scripted thread
+        // omits it and returned above).
+        let message = raw_comms.message.ok_or_else(|| {
+            format!(
+                "Comms block from '{}' requires a 'message' field \
+                 (or a 'script' root-node fn for a scripted thread)",
+                raw_comms.from
+            )
+        })?;
         let responses = parse_comms_responses(&raw_comms.responses)?;
         let root_follow_up = if let Some(ref raw_fu) = raw_comms.follow_up {
             if !responses.is_empty() {
@@ -1871,7 +1959,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             None
         };
         let node = CommsDialogueNode {
-            body: raw_comms.message,
+            body: message,
             responses,
             speaker: raw_comms.speaker,
             trigger: None,
@@ -1933,6 +2021,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         entities,
         triggers,
         comms,
+        scripted_comms,
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
         delayed_unload_policy,
@@ -3764,6 +3853,68 @@ message = "MAYDAY!"
         );
         assert_eq!(cfg.comms[0].node.body, "MAYDAY!");
         assert!(cfg.comms[0].node.responses.is_empty());
+    }
+
+    #[test]
+    fn scripted_comms_block_parses_to_metadata_only() {
+        // Issue #982 (M4): a `[[comms]] script = "fn"` block moves its dialogue
+        // tree to script and reduces to metadata. It lands in `scripted_comms`,
+        // NOT `comms`, so the live TOML comms path never injects it (dormant).
+        let toml = r#"
+[[comms]]
+from         = "axiom"
+trigger      = "on_hailed"
+entity       = "axiom"
+thread_id    = "axiom_thread"
+urgent       = true
+display_name = "Axiom Station"
+speaker      = "Dockmaster"
+script       = "hail_axiom"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert!(
+            cfg.comms.is_empty(),
+            "a scripted thread must NOT land in the live `comms` list"
+        );
+        assert_eq!(cfg.scripted_comms.len(), 1);
+        let t = &cfg.scripted_comms[0];
+        assert_eq!(t.from, "axiom");
+        assert_eq!(t.root_fn, "hail_axiom");
+        assert_eq!(t.thread_id.as_deref(), Some("axiom_thread"));
+        assert!(t.urgent);
+        assert_eq!(t.display_name.as_deref(), Some("Axiom Station"));
+        assert_eq!(t.speaker.as_deref(), Some("Dockmaster"));
+        assert_eq!(
+            t.trigger,
+            TriggerCondition::OnHailed {
+                entity_name: "axiom".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn scripted_comms_ignores_any_inline_response_tree() {
+        // A block carrying BOTH `script` and a `[[response]]` tree parses (the
+        // parser prefers `script` and drops the tree); the script cross-reference
+        // pass (`validate_toml_script_comms`) is what rejects the ambiguity. The
+        // parsed result is metadata-only, with nothing in `comms`.
+        let toml = r#"
+[[comms]]
+from    = "axiom"
+trigger = "on_hailed"
+entity  = "axiom"
+script  = "hail_axiom"
+
+  [[comms.response]]
+  text = "Acknowledge"
+  [[comms.response.action]]
+  type = "complete_objective"
+  id   = "obj-x"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert!(cfg.comms.is_empty());
+        assert_eq!(cfg.scripted_comms.len(), 1);
+        assert_eq!(cfg.scripted_comms[0].root_fn, "hail_axiom");
     }
 
     #[test]

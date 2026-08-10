@@ -41,6 +41,47 @@ name = "tune-lods"
 path = "src/bin/tune_lods.rs"
 required-features = ["capture"]
 
+# The test suite is RUNTIME-bound, not compile-bound: 4184 unit tests spent
+# 767s and the 59 headless scenarios 1472s of CI wall-clock, all of it
+# Bevy/Rapier simulation executing at opt-level 0. Optimising the dev profile
+# is the single largest lever on this repository's CI time.
+#
+# Why this is determinism-safe, and it is not an assumption: this repo ALREADY
+# runs the same simulation at two optimisation levels — opt-level 0 in
+# `cargo test`, opt-level 3 + fat LTO in the `phoenix-headless` binary the
+# perf and balance jobs run — and asserts both against the same authored RON
+# baselines and digests (tests/rng_determinism.rs, tests/cross_target_probe.rs,
+# tests/registration_order_determinism.rs). Optimisation-level independence is
+# a property this repository continuously proves, not one this block
+# introduces. Rust enables no fast-math and performs no FMA contraction, so
+# every float op is IEEE-pinned regardless of opt-level.
+#
+# What must NEVER be added here: `debug-assertions = false` or
+# `overflow-checks = false`. `debug_assertions` is not decoration in this
+# crate — src/ship/physics_systems.rs, src/ship/helm.rs (HelmPhysicsWriteGuard),
+# src/ship_plugin.rs and src/world/script/engine.rs all cfg real behaviour on
+# it. Turning it off would leave the test suite testing a different simulation
+# than the one it is written against. opt-level does not touch it; those two
+# keys do.
+[profile.dev]
+# The crate's own hot paths (simmath, physics_systems, the AI evaluators) run
+# in every test. opt-level 1 takes most of the runtime win at a fraction of
+# opt-level 3's compile cost, which matters for local incremental builds.
+opt-level = 1
+# Line tables keep file:line in test-failure backtraces without the multi-GB
+# DWARF that would otherwise dominate the CI rust-cache upload.
+debug = "line-tables-only"
+
+# Dependencies only — this glob never matches the crate itself. bevy, rapier3d,
+# parry3d and nalgebra are where the simulation actually spends its time, they
+# are rebuilt approximately never, and the rust-cache carries them between CI
+# runs, so opt-level 3 here is paid once and refunded every run. Their debug
+# info is never read (nothing here is debugged by stepping through bevy_ecs)
+# and is the bulk of the target dir, hence the cache.
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+
 [profile.release]
 opt-level = 3
 lto = true

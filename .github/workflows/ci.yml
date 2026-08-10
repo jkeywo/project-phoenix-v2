@@ -382,10 +382,63 @@ jobs:
           }
           NODE
 
+  # ── Native release binaries, built once ───────────────────────────────────────
+  #
+  # `perf` and `balance` each used to build phoenix-headless from scratch in
+  # release — 19 of perf's 20 minutes and 10 of balance's 12, for the same two
+  # binaries, twice, on the critical path. This job builds them once at t=0 and
+  # hands them over as an artifact.
+  #
+  # The profile is `release`, unchanged and deliberately so. A thinner profile
+  # would build faster, but this job is not on the critical path (perf cannot
+  # start until smoke finishes anyway) so the speed would buy nothing — while a
+  # different profile WOULD move perf/baselines/headless-default.ron's timings
+  # and could shift the balance batch's per-run wall-clock. Identical binary,
+  # identical numbers, zero baseline churn.
+  native-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      # Release, because a debug-build measurement describes a binary nobody
+      # ships. The committed timing baseline was recorded the same way.
+      - name: Build headless runner and perf tool
+        run: |
+          cargo build --release --features headless --bin phoenix-headless
+          cargo build --release --features perf --bin phoenix-perf
+
+      # Paired with the consumers' post-download sha256sum: a mismatch means the
+      # artifact round-trip changed the binary, which invalidates every number
+      # measured from it.
+      - name: Record binary digests
+        run: sha256sum target/release/phoenix-headless target/release/phoenix-perf | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Both paths share target/release, so the two files land at the artifact
+      # root — which is why the consumers can download straight back into
+      # target/release/ and every existing `./target/release/...` invocation
+      # keeps working. That path is not cosmetic: balance-runs.mjs::binaryPath()
+      # hardcodes `<root>/target/release/phoenix-headless` and exits if absent.
+      - name: Upload native binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-bins
+          path: |
+            target/release/phoenix-headless
+            target/release/phoenix-perf
+          retention-days: 1
+
   # ── Performance measurement (issue #868; gating decided in #905) ─────────────
   #
   # Runs after smoke so the browser capture that job produces can be compared
-  # here, where a Rust toolchain exists. The comparison has exactly one
+  # here, where the perf tooling lives. The comparison has exactly one
   # implementation — `phoenix-perf report` — rather than a second opinion
   # written in whatever language each job happens to have.
   #
@@ -412,25 +465,33 @@ jobs:
   # and uploads them, because CI cannot commit. `phoenix-perf adopt` turns them
   # into a reviewable diff on a developer's machine — see src/perf/baseline.rs.
   perf:
-    needs: [test, smoke]
+    needs: [test, smoke, native-build]
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
-
+      # No Rust toolchain: the binaries arrive prebuilt from native-build. The
+      # apt step stays — they are dynamically linked against libudev, libasound,
+      # libxkbcommon and libwayland, and `phoenix-perf mesh` drives Bevy's real
+      # asset loader.
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
 
-      # Release, because a debug-build measurement describes a binary nobody
-      # ships. The committed timing baseline was recorded the same way.
-      - name: Build headless runner and perf tool
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: native-bins
+          path: target/release/
+
+      # actions/upload-artifact ships a zip and the download does not restore
+      # the executable bit; without this every invocation below dies with
+      # "Permission denied". The sha256sum must match native-build's summary.
+      - name: Restore the executable bit
         run: |
-          cargo build --release --features headless --bin phoenix-headless
-          cargo build --release --features perf --bin phoenix-perf
+          chmod +x target/release/phoenix-headless target/release/phoenix-perf
+          sha256sum target/release/phoenix-headless target/release/phoenix-perf
 
       - name: Measure the default headless scenario
         run: |
@@ -554,18 +615,30 @@ jobs:
   # red on infrastructure failure (binary won't build, runner crashes). Gating
   # starts once the recorded numbers have proven stable across reports.
   balance:
-    needs: test
+    needs: [test, native-build]
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
-
+      # No Rust toolchain: phoenix-headless arrives prebuilt from native-build.
+      # The apt step stays for the runtime .so's the binary links against.
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: native-bins
+          path: target/release/
+
+      # The zip round-trip drops the executable bit; balance-runs.mjs invokes
+      # `<root>/target/release/phoenix-headless` directly.
+      - name: Restore the executable bit
+        run: |
+          chmod +x target/release/phoenix-headless target/release/phoenix-perf
+          sha256sum target/release/phoenix-headless
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -577,12 +650,6 @@ jobs:
       # balance-runs.mjs imports smol-toml.
       - name: Install Node dependencies
         run: npm install
-
-      # Release, matching the perf job and the recorded local baselines: the
-      # batch fans out one process per (matchup x seed) and a debug binary
-      # would make the job the slowest in the workflow.
-      - name: Build headless runner
-        run: cargo build --release --features headless --bin phoenix-headless
 
       - name: Run the demo matchup batch
         run: node scripts/balance-runs.mjs scripts/balance-runs.demo.toml --out target/balance

@@ -29,8 +29,8 @@ use vellum_script::ScriptSource;
 
 use crate::world::script::engine::{loading_engine, BuilderState, Registration, ScriptTrigger};
 use crate::world::script::validate::{
-    validate_registrations, validate_script_triggers, validate_toml_script_comms,
-    validate_toml_script_triggers,
+    validate_flag_opassign, validate_registrations, validate_script_triggers,
+    validate_toml_script_comms, validate_toml_script_triggers,
 };
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
 
@@ -276,6 +276,12 @@ pub fn load_world_scripts(
         world_toml,
         &compiled.defined_fns,
     ));
+    // Walk each script body for a compound assignment on the `flags` accessor
+    // (`flags.x += n`), which Rhai desugars to an absolute get-then-set and so
+    // silently drains as a clobber-prone `SetValue` instead of a composable
+    // increment. Each is a blocking finding, so the atomic activation gate keeps a
+    // world that reaches for the old `+=` idiom from spawning (issue #994).
+    compiled.findings.extend(validate_flag_opassign(&sources));
     compiled
 }
 
@@ -481,6 +487,61 @@ mod tests {
 
             [script]
             setup = "fn hail_axiom(ctx) { #{ message: \"hi\", responses: [] } }"
+            "#,
+        );
+        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
+        assert!(
+            !crate::world::validate::has_error(&compiled.findings),
+            "findings: {:?}",
+            compiled.findings
+        );
+    }
+
+    // ── `flags` compound-assignment lint (issue #994) ─────────────────────────
+
+    #[test]
+    fn full_load_blocks_a_flag_opassign() {
+        // A `flags.x += n` body must block activation via the atomic gate, exactly
+        // like an unresolved handler.
+        let world = toml_of(
+            r#"
+            [script]
+            setup = "fn on_x(ctx) { ctx.flags.score += 50; }"
+            "#,
+        );
+        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
+        assert!(
+            crate::world::validate::has_error(&compiled.findings),
+            "a flag compound-assignment must block activation"
+        );
+        assert!(compiled
+            .findings
+            .iter()
+            .any(|f| f.category == "flag-opassign-not-composable"));
+    }
+
+    #[test]
+    fn full_load_of_the_increment_verb_is_clean() {
+        let world = toml_of(
+            r#"
+            [script]
+            setup = "fn on_x(ctx) { ctx.flags.increment(\"score\", 50); }"
+            "#,
+        );
+        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
+        assert!(
+            !crate::world::validate::has_error(&compiled.findings),
+            "findings: {:?}",
+            compiled.findings
+        );
+    }
+
+    #[test]
+    fn full_load_of_a_plain_flag_assign_is_clean() {
+        let world = toml_of(
+            r#"
+            [script]
+            setup = "fn on_x(ctx) { ctx.flags.armed = 1; }"
             "#,
         );
         let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());

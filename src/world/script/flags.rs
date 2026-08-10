@@ -273,6 +273,44 @@ mod tests {
         );
     }
 
+    /// PIN (issue #994): `flags.x += n` on the indexer degrades to an **absolute**
+    /// `SetValue(final)`, NOT a composable `Increment(n)`.
+    ///
+    /// Rhai desugars a compound assignment on a custom-type indexer to get-then-set
+    /// *before* the custom type is consulted, so the host only ever sees a set of
+    /// the final computed value — physically indistinguishable from `flags.x =
+    /// final`. That is the exact clobber-prone degradation the load-time lint
+    /// (`validate::validate_flag_opassign`) now rejects. This test nails the
+    /// runtime behaviour so a future Rhai upgrade that changed the desugaring, or
+    /// an attempt to intercept `+=`, breaks here loudly rather than silently
+    /// altering flag semantics out from under the lint's premise.
+    #[test]
+    fn plus_equals_degrades_to_absolute_setvalue_not_increment() {
+        let mut base = FlagStore::new();
+        base.set_flag_value("x", 10);
+        let cmds = run(r#"fn on_x(ctx) { ctx.flags.x += 5; }"#, "on_x", base);
+        // The host sees an ABSOLUTE set of the final value (10 + 5 = 15), not a
+        // relative Increment(5) — so a concurrent TOML increment would be clobbered.
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::MutateFlag {
+                target_layer: None,
+                name: "x".to_string(),
+                mutation: FlagMutation::SetValue(15),
+            }]
+        );
+        assert!(
+            !matches!(
+                cmds[0],
+                ActionCmd::MutateFlag {
+                    mutation: FlagMutation::Increment(_),
+                    ..
+                }
+            ),
+            "`+=` must degrade to SetValue; an Increment here would void the lint's premise"
+        );
+    }
+
     #[test]
     fn no_writes_emit_nothing() {
         // Reading a flag must not emit a mutation.

@@ -711,6 +711,7 @@ name = "Captain"
 description = "entity.ship_harrow_warhawk.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
+console = "gui/battleship/captain.html"
 
 [[station.rating]]
 name = "Std"
@@ -722,6 +723,7 @@ name = "Helm"
 description = "entity.ship_harrow_warhawk.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
+console = "gui/battleship/helm.html"
 
 [[station.rating]]
 name = "Std"
@@ -733,6 +735,7 @@ name = "Tactical"
 description = "entity.ship_harrow_warhawk.station.tactical.description"
 rank = "Lt. Cmdr."
 short_code = "TAC"
+console = "gui/battleship/tactical.html"
 
 [[station.rating]]
 name = "Std"
@@ -744,6 +747,7 @@ name = "Engineering"
 description = "entity.ship_harrow_warhawk.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
+console = "gui/battleship/power.html"
 
 [[station.rating]]
 name = "Std"

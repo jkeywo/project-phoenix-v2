@@ -32,6 +32,7 @@
       <div class="console-body">
         <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
         <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
+        <ph-blasters-controls id="blasters-controls" hidden></ph-blasters-controls>
         <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
       </div>
       <footer class="console-footer footer-bar">
@@ -46,6 +47,7 @@
   <script type="module">
     import '../components/ph-tactical-radar.js';
     import '../components/ph-phasers-controls.js';
+    import '../components/ph-blasters-controls.js';
     import '../components/ph-torpedo-controls.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
@@ -57,6 +59,15 @@
       render: function(s) {
         document.getElementById('tactical-radar').state = { blips: s.blips || [], x: s.ship_x || 0, z: s.ship_z || 0, heading: s.ship_heading || 0, speed: s.ship_speed || 0, ship_heading: s.ship_heading || 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null, target_uuid: s.target_uuid || null };
         document.getElementById('phasers-controls').state = { banks: s.banks || [], target_valid: !!s.target_uuid, mode: s.phaser_mode || 'Auto' };
+        // Blasters (issue #925): the battleship mounts no blaster bank, so this
+        // stays hidden for it; a reused hull whose Tactical seat owns blaster
+        // banks (e.g. the Harrow destroyer/warhawk) gets its real blaster state
+        // from the same flat WeaponsConsolePayload. Hidden-when-empty keeps every
+        // hull without blasters visually unchanged.
+        var blastersEl = document.getElementById('blasters-controls');
+        var blasterBanks = s.blasters || [];
+        blastersEl.hidden = blasterBanks.length === 0;
+        blastersEl.state = { banks: blasterBanks };
         document.getElementById('torpedo-controls').state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 }, target_uuid: s.target_uuid || null };
         document.getElementById('station-damage').state = s.own_hull || null;
         document.getElementById('footer-target').textContent = s.target_name || (s.target_uuid ? t('console.common.locked') : t('console.common.no_target'));

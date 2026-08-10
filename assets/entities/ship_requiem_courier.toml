@@ -94,6 +94,7 @@ name = "Captain"
 description = "entity.ship_requiem_courier.station.captain.description"
 rank = "Cmdr."
 short_code = "CPT"
+console = "gui/courier/captain.html"
 
 [[station.rating]]
 name = "Std"
@@ -105,6 +106,7 @@ name = "Tactical"
 description = "entity.ship_requiem_courier.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
+console = "gui/courier/tactical.html"
 
 [[station.rating]]
 name = "Std"

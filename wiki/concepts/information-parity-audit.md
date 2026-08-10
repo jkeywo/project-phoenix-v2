@@ -17,9 +17,12 @@ surface as shipped.
 The result: **47 authored fact references (46 distinct fact names) across the
 19 AI policy hosts. 41 have a rendered console counterpart on the hull that
 authors them; 4 are derived policy state where no parity is owed; 2 render on
-the battleship only. Three findings filed: #925, #926, #927.** That per-fact
-tally is for the four player hulls — on the NPC hulls the seat mounts no
-console at all, which is #925 and is structural rather than per-fact.
+the battleship only. Three findings filed: #925, #926, #927 — all now
+resolved.** That per-fact tally is for the four player hulls — on the NPC hulls
+the seat authored no console at all, the structural gap #925 (now resolved:
+every NPC-hull seat mounts a console chosen by its owned systems, enforced by
+`tests/client/npc-hull-console-coverage.test.js`); one sensors-family follow-up
+noted under finding 1.
 
 The three candidates #880 names — threat bearing, safe-range ring, closest
 approach — are assessed individually below; one is a real gap (threat
@@ -260,17 +263,57 @@ follow-up filed.
 ## Findings
 
 1. **NPC-hull seats mount no console, so no fact on those hulls has a
-   counterpart.** #871 gave the Harrow and Requiem hulls `[[station]]` blocks
-   and rating structure, and a human can be admitted to those seats — but none
-   of those stations authors a `console` path (`console: Option<String>`,
-   `src/ship/config.rs:48`). `resolveConsoleUrl` returns `null`
-   (`gui/console-resolver.js:4`) and `planMounts` skips the station
-   (`gui/mount-plan.js:60`), so the seat mounts no iframe. Every fact the
-   Harrow doctrine reads — including `target_facing_shields`,
-   `target_facing_shield_down`, `inside_threat_range` and
-   `separation_progress`, all of which only Harrow hulls author — therefore has
-   no human counterpart on the hull that reads it. This is the largest parity
-   gap in the game and it is structural, not per-fact. Filed as **#925**.
+   counterpart.** Filed as #925 — **resolved**. #871 gave the Harrow and Requiem
+   hulls `[[station]]` blocks and rating structure, and a human can be admitted
+   to those seats, but none of those stations authored a `console` path
+   (`console: Option<String>`, `src/ship/config.rs:48`), so `resolveConsoleUrl`
+   returned `null` and `planMounts` skipped the seat — a blank station. #925 now
+   authors a `console` on every NPC-hull seat, chosen by the fine systems the
+   seat OWNS (not by hull name — AGENTS.md #11), reusing the console of a
+   similar player class. Two dimensions decide the reuse: the seat's owned
+   *families* must be covered by the console, AND the payload *shape* must match.
+   `buildConsoleStateInner` emits a FLAT plain-builder payload for a single-family
+   seat and a system-id-KEYED payload for a multi-family seat, and each console
+   consumes exactly one shape. The four four-seat Harrow hulls
+   (`ship_harrow_cruiser`, `ship_harrow_destroyer`, `ship_harrow_warhawk`,
+   `ship_harrow_patrol`) each have four single-family seats (captain→captain,
+   helm→helm, tactical→tactical, engineering→power), so they reuse the FLAT
+   `gui/battleship/{captain,helm,tactical,power}.html` consoles; the single-family
+   dispatch in `gui/console-state.js` keys on the owned family (via
+   `FAMILY_BUILDERS`) so the `engineering` seat, owning only the power family,
+   correctly gets the flat power payload despite its id not matching a builder
+   name. `battleship/tactical.html` gained a hidden-when-empty
+   `ph-blasters-controls` so the blaster-armed Harrow destroyer/warhawk Tactical
+   seats render their real banks (the battleship mounts no blaster bank, so it is
+   visually unchanged). The two-seat `ship_requiem_courier` has two MULTI-family
+   seats ({captain,power} and {helm,tactical}), so it reuses the KEYED
+   `gui/courier/{captain,tactical}.html`. Neither dimension is left to chance: a
+   console spec map (`gui/console-families.js`, `{ families, shape }` per console)
+   plus a Vitest test (`tests/client/npc-hull-console-coverage.test.js`) asserts,
+   for every NPC hull's `ship_stations`, that `planMounts` yields an iframe for
+   every seat, that each seat's owned families are covered by its console, and
+   that the console's payload shape matches the seat's family-count — a family
+   gap OR a shape mismatch fails CI loudly instead of mounting a blank panel.
+
+   The four facts only Harrow hulls author — their human counterparts:
+
+   | Fact | Hulls | Counterpart | Status |
+   |------|-------|-------------|--------|
+   | `inside_threat_range` | destroyer | Red-alert hostile weapon-arc overlay on the Helm radar (`hostile_arcs`, `gui/battleship/helm.html` → `ph-helm-radar`). The Helm seat owns the helm family and reads it. | **covered** |
+   | `separation_progress` | destroyer | None by design — an AI-only derived policy quantity (closest-approach state, candidate 3), no widget. | **no gap (AI-only)** |
+   | `target_facing_shields` | cruiser, warhawk | Target shield rows via `ph-sensor-panel` (sensors family, #927). But the seat that reads this fact (Tactical, via the torpedo/weapons doctrine) owns NO sensors system, and neither the mounted flat `gui/battleship/tactical.html` nor the Captain seat's `gui/battleship/captain.html` embeds a sensors panel — and even a sensors-panel console would render nothing, since no Harrow four-seat seat owns a sensors system (the captain owns only `red-alert`). | **follow-up gap** — see below |
+   | `target_facing_shield_down` | cruiser, warhawk | Same as above — `ph-sensor-panel` sensors-family readout, but no Harrow seat on these hulls owns a sensors system to populate it. | **follow-up gap** — see below |
+
+   **Follow-up gap (sensors on four-seat Harrow hulls).** `target_facing_shields`
+   and `target_facing_shield_down` have a rendered home only where a seat owns a
+   sensors system. On the Harrow cruiser and warhawk no seat does, so the
+   #927-era shield rows never populate for a human there. Closing it means either
+   authoring a `sensors`/`sensor_radar` system onto one of those hulls' seats
+   (which would make that seat multi-family and so need a KEYED console covering
+   the sensors family — e.g. `gui/destroyer/captain.html`, which already does) or
+   a dedicated follow-up issue; tracked here rather than blocking #925, whose
+   structural fix (every seat mounts a working, shape-matched console) is
+   complete.
 2. **Threat bearing has no persistent console counterpart outside the
    battleship, and the battleship's is a different quantity.** See candidate 1.
    Filed as #926 — **resolved**.

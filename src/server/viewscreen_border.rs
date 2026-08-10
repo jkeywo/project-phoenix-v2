@@ -479,19 +479,16 @@ fn compute_hud_state(
     } else {
         0.0
     };
-    let game_over_message = if *phase == GamePhase::GameOver {
-        let reason = game_over_reason.and_then(|r| r.0.as_deref()).unwrap_or("");
-        let msg = if reason.starts_with("All consoles destroyed")
-            || reason.starts_with("Ship destroyed")
-        {
-            "Ship Destroyed".to_string()
-        } else {
-            reason.to_string()
-        };
-        Some(msg)
-    } else {
-        None
-    };
+    // Pass the reason through untouched (issue #977). The built-in death sites
+    // latch the `server.game_over.ship_destroyed` string id, and a scenario's
+    // `game_over` action authors its own message id; either way this is a
+    // `strings.csv` id (or authored data) the HUD channel resolves through
+    // `localiseTree` client-side. Rust composes no display English here.
+    let game_over_message = (*phase == GamePhase::GameOver).then(|| {
+        game_over_reason
+            .and_then(|r| r.0.clone())
+            .unwrap_or_default()
+    });
     ViewscreenHudState {
         heading: yaw_to_compass_bearing(physics.yaw),
         hull_pct: hull_pct.round() as i32,
@@ -684,7 +681,10 @@ mod tests {
     fn compute_hud_state_game_over_ship_destroyed() {
         use crate::server_app::GameOverReason;
         let physics = ShipPhysics::default();
-        let reason = GameOverReason(Some("All consoles destroyed".into()), None);
+        // The built-in death sites latch the string id (issue #977);
+        // `compute_hud_state` passes it through, `localiseTree` resolves it to
+        // "Ship Destroyed" on the client. No English is composed here.
+        let reason = GameOverReason(Some("server.game_over.ship_destroyed".into()), None);
         let state = compute_hud_state(
             false,
             &physics,
@@ -695,7 +695,10 @@ mod tests {
             &GamePhase::GameOver,
             Some(&reason),
         );
-        assert_eq!(state.game_over_message.as_deref(), Some("Ship Destroyed"));
+        assert_eq!(
+            state.game_over_message.as_deref(),
+            Some("server.game_over.ship_destroyed")
+        );
     }
 
     #[test]

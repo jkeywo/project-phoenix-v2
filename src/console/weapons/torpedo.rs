@@ -1541,7 +1541,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             }
             if let Some(ref mut reason) = death_latch.reason {
                 if reason.0.is_none() {
-                    reason.0 = Some("Ship destroyed".into());
+                    reason.0 = Some("server.game_over.ship_destroyed".into());
                     // The LocalShip died → defeat (#843).
                     reason.1 = Some(crate::balance::Outcome::Defeat);
                     if let Some(ref mut msgs) = balance_events {

@@ -226,10 +226,18 @@ pub fn tick_intent_narration(
                 NarratingSeat::Power => IntentSnapshot {
                     // Sorted: the advisory names the group that newly appeared,
                     // and `notified_groups` is a `HashSet`, whose order would
-                    // otherwise decide which one that is.
+                    // otherwise decide which one that is. Each group id is
+                    // mapped to its `strings.csv` label id (issue #977) so the
+                    // advisory `subject` — rendered raw in the popup body — is an
+                    // id `localiseTree` resolves, not a bare machine token.
                     brownout_groups: {
                         let mut groups: Vec<String> = brownout
-                            .map(|b| b.notified_groups.iter().cloned().collect())
+                            .map(|b| {
+                                b.notified_groups
+                                    .iter()
+                                    .map(|g| crate::ship::power::power_group_label(g).to_string())
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         groups.sort();
                         groups
@@ -596,9 +604,12 @@ mod tests {
         decide(&mut app);
         let msgs = drain(&mut app);
         assert_eq!(advisory_kinds(&msgs), vec![IntentKind::PowerBrownout]);
+        // The subject is the group's `strings.csv` label id (issue #977), which
+        // `localiseTree` resolves in the popup — not the bare group token.
         assert!(matches!(
             &msgs[0].payload,
-            CoordinationPayload::IntentAdvisory { subject: Some(s), .. } if s == "weapons"
+            CoordinationPayload::IntentAdvisory { subject: Some(s), .. }
+                if s == "power.group.weapons"
         ));
 
         for _ in 0..5 {

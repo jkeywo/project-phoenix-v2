@@ -314,29 +314,39 @@ impl ShieldFacing {
     }
 }
 
-/// Default facing labels for 1, 2, 3, or 4 arcs.
+/// Default facing labels for 1, 2, 3, or 4 arcs, as `strings.csv` ids (issue
+/// #977). The label rides the wire on `ShieldFacing.label` → the facing
+/// snapshot and the `ShieldFacingDown`/`Restored` coordination payloads, and is
+/// resolved to display text ("Fore" / "Aft" / …) by `localiseTree` at the
+/// client boundary — Rust composes no English. Kept in lockstep with
+/// [`default_arc_id`], which emits the parallel lowercase arc ids.
 ///
 /// Facings are indexed going **counter-clockwise** (anti-clockwise) from forward:
 /// Fore(0) → Port(1) → Aft(2) → Starboard(3)
+///
+/// The `_` (5+ arcs) branch derives a per-index id `shield.facing.arc_<n>`;
+/// `strings.csv` carries rows through `arc_7`, enough for the evenly-spaced
+/// legacy constructor's realistic range (production authors arcs via
+/// [`ShieldSystem::from_arcs`]).
 fn default_label(index: usize, num_facings: usize) -> String {
     match num_facings {
-        1 => "All".to_string(),
+        1 => "shield.facing.all".to_string(),
         2 => match index {
-            0 => "Fore".to_string(),
-            _ => "Aft".to_string(),
+            0 => "shield.facing.fore".to_string(),
+            _ => "shield.facing.aft".to_string(),
         },
         3 => match index {
-            0 => "Fore".to_string(),
-            1 => "Port".to_string(),
-            _ => "Starboard".to_string(),
+            0 => "shield.facing.fore".to_string(),
+            1 => "shield.facing.port".to_string(),
+            _ => "shield.facing.starboard".to_string(),
         },
         4 => match index {
-            0 => "Fore".to_string(),
-            1 => "Port".to_string(),
-            2 => "Aft".to_string(),
-            _ => "Starboard".to_string(),
+            0 => "shield.facing.fore".to_string(),
+            1 => "shield.facing.port".to_string(),
+            2 => "shield.facing.aft".to_string(),
+            _ => "shield.facing.starboard".to_string(),
         },
-        _ => format!("Arc {}", index),
+        _ => format!("shield.facing.arc_{}", index),
     }
 }
 
@@ -415,7 +425,7 @@ impl ShieldSystem {
     /// `[[shield_arc]]` TOML blocks. Production ship spawns should use
     /// [`ShieldSystem::from_arcs`] which reads designer-authored arcs.
     pub fn new(config: &ShieldConfig) -> Self {
-        assert!(config.num_facings >= 1, "num_facings must be >= 1");
+        assert!(config.num_facings >= 1);
         let n = config.num_facings as f32;
         let width_deg = 360.0 / n;
         let facings = (0..config.num_facings)
@@ -466,7 +476,7 @@ impl ShieldSystem {
     /// Requires at least one arc. Panics on empty input to match
     /// `ShieldSystem::new`'s `num_facings >= 1` invariant.
     pub fn from_arcs(arcs: &[ArcRuntimeConfig], ship_wide: &ShieldConfig) -> Self {
-        assert!(!arcs.is_empty(), "from_arcs requires at least one arc");
+        assert!(!arcs.is_empty());
         let facings: Vec<ShieldFacing> = arcs
             .iter()
             .map(|a| {
@@ -560,10 +570,7 @@ impl ShieldSystem {
     ///    signed delta is more negative (clockwise from bearing) to match
     ///    the historical convention that -π/2 → Port(1) rather than Fore(0).
     pub fn facing_index_for_bearing(&self, bearing_relative: f32) -> usize {
-        assert!(
-            !self.facings.is_empty(),
-            "shield system must have >= 1 facing"
-        );
+        assert!(!self.facings.is_empty());
         // Convert relative bearing (-π..π] to world-bearing degrees
         // (0..360) with fore=0 and starboard=90 (i.e. clockwise from fore).
         let deg = bearing_relative.to_degrees().rem_euclid(360.0);
@@ -1158,10 +1165,12 @@ mod tests {
         let s = ShieldSystem::default();
         let snaps = s.snapshot();
         assert_eq!(snaps.len(), 4);
-        assert_eq!(snaps[0].label, "Fore");
-        assert_eq!(snaps[1].label, "Port");
-        assert_eq!(snaps[2].label, "Aft");
-        assert_eq!(snaps[3].label, "Starboard");
+        // Default facings carry `strings.csv` ids now (issue #977); the client
+        // resolves them through `localiseTree`.
+        assert_eq!(snaps[0].label, "shield.facing.fore");
+        assert_eq!(snaps[1].label, "shield.facing.port");
+        assert_eq!(snaps[2].label, "shield.facing.aft");
+        assert_eq!(snaps[3].label, "shield.facing.starboard");
     }
 
     #[test]

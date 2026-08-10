@@ -399,12 +399,20 @@ for (const file of codeFiles) {
 // flags only prose (see that file for the exact signal). An ERROR, not a
 // warning: these modules are fully migrated, so any prose here is a regression.
 //
-// Scope note: `src/server/viewscreen_border.rs` also feeds the hud channel and
-// #975 fixed its `condition` token, but it is NOT on this list because its
-// `game_over_message` still composes an English override ("Ship Destroyed") —
-// part of the separate game-over-reason surface #975 does not own. Adding it
-// here would demand fixing that too; it stays a documented known gap.
-const WIRE_VISIBLE_RUST = ['src/ship/coordination_systems.rs'];
+// Issue #977 closed the remaining wire-visible producers: the power group and
+// shield facing labels, the navigation waypoint label, the intent-advisory
+// subjects and the game-over reason all now emit `strings.csv` ids that
+// `localiseTree` resolves client-side, so their modules join the list. Every
+// prose literal in each file's production region — including incidental log and
+// panic text — is now an error, which is the point: these modules are fully
+// migrated and any new prose is a regression.
+const WIRE_VISIBLE_RUST = [
+  'src/ship/coordination_systems.rs',
+  'src/ship/power.rs',
+  'src/weapons/shield.rs',
+  'src/console/navigation/mod.rs',
+  'src/server/viewscreen_border.rs',
+];
 
 for (const relPath of WIRE_VISIBLE_RUST) {
   let src;

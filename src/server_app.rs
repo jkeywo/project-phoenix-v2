@@ -2034,7 +2034,11 @@ fn handle_collisions(
             if ship_destroyed {
                 outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
                 if game_over_reason.0.is_none() {
-                    game_over_reason.0 = Some("All consoles destroyed".into());
+                    // Player-visible via the game-over overlays, so a
+                    // `strings.csv` id, not English (issue #977); the HUD and
+                    // GameOver paths resolve it client-side. Every built-in
+                    // ship-death site latches this same id.
+                    game_over_reason.0 = Some("server.game_over.ship_destroyed".into());
                     // The LocalShip died → this run is a defeat (#843). Latched
                     // alongside the reason under the same first-write guard.
                     game_over_reason.1 = Some(crate::balance::Outcome::Defeat);

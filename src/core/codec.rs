@@ -681,7 +681,7 @@ mod tests {
             (
                 ServerMessageDiscriminants::GameOver,
                 ServerMessage::GameOver {
-                    reason: "Ship Destroyed".into(),
+                    reason: "server.game_over.ship_destroyed".into(),
                 },
             ),
             (
@@ -1253,9 +1253,11 @@ mod tests {
     /// directions of the channel-3 bus (issue #681 — Navigation clears Helm to
     /// follow the ship's waypoint).
     ///
-    /// Post-#702 the payload carries the waypoint's `generation` rather than
-    /// its `{x, z}`: the waypoint itself is the shared goal, and this message
-    /// only names which one the Helm is cleared for. The generation is a `u64`
+    /// The `generation` is the navigation contract: the waypoint itself is the
+    /// shared goal, `process_coordination_lag` latches only this, and it names
+    /// which waypoint the Helm is cleared for. The `x` / `z` alongside it are
+    /// display-only (issue #977 — the chatter popup formats them, replacing the
+    /// English label Rust used to compose). The generation is a `u64`
     /// (not a timestamp) for PRD #620 lockstep determinism, so a value beyond
     /// f64's exact-integer range is used here to pin that it survives the JSON
     /// codec without precision loss — the failure mode a naive `f32`/`f64`
@@ -1267,7 +1269,8 @@ mod tests {
             target: crate::system_registry::helm_station_key(),
             payload: CoordinationPayload::NavigateTo {
                 generation,
-                label: "Hostile base".into(),
+                x: 300.0,
+                z: -100.0,
             },
         };
         assert_client_roundtrip(&JsonCodec, send_msg.clone());
@@ -1277,7 +1280,8 @@ mod tests {
             target: crate::system_registry::helm_station_key(),
             payload: CoordinationPayload::NavigateTo {
                 generation,
-                label: "Hostile base".into(),
+                x: 300.0,
+                z: -100.0,
             },
             sender_label: "Navigation".into(),
         };

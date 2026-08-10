@@ -354,7 +354,11 @@ fn apply_damage_zone_damage(
                         }
                         if let Some(ref mut reason) = game_over_reason {
                             if reason.0.is_none() {
-                                reason.0 = Some("All consoles destroyed".into());
+                                // Player-visible via the game-over overlays, so a
+                                // `strings.csv` id, not English (issue #977); the
+                                // HUD/GameOver paths resolve it client-side. All
+                                // built-in ship-death sites latch the same id.
+                                reason.0 = Some("server.game_over.ship_destroyed".into());
                                 // The LocalShip died → defeat (#843), latched
                                 // under the same first-write guard as the reason.
                                 reason.1 = Some(crate::balance::Outcome::Defeat);

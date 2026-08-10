@@ -169,24 +169,25 @@ pub struct PowerBrownoutState {
     pub locked_changed: bool,
 }
 
-/// Maps a canonical power group id string to its display label in the HTML
-/// power panel. Anything unknown falls back to `"UNKNOWN"`.
+/// Maps a canonical power group id string to the `strings.csv` id for its
+/// display label. Anything unknown falls back to `power.group.unknown`.
 ///
-/// **These literals are the live path, for every hull.** This function is the
-/// sole producer of [`PowerGroupEntry::label`], nothing in `gui/` reads a
-/// `power_groups` block, and no other code path resolves an authored
-/// `[power_groups.<id>] label` — so what a Power officer sees on any hull is
-/// "HELM" / "WEAPONS" / "SHIELDS" from right here. The authored `label` fields
-/// are real `strings.csv` ids and are covered by `scripts/check-strings.mjs`,
-/// but nothing displays them yet; wiring them up means carrying the ship's
-/// authored labels into `publish_power_blackboard` and resolving them client
-/// side through `t()`, with these as the fallback for a hull that authors none.
+/// **This function is the live path, for every hull.** It is the sole producer
+/// of [`PowerGroupEntry::label`] and of [`CoordinationPayload::PowerBrownout`]'s
+/// label, and nothing in `gui/` reads a `power_groups` block. Per issue #977 it
+/// emits a `strings.csv` id, never composed English: the blackboard and the
+/// coordination payload both cross `localiseTree` at the wire boundary, which
+/// resolves the id to "HELM" / "WEAPONS" / "SHIELDS" client-side. The authored
+/// `[power_groups.<id>] label` fields are real ids too and covered by
+/// `scripts/check-strings.mjs`; wiring them up means carrying the ship's
+/// authored labels into `publish_power_blackboard`, with these as the fallback
+/// for a hull that authors none.
 pub fn power_group_label(group_id: &str) -> &'static str {
     match group_id {
-        HELM_POWER_GROUP => "HELM",
-        WEAPONS_POWER_GROUP => "WEAPONS",
-        SHIELDS_POWER_GROUP => "SHIELDS",
-        _ => "UNKNOWN",
+        HELM_POWER_GROUP => "power.group.helm",
+        WEAPONS_POWER_GROUP => "power.group.weapons",
+        SHIELDS_POWER_GROUP => "power.group.shields",
+        _ => "power.group.unknown",
     }
 }
 
@@ -385,12 +386,12 @@ pub fn handle_power_messages(
         for (group, level) in pending {
             if let Some(pc) = power_comp.as_deref_mut() {
                 if let Err(err) = pc.0.set_group_allocation(&group, level) {
-                    warn!("[power] ignored power allocation: {err:?}");
+                    warn!("power.allocation_ignored={err:?}");
                 }
             } else if is_local {
                 if let Some(pr) = power_res.as_deref_mut() {
                     if let Err(err) = pr.0.set_group_allocation(&group, level) {
-                        warn!("[power] ignored power allocation: {err:?}");
+                        warn!("power.allocation_ignored={err:?}");
                     }
                 }
             }
@@ -878,6 +879,32 @@ fn publish_power_blackboard(
 mod tests {
     use super::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
+
+    /// Issue #977: the label producer emits `strings.csv` ids, never composed
+    /// English. Every id it can return must exist in the table (so `localiseTree`
+    /// resolves it), and the shape must be a dotted lowercase id.
+    #[test]
+    fn power_group_label_emits_string_ids_not_english() {
+        use crate::power_system::{HELM_POWER_GROUP, WEAPONS_POWER_GROUP};
+        for group in [
+            HELM_POWER_GROUP,
+            WEAPONS_POWER_GROUP,
+            SHIELDS_POWER_GROUP,
+            "ops",
+        ] {
+            let id = power_group_label(group);
+            assert!(
+                id.starts_with("power.group."),
+                "{group} → {id:?} must be a power.group.* id, not English"
+            );
+            assert!(
+                !id.chars().any(|c| c.is_ascii_uppercase() || c == ' '),
+                "{id:?} must be a dotted lowercase id"
+            );
+        }
+        assert_eq!(power_group_label("ops"), "power.group.unknown");
+    }
+
     use crate::messages::{ModifierSlot, ServerMessage, *};
     use crate::modifiers::ShipModifiers;
     use crate::power_system::SHIELDS_POWER_GROUP;
@@ -1317,17 +1344,19 @@ mod tests {
             !bb.groups.is_empty(),
             "expected at least one power group entry"
         );
+        // Labels are `strings.csv` ids now (issue #977); `localiseTree`
+        // resolves them to HELM / WEAPONS / SHIELDS at the client boundary.
         assert!(
-            bb.groups.iter().any(|e| e.label == "HELM"),
-            "expected HELM entry"
+            bb.groups.iter().any(|e| e.label == "power.group.helm"),
+            "expected helm entry"
         );
         assert!(
-            bb.groups.iter().any(|e| e.label == "WEAPONS"),
-            "expected WEAPONS entry"
+            bb.groups.iter().any(|e| e.label == "power.group.weapons"),
+            "expected weapons entry"
         );
         assert!(
-            bb.groups.iter().any(|e| e.label == "SHIELDS"),
-            "expected SHIELDS entry"
+            bb.groups.iter().any(|e| e.label == "power.group.shields"),
+            "expected shields entry"
         );
         assert!(bb.total > 0, "total should be > 0");
         // Total 6 on the default seed, where the default `rates` are still
@@ -1352,7 +1381,11 @@ mod tests {
         tick(&mut app);
 
         let bb = power_blackboard(&mut app);
-        let helm_entry = bb.groups.iter().find(|e| e.label == "HELM").unwrap();
+        let helm_entry = bb
+            .groups
+            .iter()
+            .find(|e| e.label == "power.group.helm")
+            .unwrap();
         assert_eq!(
             helm_entry.level, 3,
             "helm level should be 3 after direct assignment"

@@ -348,7 +348,11 @@ fn issue_navigate_to_clearance(
                 target: crate::system_registry::helm_station_key(),
                 payload: crate::messages::CoordinationPayload::NavigateTo {
                     generation,
-                    label: format!("waypoint ({:.0}, {:.0})", snapshot.x, snapshot.z),
+                    // Coords for the chatter popup's display only (issue #977);
+                    // the Helm latches on `generation` and reads the waypoint
+                    // itself, so nothing steers off these.
+                    x: snapshot.x,
+                    z: snapshot.z,
                 },
                 sender_label: crate::ship::coordination::CHATTER_SENDER_NAVIGATION.to_string(),
             });
@@ -1703,23 +1707,21 @@ mod tests {
             )
         });
         assert!(nav_to.is_some(), "expected NavigateTo coordination event");
-        if let Some(crate::messages::CoordinationPayload::NavigateTo { generation, label }) =
+        if let Some(crate::messages::CoordinationPayload::NavigateTo { generation, x, z }) =
             nav_to.map(|c| &c.payload)
         {
-            // The message names *which* waypoint the Helm is cleared for; the
-            // position lives on the waypoint itself (asserted above). Post-#702
-            // no coordinates travel on the wire at all — that duplication was
-            // the `nav_goal` split brain.
+            // The generation is the navigation contract the Helm latches on; it
+            // must be the waypoint's own so the clearance can match.
             assert_eq!(
                 *generation,
                 nav_waypoint_generation(&mut app),
                 "NavigateTo must carry the current waypoint's generation, or the                  Helm's clearance can never match and it will never fly it"
             );
-            // The label is derived from the waypoint itself by the shared
-            // origin-agnostic issuer (`issue_navigate_to_clearance`), not from
-            // the objective text — the issuer no longer knows which objective
-            // produced the waypoint.
-            assert_eq!(label, "waypoint (300, -100)");
+            // `x` / `z` ride for the chatter popup's display only (issue #977) —
+            // Rust no longer composes the English "waypoint (x, z)" label; the
+            // client's `coordination.navigate.title` template formats them. They
+            // are the waypoint's own coordinates.
+            assert_eq!((*x, *z), (300.0, -100.0));
         }
     }
 

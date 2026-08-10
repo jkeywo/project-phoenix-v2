@@ -101,9 +101,11 @@ describe('normalizeCoordinationPayload — variants', () => {
   });
 
   it('NavigateTo / RepairRequest / ThreatBearing (now first-class, issue #975)', () => {
+    // Coords carried on the payload now (issue #977); the popup rounds them and
+    // the template composes "waypoint (x, z)". Rust no longer sends a label.
     expect(normalizeCoordinationPayload(
-      { type: 'NavigateTo', data: { label: 'waypoint 3' } }, 'x').title)
-      .toBe(t('coordination.navigate.title', { label: 'waypoint 3' }));
+      { type: 'NavigateTo', data: { x: 300.4, z: -100.6 } }, 'x').title)
+      .toBe(t('coordination.navigate.title', { x: 300, z: -101 }));
     expect(normalizeCoordinationPayload(
       { type: 'RepairRequest', data: { station_label: 'Tactical' } }, 'x').title)
       .toBe(t('coordination.repair.title', { label: 'Tactical' }));

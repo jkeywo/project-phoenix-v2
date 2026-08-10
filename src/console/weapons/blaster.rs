@@ -822,7 +822,7 @@ pub(crate) fn handle_blaster_hits(
                         }
                         if let Some(ref mut reason) = game_over_reason {
                             if reason.0.is_none() {
-                                reason.0 = Some("Ship destroyed".into());
+                                reason.0 = Some("server.game_over.ship_destroyed".into());
                                 // The LocalShip died → defeat (#843), latched
                                 // under the same first-write guard as the reason.
                                 reason.1 = Some(crate::balance::Outcome::Defeat);

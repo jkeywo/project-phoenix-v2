@@ -1755,7 +1755,9 @@ pub enum CoordinationPayload {
     PowerBrownout {
         /// Which power group (e.g. "weapons", "helm", "sensors").
         group: String,
-        /// Human-readable label for the affected system (e.g. "WEAPONS").
+        /// `strings.csv` id for the affected system's display label (e.g.
+        /// `"power.group.weapons"`); `localiseTree` resolves it client-side
+        /// (issue #977).
         label: String,
         /// Current allocated level (what the system is actually getting).
         allocated_level: u8,
@@ -1763,16 +1765,17 @@ pub enum CoordinationPayload {
     /// Navigation clears Helm to follow the ship's current `NavigationWaypoint`
     /// (issues #681, #702).
     ///
-    /// Carries the waypoint's `generation`, not a position. The waypoint is the
-    /// goal and lives on the ship as one per-entity component that both
-    /// consoles read; duplicating its coordinates onto the wire is what created
-    /// the `AiMemory.nav_goal` split brain this replaced. All this message does
-    /// is say *which* waypoint the Helm is now cleared to fly to, which — once
-    /// it has survived the Channel-3 delivery lag — is the whole of the lag's
-    /// job. See [`NavigationWaypoint::generation`].
+    /// Navigation control is the `generation`: the waypoint is the goal and
+    /// lives on the ship as one per-entity component that both consoles read;
+    /// `process_coordination_lag` latches only the generation, never a wire
+    /// position, so the `AiMemory.nav_goal` split brain this replaced cannot
+    /// return. `x` / `z` ride alongside for DISPLAY only (issue #977): the
+    /// chatter popup renders "steer toward waypoint (x, z)" from them, replacing
+    /// the English `label` Rust used to compose. No navigation logic reads them.
+    /// See [`NavigationWaypoint::generation`].
     ///
     /// [`NavigationWaypoint::generation`]: crate::navigation_plugin::NavigationWaypoint::generation
-    NavigateTo { generation: u64, label: String },
+    NavigateTo { generation: u64, x: f32, z: f32 },
     /// A system has crossed to a worse damage tier and needs repair (issue #682).
     ///
     /// `deficit` is the exact HP shortfall and is therefore gated by the #737
@@ -2283,8 +2286,10 @@ pub struct ViewscreenHudState {
     /// struct is change-detected — see `recompute_hud_state`.
     #[serde(default)]
     pub phaser_firing: bool,
-    /// Set when the game has ended. "Ship Destroyed" for hull death; the
-    /// scenario `game_over` message otherwise. `None` while in progress.
+    /// Set when the game has ended, as a `strings.csv` id (issue #977):
+    /// `server.game_over.ship_destroyed` for hull death, or the scenario
+    /// `game_over` message id otherwise. The HUD channel resolves it through
+    /// `localiseTree` client-side. `None` while in progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_over_message: Option<String>,
 }
@@ -3074,7 +3079,9 @@ fn default_shield_frequency() -> f32 {
 pub struct PowerGroupEntry {
     /// Power group identifier — the `PowerGroupId` string (e.g. `"helm"`).
     pub id: String,
-    /// Display label shown in the HTML panel (e.g. `"HELM"`, `"WEAPONS"`).
+    /// `strings.csv` id for the display label shown in the HTML panel (e.g.
+    /// `"power.group.helm"`); `localiseTree` resolves it to "HELM" client-side
+    /// (issue #977).
     pub label: String,
     /// Current EFFECTIVE power level (1 – `max_level`) — what the group is
     /// actually running at, which is `commanded_level` unless the reactor's

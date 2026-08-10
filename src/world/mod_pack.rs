@@ -37,7 +37,9 @@ use std::collections::BTreeMap;
 use crate::entity_includes::FragmentSource;
 use crate::entity_loader::TemplateLoader;
 use crate::world::config::parse_world;
-use crate::world::manifest::{parse_manifest, validate_manifest};
+use crate::world::manifest::{
+    parse_pack_manifest, validate_manifest, ContentIdentity, SUPPORTED_PACK_FORMAT,
+};
 use crate::world::validate::{
     has_error, validate_composition_with_fragments, Severity, SourceLocation, WorldFinding,
     WorldSource,
@@ -309,6 +311,21 @@ impl<F: Fn(&str) -> Option<String>> TemplateLoader for PackTemplates<'_, F> {
 
 /// Validate an uploaded mod-pack ZIP atomically (issue #760, AC1).
 ///
+/// `base_content` is the host's declared content identity (the `[content]` block
+/// of the base `assets/scenarios.toml`), against which the pack's
+/// `[pack.requires]` clause is checked. It is injected rather than read from a
+/// host default here — the same seam discipline as `resolve_base` — so this
+/// module keeps no host dependency of its own (issue #986).
+///
+/// The pack's `[pack]` identity header is judged BEFORE any content validation:
+/// a missing header (`missing-pack-header`) or a `format` above
+/// [`SUPPORTED_PACK_FORMAT`] (`unsupported-pack-format`) rejects the pack
+/// immediately, so a future-format pack can never bury its one real
+/// incompatibility under a wall of content findings. An empty `id`
+/// (`invalid-pack-id`) and a content-identity mismatch (`pack-content-mismatch`)
+/// are also reported; validation is atomic, so any of these blocks the whole
+/// pack.
+///
 /// `zip_bytes` is the raw uploaded archive. `resolve_base` resolves an authored
 /// path against BASE content (returning `None` when the host has not fetched
 /// it) — worlds for the manifest, and raw entity/fragment TOML for include
@@ -340,6 +357,7 @@ impl<F: Fn(&str) -> Option<String>> TemplateLoader for PackTemplates<'_, F> {
 /// when [`ValidatedModPack::is_accepted`] holds.
 pub fn validate_mod_pack(
     zip_bytes: &[u8],
+    base_content: &ContentIdentity,
     resolve_base: impl Fn(&str) -> Option<String>,
     template_loader: &dyn TemplateLoader,
 ) -> ValidatedModPack {
@@ -361,19 +379,9 @@ pub fn validate_mod_pack(
 
     let mut findings = Vec::new();
 
-    // 2. Path whitelist — any file outside the supported authored paths (or a
-    //    traversal attempt) rejects the whole pack.
-    for path in files.keys() {
-        if !is_allowed_content_path(path) {
-            findings.push(archive_error(
-                "disallowed-path",
-                path,
-                format!("mod pack path {path:?} is not a supported authored TOML path"),
-            ));
-        }
-    }
-
-    // 3. Require the manifest.
+    // 2. Require the manifest FIRST — the pack identity header is read from it,
+    //    and the header gate (step 3) runs before any content or path check so
+    //    an unsupported future format is not buried under those.
     let Some(manifest_toml) = files.get(MANIFEST_PATH).cloned() else {
         findings.push(archive_error(
             "missing-manifest",
@@ -386,23 +394,9 @@ pub fn validate_mod_pack(
         };
     };
 
-    // 4. Parse every non-manifest TOML (worlds are re-parsed by the validators
-    //    below; this catches unparseable entity/faction/model files too).
-    for (path, text) in &files {
-        if path == MANIFEST_PATH {
-            continue;
-        }
-        if let Err(e) = toml::from_str::<toml::Value>(text) {
-            findings.push(archive_error(
-                "unparseable-content",
-                path,
-                format!("mod pack file {path:?} is not valid TOML: {e}"),
-            ));
-        }
-    }
-
-    // 5. Parse + validate the manifest, resolving worlds against pack THEN base.
-    let manifest = match parse_manifest(&manifest_toml) {
+    // 3. Parse the manifest ([pack] header + [[scenario]] entries) and gate on
+    //    the pack identity BEFORE any content or path validation (issue #986).
+    let pack_manifest = match parse_pack_manifest(&manifest_toml) {
         Ok(m) => m,
         Err(e) => {
             findings.push(archive_error(
@@ -417,6 +411,90 @@ pub fn validate_mod_pack(
         }
     };
 
+    // 3a. A missing header or unsupported format rejects immediately — nothing
+    //     further is worth checking, and a wall of content errors against a
+    //     format this host cannot read correctly would only mislead.
+    let Some(pack) = pack_manifest.pack.as_ref() else {
+        findings.push(archive_error(
+            "missing-pack-header",
+            MANIFEST_PATH,
+            format!("mod pack {MANIFEST_PATH} has no required [pack] identity table"),
+        ));
+        return ValidatedModPack {
+            findings,
+            ..Default::default()
+        };
+    };
+    if pack.format > SUPPORTED_PACK_FORMAT {
+        findings.push(archive_error(
+            "unsupported-pack-format",
+            MANIFEST_PATH,
+            format!(
+                "mod pack declares [pack] format {} but this host supports at most {SUPPORTED_PACK_FORMAT}",
+                pack.format
+            ),
+        ));
+        return ValidatedModPack {
+            findings,
+            ..Default::default()
+        };
+    }
+
+    // 3b. Identity + compatibility findings that still let content validation
+    //     run (atomic acceptance blocks the pack regardless): an empty id, and a
+    //     content-identity mismatch against the injected base.
+    if pack.id.trim().is_empty() {
+        findings.push(archive_error(
+            "invalid-pack-id",
+            MANIFEST_PATH,
+            "mod pack [pack] id is empty or whitespace".to_string(),
+        ));
+    }
+    if pack.requires.content_id.as_deref() != Some(base_content.id.as_str())
+        || pack.requires.content_epoch != Some(base_content.epoch)
+    {
+        findings.push(archive_error(
+            "pack-content-mismatch",
+            MANIFEST_PATH,
+            format!(
+                "mod pack requires content id {:?} epoch {:?}, but this host provides id {:?} epoch {}",
+                pack.requires.content_id,
+                pack.requires.content_epoch,
+                base_content.id,
+                base_content.epoch,
+            ),
+        ));
+    }
+
+    // 4. Path whitelist — any file outside the supported authored paths (or a
+    //    traversal attempt) rejects the whole pack.
+    for path in files.keys() {
+        if !is_allowed_content_path(path) {
+            findings.push(archive_error(
+                "disallowed-path",
+                path,
+                format!("mod pack path {path:?} is not a supported authored TOML path"),
+            ));
+        }
+    }
+
+    // 5. Parse every non-manifest TOML (worlds are re-parsed by the validators
+    //    below; this catches unparseable entity/faction/model files too).
+    for (path, text) in &files {
+        if path == MANIFEST_PATH {
+            continue;
+        }
+        if let Err(e) = toml::from_str::<toml::Value>(text) {
+            findings.push(archive_error(
+                "unparseable-content",
+                path,
+                format!("mod pack file {path:?} is not valid TOML: {e}"),
+            ));
+        }
+    }
+
+    // 6. Validate the manifest, resolving worlds against pack THEN base.
+    let manifest = pack_manifest.manifest;
     let resolve = |path: &str| files.get(path).cloned().or_else(|| resolve_base(path));
     // Bind a shared reference so the same resolver serves both the manifest
     // validation here and the per-world composition checks below (`&F: Fn` is
@@ -437,7 +515,7 @@ pub fn validate_mod_pack(
         host: template_loader,
     };
 
-    // 6. Composition references for every manifest-listed root world that
+    // 7. Composition references for every manifest-listed root world that
     //    resolves + parses (unresolved / unparseable worlds are already
     //    reported by validate_manifest above).
     for entry in &manifest.scenarios {
@@ -477,7 +555,7 @@ pub fn validate_mod_pack(
         ));
     }
 
-    // 7. On success, hand back the supported authored files (excluding the
+    // 8. On success, hand back the supported authored files (excluding the
     //    manifest itself) for the session overlay.
     let overlay_files: BTreeMap<String, String> = files
         .iter()
@@ -571,8 +649,34 @@ mod tests {
         format!("[global]\ntitle = \"{title}\"\n")
     }
 
+    /// The base content identity the test packs declare `[pack.requires]`
+    /// against, mirrored by [`base_identity`] below.
+    const TEST_CONTENT_ID: &str = "phoenix-base";
+    const TEST_CONTENT_EPOCH: i64 = 1;
+
+    fn base_identity() -> ContentIdentity {
+        ContentIdentity {
+            id: TEST_CONTENT_ID.to_string(),
+            epoch: TEST_CONTENT_EPOCH,
+        }
+    }
+
+    /// A manifest carrying a well-formed `[pack]` header (matching
+    /// [`base_identity`]) plus one `[[scenario]]` — the shape every pack now
+    /// requires (issue #986). The identity-rejection tests below author their
+    /// own headers instead.
     fn manifest_for(id: &str, world: &str) -> String {
-        format!("[[scenario]]\nid = \"{id}\"\nworld = \"{world}\"\n")
+        format!(
+            "[pack]\n\
+             format = 1\n\
+             id = \"test-pack\"\n\
+             version = \"1.0.0\"\n\
+             name = \"Test Pack\"\n\n\
+             [pack.requires]\n\
+             content_id = \"{TEST_CONTENT_ID}\"\n\
+             content_epoch = {TEST_CONTENT_EPOCH}\n\n\
+             [[scenario]]\nid = \"{id}\"\nworld = \"{world}\"\n"
+        )
     }
 
     fn no_base(_: &str) -> Option<String> {
@@ -679,7 +783,7 @@ mod tests {
             ),
             ("assets/worlds/modx.toml", &simple_world("world.modx.title")),
         ]);
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(
             result.is_accepted(),
             "unexpected findings: {:?}",
@@ -701,7 +805,7 @@ mod tests {
         // nothing (AC1).
         let mut zip = create_store_zip(&[("scenarios.toml", "manifest")]);
         zip.truncate(20); // cut off inside the first local header
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result.files.is_empty());
         assert_eq!(result.findings[0].category, "invalid-archive");
@@ -712,7 +816,8 @@ mod tests {
         // Bytes with no local-file-header signature parse as an empty archive,
         // so the required manifest is absent — still an atomic rejection with
         // nothing applied.
-        let result = validate_mod_pack(b"not a zip at all", no_base, &NoTemplates);
+        let result =
+            validate_mod_pack(b"not a zip at all", &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result.files.is_empty());
         assert!(result
@@ -724,7 +829,7 @@ mod tests {
     #[test]
     fn missing_manifest_rejects_whole_pack() {
         let zip = create_store_zip(&[("assets/worlds/x.toml", &simple_world("t"))]);
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -740,7 +845,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/secret/keys.toml", "danger = true"),
         ]);
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -755,7 +860,7 @@ mod tests {
             "scenarios.toml",
             &manifest_for("ghost", "assets/worlds/ghost.toml"),
         )]);
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -770,7 +875,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/entities/broken.toml", "not valid ["),
         ]);
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -801,7 +906,7 @@ entity = "raider"
             ),
             ("assets/worlds/bad.toml", bad_world),
         ]);
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -824,7 +929,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
@@ -881,7 +986,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates);
         assert!(
             result.is_accepted(),
             "a pack's hull must compose against the fragment the pack itself \
@@ -908,7 +1013,7 @@ entity = "raider"
                 "includes = [\"pack_core.toml\"]\nname = \"Pack Hull\"\n",
             ),
         ]);
-        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
         assert!(!result.is_accepted(), "findings: {:?}", result.findings);
         assert!(
             result
@@ -946,7 +1051,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, base, &NoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
@@ -991,7 +1096,7 @@ entity = "raider"
             ),
             ("assets/entities/pack_hull.toml", "name = \"Pack Hull\"\n"),
         ]);
-        let result = validate_mod_pack(&zip, no_base, &AuthoritativeNoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &AuthoritativeNoTemplates);
         assert!(
             result.is_accepted(),
             "a hull the pack itself carries must not read as absent: {:?}",
@@ -1014,7 +1119,7 @@ entity = "raider"
                 &world_spawning("assets/entities/absent_hull.toml", "pack_one"),
             ),
         ]);
-        let result = validate_mod_pack(&zip, no_base, &AuthoritativeNoTemplates);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &AuthoritativeNoTemplates);
         assert!(!result.is_accepted(), "findings: {:?}", result.findings);
         assert!(
             result
@@ -1024,5 +1129,153 @@ entity = "raider"
             "expected an unresolvable-template finding: {:?}",
             result.findings
         );
+    }
+
+    // ── Pack identity + compatibility gate (issue #986) ──────────────────────
+
+    fn has_category(result: &ValidatedModPack, category: &str) -> bool {
+        result.findings.iter().any(|f| f.category == category)
+    }
+
+    /// A pack whose manifest carries no `[pack]` table is rejected.
+    #[test]
+    fn missing_pack_header_rejects_whole_pack() {
+        // The bare pre-#986 manifest shape — no [pack] table.
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                "[[scenario]]\nid = \"m\"\nworld = \"assets/worlds/m.toml\"\n",
+            ),
+            ("assets/worlds/m.toml", &simple_world("world.m.title")),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "missing-pack-header"));
+        assert!(result.files.is_empty());
+    }
+
+    /// A `format` above the host's supported max is rejected BEFORE any content
+    /// validation runs — the manifest here references a world that is NOT in the
+    /// pack, which would be a `missing-scenario-world` if content validation ran,
+    /// but the format gate short-circuits so only that one finding appears.
+    #[test]
+    fn unsupported_pack_format_rejects_before_content_validation() {
+        let manifest = format!(
+            "[pack]\nformat = {}\nid = \"future\"\nversion = \"9.0.0\"\nname = \"Future Pack\"\n\n\
+             [pack.requires]\ncontent_id = \"{TEST_CONTENT_ID}\"\ncontent_epoch = {TEST_CONTENT_EPOCH}\n\n\
+             [[scenario]]\nid = \"ghost\"\nworld = \"assets/worlds/ghost.toml\"\n",
+            SUPPORTED_PACK_FORMAT + 1,
+        );
+        let zip = create_store_zip(&[("scenarios.toml", &manifest)]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "unsupported-pack-format"));
+        // No wall of content errors: the missing world is never reached.
+        assert!(
+            !has_category(&result, "missing-scenario-world"),
+            "content validation must not run for an unsupported format: {:?}",
+            result.findings,
+        );
+        assert_eq!(
+            result.findings.len(),
+            1,
+            "only the format finding: {:?}",
+            result.findings
+        );
+    }
+
+    /// An empty / whitespace `[pack] id` is rejected.
+    #[test]
+    fn invalid_pack_id_rejects_whole_pack() {
+        let manifest = format!(
+            "[pack]\nformat = 1\nid = \"   \"\nversion = \"1.0.0\"\nname = \"Nameless\"\n\n\
+             [pack.requires]\ncontent_id = \"{TEST_CONTENT_ID}\"\ncontent_epoch = {TEST_CONTENT_EPOCH}\n\n\
+             [[scenario]]\nid = \"s\"\nworld = \"assets/worlds/s.toml\"\n",
+        );
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest),
+            ("assets/worlds/s.toml", &simple_world("world.s.title")),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "invalid-pack-id"));
+    }
+
+    /// A `requires.content_id` that does not match the injected base content is
+    /// a `pack-content-mismatch`.
+    #[test]
+    fn pack_content_id_mismatch_rejects_whole_pack() {
+        let manifest = "[pack]\nformat = 1\nid = \"x\"\nversion = \"1.0.0\"\nname = \"X\"\n\n\
+             [pack.requires]\ncontent_id = \"some-other-content\"\ncontent_epoch = 1\n\n\
+             [[scenario]]\nid = \"s\"\nworld = \"assets/worlds/s.toml\"\n";
+        let zip = create_store_zip(&[
+            ("scenarios.toml", manifest),
+            ("assets/worlds/s.toml", &simple_world("world.s.title")),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "pack-content-mismatch"));
+    }
+
+    /// A `requires.content_epoch` that does not match the injected base content
+    /// is a `pack-content-mismatch`, even when the id matches.
+    #[test]
+    fn pack_content_epoch_mismatch_rejects_whole_pack() {
+        let manifest = format!(
+            "[pack]\nformat = 1\nid = \"x\"\nversion = \"1.0.0\"\nname = \"X\"\n\n\
+             [pack.requires]\ncontent_id = \"{TEST_CONTENT_ID}\"\ncontent_epoch = {}\n\n\
+             [[scenario]]\nid = \"s\"\nworld = \"assets/worlds/s.toml\"\n",
+            TEST_CONTENT_EPOCH + 1,
+        );
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest),
+            ("assets/worlds/s.toml", &simple_world("world.s.title")),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "pack-content-mismatch"));
+    }
+
+    // ── Committed fixtures, validated through the real archive bytes ─────────
+    //
+    // The SAME .zip bytes are read on the JS side through `readStoreZip`
+    // (editor/tests/mod-pack-export.test.js), so the two languages are proven to
+    // agree on one archive. Regenerate the fixtures with
+    // `node scripts/build-mod-pack-fixtures.mjs` (gated by `--check`).
+
+    /// The base identity the committed fixtures declare `[pack.requires]`
+    /// against — kept in step with scripts/build-mod-pack-fixtures.mjs.
+    fn fixture_base_identity() -> ContentIdentity {
+        ContentIdentity {
+            id: "phoenix-base".to_string(),
+            epoch: 1,
+        }
+    }
+
+    #[test]
+    fn fixture_valid_v1_is_accepted() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/valid-v1.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates);
+        assert!(
+            result.is_accepted(),
+            "valid-v1.zip must be accepted: {:?}",
+            result.findings
+        );
+    }
+
+    #[test]
+    fn fixture_format_too_new_is_rejected() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/format-too-new.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "unsupported-pack-format"));
+    }
+
+    #[test]
+    fn fixture_content_epoch_mismatch_is_rejected() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/content-epoch-mismatch.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "pack-content-mismatch"));
     }
 }

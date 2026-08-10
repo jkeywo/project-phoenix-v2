@@ -1,0 +1,19 @@
+# Committed mod-pack fixture (issue #986): a pack whose [pack] format is above
+# the host's supported max (SUPPORTED_PACK_FORMAT = 1). The host rejects it with
+# `unsupported-pack-format` BEFORE any content validation runs.
+#
+# Regenerate with `node scripts/build-mod-pack-fixtures.mjs` (gated by `--check`).
+
+[pack]
+format = 2
+id = "aurora-skirmish-future"
+version = "2.0.0"
+name = "Aurora Skirmish (Future)"
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "aurora_skirmish"
+world = "assets/worlds/aurora_skirmish.toml"

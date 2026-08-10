@@ -1,0 +1,19 @@
+# Committed mod-pack fixture (issue #986): a v1 pack authored against a
+# different content epoch than the host provides. The host rejects it with
+# `pack-content-mismatch` (requires.content_epoch = 2, base epoch = 1).
+#
+# Regenerate with `node scripts/build-mod-pack-fixtures.mjs` (gated by `--check`).
+
+[pack]
+format = 1
+id = "aurora-skirmish"
+version = "1.0.0"
+name = "Aurora Skirmish"
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 2
+
+[[scenario]]
+id = "aurora_skirmish"
+world = "assets/worlds/aurora_skirmish.toml"

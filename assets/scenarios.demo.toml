@@ -17,6 +17,14 @@
 # read. A single curated ship also makes the lobby ship picker resolve
 # straight to it (gui/ship-picker.js / the pre-load arbiter auto-select),
 # without a hull-specific code branch anywhere.
+#
+# `[content]` (issue #986) mirrors the base manifest's content identity: the
+# demo curates the same shipped assets, so a mod pack compatible with the base
+# is compatible here too. Keep this in step with `assets/scenarios.toml`.
+
+[content]
+id = "phoenix-base"
+epoch = 1
 
 [[scenario]]
 id = "combat_test"

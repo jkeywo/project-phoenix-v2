@@ -1638,8 +1638,18 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_validate_mod_pack(bytes: &[u8]) -> Array {
+    // The host side of the mod-pack compatibility contract (issue #986): read
+    // the base manifest's `[content]` identity and INJECT it, rather than let
+    // the pure validator reach for a host default — the same seam discipline as
+    // `resolve_base` below. A host whose manifest declares no `[content]` block
+    // yields an identity no real pack can match (empty id, epoch 0), so an
+    // upload is rejected rather than silently accepted against unknown content.
+    let base_content = crate::config_cache::get_scenario_manifest_toml()
+        .and_then(|toml| crate::world::manifest::parse_content_identity(&toml))
+        .unwrap_or_default();
     let result = crate::world::mod_pack::validate_mod_pack(
         bytes,
+        &base_content,
         |path| {
             // Base content the host has already fetched, by authored path:
             // world TOML for the manifest, and raw entity/fragment TOML so a
@@ -1715,6 +1725,39 @@ pub fn wasm_validate_mod_pack(bytes: &[u8]) -> Array {
 #[wasm_bindgen]
 pub fn wasm_clear_mod_pack() {
     crate::config_cache::clear_mod_pack_overlay();
+}
+
+/// The accepted mod pack's `[pack]` identity, for the host status line (issue
+/// #986). Returns `{ name, version }` for the currently-installed overlay, or
+/// `null` when no valid pack is active (or the installed manifest carries no
+/// `[pack]` header). Read by `server.html` after a successful upload so the
+/// status shows the pack's name and version rather than a bare "applied".
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_mod_pack_meta() -> JsValue {
+    let Some(toml) = crate::config_cache::get_mod_manifest_toml() else {
+        return JsValue::NULL;
+    };
+    let Ok(parsed) = crate::world::manifest::parse_pack_manifest(&toml) else {
+        return JsValue::NULL;
+    };
+    let Some(pack) = parsed.pack else {
+        return JsValue::NULL;
+    };
+    let obj = Object::new();
+    Reflect::set(
+        &obj,
+        &JsValue::from_str("name"),
+        &JsValue::from_str(&pack.name),
+    )
+    .ok();
+    Reflect::set(
+        &obj,
+        &JsValue::from_str("version"),
+        &JsValue::from_str(&pack.version),
+    )
+    .ok();
+    obj.into()
 }
 
 /// Return the authoritative pre-load scenario/ship catalog.

@@ -251,6 +251,16 @@ jobs:
       - name: Check generated LODs are current
         run: npm run lods:check
 
+      # Guards the committed mod-pack fixture archives against silent drift
+      # (issue #986): re-derives each store-only .zip from its source dir in
+      # memory and byte-compares to the committed archive, the same way
+      # lods:check works. The fixtures are consumed byte-for-byte by both the
+      # Rust validate_mod_pack tests and the JS readStoreZip tests, so a stale
+      # zip would let the two languages silently diverge. Regenerating stays a
+      # local command (`node scripts/build-mod-pack-fixtures.mjs`).
+      - name: Check mod-pack fixtures are current
+        run: node scripts/build-mod-pack-fixtures.mjs --check
+
   # ── Smoke tests ───────────────────────────────────────────────────────────────
   smoke:
     needs: build

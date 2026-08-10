@@ -239,19 +239,82 @@ export function readStoreZip(bytes) {
 
 // ── Manifest ──────────────────────────────────────────────────────────────────
 
+/** The `[pack]` manifest format this exporter emits (issue #986). Mirrors
+ * `SUPPORTED_PACK_FORMAT` in `src/world/manifest.rs`: a versioning constant, not
+ * a gameplay value. */
+export const PACK_FORMAT = 1;
+
 /**
- * Serialise `[[scenario]]` manifest entries to TOML. Emits `id`, `world`, and
- * an optional `label`, matching the schema `parse_manifest` reads
- * (`src/world/manifest.rs`).
+ * Normalise the caller-supplied `pack` metadata into the `[pack]` table shape
+ * `parse_pack_manifest` reads (`src/world/manifest.rs`). `format` defaults to
+ * {@link PACK_FORMAT}; `author`/`description` are emitted only when present;
+ * `requires` always carries `content_id` + `content_epoch`.
  */
-export function buildManifestToml(scenarios) {
+export function buildPackTable(pack) {
+  const p = {
+    format: Number.isInteger(pack?.format) ? pack.format : PACK_FORMAT,
+    id: String(pack?.id ?? ''),
+    version: String(pack?.version ?? ''),
+    name: String(pack?.name ?? ''),
+  };
+  if (typeof pack?.author === 'string' && pack.author.length > 0) p.author = pack.author;
+  if (typeof pack?.description === 'string' && pack.description.length > 0) {
+    p.description = pack.description;
+  }
+  const req = pack?.requires ?? {};
+  p.requires = {
+    content_id: String(req.content_id ?? ''),
+    content_epoch: Number(req.content_epoch ?? 0),
+  };
+  return p;
+}
+
+/**
+ * Serialise a mod-pack manifest to TOML. When `pack` metadata is supplied the
+ * `[pack]` identity table (issue #986) is emitted ABOVE the `[[scenario]]`
+ * entries; each scenario emits `id`, `world`, and an optional `label`, matching
+ * the schema `parse_pack_manifest`/`parse_manifest` read (`src/world/manifest.rs`).
+ */
+export function buildManifestToml(scenarios, pack) {
   const scenario = [];
   for (const s of scenarios || []) {
     const entry = { id: String(s.id ?? ''), world: String(s.world ?? '') };
     if (typeof s.label === 'string' && s.label.length > 0) entry.label = s.label;
     scenario.push(entry);
   }
-  return tomlStringify({ scenario });
+  // Object key order is the emit order: `[pack]` (and its nested
+  // `[pack.requires]`) precede `[[scenario]]`.
+  const doc = pack ? { pack: buildPackTable(pack), scenario } : { scenario };
+  return tomlStringify(doc);
+}
+
+/**
+ * The findings that block export of a pack with missing/invalid `[pack]`
+ * metadata (issue #986). Returned as message strings so `exportModPack` can
+ * fold them into its error list. A pack MUST declare an id, version, name, and a
+ * `requires` clause naming the content id + epoch it was authored against.
+ */
+export function validatePackMeta(pack) {
+  const errors = [];
+  if (!pack || typeof pack !== 'object') {
+    errors.push('a mod pack requires [pack] metadata (id, version, name, requires) — none was provided');
+    return errors;
+  }
+  if (String(pack.id ?? '').trim() === '') errors.push('[pack] id is required and must not be empty');
+  if (String(pack.version ?? '').trim() === '') errors.push('[pack] version is required');
+  if (String(pack.name ?? '').trim() === '') errors.push('[pack] name is required');
+  const req = pack.requires;
+  if (!req || typeof req !== 'object') {
+    errors.push('[pack.requires] is required — name the content_id + content_epoch the pack targets');
+  } else {
+    if (String(req.content_id ?? '').trim() === '') {
+      errors.push('[pack.requires] content_id is required');
+    }
+    if (!Number.isInteger(req.content_epoch)) {
+      errors.push('[pack.requires] content_epoch is required and must be an integer');
+    }
+  }
+  return errors;
 }
 
 /**
@@ -374,10 +437,15 @@ function declaresIncludes(parsed) {
  * @param {{
  *   files: Array<{ path: string, parsed: object, text?: string }>,
  *   scenarios: Array<{ id: string, world: string, label?: string }>,
+ *   pack: { format?: number, id: string, version: string, name: string,
+ *           author?: string, description?: string,
+ *           requires: { content_id: string, content_epoch: number } },
  *   rigIndex?: import('./marker-validate.js').RigIndex,
  *   fragmentSource?: Function | {read:Function} | Map | object,
  * }} input
- *   `files` are the selected authored files (parsed TOML plus optional
+ *   `pack` is the required `[pack]` identity metadata (issue #986); an export
+ *   without valid pack metadata is refused. `files` are the selected authored
+ *   files (parsed TOML plus optional
  *   pre-serialised `text`; when absent the parsed object is serialised with
  *   smol-toml). `scenarios` are the manifest's root-world entries. `rigIndex`,
  *   when supplied, drives cross-file marker validation exactly as a save does.
@@ -403,11 +471,17 @@ function declaresIncludes(parsed) {
 export function exportModPack(input) {
   const files = Array.isArray(input?.files) ? input.files : [];
   const scenarios = Array.isArray(input?.scenarios) ? input.scenarios : [];
+  const pack = input?.pack ?? null;
   const rigIndex = input?.rigIndex ?? null;
   const fragmentSource = normaliseFragmentSource(input?.fragmentSource);
 
   const errors = [];
   const warnings = [];
+
+  // 0. Pack identity is required (issue #986): a pack without a valid [pack]
+  //    header cannot be uploaded (the host rejects `missing-pack-header`), so
+  //    the exporter refuses to produce one.
+  for (const e of validatePackMeta(pack)) errors.push(e);
 
   // 1. Path whitelist + serialisation — a file that escapes the supported
   //    authored paths is a definite error, never silently dropped. Validation
@@ -514,8 +588,9 @@ export function exportModPack(input) {
     return { ok: false, errors, warnings };
   }
 
-  // 4. Build the archive: the required manifest plus every validated file.
-  const manifestToml = buildManifestToml(scenarios);
+  // 4. Build the archive: the required manifest (with its [pack] header) plus
+  //    every validated file.
+  const manifestToml = buildManifestToml(scenarios, pack);
   const archiveEntries = [{ path: MANIFEST_PATH, text: manifestToml }, ...zipEntries];
   const zip = createStoreZip(archiveEntries);
 

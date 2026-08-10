@@ -1,17 +1,24 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parse as tomlParse } from 'smol-toml';
 import {
   exportModPack,
   isAllowedContentPath,
   validateManifestEntries,
+  validatePackMeta,
   buildManifestToml,
+  buildPackTable,
   createStoreZip,
   readStoreZip,
   crc32,
+  PACK_FORMAT,
   MANIFEST_PATH,
 } from '../mod-pack-export.js';
 
 // Issue #759 — validated TOML mod-pack export.
+// Issue #986 — required [pack] identity header + content-compatibility gate.
 //
 // The exporter is the export twin of the SaveFlow admission gate (issue #757):
 // definite errors across ALL selected files (and the manifest) block the
@@ -28,6 +35,19 @@ function goodWorld(extra = {}) {
 // A structurally valid entity: non-empty tags + a shape.
 function goodEntity() {
   return { tags: ['ship'], shape: { kind: 'sphere', radius: 1 } };
+}
+
+// Well-formed [pack] identity metadata (issue #986). Every successful export
+// needs it; the identity-rejection tests below vary or omit it.
+function goodPack(extra = {}) {
+  return {
+    format: 1,
+    id: 'test-pack',
+    version: '1.0.0',
+    name: 'Test Pack',
+    requires: { content_id: 'phoenix-base', content_epoch: 1 },
+    ...extra,
+  };
 }
 
 const DEFAULT_WORLD_PATH = 'assets/worlds/default.toml';
@@ -105,6 +125,54 @@ describe('buildManifestToml + validateManifestEntries', () => {
       id: 'combat',
       world: 'assets/worlds/combat.toml',
     });
+    // With no pack argument there is no [pack] header (base-manifest shape).
+    expect(parsed.pack).toBeUndefined();
+  });
+
+  it('#986: emits a [pack] header above [[scenario]] when pack metadata is given', () => {
+    const toml = buildManifestToml(
+      [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      goodPack({ author: 'Someone', description: 'A pack.' }),
+    );
+    // [pack] must precede [[scenario]] textually.
+    expect(toml.indexOf('[pack]')).toBeGreaterThanOrEqual(0);
+    expect(toml.indexOf('[pack]')).toBeLessThan(toml.indexOf('[[scenario]]'));
+
+    const parsed = tomlParse(toml);
+    expect(parsed.pack.format).toBe(1);
+    expect(parsed.pack.id).toBe('test-pack');
+    expect(parsed.pack.version).toBe('1.0.0');
+    expect(parsed.pack.name).toBe('Test Pack');
+    expect(parsed.pack.author).toBe('Someone');
+    expect(parsed.pack.description).toBe('A pack.');
+    expect(parsed.pack.requires).toEqual({ content_id: 'phoenix-base', content_epoch: 1 });
+    expect(parsed.scenario[0].id).toBe('default');
+  });
+
+  it('#986: buildPackTable defaults format and omits absent optional fields', () => {
+    const table = buildPackTable({ id: 'x', version: '1', name: 'X', requires: {} });
+    expect(table.format).toBe(PACK_FORMAT);
+    expect(table).not.toHaveProperty('author');
+    expect(table).not.toHaveProperty('description');
+    expect(table.requires).toEqual({ content_id: '', content_epoch: 0 });
+  });
+
+  it('#986: validatePackMeta requires id, version, name and a requires clause', () => {
+    expect(validatePackMeta(null).length).toBeGreaterThan(0);
+    expect(validatePackMeta(goodPack())).toEqual([]);
+    expect(validatePackMeta(goodPack({ id: '   ' })).some((e) => e.includes('id'))).toBe(true);
+    expect(validatePackMeta(goodPack({ version: '' })).some((e) => e.includes('version'))).toBe(true);
+    expect(validatePackMeta(goodPack({ name: '' })).some((e) => e.includes('name'))).toBe(true);
+    expect(
+      validatePackMeta(goodPack({ requires: { content_id: '', content_epoch: 1 } })).some((e) =>
+        e.includes('content_id'),
+      ),
+    ).toBe(true);
+    expect(
+      validatePackMeta(goodPack({ requires: { content_id: 'phoenix-base' } })).some((e) =>
+        e.includes('content_epoch'),
+      ),
+    ).toBe(true);
   });
 
   it('empty manifest is a blocking finding', () => {
@@ -157,6 +225,7 @@ describe('buildManifestToml + validateManifestEntries', () => {
 describe('exportModPack', () => {
   it('AC1: archive contains only allowed paths plus the required manifest', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [
         { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
         { path: 'assets/entities/cruiser.toml', parsed: goodEntity() },
@@ -171,13 +240,37 @@ describe('exportModPack', () => {
       DEFAULT_WORLD_PATH,
       'scenarios.toml',
     ]);
-    // The manifest is always present and parseable.
+    // The manifest is always present and parseable, with a [pack] header.
     expect(files[MANIFEST_PATH]).toBeDefined();
-    expect(tomlParse(files[MANIFEST_PATH]).scenario[0].id).toBe('default');
+    const manifest = tomlParse(files[MANIFEST_PATH]);
+    expect(manifest.scenario[0].id).toBe('default');
+    expect(manifest.pack.id).toBe('test-pack');
+  });
+
+  it('#986: refuses the export when [pack] metadata is missing', () => {
+    const result = exportModPack({
+      files: [{ path: DEFAULT_WORLD_PATH, parsed: goodWorld() }],
+      scenarios: [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+      // No pack.
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('[pack] metadata'))).toBe(true);
+    expect(result.zip).toBeUndefined();
+  });
+
+  it('#986: refuses the export when [pack] metadata is invalid (empty id)', () => {
+    const result = exportModPack({
+      pack: goodPack({ id: '' }),
+      files: [{ path: DEFAULT_WORLD_PATH, parsed: goodWorld() }],
+      scenarios: [{ id: 'default', world: DEFAULT_WORLD_PATH }],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('id'))).toBe(true);
   });
 
   it('AC1: a disallowed path blocks the export', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [
         { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
         { path: 'assets/scripts/evil.toml', parsed: { global: {}, anchors: {} } },
@@ -191,6 +284,7 @@ describe('exportModPack', () => {
 
   it('AC3: a definite authoring error blocks the export', () => {
     const result = exportModPack({
+      pack: goodPack(),
       // World missing [global] and [anchors] => error findings from validateFile.
       files: [{ path: 'assets/worlds/bad.toml', parsed: { name: 'nope' } }],
       scenarios: [{ id: 'bad', world: 'assets/worlds/bad.toml' }],
@@ -202,6 +296,7 @@ describe('exportModPack', () => {
 
   it('AC3: warnings do NOT block the export and are surfaced', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [
         {
           path: DEFAULT_WORLD_PATH,
@@ -220,6 +315,7 @@ describe('exportModPack', () => {
 
   it('AC2: manifest root-world validated against selected content — missing world blocks', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [{ path: DEFAULT_WORLD_PATH, parsed: goodWorld() }],
       // References a world NOT among the selected files.
       scenarios: [{ id: 'ghost', world: 'assets/worlds/ghost.toml' }],
@@ -232,6 +328,7 @@ describe('exportModPack', () => {
 
   it('AC2: an empty manifest blocks the export', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [{ path: DEFAULT_WORLD_PATH, parsed: goodWorld() }],
       scenarios: [],
     });
@@ -241,6 +338,7 @@ describe('exportModPack', () => {
 
   it('AC5: the produced archive is a parseable store-only ZIP whose manifest re-parses', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [{ path: DEFAULT_WORLD_PATH, parsed: goodWorld() }],
       scenarios: [{ id: 'default', world: DEFAULT_WORLD_PATH, label: 'Default' }],
     });
@@ -256,6 +354,7 @@ describe('exportModPack', () => {
       world: DEFAULT_WORLD_PATH,
       label: 'Default',
     });
+    expect(manifest.pack.name).toBe('Test Pack');
   });
 
   // ── Composable-template dependencies (issue #910) ─────────────────────────
@@ -267,6 +366,7 @@ describe('exportModPack', () => {
 
   it('#910: carries a composed hull\'s fragment into the pack as a dependency', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [
         { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
         // The hull authors ONLY its includes — tags + systems come from the
@@ -294,6 +394,7 @@ describe('exportModPack', () => {
     // exporter validates the resolved document, whose tags come from the
     // fragment.
     const result = exportModPack({
+      pack: goodPack(),
       files: [
         { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
         { path: HULL_PATH, parsed: { includes: ['base.toml'] } },
@@ -307,6 +408,7 @@ describe('exportModPack', () => {
 
   it('#910: a hull whose fragment is missing blocks the export, naming the hull', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [
         { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
         { path: HULL_PATH, parsed: { includes: ['base.toml'] } },
@@ -323,6 +425,7 @@ describe('exportModPack', () => {
 
   it('rejects a caller-supplied scenarios.toml among the selected files', () => {
     const result = exportModPack({
+      pack: goodPack(),
       files: [
         { path: MANIFEST_PATH, parsed: { scenario: [] } },
         { path: DEFAULT_WORLD_PATH, parsed: goodWorld() },
@@ -331,5 +434,47 @@ describe('exportModPack', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes('generated by the exporter'))).toBe(true);
+  });
+});
+
+// ── Committed fixtures: the SAME bytes Rust validates (issue #986) ───────────
+//
+// scripts/build-mod-pack-fixtures.mjs writes these deterministically; the Rust
+// side include_bytes!s them through `validate_mod_pack`. Reading them here
+// through `readStoreZip` proves both languages agree on one archive.
+
+const FIXTURE_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../tests/fixtures/mod-packs',
+);
+
+function readFixtureManifest(name) {
+  const bytes = new Uint8Array(readFileSync(path.join(FIXTURE_DIR, name)));
+  const files = readStoreZip(bytes);
+  expect(files[MANIFEST_PATH]).toBeDefined();
+  return tomlParse(files[MANIFEST_PATH]);
+}
+
+describe('committed mod-pack fixtures round-trip through readStoreZip', () => {
+  it('valid-v1.zip carries a well-formed [pack] header', () => {
+    const manifest = readFixtureManifest('valid-v1.zip');
+    expect(manifest.pack.format).toBe(1);
+    expect(manifest.pack.id).toBe('aurora-skirmish');
+    expect(manifest.pack.version).toBe('1.0.0');
+    expect(manifest.pack.name).toBe('Aurora Skirmish');
+    expect(manifest.pack.requires).toEqual({ content_id: 'phoenix-base', content_epoch: 1 });
+    expect(manifest.scenario[0].world).toBe('assets/worlds/aurora_skirmish.toml');
+  });
+
+  it('format-too-new.zip declares a format above the supported max', () => {
+    const manifest = readFixtureManifest('format-too-new.zip');
+    expect(manifest.pack.format).toBe(2);
+    expect(manifest.pack.format).toBeGreaterThan(PACK_FORMAT);
+  });
+
+  it('content-epoch-mismatch.zip requires a mismatched content epoch', () => {
+    const manifest = readFixtureManifest('content-epoch-mismatch.zip');
+    expect(manifest.pack.format).toBe(1);
+    expect(manifest.pack.requires.content_epoch).toBe(2);
   });
 });

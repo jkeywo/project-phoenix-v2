@@ -14,6 +14,15 @@
 #
 # This schema is shared with mod-pack scenario manifests (issues #759/#760):
 # `[[scenario]]` entries with an `id`, a `world` path, and an optional `label`.
+#
+# `[content]` (issue #986) declares the host side of the mod-pack compatibility
+# contract: the identity + revision an uploaded pack's `[pack.requires]` must
+# match to be accepted. Bump `epoch` when shipped content changes in a way that
+# would invalidate packs authored against the previous revision.
+
+[content]
+id = "phoenix-base"
+epoch = 1
 
 [[scenario]]
 id = "default"

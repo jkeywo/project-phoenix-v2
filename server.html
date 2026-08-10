@@ -2534,7 +2534,20 @@
           refreshMergedCatalog();
           return;
         }
-        setStatus('server.mod_pack_applied');
+        // Show the accepted pack's name + version when the bridge can report
+        // them (issue #986); fall back to the bare "applied" status otherwise.
+        let named = false;
+        try {
+          const meta = wasmBindings.wasm_get_mod_pack_meta();
+          if (meta && meta.name && status) {
+            status.textContent = t('server.mod_pack_applied_named', {
+              name: meta.name,
+              version: meta.version || '',
+            });
+            named = true;
+          }
+        } catch (_) {}
+        if (!named) setStatus('server.mod_pack_applied');
         refreshMergedCatalog();
       });
     })();

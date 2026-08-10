@@ -1,0 +1,21 @@
+# Committed mod-pack fixture (issue #986): a well-formed v1 pack.
+#
+# Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
+# (byte-reproducible; gated by `--check`). The SAME .zip bytes are validated
+# from both Rust (src/world/mod_pack.rs) and JS (editor/tests/mod-pack-export.test.js).
+
+[pack]
+format = 1
+id = "aurora-skirmish"
+version = "1.0.0"
+name = "Aurora Skirmish"
+author = "Fixture Author"
+description = "A deterministic fixture pack for issue #986."
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "aurora_skirmish"
+world = "assets/worlds/aurora_skirmish.toml"

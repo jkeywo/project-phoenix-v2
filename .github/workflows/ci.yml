@@ -669,8 +669,15 @@ jobs:
           name: dist
           path: dist/
 
+      # `cname` writes a CNAME file into the published branch on every deploy.
+      # Without it, peaceiris/actions-gh-pages replaces the whole gh-pages
+      # branch with dist/ (which has no CNAME), so GitHub Pages drops the
+      # custom domain and the site reverts to *.github.io until it's re-set by
+      # hand. Keeping the domain here makes the deploy self-describing and
+      # idempotent.
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
+          cname: pp-dev.kiwigamedesign.co.uk

@@ -592,6 +592,7 @@ mod tests {
                     shields: 4,
                     battery_charge: 65.5,
                     draining: true,
+                    locked: false,
                 },
             ),
             (

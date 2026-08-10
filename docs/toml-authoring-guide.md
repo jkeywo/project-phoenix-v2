@@ -615,118 +615,34 @@ chart pushed to the viewscreen.
 |---|---|---|---|
 | `capacity` | f32 | **required** | Total battery capacity. |
 | `rates` | `[f32; 6]` | **required** | Per-level drain/regen rates (level 0..5). Negative = recharge. |
-| `emergency_threshold` | f32 | **required** | Emergency reserve marker, in the same ABSOLUTE units as `capacity`. Published on `PowerBatteryBlackboard` so the battery gauge can paint the reserve band; since issue #952 removed the brownout lock it gates nothing in the simulation. |
-| `battery_floor_release_margin` | f32 | `5.0` | Hysteresis band for the ladder below, in the same PERCENTAGE-of-`capacity` units as the floors. A floored group is released only once the charge climbs to its own floor **plus** this. Must be positive wherever a floor can bite — `0` fails the entity load; see below. |
+| `emergency_threshold` | f32 | **required** | Recovery threshold, in the same ABSOLUTE units as `capacity`. A reactor locked out by a flat battery stays locked until the charge climbs back to this level. Also published on `PowerBatteryBlackboard` so the gauge can paint the reserve band. |
 
-#### `[power.battery_floor]` — the brownout ladder (issue #952)
+##### The exhaustion lock
 
-`<group> = <percent-of-capacity>`. While the battery sits below a group's
-percentage, that group is held at its own `[power_groups.<group>] min_level`;
-it is released once the charge climbs back past that percentage **plus**
-`battery_floor_release_margin` **and** no rung above it is still engaged. A
-group with no entry is never cut, and a group whose hull declares no
-`[power_groups.*]` at all lands on `2` — the level the runtime seeds it at,
-i.e. nominal.
+There are no per-group battery floors. When the battery is drained to **empty**,
+the reactor browns out completely: every group is forced to level 1 and the
+allocation controls freeze (both increase and decrease no-op) until the charge
+recovers past `emergency_threshold`. A player who mismanages power loses the lot
+— that is the intended consequence, not a bug.
 
-The landing level is the other half of the decision and it lives with the
-group, not here. A brownout is meant to take back what was SPENT: the four
-Alliance hulls author `min_level = 2` on `helm` and `weapons` so the reactor
-reclaims the combat-stations point and stops at nominal, and `min_level = 1`
-on `shields`, which rests there anyway — so on those hulls the shields rung is
-only reachable by a human Power officer who has bought it.
+(The per-group `[power.battery_floor]` ladder issue #952 briefly introduced —
+which held each group at an authored floor rather than locking — was reverted.
+`[power.battery_floor]` and `battery_floor_release_margin` are no longer valid
+fields and will fail the entity load if authored.)
 
-Note the units differ from `emergency_threshold` above: these are PERCENTAGES,
-because "half the reserve gone" means the same thing on every hull and a raw
-charge does not. Values outside `0..=100` fail the entity load, and so does a
-ladder that does not DESCEND helm → weapons → shields.
-
-The parse default is `helm = 50`, `weapons = 25`, `shields = 5`, so a falling
-battery costs the ship its helm first, then its guns, and keeps its screens
-longest. There is no lock: a ship that bottoms out sits at its floors and is
-still flying. The shipped fleet authors `weapons = 25` and `shields = 5` but
-`helm = 40` — see the tuning note below.
-
-##### The ladder releases from the top
-
-Falling and recovering are not mirror images, and the asymmetry is deliberate.
-Falling, the rungs are cut one at a time in descending order. Recovering, a cut
-rung waits for **every rung above it** as well as for its own release band, so
-the whole ladder comes back together and the LOWEST-floor group is the last one
-released, not the first.
-
-The reason is arithmetic, not taste. The cut that finally flips the `rates` rung
-positive is the lowest engaged one — that is what it means for the reserve to
-start climbing at all. Release it the moment it clears its own band and the draw
-goes straight back up, so the charge stalls in a limit cycle a few points wide
-and every higher rung's release threshold is unreachable for the rest of the
-encounter. On the shipped destroyer an officer commanding the legal `ops 1 /
-helm 3 / weapons 3 / shields 1` used to park at exactly that: weapons cycling
-across 25–30 % at ±2/s with zero net drift, helm latched at its `min_level`
-against a release threshold of 45 % it could never reach, and nothing on the
-Power panel to explain why. Pinned by
-`ship::power::tests::a_human_commanded_destroyer_climbs_back_out_of_its_own_floor_ladder`.
-
-##### Two thresholds, not one
-
-`battery_floor_release_margin` is the field a retune most often gets wrong, so:
-**flooring a group lowers the EFFECTIVE total, and the effective total is what
-picks the `rates` rung.** On every shipped reactor the rungs either side of the
-resting total have opposite signs, so the cut immediately starts recharging the
-reserve straight back through the threshold that made it. With a single
-threshold the group is released on the very next tick, the draw goes back up,
-the threshold is re-crossed — at 60 Hz, with `MaxSpeed`, `PhaserDamage` and the
-brownout advisory to Helm and Tactical toggling along with it. The margin turns
-that into a relaxation cycle whose period *you* choose: bigger margin, longer
-and more deliberate brownouts.
-
-##### Floors and `min_reserve_*`
-
-A hull's `[power.ai_policy.param] min_reserve_<group>` answers a related
-question — when the CREW stops spending — and the relation between the two is a
-tuning choice, not a rule:
-
-* **Floor above the reserve** (`weapons` 25 against `min_reserve_weapons` 10, as
-  the fleet ships) gives a band where the reactor has cut and the policy has
-  not. **This is the only shape that does anything on an AI-crewed hull**, and
-  it is worth being blunt about why: a floor bites only when it is reached while
-  the operator is still commanding above the landing level, and a policy with a
-  reserve guard has already commanded the group down to exactly that level by
-  the time a lower floor is reached. The reactor then finds nothing to take.
-* **Floor below the reserve** (`helm` 40 against `min_reserve_helm` 50, as the
-  fleet ships) makes the reactor a backstop for an operator with no reserve
-  guard — chiefly a human Power officer, who has none at all — and inert under
-  AI. That is the right answer where the group is the ship's way out of
-  trouble: raising the fleet's `helm` floor to 50 fails
-  `the_composed_destroyer_passes_breaks_off_and_passes_again`, because holding
-  helm down through a band the crew has already decided it can afford leaves an
-  attack-pass hull grinding along at contact range instead of breaking off.
-
-The margin is not part of that trade. `battery_floor_release_margin = 0` fails
-the entity load as soon as ANY authored floor can bite — that is, as soon as its
-group can be commanded above the level the floor lands it on — whichever side of
-a reserve the floor sits on. (An earlier revision only refused the margin on a
-floor at or above a reserve, which exempted the shipped `helm = 40` on the one
-hull a human Power officer flies.) The fleet walk
-`ship::power::tests::every_hulls_battery_floors_descend` states the same rule
-over `assets/entities`.
+Avoidable brownouts are prevented on the **AI side**, not by the reactor: each
+`[[power.ai_policy.rule]]` carries a `min_reserve_<group>` param referenced by
+its `when` guard (`fact(battery_pct) >= param(min_reserve_<group>)`), so a
+below-reserve group is never elevated. An AI-crewed hull stops spending before
+it drains the battery; a human Power officer, who has no such guard, can still
+drive it flat and trip the lock.
 
 ```toml
 [power]
 capacity = 70
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 20
-battery_floor_release_margin = 5.0
-
-[power.battery_floor]
-helm = 40.0      # under `min_reserve_helm = 50` — the crew's guard binds first
-weapons = 25.0   # above `min_reserve_weapons = 10` — a real 15-point band
-shields = 5.0
 ```
-
-One more rule the fleet walk enforces: a hull's FULLY FLOORED total — every
-group on its landing level — must land on a strictly positive `rates` rung. A
-zero there is a trap with no exit, since the reserve then never climbs back
-through the release margin and no floor can ever lift.
 
 #### Power levels are gameplay numbers — and what each group actually buys
 

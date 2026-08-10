@@ -3791,17 +3791,6 @@ fn spawn_game_start_entities(
                     capacity: pc.capacity,
                     rates: pc.rates,
                     emergency_threshold: pc.emergency_threshold,
-                    // Battery floors (issue #952) — see the NPC-side twin in
-                    // `entities::spawner`.
-                    group_floors: crate::ship::power::authored_power_group_floors(
-                        &pc.battery_floor,
-                        &config
-                            .ship_config
-                            .as_ref()
-                            .map(|sc| sc.power_groups.clone())
-                            .unwrap_or_default(),
-                    ),
-                    floor_release_margin_pct: pc.battery_floor_release_margin,
                 })
             } else {
                 PowerConfigResource::default()
@@ -8823,13 +8812,11 @@ station = "pilot"
         );
     }
 
-    /// Re-aimed by issue #952: a flat battery takes back each group's SPENT
-    /// point, landing it on the level its file seeds it at (nominal for a hull
-    /// that authors no `[power_groups.*]`, as this fixture does) rather than
-    /// slamming every group to 1. The old name and its x0.667 assertions
-    /// described the retired brownout lock.
+    /// A flat battery locks the reactor and slams every group to 1 (the
+    /// exhaustion lock restored after issue #952's floors were reverted), so
+    /// every multiplier crushes to x0.667 and the standing order is overwritten.
     #[test]
-    fn a_flat_battery_floors_every_group_and_updates_all_modifiers() {
+    fn a_flat_battery_locks_every_group_to_one_and_updates_all_modifiers() {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
@@ -8857,9 +8844,9 @@ station = "pilot"
                 defaults,
             );
 
-        // Set state that will trigger the battery floors on the next tick:
-        // total=8 (negative rate), battery already at 0 -> tick keeps it at 0,
-        // and every group is under its authored floor (#952).
+        // Set state that will trigger the exhaustion lock on the next tick:
+        // total=8 (negative rate), battery already at 0 -> tick keeps it at 0
+        // and forces every group to 1.
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
             let _ = ps.0.set_group_allocation(
@@ -8877,10 +8864,11 @@ station = "pilot"
             ps.0.battery_charge = 0.0;
         }
 
-        // Tick applies the floors -> translate_power_modifiers runs
+        // Tick applies the lock -> translate_power_modifiers runs
         tick(&mut app);
 
-        // All three at their nominal floor -> bonus 0.0 -> multiplier 1.0.
+        // All three locked to level 1 -> bonus -0.5 -> multiplier 0.667.
+        let expected = 1.0 / 1.5;
         let mods = get_ship_modifiers(&mut app);
         for (slot, label) in [
             (ModifierSlot::MaxSpeed, "MaxSpeed"),
@@ -8889,19 +8877,13 @@ station = "pilot"
         ] {
             let mult = mods.get(&slot);
             assert!(
-                (mult - 1.0).abs() < 1e-6,
-                "with every group held at its NOMINAL floor, {label} should be                  x1.0, got {mult}"
+                (mult - expected).abs() < 1e-6,
+                "with every group locked to 1, {label} should be x{expected}, got {mult}"
             );
         }
-        assert_eq!(
-            app.world()
-                .resource::<ShipPowerSystem>()
-                .0
-                .commanded_level_for(&crate::messages::PowerGroupId(
-                    crate::power_system::HELM_POWER_GROUP.into()
-                )),
-            4,
-            "the brownout must not have rewritten the standing order"
+        assert!(
+            app.world().resource::<ShipPowerSystem>().0.locked(),
+            "the flat battery must have locked the reactor"
         );
     }
 

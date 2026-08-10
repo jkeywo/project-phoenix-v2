@@ -785,32 +785,6 @@ hull_max_hp = 8
 capacity = 90
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 22
-# How far above its own floor the reserve has to climb before the reactor lets
-# a group back up, in the same percentage-of-`capacity` units. Without this band
-# a floor chatters at tick rate: cutting a group lowers the EFFECTIVE total, the
-# effective total is what picks the `rates` rung, and on this reactor the rungs
-# either side of the resting total have opposite signs — so the cut immediately
-# recharges the reserve back through the threshold that made it. Raise it for
-# longer, more deliberate brownouts; lower it for a ship that scrabbles back.
-battery_floor_release_margin = 5.0
-
-# Battery floors (issue #952): the percentage of `capacity` below which each
-# group is held down to its `[power_groups.*] min_level`, released again only
-# once the charge climbs back through `battery_floor_release_margin` above it.
-# Falling, the ship loses helm first, then its guns, and keeps its screens
-# longest. Recovering, the ladder releases from the TOP, not in reverse: a cut
-# rung waits for every rung above it, so the reserve climbs on the deep-cut draw
-# instead of re-imposing the one that emptied it, and `shields` — the lowest
-# rung — is the LAST group back rather than the first. `weapons` sits ABOVE
-# this hull's own `min_reserve_weapons`, so the reactor cuts the guns before the
-# crew would and the ladder actually bites on an AI-crewed hull; `helm` stays
-# UNDER `min_reserve_helm`, so the crew's guard binds first there. See the fuller
-# note in `assets/entities/fragments/ai/fleet_baseline.toml` for the measurement
-# behind that asymmetry.
-[power.battery_floor]
-helm = 40.0
-weapons = 25.0
-shields = 5.0
 
 [captain_console]
 
@@ -833,31 +807,20 @@ max_level = 4
 
 [power_groups.helm]
 label = "entity.alliance_battleship.power_groups.helm.label"
-# `min_level = 2`, and since issue #952 that is a load-bearing number rather
-# than a formality: it is where `[power.battery_floor] helm` puts this group when
-# the reserve runs low. 2 is NOMINAL — the rung whose multiplier is 1.0 — so the
-# floor takes back the combat-stations point and no more.
-#
-# On an AI-crewed hull it never gets the chance, and that is authored rather
-# than accidental: `[power.battery_floor] helm` is 40 while this hull's
-# `min_reserve_helm` is 50, so the policy has already given the point back by
-# the time the floor is reached. The floor is here for a human Power officer,
-# who has no reserve guard at all. It does NOT stop that officer commanding 1:
-# the console clamps to [1, 4] and reads this field not at all, so the two spare
-# points in the 8-point budget are still theirs to move.
+# `min_level = 2` is the allocation lower bound the console and AI budget clamp
+# to — 2 is NOMINAL, the rung whose multiplier is 1.0. It is not a brownout
+# floor: a drained battery locks the reactor and forces every group to 1
+# regardless. A human Power officer can still command down to 1 to free the two
+# spare points in the 8-point budget.
 default_level = 2
 min_level = 2
 max_level = 4
 
 [power_groups.weapons]
 label = "entity.alliance_battleship.power_groups.weapons.label"
-# `min_level = 2`, and since issue #952 that is a load-bearing number rather
-# than a formality: it is where `[power.battery_floor] weapons` puts this group when
-# the reserve runs low. 2 is NOMINAL — the rung whose multiplier is 1.0 — so a
-# brownout takes back the combat-stations point the AI policy spends and no
-# more. It does NOT stop a human Power officer commanding 1: the console clamps
-# to [1, 4] and reads this field not at all, so the two spare points in the
-# 8-point budget are still the officer's to move.
+# `min_level = 2`: the allocation lower bound (NOMINAL, ×1.0). Not a brownout
+# floor — a flat battery locks the reactor and forces every group to 1. A human
+# Power officer can command down to 1 to spend the freed points elsewhere.
 default_level = 2
 min_level = 2
 max_level = 4
@@ -867,15 +830,8 @@ label = "entity.alliance_battleship.power_groups.shields.label"
 # Rests at 1 (the seat the retired `sensors` group used to occupy) so the four
 # authored groups still sum to a sustainable total. Level 1 is the ×1.0 rung on
 # this hull's `[shields_console] power_multipliers`, so resting here costs the
-# arcs nothing — spending UP is what buys regen, and it is a human Power
-# officer's trade against helm or weapons. `min_level = 1` is also where
-# `[power.battery_floor] shields` puts the group on a failing battery, and
-# because the group RESTS there the brownout has nothing to take from it: the
-# reactor never cuts a group that is already at or below its landing level.
-# That is the point of putting shields on the lowest rung of the ladder — the
-# last group to be reached, and on this hull's resting allocation the one the
-# ladder cannot touch at all. It bites only on a shields level a human Power
-# officer has bought, which is exactly the point at which losing it matters.
+# arcs nothing — spending UP is what buys regen, a human Power officer's trade
+# against helm or weapons.
 default_level = 1
 min_level = 1
 max_level = 4

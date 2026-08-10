@@ -249,9 +249,6 @@ export const COMPONENT_SCHEMA = {
       { key: 'capacity', type: 'number' },
       { key: 'rates', type: 'array', items: 'number' },
       { key: 'emergency_threshold', type: 'number' },
-      // Hysteresis band for the `[power.battery_floor]` ladder, in percentage
-      // points of `capacity` (issue #952). Optional — the parse default is 5.
-      { key: 'battery_floor_release_margin', type: 'number', optional: true },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
     ],
   },

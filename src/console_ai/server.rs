@@ -537,10 +537,9 @@ pub(crate) fn ai_shield_focus(
 /// The verb carries an absolute target level, and the levels for ALL of the
 /// ship's groups are decided together rather than one channel at a time.
 /// [`crate::modifiers::power_system::plan_allocation`] takes each group's bid —
-/// the winning rule's level, that rule's authored `priority`, the group's
-/// authored `max_level`, and its rung on the hull's `[power.battery_floor]`
-/// ladder — reserves the budget the un-bid groups are already holding, and
-/// hands out what is left in authored-priority order. The host emits **only the
+/// the winning rule's level, that rule's authored `priority`, and the group's
+/// authored `max_level` — reserves the budget the un-bid groups are already
+/// holding, and hands out what is left in authored-priority order. The host emits **only the
 /// groups whose commanded level actually changes**, decreases first, so a
 /// settled ship emits nothing.
 ///
@@ -743,14 +742,6 @@ fn ai_power_allocation(
                         .map(|g| g.max_level)
                         .unwrap_or_else(crate::ship::config::default_max_power_level),
                     rule_priority,
-                    // This group's rung on the hull's own `[power.battery_floor]`
-                    // ladder — the tie-break when the authored rule priorities
-                    // are equal. `None` for a group the ladder does not name.
-                    floor_pct: cfg
-                        .0
-                        .group_floors
-                        .get(group_id.0.as_str())
-                        .map(|f| f.battery_pct),
                 });
             }
         }
@@ -2695,10 +2686,10 @@ station = "sensors"
     }
 
     /// Variant of [`power_test_app`] built from a SHIPPED hull file: its own
-    /// `[power]` reactor (capacity, rates, `[power.battery_floor]` ladder and
-    /// release margin), its own `[power_groups.*]` seeding, and its own
-    /// `[power.ai_policy]`, with `ship::power::tick_power_system` chained after
-    /// the applier so the reactor's floors are re-derived every tick.
+    /// `[power]` reactor (capacity, rates, emergency threshold), its own
+    /// `[power_groups.*]` seeding, and its own `[power.ai_policy]`, with
+    /// `ship::power::tick_power_system` chained after the applier so the reactor
+    /// integrates the battery and exhaustion lock every tick.
     ///
     /// Nothing is hand-written: everything the ladder depends on comes off the
     /// file the fleet actually flies.
@@ -2716,11 +2707,6 @@ station = "sensors"
                 capacity: reactor.capacity,
                 rates: reactor.rates,
                 emergency_threshold: reactor.emergency_threshold,
-                group_floors: crate::ship::power::authored_power_group_floors(
-                    &reactor.battery_floor,
-                    &power_groups,
-                ),
-                floor_release_margin_pct: reactor.battery_floor_release_margin,
             });
         let seed = crate::ship::power::authored_power_group_seed(&power_groups);
         let policy = PowerAiPolicy(
@@ -2776,149 +2762,6 @@ station = "sensors"
             ))
             .id();
         (app, e)
-    }
-
-    /// **The battery-floor ladder acts on an AI-crewed hull, in floor order.**
-    ///
-    /// The invariant issue #952's first revision did not have, and the one that
-    /// matters: every hull in the fleet but the player's is crewed by
-    /// `ai_power_allocation`, so a ladder that only bites for a human Power
-    /// officer does nothing where the game spends its time.
-    ///
-    /// It did exactly that. With every floor authored strictly UNDER the same
-    /// group's `min_reserve_*`, the policy had already commanded the group down
-    /// to the floor's own landing level by the time the charge reached the
-    /// floor, so `apply_battery_floors` skipped it (`held >= commanded`) and no
-    /// AI hull was ever cut. Raising `weapons` from 8 to 25 against a reserve of
-    /// 10 opens a fifteen-point band in which the reactor has cut and the crew
-    /// has not, and the assertions below check that EFFECT — a group running
-    /// below the level its own crew is still asking for — rather than the
-    /// arithmetic that produces it.
-    ///
-    /// `helm` is deliberately NOT symmetrical: its floor of 40 sits under this
-    /// hull's `min_reserve_helm` of 50, so the crew's guard binds first and the
-    /// reactor is only the backstop for an operator who has no guard at all — a
-    /// human Power officer. See the `[power.battery_floor]` note in
-    /// `assets/entities/fragments/ai/fleet_baseline.toml` for the measurement
-    /// behind that asymmetry.
-    ///
-    /// Cutting runs in floor order; RELEASING runs from the top of the ladder,
-    /// not in reverse. The recovery leg below pins that: the guns wait for
-    /// helm's rung above them even after clearing their own band, because
-    /// releasing the lowest engaged rung first restores the very draw that was
-    /// emptying the battery. See
-    /// `modifiers::power_system::PowerSystem::apply_battery_floors`.
-    #[test]
-    fn the_battery_floor_ladder_cuts_an_ai_crewed_hull_in_floor_order() {
-        use crate::modifiers::power_system::{
-            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
-        };
-        let (mut app, e) = shipped_hull_power_app("assets/entities/alliance_destroyer.toml");
-        let capacity = 70.0_f32; // `[power] capacity` on this hull.
-
-        // Park the charge, step the world, read back. `dt` is small enough that
-        // the tick's own integration cannot carry the charge across a floor.
-        let at = |app: &mut App, pct: f32| {
-            set_battery(app, e, capacity * pct / 100.0);
-            power_tick_with_dt(app, 0.01);
-            (
-                power_level(app, e, HELM_POWER_GROUP),
-                power_level(app, e, WEAPONS_POWER_GROUP),
-                power_level(app, e, SHIELDS_POWER_GROUP),
-            )
-        };
-        let floored = |app: &App, group: &str| {
-            app.world()
-                .entity(e)
-                .get::<crate::ship::power::ShipPowerSystem>()
-                .unwrap()
-                .0
-                .is_floored(&crate::messages::PowerGroupId(group.into()))
-        };
-
-        // Combat stations on a healthy reserve: the policy spends its two
-        // points, and no floor is anywhere near.
-        assert_eq!(
-            at(&mut app, 90.0),
-            (3, 3, 1),
-            "red alert + thrust must reach the hull's authored combat-stations \
-             allocation before any floor is tested"
-        );
-
-        // 30 %: under `min_reserve_helm`, over `weapons`' floor of 25. Helm
-        // loses its point — to its own crew's discipline, not to the reactor —
-        // and the guns keep theirs.
-        assert_eq!(at(&mut app, 30.0), (2, 3, 1), "helm goes first");
-
-        // 20 %: under `weapons`' floor of 25 but still well over the crew's own
-        // `min_reserve_weapons` of 10 — so this cut is the REACTOR's, and the
-        // standing order it is overriding is still on the books.
-        assert_eq!(at(&mut app, 20.0), (2, 2, 1), "the guns go next");
-        assert!(
-            floored(&app, WEAPONS_POWER_GROUP),
-            "weapons must be held down BY THE FLOOR at 20 %, not merely resting \
-             low — if this fails the ladder is inert again and the policy's own \
-             reserve is doing all the work"
-        );
-        assert_eq!(
-            app.world()
-                .entity(e)
-                .get::<crate::ship::power::ShipPowerSystem>()
-                .unwrap()
-                .0
-                .commanded_level_for(&crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into())),
-            3,
-            "and the crew's standing order survives the brownout intact"
-        );
-
-        // 1 %: everything is under its floor, and shields — resting at the
-        // `min_level` its own file gives it — has nothing left to lose. That is
-        // what "shields hold longest" means on this hull.
-        assert_eq!(
-            at(&mut app, 1.0),
-            (2, 2, 1),
-            "shields never gave anything up"
-        );
-        assert!(
-            !floored(&app, SHIELDS_POWER_GROUP),
-            "a group resting at its own landing level is never recorded as held: \
-             the brownout has nothing to take from it"
-        );
-
-        // Recovery: crossing a floor is not enough, the charge has to clear the
-        // release margin as well, or the cut chatters at tick rate.
-        assert_eq!(
-            at(&mut app, 27.0),
-            (2, 2, 1),
-            "27 % is inside weapons' 25+5 band"
-        );
-        assert!(
-            floored(&app, WEAPONS_POWER_GROUP),
-            "still the reactor holding the guns down, against a live order of 3"
-        );
-
-        // …and clearing its OWN band is not enough either, while a rung above it
-        // is still engaged. 31 % is past weapons' 25+5, but helm's floor of 40
-        // is engaged (it releases at 45), so the guns wait. This is the half of
-        // the ladder issue #952's review found latched: releasing the lowest
-        // engaged rung here restores the draw that was emptying the battery, and
-        // on this hull's own rates that caps the reserve in a 25–30 % limit cycle
-        // helm's 45 % release threshold can never be reached from. See
-        // `ship::power::tests::a_human_commanded_destroyer_climbs_back_out_of_its_own_floor_ladder`,
-        // which flies this same hull through the excursion with a live battery.
-        assert_eq!(
-            at(&mut app, 31.0),
-            (2, 2, 1),
-            "the guns wait for the rung above them"
-        );
-        assert!(floored(&app, WEAPONS_POWER_GROUP));
-
-        // Clear of helm's 40+5 the whole ladder releases together, and the crew
-        // is over `min_reserve_helm` (50) as well, so the policy re-spends both
-        // combat-stations points at once.
-        assert_eq!(at(&mut app, 51.0), (3, 3, 1), "and then everything is back");
-        assert!(!floored(&app, HELM_POWER_GROUP));
-        assert!(!floored(&app, WEAPONS_POWER_GROUP));
     }
 
     #[test]
@@ -3296,15 +3139,11 @@ station = "sensors"
     /// not drain the queue, so a second arm that decides to emit nothing leaves
     /// the emitted list byte-identical.
     ///
-    /// The emitted ORDER is pinned too, and on this hull it is the one piece of
-    /// shipped evidence that the authored `[power.battery_floor]` ladder reaches
-    /// the planner at all: helm and weapons both win at `priority = 10`, so the
-    /// ladder is the only key left, and this hull puts weapons on the lower rung
-    /// (25 against helm's 40) — keep the guns longest, spend on them first. Read
-    /// no ladder and the two tie, the stable sort falls back to the reactor's
-    /// own seed order, and helm is emitted first instead. Both are paid in full
-    /// either way, which is why the dedicated tie-break wiring test below
-    /// arranges a budget too short to pay everyone.
+    /// The emitted ORDER is pinned too: helm and weapons both win at
+    /// `priority = 10`, so with the battery floors reverted there is no
+    /// secondary authored key, and the stable sort falls back to the reactor's
+    /// own seed order (`POWER_GROUP_ORDER`: helm before weapons). Both are paid
+    /// in full either way.
     #[test]
     fn the_shipped_combat_stations_allocation_is_unchanged_and_settles() {
         use crate::modifiers::power_system::{
@@ -3330,10 +3169,10 @@ station = "sensors"
         assert_eq!(
             first_arm,
             vec![
-                (WEAPONS_POWER_GROUP.to_string(), 3),
                 (HELM_POWER_GROUP.to_string(), 3),
+                (WEAPONS_POWER_GROUP.to_string(), 3),
             ],
-            "the hull's own floor ladder orders the two equal-priority bidders"
+            "equal-priority bidders fall back to the reactor's seed order"
         );
 
         // …and it has settled: the second arm adds nothing to the queue.
@@ -3379,33 +3218,6 @@ default_level = 2
             &[crate::system_registry::POWER_REACTOR_KIND],
         )
         .unwrap()
-    }
-
-    /// A `PowerConfigResource` COMPONENT whose `[power.battery_floor]` ladder
-    /// runs the other way to the shipped fleet's: this hull gives its SCREENS up
-    /// first and keeps its guns longest, where every Alliance hull does the
-    /// reverse.
-    ///
-    /// Authored the way a hull authors it — group id to percentage of capacity —
-    /// and resolved into the runtime table by the same
-    /// `ship::power::authored_power_group_floors` a real spawn goes through, so
-    /// there is no hand-built shortcut between the TOML shape and the component.
-    fn inverted_ladder_power_config() -> crate::ship::power::PowerConfigResource {
-        let battery_floor: std::collections::HashMap<String, f32> = toml::from_str(
-            r#"
-helm = 25.0
-weapons = 5.0
-shields = 50.0
-"#,
-        )
-        .expect("[power.battery_floor] ladder parses");
-        crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
-            group_floors: crate::ship::power::authored_power_group_floors(
-                &battery_floor,
-                &std::collections::HashMap::new(),
-            ),
-            ..Default::default()
-        })
     }
 
     /// **The hull's own `[power_groups.<id>] max_level` is what caps a grant.**
@@ -3454,71 +3266,6 @@ shields = 50.0
             "the points weapons was not allowed to take fall through to the next bid"
         );
         assert_eq!(commanded(&app, e, SHIELDS_POWER_GROUP), 1);
-        assert_eq!(commanded(&app, e, "ops"), 1);
-        assert_eq!(commanded_total(&app, e), MAX_COMMANDED_TOTAL);
-    }
-
-    /// **The hull's own `[power.battery_floor]` ladder breaks a priority tie.**
-    ///
-    /// The wiring test for `AllocationBid::floor_pct`.
-    /// `plan_allocation_breaks_a_priority_tie_on_the_authored_floor_ladder`
-    /// proves the PLANNER inverts with the data; this proves the data reaches
-    /// it. Every other host fixture leaves `PowerConfigResource` as a bare
-    /// `Resource`, which `ai_power_allocation` never reads — it takes an
-    /// `Option<&PowerConfigResource>` COMPONENT — so the ladder in play has
-    /// always been `default_group_floors`', and on the shipped destroyer both
-    /// bidders are paid in full so the ordering cannot show.
-    ///
-    /// THREE equal-priority bidders, not two, and that is the point of the
-    /// fixture: with only two there are two possible orders, and one of the two
-    /// ways to misread the ladder lands on the same answer as reading it right.
-    /// Three separates every case, because each misread starts the ration with a
-    /// different group and only the first one is paid in full:
-    ///
-    /// | ladder actually read                | ration order     | takes 4 |
-    /// |-------------------------------------|------------------|---------|
-    /// | this hull's (helm 25, wpn 5, shd 50) | wpn, helm, shd  | weapons |
-    /// | the `Resource` default (50, 25, 5)   | shd, wpn, helm  | shields |
-    /// | nothing at all (every group `None`)  | helm, wpn, shd  | helm    |
-    ///
-    /// The last row is the reactor's own seed order, which the stable sort falls
-    /// back to when every key ties — so it is also the case a two-bidder fixture
-    /// would have quietly aliased onto the right answer.
-    #[test]
-    fn the_authored_battery_floor_ladder_breaks_the_hosts_priority_tie() {
-        use crate::modifiers::power_system::{
-            HELM_POWER_GROUP, MAX_COMMANDED_TOTAL, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
-        };
-        let policy = power_policy(
-            &[],
-            vec![
-                alloc_rule(10, HELM_POWER_GROUP, "true", 4),
-                alloc_rule(10, WEAPONS_POWER_GROUP, "true", 4),
-                alloc_rule(10, SHIELDS_POWER_GROUP, "true", 4),
-            ],
-        );
-        let (mut app, e) = over_budget_power_app(policy);
-        app.world_mut()
-            .entity_mut(e)
-            .insert(inverted_ladder_power_config());
-
-        power_tick_with_dt(&mut app, 0.1);
-
-        assert_eq!(
-            commanded(&app, e, WEAPONS_POWER_GROUP),
-            4,
-            "this hull keeps its guns longest, so its guns are served first"
-        );
-        assert_eq!(
-            commanded(&app, e, HELM_POWER_GROUP),
-            2,
-            "helm sits on the middle rung and takes what weapons left"
-        );
-        assert_eq!(
-            commanded(&app, e, SHIELDS_POWER_GROUP),
-            1,
-            "the group this hull gives up first gets nothing discretionary"
-        );
         assert_eq!(commanded(&app, e, "ops"), 1);
         assert_eq!(commanded_total(&app, e), MAX_COMMANDED_TOTAL);
     }

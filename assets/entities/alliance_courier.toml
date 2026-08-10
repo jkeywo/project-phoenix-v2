@@ -337,102 +337,13 @@ hull_max_hp = 4
 # Small-hull values are authored here rather than inferred from ship class.
 [power]
 capacity = 35
-# Index 3 (a ship-wide total of 6) is +1, not the 0 this hull shipped until
-# issue #952's review. 6 is exactly where this hull's own battery floors settle
-# it — `ops 1 + helm 2 + weapons 2 + shields 1`, every group on its
-# `min_level` — and a flat 0 there is a trap with no exit: the reserve neither
-# drains nor charges, so no floor can ever lift and the ship is parked at its
-# floors for the rest of the encounter. 6 is also this hull's RESTING total, so
-# the same 0 meant a courier sitting quietly at anchor never recovered a point
-# of charge either. Every hull's fully-floored rung must be strictly positive;
-# pinned by `ship::power::tests::every_hulls_fully_floored_total_recharges`.
+# Index 3 (a ship-wide total of 6) is +1, not a 0. 6 is this hull's RESTING
+# total (`ops 1 + helm 2 + weapons 2 + shields 1`), so a 0 rate there would mean
+# a courier sitting quietly at anchor never recovers a point of charge — the
+# resting draw must recharge, however slowly.
 rates = [ 3, 2, 1, 1, -1, -3 ]
 emergency_threshold = 10
-# How far above its own floor the reserve has to climb before the reactor lets
-# a group back up, in the same percentage-of-`capacity` units. Without this band
-# a floor chatters at tick rate: cutting a group lowers the EFFECTIVE total, the
-# effective total is what picks the `rates` rung, and on this reactor the rungs
-# either side of the resting total have opposite signs — so the cut immediately
-# recharges the reserve back through the threshold that made it. Raise it for
-# longer, more deliberate brownouts; lower it for a ship that scrabbles back.
-battery_floor_release_margin = 5.0
 
-# Battery floors (issue #952): the percentage of `capacity` below which each
-# group is held down to its `[power_groups.*] min_level`, released again only
-# once the charge climbs back through `battery_floor_release_margin` above it.
-# Falling, the ship loses helm first, then its guns, and keeps its screens
-# longest. Recovering, the ladder releases from the TOP, not in reverse: a cut
-# rung waits for every rung above it, so the reserve climbs on the deep-cut draw
-# instead of re-imposing the one that emptied it, and `shields` — the lowest
-# rung — is the LAST group back rather than the first. `weapons` sits ABOVE
-# this hull's own `min_reserve_weapons`, so the reactor cuts the guns before the
-# crew would and the ladder actually bites on an AI-crewed hull; `helm` stays
-# UNDER `min_reserve_helm`, so the crew's guard binds first there. See the fuller
-# note in `assets/entities/fragments/ai/fleet_baseline.toml` for the measurement
-# behind that asymmetry.
-[power.battery_floor]
-helm = 40.0
-weapons = 25.0
-shields = 5.0
-
-# Inline stateless power allocation policy (issue #784). Each rule binds a
-# priority + power-group channel to a `when` guard and the value-carrying
-# `set_power_group_allocation` verb (its `level` the absolute target). Every
-# allocation rule declares a MINIMUM BATTERY RESERVE as a `param` its guard
-# reads, so a group is elevated only while the trigger holds AND the battery is
-# at or above that reserve — allocation never rises past what the reactor can
-# sustain (no avoidable brownout), replacing the old global emergency exception.
-#
-# The `weapons` channel is the fleet's #955 COMBAT-STATIONS allocation,
-# transcribed from `fragments/ai/fleet_baseline.toml` — this hull composes no
-# fragment, so it owns its copy and a retune there has to be repeated here. The
-# full derivation (weapons level → `ModifierSlot::PhaserDamage` → beam
-# intensity, not reach) lives in that fragment's header and in
-# `docs/toml-authoring-guide.md` §2.2.
-#
-# This hull mounts no phaser bank, so nothing here changes anything it fires:
-# `PhaserDamage` only multiplies a bank's authored `beam_damage_per_sec`
-# (`console::weapons::beam::tick_beams`), and this hull's one weapon is a
-# blaster bank, whose `damage` field no power group scales at all. The
-# red-alert `weapons` elevation is therefore inert on this hull by
-# construction — recorded here so the frozen-battery exception below is not
-# mistaken for a live damage bug.
-#
-# ── The frozen-battery exception (issue #923 follow-up; #955 moved the elevated
-# channel from `sensors` to `weapons`; #952 fixed the rates that caused it) ───
-#
-# This hull used to author `rates = [3, 2, 1, 0, -1, -3]`, a flat 0 at total-6 —
-# the resting allocation, and also the allocation red alert falls back to once
-# the battery has dropped under `min_reserve_helm` and then
-# `min_reserve_weapons`: ops 1 + helm 2 + weapons 2 + shields 1 = 6. At that
-# total the battery neither drained nor recharged, so it settled there and
-# stayed, and weapons could never re-cross `min_reserve_weapons` to climb back
-# to 3 for the rest of the encounter. Every other Alliance hull's total-6 entry
-# was positive; this was a one-way ladder unique to the courier's own rates.
-#
-# #952's `[power.battery_floor]` ladder does not rescue that on its own, and it
-# is worth being exact about why, because the first draft of this note claimed
-# it did. The ladder holds each group at its `[power_groups.*] min_level`, and
-# on this hull those levels ARE the resting allocation — helm 2, weapons 2,
-# shields 1, ops 1 — so a fully-floored courier sits on total 6, the same rung
-# that was flat. The floors could not lift a ship off a rung they land it on.
-# The fix is the rate: index 3 is now +1 (see `[power] rates` above), so the
-# floored total recharges and the reserve climbs, on that floored draw, all the
-# way through `battery_floor_release_margin` above helm's own rung — which
-# releases helm and, with it, every rung below.
-#
-# This note used to end "DO NOT retune the rates to fix it", on the grounds that
-# the freeze cost this non-demo hull nothing in practice. #952 makes that no
-# longer true: the ladder settles a browned-out ship on its floored total by
-# design, so a hull with a dead rung there is stuck at its minimums with a
-# working reactor and no path back. The rung is now an invariant, not an
-# accepted exception.
-#
-# What the ladder DOES buy here is the band between the two mechanisms:
-# `[power.battery_floor] weapons = 25` against `min_reserve_weapons = 10` means
-# the reactor takes the combat-stations point back fifteen points of charge
-# before the policy would have, and holds it back until the reserve is a clear
-# margin above 25 again.
 [power.ai_policy.param]
 thrust_threshold = 0.7
 min_reserve_helm = 50.0
@@ -484,31 +395,20 @@ max_level = 4
 
 [power_groups.helm]
 label = "entity.alliance_courier.power_groups.helm.label"
-# `min_level = 2`, and since issue #952 that is a load-bearing number rather
-# than a formality: it is where `[power.battery_floor] helm` puts this group when
-# the reserve runs low. 2 is NOMINAL — the rung whose multiplier is 1.0 — so the
-# floor takes back the combat-stations point and no more.
-#
-# On an AI-crewed hull it never gets the chance, and that is authored rather
-# than accidental: `[power.battery_floor] helm` is 40 while this hull's
-# `min_reserve_helm` is 50, so the policy has already given the point back by
-# the time the floor is reached. The floor is here for a human Power officer,
-# who has no reserve guard at all. It does NOT stop that officer commanding 1:
-# the console clamps to [1, 4] and reads this field not at all, so the two spare
-# points in the 8-point budget are still theirs to move.
+# `min_level = 2` is the allocation lower bound the console and AI budget clamp
+# to — 2 is NOMINAL, the rung whose multiplier is 1.0. It is not a brownout
+# floor: a drained battery locks the reactor and forces every group to 1
+# regardless. A human Power officer can still command down to 1 to free the two
+# spare points in the 8-point budget.
 default_level = 2
 min_level = 2
 max_level = 4
 
 [power_groups.weapons]
 label = "entity.alliance_courier.power_groups.weapons.label"
-# `min_level = 2`, and since issue #952 that is a load-bearing number rather
-# than a formality: it is where `[power.battery_floor] weapons` puts this group when
-# the reserve runs low. 2 is NOMINAL — the rung whose multiplier is 1.0 — so a
-# brownout takes back the combat-stations point the AI policy spends and no
-# more. It does NOT stop a human Power officer commanding 1: the console clamps
-# to [1, 4] and reads this field not at all, so the two spare points in the
-# 8-point budget are still the officer's to move.
+# `min_level = 2`: the allocation lower bound (NOMINAL, ×1.0). Not a brownout
+# floor — a flat battery locks the reactor and forces every group to 1. A human
+# Power officer can command down to 1 to spend the freed points elsewhere.
 default_level = 2
 min_level = 2
 max_level = 4
@@ -518,15 +418,8 @@ label = "entity.alliance_courier.power_groups.shields.label"
 # Rests at 1 (the seat the retired `sensors` group used to occupy) so the four
 # authored groups still sum to a sustainable total. Level 1 is the ×1.0 rung on
 # this hull's `[shields_console] power_multipliers`, so resting here costs the
-# arcs nothing — spending UP is what buys regen, and it is a human Power
-# officer's trade against helm or weapons. `min_level = 1` is also where
-# `[power.battery_floor] shields` puts the group on a failing battery, and
-# because the group RESTS there the brownout has nothing to take from it: the
-# reactor never cuts a group that is already at or below its landing level.
-# That is the point of putting shields on the lowest rung of the ladder — the
-# last group to be reached, and on this hull's resting allocation the one the
-# ladder cannot touch at all. It bites only on a shields level a human Power
-# officer has bought, which is exactly the point at which losing it matters.
+# arcs nothing — spending UP is what buys regen, a human Power officer's trade
+# against helm or weapons.
 default_level = 1
 min_level = 1
 max_level = 4

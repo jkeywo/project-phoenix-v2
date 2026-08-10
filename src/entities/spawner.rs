@@ -381,18 +381,6 @@ pub fn spawn_entity(
                     capacity: pc.capacity,
                     rates: pc.rates,
                     emergency_threshold: pc.emergency_threshold,
-                    // Battery floors (issue #952): the authored
-                    // `[power.battery_floor]` percentages, each paired with its
-                    // group's own `[power_groups.*] min_level`.
-                    group_floors: crate::ship::power::authored_power_group_floors(
-                        &pc.battery_floor,
-                        &config
-                            .ship_config
-                            .as_ref()
-                            .map(|sc| sc.power_groups.clone())
-                            .unwrap_or_default(),
-                    ),
-                    floor_release_margin_pct: pc.battery_floor_release_margin,
                 },
             ),
             None => crate::power_plugin::PowerConfigResource::default(),

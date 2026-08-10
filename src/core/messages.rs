@@ -2068,20 +2068,21 @@ pub enum ServerMessage {
         radar_size: Option<f32>,
     },
     /// Sent at 10 Hz to the Power console holder only. Carries the current
-    /// EFFECTIVE per-group allocation levels (a group held down by its battery
-    /// floor reports the floor, not what it was commanded at), the battery
-    /// charge, and whether the reserve is currently emptying.
+    /// per-group allocation levels, the battery charge, whether the reserve is
+    /// currently emptying, and whether the reactor is locked out after a full
+    /// brownout.
     ///
-    /// The third group is `shields`, not `sensors` (issue #952), and `draining`
-    /// replaces the retired `locked` flag: there is no brownout lock any more,
-    /// so the only thing left worth telling the gauge is which way the reserve
-    /// is moving.
+    /// The third group is `shields`, not `sensors` (issue #952). `locked` marks
+    /// the exhaustion lock: when the battery bottoms out every group is forced
+    /// to 1 and the allocation controls freeze until the reserve recovers past
+    /// `emergency_threshold`. `draining` says which way the reserve is moving.
     PowerState {
         helm: u8,
         weapons: u8,
         shields: u8,
         battery_charge: f32,
         draining: bool,
+        locked: bool,
     },
     /// Broadcast when a non-asteroid entity is spawned at runtime (e.g. by a
     /// scenario trigger). Carries a full `EntitySnapshot` so the client can
@@ -2909,12 +2910,9 @@ pub struct PowerBlackboard {
     pub battery_charge: f32,
     /// Maximum battery capacity.
     pub battery_max: f32,
-    /// Whether the reserve is emptying at the current draw. Replaces the
-    /// `locked` flag issue #952 retired with the brownout lock: a low battery
-    /// no longer freezes the console, it cuts groups back to their authored
-    /// floors one at a time, so what the panel needs to say is which way the
-    /// charge is going. `#[serde(default)]` so a pre-#952 payload (which
-    /// carried `locked` here) still decodes.
+    /// Whether the reserve is emptying at the current draw — which way the
+    /// charge is going, so the panel can paint a draining reserve.
+    /// `#[serde(default)]` for round-tripping older payloads.
     #[serde(default)]
     pub draining: bool,
     /// Whether the reserve is actually FILLING at the current draw.
@@ -2927,6 +2925,13 @@ pub struct PowerBlackboard {
     /// `#[serde(default)]` for pre-#952 payloads.
     #[serde(default)]
     pub charging: bool,
+    /// Whether the reactor is locked out after a full brownout: the battery
+    /// bottomed out, every group was forced to 1, and the allocation controls
+    /// are frozen until the charge recovers past `emergency_threshold`. Lets the
+    /// Power panel grey out its +/- and show the lockout. `#[serde(default)]`
+    /// so payloads predating the lock's restoration still decode.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.

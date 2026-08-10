@@ -1112,9 +1112,7 @@ export function buildPowerConsoleState(state) {
     total_max:      bb.total_max      ?? 8,
     battery_charge: bb.battery_charge ?? 0,
     battery_max:    bb.battery_max    ?? 100,
-    // `draining` replaced `locked` when issue #952 retired the brownout lock:
-    // the reserve emptying is what the gauge needs, and the reserve having run
-    // out no longer freezes anything.
+    // Which way the reserve is moving, for the battery gauge.
     draining:       bb.draining       || false,
     // NOT `!draining`. A hull can author a reactor rate of exactly zero for
     // some total, and there the reserve is frozen — neither emptying nor
@@ -1122,6 +1120,10 @@ export function buildPowerConsoleState(state) {
     // parked reserve says nothing rather than promising a recovery that is
     // never going to arrive.
     charging:       bb.charging       || false,
+    // The exhaustion lock (restored when issue #952's floors were reverted): the
+    // battery bottomed out, every group was slammed to 1, and the +/- controls
+    // are frozen until the reserve recovers past `emergency_threshold`.
+    locked:         bb.locked         || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),

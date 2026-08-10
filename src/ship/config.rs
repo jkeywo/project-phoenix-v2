@@ -114,11 +114,8 @@ pub struct PowerGroupConfig {
 }
 
 /// The level a `[power_groups.<id>]` entry is seeded at when its hull authors
-/// no `default_level` — and, through
-/// [`crate::modifiers::power_system::UNAUTHORED_FLOOR_LEVEL`], the level a
-/// battery floor lands a group on when the hull describes no such entry at all.
-/// `const` so that constant can be defined by CALLING this rather than by
-/// restating the number next to it.
+/// no `default_level`. `const` so callers can define their own constants by
+/// CALLING this rather than by restating the number next to it.
 pub const fn default_power_level() -> u8 {
     2
 }

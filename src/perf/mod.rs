@@ -62,7 +62,7 @@
 //! But *where* gating happens has moved. During the move-fast demo phase:
 //!
 //! - **The regular CI perf job (`.github/workflows/ci.yml`) gates on nothing.**
-//!   Every scenario is warnings-first there; a capture over its baseline is
+//!   Every scenario is warnings-first there; adverse drift from a baseline is
 //!   filed as a GitHub issue to fix later, never a red build and never a silent
 //!   re-record. The job stays out of `deploy`'s `needs`, as before.
 //! - **The manual demo deploy (`.github/workflows/deploy-demo.yml`) is the
@@ -105,6 +105,60 @@ use vellum_perf::{Baseline, Capture, Finding};
 /// Where committed baselines live. One file per scenario, RON, reviewable in
 /// a diff — the crate owns the types, this repository owns the layout.
 pub const BASELINE_DIR: &str = "perf/baselines";
+
+/// Which side of an expectation is adverse for a metric.
+///
+/// `vellum-perf` intentionally compares by absolute drift. Phoenix adds this
+/// policy at its boundary because a smaller download or faster frame is an
+/// improvement, while a deeper LOD ladder is improved by growing. Unknown
+/// metrics retain vellum's symmetric comparison until their meaning is made
+/// explicit here.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetricDirection {
+    LowerIsBetter,
+    HigherIsBetter,
+    Symmetric,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn metric_direction(metric: &str) -> MetricDirection {
+    match metric {
+        "sim.tick"
+        | "sim.run"
+        | "browser.boot"
+        | "browser.preload"
+        | "browser.frame"
+        | "assets.glb.bytes"
+        | "assets.glb.total.bytes"
+        | "assets.glb.without_lod"
+        | "assets.mesh.triangles"
+        | "assets.mesh.triangles.total"
+        | "assets.texture.count"
+        | "assets.texture.pixels" => MetricDirection::LowerIsBetter,
+        "assets.lod.levels" => MetricDirection::HigherIsBetter,
+        _ => MetricDirection::Symmetric,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn normalize_direction(findings: &mut [Finding]) {
+    for finding in findings {
+        // Incomparability is a broken measurement contract, not drift, and
+        // must never be normalized into a pass.
+        if finding.verdict == vellum_perf::Verdict::Incomparable {
+            continue;
+        }
+        let favourable = match metric_direction(&finding.metric) {
+            MetricDirection::LowerIsBetter => finding.got <= finding.expected,
+            MetricDirection::HigherIsBetter => finding.got >= finding.expected,
+            MetricDirection::Symmetric => false,
+        };
+        if favourable {
+            finding.verdict = vellum_perf::Verdict::Pass;
+        }
+    }
+}
 
 /// Build provenance for a capture, so two captures are only compared when
 /// they are comparable.
@@ -199,7 +253,8 @@ pub fn load_baseline(path: &Path) -> Result<Option<Baseline>, BaselineError> {
 /// not.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn report(capture: &Capture, baseline: &Baseline) -> (Vec<Finding>, String) {
-    let findings = vellum_perf::compare(capture, baseline);
+    let mut findings = vellum_perf::compare(capture, baseline);
+    normalize_direction(&mut findings);
     let rendered = vellum_perf::render(&findings);
     (findings, rendered)
 }
@@ -324,6 +379,78 @@ mod tests {
         let baseline = baseline_with("m", Unit::Millis, 10.0);
         let (findings, _) = report(&capture, &baseline);
         assert_eq!(findings[0].verdict, Verdict::Incomparable);
+    }
+
+    #[test]
+    fn lower_is_better_reduction_passes_even_beyond_fail_tolerance() {
+        let capture = capture_with("assets.glb.total.bytes", Unit::Bytes, &[1.0]);
+        let baseline = baseline_with("assets.glb.total.bytes", Unit::Bytes, 10.0);
+        let (findings, _) = report(&capture, &baseline);
+        assert_eq!(findings[0].verdict, Verdict::Pass);
+        assert!(!gates(&findings));
+    }
+
+    #[test]
+    fn lower_is_better_increase_still_fails() {
+        let capture = capture_with("assets.glb.total.bytes", Unit::Bytes, &[30.0]);
+        let baseline = baseline_with("assets.glb.total.bytes", Unit::Bytes, 10.0);
+        let (findings, _) = report(&capture, &baseline);
+        assert_eq!(findings[0].verdict, Verdict::Fail);
+        assert!(gates(&findings));
+    }
+
+    #[test]
+    fn deeper_lod_ladder_passes_but_shallower_ladder_fails() {
+        let deeper = capture_with("assets.lod.levels", Unit::Count, &[30.0]);
+        let shallower = capture_with("assets.lod.levels", Unit::Count, &[1.0]);
+        let baseline = baseline_with("assets.lod.levels", Unit::Count, 10.0);
+
+        let (deeper_findings, _) = report(&deeper, &baseline);
+        let (shallower_findings, _) = report(&shallower, &baseline);
+        assert_eq!(deeper_findings[0].verdict, Verdict::Pass);
+        assert_eq!(shallower_findings[0].verdict, Verdict::Fail);
+    }
+
+    #[test]
+    fn incomparable_known_metric_remains_incomparable() {
+        let capture = capture_with("assets.glb.total.bytes", Unit::Count, &[1.0]);
+        let baseline = baseline_with("assets.glb.total.bytes", Unit::Bytes, 10.0);
+        let (findings, _) = report(&capture, &baseline);
+        assert_eq!(findings[0].verdict, Verdict::Incomparable);
+        assert!(gates(&findings));
+    }
+
+    #[test]
+    fn unknown_metrics_keep_symmetric_comparison() {
+        let capture = capture_with("unknown.metric", Unit::Count, &[1.0]);
+        let baseline = baseline_with("unknown.metric", Unit::Count, 10.0);
+        let (findings, _) = report(&capture, &baseline);
+        assert_eq!(findings[0].verdict, Verdict::Fail);
+        assert!(gates(&findings));
+    }
+
+    /// Adding a metric to a committed baseline is a budget decision. Force the
+    /// same change to choose its direction rather than silently inheriting a
+    /// symmetric policy that reports improvements as adverse drift.
+    #[test]
+    fn every_committed_metric_has_an_explicit_direction() {
+        for entry in std::fs::read_dir(BASELINE_DIR).expect("baseline directory exists") {
+            let path = entry.expect("readable directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("ron") {
+                continue;
+            }
+            let baseline = load_baseline(&path)
+                .unwrap_or_else(|e| panic!("{e}"))
+                .expect("the baseline exists");
+            for metric in baseline.expectations.keys() {
+                assert_ne!(
+                    metric_direction(metric),
+                    MetricDirection::Symmetric,
+                    "committed metric {metric:?} in {} has no direction policy",
+                    path.display()
+                );
+            }
+        }
     }
 
     /// The gating rule from the module documentation, as code: drift that only

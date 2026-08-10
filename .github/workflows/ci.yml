@@ -427,11 +427,11 @@ jobs:
   # written in whatever language each job happens to have.
   #
   # WARNINGS-ONLY (src/perf/mod.rs carries the rule). This job gates on NOTHING:
-  # every scenario is reported, and any metric over its baseline is filed as a
+  # every scenario is reported, and any metric with adverse baseline drift is filed as a
   # GitHub issue to fix later (see the "File issues" step). Enforcement lives in
   # the manual demo deploy (deploy-demo.yml), which runs `report --gate` on all
-  # four scenarios and blocks the demo build on a regression. Moving fast in this
-  # phase means a perf regression is tracked, not a reason to redden main.
+  # four scenarios and blocks the demo build on adverse drift. Moving fast in this
+  # phase means adverse perf drift is tracked, not a reason to redden main.
   #
   # CI COMMITS MISSING BASELINES. A scenario with no committed baseline yet is
   # bootstrapped here: on a push to main the job adopts it from its own capture
@@ -444,7 +444,7 @@ jobs:
     needs: [test, smoke, native-build]
     runs-on: ubuntu-latest
     # contents: write to commit a bootstrapped baseline; issues: write to file
-    # the regression record. Both use the default GITHUB_TOKEN.
+    # the adverse-drift record. Both use the default GITHUB_TOKEN.
     permissions:
       contents: write
       issues: write
@@ -487,7 +487,7 @@ jobs:
           # is reported (and filed as an issue) like every other scenario.
           # Warnings-only — no --gate in regular CI. A missing baseline prints
           # "nothing to compare" and exits 0; only a malformed baseline (a
-          # broken contract, not a regression) fails here.
+          # broken contract, not performance drift) fails here.
           ./target/release/phoenix-perf report --capture target/perf/capture.json \
             > target/perf/headless-report.txt
           cat target/perf/headless-report.txt
@@ -572,13 +572,14 @@ jobs:
             echo 'no missing baselines to bootstrap'
           fi
 
-      # The warnings record: one GitHub issue per metric over its baseline, so a
-      # regression is tracked to fix later rather than lost in a green log. Push
+      # The warnings record: one GitHub issue per metric with adverse drift (or
+      # an incomparable measurement contract), so the finding is tracked rather
+      # than lost in a green log. Push
       # to main only (a fork PR has no token, and per-PR issues would be noise).
       # Deduped by a stable title and reopened if it had been closed. `report`
       # renders one line per finding as "<verdict> <metric> ...", so $1 is the
       # verdict and $2 the metric.
-      - name: File issues for perf regressions
+      - name: File issues for adverse perf drift
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
@@ -592,13 +593,21 @@ jobs:
             [ -f "$report" ] || continue
             awk '$1=="warn" || $1=="fail" || $1=="incomparable" {print $1" "$2}' "$report" \
             | while read -r verdict metric; do
-                title="perf: ${scenario} / ${metric} over baseline"
+                if [ "$verdict" = "incomparable" ]; then
+                  title="perf: ${scenario} / ${metric} measurement contract failure"
+                  finding="cannot be compared with"
+                  action="Restore the measurement contract, or deliberately amend the baseline if its unit or presence changed."
+                else
+                  title="perf: ${scenario} / ${metric} adverse drift"
+                  finding="has **${verdict}** adverse drift from"
+                  action="Fix the adverse drift, or if the new number is the intended budget move the baseline with \`phoenix-perf adopt\`."
+                fi
                 line=$(grep -F " ${metric} " "$report" | head -n1)
                 existing=$(gh issue list --state all --search "\"${title}\" in:title" \
                   --json number,title --jq ".[] | select(.title == \"${title}\") | .number" \
                   | head -n1)
-                body=$(printf '`%s` is **%s** against its committed baseline in scenario `%s`.\n\nSeen on `%s` (run %s). Regular CI is warnings-only during the move-fast demo phase; the demo deploy is what gates on this. Fix the regression, or if the new number is the intended budget move the baseline with `phoenix-perf adopt`.\n\n```\n%s\n```' \
-                  "$metric" "$verdict" "$scenario" "${GITHUB_SHA:-unknown}" "${GITHUB_RUN_ID:-local}" "$line")
+                body=$(printf '`%s` %s its committed baseline in scenario `%s`.\n\nSeen on `%s` (run %s). Regular CI is warnings-only during the move-fast demo phase; the demo deploy is what gates on this. %s\n\n```\n%s\n```' \
+                  "$metric" "$finding" "$scenario" "${GITHUB_SHA:-unknown}" "${GITHUB_RUN_ID:-local}" "$action" "$line")
                 if [ -n "$existing" ]; then
                   echo "updating issue #${existing}: ${title}"
                   gh issue reopen "$existing" 2>/dev/null || true
@@ -624,7 +633,7 @@ jobs:
               echo '```'
             done
             echo
-            echo 'Regular CI is warnings-only: any metric over its baseline is'
+            echo 'Regular CI is warnings-only: any metric with adverse baseline drift is'
             echo 'filed as a GitHub issue to fix later, and a scenario with no'
             echo 'baseline yet is bootstrapped and committed on main. The demo'
             echo 'deploy (`deploy-demo.yml`) is what gates on these budgets. To'

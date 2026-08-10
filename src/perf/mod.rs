@@ -23,11 +23,15 @@
 //! Values are benchmark evidence, not assertions. Nothing in the test suite
 //! asserts on a duration; the tests cover the pure machinery around them.
 //!
-//! # Recording a baseline (issue #905)
+//! # Recording a baseline (issue #905, revised for the move-fast demo phase)
 //!
-//! Baselines are recorded on the machine that compares against them. CI cannot
-//! commit, so the runner renders the baseline it *would* record and uploads it
-//! with the captures; a human adopts it into a reviewable diff:
+//! Baselines are recorded on the machine that compares against them, and the CI
+//! runner commits them: a scenario with no committed baseline yet is
+//! bootstrapped by the perf job, which records the missing file from its own
+//! capture and commits it on a push to `main` (with `[skip ci]`, so the
+//! baseline commit does not start another run). An *existing* baseline is never
+//! moved by CI — a baseline that changes is a budget decision, so it still
+//! moves only through a deliberate `adopt` that lands in a reviewable diff:
 //!
 //! ```text
 //! gh run download <run-id> -n perf-capture -D target/perf-artifact
@@ -40,46 +44,45 @@
 //! existing expectation keeps its statistic and tolerances and only its
 //! `expected` moves. See [`baseline`].
 //!
-//! # When measurement gates (issue #905, deliverable 3)
+//! # When measurement gates (issue #905, revised for the demo phase)
 //!
-//! **Decided:** a scenario's [`vellum_perf::Verdict::Fail`] becomes a build
-//! gate when, and only when, both of these are true of it:
+//! Whether a scenario's [`vellum_perf::Verdict::Fail`] *can* become a build
+//! gate honestly still turns on both of these being true of it:
 //!
 //! 1. **Its metrics are a function of the checkout, not of the host.** Bytes on
 //!    disk, LOD ladder depth, triangle counts and texture dimensions are the
 //!    same on every machine that reads the same commit, so a drift is a real
 //!    change to what a player downloads or what a GPU is handed. Wall-clock
-//!    metrics are not: a shared runner's neighbours move them, and a gate that
-//!    fires on a noisy neighbour gets disabled rather than obeyed.
+//!    metrics are not: a shared runner's neighbours move them.
 //! 2. **Its baseline was recorded by a machine whose measurement the comparing
 //!    runner reproduces.** For a metric that passes (1) that is every machine,
 //!    and the runner's own captures are the proof. For a wall-clock metric it
-//!    is only the runner itself — otherwise a red build means "measured
-//!    somewhere else", which is a provenance bug wearing a regression's
-//!    clothes.
+//!    is only a machine of the same class the baseline was recorded on.
 //!
-//! Applying that rule to the four scenarios as they stand:
+//! But *where* gating happens has moved. During the move-fast demo phase:
 //!
-//! | scenario | gates | why |
-//! |---|---|---|
-//! | `assets` | **yes** | machine-independent by construction, and the runner's own capture of e87c871 compares at +0.0% drift on every metric |
-//! | `assets-mesh` | not yet | machine-independent in theory, but recorded on a developer desktop and never yet measured by a runner. It gates the moment one has recorded it — adopt the baseline the perf job uploads, then add `--gate` to its step |
-//! | `headless-default` | no | wall-clock on a shared runner |
-//! | `browser-automation` | no | wall-clock on a shared runner, and under WebDriver it is not even measuring the render path |
+//! - **The regular CI perf job (`.github/workflows/ci.yml`) gates on nothing.**
+//!   Every scenario is warnings-first there; a capture over its baseline is
+//!   filed as a GitHub issue to fix later, never a red build and never a silent
+//!   re-record. The job stays out of `deploy`'s `needs`, as before.
+//! - **The manual demo deploy (`.github/workflows/deploy-demo.yml`) is the
+//!   gate.** It runs `phoenix-perf report --gate` on all four scenarios —
+//!   including the wall-clock ones — and a fail blocks the demo deploy before
+//!   it ships. A demo deploy is human-dispatched, so a wall-clock gate that
+//!   fires on runner noise costs a re-dispatch rather than a disabled gate;
+//!   that is the trade the demo accepts to ship a build whose budgets were
+//!   actually checked. Its browser and headless captures are taken the same way
+//!   CI takes them (native release binary; the smoke perf spec under WebDriver)
+//!   so the comparison against the runner-recorded baseline stays valid.
 //!
-//! The two timing scenarios are reviewed again post-demo, against the spread
-//! of a run of green captures rather than against a hope: the question is
-//! whether a runner's own p95 varies less than the tolerance, and nobody has
-//! that number yet. `Verdict::Incomparable` gates wherever `Fail` does — a
-//! metric that vanished from a capture is a broken contract, and passing it is
-//! how a budget stops being enforced without anyone deciding to stop enforcing
-//! it.
+//! `Verdict::Incomparable` gates wherever `Fail` does — a metric that vanished
+//! from a capture is a broken contract, and passing it is how a budget stops
+//! being enforced without anyone deciding to stop enforcing it. `Warn` never
+//! gates; the whole tolerance design assumes a warning is read — now, filed —
+//! rather than obeyed.
 //!
 //! The mechanism is `phoenix-perf report --gate`, which is off unless asked
-//! for; `.github/workflows/ci.yml` says which step asks. The `perf` job stays
-//! out of `deploy`'s `needs` even so: a gated asset regression turns the run
-//! red — it has to be fixed rather than routed around — but a download-size
-//! budget is not a reason to withhold a working build.
+//! for; `deploy-demo.yml` is the workflow that asks.
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod assets;

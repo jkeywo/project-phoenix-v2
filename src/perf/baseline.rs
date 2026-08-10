@@ -6,14 +6,17 @@
 //! desktop and compared on a GitHub runner is not a budget, it is a warning
 //! generator.
 //!
-//! CI cannot commit, so the loop is deliberately two-sided:
+//! There are two ways a baseline is recorded, and the split is deliberate:
 //!
-//! 1. The runner renders the baseline it *would* record from its own captures
-//!    and uploads it in the `perf-capture` artifact. That file is the runner's
-//!    own opinion, produced by the same code path that compares.
-//! 2. A human downloads the artifact and runs `phoenix-perf adopt`, which
-//!    rewrites `perf/baselines/*.ron` from it. The result lands in a diff
-//!    someone reads, which is the whole reason baselines are committed files.
+//! 1. **A missing baseline is bootstrapped by CI.** A scenario with no
+//!    committed file yet has the runner record one from its own capture and
+//!    commit it on a push to `main` (with `[skip ci]`). The file is then the
+//!    runner's own opinion, produced by the same code path that compares.
+//! 2. **An existing baseline moves only by a deliberate `adopt`.** Moving a
+//!    budget is a decision, so CI never rewrites an existing file — a human
+//!    adopts from the `perf-capture` artifact, and the result lands in a diff
+//!    someone reads (a capture over an unchanged baseline is instead filed as a
+//!    GitHub issue to fix later; see `.github/workflows/ci.yml`).
 //!
 //! ```text
 //! gh run download <run-id> -n perf-capture -D target/perf-artifact

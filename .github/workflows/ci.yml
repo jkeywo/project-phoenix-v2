@@ -419,38 +419,35 @@ jobs:
             target/release/phoenix-perf
           retention-days: 1
 
-  # ── Performance measurement (issue #868; gating decided in #905) ─────────────
+  # ── Performance measurement (issue #868; model revised for the demo phase) ───
   #
   # Runs after smoke so the browser capture that job produces can be compared
   # here, where the perf tooling lives. The comparison has exactly one
   # implementation — `phoenix-perf report` — rather than a second opinion
   # written in whatever language each job happens to have.
   #
-  # WHAT GATES (issue #905, and src/perf/mod.rs carries the rule):
+  # WARNINGS-ONLY (src/perf/mod.rs carries the rule). This job gates on NOTHING:
+  # every scenario is reported, and any metric over its baseline is filed as a
+  # GitHub issue to fix later (see the "File issues" step). Enforcement lives in
+  # the manual demo deploy (deploy-demo.yml), which runs `report --gate` on all
+  # four scenarios and blocks the demo build on a regression. Moving fast in this
+  # phase means a perf regression is tracked, not a reason to redden main.
   #
-  #   assets       GATES. Bytes on disk and counts in authored TOML are a
-  #                function of the checkout, not of this runner, and the
-  #                runner's own capture compares at +0.0% drift. The last step
-  #                below re-runs its report with --gate, which exits 3.
-  #   assets-mesh  Reports. Machine-independent too, but its baseline was
-  #                recorded on a developer desktop; it gates once a runner has
-  #                recorded it — adopt the rendered baseline this job uploads,
-  #                then add --gate to the same step.
-  #   headless-default, browser-automation
-  #                Report only. Wall-clock on a shared runner is moved by
-  #                neighbours, and a gate that fires on a neighbour gets
-  #                disabled rather than obeyed. Reviewed again post-demo.
+  # CI COMMITS MISSING BASELINES. A scenario with no committed baseline yet is
+  # bootstrapped here: on a push to main the job adopts it from its own capture
+  # and commits it with [skip ci] (so the commit starts no new run). An existing
+  # baseline is NEVER moved by CI — that stays a deliberate `adopt` in a diff a
+  # human reads (see src/perf/baseline.rs).
   #
-  # Still not in `deploy`'s `needs`: a gated asset regression turns this run
-  # red, which is the point — it must be fixed rather than routed around — but
-  # it does not hold up a deploy of the page.
-  #
-  # The job also renders the baselines it WOULD record from its own captures
-  # and uploads them, because CI cannot commit. `phoenix-perf adopt` turns them
-  # into a reviewable diff on a developer's machine — see src/perf/baseline.rs.
+  # Still not in `deploy`'s `needs`.
   perf:
     needs: [test, smoke, native-build]
     runs-on: ubuntu-latest
+    # contents: write to commit a bootstrapped baseline; issues: write to file
+    # the regression record. Both use the default GITHUB_TOKEN.
+    permissions:
+      contents: write
+      issues: write
 
     steps:
       - name: Checkout
@@ -484,13 +481,21 @@ jobs:
             --sim-seconds 60 \
             --report target/perf/run-report.json \
             --perf-capture target/perf/capture.json \
-            2> target/perf/headless-report.txt
+            2> target/perf/headless-run.txt
+          cat target/perf/headless-run.txt
+          # Compare the capture against its committed baseline so a timing drift
+          # is reported (and filed as an issue) like every other scenario.
+          # Warnings-only — no --gate in regular CI. A missing baseline prints
+          # "nothing to compare" and exits 0; only a malformed baseline (a
+          # broken contract, not a regression) fails here.
+          ./target/release/phoenix-perf report --capture target/perf/capture.json \
+            > target/perf/headless-report.txt
           cat target/perf/headless-report.txt
 
       # No simulation runs: this reads bytes on disk and counts in authored
-      # TOML, so it is machine-independent and its tolerances are tight.
-      # Reported here and GATED in the last step, so a failure still leaves a
-      # full artifact behind to diagnose it from.
+      # TOML, so it is machine-independent and its tolerances are tight. Reported
+      # here (warnings-only); a drift is filed as an issue and enforced by the
+      # demo deploy, not by this job.
       - name: Measure asset budgets
         run: |
           ./target/release/phoenix-perf assets --capture target/perf/assets.json
@@ -533,24 +538,78 @@ jobs:
               > target/perf/browser-report.txt
           fi
 
-      # A baseline belongs on the machine that compares against it, and this
-      # runner cannot commit — so it renders the baselines it would record and
-      # ships them in the artifact. Seeded from the committed files first, so
-      # every rendered baseline carries the prose and the tolerances a human
-      # wrote; only the measured numbers move. See src/perf/baseline.rs for the
-      # adoption command that turns these into a diff.
-      # continue-on-error, because this is a convenience for a human, not a
-      # gate: a run where no capture survived should fail on the measurement
-      # that died, not on the step that had nothing left to record.
-      - name: Render the baselines this runner would record
-        if: always()
+      # Bootstrap: commit a baseline for any scenario that has none yet, from
+      # this runner's own capture. Push-to-main only, and it never touches an
+      # existing baseline — an existing budget moves only through a deliberate
+      # `adopt` in a human-read diff. The commit carries [skip ci] so it starts
+      # no new run; continue-on-error so a race on main never reddens the build.
+      - name: Commit any missing baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         run: |
-          mkdir -p target/perf/baselines
-          cp perf/baselines/*.ron target/perf/baselines/ 2>/dev/null || true
-          ./target/release/phoenix-perf adopt \
-            --artifact target/perf \
-            --out-dir target/perf/baselines
+          set -uo pipefail
+          committed=0
+          for capture in target/perf/capture.json target/perf/assets.json \
+                         target/perf/mesh.json target/perf/browser-capture.json; do
+            [ -f "$capture" ] || continue
+            scenario=$(jq -r '.scenario // empty' "$capture")
+            [ -n "$scenario" ] || continue
+            target="perf/baselines/${scenario}.ron"
+            if [ ! -f "$target" ]; then
+              echo "bootstrapping missing baseline: $target"
+              ./target/release/phoenix-perf adopt --capture "$capture" --out "$target"
+              git add "$target"
+              committed=1
+            fi
+          done
+          if [ "$committed" -eq 1 ]; then
+            git config user.name  'github-actions[bot]'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git commit -m 'chore(perf): bootstrap missing baseline(s) [skip ci]'
+            git pull --rebase origin main
+            git push
+          else
+            echo 'no missing baselines to bootstrap'
+          fi
+
+      # The warnings record: one GitHub issue per metric over its baseline, so a
+      # regression is tracked to fix later rather than lost in a green log. Push
+      # to main only (a fork PR has no token, and per-PR issues would be noise).
+      # Deduped by a stable title and reopened if it had been closed. `report`
+      # renders one line per finding as "<verdict> <metric> ...", so $1 is the
+      # verdict and $2 the metric.
+      - name: File issues for perf regressions
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          for pair in "headless-default:headless" "assets:assets" \
+                      "assets-mesh:mesh" "browser-automation:browser"; do
+            scenario="${pair%%:*}"
+            report="target/perf/${pair##*:}-report.txt"
+            [ -f "$report" ] || continue
+            awk '$1=="warn" || $1=="fail" || $1=="incomparable" {print $1" "$2}' "$report" \
+            | while read -r verdict metric; do
+                title="perf: ${scenario} / ${metric} over baseline"
+                line=$(grep -F " ${metric} " "$report" | head -n1)
+                existing=$(gh issue list --state all --search "\"${title}\" in:title" \
+                  --json number,title --jq ".[] | select(.title == \"${title}\") | .number" \
+                  | head -n1)
+                body=$(printf '`%s` is **%s** against its committed baseline in scenario `%s`.\n\nSeen on `%s` (run %s). Regular CI is warnings-only during the move-fast demo phase; the demo deploy is what gates on this. Fix the regression, or if the new number is the intended budget move the baseline with `phoenix-perf adopt`.\n\n```\n%s\n```' \
+                  "$metric" "$verdict" "$scenario" "${GITHUB_SHA:-unknown}" "${GITHUB_RUN_ID:-local}" "$line")
+                if [ -n "$existing" ]; then
+                  echo "updating issue #${existing}: ${title}"
+                  gh issue reopen "$existing" 2>/dev/null || true
+                  gh issue comment "$existing" --body "$body" || true
+                else
+                  echo "opening issue: ${title}"
+                  gh issue create --title "$title" --body "$body" --label perf 2>/dev/null \
+                    || gh issue create --title "$title" --body "$body"
+                fi
+              done
+          done
 
       - name: Summarise
         if: always()
@@ -565,9 +624,12 @@ jobs:
               echo '```'
             done
             echo
-            echo 'Baselines this runner would record are in the `perf-capture`'
-            echo 'artifact under `baselines/`; adopt them with the command in'
-            echo '`src/perf/baseline.rs`.'
+            echo 'Regular CI is warnings-only: any metric over its baseline is'
+            echo 'filed as a GitHub issue to fix later, and a scenario with no'
+            echo 'baseline yet is bootstrapped and committed on main. The demo'
+            echo 'deploy (`deploy-demo.yml`) is what gates on these budgets. To'
+            echo 'move an existing baseline deliberately, `adopt` from the'
+            echo '`perf-capture` artifact — see `src/perf/baseline.rs`.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload captures
@@ -577,17 +639,6 @@ jobs:
           name: perf-capture
           path: target/perf/
           retention-days: 14
-
-      # Last, so a red gate still leaves the full artifact and summary behind.
-      # `assets` is the one scenario that has earned this: machine-independent
-      # by construction, and this runner reproduces the committed numbers
-      # exactly. `phoenix-perf report --gate` exits 3 on a fail or on an
-      # incomparable metric — a budget that could not be checked is not a
-      # budget that passed.
-      - name: Gate on the machine-independent asset budgets
-        run: |
-          ./target/release/phoenix-perf report \
-            --capture target/perf/assets.json --gate > /dev/null
 
   # ── Demo balance regression report (issue #915, non-gating) ───────────────────
   #

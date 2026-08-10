@@ -18,7 +18,114 @@ on:
         default: 'https://phoenix-turn-credentials-demo.project-phoenix.workers.dev'
 
 jobs:
+  # ── Perf gate: the demo takes perf seriously ──────────────────────────────
+  #
+  # Unlike regular CI (ci.yml, warnings-only), the demo build must not ship over
+  # budget. This job measures all four scenarios and runs `phoenix-perf report
+  # --gate` on each: a fail or an incomparable metric exits 3 and blocks the
+  # deploy job below (which `needs` it). The wall-clock scenarios (headless,
+  # browser) gate too — a demo deploy is human-dispatched, so a rare block on
+  # runner noise just means re-dispatching the workflow.
+  #
+  # Captures are taken the same way ci.yml takes them (native release binary;
+  # the smoke perf spec under WebDriver) so the comparison against the
+  # runner-recorded baseline stays valid. The dist built here for the browser
+  # capture is a PLAIN (non-demo) build on purpose: `browser.frame` is the ECS
+  # schedule with the render stack skipped under WebDriver, which the demo cfg
+  # does not change, and the committed browser-automation baseline was recorded
+  # from exactly this build.
+  perf-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@582a61206d39c13d051d2e73bf463bb5d167d484
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      - name: Build headless runner and perf tool
+        run: |
+          cargo build --release --features headless --bin phoenix-headless
+          cargo build --release --features perf --bin phoenix-perf
+
+      # Machine-independent budgets: bytes/LOD coverage and the mesh interior.
+      - name: Gate on asset budgets
+        run: |
+          mkdir -p target/perf
+          ./target/release/phoenix-perf assets --capture target/perf/assets.json
+          ./target/release/phoenix-perf report --capture target/perf/assets.json --gate
+
+      - name: Gate on the mesh interior
+        run: |
+          ./target/release/phoenix-perf mesh --capture target/perf/mesh.json
+          ./target/release/phoenix-perf report --capture target/perf/mesh.json --gate
+
+      - name: Gate on the headless timing
+        run: |
+          ./target/release/phoenix-headless \
+            --sim-seconds 60 \
+            --report target/perf/run-report.json \
+            --perf-capture target/perf/capture.json
+          ./target/release/phoenix-perf report --capture target/perf/capture.json --gate
+
+      # Browser timing needs a served dist and Playwright, mirroring ci.yml's
+      # `build` + `smoke` jobs. Plain build — see the job header for why.
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+        with:
+          version: v0.21.14
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.120
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Build server page (WASM + JS)
+        run: TRUNK_BUILD_RELEASE=true trunk build --release
+
+      - name: Build client page (pure JS)
+        run: node scripts/build-client.mjs
+
+      - name: Install smoke-test dependencies
+        working-directory: tests/smoke
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/smoke/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        working-directory: tests/smoke
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture browser timing
+        working-directory: tests/smoke
+        run: npx playwright test perf-browser.spec.js
+
+      - name: Gate on the browser timing
+        run: |
+          ./target/release/phoenix-perf report \
+            --capture target/perf/browser-capture.json --gate
+
   deploy-demo:
+    # The perf gate must pass before anything ships.
+    needs: [perf-gate]
     runs-on: ubuntu-latest
 
     steps:

@@ -19,14 +19,17 @@
 //! defensively before constructing the engine — cheap (a `Once`), and it means
 //! even a bare unit test that builds only one engine gets a seeded process.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rhai::{Engine, Map, AST};
 
-use crate::world::dispatch::ActionCmd;
 use crate::world::flags::FlagStore;
 use crate::world::script::effects::{register_effects, EffectSink};
 use crate::world::script::flags::{register_flags, Flags};
+use crate::world::script::schedule::{
+    register_scheduling, CallEffects, SchedClock, ScheduleSink, TickBudget,
+};
 use crate::world::script::{init_hashing_seed, MAX_OPS_PER_CALL};
 
 /// One handler registration collected at load time.
@@ -123,12 +126,21 @@ pub fn runtime_engine() -> Engine {
     engine.set_max_operations(MAX_OPS_PER_CALL);
     register_flags(&mut engine);
     register_effects(&mut engine);
+    register_scheduling(&mut engine);
     engine
 }
 
 /// The runtime script host: owns the runtime engine and runs retained functions.
+///
+/// The engine carries an `on_progress` hook that records each call's operation
+/// high-water mark into [`ops_counter`](Self::ops_counter), so the host can
+/// charge it to a per-tick [`TickBudget`] — the operation-budget half of the M3
+/// safety limits.
 pub struct RuntimeHost {
     engine: Engine,
+    /// High-water operation count of the most recent call, written every
+    /// operation by the engine's `on_progress` hook. Read once per call.
+    ops_counter: Arc<AtomicU64>,
 }
 
 impl Default for RuntimeHost {
@@ -138,10 +150,22 @@ impl Default for RuntimeHost {
 }
 
 impl RuntimeHost {
-    /// Build a host on a fresh runtime engine.
+    /// Build a host on a fresh runtime engine, wiring the operation counter.
     pub fn new() -> Self {
+        let ops_counter = Arc::new(AtomicU64::new(0));
+        let mut engine = runtime_engine();
+        let counter = ops_counter.clone();
+        // Count operations for the per-tick budget. Always returns `None` — it
+        // never aborts a call; the fixed per-call cap is enforced independently
+        // by `set_max_operations` (see `runtime_engine`). It only records the
+        // running op count so the caller can charge the call to a `TickBudget`.
+        engine.on_progress(move |ops| {
+            counter.store(ops, Ordering::Relaxed);
+            None
+        });
         Self {
-            engine: runtime_engine(),
+            engine,
+            ops_counter,
         }
     }
 
@@ -151,30 +175,50 @@ impl RuntimeHost {
         &self.engine
     }
 
-    /// Call a retained function, returning the `ActionCmd`s it produced —
-    /// effect-buffer pushes followed by the flag overlay's drained writes.
+    /// Run a retained function under a per-tick `budget`, returning its immediate
+    /// effects and the deferred work it scheduled, stamped against `clock`.
     ///
-    /// The context map is `extra` with the `flags` and `effects` handles
-    /// inserted; a script reads it as its single parameter (`fn on_x(ctx)`).
-    /// `base_flags` is the live store the flag overlay snapshots.
+    /// The context map is `extra` with the `flags`, `effects` and `schedule`
+    /// handles inserted; a script reads it as its single parameter
+    /// (`fn on_x(ctx)`). `base_flags` is the live store the flag overlay snapshots.
+    ///
+    /// The `budget` is threaded across every call in a tick (the M0 aggregate
+    /// caps): a call refused by [`admit_call`](TickBudget::admit_call) — the tick
+    /// is already tripped, or the call cap is reached — is **dropped**, returning
+    /// empty effects and scheduling nothing, so the tick's remaining script work
+    /// is deterministically skipped. A completed call's operations are charged to
+    /// the budget, which may trip it for the *next* call.
     ///
     /// This is the failure boundary (settled decision 10). On a script error it
     /// **panics in dev** (`debug_assertions`) and, in release, discards this
-    /// call's effects whole, logs, and returns an empty vector so the game
+    /// call's effects whole, logs, and returns empty effects so the game
     /// continues. Callers that need to inspect the error use [`try_call`].
     ///
     /// [`try_call`]: RuntimeHost::try_call
     pub fn call(
         &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
         ast: &AST,
         path: &str,
         fn_name: &str,
         base_flags: &FlagStore,
         extra: Map,
-    ) -> Vec<ActionCmd> {
-        match self.try_call(ast, path, fn_name, base_flags, extra) {
-            Ok(cmds) => cmds,
+    ) -> CallEffects {
+        if !budget.admit_call() {
+            // Dropped: the call cap is reached or the tick has already tripped.
+            return CallEffects::default();
+        }
+        match self.try_call(clock, ast, path, fn_name, base_flags, extra) {
+            Ok((effects, ops)) => {
+                budget.charge_ops(ops);
+                effects
+            }
             Err(err) => {
+                // Charge the operations the failed call still consumed, so a
+                // runaway that trips the per-call cap also counts against the
+                // tick (and does so identically on every peer).
+                budget.charge_ops(self.ops_counter.load(Ordering::Relaxed));
                 if cfg!(debug_assertions) {
                     panic!("{err}");
                 }
@@ -185,79 +229,367 @@ impl RuntimeHost {
                     target: crate::logging::LogCat::World.target(),
                     "{err}; discarding this call's effects"
                 );
-                Vec::new()
+                CallEffects::default()
             }
         }
     }
 
-    /// Like [`call`](RuntimeHost::call) but returns the error instead of
-    /// applying the panic/discard policy. On error, the call's effects are
-    /// dropped (never drained), so this never returns a partial buffer.
+    /// Like [`call`](RuntimeHost::call) but without the budget or the
+    /// panic/discard policy: returns the error, and — on success — the call's
+    /// effects plus the operation count it consumed (for the caller to charge to
+    /// a budget). On error the buffers are dropped whole (never returned).
     pub fn try_call(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        base_flags: &FlagStore,
+        extra: Map,
+    ) -> Result<(CallEffects, u64), vellum_script::CallError> {
+        let sink = EffectSink::new();
+        // Flags share the one ordered command buffer, so a flag write is emitted
+        // in authored order, interleaved with effects (issue #981 hazard 2).
+        let flags = Flags::new(base_flags, sink.clone());
+        let schedule = ScheduleSink::new();
+
+        let mut ctx = extra;
+        ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
+        ctx.insert("flags".into(), rhai::Dynamic::from(flags));
+        ctx.insert("schedule".into(), rhai::Dynamic::from(schedule.clone()));
+
+        // Reset the op counter, then call. On error we return before draining
+        // anything, so the effect buffer and the schedule buffer are dropped
+        // whole. The returned `Dynamic` is discarded: effects are collected
+        // imperatively via the buffers, not from a return value.
+        self.ops_counter.store(0, Ordering::Relaxed);
+        let _ = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
+        let ops = self.ops_counter.load(Ordering::Relaxed);
+
+        // `sink` already carries effects and flag writes in authored order.
+        let commands = sink.take();
+        let (delayed, callbacks) = schedule.drain(clock, path);
+        Ok((
+            CallEffects {
+                commands,
+                delayed,
+                callbacks,
+            },
+            ops,
+        ))
+    }
+
+    /// Convenience for callers wanting only a call's immediate effects: a fresh
+    /// per-tick budget and a zero clock. Applies the failure policy. Any deferred
+    /// work the call scheduled is discarded, so this is for effect-only handlers
+    /// and simple tests.
+    pub fn call_immediate(
         &self,
         ast: &AST,
         path: &str,
         fn_name: &str,
         base_flags: &FlagStore,
         extra: Map,
-    ) -> Result<Vec<ActionCmd>, vellum_script::CallError> {
-        let sink = EffectSink::new();
-        let flags = Flags::new(base_flags);
-
-        let mut ctx = extra;
-        ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
-        ctx.insert("flags".into(), rhai::Dynamic::from(flags.clone()));
-
-        // On error we return before draining anything, so both the effect
-        // buffer and the flag overlay are dropped whole. The returned `Dynamic`
-        // is discarded: effects are collected imperatively via the buffer, not
-        // from a return value (unlike last-aeon's effects-as-return model).
-        let _ = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
-
-        let mut cmds = sink.take();
-        cmds.extend(flags.drain());
-        Ok(cmds)
+    ) -> Vec<crate::world::dispatch::ActionCmd> {
+        let mut budget = TickBudget::new();
+        self.call(
+            &mut budget,
+            &SchedClock::ZERO,
+            ast,
+            path,
+            fn_name,
+            base_flags,
+            extra,
+        )
+        .commands
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::dispatch::FlagMutation;
+    use crate::world::config::TriggerAction;
+    use crate::world::dispatch::{ActionCmd, FlagMutation};
+
+    /// A clock five minutes and 300 ticks in, at 60 Hz — enough offset that a
+    /// stamped fire time is visibly `now + delay`.
+    fn clock() -> SchedClock {
+        SchedClock {
+            tick: 300,
+            elapsed_secs: 5.0,
+            tick_hz: 60.0,
+        }
+    }
 
     #[test]
     fn runtime_engine_builds_and_runs_a_trivial_fn() {
         let host = RuntimeHost::new();
         let ast = host.engine().compile("fn noop(ctx) { }").expect("compiles");
-        let cmds = host.call(&ast, "t.rhai", "noop", &FlagStore::new(), Map::new());
+        let cmds = host.call_immediate(&ast, "t.rhai", "noop", &FlagStore::new(), Map::new());
         assert!(cmds.is_empty());
     }
 
     #[test]
-    fn call_drains_effects_then_flag_writes() {
+    fn effects_and_flag_writes_emit_in_authored_order() {
+        // Issue #981 hazard 2: a flag write authored BEFORE an effect must emit
+        // before it, not after every effect. The M1 host appended all flag
+        // writes last, so this interleaving would have failed.
         let host = RuntimeHost::new();
         let ast = host
             .engine()
             .compile(
                 r#"fn on_x(ctx) {
+                    ctx.flags.armed = 1;
                     ctx.effects.complete_objective("obj1");
-                    ctx.flags.score += 50;
+                    ctx.flags.increment("score", 50);
+                    ctx.effects.fail_objective("obj2");
                 }"#,
             )
             .expect("compiles");
-        let cmds = host.call(&ast, "t.rhai", "on_x", &FlagStore::new(), Map::new());
+        let cmds = host.call_immediate(&ast, "t.rhai", "on_x", &FlagStore::new(), Map::new());
         assert_eq!(
             cmds,
             vec![
+                ActionCmd::MutateFlag {
+                    target_layer: None,
+                    name: "armed".to_string(),
+                    mutation: FlagMutation::SetValue(1),
+                },
                 ActionCmd::CompleteObjective {
                     id: "obj1".to_string()
                 },
                 ActionCmd::MutateFlag {
                     target_layer: None,
                     name: "score".to_string(),
-                    mutation: FlagMutation::SetValue(50),
+                    mutation: FlagMutation::Increment(50),
+                },
+                ActionCmd::FailObjective {
+                    id: "obj2".to_string()
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn in_seconds_stamps_a_delayed_effect() {
+        // `in_seconds(n).<verb>(…)` buffers a delayed effect that surfaces as a
+        // `DelayedAction` ready for `pending_delayed_actions`, with the delay
+        // converted to elapsed seconds at the host boundary.
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(
+                r#"fn on_x(ctx) {
+                    ctx.effects.complete_objective("now");
+                    ctx.schedule.in_seconds(10).complete_objective("later");
+                }"#,
+            )
+            .expect("compiles");
+        let mut budget = TickBudget::new();
+        let clk = clock();
+        let effects = host.call(
+            &mut budget,
+            &clk,
+            &ast,
+            "t.rhai",
+            "on_x",
+            &FlagStore::new(),
+            Map::new(),
+        );
+        // The immediate effect applies now; the delayed one is deferred.
+        assert_eq!(
+            effects.commands,
+            vec![ActionCmd::CompleteObjective {
+                id: "now".to_string()
+            }]
+        );
+        assert_eq!(effects.delayed.len(), 1);
+        let d = &effects.delayed[0];
+        assert_eq!(
+            d.action,
+            TriggerAction::CompleteObjective {
+                id: "later".to_string()
+            }
+        );
+        assert_eq!(d.fire_at_elapsed, 15.0, "elapsed 5s + 10s delay");
+        assert!(d.origin_layer.is_none());
+        assert!(effects.callbacks.is_empty());
+    }
+
+    #[test]
+    fn after_schedules_a_named_callback_from_an_anonymous_closure() {
+        // `after(n, |ctx| …)` records the closure's generated `anon$…` name as a
+        // serialisable `(fire_tick, script_path, fn_name)` callback, and that
+        // name resolves back to a callable function on the same AST.
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(
+                r#"fn on_x(ctx) {
+                    ctx.schedule.after(5, |ctx| { ctx.effects.complete_objective("deferred"); });
+                }"#,
+            )
+            .expect("compiles");
+        let mut budget = TickBudget::new();
+        let clk = clock();
+        let effects = host.call(
+            &mut budget,
+            &clk,
+            &ast,
+            "t.rhai",
+            "on_x",
+            &FlagStore::new(),
+            Map::new(),
+        );
+        assert_eq!(effects.callbacks.len(), 1);
+        let cb = &effects.callbacks[0];
+        assert_eq!(cb.fire_tick, 300 + 5 * 60, "tick 300 + 5s at 60 Hz");
+        assert_eq!(cb.script_path, "t.rhai");
+        assert!(
+            cb.fn_name.starts_with("anon$"),
+            "an anonymous closure lifts to a generated name, got '{}'",
+            cb.fn_name
+        );
+
+        // The lifted name is callable: invoking it produces the deferred effect.
+        let resolved =
+            host.call_immediate(&ast, "t.rhai", &cb.fn_name, &FlagStore::new(), Map::new());
+        assert_eq!(
+            resolved,
+            vec![ActionCmd::CompleteObjective {
+                id: "deferred".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn anonymous_closure_name_is_stable_across_hosts() {
+        // The fixed hashing seed makes the generated name reproducible: two
+        // independent hosts schedule the identical callback name (the basis for
+        // serialising deferred work).
+        let source = r#"fn on_x(ctx) {
+            ctx.schedule.after(5, |ctx| { ctx.effects.complete_objective("deferred"); });
+        }"#;
+        let schedule_once = || {
+            let host = RuntimeHost::new();
+            let ast = host.engine().compile(source).expect("compiles");
+            let mut budget = TickBudget::new();
+            host.call(
+                &mut budget,
+                &clock(),
+                &ast,
+                "t.rhai",
+                "on_x",
+                &FlagStore::new(),
+                Map::new(),
+            )
+            .callbacks
+        };
+        assert_eq!(
+            schedule_once(),
+            schedule_once(),
+            "same seed + same script → identical schedule"
+        );
+    }
+
+    #[test]
+    fn schedule_is_deterministic_across_runs() {
+        // Same seed + same script → identical immediate, delayed and callback
+        // schedules on two independent runs.
+        let source = r#"fn on_x(ctx) {
+            ctx.effects.complete_objective("now");
+            ctx.schedule.in_seconds(3).fail_objective("soon");
+            ctx.schedule.after(7, |ctx| { ctx.effects.reset_trigger("t"); });
+        }"#;
+        let run = || {
+            let host = RuntimeHost::new();
+            let ast = host.engine().compile(source).expect("compiles");
+            let mut budget = TickBudget::new();
+            let e = host.call(
+                &mut budget,
+                &clock(),
+                &ast,
+                "t.rhai",
+                "on_x",
+                &FlagStore::new(),
+                Map::new(),
+            );
+            // Reduce to comparable, `PartialEq` parts (DelayedAction is not Eq).
+            let delayed: Vec<(TriggerAction, f32)> = e
+                .delayed
+                .iter()
+                .map(|d| (d.action.clone(), d.fire_at_elapsed))
+                .collect();
+            (e.commands, delayed, e.callbacks)
+        };
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn budget_drops_calls_once_the_call_cap_trips() {
+        // A tripped budget drops a call whole: no effects, nothing scheduled.
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(r#"fn on_x(ctx) { ctx.effects.complete_objective("x"); }"#)
+            .expect("compiles");
+        let mut budget = TickBudget::new();
+        // Exhaust the call cap.
+        for _ in 0..crate::world::script::MAX_CALLS_PER_TICK {
+            budget.admit_call();
+        }
+        assert!(!budget.tripped());
+        let effects = host.call(
+            &mut budget,
+            &SchedClock::ZERO,
+            &ast,
+            "t.rhai",
+            "on_x",
+            &FlagStore::new(),
+            Map::new(),
+        );
+        assert!(
+            effects.commands.is_empty()
+                && effects.delayed.is_empty()
+                && effects.callbacks.is_empty(),
+            "a call over the cap is dropped whole"
+        );
+        assert!(budget.tripped());
+    }
+
+    #[test]
+    fn budget_charges_operations_across_calls() {
+        // Each real call charges a positive, deterministic op count to the tick
+        // budget, so a busy tick converges toward the aggregate.
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(r#"fn on_x(ctx) { ctx.effects.complete_objective("x"); }"#)
+            .expect("compiles");
+        let mut budget = TickBudget::new();
+        host.call(
+            &mut budget,
+            &SchedClock::ZERO,
+            &ast,
+            "t.rhai",
+            "on_x",
+            &FlagStore::new(),
+            Map::new(),
+        );
+        let after_one = budget.ops_used();
+        assert!(after_one > 0, "a real call charges operations");
+        host.call(
+            &mut budget,
+            &SchedClock::ZERO,
+            &ast,
+            "t.rhai",
+            "on_x",
+            &FlagStore::new(),
+            Map::new(),
+        );
+        assert!(
+            budget.ops_used() > after_one,
+            "a second call adds to the tick aggregate"
         );
     }
 
@@ -270,7 +602,14 @@ mod tests {
             .compile("fn boom(ctx) { let i = 0; loop { i += 1; } }")
             .expect("compiles");
         let err = host
-            .try_call(&ast, "scenario.rhai", "boom", &FlagStore::new(), Map::new())
+            .try_call(
+                &SchedClock::ZERO,
+                &ast,
+                "scenario.rhai",
+                "boom",
+                &FlagStore::new(),
+                Map::new(),
+            )
             .expect_err("a runaway must be refused");
         // The failure names the file (vellum's `CallError::Runtime`).
         assert!(err.to_string().contains("scenario.rhai"), "{err}");
@@ -291,7 +630,14 @@ mod tests {
             )
             .expect("compiles");
         assert!(host
-            .try_call(&ast, "t.rhai", "boom", &FlagStore::new(), Map::new())
+            .try_call(
+                &SchedClock::ZERO,
+                &ast,
+                "t.rhai",
+                "boom",
+                &FlagStore::new(),
+                Map::new()
+            )
             .is_err());
     }
 
@@ -305,7 +651,7 @@ mod tests {
             .engine()
             .compile("fn boom(ctx) { let i = 0; loop { i += 1; } }")
             .expect("compiles");
-        let _ = host.call(&ast, "t.rhai", "boom", &FlagStore::new(), Map::new());
+        let _ = host.call_immediate(&ast, "t.rhai", "boom", &FlagStore::new(), Map::new());
     }
 
     #[test]

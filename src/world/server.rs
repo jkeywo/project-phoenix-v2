@@ -2767,6 +2767,85 @@ pub(crate) mod tests {
         );
     }
 
+    /// Issue #981 (Rhai M3): a scripted `in_seconds(n).<verb>(…)` delayed effect
+    /// routes through the EXISTING `tick_delayed_actions` queue — the builder
+    /// hands the host a `DelayedAction` (the same struct a TOML `action_delays`
+    /// entry produces), and once on `pending_delayed_actions` it dispatches
+    /// exactly as a declaratively-delayed action does. No second scheduler.
+    #[test]
+    fn scripted_in_seconds_effect_routes_through_tick_delayed_actions() {
+        use crate::world::script::engine::RuntimeHost;
+        use crate::world::script::schedule::{SchedClock, TickBudget};
+        use rhai::Map;
+
+        // Run a handler that schedules a delayed `complete_objective`, and collect
+        // the `DelayedAction`s it produced.
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(
+                r#"fn on_x(ctx) {
+                    ctx.schedule.in_seconds(0).complete_objective("aphelion_secured");
+                }"#,
+            )
+            .expect("compiles");
+        let mut budget = TickBudget::new();
+        // A zero clock: the delay of 0s makes the action due immediately
+        // (`fire_at_elapsed = 0`).
+        let clock = SchedClock {
+            tick: 0,
+            elapsed_secs: 0.0,
+            tick_hz: 60.0,
+        };
+        let effects = host.call(
+            &mut budget,
+            &clock,
+            &ast,
+            "world.toml#script.setup",
+            "on_x",
+            &crate::world::flags::FlagStore::new(),
+            Map::new(),
+        );
+        assert_eq!(effects.delayed.len(), 1, "one delayed effect was scheduled");
+
+        // Wire the real system and seed the objective the delayed effect targets.
+        let mut app = ai_trigger_test_app();
+        app.add_systems(Update, tick_delayed_actions.after(tick_trigger_pipeline));
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "aphelion_secured",
+            "secure the aphelion",
+            true,
+            vec![],
+        );
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.mission_clock_anchor_secs = Some(0.0);
+            // The route: the script-scheduled DelayedAction goes onto the SAME
+            // `pending_delayed_actions` queue a TOML `action_delays` entry uses.
+            runtime.pending_delayed_actions.extend(effects.delayed);
+        }
+
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.pending_delayed_actions.is_empty(),
+            "the due script-scheduled action must be drained by tick_delayed_actions"
+        );
+        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        let snapshot = objectives
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .find(|o| o.id == "aphelion_secured")
+            .expect("the objective exists");
+        assert_eq!(
+            snapshot.status,
+            ObjectiveStatus::Completed,
+            "tick_delayed_actions must dispatch the scripted delayed complete_objective"
+        );
+    }
+
     /// A scenario trigger fires when the named ship reaches the named
     /// waypoint — the `AiWaypointReached` message the cursor evaluator emits
     /// is bridged into a `WorldEvent::WaypointReached` and matched here.

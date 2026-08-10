@@ -14,10 +14,24 @@
 //! * [`effects`] — the per-call effect buffer. Host functions push the
 //!   *existing* [`ActionCmd`](crate::world::dispatch::ActionCmd)s; script gets
 //!   no new effect vocabulary of its own.
-//! * [`flags`] — a sugared `flags` custom type (`flags.score += 50`) over
-//!   [`FlagStore`](crate::world::flags::FlagStore), with a scratch overlay so
-//!   read-after-write within one call is correct; the overlay drains into the
-//!   effect buffer as `ActionCmd::MutateFlag`.
+//! * [`flags`] — a sugared `flags` custom type over
+//!   [`FlagStore`](crate::world::flags::FlagStore). Use `flags.increment("score",
+//!   50)` for a composable counter (emits `FlagMutation::Increment`, so a script
+//!   increment and a concurrent TOML `increment_flag` on the same flag in the
+//!   same tick compose in either order) and `flags.x = v` for an absolute set
+//!   (`FlagMutation::SetValue`). A scratch overlay keeps read-after-write within
+//!   one call correct; each mutation is pushed onto the call's single shared
+//!   effect sink *at the point it is authored*, so flag writes and effects emit
+//!   in authored order. Note: `flags.x += n` still parses but silently degrades
+//!   to an absolute `SetValue` (Rhai desugars `+=` on an indexer to get-then-set
+//!   before the custom type is consulted, so it cannot be made composable) — do
+//!   not use it for counters; reach for `flags.increment` instead.
+//! * [`schedule`] — the `schedule` custom type (issue #981, M3): `in_seconds(n)`
+//!   stamps a delay onto a buffered effect and routes it through the *existing*
+//!   [`DelayedAction`](crate::world::delayed::DelayedAction) queue, and
+//!   `after(n, |ctx| …)` defers a callback as a serializable
+//!   `(fire_tick, script_path, fn_name)` record. Per-tick operation and call
+//!   budgets are fixed engine-safety limits enforced deterministically.
 //! * [`load`] — resolves `script = "…"` sibling `.rhai` files and lifts inline
 //!   `[script.*]` TOML blocks to virtual paths (`world.toml#script.on_x`), so
 //!   there is one loader, one AST map, and one span-offset mapping. ASTs land
@@ -66,6 +80,7 @@ pub mod effects;
 pub mod engine;
 pub mod flags;
 pub mod load;
+pub mod schedule;
 pub mod triggers;
 pub mod validate;
 
@@ -90,19 +105,23 @@ pub const HASHING_SEED: [u64; 4] = [1, 2, 3, 4];
 pub const MAX_OPS_PER_CALL: u64 = 50_000;
 
 /// Per-tick aggregate operation budget, summed across every script call in a
-/// tick. A circuit breaker: when it trips, the tick's remaining chaining passes
-/// are dropped and the tick completes (every peer sums the same operations in
-/// the same order, so every peer trips on the same tick).
+/// tick. A circuit breaker: when it trips, the tick's remaining script work is
+/// dropped and the tick completes (every peer sums the same operations in the
+/// same order, so every peer trips on the same tick).
 ///
-/// TODO(M3): enforce once there is a tick loop to hook. Defined now so the
-/// constant is settled; M1 has no tick aggregation site.
+/// Enforced by [`schedule::TickBudget`] (issue #981, M3): the host charges each
+/// call's measured operation count (an `on_progress` high-water counter) to a
+/// per-tick budget, which refuses the tick's remaining calls once this aggregate
+/// is reached.
 pub const MAX_OPS_PER_TICK: u64 = 200_000;
 
 /// Per-tick script call cap. Operations do not price the ~2 µs of fixed
 /// per-`call_fn` overhead, so this closes the "thousands of tiny handlers" hole
 /// the operation budget alone leaves open (M0 spike).
 ///
-/// TODO(M3): enforce alongside [`MAX_OPS_PER_TICK`]; M1 has no tick loop.
+/// Enforced alongside [`MAX_OPS_PER_TICK`] by [`schedule::TickBudget`] (issue
+/// #981, M3): [`admit_call`](schedule::TickBudget::admit_call) refuses a call once
+/// this many have run in the tick.
 pub const MAX_CALLS_PER_TICK: u32 = 512;
 
 static SEED_INIT: Once = Once::new();

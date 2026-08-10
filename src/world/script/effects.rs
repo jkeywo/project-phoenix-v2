@@ -42,7 +42,12 @@ impl EffectSink {
     }
 
     /// Push one command onto the buffer.
-    fn push(&self, cmd: ActionCmd) {
+    ///
+    /// `pub(crate)` because [`Flags`](super::flags::Flags) shares this one buffer
+    /// so a flag mutation lands in the emitted sequence *at the point the script
+    /// authored it*, interleaved with effects, rather than being appended after
+    /// them (issue #981 flag-ordering hazard).
+    pub(crate) fn push(&self, cmd: ActionCmd) {
         self.0.lock().expect("effect sink lock").push(cmd);
     }
 
@@ -145,9 +150,14 @@ mod tests {
         let sink = EffectSink::new();
         let mut ctx = Map::new();
         ctx.insert("effects".into(), Dynamic::from(sink.clone()));
+        // Flags share the one ordered buffer (issue #981), so a flag write lands
+        // in `sink` alongside effects; these tests write no flags.
         ctx.insert(
             "flags".into(),
-            Dynamic::from(Flags::new(&crate::world::flags::FlagStore::new())),
+            Dynamic::from(Flags::new(
+                &crate::world::flags::FlagStore::new(),
+                sink.clone(),
+            )),
         );
         let _ = vellum_script::call_fn(&engine, &ast, "t.rhai", fn_name, ctx).expect("calls");
         sink.take()

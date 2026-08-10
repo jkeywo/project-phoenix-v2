@@ -521,7 +521,8 @@ mod tests {
         );
         let host = RuntimeHost::new();
         let ast = compiled.asts.get(path).expect("compiled ast");
-        let scripted_cmds = host.call(ast, path, &st.handler, &FlagStore::new(), Map::new());
+        let scripted_cmds =
+            host.call_immediate(ast, path, &st.handler, &FlagStore::new(), Map::new());
 
         // ---- Declarative TOML front-end: the same trigger, actions inline. ----
         let cfg = parse_world(

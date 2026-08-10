@@ -6,6 +6,53 @@ import { getRegionRenderSpec } from './canvas-region.js';
 import { getAnchorRenderSpecs } from './canvas-anchor.js';
 import { analyzeAnchorRename } from './anchor-rename.js';
 import { canDeleteAnchor } from './anchor-delete.js';
+
+/**
+ * Build a THROWAWAY render-only view of `spawn` with its template/fragment
+ * appearance fields merged in (issue #993).
+ *
+ * The persisted spawn is the layer's saved data model: a save serialises it
+ * straight to the world/scenario TOML, and the override panel writes
+ * `spawn.override` into the same object. So template- and fragment-derived
+ * fields must NOT be baked onto it — doing so freezes a stale copy of the
+ * template into the file, and editing the template later leaves every
+ * already-saved spawn stale, defeating `template_path` as the single source of
+ * truth. This function instead returns a fresh object the renderer reads and
+ * then discards; `spawn` itself is never mutated.
+ *
+ * `entConfig` is the RESOLVED document from `getEntityConfig` (issue #910), so
+ * the merge already carries fragment-inherited fields. Template fields are
+ * shared by reference — safe, because nothing mutates them on the throwaway
+ * view. The field set and the `!field` "only when the spawn lacks it" guards
+ * match the historic in-place merge exactly, so existing worlds render
+ * identically; only the persistence side effect is removed.
+ *
+ * @param {object} spawn          The persisted spawn (never mutated).
+ * @param {object|null} entConfig Resolved template config, or null.
+ * @returns {object} throwaway view: spawn-authored fields + template appearance.
+ */
+export function buildSpawnRenderView(spawn, entConfig) {
+  const view = { ...spawn };
+  if (!entConfig) return view;
+  if (!view.tags && entConfig.tags) view.tags = entConfig.tags;
+  if (!view.radar_appearance && entConfig.radar_appearance) view.radar_appearance = entConfig.radar_appearance;
+  if (!view.collider && entConfig.collider) view.collider = entConfig.collider;
+  if (!view.shape && entConfig.shape) view.shape = entConfig.shape;
+  // Synthesize a torus shape from an asteroid_field block. Checked AFTER the
+  // `entConfig.shape` merge above so an explicit template shape wins.
+  if (!view.shape && entConfig.asteroid_field) {
+    view.shape = {
+      type: 'torus',
+      inner_radius: entConfig.asteroid_field.inner_radius ?? 100,
+      outer_radius: entConfig.asteroid_field.outer_radius ?? 200,
+    };
+  }
+  // Region-entity fields needed by the canvas-region renderer.
+  if (!view.effects && entConfig.effects) view.effects = entConfig.effects;
+  if (!view.colour && entConfig.colour) view.colour = entConfig.colour;
+  return view;
+}
+
 export class CanvasManager {
   constructor(layerManager, onSpawnSelect, onSpawnUpdate, onSpawnCreate, onSpawnDrag, undoController) {
     if (!undoController || typeof undoController.snapshotForUndo !== 'function') {
@@ -367,48 +414,26 @@ export class CanvasManager {
     const pos = getSpawnPosition(spawn, allAnchors);
     const relative = getRelativeInfo(spawn);
 
-    // Merge entity-template fields into spawn if not already set.
+    // Resolve template/fragment appearance onto a THROWAWAY view (issue #993).
     //
-    // `getEntityConfig` now returns the RESOLVED document (issue #910), whose
-    // objects/arrays are the SHARED cache entries. Assigning them onto the spawn
-    // by reference would alias the cache — a later mutation of `spawn.tags`
-    // (e.g. via the override panel) would then corrupt every other spawn reading
-    // the same template. So each inherited field is deep-cloned before it lands
-    // on the spawn, severing the alias.
-    //
-    // NOTE (follow-up): this still BAKES template/fragment fields onto the spawn
-    // object, which is the layer's persisted data model, so a save freezes a
-    // copy into the world TOML. That predates #910 (it applied to authored
-    // template fields before; #910 merely extended it to fragment data). Moving
-    // the merge onto a throwaway view so the world file stores only
-    // spawn-authored data + template_path + override changes how existing
-    // authored-template fields round-trip, which is beyond #910's scope — left
-    // for a follow-up issue. This change only severs the cache alias.
+    // `getEntityConfig` returns the RESOLVED document (issue #910), whose fields
+    // must drive what we DRAW but must never be baked onto `spawn`. The spawn is
+    // the layer's persisted data model — a save serialises it straight to the
+    // world/scenario TOML, and the override panel writes `spawn.override` into
+    // the same object — so mutating it here would freeze a stale copy of the
+    // template/fragment fields into the file. `buildSpawnRenderView` merges
+    // those fields onto a fresh object read only by the drawing code below and
+    // then discarded; `spawn` keeps only its own authored data + `template_path`
+    // + `override`. Everything downstream reads `view`, not `spawn`.
     const entConfig = spawn.template_path
       ? getEntityConfig(spawn.template_path)
       : null;
-    if (entConfig) {
-      if (!spawn.tags && entConfig.tags) spawn.tags = structuredClone(entConfig.tags);
-      if (!spawn.radar_appearance && entConfig.radar_appearance) spawn.radar_appearance = structuredClone(entConfig.radar_appearance);
-      if (!spawn.collider && entConfig.collider) spawn.collider = structuredClone(entConfig.collider);
-      if (!spawn.shape && entConfig.shape) spawn.shape = structuredClone(entConfig.shape);
-      // Synthesize a torus shape from asteroid_field block
-      if (!spawn.shape && entConfig.asteroid_field) {
-        spawn.shape = {
-          type: 'torus',
-          inner_radius: entConfig.asteroid_field.inner_radius ?? 100,
-          outer_radius: entConfig.asteroid_field.outer_radius ?? 200,
-        };
-      }
-      // Region-entity fields needed by canvas-region renderer
-      if (!spawn.effects && entConfig.effects) spawn.effects = structuredClone(entConfig.effects);
-      if (!spawn.colour && entConfig.colour) spawn.colour = structuredClone(entConfig.colour);
-    }
+    const view = buildSpawnRenderView(spawn, entConfig);
 
     const canvasPos = this.worldToCanvas(pos.x, pos.z);
 
     // Resolve appearance: use radar_appearance when present, X fallback otherwise
-    const appearance = resolveEntityAppearance(spawn, allAnchors);
+    const appearance = resolveEntityAppearance(view, allAnchors);
     const isSelected = this.selectedSpawn?.spawn === spawn;
 
     // Determine canvas radius for label placement
@@ -424,8 +449,8 @@ export class CanvasManager {
     });
 
     // Draw region area overlay FIRST (behind the entity marker)
-    if (spawn.asteroid_field) {
-      const af = spawn.asteroid_field;
+    if (view.asteroid_field) {
+      const af = view.asteroid_field;
       const s = this.scale;
       const ring = new Konva.Ring({
         innerRadius: (af.inner_radius ?? 0) * s,
@@ -437,15 +462,15 @@ export class CanvasManager {
       group.add(ring);
     }
 
-    if (spawn.shape) {
+    if (view.shape) {
       // Build a region entity input for the pure renderer. The spawn group is
       // already positioned at (canvasPos.x, canvasPos.y), so we want the spec
       // centred on the group origin — pass position=[0,0,0] and let the
       // shapes draw at local (0,0). `cx`/`cz` from the spec are not used here.
       const regionEntity = {
-        shape: spawn.shape,
-        colour: spawn.colour,
-        effects: spawn.effects,
+        shape: view.shape,
+        colour: view.colour,
+        effects: view.effects,
         position: [0, 0, 0],
       };
       const spec = getRegionRenderSpec(regionEntity);

@@ -120,7 +120,8 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "SystemBlackboard",
     "SystemHull", "TacticalRadarSelection", "TeamSlot", "ThrustInput", "Torpedo",
     "TorpedoDetonation", "TorpedoSystem", "TorpedoTube", "TubeBurstState", "VerticalMovementMode",
-    "ViewscreenArbiter", "ViewscreenResolution", "WaypointMode", "WorldConfig", "WorldEntity",
+    "ViewscreenArbiter", "ViewscreenResolution", "WaypointMode", "WeaponsDoctrineAiPolicy",
+    "WorldConfig", "WorldEntity",
     "WorldEventBuffer", "WorldFinding", "WorldLayerChange", "WorldLayerMap", "WorldRuntime",
     "WorldSnapshot", "WorldSource", "WorldView",
     // Issue #907's tick-scoped id mint. Authoritative, and FOLDED: its

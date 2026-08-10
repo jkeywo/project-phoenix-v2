@@ -2262,6 +2262,18 @@
     // ScenarioCatalog ServerMessage and delivers it over PeerJS. The wire shape
     // matches serde `{ type, data }` so the phone's lobby-state applies it
     // exactly like a Rust-emitted message.
+    // The applied mod packs, in {id,name,version} form for the phone's "Mods
+    // active" list (issue #990). Read from wasm_active_pack_manifest() — the
+    // SAME call renderModPackList() renders the host's own list from, so host
+    // and phones show one source of truth, not two derivations of it.
+    function activePacksForWire() {
+      let report;
+      try { report = wasmBindings.wasm_active_pack_manifest(); } catch (_) { return []; }
+      const packs = (report && report.packs) ? Array.from(report.packs) : [];
+      return packs.map(function (p) {
+        return { id: p.id, name: p.name, version: p.version };
+      });
+    }
     function scenarioCatalogMessage() {
       return {
         type: 'ScenarioCatalog',
@@ -2269,6 +2281,10 @@
           scenarios: _scenarioCatalog,
           locked_scenario: _preSelection.scenario_id,
           locked_ship: _preSelection.template_path,
+          // Rides on both the pre-load broadcast and the locked-catalog
+          // "selection done" broadcast (broadcastSelectionComplete), so the
+          // list survives world load for an already-connected phone (#990).
+          active_packs: activePacksForWire(),
         },
       };
     }

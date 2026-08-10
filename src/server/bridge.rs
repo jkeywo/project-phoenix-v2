@@ -1844,8 +1844,10 @@ pub fn wasm_active_pack_manifest() -> JsValue {
 /// and each referenced world TOML delivered via `wasm_push_world_toml`, so the
 /// catalog is available *before* a root world is activated (issue #754).
 ///
-/// Returns a JS array of `{ id, world, label, description, ships: [...] }`
+/// Returns a JS array of `{ id, world, label, description, source, ships: [...] }`
 /// objects where each `ships` entry matches `wasm_get_available_ships`'s shape.
+/// `source` (issue #990) is the pack id the scenario came from, or `"base"` for
+/// a base-manifest scenario, so the phone picker can badge mod-supplied worlds.
 /// Only scenarios whose world TOML has been delivered are catalogued; a
 /// scenario whose world is still in flight is omitted until its TOML arrives.
 /// Returns an empty array when no manifest has been pushed.
@@ -1935,6 +1937,17 @@ pub fn wasm_get_scenario_catalog() -> Array {
             )
             .ok();
         }
+        // Provenance for the client (issue #990): the pack id this scenario came
+        // from, or the literal `"base"` for a base-manifest scenario. Always
+        // present so the phone can badge a mod-supplied scenario and leave a base
+        // one unmarked without a second lookup — `ScenarioCatalogEntry::origin`
+        // (issue #987) is `None` for base, which this flattens to `"base"`.
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("source"),
+            &JsValue::from_str(scenario.origin.as_deref().unwrap_or("base")),
+        )
+        .ok();
         let ships = Array::new();
         for ship in &scenario.ships {
             ships.push(&ship_entry_to_js(ship));

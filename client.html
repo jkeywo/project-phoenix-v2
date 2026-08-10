@@ -361,6 +361,31 @@
     #scenario-picker-body .scenario-btn:active { background: rgba(140, 180, 220, 0.22); }
     #scenario-picker-body .scenario-desc { font-size: 0.75rem; color: #8a98c4; margin-top: 6px; letter-spacing: 0.02em; }
     #scenario-picker-body .scenario-locked-note { text-align: center; color: #8a98c4; font-size: 0.85rem; letter-spacing: 0.05em; }
+    /* Mod-origin badge on a scenario button (issue #990): a base scenario gets
+       none, a mod-supplied one wears the applied pack's name. */
+    #scenario-picker-body .scenario-origin {
+      display: inline-block; margin-top: 8px;
+      padding: 2px 8px; border-radius: 4px;
+      font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase;
+      color: #cfe0ff; background: rgba(120, 160, 220, 0.22);
+      border: 1px solid #6a7fb8;
+    }
+
+    /* -- "Mods active" lobby list (issue #990) --------------------------- */
+    #lobby-mods[aria-hidden="true"] { display: none; }
+    #lobby-mods {
+      display: flex; flex-direction: column; gap: 3px;
+      margin: 4px 0 2px;
+      font-family: 'Chakra Petch', monospace;
+    }
+    #lobby-mods .mods-active-heading {
+      font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+      color: #8a98c4;
+    }
+    #lobby-mods .mods-active-row {
+      font-size: 0.8rem; letter-spacing: 0.03em; color: #cfe0ff;
+    }
+    #lobby-mods .mods-active-version { color: #8a98c4; margin-left: 6px; }
 
 
     /* Console title label — fixed strip at the top center of the game
@@ -833,6 +858,11 @@
         </div>
       </div>
 
+      <!-- Active mod packs the host applied (issue #990). Populated by
+           renderActiveMods() from lobbyState.activePacks; empty (and hidden)
+           when no packs are applied, so nothing extra renders in the base game. -->
+      <div id="lobby-mods" aria-hidden="true"></div>
+
       <!-- Name input -->
       <div id="lobby-name-row">
         <label><span data-i18n="client.name_label">Name</span>
@@ -1219,13 +1249,17 @@
       const heading = document.getElementById('scenario-picker-heading');
       if (!ls || !body) return;
       const catalog = ls.scenarioCatalog || [];
+      const activePacks = ls.activePacks || [];
       const locked = ls.selectionLocked || { scenario_id: null, template_path: null };
 
       let stage;
       if (locked.scenario_id == null) stage = 'scenario';
       else if (locked.template_path == null) stage = 'ship:' + locked.scenario_id;
       else stage = 'locked';
-      const key = stage + '|' + catalog.length;
+      // Pack count is in the key so a change to the applied mods re-renders the
+      // scenario buttons' mod-origin badges (issue #990), not only a catalog
+      // change (the two arrive together, but a later pack edit updates one).
+      const key = stage + '|' + catalog.length + '|' + activePacks.length;
       if (key === _pickerStageKey) return;
       _pickerStageKey = key;
 
@@ -1251,6 +1285,16 @@
             desc.className = 'scenario-desc';
             desc.textContent = sc.description;
             btn.appendChild(desc);
+          }
+          // Mod-origin badge (issue #990): only a mod-supplied scenario gets one;
+          // a base scenario returns null and stays unmarked.
+          const badge = (typeof window.scenarioOriginBadge === 'function')
+            ? window.scenarioOriginBadge(sc, activePacks) : null;
+          if (badge) {
+            const badgeEl = document.createElement('span');
+            badgeEl.className = 'scenario-origin';
+            badgeEl.textContent = t('client.scenario_mod_origin', { name: badge.name });
+            btn.appendChild(badgeEl);
           }
           btn.addEventListener('click', () => {
             // Same action map as the host page — two transports (issue #755).
@@ -1397,7 +1441,46 @@
       else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
     }
 
+    // "Mods active" lobby list (issue #990): render the packs the host applied
+    // from lobbyState.activePacks. Nothing renders (and the row is hidden) when
+    // no packs are applied, so the base game shows no empty banner. Separate
+    // from the station list so it survives the boot-race guard below — a mid-
+    // round spectator still sees what mods the session is running.
+    function renderActiveMods() {
+      const el = document.getElementById('lobby-mods');
+      if (!el) return;
+      const rows = (typeof window.activePacksView === 'function')
+        ? window.activePacksView(window.lobbyState && window.lobbyState.activePacks)
+        : [];
+      el.innerHTML = '';
+      if (rows.length === 0) {
+        el.setAttribute('aria-hidden', 'true');
+        return;
+      }
+      el.setAttribute('aria-hidden', 'false');
+      const heading = document.createElement('div');
+      heading.className = 'mods-active-heading';
+      heading.textContent = t('client.mods_active');
+      el.appendChild(heading);
+      for (const row of rows) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'mods-active-row';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'mods-active-name';
+        nameEl.textContent = row.name;
+        rowEl.appendChild(nameEl);
+        if (row.version) {
+          const verEl = document.createElement('span');
+          verEl.className = 'mods-active-version';
+          verEl.textContent = t('client.mods_active_version', { version: row.version });
+          rowEl.appendChild(verEl);
+        }
+        el.appendChild(rowEl);
+      }
+    }
+
     function renderLobby(s) {
+      renderActiveMods();
       const list = document.getElementById('station-list');
       if (!list) return;
       // Pure selectors live in gui/lobby-view.js (issue #827); this function

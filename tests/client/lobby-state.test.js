@@ -192,7 +192,7 @@ describe('apply phase transitions', () => {
 });
 
 describe('ScenarioCatalog (QR-first pre-scenario picker, issue #755)', () => {
-  const catalogMsg = (locked_scenario = null, locked_ship = null) => ({
+  const catalogMsg = (locked_scenario = null, locked_ship = null, active_packs = []) => ({
     type: 'ScenarioCatalog',
     data: {
       scenarios: [
@@ -200,11 +200,13 @@ describe('ScenarioCatalog (QR-first pre-scenario picker, issue #755)', () => {
           id: 'default',
           world: 'assets/worlds/default.toml',
           label: 'Starbase Alpha',
+          source: 'base',
           ships: [{ template_path: 'assets/entities/alliance_cruiser.toml', label: 'Cruiser' }],
         },
       ],
       locked_scenario,
       locked_ship,
+      active_packs,
     },
   });
 
@@ -277,6 +279,73 @@ describe('ScenarioCatalog (QR-first pre-scenario picker, issue #755)', () => {
     expect(s.showScenarioPicker()).toBe(false);
     expect(s.waitingForScenario).toBe(false);
     expect(s.phase).toBe('Lobby');
+  });
+});
+
+describe('active mod packs (issue #990)', () => {
+  const PACKS = [
+    { id: 'aurora-skirmish', name: 'Aurora Skirmish', version: '1.0.0' },
+    { id: 'nebula-run', name: 'Nebula Run', version: '2.1' },
+  ];
+  const catalogMsg = (active_packs = [], locked_scenario = null, locked_ship = null) => ({
+    type: 'ScenarioCatalog',
+    data: {
+      scenarios: [{ id: 'default', world: 'assets/worlds/default.toml', source: 'base', ships: [] }],
+      locked_scenario,
+      locked_ship,
+      active_packs,
+    },
+  });
+  const welcomeMsg = () => ({
+    type: 'Welcome',
+    data: {
+      state: { phase: 'Lobby', players: [], world: null },
+      ship_stations: { stations: [] },
+      ship_config: {},
+    },
+  });
+
+  it('defaults to an empty active-pack list', () => {
+    expect(new LobbyState().activePacks).toEqual([]);
+  });
+
+  it('stores the active packs from a ScenarioCatalog message', () => {
+    const s = new LobbyState();
+    s.apply(catalogMsg(PACKS));
+    expect(s.activePacks).toEqual(PACKS);
+  });
+
+  it('treats a catalog with no active_packs as no packs applied', () => {
+    const s = new LobbyState();
+    s.apply({ type: 'ScenarioCatalog', data: { scenarios: [], locked_scenario: null, locked_ship: null } });
+    expect(s.activePacks).toEqual([]);
+  });
+
+  it('SURVIVES world load — Welcome does not clear it (issue #990 AC5)', () => {
+    const s = new LobbyState();
+    s.apply(catalogMsg(PACKS));
+    s.apply(welcomeMsg());
+    // The picker is gone, but the mods list persists — a mid-round player must
+    // still see what they are playing.
+    expect(s.scenarioCatalog).toBeNull();
+    expect(s.activePacks).toEqual(PACKS);
+  });
+
+  it('the locked-catalog "selection done" broadcast still carries the packs', () => {
+    const s = new LobbyState();
+    // Fully-locked catalog (scenario + ship): scenarioCatalog is cleared, but
+    // active_packs on the same message keeps the list alive.
+    s.apply(catalogMsg(PACKS, 'default', 'assets/entities/alliance_cruiser.toml'));
+    expect(s.scenarioCatalog).toBeNull();
+    expect(s.activePacks).toEqual(PACKS);
+  });
+
+  it('reset() clears the active packs (the same wipe that clears the catalog)', () => {
+    const s = new LobbyState();
+    s.apply(catalogMsg(PACKS));
+    s.reset();
+    expect(s.activePacks).toEqual([]);
+    expect(s.scenarioCatalog).toBeNull();
   });
 });
 

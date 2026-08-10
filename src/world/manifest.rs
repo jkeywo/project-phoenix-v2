@@ -886,12 +886,53 @@ label = "Modded Default"
             .unwrap();
         assert_eq!(default.world, "assets/worlds/mod_default.toml");
         assert_eq!(default.label.as_deref(), Some("Modded Default"));
+        // The base-id-replacement case (issue #990): the entry that replaced the
+        // base `default` now reports its PACK as the origin, not base — a player
+        // must see it as mod-supplied even though it wears a base scenario id.
+        assert_eq!(default.origin.as_deref(), Some("modpack"));
         // Replacing a BASE scenario is the sanctioned override — no warning.
         assert!(
             merged.findings.is_empty(),
             "base-vs-mod replacement must not warn: {:?}",
             merged.findings
         );
+    }
+
+    #[test]
+    fn merged_catalog_base_scenarios_report_no_origin() {
+        // A base-manifest scenario carries NO origin (issue #987/#990): `None`
+        // is what the bridge flattens to the wire `source: "base"`, so a base
+        // scenario is never badged as mod-supplied. Asserted both with a mod
+        // pack present (to prove only the mod entry is stamped) and without.
+        let base = parse_manifest(MANIFEST).unwrap();
+        let mod_manifest = parse_manifest(
+            r#"
+[[scenario]]
+id = "mod_skirmish"
+world = "assets/worlds/mod_skirmish.toml"
+"#,
+        )
+        .unwrap();
+        let mut map = full_map();
+        map.insert(
+            "assets/worlds/mod_skirmish.toml".to_string(),
+            "[global]\ntitle = \"world.mod_skirmish.title\"\n".to_string(),
+        );
+        let merged = build_merged_catalog(&base, &[("modpack", &mod_manifest)], resolver(map));
+        let combat = merged
+            .catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "combat_test")
+            .unwrap();
+        assert_eq!(combat.origin, None, "a base scenario reports base (None)");
+        let skirmish = merged
+            .catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "mod_skirmish")
+            .unwrap();
+        assert_eq!(skirmish.origin.as_deref(), Some("modpack"));
     }
 
     #[test]

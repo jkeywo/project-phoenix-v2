@@ -66,50 +66,34 @@ jobs:
       - name: Clippy (deny warnings)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run unit tests (server)
-        run: cargo test
-
-      # The headless scenario suite (issue #912). `tests/headless_runner.rs` is
-      # `#![cfg(all(feature = "headless", ...))]`, so the bare `cargo test`
-      # above compiles it to NOTHING — the whole file is empty without the
-      # feature. `--features headless` appeared exactly once in this workflow
-      # and only as a `cargo build --bin`, never a test target, so these tests
-      # had never run in CI and did not gate #872: two backfilled Alliance
-      # hulls stopped shooting at each other entirely and every job stayed
-      # green.
+      # One invocation, one feature set, one compile of the crate and of every
+      # integration-test binary. This previously ran as four steps across two
+      # feature sets (bare `cargo test`, then `--features headless --test
+      # <file>` three times), which built the crate and the test binaries
+      # roughly twice.
       #
-      # It belongs in `test` rather than a job of its own: `test` is the
-      # fail-fast gate `build`, `smoke` and `perf` all `needs:`, and it already
-      # has the toolchain, the rust-cache and this exact apt set. Debug is
-      # correct — the runner is deterministic and asserts on end state, not on
-      # wall-clock timing — and release would triple the build for nothing.
-      # Roughly 110 s on a warm cache.
-      - name: Run headless scenario tests
-        run: cargo test --features headless --test headless_runner
-
-      # The seeded-RNG determinism guard (issue #837). `tests/rng_determinism.rs`
-      # is `#![cfg(all(feature = "headless", ...))]`, same as the headless
-      # scenario suite above, so the bare `cargo test` above compiles it to
-      # nothing and only `headless_runner` was ever wired into this job — this
-      # file ran on nobody's machine but the author's (found during #915's gate
-      # pass). It gets its own step, mirroring `headless_runner`'s own
-      # process-isolation requirement: Cargo gives each integration-test file
-      # its own process, and this test needs that isolation to keep Bevy's
-      # process-global task pool single-threaded and system order fixed — see
-      # the file header for why sharing a binary makes the assertions flaky.
-      - name: Run RNG determinism tests
-        run: cargo test --features headless --test rng_determinism
-
-      # The registration-order determinism guard (issue #899, ordering half of
-      # the parent's #849 ask). `tests/registration_order_determinism.rs` is
-      # `#![cfg(all(feature = "headless", ...))]`, same as the two suites
-      # above, and needs the same own-process isolation for the same reason:
-      # `--deterministic` only pins Bevy's task pool to one thread if nothing
-      # else has already claimed the process-global pool first. Same seed, the
-      # 13 SimSet-chain plugins registered in a deterministic shuffle instead
-      # of their canonical order, byte-identical digest required either way.
-      - name: Run registration-order determinism tests
-        run: cargo test --features headless --test registration_order_determinism
+      # `--features headless` is what makes the headless scenario suite
+      # (issue #912), the seeded-RNG determinism guard (#837) and the
+      # registration-order determinism guard (#899) non-empty — all three files
+      # are `#![cfg(all(feature = "headless", ...))]` and compile to NOTHING
+      # without it, which is how they once sat unrun in CI while every job
+      # stayed green. The named `--test` allowlist had the same failure mode:
+      # every OTHER headless-gated integration file (snapshot_resume,
+      # authoritative_state_enumeration, cross_target_probe, ...) was compiled
+      # empty by the bare invocation and never named, so none of them had ever
+      # run in CI. This runs all of them.
+      #
+      # The process isolation the old per-file steps guaranteed is UNCHANGED
+      # and was never this workflow's to provide: cargo gives every integration
+      # test file its own binary and runs them one process at a time.
+      # headless_runner.rs's process-global native template cache, and the two
+      # determinism files' need to claim Bevy's process-global task pool first,
+      # are satisfied exactly as before — see those files' headers.
+      #
+      # Debug (well, [profile.dev] — deps at opt-level 3) is correct: the
+      # runner is deterministic and asserts on end state, never wall-clock.
+      - name: Run the native test suite
+        run: cargo test --features headless
 
       # The demo build, actually compiled (issue #940). PHOENIX_DEMO_BUILD is
       # set in exactly one place in this repo — deploy-demo.yml — and that job

@@ -114,8 +114,13 @@ export function normalizeCoordinationPayload(payload, senderLabel) {
     title = intentTitle(data.kind || payload.kind);
     body = data.subject ?? payload.subject ?? '';
   } else if (type === 'NavigateTo') {
+    // Coords carried on the payload (issue #977); Rust no longer composes the
+    // "waypoint (x, z)" label. Round to whole units, matching the old label.
+    const nx = data.x ?? payload.x ?? 0;
+    const nz = data.z ?? payload.z ?? 0;
     title = t('coordination.navigate.title', {
-      label: data.label || payload.label || '?',
+      x: Math.round(nx),
+      z: Math.round(nz),
     });
   } else if (type === 'RepairRequest') {
     title = t('coordination.repair.title', {

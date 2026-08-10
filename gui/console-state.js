@@ -1112,9 +1112,7 @@ export function buildPowerConsoleState(state) {
     total_max:      bb.total_max      ?? 8,
     battery_charge: bb.battery_charge ?? 0,
     battery_max:    bb.battery_max    ?? 100,
-    // `draining` replaced `locked` when issue #952 retired the brownout lock:
-    // the reserve emptying is what the gauge needs, and the reserve having run
-    // out no longer freezes anything.
+    // Which way the reserve is moving, for the battery gauge.
     draining:       bb.draining       || false,
     // NOT `!draining`. A hull can author a reactor rate of exactly zero for
     // some total, and there the reserve is frozen — neither emptying nor
@@ -1122,6 +1120,10 @@ export function buildPowerConsoleState(state) {
     // parked reserve says nothing rather than promising a recovery that is
     // never going to arrive.
     charging:       bb.charging       || false,
+    // The exhaustion lock (restored when issue #952's floors were reverted): the
+    // battery bottomed out, every group was slammed to 1, and the +/- controls
+    // are frozen until the reserve recovers past `emergency_threshold`.
+    locked:         bb.locked         || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
@@ -1508,6 +1510,25 @@ export function consoleForSystemId(id) {
 }
 
 /**
+ * Console family → the flat (plain, non-system-keyed) builder that produces its
+ * payload. Used by buildConsoleStateInner to dispatch a single-family station by
+ * the family it OWNS rather than by its station-id string (issue #925), so a
+ * flat console renders correctly regardless of what the seat is named. Every
+ * family here has a matching flat `gui/battleship/*.html` console.
+ */
+const FAMILY_BUILDERS = {
+  captain: buildCaptainConsoleState,
+  helm: buildHelmConsoleState,
+  tactical: buildWeaponsConsoleState,
+  sensors: buildSensorsConsoleState,
+  navigation: buildNavigationConsoleState,
+  comms: buildCommsConsoleState,
+  shields: buildShieldsConsoleState,
+  power: buildPowerConsoleState,
+  repair: buildRepairConsoleState,
+};
+
+/**
  * Payload contract for system-composed station consoles (issues #825, #827):
  * any station whose TOML-owned fine systems span more than one console
  * family. `systems` holds one per-family view (a *ConsolePayload above)
@@ -1646,15 +1667,26 @@ if (typeof window !== 'undefined') {
     // their flat plain-builder payloads.
     const owned = state.stationSystems?.[consoleName];
     if (owned) {
-      const families = new Set(owned.map(consoleForSystemId).filter(f => f !== null));
-      if (families.size > 1) {
+      const families = [...new Set(owned.map(consoleForSystemId).filter(f => f !== null))];
+      if (families.length > 1) {
         return buildSystemStationConsoleState(consoleName, state);
       }
+      // Single-family station: dispatch by the family it OWNS, not by its
+      // station-id string (issue #925). On the battleship every single-family
+      // station id equals its family name, so this is identical to the switch
+      // below — but an NPC hull can name the seat anything (e.g. `engineering`
+      // owning only the `power` family), and keying on the owned family gives
+      // it the correct flat builder instead of the `default: '{}'` blank that a
+      // station-id mismatch used to produce.
+      if (families.length === 1) {
+        const build = FAMILY_BUILDERS[families[0]];
+        if (build) return build(state);
+      }
     }
-    // Single-family stations, plus the boot race before Welcome delivers
-    // stationSystems: fall back to the plain builder matching the station
-    // name ('{}' for names with no single-family builder, e.g. 'science',
-    // 'engineering' or 'pilot' pre-Welcome — they render on the next update).
+    // Pre-Welcome boot race (stationSystems not yet delivered): fall back to the
+    // plain builder matching the station id ('{}' for ids with no single-family
+    // builder, e.g. 'science', 'engineering' or 'pilot' — they render on the
+    // next update once stationSystems arrives and the family dispatch above runs).
     switch (consoleName) {
       case 'tactical':    return buildWeaponsConsoleState(state);
       case 'captain':     return buildCaptainConsoleState(state);

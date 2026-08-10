@@ -452,9 +452,20 @@ maintain_range = 40.0
 # owns — so an unmanned hull behaves exactly as it did when its systems were
 # `ai_only`.
 #
-# No `console` key: there is no authored HTML console for these hulls yet, so a
-# human taking a seat gets admission but no bespoke UI. `manual_overview` is
-# likewise omitted — the ship manual is published for the player's own hull.
+# Each seat authors a `console` path (issue #925), chosen by the fine systems it
+# owns rather than by hull name. Every seat here owns exactly ONE console family
+# (captain→captain, helm→helm, tactical→tactical, engineering→power), so each
+# gets the FLAT plain-builder payload and reuses the matching flat
+# `gui/battleship/*.html` console: captain, helm, tactical, and power (the
+# Engineering seat owns only the power family, so it mounts battleship/power.html;
+# the single-family dispatch in gui/console-state.js keys on the owned family, so
+# the `engineering` seat id need not equal the family name). tactical mounts
+# battleship/tactical.html, which renders this hull's blaster banks. The seat's
+# owned families ⊆ its console's families AND the payload shape (flat vs
+# system-keyed) is checked in tests/client/npc-hull-console-coverage.test.js
+# (spec map in gui/console-families.js) so a family gap OR a shape mismatch fails
+# CI loudly instead of mounting a blank seat. `manual_overview` is still omitted —
+# the ship manual is published for the player's own hull.
 #
 # Only the AUTO-GENERATED systems stay ownerless + `ai_only`: the
 # `shield-arc-all` system synthesised from `[[shield_arc]]` above (no shields
@@ -466,6 +477,7 @@ name = "Captain"
 description = "entity.ship_harrow_destroyer.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
+console = "gui/battleship/captain.html"
 
 [[station.rating]]
 name = "Std"
@@ -477,6 +489,7 @@ name = "Helm"
 description = "entity.ship_harrow_destroyer.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
+console = "gui/battleship/helm.html"
 
 [[station.rating]]
 name = "Std"
@@ -488,6 +501,7 @@ name = "Tactical"
 description = "entity.ship_harrow_destroyer.station.tactical.description"
 rank = "Lt. Cmdr."
 short_code = "TAC"
+console = "gui/battleship/tactical.html"
 
 [[station.rating]]
 name = "Std"
@@ -499,6 +513,7 @@ name = "Engineering"
 description = "entity.ship_harrow_destroyer.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
+console = "gui/battleship/power.html"
 
 [[station.rating]]
 name = "Std"
@@ -598,38 +613,7 @@ value = false
 capacity = 100.0
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25.0
-# How far above its own floor the reserve has to climb before the reactor lets
-# a group back up, in the same percentage-of-`capacity` units. Without this band
-# a floor chatters at tick rate: cutting a group lowers the EFFECTIVE total, the
-# effective total is what picks the `rates` rung, and on this reactor the rungs
-# either side of the resting total have opposite signs — so the cut immediately
-# recharges the reserve back through the threshold that made it. Raise it for
-# longer, more deliberate brownouts; lower it for a ship that scrabbles back.
-battery_floor_release_margin = 5.0
 
-# Battery floors (issue #952): the percentage of `capacity` below which each
-# group is held down to its `[power_groups.*] min_level`, released again only
-# once the charge climbs back through `battery_floor_release_margin` above it.
-# Falling, the ship loses helm first, then its guns, and keeps its screens
-# longest. Recovering, the ladder releases from the TOP, not in reverse: a cut
-# rung waits for every rung above it, so the reserve climbs on the deep-cut draw
-# instead of re-imposing the one that emptied it, and `shields` — the lowest
-# rung — is the LAST group back rather than the first. `weapons` sits ABOVE
-# this hull's own `min_reserve_weapons`, so the reactor cuts the guns before the
-# crew would and the ladder actually bites on an AI-crewed hull; `helm` stays
-# UNDER `min_reserve_helm`, so the crew's guard binds first there. See the fuller
-# note in `assets/entities/fragments/ai/fleet_baseline.toml` for the measurement
-# behind that asymmetry.
-[power.battery_floor]
-helm = 40.0
-weapons = 25.0
-shields = 5.0
-
-# Power allocation — one rule pair per group. Each ELEVATE rule declares a
-# minimum battery reserve as a `param` its own guard reads, so a group rises
-# only while its trigger holds AND the battery can sustain it; the baseline
-# rules only ever LOWER allocation, and carry a zero reserve so that every rule
-# declares one. Groups this policy does not name hold their seeded level.
 [power.ai_policy.param]
 thrust_threshold = 0.7
 min_reserve_helm = 50.0

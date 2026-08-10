@@ -7,10 +7,10 @@
 # `[[available_ships]]` sections, so this manifest stays a thin index and the
 # authored data is single-sourced in the world file.
 #
-# Only regular selectable roots are listed. Composition-only worlds (patrol,
-# reinforcements, btf_path_*, btf_aphelion_protocol, the probe_* / duel /
-# rng_coverage test worlds) are loaded additively via `extra_worlds` or trigger
-# actions and are deliberately absent here.
+# Only regular selectable roots are listed. Composition-only and test-infra
+# worlds (patrol, reinforcements, default, the probe_* / duel / rng_coverage test
+# worlds) are loaded additively via `extra_worlds`, trigger actions, or the
+# headless harness and are deliberately absent here.
 #
 # This schema is shared with mod-pack scenario manifests (issues #759/#760):
 # `[[scenario]]` entries with an `id`, a `world` path, and an optional `label`.
@@ -25,13 +25,5 @@ id = "phoenix-base"
 epoch = 1
 
 [[scenario]]
-id = "default"
-world = "assets/worlds/default.toml"
-
-[[scenario]]
 id = "combat_test"
 world = "assets/worlds/combat_test.toml"
-
-[[scenario]]
-id = "before_the_fire"
-world = "assets/worlds/before_the_fire.toml"

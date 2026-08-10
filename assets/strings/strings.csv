@@ -206,115 +206,6 @@ entity.station_outpost.name,assets/entities/station_outpost.toml → name (top l
 entity.station_outpost.target.description,assets/entities/station_outpost.toml → [target] description,Outpost Alpha
 entity.station_research_outpost.name,assets/entities/station_research_outpost.toml → name (top level),Research Outpost
 entity.station_research_outpost.target.description,assets/entities/station_research_outpost.toml → [target] description,Research Outpost
-world.before_the_fire.global.title,assets/worlds/before_the_fire.toml → [global] title,[Before the Fire]
-world.before_the_fire.global.description,assets/worlds/before_the_fire.toml → [global] description,[Investigate a distress signal deep in the Axiom System.]
-world.entity.axiom_station.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),Axiom Station
-world.entity.axiom_station_dock.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Axiom Station Dock]
-world.entity.research_outpost.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),Research Outpost
-world.entity.requiem_courier.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),Requiem Courier
-world.entity.ironveil.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),Ironveil
-world.entity.ashrender.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),Ashrender
-world.entity.kaleth_nebula.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),Kaleth Nebula
-world.entity.ironveil_patrol_zone_a.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Ironveil Patrol Zone A]
-world.entity.ironveil_patrol_zone_b.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Ironveil Patrol Zone B]
-world.before_the_fire.trigger.action.obj_investigate.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[Investigate the situation in the Axiom System.]
-world.before_the_fire.trigger.action.obj_hail_briefing.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[Hail Axiom Station or Research Outpost for a briefing.]
-world.before_the_fire.comms.starcorp_command.from,assets/worlds/before_the_fire.toml → [comms] from,Starcorp Command
-world.before_the_fire.comms.starcorp_command.message,assets/worlds/before_the_fire.toml → [comms] message,"[A.E.V. Ardent, this is Starcorp Command. You are ordered to proceed to the Axiom System immediately. Harrow vessels have been observed acting outside normal patrol parameters. Investigate and report. Do not engage unless fired upon. Command out.]"
-world.before_the_fire.comms.0.message,assets/worlds/before_the_fire.toml → [comms] message,"[This is Axiom Station to any Alliance vessel — we have a situation. Our lead negotiator, Dr. Sol Varen, has gone missing. Their last confirmed position puts them near the Harrow patrol operating area. The peace talks cannot continue without them. Please respond.]"
-world.before_the_fire.comms.response.0.text,assets/worlds/before_the_fire.toml → [comms.response] text,"[Understood, Axiom Station. We are proceeding to your location.]"
-world.before_the_fire.comms.response.follow_up.message,assets/worlds/before_the_fire.toml → [comms.response.follow_up] message,"[Ardent, we have you on the dock approach. Welcome to Axiom. Administrator Chen is preparing the full briefing now — stand by.]"
-world.before_the_fire.comms.response.1.text,assets/worlds/before_the_fire.toml → [comms.response] text,"[Axiom Station, do you know where the Harrow patrol is operating?]"
-world.before_the_fire.comms.response.follow_up.message_2,assets/worlds/before_the_fire.toml → [comms.response.follow_up] message,"[The Harrow patrol — I.V. Ironveil — was last observed near the inner asteroid belt, between our position and the outer system. They have not responded to our hails. I don't know what they're waiting for, but Dr. Varen is somewhere near their patrol route.]"
-world.before_the_fire.comms.research_scholar.message,assets/worlds/before_the_fire.toml → [comms] message,"[A.E.V. Ardent, this is the Research Outpost. We read you. Stand by — patching you through to Dr. Myst now.]"
-world.before_the_fire.comms.follow_up.speaker,assets/worlds/before_the_fire.toml → [comms.follow_up] speaker,Dr. Myst
-world.before_the_fire.comms.follow_up.message,assets/worlds/before_the_fire.toml → [comms.follow_up] message,"[Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system — beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging.]"
-world.before_the_fire.comms.follow_up.response.0.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response] text,[What happens if it fires?]
-world.before_the_fire.comms.follow_up.response.follow_up.speaker,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] speaker,Dr. Myst
-world.before_the_fire.comms.follow_up.response.follow_up.message,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] message,[If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon — it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong.]
-world.before_the_fire.comms.follow_up.response.follow_up.response.0.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up.response] text,[Can you pinpoint the source?]
-world.before_the_fire.comms.follow_up.response.follow_up.response.action.obj_locate_ashrender.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up.response.action] text,[Locate the weapon source beyond the Kaleth Nebula.]
-world.before_the_fire.comms.follow_up.response.1.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response] text,[Is there anything unusual about the signal?]
-world.before_the_fire.comms.follow_up.response.follow_up.speaker_2,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] speaker,Dr. Myst
-world.before_the_fire.comms.follow_up.response.follow_up.message_2,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] message,[Yes — there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs.]
-world.before_the_fire.comms.follow_up.response.follow_up.response.1.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up.response] text,[Understood. Keep monitoring.]
-world.before_the_fire.comms.requiem_override.message,assets/worlds/before_the_fire.toml → [comms] message,"[This channel is not secure. We know what Ashrender carries. When the time comes, there may be an alternative. Stand by.]"
-world.before_the_fire.trigger.action.obj_ironveil_destroyed.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[I.V. Ironveil destroyed. Ashrender executing contingency — Aphelion Protocol armed.]
-world.before_the_fire.trigger.action.obj_protocol_timer.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[Aphelion Protocol armed on schedule — Ashrender is charging the weapon.]
-world.entity.radiation_zone.name,assets/worlds/btf_aphelion_protocol.toml → [entity] name (entity display name; also the cross-reference key),Radiation Zone
-world.btf_aphelion_protocol.trigger.action.obj_finale.text,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] text,"[Aphelion Protocol armed. Choose your response: Fight, Evacuate, Contain, or Override.]"
-world.btf_aphelion_protocol.trigger.action.0.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[PARTIAL DETONATION — The Aphelion weapon discharged on Ashrender's destruction, triggering a partial resonance cascade. Axiom Station sustained heavy structural damage. The quantum interference zone has formed — smaller than planned, but permanent. It will grow over decades. In 35 years it will be called the Neutral Zone.
-
-Harrow High Command issued a communiqué within hours: an Alliance warship destroyed an Imperium vessel in the Axiom System during peace negotiations. The A.E.V. Ardent is named. The war begins not with a declaration but with a press release.
-
-The Neutral Zone exists because you fought.
-
-END: FIGHT]"
-world.btf_aphelion_protocol.trigger.action.obj_containment.text,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] text,[Containment position held. Survive 30 seconds in the radiation discharge zone.]
-world.btf_aphelion_protocol.trigger.action.2.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[CONTAINMENT HELD — Ardent absorbed the weapon's discharge. Hull integrity critical; multiple console failures. The quantum resonance was partially contained — the interference zone formed but smaller than projected.
-
-Axiom Station survived. Kaleth Prime sustained atmospheric disturbance but no population loss. The A.E.V. Ardent limped to Axiom Station under emergency power. Three crew were lost to hull breach. The rest received commendations they never spoke about.
-
-The Neutral Zone exists because you stood in the way.
-
-END: CONTAINMENT]"
-world.btf_aphelion_protocol.trigger.action.3.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[EVACUATION COMPLETE — The weapon fired. Axiom Station and the Kaleth Prime orbital platforms were destroyed. But 70% of the civilian population reached safety. The quantum interference zone formed as predicted.
-
-Starcorp Command's official account credits the A.E.V. Ardent with saving an estimated 28 million lives. Your name appears in the historical record not as the crew that stopped the war, but as the crew that made it survivable.
-
-The Neutral Zone exists because you chose people over victory.
-
-END: EVACUATE]"
-world.btf_aphelion_protocol.trigger.action.4.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[PARTIAL EVACUATION — The weapon fired. Casualties were reduced but not minimised. The quantum interference zone formed.
-
-You saved some of them. The records note the partial evacuation effort.
-
-The Neutral Zone exists.
-
-END: EVACUATE (PARTIAL)]"
-world.btf_aphelion_protocol.comms.0.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,[This is I.V. Ashrender to A.E.V. Ardent. The Aphelion Protocol is armed and charging. You cannot stop this. What you choose to do in the next ten minutes will determine which side history blames. Stand clear.]
-world.btf_aphelion_protocol.comms.starcorp_command.from,assets/worlds/btf_aphelion_protocol.toml → [comms] from,Starcorp Command
-world.btf_aphelion_protocol.comms.starcorp_command.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[Ardent, this is Starcorp Command — FLASH priority. Aphelion Protocol confirmed active. You are hereby ordered to stand down and withdraw immediately. Do NOT engage Harrow forces. We cannot afford an incident. Command out.]"
-world.btf_aphelion_protocol.comms.requiem_override.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[This is the channel you were told to stand by for. We have the weapon's abort code. One accepted exchange and Ashrender cannot fire. There will be consequences for us — but the weapon will not fire. Your move, Ardent.]"
-world.btf_aphelion_protocol.comms.1.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[Ardent, we've received the evacuation order. We're beginning to load the shuttles but we need navigation vectors — Helm, plot us an escape route away from the weapon's axis of fire. Science, we need atmospheric dispersal models for Kaleth Prime's eastern continent evacuation. Acknowledge.]"
-world.btf_aphelion_protocol.comms.response.0.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response] text,[Vectors confirmed. Initiating evacuation coordination — round one.]
-world.btf_aphelion_protocol.comms.response.action.obj_evacuate_r1.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.action] text,[Evacuation round 1 complete. Hail Axiom Station for the next vector.]
-world.btf_aphelion_protocol.comms.response.follow_up.message,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up] message,"[First vector confirmed. We have 40% of the civilian population moving. We need two more vectors before the weapon fires. Round two — deep colony vectors and sub-orbital trajectories for the northern settlements. Helm, compensate for the interference zone forming on the starboard approach.]"
-world.btf_aphelion_protocol.comms.response.follow_up.response.0.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response] text,[Round two vectors transmitted.]
-world.btf_aphelion_protocol.comms.response.follow_up.response.action.obj_evacuate_r2.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.action] text,[Evacuation round 2 complete. One more vector needed.]
-world.btf_aphelion_protocol.comms.response.follow_up.response.follow_up.message,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.follow_up] message,"[Second vector confirmed. We're at 70% evacuation capacity. Final vector — the weapon is nearly charged. Whatever happens in the next few minutes, Ardent, you've saved most of them. Transmit the final trajectory and we'll execute.]"
-world.btf_aphelion_protocol.comms.response.follow_up.response.follow_up.response.0.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.follow_up.response] text,[Final vector transmitted. Evacuation complete.]
-world.btf_aphelion_protocol.comms.response.follow_up.response.follow_up.response.action.obj_evacuate_r3.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.follow_up.response.action] text,[Evacuation complete. Casualties minimised.]
-world.btf_aphelion_protocol.comms.requiem_override.message_2,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[Confirm: you are accepting the override channel. Once you acknowledge, we transmit the abort code and Ashrender cannot fire. But Harrow will know we helped you. They will come for us. This is the price of doing the right thing at the wrong time. Confirm acceptance.]"
-world.btf_aphelion_protocol.comms.response.1.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response] text,[Confirmed. Transmit the abort code.]
-world.btf_aphelion_protocol.comms.response.action.3.message,assets/worlds/btf_aphelion_protocol.toml → [comms.response.action] message,"[REQUIEM OVERRIDE — The abort code was transmitted. Ashrender's weapon discharge sequence terminated. I.V. Ashrender stands down.
-
-Within minutes, Harrow warships arrived in the Axiom System. The Requiem courier was destroyed. House Requiem was denounced as traitors to the Imperium. High Executor Veth Harrow had the casus belli he needed — not a weapon discharge, but an act of treachery.
-
-The war began differently. It began the same.
-
-The quantum resonance from Ashrender's aborted charge left a sub-harmonic scar in the system's spatial fabric. Smaller than the full discharge would have created. But permanent. In 35 years, navigators will notice something strange about this region of space.
-
-The Neutral Zone exists because a deal was made.
-
-END: REQUIEM OVERRIDE]"
-world.btf_aphelion_protocol.comms.response.2.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response] text,[We need more time. Stand by.]
-world.btf_path_a.trigger.action.obj_rescue_varen.text,assets/worlds/btf_path_a.toml → [trigger.action] text,[Rescue Dr. Varen's escape pod from the inner asteroid belt.]
-world.btf_path_a.trigger.action.obj_rescue_varen.text_2,assets/worlds/btf_path_a.toml → [trigger.action] text,[Rescue Dr. Varen's escape pod from the inner asteroid belt.]
-world.btf_path_a.comms.axiom_diplomat.message,assets/worlds/btf_path_a.toml → [comms] message,"[Ardent, Administrator Chen here. Thank you for responding. Dr. Sol Varen — the Alliance's lead negotiator — disappeared three hours ago. They were due to transmit the final accord terms. The Harrow patrol, I.V. Ironveil, has been operating in restricted space near their last known position. I cannot reach Varen and I suspect Ironveil knows why.]"
-world.btf_path_a.comms.response.0.text,assets/worlds/btf_path_a.toml → [comms.response] text,[We will investigate Ironveil's patrol route.]
-world.btf_path_a.comms.response.action.obj_investigate_ironveil.text,assets/worlds/btf_path_a.toml → [comms.response.action] text,[Investigate I.V. Ironveil's patrol route near the inner asteroid belt.]
-world.btf_path_a.comms.response.1.text,assets/worlds/btf_path_a.toml → [comms.response] text,[Is Ironveil actively hostile?]
-world.btf_path_a.comms.response.follow_up.message,assets/worlds/btf_path_a.toml → [comms.response.follow_up] message,"[Their transponder data shows them holding position near the inner belt, running active sensors. They haven't fired on anything yet, but they're not patrolling normally — they're watching for something. Or someone. If Varen is alive out there, Ironveil knows exactly where they are.]"
-world.btf_path_a.comms.response.follow_up.response.0.text,assets/worlds/btf_path_a.toml → [comms.response.follow_up.response] text,[Understood. We'll deal with Ironveil.]
-world.btf_path_a.comms.response.follow_up.response.action.obj_investigate_ironveil.text,assets/worlds/btf_path_a.toml → [comms.response.follow_up.response.action] text,[Investigate I.V. Ironveil's patrol route near the inner asteroid belt.]
-world.btf_path_a.comms.axiom_diplomat.message_2,assets/worlds/btf_path_a.toml → [comms] message,[Ardent — we're picking up an escape pod distress signal from the inner asteroid belt. Life signs confirmed. That has to be Varen. Get to them before the debris closes in.]
-world.btf_path_a.comms.response.2.text,assets/worlds/btf_path_a.toml → [comms.response] text,[On our way.]
-world.btf_path_c.trigger.action.obj_harrow_orders.text,assets/worlds/btf_path_c.toml → [trigger.action] text,[Decrypted Harrow orders recovered: Ashrender is the weapon platform.]
-world.btf_path_c.comms.path_c_internal.from,assets/worlds/btf_path_c.toml → [comms] from,_self
-world.btf_path_c.comms.path_c_internal.message,assets/worlds/btf_path_c.toml → [comms] message,[TACTICAL ALERT — I.V. Ironveil has opened fire. Science is tracking hull frequencies. Recommend Tactical tune shield harmonics to counter gamma-frequency phaser banks.]
-world.btf_path_c.comms.path_c_internal.from_2,assets/worlds/btf_path_c.toml → [comms] from,_self
-world.btf_path_c.comms.path_c_internal.message_2,assets/worlds/btf_path_c.toml → [comms] message,"[INTERNAL REPORT — DECRYPTED SIGNAL INTERCEPT from I.V. Ironveil wreckage: HARROW OPERATIONAL ORDER HK-7 CONFIRMED. CODENAME: APHELION PROTOCOL. Authorised by High Executor Veth Harrow, countersigned Archivist Kallas. PRIMARY TARGET: Axiom Station (coordinates attached). SECONDARY TARGET: Kaleth Prime — atmospheric saturation required as territorial demonstration. ASHRENDER CONFIRMED ON STATION. WEAPON CHARGE: PROCEEDING ON SCHEDULE. NOTE: negotiator extraction complete. Varen is aboard Ashrender. — END INTERCEPT.]"
 world.combat_test.global.title,assets/worlds/combat_test.toml → [global] title,[Combat Test: Defend Starbase Alpha]
 world.combat_test.global.description,assets/worlds/combat_test.toml → [global] description,"[Eight waves of Harrow attackers, launched on a clock and all of them aimed at Starbase Alpha. They will not wait for you.]"
 world.entity.earth.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),earth
@@ -977,7 +868,7 @@ coordination.weapon_family.blasters,"Coordination popup/chatter — weapon famil
 coordination.weapon_family.torpedoes,"Coordination popup/chatter — weapon family name, torpedoes","torpedoes"
 coordination.power_brownout.title,"Coordination popup/chatter — a power group is browning out. {label} is the affected system","{label} Power Brownout"
 coordination.power_brownout.body,"Coordination popup/chatter — power-brownout body. {level} is the allocated power level","Allocation: {level}"
-coordination.navigate.title,"Coordination popup/chatter — Navigation clears Helm toward a waypoint. {label} is the waypoint name","Navigation: steer toward {label}"
+coordination.navigate.title,"Coordination popup/chatter — Navigation clears Helm toward a waypoint. {x} and {z} are the waypoint coordinates","Navigation: steer toward waypoint ({x}, {z})"
 coordination.repair.title,"Coordination popup/chatter — a system needs repair. {label} is the station or system name","Repair requested: {label}"
 coordination.threat_bearing.title,"Coordination popup/chatter — Sensors warns Shields of a threat. {deg} is the bearing in degrees, {label} the threat name","Sensors: threat bearing {deg}° — {label}"
 coordination.intent.target_acquired,"Coordination popup — an AI seat took a target. Intent-advisory title","Target acquired"
@@ -996,3 +887,21 @@ server.mod_pack_remove,"Host scenario picker — button that removes an applied 
 server.mod_pack_conflicts,"Host scenario picker — heading above the list of authored paths carried by more than one applied mod pack","[Path conflicts]"
 server.mod_pack_conflict_entry,"Host scenario picker — one path conflict line. {path} is the authored path, {winner} the pack id that wins it, {losers} the shadowed pack ids","[{path}: {winner} wins, shadows {losers}]"
 server.mod_pack_findings,"Host scenario picker — heading above the validation findings from the last mod-pack upload","[Findings]"
+server.game_over.ship_destroyed,"Game-over overlay / viewscreen HUD — the player's ship was destroyed. Emitted as an id by the built-in death sites (issue #977)","Ship Destroyed"
+power.group.helm,"Power console / chatter — display label for the helm power group (issue #977). Emitted by power_group_label, resolved via localiseTree","HELM"
+power.group.weapons,"Power console / chatter — display label for the weapons power group (issue #977)","WEAPONS"
+power.group.shields,"Power console / chatter — display label for the shields power group (issue #977)","SHIELDS"
+power.group.unknown,"Power console / chatter — fallback label for an unrecognised power group id (issue #977)","UNKNOWN"
+shield.facing.all,"Shield console / chatter — default facing label for a single-arc grid (issue #977)","All"
+shield.facing.fore,"Shield console / chatter — default facing label, forward arc (issue #977)","Fore"
+shield.facing.aft,"Shield console / chatter — default facing label, aft arc (issue #977)","Aft"
+shield.facing.port,"Shield console / chatter — default facing label, port arc (issue #977)","Port"
+shield.facing.starboard,"Shield console / chatter — default facing label, starboard arc (issue #977)","Starboard"
+shield.facing.arc_0,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 0 (issue #977)","Arc 0"
+shield.facing.arc_1,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 1 (issue #977)","Arc 1"
+shield.facing.arc_2,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 2 (issue #977)","Arc 2"
+shield.facing.arc_3,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 3 (issue #977)","Arc 3"
+shield.facing.arc_4,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 4 (issue #977)","Arc 4"
+shield.facing.arc_5,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 5 (issue #977)","Arc 5"
+shield.facing.arc_6,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 6 (issue #977)","Arc 6"
+shield.facing.arc_7,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 7 (issue #977)","Arc 7"

@@ -228,6 +228,18 @@ impl ShieldFacing {
         self.offline_remaining <= 0.0
     }
 
+    /// The sub-integer regen/decay accumulator — the fractional HP carried
+    /// between fixed-timestep ticks (and the negative fractional decay an
+    /// over-max non-focused arc bleeds off). Private to the facing because
+    /// only `tick_with_regen_scale` mutates it during the sim; exposed
+    /// read-only so the snapshot layer can capture it (issue #997 follow-up).
+    /// A resume that dropped it would forgive the sub-tick regen debt exactly
+    /// the way a dropped beam `damage_accumulator` would — see
+    /// [`crate::snapshot::WeaponState::shield_charge`].
+    pub fn hp_frac(&self) -> f32 {
+        self.hp_frac
+    }
+
     /// Apply `amount` damage to this facing.
     ///
     /// The incoming `amount` is scaled by `self.damage_multiplier` before
@@ -511,6 +523,42 @@ impl ShieldSystem {
     /// Recalculates each facing's effective max_hp, regen, and is_focused flag.
     pub fn set_focused_facing(&mut self, facing: Option<usize>) {
         self.focused_facing = facing;
+        self.recalculate_focus();
+    }
+
+    /// Restore ONLY the runtime charge state of each facing from a snapshot,
+    /// matching by arc `id`, then re-derive every focus-dependent field so the
+    /// restored system is byte-identical to the captured one (issue #997
+    /// follow-up).
+    ///
+    /// Each tuple is `(id, hp, hp_frac, offline_remaining, is_focused)`. This
+    /// overwrites the charge the sim accumulated — `hp`, the fractional
+    /// `hp_frac` accumulator, the `offline_remaining` timer, and the
+    /// `is_focused` flag — and NOTHING the ship TOML rebuilt at spawn: arc
+    /// ids, labels, `base_max_hp` / `base_regen_per_sec`, `priority`,
+    /// `center_deg` / `width_deg`, `focus_config` and the ship-wide frequency
+    /// are all left untouched. An id the snapshot does not mention is left as
+    /// the bootstrap built it (the content digest is what refuses a save
+    /// written against a different arc layout).
+    ///
+    /// `focused_facing` is re-derived from the restored `is_focused` flags —
+    /// the console carries a single focus slot, so at most one facing is
+    /// focused — and then [`Self::recalculate_focus`] rebuilds `max_hp`,
+    /// `regen_per_sec` and `damage_multiplier` from each arc's own baseline.
+    /// That recalc reads `focused_facing` and writes only the focus-derived
+    /// fields; it never touches `hp` / `hp_frac` / `offline_remaining`, so the
+    /// charge written just above survives it — the set order is load-bearing
+    /// and is why the charge write comes first.
+    pub fn restore_facings(&mut self, charge: &[(String, i32, f32, f32, bool)]) {
+        for (id, hp, hp_frac, offline_remaining, is_focused) in charge {
+            if let Some(facing) = self.facings.iter_mut().find(|f| &f.id == id) {
+                facing.hp = *hp;
+                facing.hp_frac = *hp_frac;
+                facing.offline_remaining = *offline_remaining;
+                facing.is_focused = *is_focused;
+            }
+        }
+        self.focused_facing = self.facings.iter().position(|f| f.is_focused);
         self.recalculate_focus();
     }
 

@@ -364,8 +364,26 @@ pub struct WeaponState {
     /// Per-arc shield hull as `(arc id, current, max)` in the arc order the
     /// TOML declared — `ShipArcHull`'s own iteration order, which it keeps
     /// separately from its map for exactly this determinism reason.
+    ///
+    /// This is the STRUCTURAL hull behind the emitters, not the shield CHARGE
+    /// the arcs are currently holding — those are two different quantities and
+    /// `shield_charge` below carries the other one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub arc_hull: Vec<(String, f32, f32)>,
+    /// Per-facing shield CHARGE as `(arc id, hp, hp_frac, offline_remaining,
+    /// is_focused)`, in `ShieldSystem.facings` order — the fractional
+    /// deterministic sim state a resume was silently dropping (issue #997
+    /// follow-up: a restored world defaulted every arc back to full charge).
+    ///
+    /// `hp_frac` rides along for `beams`' `damage_accumulator` reason: it is the
+    /// sub-tick regen/decay carried between fixed-timestep ticks, and a charge
+    /// restored without it is a charge whose fractional debt was forgiven.
+    /// `max_hp` is deliberately absent — it is not runtime charge but a
+    /// focus-derived value `ShieldSystem::restore_facings` rebuilds from each
+    /// arc's TOML baseline, so storing it would commit a derived quantity to
+    /// the wire.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shield_charge: Vec<(String, i32, f32, f32, bool)>,
     /// Every blaster bank's volley/cooldown cycle and bolts, in the authored
     /// bank order the component keeps — see [`BlasterRuntime`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1123,6 +1141,7 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
         Option<&crate::server_app::ShipSystemBlackboards>,
         Option<&crate::ai::server::ObjectiveCursors>,
         Option<&crate::console::weapons::blaster::BlasterSystemResource>,
+        Option<&crate::ship::shields::ShipShields>,
     )>() else {
         return Vec::new();
     };
@@ -1141,6 +1160,7 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
                 blackboards,
                 cursors,
                 blasters,
+                shields,
             )| {
                 // A row is emitted only for an entity that carries at least one
                 // of these, for `capture_controls`' reason: an all-defaults
@@ -1151,8 +1171,9 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
                     || cooldown.is_some()
                     || torpedoes.is_some()
                     || arcs.is_some()
-                    || blasters.is_some())
-                .then(|| weapon_state(beam, cooldown, torpedoes, arcs, blasters));
+                    || blasters.is_some()
+                    || shields.is_some())
+                .then(|| weapon_state(beam, cooldown, torpedoes, arcs, blasters, shields));
                 let repair = (teams.is_some() || queue.is_some() || alerted.is_some())
                     .then(|| repair_state(teams, queue, alerted));
                 let mut boards: Vec<(String, crate::messages::SystemBlackboard)> = blackboards
@@ -1276,6 +1297,7 @@ fn weapon_state(
     torpedoes: Option<&TorpedoSystemResource>,
     arcs: Option<&EntityShipArcHull>,
     blasters: Option<&crate::console::weapons::blaster::BlasterSystemResource>,
+    shields: Option<&crate::ship::shields::ShipShields>,
 ) -> WeaponState {
     let system = torpedoes.map(|t| &t.0);
     WeaponState {
@@ -1370,6 +1392,22 @@ fn weapon_state(
             .map(|a| {
                 a.0.iter()
                     .map(|(id, entry)| (id.to_string(), entry.current, entry.max))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        shield_charge: shields
+            .map(|s| {
+                s.0.facings
+                    .iter()
+                    .map(|f| {
+                        (
+                            f.id.clone(),
+                            f.hp,
+                            f.hp_frac(),
+                            f.offline_remaining,
+                            f.is_focused,
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default(),
@@ -1819,9 +1857,31 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     restore_entities(world, snapshot, &mut report);
     restore_asteroids(world, snapshot, &mut report);
     restore_run_scope(world, snapshot, &mut report);
+    rebuild_power_modifiers(world);
     rebuild_ai_world_snapshot(world);
 
     report
+}
+
+/// Rebuild each ship's `ShipModifiers` from the reactor allocation this restore
+/// just wrote, for [`rebuild_ai_world_snapshot`]'s reason: the modifier cache is
+/// a per-tick DERIVATION of power (issue #952 — WEAPONS buys `PhaserDamage`,
+/// SHIELDS buys `ShieldRegen`, HELM buys `MaxSpeed`/`MaxYawRate`), and a fresh
+/// app's bootstrap left it at the seeded rest values while [`PowerState`]
+/// restored the allocation those modifiers derive from. Without this, the first
+/// tick after the restore integrates beam damage and shield regen at the wrong
+/// intensity for exactly one tick — invisible to `world_digest`, which leaves
+/// shield charge deferred from the fold, and caught instead by the shield-charge
+/// continuation in `tests/snapshot_resume.rs`, which reads `ShipShields` off the
+/// live and resumed worlds directly and parts within a frame if this cache is
+/// left at its seeded default. The system is a pure
+/// function of restored power, so running it once here settles the cache before
+/// the first tick reads it; the per-tick `translate_power_modifiers` recomputes
+/// the identical values from then on. Errors are swallowed for the same
+/// partial-world reason as the snapshot rebuild below.
+fn rebuild_power_modifiers(world: &mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+    let _ = world.run_system_once(crate::modifiers::coordination::translate_power_modifiers);
 }
 
 /// Rebuild the AI's `WorldSnapshot` from the world this restore just wrote.
@@ -2256,6 +2316,18 @@ fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
     if let Some(mut arcs) = entity.get_mut::<EntityShipArcHull>() {
         for (id, current, _max) in &stored.arc_hull {
             arcs.0.set_hp(id, *current);
+        }
+    }
+    if let Some(mut shields) = entity.get_mut::<crate::ship::shields::ShipShields>() {
+        // Charge, not structural hull (that is `arc_hull` above): overwrite the
+        // per-facing hp / fractional accumulator / offline timer / focus, then
+        // let the system re-derive its focus-dependent fields so the restored
+        // system is field-identical to the captured one (issue #997 follow-up).
+        // Verified directly off `ShipShields` in `snapshot_resume`, since the
+        // digest deliberately defers shield charge from the fold. An arc the
+        // save omits is left as the bootstrap built it.
+        if !stored.shield_charge.is_empty() {
+            shields.0.restore_facings(&stored.shield_charge);
         }
     }
     if let Some(mut torpedoes) = entity.get_mut::<TorpedoSystemResource>() {

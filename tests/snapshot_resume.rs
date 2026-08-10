@@ -196,6 +196,49 @@ fn step(app: &mut bevy::prelude::App, frames: u64) {
     }
 }
 
+/// Read every `ShipShields`-bearing entity's per-facing CHARGE out of a world,
+/// keyed by `EntityUuid`, in a form two worlds can be compared field-for-field
+/// **without** going through `world_digest`.
+///
+/// The digest deliberately does not fold shield charge — shields stay in the
+/// deferred list in `deterministic-simulation.yaml` — so a continuation claim
+/// about shields cannot be read off the digest the way the motion/hull claim in
+/// `resume_round_trip` is; it has to read the component itself. Each facing is
+/// `(arc id, hp, hp_frac, offline_remaining, is_focused)`, the same runtime
+/// charge tuple the snapshot layer captures as `WeaponState::shield_charge`.
+/// Per-facing runtime charge tuple: `(arc id, hp, hp_frac, offline_remaining, is_focused)`.
+type FacingCharge = (String, i32, f32, f32, bool);
+
+fn shield_charge_by_uuid(
+    world: &mut bevy::prelude::World,
+) -> std::collections::BTreeMap<String, Vec<FacingCharge>> {
+    use project_phoenix::entity_spawner::EntityUuid;
+    use project_phoenix::server_app::ShipShields;
+    let mut query = world.query::<(&EntityUuid, &ShipShields)>();
+    query
+        .iter(world)
+        .map(|(uuid, shields)| {
+            (
+                uuid.0.clone(),
+                shields
+                    .0
+                    .facings
+                    .iter()
+                    .map(|f| {
+                        (
+                            f.id.clone(),
+                            f.hp,
+                            f.hp_frac(),
+                            f.offline_remaining,
+                            f.is_focused,
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 /// Bring a fresh app up to the point where the scenario's world exists.
 ///
 /// A fresh app has no ships at tick 0 — the lobby's collective auto-start has
@@ -518,6 +561,38 @@ fn the_resumed_player_ship_keeps_its_identity_and_condition() {
 fn the_resumed_ship_keeps_its_weapon_and_repair_state() {
     let mut live = duel();
     step(&mut live, CAPTURE_AT);
+
+    // Damage a shield arc on every ship BEFORE the capture so the round-trip
+    // below proves charge is RESTORED, not defaulted back to full — the exact
+    // regression issue #997's follow-up fixes (a resumed world measured ~17 HP
+    // live against 100 resumed). A full-health capture would round-trip
+    // trivially even if restore dropped the charge entirely, so the fixture
+    // knocks the fore arc down to a known sub-max hp and focuses it: both the
+    // whole-`WeaponState` equality and the explicit shield-charge assertion
+    // below then have a non-default value to disagree on if the wire ever
+    // forgets it.
+    {
+        use project_phoenix::server_app::ShipShields;
+        let world = live.world_mut();
+        let mut q = world.query::<&mut ShipShields>();
+        let mut damaged = 0usize;
+        for mut shields in q.iter_mut(world) {
+            if shields.0.facings.is_empty() {
+                continue;
+            }
+            // Focus arc 0, then damage it. `set_focused_facing` re-derives the
+            // focused arc's `max_hp`; it does not touch `hp`, so the write
+            // below survives — the same set order `restore_facings` relies on.
+            shields.0.set_focused_facing(Some(0));
+            shields.0.facings[0].hp = 17;
+            damaged += 1;
+        }
+        assert!(
+            damaged > 0,
+            "the duel's ships carry shield facings to damage"
+        );
+    }
+
     let payload = capture(live.world());
     assert_capture_is_alive(&payload, DUEL, true);
 
@@ -543,8 +618,43 @@ fn the_resumed_ship_keeps_its_weapon_and_repair_state() {
             .unwrap_or_else(|| panic!("ship {uuid} came back without its weapons"));
         assert_eq!(
             restored, weapons,
-            "ship {uuid}: live beams, cooldowns, tubes, rounds in flight and \
-             per-arc shields all came back"
+            "ship {uuid}: live beams, cooldowns, tubes, rounds in flight, \
+             per-arc shield hull and shield charge all came back"
+        );
+    }
+
+    // Shield CHARGE specifically (issue #997 follow-up), named rather than left
+    // to ride inside the struct equality above: the capture carries the
+    // damaged arc, and every captured facing's charge reappears after the
+    // restore instead of defaulting to full.
+    let captured_charge: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.weapons.as_ref().map(|w| (&e.uuid, &w.shield_charge)))
+        .filter(|(_, charge)| !charge.is_empty())
+        .collect();
+    assert!(
+        !captured_charge.is_empty(),
+        "the duel's ships carry shield charge in the capture"
+    );
+    assert!(
+        captured_charge
+            .iter()
+            .any(|(_, charge)| charge.iter().any(|(_, hp, ..)| *hp == 17)),
+        "the damaged arc (hp=17) was captured — the round-trip is not trivially \
+         full-health, so a restore that defaulted shields to full would fail here"
+    );
+    for (uuid, charge) in captured_charge {
+        let restored = after
+            .entities
+            .iter()
+            .find(|e| &e.uuid == uuid)
+            .and_then(|e| e.weapons.as_ref())
+            .map(|w| &w.shield_charge)
+            .unwrap_or_else(|| panic!("ship {uuid} came back without its shield charge"));
+        assert_eq!(
+            restored, charge,
+            "ship {uuid}: shield charge (hp, hp_frac, offline, focus) round-tripped"
         );
     }
 
@@ -562,6 +672,105 @@ fn the_resumed_ship_keeps_its_weapon_and_repair_state() {
             restored, repair,
             "ship {}: the repair crew is where it was standing",
             entity.uuid
+        );
+    }
+}
+
+/// The shield-charge **continuation** claim, read DIRECTLY off `ShipShields` in
+/// both worlds rather than through `world_digest`.
+///
+/// The digest continuation in `resume_round_trip` cannot make this claim:
+/// shields are deferred from the fold (`deterministic-simulation.yaml`), so a
+/// resumed ship whose shield charge drifted a frame after the restore would
+/// leave that digest untouched. This test steps the live and resumed duel
+/// forward together and compares each ship's per-facing charge — hp, the
+/// fractional `hp_frac` accumulator, `offline_remaining` and focus — read out of
+/// `ShipShields` on both worlds every frame.
+///
+/// It is what validates BOTH halves of the fix at once. The capture carries a
+/// deliberately damaged, focused fore arc, so every ship comes back with a
+/// sub-max arc that is actively **regenerating** — and shield regen is scaled by
+/// `ShipModifiers` (issue #952's SHIELDS -> `ShieldRegen`), the very cache
+/// `restore`'s `rebuild_power_modifiers` step settles from the restored reactor
+/// allocation. Drop that step and the resumed ship regens (and, in an
+/// actively-engaging duel, takes phaser damage under a wrong `PhaserDamage`) at
+/// the wrong intensity for the first tick, and the per-facing charge parts from
+/// the live world's within a frame or two — so the test is not vacuous: it fails
+/// if `rebuild_power_modifiers` is removed.
+#[test]
+fn the_resumed_ship_holds_its_shield_charge_step_for_step() {
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+
+    // Damage + focus a fore arc on every ship so the continuation has live,
+    // sub-max charge to diverge on. A full arc with nothing to regen would step
+    // forward identically even with `rebuild_power_modifiers` removed; a damaged
+    // one regenerates at a modifier-scaled rate, which is exactly the quantity
+    // that step exists to get right.
+    {
+        use project_phoenix::server_app::ShipShields;
+        let world = live.world_mut();
+        let mut q = world.query::<&mut ShipShields>();
+        let mut damaged = 0usize;
+        for mut shields in q.iter_mut(world) {
+            if shields.0.facings.is_empty() {
+                continue;
+            }
+            // Focus arc 0, then damage it — `set_focused_facing` re-derives the
+            // focused arc's `max_hp` but not its `hp`, so the write survives.
+            shields.0.set_focused_facing(Some(0));
+            shields.0.facings[0].hp = 17;
+            damaged += 1;
+        }
+        assert!(
+            damaged > 0,
+            "the duel's ships carry shield facings to damage"
+        );
+    }
+
+    let payload = capture(live.world());
+    assert_capture_is_alive(&payload, DUEL, true);
+    let damaged_arc_captured = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.weapons.as_ref())
+        .any(|w| w.shield_charge.iter().any(|(_, hp, ..)| *hp == 17));
+    assert!(
+        damaged_arc_captured,
+        "the damaged arc (hp=17) rode into the capture — the continuation is \
+         not a trivially-full-health one that would track even with the charge \
+         dropped"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    // At the instant of restore the two worlds' shield charge is equal — the
+    // photograph, read off the component rather than the digest.
+    let live_charge = shield_charge_by_uuid(live.world_mut());
+    let resumed_charge = shield_charge_by_uuid(resumed.world_mut());
+    assert!(
+        !live_charge.is_empty(),
+        "the live duel carries shields to compare"
+    );
+    assert_eq!(
+        resumed_charge, live_charge,
+        "shield charge differed at the very instant of restore"
+    );
+
+    // And it stays equal step for step. This is the assertion the digest
+    // continuation in `resume_round_trip` cannot make, because shields are not
+    // in the fold: without `rebuild_power_modifiers` the resumed ship's first
+    // continuation tick regens (and takes phaser damage) at the wrong intensity
+    // and the charge parts here.
+    for frame in 1..=CONTINUE_FOR {
+        live.update();
+        resumed.update();
+        assert_eq!(
+            shield_charge_by_uuid(resumed.world_mut()),
+            shield_charge_by_uuid(live.world_mut()),
+            "shield charge diverged {frame} frame(s) after the restore"
         );
     }
 }

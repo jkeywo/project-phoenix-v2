@@ -1,0 +1,5 @@
+# A valid world in an otherwise valid pack — but this entry is the one whose
+# stored CRC the generator corrupts, so the archive never reads and the pack is
+# rejected `invalid-archive` before this content is ever looked at.
+[global]
+title = "Corrupt Arena"

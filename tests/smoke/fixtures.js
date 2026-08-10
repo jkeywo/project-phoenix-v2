@@ -248,7 +248,12 @@ export function captureServerPageErrors(page) {
 /**
  * @param {import('@playwright/test').BrowserContext} ctx
  * @param {string} hostId  peer id read from the server page's QR link
- * @param {{ token?: string, name?: string }} [opts]
+ * @param {{ token?: string, name?: string, waitFor?: string }} [opts]
+ *   `waitFor` is the message type to block on before resolving — defaults to
+ *   `'Welcome'` (the world has loaded). A phone that connects DURING the
+ *   QR-first scenario stage never gets a Welcome (Bevy is not running yet); the
+ *   host answers `Identify` with a synthesized `ScenarioCatalog` (server.html
+ *   `sendCatalogTo`), so those specs pass `waitFor: 'ScenarioCatalog'`.
  * @returns {Promise<TestClient>}
  */
 export async function createTestClient(
@@ -258,6 +263,7 @@ export async function createTestClient(
 ) {
   const token = opts.token ?? 'tc-' + Math.random().toString(16).slice(2, 10);
   const name = opts.name ?? 'Tester';
+  const waitFor = opts.waitFor ?? 'Welcome';
 
   const page = await ctx.newPage();
   const routeKey = Math.random().toString(16).slice(2, 10);
@@ -267,9 +273,9 @@ export async function createTestClient(
   );
   await page.goto(`http://localhost:3000/blank-${routeKey}`);
 
-  // Connect to host and wait for Welcome before returning.
+  // Connect to host and wait for the readiness message before returning.
   await page.evaluate(
-    ({ hostId, token, name }) =>
+    ({ hostId, token, name, waitFor }) =>
       new Promise((resolve, reject) => {
         window.__messages = [];
         const peer = new window.Peer();
@@ -284,14 +290,14 @@ export async function createTestClient(
           });
         });
         const t = setInterval(() => {
-          if (window.__messages?.some((m) => m.type === 'Welcome')) {
+          if (window.__messages?.some((m) => m.type === waitFor)) {
             clearInterval(t);
             resolve();
           }
         }, 50);
-        setTimeout(() => { clearInterval(t); reject(new Error(`Welcome timeout (token=${token})`)); }, 15_000);
+        setTimeout(() => { clearInterval(t); reject(new Error(`${waitFor} timeout (token=${token})`)); }, 15_000);
       }),
-    { hostId, token, name },
+    { hostId, token, name, waitFor },
   );
 
   const client = {
@@ -470,6 +476,48 @@ export function expectFixtureWorld(worldSetupMsg, fixtureToml) {
       `fixture world ${JSON.stringify(title)} — the context.route glob almost ` +
       'certainly stopped matching and production assets/worlds/ was served instead',
   ).toBe(title);
+}
+
+// ── Committed mod-pack fixtures (issues #986–#991) ───────────────────────────
+//
+// The smoke spec (mod-pack.spec.js) uploads the committed `.zip` archives under
+// tests/fixtures/mod-packs/ and derives its expectations (pack name/version,
+// scenario id, mod world path) from each pack's own manifest rather than pinning
+// literals — the same derive-don't-pin rule the rest of this file follows. The
+// archives are byte-reproducible via `scripts/build-mod-pack-fixtures.mjs`.
+
+/** Absolute path to a committed fixture archive by bare name (no `.zip`). */
+export function modPackFixturePath(name) {
+  return path.join(__dirname, '../fixtures/mod-packs', `${name}.zip`);
+}
+
+/**
+ * Extract the `scenarios.toml` manifest TEXT from a committed fixture archive.
+ *
+ * A deliberately tiny store-only ZIP reader that does NOT verify CRCs — so it
+ * still reads the manifest out of the `corrupt-crc` fixture, whose corruption is
+ * confined to another entry's CRC. Returns the manifest as a string, or throws
+ * if the archive carries no `scenarios.toml`. Feed the result to `tomlString` /
+ * `tableArrayValues` to read the pack + scenario fields.
+ */
+export function readModPackManifest(name) {
+  const bytes = fs.readFileSync(modPackFixturePath(name));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const dec = new TextDecoder();
+  let pos = 0;
+  while (pos + 4 <= bytes.length && view.getUint32(pos, true) === 0x04034b50) {
+    const compSize = view.getUint32(pos + 18, true);
+    const nameLen = view.getUint16(pos + 26, true);
+    const extraLen = view.getUint16(pos + 28, true);
+    const nameStart = pos + 30;
+    const dataStart = nameStart + nameLen + extraLen;
+    const entry = dec.decode(bytes.subarray(nameStart, nameStart + nameLen));
+    if (entry === 'scenarios.toml') {
+      return dec.decode(bytes.subarray(dataStart, dataStart + compSize));
+    }
+    pos = dataStart + compSize;
+  }
+  throw new Error(`mod-pack fixture ${name}.zip has no scenarios.toml`);
 }
 
 // Reads the host peer ID from the server page's QR-link href, which is set

@@ -1,0 +1,23 @@
+# Committed mod-pack fixture (issue #991): a pack carrying a file OUTSIDE the
+# supported authored `assets/*` whitelist (`assets/secret/keys.toml`). The host
+# rejects it with `disallowed-path` and applies NOTHING (atomic) — the valid
+# world it also carries never reaches the session overlay.
+#
+# Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
+# (byte-reproducible; gated by `--check`). The SAME .zip bytes are validated
+# from both Rust (src/world/mod_pack.rs) and the browser smoke spec
+# (tests/smoke/mod-pack.spec.js), so the two consumers cannot drift.
+
+[pack]
+format = 1
+id = "disallowed-path"
+version = "1.0.0"
+name = "Disallowed Path"
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "forbidden_arena"
+world = "assets/worlds/forbidden_arena.toml"

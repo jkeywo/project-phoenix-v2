@@ -1704,6 +1704,90 @@ entity = "raider"
         assert!(has_category(&result, "denied-script-capability"));
     }
 
+    // ── #991 corpus completion, validated through the REAL archive bytes ──────
+    //
+    // The five fixtures the earlier slices left unbuilt. Each is asserted here
+    // AND in the browser smoke spec (tests/smoke/mod-pack.spec.js) over the SAME
+    // committed .zip, so the Rust validator and the real host page cannot drift.
+
+    /// A committed pack carrying a file OUTSIDE the authored whitelist is
+    /// rejected `disallowed-path`, with nothing applied (atomic).
+    #[test]
+    fn fixture_disallowed_path_is_rejected() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/disallowed-path.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "disallowed-path"),
+            "findings: {:?}",
+            result.findings
+        );
+        // Atomicity is the caller's `is_accepted` gate (bridge::wasm_add_mod_pack),
+        // not a cleared `files` — the whitelist violation blocks acceptance, which
+        // is what stops anything being applied.
+    }
+
+    /// The deliberately CRC-corrupted committed archive fails to read, so the
+    /// whole pack is rejected `invalid-archive` (its intact manifest is never
+    /// reached). Byte-for-byte the archive the browser spec uploads.
+    #[test]
+    fn fixture_corrupt_crc_is_rejected() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/corrupt-crc.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert_eq!(
+            result.findings[0].category, "invalid-archive",
+            "findings: {:?}",
+            result.findings
+        );
+        assert!(result.files.is_empty());
+    }
+
+    /// A committed pack whose world is valid TOML but violates the world schema
+    /// (an `[[entity]]` with no `template_path`) is rejected
+    /// `unparseable-scenario-world`.
+    #[test]
+    fn fixture_schema_invalid_world_is_rejected() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/schema-invalid-world.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "unparseable-scenario-world"),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+
+    /// A committed pack whose manifest names a world neither carried nor in base
+    /// content is rejected `missing-scenario-world`.
+    #[test]
+    fn fixture_unresolved_manifest_world_is_rejected() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/unresolved-manifest-world.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "missing-scenario-world"),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+
+    /// The editor exporter's OWN output validates on the host — the round trip
+    /// #991 closes end to end (editor #759/#989 → host validator #760/#986). The
+    /// archive is produced by `exportModPack` in the fixture generator, not
+    /// hand-authored, so this proves the real editor bytes are accepted.
+    #[test]
+    fn fixture_editor_round_trip_is_accepted() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/editor-round-trip.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        assert!(
+            result.is_accepted(),
+            "editor-round-trip.zip must be accepted: {:?}",
+            result.findings
+        );
+        assert!(result.files.contains_key("assets/worlds/editor_arena.toml"));
+    }
+
     // ── Multi-pack stack: precedence, conflicts, provenance (issue #987) ─────
 
     /// Build a minimal already-active pack from a set of `(path, text)` files.

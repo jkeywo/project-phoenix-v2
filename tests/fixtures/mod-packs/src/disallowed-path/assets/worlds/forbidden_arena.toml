@@ -1,0 +1,4 @@
+# A perfectly valid world — but the pack also carries an off-whitelist file, so
+# atomic validation rejects the WHOLE pack and this world is never installed.
+[global]
+title = "Forbidden Arena"

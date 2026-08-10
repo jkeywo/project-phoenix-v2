@@ -1,0 +1,8 @@
+# Valid TOML, INVALID world: an `[[entity]]` must carry a `template_path`
+# (src/world/config.rs `WorldEntity`). This one omits it, so `parse_world`
+# fails deserialization and the pack is rejected `unparseable-scenario-world`.
+[global]
+title = "Schema Invalid World"
+
+[[entity]]
+name = "orphan"

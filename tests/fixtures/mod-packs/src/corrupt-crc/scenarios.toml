@@ -1,0 +1,25 @@
+# Committed mod-pack fixture (issue #991): the SOURCE for the deliberately
+# CRC-corrupted archive. This directory describes a perfectly valid pack; the
+# generator zips it store-only and then flips one byte of the FIRST entry's
+# stored CRC field (a documented, deterministic corruption step — see
+# scripts/build-mod-pack-fixtures.mjs). The archive therefore cannot round-trip
+# through the store-writer, so `--check` re-derives it the same way.
+#
+# The host's store-zip reader verifies each entry's CRC, so the corrupted
+# archive fails to read and the pack is rejected `invalid-archive` — nothing is
+# applied. Validated from both Rust (src/world/mod_pack.rs) and the browser
+# smoke spec (tests/smoke/mod-pack.spec.js).
+
+[pack]
+format = 1
+id = "corrupt-crc"
+version = "1.0.0"
+name = "Corrupt CRC"
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "corrupt_arena"
+world = "assets/worlds/corrupt_arena.toml"

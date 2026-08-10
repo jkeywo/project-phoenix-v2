@@ -183,7 +183,9 @@ mod tests {
     use rhai::{Dynamic, Map};
 
     /// Compile `source`, call `fn_name` with a `flags` view over `base` sharing a
-    /// fresh effect sink, and return the emitted commands in authored order.
+    /// fresh effect sink, and return the emitted commands in authored order. Flag
+    /// writes are all `Cmd` effects, so the drained `BufferedEffect`s unwrap to
+    /// their `ActionCmd`s here.
     fn run(source: &str, fn_name: &str, base: FlagStore) -> Vec<ActionCmd> {
         let engine = runtime_engine();
         let ast = engine.compile(source).expect("compiles");
@@ -192,7 +194,16 @@ mod tests {
         let mut ctx = Map::new();
         ctx.insert("flags".into(), Dynamic::from(flags));
         let _ = vellum_script::call_fn(&engine, &ast, "t.rhai", fn_name, ctx).expect("calls");
+        use crate::world::script::effects::BufferedEffect;
         sink.take()
+            .into_iter()
+            .map(|e| match e {
+                BufferedEffect::Cmd(cmd) => cmd,
+                BufferedEffect::Action(a) => {
+                    unreachable!("flags emit only command effects, got {a:?}")
+                }
+            })
+            .collect()
     }
 
     #[test]

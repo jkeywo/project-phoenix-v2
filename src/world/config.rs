@@ -372,8 +372,12 @@ struct RawTriggerEntry {
 }
 
 /// A single condition-weighted modifier inside an `add_objective` TOML action.
+///
+/// `pub(crate)` only so it may appear in [`RawActionEntry`]'s (also `pub(crate)`)
+/// `modifiers` field without tripping the private-in-public lint; its fields stay
+/// module-private (only [`parse_utility_config`] reads them, in this file).
 #[derive(Debug, Deserialize)]
-struct RawModifier {
+pub(crate) struct RawModifier {
     condition: String,
     #[serde(default)]
     threshold: Option<f32>,
@@ -381,126 +385,138 @@ struct RawModifier {
 }
 
 /// A zero-gate veto condition inside an `add_objective` TOML action.
+///
+/// `pub(crate)` for the same reason as [`RawModifier`].
 #[derive(Debug, Deserialize)]
-struct RawZeroGate {
+pub(crate) struct RawZeroGate {
     condition: String,
     #[serde(default)]
     threshold: Option<f32>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawActionEntry {
+/// One flat, all-optional `[[trigger.action]]` row as authored in TOML.
+///
+/// `pub(crate)` (with `pub(crate)` fields and a `Default` derive) so the Rhai
+/// effect host (`world::script::effects`) can populate one from a `#{ … }` script
+/// map and run it through the SHARED [`parse_action_entry`] — the scripted
+/// `add_objective` / `spawn_entity` verbs reuse the exact directive / utility /
+/// anchor-XOR validation the declarative front-end applies, rather than
+/// re-implementing it (a divergence magnet). `..Default::default()` fills the
+/// fields a given script verb does not read, which is why every field must be
+/// crate-visible: struct-literal construction needs all fields in scope.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct RawActionEntry {
     #[serde(rename = "type")]
-    kind: String,
+    pub(crate) kind: String,
     #[serde(default)]
-    id: Option<String>,
+    pub(crate) id: Option<String>,
     #[serde(default)]
-    text: Option<String>,
+    pub(crate) text: Option<String>,
     #[serde(default)]
-    mandatory: Option<bool>,
+    pub(crate) mandatory: Option<bool>,
     /// Optional list of entity names to mark on the nav radar for an
     /// `add_objective` action. Each name may reference a real entity
     /// (station, ship) or an invisible `objective_marker` beacon.
     #[serde(default)]
-    targets: Option<Vec<String>>,
+    pub(crate) targets: Option<Vec<String>>,
     #[serde(default)]
-    entity: Option<String>,
+    pub(crate) entity: Option<String>,
     #[serde(default)]
-    state: Option<String>,
+    pub(crate) state: Option<String>,
     #[serde(default)]
-    target: Option<String>,
+    pub(crate) target: Option<String>,
     #[serde(default)]
-    tag: Option<String>,
+    pub(crate) tag: Option<String>,
     #[serde(default)]
-    slot: Option<String>,
+    pub(crate) slot: Option<String>,
     #[serde(default)]
-    bonus: Option<f32>,
+    pub(crate) bonus: Option<f32>,
     #[serde(default)]
-    int_bonus: Option<i32>,
+    pub(crate) int_bonus: Option<i32>,
     #[serde(default, rename = "kind")]
-    flag_kind: Option<String>,
+    pub(crate) flag_kind: Option<String>,
     #[serde(default)]
-    message: Option<String>,
+    pub(crate) message: Option<String>,
     /// Declared run outcome for a `game_over` action (#843):
     /// `"victory"` | `"defeat"`, case-insensitive.
     #[serde(default)]
-    outcome: Option<String>,
+    pub(crate) outcome: Option<String>,
     #[serde(default)]
-    path: Option<String>,
+    pub(crate) path: Option<String>,
     /// Flag name for `set_flag` / `clear_flag` / `increment_flag` / `set_flag_value`.
     #[serde(default)]
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     /// Increment delta for `increment_flag`.
     #[serde(default)]
-    by: Option<i64>,
+    pub(crate) by: Option<i64>,
     /// Direct counter assignment for `set_flag_value`.
     #[serde(default)]
-    value: Option<i64>,
+    pub(crate) value: Option<i64>,
     /// Entity template path for `spawn_entity` action.
     #[serde(default)]
-    template_path: Option<String>,
+    pub(crate) template_path: Option<String>,
     /// Anchor reference for `spawn_entity` action (mutually exclusive with `position`).
     #[serde(default)]
-    anchor: Option<String>,
+    pub(crate) anchor: Option<String>,
     /// Explicit `[x, y, z]` for `spawn_entity` action (mutually exclusive with `anchor`).
     #[serde(default)]
-    position: Option<[f32; 3]>,
+    pub(crate) position: Option<[f32; 3]>,
     /// XYZ Euler rotation in radians for `spawn_entity` (optional).
     #[serde(default)]
-    rotation: Option<[f32; 3]>,
+    pub(crate) rotation: Option<[f32; 3]>,
     /// Per-axis scale for `spawn_entity` (optional).
     #[serde(default)]
-    scale: Option<[f32; 3]>,
+    pub(crate) scale: Option<[f32; 3]>,
     /// Faction `name` for `add_faction_enemy` / `remove_faction_enemy`.
     /// Resolved via `FactionRegistry::uuid_by_name` at dispatch time.
     #[serde(default)]
-    faction: Option<String>,
+    pub(crate) faction: Option<String>,
     /// Enemy faction `name` for `add_faction_enemy` / `remove_faction_enemy`.
     #[serde(default)]
-    enemy: Option<String>,
+    pub(crate) enemy: Option<String>,
     // ── add_objective extended fields (issue #571) ─────────────────────────
     /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
     /// `"Hail"`, or omit for `None`.
     #[serde(default)]
-    directive_kind: Option<String>,
+    pub(crate) directive_kind: Option<String>,
     /// Anchor names for a `Patrol` directive.
     #[serde(default)]
-    directive_anchors: Option<Vec<String>>,
+    pub(crate) directive_anchors: Option<Vec<String>>,
     /// Whether a `Patrol` directive loops back to the first anchor.
     #[serde(default)]
-    directive_loop: Option<bool>,
+    pub(crate) directive_loop: Option<bool>,
     /// Anchor name for a `Reach` or `Retreat` directive.
     #[serde(default)]
-    directive_anchor: Option<String>,
+    pub(crate) directive_anchor: Option<String>,
     /// Base utility score for the objective (default 0.0).
     #[serde(default)]
-    base_priority: Option<f32>,
+    pub(crate) base_priority: Option<f32>,
     /// Objective source: `"mission"` (default) or `"doctrine"`.
     #[serde(default)]
-    source: Option<String>,
+    pub(crate) source: Option<String>,
     /// Condition-weighted score modifiers.
     #[serde(default)]
-    modifiers: Option<Vec<RawModifier>>,
+    pub(crate) modifiers: Option<Vec<RawModifier>>,
     /// Zero-gate veto conditions.
     #[serde(default)]
-    zero_gates: Option<Vec<RawZeroGate>>,
+    pub(crate) zero_gates: Option<Vec<RawZeroGate>>,
     /// Named groups for `spawn_entity` action. The entity is tracked as a
     /// member of each group and removed from all groups on destruction.
     #[serde(default)]
-    groups: Option<Vec<String>>,
+    pub(crate) groups: Option<Vec<String>>,
     /// Optional inline TOML overrides for `spawn_entity` action, same shape
     /// as the static `[[entity]] overrides` field.
     #[serde(default)]
-    overrides: Option<toml::Value>,
+    pub(crate) overrides: Option<toml::Value>,
     /// Per-action predicate gate. When `Some`, the action only fires if the
     /// predicate evaluates to true at dispatch time.
     #[serde(default)]
-    when: Option<String>,
+    pub(crate) when: Option<String>,
     /// Delay in seconds before this action fires (relative to trigger fire time).
     /// Actions with `delay_secs > 0.0` are queued and dispatched after the
     /// delay period expires.
     #[serde(default)]
-    delay_secs: Option<f32>,
+    pub(crate) delay_secs: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1261,6 +1277,274 @@ fn parse_flag_kind(s: &str) -> Result<crate::messages::FlagKind, String> {
     }
 }
 
+/// Parse ONE `[[trigger.action]]` row into a `TriggerAction`.
+///
+/// Factored out of [`parse_raw_actions`] so the Rhai effect host
+/// (`world::script::effects`) can drive the SAME per-type parse — directive
+/// validation, utility config, the `spawn_entity` anchor/position XOR — from a
+/// script `#{ … }` map rather than re-implementing it (issue #984, Rhai M6). The
+/// declarative loop and the scripted `add_objective` / `spawn_entity` verbs are
+/// then two front-ends over one parser. `when` / `delay_secs` are row-level
+/// scheduling metadata [`parse_raw_actions`] reads separately, not part of the
+/// action itself.
+pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerAction, String> {
+    let action =
+        match raw_action.kind.as_str() {
+            "add_objective" => {
+                let directive = parse_directive(raw_action)?;
+                let utility = parse_utility_config(raw_action);
+                let source = match raw_action.source.as_deref() {
+                    Some("doctrine") => ObjectiveSource::Doctrine,
+                    _ => ObjectiveSource::Mission,
+                };
+                TriggerAction::AddObjective {
+                    id: raw_action.id.clone().ok_or_else(|| {
+                        "Action 'add_objective' requires an 'id' field".to_string()
+                    })?,
+                    text: raw_action.text.clone().ok_or_else(|| {
+                        "Action 'add_objective' requires a 'text' field".to_string()
+                    })?,
+                    mandatory: raw_action.mandatory.unwrap_or(false),
+                    targets: raw_action.targets.clone().unwrap_or_default(),
+                    directive,
+                    utility,
+                    source,
+                }
+            }
+            "complete_objective" => TriggerAction::CompleteObjective {
+                id: raw_action.id.clone().ok_or_else(|| {
+                    "Action 'complete_objective' requires an 'id' field".to_string()
+                })?,
+            },
+            "fail_objective" => TriggerAction::FailObjective {
+                id: raw_action
+                    .id
+                    .clone()
+                    .ok_or_else(|| "Action 'fail_objective' requires an 'id' field".to_string())?,
+            },
+            "set_ai_state" => TriggerAction::SetAiState {
+                entity: raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'set_ai_state' requires an 'entity' field".to_string()
+                })?,
+                state: raw_action
+                    .state
+                    .clone()
+                    .ok_or_else(|| "Action 'set_ai_state' requires a 'state' field".to_string())?,
+                target: raw_action.target.clone(),
+            },
+            "apply_modifier" => {
+                let slot_str = raw_action
+                    .slot
+                    .as_deref()
+                    .ok_or_else(|| "Action 'apply_modifier' requires a 'slot' field".to_string())?;
+                TriggerAction::ApplyModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'apply_modifier' requires an 'entity' field".to_string()
+                    })?,
+                    tag: raw_action.tag.clone().ok_or_else(|| {
+                        "Action 'apply_modifier' requires a 'tag' field".to_string()
+                    })?,
+                    slot: parse_modifier_slot(slot_str)?,
+                    bonus: raw_action.bonus.ok_or_else(|| {
+                        "Action 'apply_modifier' requires a 'bonus' field".to_string()
+                    })?,
+                }
+            }
+            "remove_modifier" => {
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                    "Action 'remove_modifier' requires a 'slot' field".to_string()
+                })?;
+                TriggerAction::RemoveModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'remove_modifier' requires an 'entity' field".to_string()
+                    })?,
+                    tag: raw_action.tag.clone().ok_or_else(|| {
+                        "Action 'remove_modifier' requires a 'tag' field".to_string()
+                    })?,
+                    slot: parse_modifier_slot(slot_str)?,
+                }
+            }
+            "apply_flag" => {
+                let kind_str = raw_action
+                    .flag_kind
+                    .as_deref()
+                    .ok_or_else(|| "Action 'apply_flag' requires a 'kind' field".to_string())?;
+                TriggerAction::ApplyFlag {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'apply_flag' requires an 'entity' field".to_string()
+                    })?,
+                    tag: raw_action
+                        .tag
+                        .clone()
+                        .ok_or_else(|| "Action 'apply_flag' requires a 'tag' field".to_string())?,
+                    kind: parse_flag_kind(kind_str)?,
+                }
+            }
+            "remove_flag" => {
+                let kind_str = raw_action
+                    .flag_kind
+                    .as_deref()
+                    .ok_or_else(|| "Action 'remove_flag' requires a 'kind' field".to_string())?;
+                TriggerAction::RemoveFlag {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'remove_flag' requires an 'entity' field".to_string()
+                    })?,
+                    tag: raw_action
+                        .tag
+                        .clone()
+                        .ok_or_else(|| "Action 'remove_flag' requires a 'tag' field".to_string())?,
+                    kind: parse_flag_kind(kind_str)?,
+                }
+            }
+            "apply_int_modifier" => {
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                    "Action 'apply_int_modifier' requires a 'slot' field".to_string()
+                })?;
+                TriggerAction::ApplyIntModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'apply_int_modifier' requires an 'entity' field".to_string()
+                    })?,
+                    tag: raw_action.tag.clone().ok_or_else(|| {
+                        "Action 'apply_int_modifier' requires a 'tag' field".to_string()
+                    })?,
+                    slot: parse_int_modifier_slot(slot_str)?,
+                    bonus: raw_action.int_bonus.ok_or_else(|| {
+                        "Action 'apply_int_modifier' requires an 'int_bonus' field".to_string()
+                    })?,
+                }
+            }
+            "remove_int_modifier" => {
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                    "Action 'remove_int_modifier' requires a 'slot' field".to_string()
+                })?;
+                TriggerAction::RemoveIntModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'remove_int_modifier' requires an 'entity' field".to_string()
+                    })?,
+                    tag: raw_action.tag.clone().ok_or_else(|| {
+                        "Action 'remove_int_modifier' requires a 'tag' field".to_string()
+                    })?,
+                    slot: parse_int_modifier_slot(slot_str)?,
+                }
+            }
+            "game_over" => TriggerAction::GameOver {
+                message: raw_action.message.clone(),
+                // Validate at parse time: an unknown value fails the world
+                // load loudly rather than silently mis-classifying the run.
+                outcome: raw_action
+                    .outcome
+                    .as_deref()
+                    .map(crate::balance::Outcome::parse)
+                    .transpose()
+                    .map_err(|e| format!("Action 'game_over' has an invalid outcome: {e}"))?,
+            },
+            "load_world" => TriggerAction::LoadWorld {
+                path: raw_action
+                    .path
+                    .clone()
+                    .ok_or_else(|| "Action 'load_world' requires a 'path' field".to_string())?,
+            },
+            "unload_world" => TriggerAction::UnloadWorld {
+                path: raw_action
+                    .path
+                    .clone()
+                    .ok_or_else(|| "Action 'unload_world' requires a 'path' field".to_string())?,
+            },
+            "reset_trigger" => TriggerAction::ResetTrigger {
+                id: raw_action
+                    .id
+                    .clone()
+                    .ok_or_else(|| "Action 'reset_trigger' requires an 'id' field".to_string())?,
+            },
+            "set_flag" => TriggerAction::SetWorldFlag {
+                name: raw_action
+                    .name
+                    .clone()
+                    .ok_or_else(|| "Action 'set_flag' requires a 'name' field".to_string())?,
+            },
+            "clear_flag" => TriggerAction::ClearWorldFlag {
+                name: raw_action
+                    .name
+                    .clone()
+                    .ok_or_else(|| "Action 'clear_flag' requires a 'name' field".to_string())?,
+            },
+            "increment_flag" => TriggerAction::IncrementWorldFlag {
+                name: raw_action
+                    .name
+                    .clone()
+                    .ok_or_else(|| "Action 'increment_flag' requires a 'name' field".to_string())?,
+                by: raw_action
+                    .by
+                    .ok_or_else(|| "Action 'increment_flag' requires a 'by' field".to_string())?,
+            },
+            "set_flag_value" => TriggerAction::SetWorldFlagValue {
+                name: raw_action
+                    .name
+                    .clone()
+                    .ok_or_else(|| "Action 'set_flag_value' requires a 'name' field".to_string())?,
+                value: raw_action.value.ok_or_else(|| {
+                    "Action 'set_flag_value' requires a 'value' field".to_string()
+                })?,
+            },
+            "spawn_entity" => {
+                let template_path = raw_action.template_path.clone().ok_or_else(|| {
+                    "Action 'spawn_entity' requires a 'template_path' field".to_string()
+                })?;
+                let name = raw_action
+                    .name
+                    .clone()
+                    .ok_or_else(|| "Action 'spawn_entity' requires a 'name' field".to_string())?;
+                let has_anchor = raw_action.anchor.is_some();
+                let has_position = raw_action.position.is_some();
+                if has_anchor && has_position {
+                    return Err(
+                        "Action 'spawn_entity' must not set both 'anchor' and 'position'"
+                            .to_string(),
+                    );
+                }
+                if !has_anchor && !has_position {
+                    return Err(
+                        "Action 'spawn_entity' requires exactly one of 'anchor' or 'position'"
+                            .to_string(),
+                    );
+                }
+                TriggerAction::SpawnEntity {
+                    template_path,
+                    name,
+                    anchor: raw_action.anchor.clone(),
+                    position: raw_action.position,
+                    rotation: raw_action.rotation,
+                    scale: raw_action.scale,
+                    groups: raw_action.groups.clone().unwrap_or_default(),
+                    overrides: raw_action.overrides.clone(),
+                }
+            }
+            "destroy_entity" => TriggerAction::DestroyEntity {
+                entity: raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'destroy_entity' requires an 'entity' field".to_string()
+                })?,
+            },
+            "add_faction_enemy" => TriggerAction::AddFactionEnemy {
+                faction: raw_action.faction.clone().ok_or_else(|| {
+                    "Action 'add_faction_enemy' requires a 'faction' field".to_string()
+                })?,
+                enemy: raw_action.enemy.clone().ok_or_else(|| {
+                    "Action 'add_faction_enemy' requires an 'enemy' field".to_string()
+                })?,
+            },
+            "remove_faction_enemy" => TriggerAction::RemoveFactionEnemy {
+                faction: raw_action.faction.clone().ok_or_else(|| {
+                    "Action 'remove_faction_enemy' requires a 'faction' field".to_string()
+                })?,
+                enemy: raw_action.enemy.clone().ok_or_else(|| {
+                    "Action 'remove_faction_enemy' requires an 'enemy' field".to_string()
+                })?,
+            },
+            other => return Err(format!("Unknown trigger action '{}'", other)),
+        };
+    Ok(action)
+}
+
 fn parse_raw_actions(
     raw_actions: &[RawActionEntry],
 ) -> Result<(Vec<TriggerAction>, Vec<Option<String>>, Vec<f32>), String> {
@@ -1268,249 +1552,7 @@ fn parse_raw_actions(
     let mut raw_predicates: Vec<Option<String>> = Vec::new();
     let mut delay_secs: Vec<f32> = Vec::new();
     for raw_action in raw_actions {
-        let action =
-            match raw_action.kind.as_str() {
-                "add_objective" => {
-                    let directive = parse_directive(raw_action)?;
-                    let utility = parse_utility_config(raw_action);
-                    let source = match raw_action.source.as_deref() {
-                        Some("doctrine") => ObjectiveSource::Doctrine,
-                        _ => ObjectiveSource::Mission,
-                    };
-                    TriggerAction::AddObjective {
-                        id: raw_action.id.clone().ok_or_else(|| {
-                            "Action 'add_objective' requires an 'id' field".to_string()
-                        })?,
-                        text: raw_action.text.clone().ok_or_else(|| {
-                            "Action 'add_objective' requires a 'text' field".to_string()
-                        })?,
-                        mandatory: raw_action.mandatory.unwrap_or(false),
-                        targets: raw_action.targets.clone().unwrap_or_default(),
-                        directive,
-                        utility,
-                        source,
-                    }
-                }
-                "complete_objective" => TriggerAction::CompleteObjective {
-                    id: raw_action.id.clone().ok_or_else(|| {
-                        "Action 'complete_objective' requires an 'id' field".to_string()
-                    })?,
-                },
-                "fail_objective" => TriggerAction::FailObjective {
-                    id: raw_action.id.clone().ok_or_else(|| {
-                        "Action 'fail_objective' requires an 'id' field".to_string()
-                    })?,
-                },
-                "set_ai_state" => TriggerAction::SetAiState {
-                    entity: raw_action.entity.clone().ok_or_else(|| {
-                        "Action 'set_ai_state' requires an 'entity' field".to_string()
-                    })?,
-                    state: raw_action.state.clone().ok_or_else(|| {
-                        "Action 'set_ai_state' requires a 'state' field".to_string()
-                    })?,
-                    target: raw_action.target.clone(),
-                },
-                "apply_modifier" => {
-                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
-                        "Action 'apply_modifier' requires a 'slot' field".to_string()
-                    })?;
-                    TriggerAction::ApplyModifier {
-                        entity: raw_action.entity.clone().ok_or_else(|| {
-                            "Action 'apply_modifier' requires an 'entity' field".to_string()
-                        })?,
-                        tag: raw_action.tag.clone().ok_or_else(|| {
-                            "Action 'apply_modifier' requires a 'tag' field".to_string()
-                        })?,
-                        slot: parse_modifier_slot(slot_str)?,
-                        bonus: raw_action.bonus.ok_or_else(|| {
-                            "Action 'apply_modifier' requires a 'bonus' field".to_string()
-                        })?,
-                    }
-                }
-                "remove_modifier" => {
-                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
-                        "Action 'remove_modifier' requires a 'slot' field".to_string()
-                    })?;
-                    TriggerAction::RemoveModifier {
-                        entity: raw_action.entity.clone().ok_or_else(|| {
-                            "Action 'remove_modifier' requires an 'entity' field".to_string()
-                        })?,
-                        tag: raw_action.tag.clone().ok_or_else(|| {
-                            "Action 'remove_modifier' requires a 'tag' field".to_string()
-                        })?,
-                        slot: parse_modifier_slot(slot_str)?,
-                    }
-                }
-                "apply_flag" => {
-                    let kind_str = raw_action
-                        .flag_kind
-                        .as_deref()
-                        .ok_or_else(|| "Action 'apply_flag' requires a 'kind' field".to_string())?;
-                    TriggerAction::ApplyFlag {
-                        entity: raw_action.entity.clone().ok_or_else(|| {
-                            "Action 'apply_flag' requires an 'entity' field".to_string()
-                        })?,
-                        tag: raw_action.tag.clone().ok_or_else(|| {
-                            "Action 'apply_flag' requires a 'tag' field".to_string()
-                        })?,
-                        kind: parse_flag_kind(kind_str)?,
-                    }
-                }
-                "remove_flag" => {
-                    let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| {
-                        "Action 'remove_flag' requires a 'kind' field".to_string()
-                    })?;
-                    TriggerAction::RemoveFlag {
-                        entity: raw_action.entity.clone().ok_or_else(|| {
-                            "Action 'remove_flag' requires an 'entity' field".to_string()
-                        })?,
-                        tag: raw_action.tag.clone().ok_or_else(|| {
-                            "Action 'remove_flag' requires a 'tag' field".to_string()
-                        })?,
-                        kind: parse_flag_kind(kind_str)?,
-                    }
-                }
-                "apply_int_modifier" => {
-                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
-                        "Action 'apply_int_modifier' requires a 'slot' field".to_string()
-                    })?;
-                    TriggerAction::ApplyIntModifier {
-                        entity: raw_action.entity.clone().ok_or_else(|| {
-                            "Action 'apply_int_modifier' requires an 'entity' field".to_string()
-                        })?,
-                        tag: raw_action.tag.clone().ok_or_else(|| {
-                            "Action 'apply_int_modifier' requires a 'tag' field".to_string()
-                        })?,
-                        slot: parse_int_modifier_slot(slot_str)?,
-                        bonus: raw_action.int_bonus.ok_or_else(|| {
-                            "Action 'apply_int_modifier' requires an 'int_bonus' field".to_string()
-                        })?,
-                    }
-                }
-                "remove_int_modifier" => {
-                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
-                        "Action 'remove_int_modifier' requires a 'slot' field".to_string()
-                    })?;
-                    TriggerAction::RemoveIntModifier {
-                        entity: raw_action.entity.clone().ok_or_else(|| {
-                            "Action 'remove_int_modifier' requires an 'entity' field".to_string()
-                        })?,
-                        tag: raw_action.tag.clone().ok_or_else(|| {
-                            "Action 'remove_int_modifier' requires a 'tag' field".to_string()
-                        })?,
-                        slot: parse_int_modifier_slot(slot_str)?,
-                    }
-                }
-                "game_over" => TriggerAction::GameOver {
-                    message: raw_action.message.clone(),
-                    // Validate at parse time: an unknown value fails the world
-                    // load loudly rather than silently mis-classifying the run.
-                    outcome: raw_action
-                        .outcome
-                        .as_deref()
-                        .map(crate::balance::Outcome::parse)
-                        .transpose()
-                        .map_err(|e| format!("Action 'game_over' has an invalid outcome: {e}"))?,
-                },
-                "load_world" => TriggerAction::LoadWorld {
-                    path: raw_action
-                        .path
-                        .clone()
-                        .ok_or_else(|| "Action 'load_world' requires a 'path' field".to_string())?,
-                },
-                "unload_world" => TriggerAction::UnloadWorld {
-                    path: raw_action.path.clone().ok_or_else(|| {
-                        "Action 'unload_world' requires a 'path' field".to_string()
-                    })?,
-                },
-                "reset_trigger" => TriggerAction::ResetTrigger {
-                    id: raw_action.id.clone().ok_or_else(|| {
-                        "Action 'reset_trigger' requires an 'id' field".to_string()
-                    })?,
-                },
-                "set_flag" => TriggerAction::SetWorldFlag {
-                    name: raw_action
-                        .name
-                        .clone()
-                        .ok_or_else(|| "Action 'set_flag' requires a 'name' field".to_string())?,
-                },
-                "clear_flag" => TriggerAction::ClearWorldFlag {
-                    name: raw_action
-                        .name
-                        .clone()
-                        .ok_or_else(|| "Action 'clear_flag' requires a 'name' field".to_string())?,
-                },
-                "increment_flag" => TriggerAction::IncrementWorldFlag {
-                    name: raw_action.name.clone().ok_or_else(|| {
-                        "Action 'increment_flag' requires a 'name' field".to_string()
-                    })?,
-                    by: raw_action.by.ok_or_else(|| {
-                        "Action 'increment_flag' requires a 'by' field".to_string()
-                    })?,
-                },
-                "set_flag_value" => TriggerAction::SetWorldFlagValue {
-                    name: raw_action.name.clone().ok_or_else(|| {
-                        "Action 'set_flag_value' requires a 'name' field".to_string()
-                    })?,
-                    value: raw_action.value.ok_or_else(|| {
-                        "Action 'set_flag_value' requires a 'value' field".to_string()
-                    })?,
-                },
-                "spawn_entity" => {
-                    let template_path = raw_action.template_path.clone().ok_or_else(|| {
-                        "Action 'spawn_entity' requires a 'template_path' field".to_string()
-                    })?;
-                    let name = raw_action.name.clone().ok_or_else(|| {
-                        "Action 'spawn_entity' requires a 'name' field".to_string()
-                    })?;
-                    let has_anchor = raw_action.anchor.is_some();
-                    let has_position = raw_action.position.is_some();
-                    if has_anchor && has_position {
-                        return Err(
-                            "Action 'spawn_entity' must not set both 'anchor' and 'position'"
-                                .to_string(),
-                        );
-                    }
-                    if !has_anchor && !has_position {
-                        return Err(
-                            "Action 'spawn_entity' requires exactly one of 'anchor' or 'position'"
-                                .to_string(),
-                        );
-                    }
-                    TriggerAction::SpawnEntity {
-                        template_path,
-                        name,
-                        anchor: raw_action.anchor.clone(),
-                        position: raw_action.position,
-                        rotation: raw_action.rotation,
-                        scale: raw_action.scale,
-                        groups: raw_action.groups.clone().unwrap_or_default(),
-                        overrides: raw_action.overrides.clone(),
-                    }
-                }
-                "destroy_entity" => TriggerAction::DestroyEntity {
-                    entity: raw_action.entity.clone().ok_or_else(|| {
-                        "Action 'destroy_entity' requires an 'entity' field".to_string()
-                    })?,
-                },
-                "add_faction_enemy" => TriggerAction::AddFactionEnemy {
-                    faction: raw_action.faction.clone().ok_or_else(|| {
-                        "Action 'add_faction_enemy' requires a 'faction' field".to_string()
-                    })?,
-                    enemy: raw_action.enemy.clone().ok_or_else(|| {
-                        "Action 'add_faction_enemy' requires an 'enemy' field".to_string()
-                    })?,
-                },
-                "remove_faction_enemy" => TriggerAction::RemoveFactionEnemy {
-                    faction: raw_action.faction.clone().ok_or_else(|| {
-                        "Action 'remove_faction_enemy' requires a 'faction' field".to_string()
-                    })?,
-                    enemy: raw_action.enemy.clone().ok_or_else(|| {
-                        "Action 'remove_faction_enemy' requires an 'enemy' field".to_string()
-                    })?,
-                },
-                other => return Err(format!("Unknown trigger action '{}'", other)),
-            };
+        let action = parse_action_entry(raw_action)?;
         actions.push(action);
         raw_predicates.push(raw_action.when.clone());
         delay_secs.push(raw_action.delay_secs.unwrap_or(0.0));

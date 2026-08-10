@@ -25,12 +25,44 @@ use std::sync::{Arc, Mutex};
 use rhai::{Engine, Map, AST};
 
 use crate::world::flags::FlagStore;
-use crate::world::script::effects::{register_effects, EffectSink};
+use crate::world::script::effects::{register_effects, BufferedEffect, EffectSink};
 use crate::world::script::flags::{register_flags, Flags};
 use crate::world::script::schedule::{
     register_scheduling, CallEffects, SchedClock, ScheduleSink, TickBudget,
 };
 use crate::world::script::{init_hashing_seed, MAX_OPS_PER_CALL};
+
+/// Unwrap a drained buffer to its `ActionCmd`s for the effect-only entry points
+/// ([`RuntimeHost::call_immediate`] and the dialogue path,
+/// [`RuntimeHost::try_call_returning`]).
+///
+/// A name-resolving [`BufferedEffect::Action`] (`spawn_entity` / `add_objective`
+/// / `add_faction_enemy`) needs the live pipeline's dispatch context
+/// (`world::server::apply_script_commands`), which these entry points do not
+/// carry. The trigger-handler and callback paths that route effects through that
+/// context take the full [`CallEffects`] and never come here — but a comms
+/// DIALOGUE fn shares the one runtime engine, so an `on_pick` CAN buffer an
+/// `Action`. Rather than panic (a hard sim crash in dev AND release), drop it
+/// with a warning per the deny-by-default failure policy (decision 10); the
+/// immediate `Cmd` effects still apply in order. Routing dialogue effects
+/// through the live applier is the comms milestone's job (M7 follow-on).
+fn resolved_cmds(effects: Vec<BufferedEffect>) -> Vec<crate::world::dispatch::ActionCmd> {
+    effects
+        .into_iter()
+        .filter_map(|e| match e {
+            BufferedEffect::Cmd(cmd) => Some(cmd),
+            BufferedEffect::Action(action) => {
+                bevy::log::warn!(
+                    "a script effect-only entry point (dialogue/immediate) buffered a \
+                     name-resolving effect that needs the live dispatch pipeline; dropping \
+                     it — such effects are only supported inside trigger handlers so far: \
+                     {action:?}"
+                );
+                None
+            }
+        })
+        .collect()
+}
 
 /// One handler registration collected at load time.
 ///
@@ -354,16 +386,20 @@ impl RuntimeHost {
         // the dialogue node the fn returned.
         let value = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
         let ops = self.ops_counter.load(Ordering::Relaxed);
-        let commands = sink.take();
+        // A dialogue `on_pick` routes through the M1 `ActionCmd` boundary (comms
+        // module docs), so the drained buffer is all `Cmd`s here.
+        let commands = resolved_cmds(sink.take());
         // Deferred work is dropped on the success path too (dialogue fns schedule
         // none in M4); `schedule` is simply not drained.
         Ok((commands, value, ops))
     }
 
-    /// Convenience for callers wanting only a call's immediate effects: a fresh
-    /// per-tick budget and a zero clock. Applies the failure policy. Any deferred
-    /// work the call scheduled is discarded, so this is for effect-only handlers
-    /// and simple tests.
+    /// Convenience for callers wanting only a call's immediate effects, unwrapped
+    /// to `ActionCmd`s: a fresh per-tick budget and a zero clock. Applies the
+    /// failure policy. Any deferred work the call scheduled is discarded, so this
+    /// is for effect-only (`Cmd`) handlers and simple tests — a name-resolving
+    /// effect needs the live pipeline, and using this on such a handler panics
+    /// (see [`resolved_cmds`]).
     pub fn call_immediate(
         &self,
         ast: &AST,
@@ -373,16 +409,18 @@ impl RuntimeHost {
         extra: Map,
     ) -> Vec<crate::world::dispatch::ActionCmd> {
         let mut budget = TickBudget::new();
-        self.call(
-            &mut budget,
-            &SchedClock::ZERO,
-            ast,
-            path,
-            fn_name,
-            base_flags,
-            extra,
+        resolved_cmds(
+            self.call(
+                &mut budget,
+                &SchedClock::ZERO,
+                ast,
+                path,
+                fn_name,
+                base_flags,
+                extra,
+            )
+            .commands,
         )
-        .commands
     }
 }
 
@@ -451,6 +489,36 @@ mod tests {
         );
     }
 
+    /// Issue #984 review: a comms dialogue fn shares the one runtime engine, so it
+    /// CAN call a name-resolving verb (`add_faction_enemy`). The effect-only
+    /// dialogue drain carries no dispatch context, so it must DROP the buffered
+    /// `Action` with a warning (settled decision 10) — NOT `unreachable!`-panic.
+    /// The immediate `Cmd` effects authored alongside it still apply, in order.
+    #[test]
+    fn dialogue_path_drops_a_name_resolving_effect_instead_of_panicking() {
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(
+                r#"fn node(ctx) {
+                    ctx.effects.complete_objective("a");
+                    ctx.effects.add_faction_enemy("Harrow", "Federation");
+                    #{}
+                }"#,
+            )
+            .expect("compiles");
+        let (cmds, _node, _ops) = host
+            .try_call_returning(&ast, "t.rhai", "node", &FlagStore::new(), Map::new())
+            .expect("the dialogue call must not error");
+        // The `Cmd` survives; the name-resolving `Action` was dropped, not applied.
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::CompleteObjective {
+                id: "a".to_string()
+            }]
+        );
+    }
+
     #[test]
     fn in_seconds_stamps_a_delayed_effect() {
         // `in_seconds(n).<verb>(…)` buffers a delayed effect that surfaces as a
@@ -477,12 +545,13 @@ mod tests {
             &FlagStore::new(),
             Map::new(),
         );
-        // The immediate effect applies now; the delayed one is deferred.
+        // The immediate effect applies now; the delayed one is deferred. The
+        // immediate buffer holds `BufferedEffect`s (a `Cmd` here).
         assert_eq!(
             effects.commands,
-            vec![ActionCmd::CompleteObjective {
+            vec![BufferedEffect::Cmd(ActionCmd::CompleteObjective {
                 id: "now".to_string()
-            }]
+            })]
         );
         assert_eq!(effects.delayed.len(), 1);
         let d = &effects.delayed[0];

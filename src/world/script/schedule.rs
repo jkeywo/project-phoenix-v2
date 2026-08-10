@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::world::config::TriggerAction;
 use crate::world::delayed::DelayedAction;
-use crate::world::dispatch::ActionCmd;
+use crate::world::script::effects::BufferedEffect;
 use crate::world::script::{MAX_CALLS_PER_TICK, MAX_OPS_PER_TICK};
 
 /// Everything one script call produced: its immediate effects and the deferred
@@ -60,8 +60,10 @@ use crate::world::script::{MAX_CALLS_PER_TICK, MAX_OPS_PER_TICK};
 /// care about.
 #[derive(Debug, Default, Clone)]
 pub struct CallEffects {
-    /// Immediate effects + flag writes, in authored order.
-    pub commands: Vec<ActionCmd>,
+    /// Immediate effects + flag writes, in authored order. Each is a
+    /// [`BufferedEffect`]: a resolved command, or a name-resolving action the
+    /// applier dispatches (issue #984, M6).
+    pub commands: Vec<BufferedEffect>,
     /// Delayed effects from `in_seconds(n).<verb>(…)`, absolute fire time stamped.
     pub delayed: Vec<DelayedAction>,
     /// Deferred callbacks from `after(n, |ctx| …)`, absolute fire tick stamped.

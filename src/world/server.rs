@@ -20,6 +20,7 @@ use crate::world::dispatch::{
 };
 use crate::world::layers::{evaluate_layer_load, evaluate_layer_unload, LayerLoadOutcome};
 use crate::world::scenario::evaluate_scenario_load;
+use crate::world::script::effects::BufferedEffect;
 use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
 use crate::world::script::schedule::{PendingCallbacks, SchedClock, TickBudget};
 
@@ -1738,6 +1739,20 @@ pub(crate) fn tick_trigger_pipeline(
                             &mut faction_dispatch,
                             &mut ai_query,
                             balance_events.as_deref_mut(),
+                            // Reuse the SAME `uuid_source`/`template_loader`/anchors
+                            // the declarative dispatch above used, and thread this
+                            // trigger's origin/entity — so a scripted name-resolving
+                            // effect resolves identically to its declarative twin
+                            // (issue #984, Rhai M6).
+                            &uuid_source,
+                            &template_loader,
+                            world_layers
+                                .base_world_config
+                                .as_ref()
+                                .map(|wc| &wc.anchors)
+                                .unwrap_or(&empty_anchors),
+                            ft.origin_layer.clone(),
+                            ft.entity_name.clone(),
                         );
                         // Script-scheduled delayed effects join the SAME queue a
                         // TOML `action_delays` entry uses; dropped when the
@@ -1853,7 +1868,7 @@ fn world_modifier_source(tag: String) -> crate::messages::ModifierSource {
 /// mirroring the per-action decide-then-apply cycle the declarative loop uses.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_script_commands(
-    commands_in: Vec<ActionCmd>,
+    commands_in: Vec<BufferedEffect>,
     log_ctx: &str,
     events_out: &mut Vec<WorldEvent>,
     uuid_to_entity: &HashMap<String, Entity>,
@@ -1875,60 +1890,128 @@ pub(crate) fn apply_script_commands(
         With<BehaviourSection>,
     >,
     mut balance_events: Option<&mut bevy::ecs::message::Messages<crate::balance::BalanceEvent>>,
+    // The dispatch context a name-resolving `BufferedEffect::Action` needs (issue
+    // #984, Rhai M6). `uuid_source` is the SAME closure `tick_trigger_pipeline`
+    // binds — so a scripted `spawn_entity` mints its `EntityUuid` inside
+    // `dispatch_spawn_entity` from the real `WorldIdMint`, in the same order as
+    // the declarative twin (never at the effects.rs boundary, never a fallback
+    // mint). `origin_layer`/`entity_name` come from the fired trigger (the
+    // callback path passes `None`/`None`).
+    uuid_source: &dyn Fn() -> String,
+    template_loader: &dyn crate::entity_loader::TemplateLoader,
+    base_anchors: &HashMap<String, [f32; 3]>,
+    origin_layer: Option<String>,
+    entity_name: Option<String>,
 ) {
-    for cmd in commands_in {
-        let mut new_events: Vec<WorldEvent> = Vec::new();
-        if let ActionCmd::MutateFlag {
-            target_layer,
-            name,
-            mutation,
-        } = &cmd
-        {
-            // Resolve the store this write lands in (scripts emit base-layer
-            // writes — `target_layer: None` — but resolve `Some` too for
-            // forward-compat), preview the mutation against it, and push the
-            // FlagSet/FlagCleared into `events_out` (via `new_events`) BEFORE the
-            // MutateFlag is applied. This is the transition event a declarative
-            // `set_flag` gets at dispatch time.
-            let store: &crate::world::flags::FlagStore = match target_layer {
-                None => &runtime.flags,
-                Some(path) => layer_map
-                    .as_deref()
-                    .and_then(|lm| lm.0.get(path))
-                    .map(|wr| &wr.flags)
-                    .unwrap_or(&runtime.flags),
-            };
-            let (before, after) = crate::world::dispatch::preview_mutation(store, name, mutation);
-            crate::world::dispatch::push_flag_transition(
-                &mut new_events,
-                name,
-                target_layer,
-                before,
-                after,
-            );
+    for eff in commands_in {
+        match eff {
+            // A resolved command (the M1 set + flag writes): applied directly, as
+            // before. A `MutateFlag` gets its transition event previewed here (it
+            // was pushed onto the sink DIRECTLY by `ctx.flags.*`, bypassing
+            // `dispatch_action`'s transition step), so a scripted flag write chains
+            // a downstream `on_flag_set` exactly as a declarative `set_flag` does.
+            BufferedEffect::Cmd(cmd) => {
+                let mut new_events: Vec<WorldEvent> = Vec::new();
+                if let ActionCmd::MutateFlag {
+                    target_layer,
+                    name,
+                    mutation,
+                } = &cmd
+                {
+                    // Resolve the store this write lands in (scripts emit base-layer
+                    // writes — `target_layer: None` — but resolve `Some` too for
+                    // forward-compat), preview the mutation against it, and push the
+                    // FlagSet/FlagCleared into `events_out` (via `new_events`) BEFORE
+                    // the MutateFlag is applied. This is the transition event a
+                    // declarative `set_flag` gets at dispatch time.
+                    let store: &crate::world::flags::FlagStore = match target_layer {
+                        None => &runtime.flags,
+                        Some(path) => layer_map
+                            .as_deref()
+                            .and_then(|lm| lm.0.get(path))
+                            .map(|wr| &wr.flags)
+                            .unwrap_or(&runtime.flags),
+                    };
+                    let (before, after) =
+                        crate::world::dispatch::preview_mutation(store, name, mutation);
+                    crate::world::dispatch::push_flag_transition(
+                        &mut new_events,
+                        name,
+                        target_layer,
+                        before,
+                        after,
+                    );
+                }
+                let result = DispatchResult {
+                    commands: vec![cmd],
+                    new_events,
+                    ..Default::default()
+                };
+                apply_dispatch_result(
+                    result,
+                    log_ctx,
+                    events_out,
+                    uuid_to_entity,
+                    runtime,
+                    objectives,
+                    commands,
+                    ship_modifiers,
+                    pending_layers.as_deref_mut(),
+                    layer_map.as_deref_mut(),
+                    next_state.as_deref_mut(),
+                    game_over_reason.as_deref_mut(),
+                    faction_dispatch,
+                    ai_query,
+                    balance_events.as_deref_mut(),
+                );
+            }
+
+            // A name-resolving effect: resolve the buffered declarative action
+            // through the SAME `dispatch_action` the TOML evaluator uses, then feed
+            // the WHOLE `DispatchResult` (commands + new_events + name/group inserts
+            // + warnings) to `apply_dispatch_result`. Feeding the whole result — not
+            // just `.commands` — is load-bearing: a `spawn_entity`'s name→uuid and
+            // group memberships ride in the insert vecs, and dropping them would let
+            // a later `on_all_destroyed{group}` or objective-target lookup silently
+            // diverge. Re-project `name_to_uuid`/`layers` per action so each sees the
+            // previous one's writes (the live-store rule `DispatchContext::base_flags`
+            // documents), matching `tick_delayed_actions`.
+            BufferedEffect::Action(action) => {
+                let name_to_uuid = runtime.name_to_uuid.clone();
+                let layers = project_layer_views(layer_map.as_deref());
+                let result = {
+                    let ctx = DispatchContext {
+                        origin_layer: origin_layer.clone(),
+                        entity_name: entity_name.clone(),
+                        name_to_uuid: &name_to_uuid,
+                        base_flags: &runtime.flags,
+                        layers: &layers,
+                        base_anchors,
+                        factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
+                        uuid_source,
+                        template_loader,
+                    };
+                    dispatch_action(&action, &ctx)
+                };
+                apply_dispatch_result(
+                    result,
+                    log_ctx,
+                    events_out,
+                    uuid_to_entity,
+                    runtime,
+                    objectives,
+                    commands,
+                    ship_modifiers,
+                    pending_layers.as_deref_mut(),
+                    layer_map.as_deref_mut(),
+                    next_state.as_deref_mut(),
+                    game_over_reason.as_deref_mut(),
+                    faction_dispatch,
+                    ai_query,
+                    balance_events.as_deref_mut(),
+                );
+            }
         }
-        let result = DispatchResult {
-            commands: vec![cmd],
-            new_events,
-            ..Default::default()
-        };
-        apply_dispatch_result(
-            result,
-            log_ctx,
-            events_out,
-            uuid_to_entity,
-            runtime,
-            objectives,
-            commands,
-            ship_modifiers,
-            pending_layers.as_deref_mut(),
-            layer_map.as_deref_mut(),
-            next_state.as_deref_mut(),
-            game_over_reason.as_deref_mut(),
-            faction_dispatch,
-            ai_query,
-            balance_events.as_deref_mut(),
-        );
     }
 }
 
@@ -2517,6 +2600,12 @@ fn tick_script_callbacks(
         ),
         With<BehaviourSection>,
     >,
+    // The mint a callback-scheduled `spawn_entity` draws its `EntityUuid` from
+    // (issue #984, Rhai M6). Added so the callback path builds the IDENTICAL
+    // `uuid_source` the trigger path holds — else a spawn from an `after(..)`
+    // callback would fall back to the process-global mint and diverge (R2). `None`
+    // for a bare-`App` fixture, exactly like `tick_delayed_actions`.
+    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     // `now_tick` before the `WorldScriptRuntime` borrow (disjoint `script` field).
@@ -2567,6 +2656,16 @@ fn tick_script_callbacks(
         .iter()
         .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
         .collect();
+
+    // The name-resolving-effect dispatch context (issue #984, Rhai M6), built
+    // once like `tick_trigger_pipeline`'s: the SAME `mint_id_with(id_mint, Entity)`
+    // closure so a callback-scheduled `spawn_entity` mints inside
+    // `dispatch_spawn_entity` from the real `WorldIdMint`, the same
+    // `WasmTemplateLoader`, and an empty base-anchors fallback.
+    let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
+    let template_loader = crate::entity_loader::WasmTemplateLoader;
+    let uuid_source =
+        || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
 
     // Reborrow the `WorldContentRuntime` `ResMut` as a plain `&mut` so `runtime.flags`
     // (the flag overlay base) and `&mut runtime` (the apply path) can be borrowed
@@ -2627,6 +2726,18 @@ fn tick_script_callbacks(
             &mut faction_dispatch,
             &mut ai_query,
             balance_events.as_deref_mut(),
+            // A callback is authored at base scope (no origin layer / trigger
+            // entity to thread), so `None`/`None` — matching the effect sink's and
+            // schedule sink's `origin_layer: None` note.
+            &uuid_source,
+            &template_loader,
+            world_layers
+                .base_world_config
+                .as_ref()
+                .map(|wc| &wc.anchors)
+                .unwrap_or(&empty_anchors),
+            None,
+            None,
         );
         runtime.pending_world_events.extend(out_events);
         // A callback-scheduled `in_seconds` effect joins the SAME delayed queue,
@@ -3887,6 +3998,125 @@ setup = 'on_destroyed("raider", "bump"); fn bump(ctx) { ctx.flags.increment("wav
                 .counter("wave"),
             1,
             "the scripted flag increment itself must land on the live store"
+        );
+    }
+
+    /// Issue #984 (Rhai M6), the DIGEST-CRITICAL guard: a scripted `spawn_entity`
+    /// and its declarative twin, fired through the LIVE `tick_trigger_pipeline`
+    /// with a fresh, identically-seeded `WorldIdMint`, mint the IDENTICAL
+    /// `EntityUuid`. This is what a converted world's authoritative digest (#894)
+    /// rides on, and it catches the P2a-class divergence risks: minting at the
+    /// effects.rs boundary or via the process-global fallback (R1), a stubbed uuid
+    /// source rather than the real one (R2), or dropping the name→uuid insert by
+    /// applying only `.commands` instead of the whole `DispatchResult` (R3) would
+    /// each break the equality below.
+    #[test]
+    fn scripted_and_declarative_spawn_mint_the_same_entity_uuid() {
+        use crate::entity_config::EntityConfig;
+
+        // A trivial template both paths spawn, served from the native config cache
+        // so the live `WasmTemplateLoader` resolves it with no files on disk.
+        crate::config_cache::insert_native_config(
+            "fixture/harrow_mint.toml".to_string(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+
+        let raider_uuid = "raider-uuid-mint";
+
+        // ---- Scripted: the handler spawns "wave" from a `#{ … }` map. ----
+        let scripted_uuid = {
+            let mut sr = compile_fixture_scripts(
+                r#"[script]
+setup = 'on_destroyed("raider", "spawn_wave"); fn spawn_wave(ctx) { ctx.effects.spawn_entity(#{ template_path: "fixture/harrow_mint.toml", name: "wave", position: [100, 0, 0], groups: ["hostiles"] }); }'
+"#,
+            );
+            let mut app = ai_trigger_test_app();
+            // A fresh mint (tick 0, every sequence 0): the spawn is the first Entity
+            // id minted, so its sequence is deterministic and shared by both paths.
+            app.world_mut()
+                .insert_resource(crate::world_id::WorldIdMint::default());
+            {
+                let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+                runtime
+                    .name_to_uuid
+                    .insert("raider".to_string(), raider_uuid.to_string());
+                runtime.trigger_states = Vec::new();
+                merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+            }
+            app.world_mut().insert_resource(sr);
+            app.world_mut()
+                .resource_mut::<Messages<AiEntityDestroyed>>()
+                .write(AiEntityDestroyed {
+                    entity_uuid: raider_uuid.into(),
+                });
+            app.update();
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .name_to_uuid
+                .get("wave")
+                .cloned()
+        };
+
+        // ---- Declarative twin: the SAME spawn authored as a trigger action. ----
+        let declarative_uuid = {
+            let mut app = ai_trigger_test_app();
+            app.world_mut()
+                .insert_resource(crate::world_id::WorldIdMint::default());
+            {
+                let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+                runtime
+                    .name_to_uuid
+                    .insert("raider".to_string(), raider_uuid.to_string());
+                runtime.trigger_states = vec![TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnDestroyed {
+                            entity_name: "raider".to_string(),
+                        },
+                        actions: vec![TriggerAction::SpawnEntity {
+                            template_path: "fixture/harrow_mint.toml".to_string(),
+                            name: "wave".to_string(),
+                            anchor: None,
+                            position: Some([100.0, 0.0, 0.0]),
+                            rotation: None,
+                            scale: None,
+                            groups: vec!["hostiles".to_string()],
+                            overrides: None,
+                        }],
+                        when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
+                    },
+                    fired: false,
+                    origin_layer: None,
+                    seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
+                }];
+            }
+            app.world_mut()
+                .resource_mut::<Messages<AiEntityDestroyed>>()
+                .write(AiEntityDestroyed {
+                    entity_uuid: raider_uuid.into(),
+                });
+            app.update();
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .name_to_uuid
+                .get("wave")
+                .cloned()
+        };
+
+        assert!(
+            scripted_uuid.is_some(),
+            "the scripted spawn must register a name→uuid entry — proving the whole \
+             DispatchResult (with its inserts) was applied, not just .commands (R3)"
+        );
+        assert_eq!(
+            scripted_uuid, declarative_uuid,
+            "a scripted spawn must mint the SAME EntityUuid as its declarative twin — \
+             the digest-critical mint-order parity (R1/R2/R3)"
         );
     }
 

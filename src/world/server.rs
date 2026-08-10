@@ -1,5 +1,8 @@
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use rhai::{Map, AST};
 
 use crate::comms::content::CommsTemplateState;
 use crate::comms::server::CommsRuntime;
@@ -17,6 +20,8 @@ use crate::world::dispatch::{
 };
 use crate::world::layers::{evaluate_layer_load, evaluate_layer_unload, LayerLoadOutcome};
 use crate::world::scenario::evaluate_scenario_load;
+use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
+use crate::world::script::schedule::{SchedClock, TickBudget};
 
 // -- Resources --------------------------------------------------------------
 
@@ -280,6 +285,127 @@ pub enum WorldLayerChange {
 #[derive(Resource, Default)]
 pub struct WorldEventBuffer(pub Vec<WorldEvent>);
 
+// ── Scripting seam (issue #984, Rhai M6 phase 2a) ───────────────────────────
+
+/// The raw world source a session loaded: its path plus the untouched TOML
+/// `Value`.
+///
+/// `WorldConfig` drops the raw `[script]` / `script` keys the Rhai loader needs,
+/// so this carries the untouched TOML alongside its path. Populated on both
+/// targets — headless inserts it directly in `build_headless_app`, the browser
+/// via `insert_raw_world_source_resource` reading `server::bridge::
+/// get_raw_world_source()` at `Startup` — and read once by
+/// `compile_world_scripts`.
+#[derive(Resource, Clone, Debug)]
+pub struct RawWorldSource {
+    /// The world TOML's path (its content-ledger / snapshot-boundary key).
+    pub path: String,
+    /// The untouched world TOML, still carrying any `[script]` / `script` key.
+    pub toml: toml::Value,
+}
+
+/// A reference to the script handler fn that supplies one scripted trigger's
+/// effects at runtime.
+///
+/// Held in [`WorldScriptRuntime::handlers`] parallel to
+/// `WorldContentRuntime.trigger_states`. `(script_path, fn_name)` is everything
+/// `RuntimeHost::call` needs to resolve the fn against the right unit's AST.
+#[derive(Clone, Debug)]
+pub struct ScriptHandlerRef {
+    /// Content-relative (or virtual) path of the unit whose AST defines the fn.
+    pub script_path: String,
+    /// The handler fn to call when the trigger fires.
+    pub fn_name: String,
+}
+
+/// Runtime state for a world that authors Rhai scripts (issue #984, Rhai M6
+/// phase 2a).
+///
+/// Inserted at `Startup` by [`compile_world_scripts`] ONLY when the loaded world
+/// compiled at least one script AST with no error; **absent** for every
+/// script-free world (the entire shipped set), so the scripted-handler branch of
+/// [`tick_trigger_pipeline`] is skipped and behaviour there is byte-identical to
+/// before scripting existed. Its lifecycle mirrors [`WorldContentRuntime`]:
+/// created at world load, persisting for the session.
+///
+/// No `pending_callbacks` in this slice — deferred `after(n, |ctx| …)` callbacks
+/// (`drain_due`) are wired in a later slice (2b).
+#[derive(Resource)]
+pub struct WorldScriptRuntime {
+    /// The runtime host that runs retained handler fns.
+    pub host: RuntimeHost,
+    /// Retained ASTs keyed by content-relative (or virtual) path.
+    pub asts: BTreeMap<String, AST>,
+    /// The compiled script triggers, consumed once by [`init_world_runtime`]'s
+    /// merge ([`merge_script_triggers`]) to append trigger states and build
+    /// [`handlers`](Self::handlers).
+    pub triggers: Vec<ScriptTrigger>,
+    /// Parallel to `WorldContentRuntime.trigger_states`: `None` for every
+    /// declarative trigger index, `Some` for each appended scripted one. Filled
+    /// by [`init_world_runtime`]; empty until the merge runs.
+    pub handlers: Vec<Option<ScriptHandlerRef>>,
+    /// The per-tick operation/call budget, shared across every script call in a
+    /// tick and reset when [`budget_tick`](Self::budget_tick) falls behind the
+    /// current `SimTick`.
+    pub budget: TickBudget,
+    /// The `SimTick` the current [`budget`](Self::budget) was created for.
+    pub budget_tick: u64,
+    /// Content hash of the compiled script set (the #988 save-binding input).
+    pub content_hash: u64,
+}
+
+/// The two script-related reads [`tick_trigger_pipeline`] needs, bundled into a
+/// single [`SystemParam`] so the pipeline stays under Bevy's 16-parameter limit.
+///
+/// Both `Option` so every bare-`App` fixture (and every script-free world) takes
+/// the `None` arm and the scripted-handler branch is a no-op.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ScriptRuntimeParams<'w> {
+    pub runtime: Option<ResMut<'w, WorldScriptRuntime>>,
+    pub sim_tick: Option<Res<'w, crate::sim_tick::SimTick>>,
+}
+
+/// Set fresh by [`compile_world_scripts`] at every world load: `true` when the
+/// world's scripts failed to compile/validate. Read by
+/// [`world_activation_blocked`] so a script-error world spawns zero entities,
+/// atomically with the composition gate.
+///
+/// A module-level `AtomicBool` static — NOT a Bevy resource — so the two
+/// `Startup` spawn systems' access sets (and therefore their scheduling) are
+/// untouched: making the gate a resource the spawn systems must borrow would add
+/// ordering edges and perturb Startup determinism for the entire script-free
+/// shipped set. The static keeps the flag out of the ECS access set entirely.
+///
+/// It must be thread-*safe*, not merely a `thread_local!`: `compile_world_scripts`
+/// and the spawn systems run on Bevy's multithreaded native executor and can land
+/// on different worker threads, so a `true` written on worker A would be invisible
+/// to a `thread_local!` read on worker B — the gate could read `false` and spawn
+/// despite a script error, and (worse) the spawn decision would become
+/// non-deterministic across lockstep peers (which worker runs which system). The
+/// atomic makes the write visible across workers. The `.chain()` ordering in
+/// `WorldPlugin` (with finding-1's matching `.after` on `setup_world`) sequences
+/// `compile_world_scripts` before both spawn systems within the Startup run, and
+/// the `Release`/`Acquire` pairing publishes that write to the reads.
+///
+/// `compile_world_scripts` writes it `false` UNCONDITIONALLY at the top of every
+/// world load (before the `script`-key check), so a script-free world — and any
+/// app, e.g. a bare-`App` fixture, that never runs the system — reads `false`.
+static SCRIPT_ACTIVATION_BLOCKED: AtomicBool = AtomicBool::new(false);
+
+/// Record whether the just-loaded world's scripts blocked activation. Written
+/// only by [`compile_world_scripts`], once per load. `Release` so the write is
+/// published to the `Acquire` read in [`script_activation_blocked`] on any worker.
+fn set_script_activation_blocked(blocked: bool) {
+    SCRIPT_ACTIVATION_BLOCKED.store(blocked, Ordering::Release);
+}
+
+/// Whether the current world's scripts blocked activation (see
+/// [`SCRIPT_ACTIVATION_BLOCKED`]). `Acquire` to observe `compile_world_scripts`'
+/// `Release` write across worker threads.
+fn script_activation_blocked() -> bool {
+    SCRIPT_ACTIVATION_BLOCKED.load(Ordering::Acquire)
+}
+
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
@@ -303,6 +429,13 @@ impl Plugin for WorldPlugin {
                 Startup,
                 (
                     insert_world_config_resource,
+                    // The scripting seam (issue #984, Rhai M6 phase 2a): source
+                    // the raw world TOML and compile its scripts BEFORE the
+                    // spawn pass (so a script error blocks it, atomically with
+                    // the composition gate) and before `init_world_runtime` (so
+                    // its trigger-merge sees the compiled `ScriptTrigger`s).
+                    insert_raw_world_source_resource,
+                    compile_world_scripts,
                     spawn_world_entities,
                     init_world_runtime,
                     load_extra_worlds,
@@ -451,6 +584,97 @@ pub(crate) fn insert_world_config_resource(mut commands: Commands) {
     }
 }
 
+/// `Startup` system: populate [`RawWorldSource`] from the browser bridge's
+/// stashed raw world TOML (issue #984, Rhai M6 phase 2a).
+///
+/// The script-loader's twin of [`insert_world_config_resource`]: `WorldConfig`
+/// has dropped the raw `[script]` / `script` keys, so the Rhai loader needs the
+/// untouched TOML text. On native `get_raw_world_source()` has no equivalent
+/// (headless inserts `RawWorldSource` directly in `build_headless_app`), so this
+/// system only ever inserts on wasm; on native it is a no-op and never disturbs
+/// the resource the headless path already inserted.
+#[cfg_attr(
+    not(all(target_arch = "wasm32", feature = "server")),
+    allow(unused_mut, unused_variables)
+)]
+pub(crate) fn insert_raw_world_source_resource(mut commands: Commands) {
+    #[cfg(all(target_arch = "wasm32", feature = "server"))]
+    if let Some((path, toml_str)) = crate::server::bridge::get_raw_world_source() {
+        match toml_str.parse::<toml::Value>() {
+            Ok(toml) => commands.insert_resource(RawWorldSource { path, toml }),
+            Err(e) => bevy::log::error!(
+                target: "world",
+                "insert_raw_world_source_resource: world TOML at {path} failed to re-parse: {e}"
+            ),
+        }
+    }
+}
+
+/// `Startup` system: compile the loaded world's Rhai scripts and insert the
+/// [`WorldScriptRuntime`] (issue #984, Rhai M6 phase 2a).
+///
+/// Ordered after [`insert_world_config_resource`] /
+/// [`insert_raw_world_source_resource`] and before `spawn_world_entities` /
+/// [`init_world_runtime`]. A world with no `script` key short-circuits before
+/// building any engine, so a script-free world is a true no-op — no
+/// `WorldScriptRuntime`, no content-ledger records, nothing that could move a
+/// digest.
+///
+/// Findings fold into the SAME atomic activation gate the composition findings
+/// use: on a script error this records the block (read by
+/// [`world_activation_blocked`]) so a script-error world spawns zero entities,
+/// and inserts no runtime. Headless additionally hard-fails the build for a
+/// script error (see `build_headless_app`), so a broken script never reaches a
+/// running authoritative host.
+pub(crate) fn compile_world_scripts(mut commands: Commands, raw: Option<Res<RawWorldSource>>) {
+    // Reset the per-load gate: every world load writes it fresh, so a script-free
+    // world (or an app that never runs this system) reads `false`.
+    set_script_activation_blocked(false);
+
+    let Some(raw) = raw else {
+        return;
+    };
+    // No `script` key → nothing to compile. Short-circuit before building any
+    // Rhai engine so the entire shipped (script-free) set pays nothing and can
+    // never record into the content ledger.
+    if raw.toml.get("script").is_none() {
+        return;
+    }
+
+    let resolver = crate::config_cache::production_script_resolver();
+    let compiled = crate::world::script::load::load_world_scripts(&raw.path, &raw.toml, &resolver);
+
+    if crate::world::validate::has_error(&compiled.findings) {
+        for f in compiled.findings.iter().filter(|f| f.is_error()) {
+            bevy::log::error!(
+                target: "world",
+                "compile_world_scripts: script [error] {}: {}",
+                f.category, f.message
+            );
+        }
+        // Block activation atomically with the composition gate — spawn nothing.
+        set_script_activation_blocked(true);
+        return;
+    }
+
+    // No scripts actually compiled (e.g. an empty `[script]` table) — nothing to
+    // run, so insert no runtime and leave behaviour identical to a script-free
+    // world.
+    if compiled.asts.is_empty() {
+        return;
+    }
+
+    commands.insert_resource(WorldScriptRuntime {
+        host: RuntimeHost::new(),
+        asts: compiled.asts,
+        triggers: compiled.script_triggers,
+        handlers: Vec::new(),
+        budget: TickBudget::new(),
+        budget_tick: 0,
+        content_hash: compiled.content_hash,
+    });
+}
+
 /// `OnEnter(GamePhase::InProgress)` system: seeds the `ship_power` counter in
 /// the world flag store from the selected ship's `power_rating`.
 ///
@@ -485,7 +709,7 @@ pub fn seed_ship_power_counter(
 /// (populated by an earlier assign-uuid pass in this same system), so the
 /// spawned `EntityUuid` component matches the UUID that trigger / comms
 /// lookups resolve to. For asteroid-field entries a fresh UUID is allocated.
-fn spawn_world_entities(
+pub(crate) fn spawn_world_entities(
     mut commands: Commands,
     world_config: Option<ResMut<crate::world::config::WorldConfig>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
@@ -581,16 +805,30 @@ pub fn world_activation_blocked(
         &templates,
     );
     let errors = findings.iter().filter(|f| f.is_error()).count();
-    if errors == 0 {
+    // The scripting seam (issue #984, Rhai M6 phase 2a) folds into the SAME
+    // atomic gate: a world whose scripts failed to compile/validate must spawn
+    // nothing either. `compile_world_scripts` runs earlier in the `Startup`
+    // chain and sets this flag fresh per load; a script-free world never trips
+    // it, so this branch is inert for the whole shipped set.
+    let script_blocked = script_activation_blocked();
+    if errors == 0 && !script_blocked {
         return false;
+    }
+    if script_blocked {
+        bevy::log::error!(
+            target: "world",
+            "{system}: spawn blocked: world scripts failed activation; spawning zero entities"
+        );
     }
     for f in findings.iter().filter(|f| f.is_error()) {
         bevy::log::error!(target: "world", "world validation [error] {}: {}", f.category, f.message);
     }
-    bevy::log::error!(
-        target: "world",
-        "{system}: spawn blocked: world composition invalid ({errors} error(s)); spawning zero entities"
-    );
+    if errors > 0 {
+        bevy::log::error!(
+            target: "world",
+            "{system}: spawn blocked: world composition invalid ({errors} error(s)); spawning zero entities"
+        );
+    }
     // See the doc above: a bare `App` has no `tracing` subscriber, so every
     // line emitted above is dropped and a fixture with an incomplete
     // `ConfigCache` looks like a broken spawner. Test builds only — integration
@@ -823,6 +1061,7 @@ pub(crate) fn init_world_runtime(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut world_resource: ResMut<WorldResource>,
+    mut script_runtime: Option<ResMut<WorldScriptRuntime>>,
 ) {
     let Some(world_config) = world_config else {
         return;
@@ -855,12 +1094,57 @@ pub(crate) fn init_world_runtime(
     // Derive trigger runtime states straight from the parsed world.
     runtime.trigger_states = trigger_states_from_world(&world_config);
 
+    // Merge script-authored triggers (issue #984, Rhai M6 phase 2a). Appended
+    // AFTER the declarative states so declarative indices/order are unchanged;
+    // `WorldScriptRuntime.handlers` is built parallel to `trigger_states` (None
+    // for every declarative index, Some for each appended scripted one). When no
+    // world authored scripts, `WorldScriptRuntime` is absent and this is a no-op,
+    // so `trigger_states` is byte-identical to the declarative-only build.
+    if let Some(script_runtime) = script_runtime.as_deref_mut() {
+        merge_script_triggers(&mut runtime.trigger_states, script_runtime);
+    }
+
     // Issue #415: emit a WorldLoaded event so `on_world_loaded` triggers
     // declared in the base world fire on the first Update tick. Pushed onto
     // the pending queue (rather than evaluated here) so the dispatch logic
     // inside `tick_trigger_pipeline` is the single owner of trigger action
     // execution.
     runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+}
+
+/// Append one [`TriggerState`] per compiled [`ScriptTrigger`] to `trigger_states`
+/// (AFTER the declarative states), and build `script_runtime.handlers` parallel
+/// to it: `None` for every pre-existing declarative index, `Some` for each
+/// appended scripted one (issue #984, Rhai M6 phase 2a).
+///
+/// A scripted trigger's `.trigger` is byte-identical to its TOML equivalent (the
+/// shared `scripted_trigger` constructor + the `scripted_and_toml` parity test),
+/// so an appended state feeds `evaluate_single_trigger` exactly as a declarative
+/// one does; its (empty) action list means the handler — resolved via the
+/// parallel `handlers` entry — supplies the effects at dispatch.
+pub(crate) fn merge_script_triggers(
+    trigger_states: &mut Vec<TriggerState>,
+    script_runtime: &mut WorldScriptRuntime,
+) {
+    let mut handlers: Vec<Option<ScriptHandlerRef>> = vec![None; trigger_states.len()];
+    // This one-time merge is the only reader of `triggers`, so `take` it rather
+    // than borrow-and-clone: the compiled `ScriptTrigger`s are consumed here and
+    // not retained for the world's lifetime (finding 5), and taking ownership lets
+    // each field move into the appended state/handler instead of cloning.
+    for st in std::mem::take(&mut script_runtime.triggers) {
+        trigger_states.push(TriggerState {
+            trigger: st.trigger,
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
+        });
+        handlers.push(Some(ScriptHandlerRef {
+            script_path: st.source_path,
+            fn_name: st.handler,
+        }));
+    }
+    script_runtime.handlers = handlers;
 }
 
 /// Startup system: queue all `extra_worlds` paths from the loaded `WorldConfig`
@@ -1123,6 +1407,11 @@ pub(crate) fn tick_trigger_pipeline(
     time: Option<Res<bevy::time::Time>>,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    // The scripting seam (issue #984, Rhai M6 phase 2a). Both `Option`, so a
+    // script-free world (no `WorldScriptRuntime`) and every bare-`App` fixture
+    // take the `None` arm and the scripted-handler branch below is skipped
+    // entirely — behaviour there is byte-identical to before scripting existed.
+    mut script: ScriptRuntimeParams,
 ) {
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     // Seeded UUID source for `SpawnEntity` dispatch. Bound once per system run
@@ -1152,6 +1441,30 @@ pub(crate) fn tick_trigger_pipeline(
             .mission_clock_anchor_secs
             .map(|loaded_at| (t.elapsed_secs() - loaded_at).max(0.0))
     });
+
+    // Scripting seam (issue #984, Rhai M6 phase 2a): the clock a scripted
+    // handler's deferred work is stamped against, and the shared per-tick budget
+    // reset. `now_tick`/`tick_hz` matter only for `after(..)` callbacks (deferred
+    // to 2b); `elapsed_secs` is what a scripted `in_seconds(..)` delayed effect
+    // stamps against, mirroring the declarative `action_delays` path below.
+    let now_tick = script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
+    let script_clock = SchedClock {
+        tick: now_tick,
+        elapsed_secs: elapsed_secs.unwrap_or(0.0),
+        tick_hz: world_layers
+            .base_world_config
+            .as_ref()
+            .map(|wc| wc.global.sim_tick_hz)
+            .unwrap_or(SchedClock::ZERO.tick_hz),
+    };
+    // Reset the shared budget once per tick (`SimTick`-keyed), so it spans every
+    // chaining pass this tick exactly as the M0 spike's aggregate caps require.
+    if let Some(sr) = script.runtime.as_deref_mut() {
+        if sr.budget_tick != now_tick {
+            sr.budget = TickBudget::new();
+            sr.budget_tick = now_tick;
+        }
+    }
 
     // Reborrow the `ResMut` as a plain `&mut` so the evaluation loop below can
     // split disjoint field borrows (`&runtime.flags` for condition chains while
@@ -1218,7 +1531,10 @@ pub(crate) fn tick_trigger_pipeline(
         // against them because the pass is two-phase — every condition is
         // evaluated before any fired action is dispatched, so no store
         // mutates while these borrows are alive.
-        let mut fired: Vec<crate::world::content::FiredTrigger> = Vec::new();
+        // Carries the trigger-states index alongside each fired trigger so the
+        // dispatch loop can look up its scripted handler (issue #984, Rhai M6
+        // phase 2a) in `WorldScriptRuntime.handlers[idx]`.
+        let mut fired: Vec<(usize, crate::world::content::FiredTrigger)> = Vec::new();
         // We have to clone the origin_layer slice up front: the evaluator
         // below takes `&mut runtime.trigger_states[idx]`, so nothing may
         // hold a borrow on `runtime.trigger_states` across the loop.
@@ -1262,7 +1578,7 @@ pub(crate) fn tick_trigger_pipeline(
                 current_elapsed,
             );
             if let Some(ft) = result {
-                fired.push(ft);
+                fired.push((idx, ft));
             }
         }
 
@@ -1271,7 +1587,7 @@ pub(crate) fn tick_trigger_pipeline(
         }
 
         let mut next_events: Vec<WorldEvent> = Vec::new();
-        for ft in fired {
+        for (idx, ft) in fired {
             for (i, action) in ft.actions.iter().enumerate() {
                 let delay = ft.action_delays.get(i).copied().unwrap_or(0.0);
                 if delay > 0.0 {
@@ -1338,6 +1654,74 @@ pub(crate) fn tick_trigger_pipeline(
                     &mut ai_query,
                     balance_events.as_deref_mut(),
                 );
+            }
+
+            // Scripted handler for this trigger (IP-2, issue #984, Rhai M6 phase
+            // 2a). A scripted trigger fires with an EMPTY action list, so the
+            // loop above dispatched nothing — its effects come from running the
+            // handler on the runtime host and feeding the result through the SAME
+            // apply path, so a scripted flag write chains into the next pass
+            // exactly as a declarative `set_flag` does (`apply_script_commands`).
+            if let Some(sr) = script.runtime.as_deref_mut() {
+                let handler = sr.handlers.get(idx).and_then(|h| h.clone());
+                if let Some(h) = handler {
+                    // Split `WorldScriptRuntime` into disjoint field borrows so
+                    // the one `&self` call takes `&mut budget` and `&ast` at once,
+                    // while `&runtime.flags` (a DISJOINT resource) is the base the
+                    // flag overlay snapshots. `call` returns owned `CallEffects`,
+                    // so no `WorldScriptRuntime` borrow survives into the apply.
+                    let effects = {
+                        let WorldScriptRuntime {
+                            host, asts, budget, ..
+                        } = &mut *sr;
+                        match asts.get(&h.script_path) {
+                            Some(ast) => Some(host.call(
+                                budget,
+                                &script_clock,
+                                ast,
+                                &h.script_path,
+                                &h.fn_name,
+                                &runtime.flags,
+                                Map::new(),
+                            )),
+                            None => {
+                                bevy::log::warn!(
+                                    "tick_trigger_pipeline: scripted handler '{}' names a \
+                                     missing unit '{}'",
+                                    h.fn_name,
+                                    h.script_path
+                                );
+                                None
+                            }
+                        }
+                    };
+                    if let Some(effects) = effects {
+                        apply_script_commands(
+                            effects.commands,
+                            "tick_trigger_pipeline (script)",
+                            &mut next_events,
+                            &uuid_to_entity,
+                            runtime,
+                            &mut objectives,
+                            &mut commands,
+                            &mut ship_modifiers,
+                            world_layers.pending_layers.as_deref_mut(),
+                            world_layers.layer_map.as_deref_mut(),
+                            next_state.as_deref_mut(),
+                            game_over_reason.as_deref_mut(),
+                            &mut faction_dispatch,
+                            &mut ai_query,
+                            balance_events.as_deref_mut(),
+                        );
+                        // Script-scheduled delayed effects join the SAME queue a
+                        // TOML `action_delays` entry uses; dropped when the
+                        // mission clock is unanchored, matching the declarative
+                        // path above. Callbacks (`after(..)`) are deferred to 2b.
+                        if elapsed_secs.is_some() {
+                            runtime.pending_delayed_actions.extend(effects.delayed);
+                        }
+                    }
+                }
             }
         }
 
@@ -1416,6 +1800,104 @@ fn world_modifier_source(tag: String) -> crate::messages::ModifierSource {
     crate::messages::ModifierSource::World {
         id: WORLD_MODIFIER_SOURCE_ID.to_string(),
         tag,
+    }
+}
+
+/// Apply a scripted handler's raw [`ActionCmd`]s through the same path as a
+/// declarative action, computing each flag mutation's transition event first
+/// (issue #984, Rhai M6 phase 2a).
+///
+/// **DETERMINISM-CRITICAL.** A script's `ctx.flags.*` write emits
+/// [`ActionCmd::MutateFlag`] DIRECTLY onto the effect buffer, bypassing
+/// `dispatch_action`'s `push_flag_transition` — the step that turns a declarative
+/// `set_flag` into the `FlagSet` / `FlagCleared` event that chains downstream
+/// `on_flag_set` / `on_flag_cleared` triggers. [`apply_dispatch_result`]'s
+/// `MutateFlag` arm assumes that transition event is already in `events_out`. So
+/// for each `MutateFlag` this previews the transition against the LIVE store and
+/// pushes the resulting event into `events_out` BEFORE applying — so a scripted
+/// flag write fires downstream triggers identically to a declarative one.
+///
+/// Processed command-by-command (one single-command `DispatchResult` each), so
+/// each mutation is applied to the live store before the next command's preview,
+/// mirroring the per-action decide-then-apply cycle the declarative loop uses.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_script_commands(
+    commands_in: Vec<ActionCmd>,
+    log_ctx: &str,
+    events_out: &mut Vec<WorldEvent>,
+    uuid_to_entity: &HashMap<String, Entity>,
+    runtime: &mut WorldContentRuntime,
+    objectives: &mut ObjectiveManagerRes,
+    commands: &mut Commands,
+    ship_modifiers: &mut ShipModifiersParams,
+    mut pending_layers: Option<&mut PendingWorldLayerChanges>,
+    mut layer_map: Option<&mut WorldLayerMap>,
+    mut next_state: Option<&mut NextState<GamePhase>>,
+    mut game_over_reason: Option<&mut crate::simulation::GameOverReason>,
+    faction_dispatch: &mut FactionDispatchParams,
+    ai_query: &mut Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<BehaviourSection>,
+    >,
+    mut balance_events: Option<&mut bevy::ecs::message::Messages<crate::balance::BalanceEvent>>,
+) {
+    for cmd in commands_in {
+        let mut new_events: Vec<WorldEvent> = Vec::new();
+        if let ActionCmd::MutateFlag {
+            target_layer,
+            name,
+            mutation,
+        } = &cmd
+        {
+            // Resolve the store this write lands in (scripts emit base-layer
+            // writes — `target_layer: None` — but resolve `Some` too for
+            // forward-compat), preview the mutation against it, and push the
+            // FlagSet/FlagCleared into `events_out` (via `new_events`) BEFORE the
+            // MutateFlag is applied. This is the transition event a declarative
+            // `set_flag` gets at dispatch time.
+            let store: &crate::world::flags::FlagStore = match target_layer {
+                None => &runtime.flags,
+                Some(path) => layer_map
+                    .as_deref()
+                    .and_then(|lm| lm.0.get(path))
+                    .map(|wr| &wr.flags)
+                    .unwrap_or(&runtime.flags),
+            };
+            let (before, after) = crate::world::dispatch::preview_mutation(store, name, mutation);
+            crate::world::dispatch::push_flag_transition(
+                &mut new_events,
+                name,
+                target_layer,
+                before,
+                after,
+            );
+        }
+        let result = DispatchResult {
+            commands: vec![cmd],
+            new_events,
+            ..Default::default()
+        };
+        apply_dispatch_result(
+            result,
+            log_ctx,
+            events_out,
+            uuid_to_entity,
+            runtime,
+            objectives,
+            commands,
+            ship_modifiers,
+            pending_layers.as_deref_mut(),
+            layer_map.as_deref_mut(),
+            next_state.as_deref_mut(),
+            game_over_reason.as_deref_mut(),
+            faction_dispatch,
+            ai_query,
+            balance_events.as_deref_mut(),
+        );
     }
 }
 
@@ -2843,6 +3325,426 @@ pub(crate) mod tests {
             snapshot.status,
             ObjectiveStatus::Completed,
             "tick_delayed_actions must dispatch the scripted delayed complete_objective"
+        );
+    }
+
+    /// A test resolver that reads no sibling files — inline `[script]` blocks
+    /// are lifted from the TOML directly and never consult a resolver.
+    struct NoScriptResolver;
+    impl crate::world::script::load::ScriptResolver for NoScriptResolver {
+        fn read(&self, _path: &str) -> Option<String> {
+            None
+        }
+    }
+
+    /// Build a `WorldScriptRuntime` from an inline-`[script]` fixture world the
+    /// SAME way `compile_world_scripts` does in production.
+    fn compile_fixture_scripts(world_toml: &str) -> WorldScriptRuntime {
+        let value: toml::Value = toml::from_str(world_toml).expect("valid fixture toml");
+        let compiled = crate::world::script::load::load_world_scripts(
+            "fixture/scripted.toml",
+            &value,
+            &NoScriptResolver,
+        );
+        assert!(
+            !crate::world::validate::has_error(&compiled.findings),
+            "fixture scripts must compile clean: {:?}",
+            compiled.findings
+        );
+        WorldScriptRuntime {
+            host: RuntimeHost::new(),
+            asts: compiled.asts,
+            triggers: compiled.script_triggers,
+            handlers: Vec::new(),
+            budget: TickBudget::new(),
+            budget_tick: 0,
+            content_hash: compiled.content_hash,
+        }
+    }
+
+    /// Issue #984 (Rhai M6 phase 2a), smallest-slice proof: a scripted trigger
+    /// authored inline fires through the LIVE `tick_trigger_pipeline` (not a
+    /// direct `RuntimeHost` call) and its handler's `complete_objective` effect
+    /// reaches the objective manager. Drives the real `ai_trigger_test_app`
+    /// harness with the same merge (`merge_script_triggers`) + dispatch path
+    /// production uses.
+    #[test]
+    fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
+        // One inline `[script]` trigger: on the raider's death, complete "obj".
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.complete_objective("obj"); }'
+"#,
+        );
+        assert_eq!(sr.triggers.len(), 1, "one scripted trigger authored");
+
+        let mut app = ai_trigger_test_app();
+        let raider_uuid = "raider-uuid-984a";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            // No declarative triggers; merge appends the scripted one and builds
+            // the parallel handler table.
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+            assert_eq!(runtime.trigger_states.len(), 1);
+        }
+        assert_eq!(sr.handlers.len(), 1);
+        assert!(
+            sr.handlers[0].is_some(),
+            "the scripted index carries a handler"
+        );
+        app.world_mut().insert_resource(sr);
+        // Seed the objective the scripted handler completes.
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "obj",
+            "hold the line",
+            true,
+            vec![],
+        );
+
+        // Drive the live pipeline: emit the destruction event and step once.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        let snap = objectives
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .find(|o| o.id == "obj")
+            .expect("the objective exists");
+        assert_eq!(
+            snap.status,
+            ObjectiveStatus::Completed,
+            "a scripted on_destroyed handler must complete the objective through the LIVE pipeline"
+        );
+    }
+
+    /// Issue #984 (Rhai M6 phase 2a), flag-chaining proof: a scripted handler's
+    /// `ctx.flags` write emits `ActionCmd::MutateFlag` directly, bypassing the
+    /// `push_flag_transition` a declarative `set_flag` gets. `apply_script_commands`
+    /// restores the transition event by previewing the write against the live
+    /// store, so a downstream declarative `on_flag_set` trigger chains in the
+    /// next pass. Without the preview the write would apply silently and the
+    /// chained objective would never appear.
+    #[test]
+    fn scripted_flag_write_chains_a_declarative_on_flag_set() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "arm"); fn arm(ctx) { ctx.flags.armed = 1; }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        let raider_uuid = "raider-uuid-984b";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            // Declarative on_flag_set("armed") -> AddObjective("chained"); the
+            // scripted on_destroyed trigger is appended AFTER it by the merge.
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagSet {
+                        name: "armed".to_string(),
+                    },
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "chained".to_string(),
+                        text: "armed via script".to_string(),
+                        mandatory: false,
+                        targets: vec![],
+                        directive: crate::messages::AiDirective::None,
+                        utility: crate::objectives::UtilityConfig::default(),
+                        source: crate::messages::ObjectiveSource::default(),
+                    }],
+                    when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        assert!(
+            objectives
+                .0
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "chained"),
+            "a scripted flag write must emit FlagSet so the declarative on_flag_set \
+             trigger chains in the next pass (the apply_script_commands preview)"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter("armed"),
+            1,
+            "the scripted flag write itself must land on the live store"
+        );
+    }
+
+    /// Issue #984 (Rhai M6 phase 2a), flag-chaining proof for a CLEARED
+    /// transition: a scripted handler writes `ctx.flags.shields_up = 0` (drains an
+    /// absolute `SetValue(0)`) over a pre-set flag. `apply_script_commands`
+    /// previews that against the live store — before 1, after 0 — so
+    /// `push_flag_transition`'s boolean flip emits `FlagCleared`, and a downstream
+    /// declarative `on_flag_cleared` trigger chains in the next pass. Without the
+    /// preview the write would apply silently and the chained objective would never
+    /// appear.
+    #[test]
+    fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "disarm"); fn disarm(ctx) { ctx.flags.shields_up = 0; }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        let raider_uuid = "raider-uuid-984c";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            // Pre-set so the scripted write is a true 1 -> 0 transition.
+            runtime.flags.set_flag("shields_up");
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            // Declarative on_flag_cleared("shields_up") -> AddObjective("disarmed");
+            // the scripted on_destroyed trigger is appended AFTER it by the merge.
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagCleared {
+                        name: "shields_up".to_string(),
+                    },
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "disarmed".to_string(),
+                        text: "shields dropped via script".to_string(),
+                        mandatory: false,
+                        targets: vec![],
+                        directive: crate::messages::AiDirective::None,
+                        utility: crate::objectives::UtilityConfig::default(),
+                        source: crate::messages::ObjectiveSource::default(),
+                    }],
+                    when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        assert!(
+            objectives
+                .0
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "disarmed"),
+            "a scripted flag clear must emit FlagCleared so the declarative \
+             on_flag_cleared trigger chains in the next pass (the \
+             apply_script_commands preview)"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter("shields_up"),
+            0,
+            "the scripted flag clear itself must land on the live store"
+        );
+    }
+
+    /// Issue #984 (Rhai M6 phase 2a), flag-chaining proof for an INCREMENT
+    /// transition: a scripted handler calls `ctx.flags.increment("wave", 1)`
+    /// (drains a relative `Increment(1)`) over an unset counter.
+    /// `apply_script_commands` previews that against the live store — before 0,
+    /// after 1 — so `push_flag_transition`'s boolean flip emits `FlagSet`, and a
+    /// downstream declarative `on_flag_set` trigger chains in the next pass.
+    /// Without the preview the increment would apply silently and the chained
+    /// objective would never appear.
+    #[test]
+    fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "bump"); fn bump(ctx) { ctx.flags.increment("wave", 1); }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        let raider_uuid = "raider-uuid-984d";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            // `wave` starts unset (counter 0), so the +1 is a true 0 -> 1
+            // transition (0 is "not set", 1 is "set").
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            // Declarative on_flag_set("wave") -> AddObjective("escalated"); the
+            // scripted on_destroyed trigger is appended AFTER it by the merge.
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagSet {
+                        name: "wave".to_string(),
+                    },
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "escalated".to_string(),
+                        text: "wave incremented via script".to_string(),
+                        mandatory: false,
+                        targets: vec![],
+                        directive: crate::messages::AiDirective::None,
+                        utility: crate::objectives::UtilityConfig::default(),
+                        source: crate::messages::ObjectiveSource::default(),
+                    }],
+                    when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        assert!(
+            objectives
+                .0
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "escalated"),
+            "a scripted flag increment from 0 must emit FlagSet so the declarative \
+             on_flag_set trigger chains in the next pass (the apply_script_commands \
+             preview)"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter("wave"),
+            1,
+            "the scripted flag increment itself must land on the live store"
+        );
+    }
+
+    /// Issue #984 (Rhai M6 phase 2a), Startup-wiring proof: `compile_world_scripts`
+    /// inserts `WorldScriptRuntime`, and `init_world_runtime` appends the scripted
+    /// trigger AFTER the declarative ones and builds `handlers` parallel to
+    /// `trigger_states` — the same `Startup` chain production runs (minus the
+    /// spawn), driven here without a full headless app.
+    #[test]
+    fn compile_and_init_wire_a_scripted_trigger_into_the_runtime() {
+        let world_toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+[[trigger.action]]
+type = "complete_objective"
+id = "declarative"
+
+[script]
+setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.complete_objective("obj"); }'
+"#;
+        let world_config = crate::world::config::parse_world(world_toml).expect("world parses");
+        let raw_value: toml::Value = toml::from_str(world_toml).expect("valid toml");
+
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>()
+            .init_resource::<WorldResource>()
+            .insert_resource(world_config)
+            .insert_resource(RawWorldSource {
+                path: "fixture/scripted.toml".to_string(),
+                toml: raw_value,
+            })
+            .add_systems(Startup, (compile_world_scripts, init_world_runtime).chain());
+        app.update();
+
+        // compile_world_scripts inserted the runtime; init_world_runtime's
+        // one-time merge then drained `triggers` (finding 5) — it is not retained
+        // for the world's lifetime, the compiled trigger now lives in
+        // `trigger_states` and the parallel `handlers` table.
+        let sr = app.world().resource::<WorldScriptRuntime>();
+        assert!(
+            sr.triggers.is_empty(),
+            "merge_script_triggers drains the retained triggers"
+        );
+        // handlers are parallel to trigger_states: the 1 declarative trigger maps
+        // to None, the appended scripted one to Some(handler "k").
+        assert_eq!(sr.handlers.len(), 2, "one declarative + one scripted");
+        assert!(
+            sr.handlers[0].is_none(),
+            "the declarative index carries no handler"
+        );
+        assert_eq!(
+            sr.handlers[1].as_ref().map(|h| h.fn_name.as_str()),
+            Some("k"),
+            "the appended scripted index carries its handler fn"
+        );
+
+        // trigger_states: declarative first (index/order unchanged), scripted
+        // appended after.
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.trigger_states.len(), 2);
+        assert_eq!(
+            runtime.trigger_states[0].trigger.condition,
+            TriggerCondition::OnWorldLoaded
+        );
+        assert_eq!(
+            runtime.trigger_states[1].trigger.condition,
+            TriggerCondition::OnDestroyed {
+                entity_name: "raider".to_string()
+            }
         );
     }
 

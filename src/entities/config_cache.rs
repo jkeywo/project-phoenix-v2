@@ -507,6 +507,56 @@ impl<R: crate::world::script::load::ScriptResolver> crate::world::script::load::
     }
 }
 
+// ── Production script-resolver fallbacks (issue #984, Rhai M6 phase 2a) ───────
+//
+// The concrete fallback `OverlayScriptResolver` wraps when no active mod pack
+// carries a world's sibling `.rhai`. Per-target, because the two hosts read a
+// sibling file differently — native/headless from the filesystem, wasm from the
+// config-cache's JS-delivered content. Inline `[script]` blocks are lifted from
+// the world TOML directly (`world::script::load::lift_world_scripts`) and never
+// reach a resolver, so no shipped world exercises the wasm path yet.
+
+/// Native/headless fallback: read a world's sibling `.rhai` from the filesystem.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct FsScriptFallback;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::world::script::load::ScriptResolver for FsScriptFallback {
+    fn read(&self, path: &str) -> Option<String> {
+        std::fs::read_to_string(path).ok()
+    }
+}
+
+/// The production script resolver for this target: the mod-pack overlay first
+/// (folding pack scripts into the content digest, issue #988), then the
+/// filesystem.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn production_script_resolver() -> OverlayScriptResolver<FsScriptFallback> {
+    OverlayScriptResolver::new(FsScriptFallback)
+}
+
+/// WASM fallback: read a sibling `.rhai` from the config cache's JS-delivered
+/// world/script content. Async prefetch of siblings is a later slice; a world
+/// that authors only inline `[script]` blocks (the tested path) never consults
+/// this, and `None` here surfaces as a `script-file-missing` finding that
+/// blocks activation.
+#[cfg(target_arch = "wasm32")]
+pub struct ConfigCacheScriptFallback;
+
+#[cfg(target_arch = "wasm32")]
+impl crate::world::script::load::ScriptResolver for ConfigCacheScriptFallback {
+    fn read(&self, path: &str) -> Option<String> {
+        peek_pending_world_toml(path)
+    }
+}
+
+/// The production script resolver for this target: the mod-pack overlay first
+/// (issue #988), then the config-cache's JS-delivered content.
+#[cfg(target_arch = "wasm32")]
+pub fn production_script_resolver() -> OverlayScriptResolver<ConfigCacheScriptFallback> {
+    OverlayScriptResolver::new(ConfigCacheScriptFallback)
+}
+
 // ── Public WASM API ──────────────────────────────────────────────────────────
 
 /// Set the JavaScript callback for config fetch requests.

@@ -1528,6 +1528,18 @@ pub fn wasm_load_world(
     crate::config_cache::wasm_load_world(path, toml_str, curated_ships)
 }
 
+/// The raw `(path, TOML text)` of the world this session loaded, if any.
+///
+/// The script-loader's twin of `config_cache::get_world_config()` (issue #984,
+/// Rhai M6 phase 2a): `WorldConfig` drops the raw `[script]`/`script` keys, so
+/// the Rhai loader needs the untouched TOML text. Read at `Startup` by
+/// `world::server::insert_raw_world_source_resource` to populate the
+/// `RawWorldSource` resource. Not a `#[wasm_bindgen]` export — Rust-internal.
+#[cfg(target_arch = "wasm32")]
+pub fn get_raw_world_source() -> Option<(String, String)> {
+    SNAPSHOT_WORLD.with(|w| w.borrow().clone())
+}
+
 /// Register the JS callback used by Rust to request a runtime world TOML fetch.
 ///
 /// The callback signature is: `callback(path: string)`. When called, JS must

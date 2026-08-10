@@ -428,6 +428,22 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     let mut world_config = crate::world::config::parse_world(&world_toml)
         .map_err(|e| BuildError(format!("world {:?} failed to parse: {e}", args.world_path)))?;
 
+    // The raw world TOML for the Rhai loader (issue #984, Rhai M6 phase 2a):
+    // `WorldConfig` above dropped the `[script]` / `script` keys, so the script
+    // seam needs the untouched value. Native's answer to the browser's
+    // `insert_raw_world_source_resource` (which reads `SNAPSHOT_WORLD`): inserted
+    // directly here so `compile_world_scripts` at `Startup` finds it.
+    let raw_world_toml: toml::Value = toml::from_str(&world_toml).map_err(|e| {
+        BuildError(format!(
+            "world {:?} failed to re-parse as a TOML value: {e}",
+            args.world_path
+        ))
+    })?;
+    app.insert_resource(crate::world::server::RawWorldSource {
+        path: args.world_path.clone(),
+        toml: raw_world_toml.clone(),
+    });
+
     // Duel side transform (issue #844). Only when `--side-a`/`--side-b` is
     // given, so a plain `--world` run is untouched. Pure over `WorldConfig`;
     // the filesystem-backed resolver is injected here in production.
@@ -572,6 +588,37 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         .ok_or_else(|| BuildError(format!("ship {ship_path:?} has no [[station]] blocks")))?;
     app.insert_resource(PendingShipConfig(ship_config));
     app.insert_resource(SelectedShipResource(ship_path.clone()));
+
+    // Compile the world's Rhai scripts at build time (issue #984, Rhai M6 phase
+    // 2a) and hard-fail on any error, exactly as `validate_composition` above
+    // hard-fails a broken composition — so a broken script never reaches a
+    // running authoritative host, and a script-error world activates zero
+    // content. Runs BEFORE `freeze` so a sibling `.rhai`'s content folds into the
+    // frozen digest (the `OverlayScriptResolver` records what it reads, #988).
+    // The `Startup` `compile_world_scripts` system re-compiles for the runtime
+    // insertion + trigger merge; this pass is only the fail-fast gate. A
+    // script-free world short-circuits before any engine is built.
+    if raw_world_toml.get("script").is_some() {
+        let resolver = crate::config_cache::production_script_resolver();
+        let compiled = crate::world::script::load::load_world_scripts(
+            &args.world_path,
+            &raw_world_toml,
+            &resolver,
+        );
+        if crate::world::validate::has_error(&compiled.findings) {
+            let errors: Vec<String> = compiled
+                .findings
+                .iter()
+                .filter(|f| f.is_error())
+                .map(|f| format!("[{}] {}", f.category, f.message))
+                .collect();
+            return Err(BuildError(format!(
+                "world scripts invalid; activation blocked ({} error(s)): {}",
+                errors.len(),
+                errors.join("; ")
+            )));
+        }
+    }
 
     // Issue #935: the world's declared file set — scenario/extra-world TOML,
     // every referenced entity template and its fragments, the player's hull —

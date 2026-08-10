@@ -733,7 +733,7 @@ fn dispatch_world_flag_action(action: &TriggerAction, context: &DispatchContext)
 /// `target_layer` is the *resolved* layer of the mutation (after `parent:`
 /// walking) — embedded in the event so layer-scoped `on_flag_set` /
 /// `on_flag_cleared` triggers only react to transitions in their own layer.
-fn push_flag_transition(
+pub(crate) fn push_flag_transition(
     events: &mut Vec<WorldEvent>,
     name: &str,
     target_layer: &Option<String>,
@@ -814,7 +814,11 @@ fn resolve_flag_target(
 ///
 /// Mirrors `FlagStore::set_flag` / `clear_flag` / `increment_flag` /
 /// `set_flag_value` exactly, including `increment`'s saturating add.
-fn preview_mutation(store: &FlagStore, name: &str, mutation: &FlagMutation) -> (i64, i64) {
+pub(crate) fn preview_mutation(
+    store: &FlagStore,
+    name: &str,
+    mutation: &FlagMutation,
+) -> (i64, i64) {
     let before = store.counter(name);
     let after = match mutation {
         FlagMutation::Set => 1,

@@ -738,7 +738,37 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         )))
         .add_systems(
             Startup,
-            setup_world.after(crate::world::server::insert_world_config_resource),
+            setup_world
+                .after(crate::world::server::insert_world_config_resource)
+                // Issue #984 (Rhai M6 phase 2a), atomic-activation gate. This
+                // spawner reaches `world_activation_blocked` (via
+                // `spawn_anonymous_entities_internal`), which reads the
+                // script-activation flag `compile_world_scripts` sets. On the
+                // browser `setup_world` and the WorldPlugin's Startup chain are
+                // independent, so without this `.after` a script-error world could
+                // spawn its anonymous stars/planets before the script gate is set
+                // — violating the "zero entities on script error" invariant.
+                // `spawn_world_entities` (the named-entity half) is already gated
+                // via the WorldPlugin `.chain()`.
+                .after(crate::world::server::compile_world_scripts)
+                // Determinism pin (issue #984, Rhai M6 phase 2a). `setup_world`
+                // (anonymous stars/planets) and `spawn_world_entities`
+                // (named/asteroid) both mint `IdNamespace::Entity` from the shared
+                // `WorldIdMint` and conflict on `WorldConfig` (Res vs ResMut), so
+                // Bevy serialises them — but with no edge between them their order
+                // is a topological-sort tie-break. Pre-2a that tie-break happened
+                // to run `setup_world` first; adding the `.after(compile_world_
+                // scripts)` edge above shifted it, flipping the entity-mint order
+                // for any world with anonymous entities (combat_test) and moving
+                // its authoritative digest — a determinism regression for the whole
+                // script-free shipped set, which must be a byte-identical no-op.
+                // This `.before` restores the pre-2a relative order explicitly, so
+                // the mint order no longer depends on the tie-break. It sits below
+                // the gate edge, so the invariant is `compile_world_scripts <
+                // setup_world < spawn_world_entities`: the script gate is still set
+                // before either spawner runs, and the mint order matches the parent
+                // commit exactly.
+                .before(crate::world::server::spawn_world_entities),
         )
         .add_systems(
             OnEnter(GamePhase::InProgress),

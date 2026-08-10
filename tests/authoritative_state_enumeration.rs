@@ -286,6 +286,16 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "TorpedoTargetSnapshot", "TorpedoTubeAiPolicies", "TrackedEntities", "VerticalThrustInput",
     "WeaponFiredThisTick", "WeaponsArcRequestState", "WeaponsConsoleSection",
     "WeaponsUpdateFirstTick", "WorldContentRuntime", "WorldSetupBroadcast",
+    // The Rhai scripting seam (issue #984, Rhai M6 phase 2a). Both are
+    // authoritative-but-deferred, exactly like `WorldContentRuntime` above:
+    // `RawWorldSource` is the untouched world TOML the script loader reads at
+    // `Startup`; `WorldScriptRuntime` holds the compiled handler ASTs, the
+    // per-tick script budget and the content hash. Registered in the census run
+    // even for a script-free world (the systems reference them via `Option<Res>`
+    // / `Option<ResMut>`), but never instantiated there. When
+    // `WorldContentRuntime`'s deferred state is folded into the digest, the
+    // script runtime's future `PendingCallbacks` (2b) belongs in the same fold.
+    "RawWorldSource", "WorldScriptRuntime",
 ];
 
 fn build_and_run() -> App {

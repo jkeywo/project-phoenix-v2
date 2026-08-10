@@ -23,6 +23,10 @@
 //!   path — so a shared fragment moving the digest is visible on either
 //!   target without the two recording different shapes.
 //! * Model-rig sidecars — `entities::glb_visual::load_sidecar_toml`.
+//! * Pack-supplied Rhai scripts — `config_cache::OverlayScriptResolver` records
+//!   every script it resolves (issue #988), so a scenario loaded with a
+//!   script-carrying mod pack folds a different content digest than the same
+//!   scenario without it, exactly as an edited entity template does.
 //!
 //! Deliberately NOT recorded from: the diagnostic bulk preload in
 //! `headless::app::preload_entity_templates` (walks every file under

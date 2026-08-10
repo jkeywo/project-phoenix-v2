@@ -1,0 +1,21 @@
+# Committed mod-pack fixture (issue #988): a v1 pack whose sibling .rhai reaches
+# for a denied capability (the wall clock) and is rejected atomically.
+#
+# Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
+# (byte-reproducible; gated by `--check`). The SAME .zip bytes are validated
+# from both Rust (src/world/mod_pack.rs) and JS (editor/tests/mod-pack-export.test.js).
+
+[pack]
+format = 1
+id = "script-denied-capability"
+version = "1.0.0"
+name = "Script Denied Capability"
+description = "A pack whose sibling .rhai reaches for the wall clock — rejected by the sandbox."
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "script_denied"
+world = "assets/worlds/script_denied.toml"

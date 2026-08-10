@@ -1,0 +1,21 @@
+# Committed mod-pack fixture (issue #988): a v1 pack carrying a valid .rhai
+# script beside its world.
+#
+# Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
+# (byte-reproducible; gated by `--check`). The SAME .zip bytes are validated
+# from both Rust (src/world/mod_pack.rs) and JS (editor/tests/mod-pack-export.test.js).
+
+[pack]
+format = 1
+id = "script-valid"
+version = "1.0.0"
+name = "Script Valid"
+description = "A pack whose sibling .rhai uses only sandbox-allowed capabilities."
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "script_valid"
+world = "assets/worlds/script_valid.toml"

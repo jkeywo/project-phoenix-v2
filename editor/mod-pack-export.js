@@ -23,6 +23,21 @@
  * The admission split comes from `partitionFindings` in validation.js — the
  * same primitive the per-file save gate uses — so a file that would be refused
  * a save can never slip through the exporter instead.
+ *
+ * ── Rhai scripts: a deliberate JS/host asymmetry (issue #988) ────────────────
+ *
+ * Every other check in this file MIRRORS a Rust validator, so the editor refuses
+ * locally exactly what the host would refuse on upload. `.rhai` members are the
+ * ONE exception. This exporter does only STRUCTURAL checks on a script — its
+ * path is a sibling `assets/worlds/*.rhai`, its text is non-empty, and some
+ * world's `script = "..."` references it — and CANNOT compile Rhai. Whether a
+ * script is *safe* is decided solely by the host's deny-by-default vellum
+ * sandbox (`validate_pack_scripts` in src/world/mod_pack.rs), which compiles
+ * every script and rejects any that fails to compile or reaches for a denied
+ * capability (eval, import/module resolve, wall clock). The file extension is
+ * not the trust boundary; the sandbox is. So a `.rhai` this exporter admits may
+ * still be rejected on upload — and that is the host's call to make, not the
+ * editor's.
  */
 
 import { stringify as tomlStringify, parse as tomlParse } from 'smol-toml';
@@ -65,13 +80,27 @@ export function isWorldContentPath(path) {
 /**
  * Whether `path` is a content path the exporter is allowed to include. The
  * top-level manifest (`scenarios.toml`) is allowed on its own; every other
- * file must sit directly under one of the supported `assets/*` directories,
- * end in `.toml`, and carry a non-empty file name with no path traversal.
+ * file must sit directly under a supported `assets/*` directory, carry a
+ * non-empty file name with no path traversal.
+ *
+ * A supported authored file is a `.toml` under one of {@link ALLOWED_DIR_PREFIXES},
+ * OR a `.rhai` script directly under `assets/worlds/` (issue #988) — the sibling
+ * layout `world::script::load` resolves a world's `script = "..."` to. The
+ * extension is NOT the trust boundary: the host's deny-by-default sandbox
+ * compiles and gates the script (see the module header). Mirrors
+ * `is_allowed_content_path` in `src/world/mod_pack.rs`.
  */
 export function isAllowedContentPath(path) {
   if (typeof path !== 'string' || path.length === 0) return false;
   if (path.includes('..') || path.includes('\\')) return false;
   if (path === MANIFEST_PATH) return true;
+  // Rhai scripts sit beside the world that loads them: a sibling
+  // assets/worlds/*.rhai, and nowhere else.
+  if (path.endsWith('.rhai')) {
+    if (!path.startsWith('assets/worlds/')) return false;
+    const name = path.slice('assets/worlds/'.length);
+    return name.length > '.rhai'.length && !name.includes('/');
+  }
   if (!path.endsWith('.toml')) return false;
   for (const prefix of ALLOWED_DIR_PREFIXES) {
     if (!path.startsWith(prefix)) continue;
@@ -81,6 +110,17 @@ export function isAllowedContentPath(path) {
     return false;
   }
   return false;
+}
+
+/**
+ * Resolve a world's sibling script path, mirroring `sibling_path` in
+ * `src/world/script/load.rs`: forward slashes, relative to the world file's
+ * directory. Used only for the referenced-by-a-world check on `.rhai` members.
+ */
+export function siblingScriptPath(worldPath, rel) {
+  const r = String(rel).replace(/\\/g, '/');
+  const i = Math.max(worldPath.lastIndexOf('/'), worldPath.lastIndexOf('\\'));
+  return i >= 0 ? `${worldPath.slice(0, i).replace(/\\/g, '/')}/${r}` : r;
 }
 
 // ── CRC-32 (IEEE) ───────────────────────────────────────────────────────────
@@ -488,6 +528,7 @@ export function exportModPack(input) {
   //    is deferred to step 2 so composed hulls can be validated RESOLVED.
   const contentByPath = {};
   const parsedByPath = {};
+  const scriptPaths = [];
   const zipEntries = [];
   const seenPaths = new Set();
   for (const file of files) {
@@ -499,11 +540,33 @@ export function exportModPack(input) {
       continue;
     }
     if (!isAllowedContentPath(path)) {
-      errors.push(`"${path}" is not a supported authored TOML path and cannot be exported`);
+      errors.push(`"${path}" is not a supported authored path and cannot be exported`);
       continue;
     }
     if (seenPaths.has(path)) {
       errors.push(`"${path}" is selected more than once`);
+      continue;
+    }
+
+    // A `.rhai` script is raw text, not TOML: it is carried verbatim and gated
+    // by the host's deny-by-default sandbox on upload (issue #988). The exporter
+    // checks only that it is non-empty here; the referenced-by-a-world check
+    // runs in step 1a. It cannot — and must not — try to compile Rhai; the host
+    // is the authoritative gate (see the module header).
+    if (path.endsWith('.rhai')) {
+      const src =
+        typeof file.text === 'string'
+          ? file.text
+          : typeof file.parsed === 'string'
+            ? file.parsed
+            : '';
+      if (src.trim().length === 0) {
+        errors.push(`"${path}" is an empty Rhai script and cannot be exported`);
+        continue;
+      }
+      seenPaths.add(path);
+      scriptPaths.push(path);
+      zipEntries.push({ path, text: src });
       continue;
     }
 
@@ -519,6 +582,26 @@ export function exportModPack(input) {
     contentByPath[path] = text;
     parsedByPath[path] = file.parsed;
     zipEntries.push({ path, text });
+  }
+
+  // 1a. Every `.rhai` member must be referenced by a world's `script = "..."`
+  //     (issue #988), so an exported pack never carries an orphan script. Only a
+  //     string `script` names a sibling file; an inline [script] table is
+  //     embedded in the world TOML, not a separate member.
+  const referencedScripts = new Set();
+  for (const [worldPath, parsed] of Object.entries(parsedByPath)) {
+    if (!worldPath.startsWith('assets/worlds/') || !worldPath.endsWith('.toml')) continue;
+    const s = parsed && typeof parsed === 'object' ? parsed.script : undefined;
+    if (typeof s === 'string' && s.length > 0) {
+      referencedScripts.add(siblingScriptPath(worldPath, s));
+    }
+  }
+  for (const sp of scriptPaths) {
+    if (!referencedScripts.has(sp)) {
+      errors.push(
+        `"${sp}" is not referenced by any world's \`script = "..."\` and cannot be exported`,
+      );
+    }
   }
 
   // Resolution reads a composed hull's own text and its fragments' text: the

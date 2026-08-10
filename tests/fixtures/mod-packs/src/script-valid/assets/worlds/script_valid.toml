@@ -1,0 +1,6 @@
+# `script` is a TOP-LEVEL world key (sibling of [global]) — the layout
+# world::script::load reads (issue #988).
+script = "script_valid.rhai"
+
+[global]
+title = "Script Valid"

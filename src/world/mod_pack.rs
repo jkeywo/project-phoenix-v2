@@ -41,10 +41,12 @@ use crate::world::config::parse_world;
 use crate::world::manifest::{
     parse_pack_manifest, validate_manifest, ContentIdentity, SUPPORTED_PACK_FORMAT,
 };
+use crate::world::script::load::{compile_scripts, lift_world_scripts, ScriptResolver};
 use crate::world::validate::{
     has_error, validate_composition_with_fragments, Severity, SourceLocation, WorldFinding,
     WorldSource,
 };
+use vellum_script::ScriptSource;
 
 /// The manifest path a mod pack always carries (top-level in the archive).
 /// Mirrors `MANIFEST_PATH` in `editor/mod-pack-export.js`. Structural, not a
@@ -72,8 +74,15 @@ pub fn is_world_content_path(path: &str) -> bool {
 /// Whether `path` is a content path a mod pack is allowed to include. Mirrors
 /// `isAllowedContentPath` in `editor/mod-pack-export.js`: the manifest is
 /// allowed on its own; every other file must sit directly under a supported
-/// `assets/*` directory, end in `.toml`, carry a real file name, and contain
-/// no path traversal or backslash.
+/// `assets/*` directory, carry a real file name, and contain no path traversal
+/// or backslash.
+///
+/// A supported authored file is a `.toml` under one of [`ALLOWED_DIR_PREFIXES`],
+/// OR a `.rhai` script directly under `assets/worlds/` (issue #988) — the exact
+/// sibling layout `world::script::load` resolves a world's `script = "..."`
+/// declaration to. The extension is NOT the trust boundary: a `.rhai` is
+/// admitted here only structurally, then COMPILED under the deny-by-default
+/// sandbox by [`validate_pack_scripts`], which is what actually gates it.
 pub fn is_allowed_content_path(path: &str) -> bool {
     if path.is_empty() {
         return false;
@@ -83,6 +92,14 @@ pub fn is_allowed_content_path(path: &str) -> bool {
     }
     if path == MANIFEST_PATH {
         return true;
+    }
+    // Rhai scripts sit beside the world that loads them: a sibling
+    // `assets/worlds/*.rhai`, and nowhere else (issue #988).
+    if path.ends_with(".rhai") {
+        return match path.strip_prefix("assets/worlds/") {
+            Some(name) => name.len() > ".rhai".len() && !name.contains('/'),
+            None => false,
+        };
     }
     if !path.ends_with(".toml") {
         return false;
@@ -529,15 +546,16 @@ pub fn validate_mod_pack(
             findings.push(archive_error(
                 "disallowed-path",
                 path,
-                format!("mod pack path {path:?} is not a supported authored TOML path"),
+                format!("mod pack path {path:?} is not a supported authored path"),
             ));
         }
     }
 
     // 5. Parse every non-manifest TOML (worlds are re-parsed by the validators
-    //    below; this catches unparseable entity/faction/model files too).
+    //    below; this catches unparseable entity/faction/model files too). A
+    //    `.rhai` entry is not TOML — it is compiled instead, in step 5a.
     for (path, text) in &files {
-        if path == MANIFEST_PATH {
+        if path == MANIFEST_PATH || path.ends_with(".rhai") {
             continue;
         }
         if let Err(e) = toml::from_str::<toml::Value>(text) {
@@ -548,6 +566,13 @@ pub fn validate_mod_pack(
             ));
         }
     }
+
+    // 5a. Compile every script the pack carries under the SAME deny-by-default
+    //     vellum sandbox M1's loader uses (issue #988): a `.rhai` that fails to
+    //     compile, or reaches for a denied capability, rejects the whole pack
+    //     atomically. Reconciles #856's "packs contain no executable code" — the
+    //     sandbox profile, not the extension, is the trust boundary.
+    findings.extend(validate_pack_scripts(&files));
 
     // 6. Validate the manifest, resolving worlds against pack THEN the active
     //    stack THEN base (issue #987 precedence: candidate → active → base).
@@ -637,6 +662,126 @@ pub fn validate_mod_pack(
         files: overlay_files,
         manifest_toml,
     }
+}
+
+// ── Pack script compilation (issue #988) ─────────────────────────────────────
+
+/// A [`ScriptResolver`] over an uploaded pack's OWN files, so a world's
+/// `script = "sibling.rhai"` resolves to the `.rhai` the pack carries. The
+/// upload-time twin of the overlay-backed resolver a live session uses
+/// ([`crate::config_cache::OverlayScriptResolver`]); here the archive is wholly
+/// in hand, so absence is final and a missing sibling is a real error.
+struct PackScriptFiles<'a> {
+    files: &'a BTreeMap<String, String>,
+}
+
+impl ScriptResolver for PackScriptFiles<'_> {
+    fn read(&self, path: &str) -> Option<String> {
+        self.files.get(path).cloned()
+    }
+}
+
+/// Whether a sandbox compile error names a statically denied capability.
+///
+/// The deny-by-default profile refuses `eval` at PARSE time (`disable_symbol`),
+/// so that one denial surfaces as a compile error rather than a top-level run
+/// error; the exact wording is rhai's, so we match the capability name it
+/// reports. This only refines the DIAGNOSTIC category — the pack is rejected
+/// whichever bucket the finding lands in — so the trust boundary never rests on
+/// this string match.
+fn names_denied_capability(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("eval") || m.contains("import") || m.contains("module") || m.contains("timestamp")
+}
+
+/// Translate a [`compile_scripts`] finding into a pack-scoped one (issue #988).
+///
+/// The loader reports parse and top-level-run failures under its own categories;
+/// a pack reports them as `unparseable-script` / `denied-script-capability`. A
+/// top-level RUN failure under the deny-by-default profile always means the
+/// script reached for something the sandbox refuses (an `import` the dummy
+/// resolver rejects, the absent wall-clock `timestamp`), so it is a denied
+/// capability. A COMPILE failure is a plain syntax error — `unparseable-script`
+/// — UNLESS it names a statically denied capability (`eval`), the one denial
+/// visible before the top level runs. Any other finding is passed through
+/// unchanged so nothing silently vanishes.
+fn map_script_finding(f: WorldFinding) -> WorldFinding {
+    let category = match f.category {
+        "script-parse-error" => {
+            if names_denied_capability(&f.message) {
+                "denied-script-capability"
+            } else {
+                "unparseable-script"
+            }
+        }
+        "script-runtime-error" => "denied-script-capability",
+        _ => return f,
+    };
+    archive_error(category, &f.source.reference, f.message)
+}
+
+/// Compile every Rhai script an uploaded pack carries, atomically (issue #988).
+///
+/// Packs MAY carry `.rhai`; the deny-by-default vellum sandbox profile — NOT the
+/// file extension — is the trust boundary (reconciles #856). Two sources reach
+/// the gate, exactly as they reach a live world through `world::script::load`:
+///
+///   * a standalone `assets/worlds/*.rhai` file the pack carries, and
+///   * an inline `[script.*]` table (or a `script = "sibling.rhai"` reference)
+///     in a pack-carried world.
+///
+/// Both are lifted to [`ScriptSource`]s and compiled through the SAME
+/// [`compile_scripts`] a shipped world uses, so the trust boundary is literally
+/// M1's gate rather than a re-implementation of it. Sources are keyed by path in
+/// a `BTreeMap` so a sibling that a world both carries AND references is compiled
+/// once, mirroring the loader's single AST map. A script that fails to compile is
+/// `unparseable-script`; one that reaches for a denied capability (eval,
+/// import/module resolve, the wall clock) is `denied-script-capability`. Either
+/// is a definite error, so acceptance (gated on [`has_error`]) rejects the whole
+/// pack.
+fn validate_pack_scripts(files: &BTreeMap<String, String>) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    // One source set, keyed by path (a sibling `.rhai` is both a pack file AND
+    // the target of a world's `script = "..."`).
+    let mut sources: BTreeMap<String, String> = BTreeMap::new();
+
+    // Standalone `.rhai` files. A script referenced by no world is still
+    // compiled here — the host gates capability; the editor gates reference.
+    for (path, text) in files {
+        if path.ends_with(".rhai") {
+            sources.entry(path.clone()).or_insert_with(|| text.clone());
+        }
+    }
+
+    // Inline `[script.*]` blocks + `script = "sibling.rhai"` references in every
+    // pack-carried world, lifted exactly as the loader does.
+    let resolver = PackScriptFiles { files };
+    for (path, text) in files {
+        if !is_world_content_path(path) {
+            continue;
+        }
+        let Ok(world) = toml::from_str::<toml::Value>(text) else {
+            // Unparseable worlds are already reported by step 5 / validate_manifest.
+            continue;
+        };
+        let (lifted, lift_findings) = lift_world_scripts(path, &world, &resolver);
+        findings.extend(lift_findings);
+        for s in lifted {
+            sources.entry(s.path).or_insert(s.source);
+        }
+    }
+
+    if sources.is_empty() {
+        return findings;
+    }
+
+    let source_vec: Vec<ScriptSource> = sources
+        .into_iter()
+        .map(|(path, source)| ScriptSource { path, source })
+        .collect();
+    let compiled = compile_scripts(&source_vec);
+    findings.extend(compiled.findings.into_iter().map(map_script_finding));
+    findings
 }
 
 #[cfg(test)]
@@ -839,6 +984,176 @@ mod tests {
         assert!(!is_allowed_content_path("assets/other/x.toml"));
         assert!(!is_allowed_content_path("assets/worlds/x.json"));
         assert!(!is_allowed_content_path("assets/worlds/.toml"));
+    }
+
+    // ── .rhai whitelist, asserted against the SHIPPED script layout (issue #988)
+
+    /// The whitelist admits a `.rhai` at the exact path `world::script::load`
+    /// resolves a `script = "..."` declaration to — enumerated from the loader,
+    /// not written as a literal, so there is one place that defines where a
+    /// script lives (AC1).
+    #[test]
+    fn whitelist_accepts_the_loaders_resolved_sibling_script_path() {
+        use crate::world::script::load::{lift_world_scripts, ScriptResolver};
+
+        // A resolver that serves any sibling, so lift reports the REAL resolved
+        // path the loader would read.
+        struct AnyScript;
+        impl ScriptResolver for AnyScript {
+            fn read(&self, _path: &str) -> Option<String> {
+                Some("fn on_x(ctx) { }".to_string())
+            }
+        }
+
+        let world: toml::Value = toml::from_str(r#"script = "combat.rhai""#).unwrap();
+        let (sources, findings) =
+            lift_world_scripts("assets/worlds/combat_test.toml", &world, &AnyScript);
+        assert!(findings.is_empty(), "{:?}", findings);
+        assert_eq!(sources.len(), 1);
+        assert!(
+            sources[0].path.ends_with(".rhai"),
+            "the loader resolves a sibling .rhai: {:?}",
+            sources[0].path,
+        );
+        assert!(
+            is_allowed_content_path(&sources[0].path),
+            "the shipped sibling-script path {:?} must be an allowed pack path",
+            sources[0].path,
+        );
+    }
+
+    #[test]
+    fn whitelist_accepts_rhai_only_directly_under_worlds() {
+        assert!(is_allowed_content_path("assets/worlds/combat.rhai"));
+        // Wrong directory, nested, or empty stem — all rejected.
+        assert!(!is_allowed_content_path("assets/entities/x.rhai"));
+        assert!(!is_allowed_content_path("assets/worlds/sub/x.rhai"));
+        assert!(!is_allowed_content_path("assets/worlds/.rhai"));
+        assert!(!is_allowed_content_path("combat.rhai"));
+        assert!(!is_allowed_content_path("assets/worlds/../x.rhai"));
+    }
+
+    // ── Pack scripts compile under the sandbox (issue #988) ──────────────────
+
+    /// A world declaring a sibling script, for the compile tests below. The
+    /// `script` key is TOP-LEVEL (a sibling of `[global]`), matching what
+    /// `world::script::load::lift_world_scripts` reads (`world_toml.get("script")`).
+    fn world_with_script(title: &str, rel: &str) -> String {
+        format!("script = \"{rel}\"\n\n[global]\ntitle = \"{title}\"\n")
+    }
+
+    #[test]
+    fn a_pack_carrying_a_valid_script_is_accepted() {
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
+            (
+                "assets/worlds/s.toml",
+                &world_with_script("world.s.title", "s.rhai"),
+            ),
+            (
+                "assets/worlds/s.rhai",
+                "fn on_alarm(ctx) { let n = 2 + 2; n }\n",
+            ),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        assert!(result.is_accepted(), "findings: {:?}", result.findings);
+        // The script rides the overlay alongside the world.
+        assert!(result.files.contains_key("assets/worlds/s.rhai"));
+    }
+
+    #[test]
+    fn an_unparseable_script_rejects_the_whole_pack() {
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
+            ("assets/worlds/s.toml", &simple_world("world.s.title")),
+            ("assets/worlds/broken.rhai", "fn oops(ctx) { let x = ; }\n"),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "unparseable-script"),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+
+    #[test]
+    fn a_script_reaching_the_wall_clock_is_a_denied_capability() {
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
+            ("assets/worlds/s.toml", &simple_world("world.s.title")),
+            ("assets/worlds/clock.rhai", "let now = timestamp();\n"),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "denied-script-capability"),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+
+    #[test]
+    fn a_script_using_eval_is_a_denied_capability() {
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
+            ("assets/worlds/s.toml", &simple_world("world.s.title")),
+            ("assets/worlds/evil.rhai", "let x = eval(\"1 + 1\");\n"),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "denied-script-capability"),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+
+    #[test]
+    fn a_script_importing_a_module_is_a_denied_capability() {
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
+            ("assets/worlds/s.toml", &simple_world("world.s.title")),
+            ("assets/worlds/reach.rhai", "import \"secret\" as s;\n"),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "denied-script-capability"),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+
+    #[test]
+    fn an_inline_script_block_in_a_pack_world_is_compiled_by_the_same_gate() {
+        // A denied capability inside an inline [script.*] block rejects the pack
+        // exactly as a sibling file does (AC3).
+        let world = "[global]\ntitle = \"world.s.title\"\n\n\
+                     [script]\nsetup = \"let t = timestamp();\"\n";
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
+            ("assets/worlds/s.toml", world),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(
+            has_category(&result, "denied-script-capability"),
+            "findings: {:?}",
+            result.findings
+        );
+    }
+
+    #[test]
+    fn a_valid_inline_script_block_is_accepted() {
+        let world = "[global]\ntitle = \"world.s.title\"\n\n\
+                     [script]\nsetup = \"fn helper(ctx) { 1 + 1 }\"\n";
+        let zip = create_store_zip(&[
+            ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
+            ("assets/worlds/s.toml", world),
+        ]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
     // ── atomic validation ────────────────────────────────────────────────────
@@ -1363,6 +1678,30 @@ entity = "raider"
         let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "pack-content-mismatch"));
+    }
+
+    /// A committed pack carrying a `.rhai` that uses only allowed capabilities is
+    /// accepted, script and all (issue #988). The SAME bytes round-trip through
+    /// `readStoreZip` on the JS side.
+    #[test]
+    fn fixture_script_valid_is_accepted() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/script-valid.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        assert!(
+            result.is_accepted(),
+            "script-valid.zip must be accepted: {:?}",
+            result.findings
+        );
+    }
+
+    /// A committed pack whose `.rhai` reaches for a denied capability is rejected
+    /// atomically with a `denied-script-capability` finding (issue #988).
+    #[test]
+    fn fixture_script_denied_capability_is_rejected() {
+        let bytes = include_bytes!("../../tests/fixtures/mod-packs/script-denied-capability.zip");
+        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        assert!(!result.is_accepted());
+        assert!(has_category(&result, "denied-script-capability"));
     }
 
     // ── Multi-pack stack: precedence, conflicts, provenance (issue #987) ─────

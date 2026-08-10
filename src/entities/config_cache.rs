@@ -461,6 +461,52 @@ pub fn clear_mod_pack_overlay() {
     ACTIVE_PACKS.with(|s| s.borrow_mut().clear());
 }
 
+// ── Overlay-backed script resolution (issue #988) ────────────────────────────
+//
+// A world's sibling `.rhai` (`world::script::load`) resolves through the mod-pack
+// overlay FIRST, then a fallback — the script-loader twin of the world/config
+// channels above, which already consult `mod_pack_overlay_get` before the normal
+// fetch (#760 AC2). An accepted pack may carry `.rhai` (validated at upload by
+// `world::mod_pack::validate_pack_scripts`), and this is what makes that script
+// actually resolve at load time instead of being fetched over HTTP.
+
+/// A [`ScriptResolver`](crate::world::script::load::ScriptResolver) that reads a
+/// world's sibling script from the mod-pack overlay stack first, then `fallback`
+/// (issue #988).
+///
+/// Every script it resolves — whether from the overlay or the fallback — is
+/// recorded in [`content_ledger`](crate::content_ledger) under its exact path.
+/// That is what makes a scenario loaded WITH a script-carrying pack fold a
+/// DIFFERENT content digest than the same scenario without it, so a pack's script
+/// can no longer drift under snapshot/replay determinism (issue #988, following
+/// the entity-template coverage #935 added).
+pub struct OverlayScriptResolver<R> {
+    /// The resolver consulted when no active pack carries the path — the live
+    /// session's HTTP/config-cache fetch, or a test fake.
+    pub fallback: R,
+}
+
+impl<R> OverlayScriptResolver<R> {
+    /// Wrap `fallback` so the overlay is tried first.
+    pub fn new(fallback: R) -> Self {
+        Self { fallback }
+    }
+}
+
+impl<R: crate::world::script::load::ScriptResolver> crate::world::script::load::ScriptResolver
+    for OverlayScriptResolver<R>
+{
+    fn read(&self, path: &str) -> Option<String> {
+        let source = mod_pack_overlay_get(path).or_else(|| self.fallback.read(path));
+        if let Some(text) = &source {
+            // Record what the loader actually consumed (pack or fallback) so the
+            // content digest covers pack-supplied scripts (issue #988).
+            crate::content_ledger::record(path, text);
+        }
+        source
+    }
+}
+
 // ── Public WASM API ──────────────────────────────────────────────────────────
 
 /// Set the JavaScript callback for config fetch requests.
@@ -1484,6 +1530,101 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
             Some("A".to_string())
         );
         super::clear_mod_pack_overlay();
+    }
+
+    // ── Overlay-backed script resolution (issue #988) ────────────────────
+    //
+    // A world's sibling `.rhai` resolves through the overlay first, and the
+    // resolved text is recorded in the content ledger so a script-carrying pack
+    // moves the content digest. Both are exercised through the loader's real
+    // resolution path (`world::script::load::lift_world_scripts`).
+
+    /// A fallback resolver serving a fixed sentinel, so a test can prove the
+    /// overlay won (or that the fallback was reached).
+    struct FixedFallback(Option<&'static str>);
+    impl crate::world::script::load::ScriptResolver for FixedFallback {
+        fn read(&self, _path: &str) -> Option<String> {
+            self.0.map(str::to_string)
+        }
+    }
+
+    #[test]
+    fn a_pack_script_resolves_from_the_overlay_not_the_fallback() {
+        use crate::world::script::load::lift_world_scripts;
+        super::clear_mod_pack_overlay();
+        crate::content_ledger::reset();
+
+        // The overlay carries the sibling; the fallback would serve DIFFERENT
+        // text, so a pass proves resolution went through the overlay.
+        super::push_mod_pack(pack_with(
+            "script-pack",
+            &[("assets/worlds/on_combat.rhai", "fn from_pack(ctx) { }")],
+        ));
+        let world: toml::Value = toml::from_str(r#"script = "on_combat.rhai""#).unwrap();
+        let resolver =
+            super::OverlayScriptResolver::new(FixedFallback(Some("fn from_fallback(ctx) { }")));
+
+        let (sources, findings) =
+            lift_world_scripts("assets/worlds/combat_test.toml", &world, &resolver);
+        assert!(findings.is_empty(), "{:?}", findings);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].path, "assets/worlds/on_combat.rhai");
+        assert_eq!(
+            sources[0].source, "fn from_pack(ctx) { }",
+            "the overlay's script must win over the fallback"
+        );
+
+        super::clear_mod_pack_overlay();
+        crate::content_ledger::reset();
+    }
+
+    #[test]
+    fn a_script_carrying_pack_moves_the_content_digest() {
+        use crate::content_ledger;
+        use crate::world::script::load::lift_world_scripts;
+
+        let world: toml::Value = toml::from_str(r#"script = "on_combat.rhai""#).unwrap();
+
+        // WITHOUT a pack: the sibling cannot resolve (no overlay, no fallback),
+        // so only the world itself is in the ledger.
+        super::clear_mod_pack_overlay();
+        content_ledger::reset();
+        content_ledger::record(
+            "assets/worlds/combat_test.toml",
+            r#"script = "on_combat.rhai""#,
+        );
+        let _ = lift_world_scripts(
+            "assets/worlds/combat_test.toml",
+            &world,
+            &super::OverlayScriptResolver::new(FixedFallback(None)),
+        );
+        let without = content_ledger::snapshot().fold();
+
+        // WITH a script-carrying pack: the resolver serves the script from the
+        // overlay AND records it, so the fold covers the script too.
+        super::push_mod_pack(pack_with(
+            "digest-pack",
+            &[("assets/worlds/on_combat.rhai", "fn on_x(ctx) { }")],
+        ));
+        content_ledger::reset();
+        content_ledger::record(
+            "assets/worlds/combat_test.toml",
+            r#"script = "on_combat.rhai""#,
+        );
+        let _ = lift_world_scripts(
+            "assets/worlds/combat_test.toml",
+            &world,
+            &super::OverlayScriptResolver::new(FixedFallback(None)),
+        );
+        let with = content_ledger::snapshot().fold();
+
+        assert_ne!(
+            without, with,
+            "a pack-supplied script must move the content digest"
+        );
+
+        super::clear_mod_pack_overlay();
+        content_ledger::reset();
     }
 
     // ── Composable-template preload contract (issue #869) ────────────────

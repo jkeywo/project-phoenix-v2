@@ -338,19 +338,19 @@ declared_by = ["assets/models/asteroid_uncommon_3.large.toml", "assets/models/as
 [[output]]
 path = "assets/models/asteroid_uncommon_4_lod1.glb"
 source = "assets/models/asteroid_uncommon_4.glb"
-source_sha256 = "8905bc837f043dd821b9eb51594e520046ebaf9929704a3573add8f84513e1cd"
+source_sha256 = "007123dea3a42db26440cfe068e98846c1eab5fcf8c03b069f1b41d8600e3629"
 params = { ratio = 0.067, error = 0.01, texture_size = 128 }
-output_sha256 = "dee566fa3cb8db85838852745f45aa1d1935d964b5f9f7f990598da9c34af7db"
-output_bytes = 474796
+output_sha256 = "9524be53f6465ed4818e381953121592cefd5de542fd847ad1f70825d8150eb4"
+output_bytes = 458372
 declared_by = ["assets/models/asteroid_uncommon_4.large.toml", "assets/models/asteroid_uncommon_4.small.toml"]
 
 [[output]]
 path = "assets/models/asteroid_uncommon_4_lod2.glb"
 source = "assets/models/asteroid_uncommon_4.glb"
-source_sha256 = "8905bc837f043dd821b9eb51594e520046ebaf9929704a3573add8f84513e1cd"
+source_sha256 = "007123dea3a42db26440cfe068e98846c1eab5fcf8c03b069f1b41d8600e3629"
 params = { ratio = 0.067, error = 0.01, texture_size = 128 }
-output_sha256 = "dee566fa3cb8db85838852745f45aa1d1935d964b5f9f7f990598da9c34af7db"
-output_bytes = 474796
+output_sha256 = "9524be53f6465ed4818e381953121592cefd5de542fd847ad1f70825d8150eb4"
+output_bytes = 458372
 declared_by = ["assets/models/asteroid_uncommon_4.large.toml", "assets/models/asteroid_uncommon_4.small.toml"]
 
 [[output]]

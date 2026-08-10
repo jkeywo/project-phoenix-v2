@@ -364,15 +364,21 @@ fn resume_round_trip(world: &str, args: HeadlessArgs, slot: &str, continue_for: 
 
 /// The acceptance criterion on the readable world, continuation and all.
 ///
-/// Ignored, issue #997: the two worlds diverge 2 frames after the restore —
-/// deterministically, at every opt-level, with byte-identical divergent
-/// digests. Found the first time this file ran at all (it was headless-gated
-/// and CI's bare `cargo test` compiled it empty until the feature-uniform
-/// invocation landed). Prime suspect is post-#935 authoritative combat state
-/// (#956's weapons doctrine) the capture does not carry. Un-ignore with the
-/// fix.
+/// Issue #997: the two worlds diverged 2 frames after the restore —
+/// deterministically, at every opt-level, with byte-identical divergent digests
+/// — because the capture did not carry the helm **pass surface**
+/// (`HelmPassSurface`). That surface is republished from scratch every AI tick by
+/// `ai_policy_state_tick`, but that system runs `.after(helm_motion_planner)`, so
+/// the planner reads the surface the *previous* tick left behind. A resumed ship
+/// booted it at the bootstrap's value — the fight the fresh app happened to run
+/// on its way to the restore point, not the captured one — so its first
+/// continuation planner tick selected a different helm leg and steered onto a
+/// different bearing, a steering-intent change the digest cannot see until helm
+/// integrates it into yaw ~2 ticks later. The surface now travels in the payload
+/// (see `EntityState::pass_surface`), alongside the reactor allocation, blaster
+/// volley state, sensor lock and arc-bearing seam that the same measurement found
+/// were also default/missing in the resumed world.
 #[test]
-#[ignore = "issue #997 — duel world diverges 2 frames after restore"]
 fn a_bounded_duel_resumes_into_a_fresh_app_and_steps_forward_with_it() {
     resume_round_trip(
         DUEL,

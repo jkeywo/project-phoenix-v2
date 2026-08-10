@@ -256,6 +256,45 @@ impl PowerSystem {
         self.order.iter().map(move |id| (id, self.level_for(id)))
     }
 
+    /// Overwrite the whole reactor state from a snapshot (issue #997).
+    ///
+    /// Reinstates each group at its stored level in the stored order, the
+    /// battery charge, and the lock — the three things a run *changed* that the
+    /// per-tick recompute cannot re-derive. `snapshot::restore` needs this
+    /// because the `PhaserDamage`/`MaxSpeed`/`ShieldRegen` modifiers are
+    /// recomputed every tick from these levels, so a resumed ship whose reactor
+    /// came back at the seeded default (every group at 2) fires, steers and
+    /// regenerates at a different intensity than the live one on the very first
+    /// tick after a restore — a small, silent, per-ship divergence a digest
+    /// match at the instant of restore cannot see, because the digest folds
+    /// `ShipPhysics` and hull, not the reactor.
+    ///
+    /// Writes the fields directly rather than routing through
+    /// [`Self::set_group_allocation`]: that path clamps to the ship-wide budget
+    /// and no-ops while `locked`, so it could neither reinstate a legally-reached
+    /// over-budget transient nor set the levels of a locked-out reactor. A
+    /// restore reinstates a state the run already reached under those rules; it
+    /// is not commanding a new one.
+    pub fn restore(
+        &mut self,
+        allocations: &[(PowerGroupId, u8)],
+        battery_charge: f32,
+        locked: bool,
+    ) {
+        self.groups.clear();
+        self.order.clear();
+        for (id, level) in allocations {
+            if self.groups.contains_key(id) {
+                continue;
+            }
+            self.groups
+                .insert(id.clone(), (*level).clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX));
+            self.order.push(id.clone());
+        }
+        self.battery_charge = battery_charge;
+        self.locked = locked;
+    }
+
     pub fn read_state(&self) -> PowerReadState {
         PowerReadState {
             allocations: self

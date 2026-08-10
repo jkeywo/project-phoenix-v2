@@ -1285,7 +1285,9 @@ pub struct HelmRecoveryHistory {
 /// and the planner steers the residual back out instead. Both are correct; the
 /// second is simply the case of a hull whose deadband is tighter than its
 /// one-tick yaw rate, and it converges rather than drifting.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+#[derive(
+    Component, Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize,
+)]
 pub struct HelmPassSurface {
     /// The hull authors at least ONE complete host-flown leg set — the
     /// fly-through pass ([`Self::pass_legs`]), the shield-recovery standoff, or

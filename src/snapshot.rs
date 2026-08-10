@@ -239,6 +239,38 @@ pub struct EntityState {
     /// The repair crew — see [`RepairState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairState>,
+    /// The Weapons→Helm arc-bearing seam — see [`ArcRequestState`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc_request: Option<ArcRequestState>,
+    /// The reactor allocation — see [`PowerState`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power: Option<PowerState>,
+    /// The ship's fly-through/orbit **pass surface** (`HelmPassSurface`), the
+    /// derived helm-leg selection the motion planner steers from.
+    ///
+    /// This is the state issue #997's duel divergence actually hinged on. The
+    /// surface is republished from scratch every AI tick by `ai_policy_state_tick`
+    /// — but that system runs `.after(helm_motion_planner)`, so the planner reads
+    /// the surface the *previous* tick left behind. A resumed ship whose surface
+    /// came back at the bootstrap's value (its own fight, not the captured one)
+    /// therefore has its first continuation planner tick select a different leg —
+    /// inbound vs escape vs orbit — and steer onto a different bearing two ticks
+    /// later, a steering-intent change the digest cannot see until helm
+    /// integrates it into yaw.
+    ///
+    /// The one place a whole component travels rather than a scalar projection,
+    /// and the exception is narrow: [`crate::ship::helm_ai::HelmPassSurface`] is a
+    /// pure-scalar `Copy` struct with no enum among its fields, so the
+    /// variant-order hazard the rest of this module writes scalars to avoid
+    /// (see [`WeaponState`]) does not apply — serde's field-name-keyed form is
+    /// stable, and a save from a build with a field this one lacks is refused by
+    /// the content-version gate, not misread here. Storing it whole is what keeps
+    /// the ~25 authored + derived fields impossible to drift out of sync one at a
+    /// time. It is a derivation, but one read a tick before it is recomputed, so
+    /// the capture-tick value has to survive the restore for the first planner
+    /// tick to read — it cannot be rebuilt in time the way `WorldSnapshot` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_surface: Option<crate::ship::helm_ai::HelmPassSurface>,
     /// `ObjectiveCursors` as `(objective id, waypoint index, settled)`.
     ///
     /// Where a patrolling ship is *around its route*, which is not derivable
@@ -334,6 +366,10 @@ pub struct WeaponState {
     /// separately from its map for exactly this determinism reason.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub arc_hull: Vec<(String, f32, f32)>,
+    /// Every blaster bank's volley/cooldown cycle and bolts, in the authored
+    /// bank order the component keeps — see [`BlasterRuntime`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blasters: Vec<BlasterRuntime>,
 }
 
 /// One torpedo tube's runtime state.
@@ -398,6 +434,66 @@ pub struct BurstState {
     pub next_shot_index: u32,
 }
 
+/// One blaster bank's runtime **volley + cooldown** cycle and its bolts in the
+/// air (issue #997).
+///
+/// The blaster analogue of [`WeaponState::phaser_cooldowns`] and the tube/burst
+/// state — and the piece whose absence issue #997's duel divergence turned out
+/// to hinge on. The WEAPONS DOCTRINE (`tick_weapons_arc_request`) chooses which
+/// family to ask Helm to bring an arc onto by walking the ship's families and
+/// stopping at the first whose emitters are ONLINE and USABLE; a bank on
+/// cooldown is not usable. A resumed destroyer whose blasters came back at the
+/// authored default — ready, no cooldown — is usable when the live ship's are
+/// still cooling, so its doctrine picks a different family, emits a different
+/// arc-bearing request, and its Helm steers onto a different bearing. That is
+/// the destroyer's yaw parting company two ticks after a restore whose digest
+/// matched exactly.
+///
+/// Only the run-changed volley cycle and the bolts travel; the bank's authored
+/// `config` (arc, cadence, damage, barrels, pattern) is rebuilt from TOML, the
+/// rule [`WeaponState`] keeps throughout.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BlasterRuntime {
+    /// Steps left to fire in the active volley (`0` when idle).
+    pub pending_volley: u32,
+    /// The resolved active firing schedule — `(barrel indices, at_secs)` steps.
+    /// Stored rather than re-derived because the cursor below indexes it, and a
+    /// re-derivation could disagree with a config that changed between builds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub schedule: Vec<(Vec<u32>, f32)>,
+    pub next_step: u32,
+    pub volley_elapsed: f32,
+    /// Barrels that fired on the most recent step — read for the Tactical
+    /// indicator and to pick the next barrel, so a bank restored without them
+    /// resumes its pattern from the wrong place, as a tube does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_barrels: Vec<u32>,
+    pub current_step: u32,
+    pub on_cooldown: bool,
+    pub cooldown_remaining: f32,
+    pub charging: bool,
+    pub charge_elapsed: f32,
+    /// Bolts this bank has in flight — moving, and about to hit somebody, so
+    /// authoritative in the plainest sense (as torpedoes in flight are).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_flight: Vec<BlasterBolt>,
+}
+
+/// One blaster bolt mid-flight — see [`BlasterRuntime::in_flight`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BlasterBolt {
+    pub id: String,
+    pub x: f32,
+    pub z: f32,
+    pub heading: f32,
+    pub speed: f32,
+    pub lifespan_remaining: f32,
+    pub collision_radius: f32,
+    pub damage: i32,
+    pub shield_pierce: f32,
+    pub source_uuid: String,
+}
+
 /// A ship's **repair state**, the other half of AC2's "weapon/repair state".
 ///
 /// A repair team is a timer with a destination. Restored idle, every team that
@@ -428,6 +524,89 @@ pub struct RepairState {
     /// inherit its iteration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub alerted: Vec<(String, crate::damage::DamageTier)>,
+}
+
+/// The Weapons→Helm **arc-bearing seam** (issues #677/#767), both halves of it.
+///
+/// This is the divergence issue #997 was opened for. The seam is a debounce on
+/// the Weapons side and a pending bearing on the Helm side, and the two are one
+/// piece of state: `tick_weapons_arc_request` only emits a channel-3
+/// [`CoordinationPayload::ArcBearingRequest`] when its debounce key *changes*,
+/// and the request it emits lands in Helm's [`PendingArcBearingRequest`], which
+/// `ai_helm_steering` folds into the steering bias every tick until the geometry
+/// self-clears.
+///
+/// A ship captured mid-engagement holds a *settled* debounce (`last = Some(key)`,
+/// already emitted) and a *pending* bearing Helm is still folding in. A resumed
+/// ship that booted both `default()` has `last = None` — so the first
+/// `ai_tick_ready` cadence tick after the restore re-fires a request the live
+/// world suppresses — and an empty pending bearing, so its helm steers without
+/// the bias the live ship still carries. Either alone changes steering intent,
+/// which the digest cannot see (it folds `ShipPhysics`, not steering input) until
+/// helm integrates it into yaw ~2 ticks later. That is exactly the lagged, opt-
+/// level-independent divergence #997 measured.
+///
+/// # Stored as its wire types, not scalars
+///
+/// [`WeaponFamily`] and [`WeaponEmitterArc`] already derive serde — they are the
+/// channel-3 payload types, so their shape was stored surface the repository had
+/// committed to before this module existed. Copying them into scalars here would
+/// not remove that commitment, only duplicate it — the [`RepairState::teams`]
+/// exception, for the same reason.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ArcRequestState {
+    /// `WeaponsArcRequestState.last` — the settled debounce key
+    /// `(family, target uuid, usable arcs)`. `Some` means a request for this key
+    /// has already been emitted and must *not* re-fire on the first cadence tick
+    /// after the restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<(
+        crate::messages::WeaponFamily,
+        String,
+        Vec<crate::messages::WeaponEmitterArc>,
+    )>,
+    /// `PendingArcBearingRequest.target` — the uuid Helm is biasing to bring a
+    /// weapon arc onto, or `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_target: Option<String>,
+    /// `PendingArcBearingRequest.arcs` — the emitting family's usable ONLINE
+    /// emitter arcs Helm folds into its steering bias and self-clears against.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_arcs: Vec<crate::messages::WeaponEmitterArc>,
+}
+
+/// A ship's **reactor allocation** — the per-group power levels, the battery
+/// reserve, and the exhaustion lock (issue #997).
+///
+/// This is the state issue #997's duel divergence was actually about. The
+/// `PhaserDamage`, `MaxSpeed`, `MaxYawRate` and `ShieldRegen` modifiers are
+/// recomputed *every tick* from the power levels (see
+/// `modifiers::coordination::apply_power_modifiers`), so a resumed ship whose
+/// reactor came back at the seeded default — every group at level 2 — burns its
+/// beams, drives its engines and regenerates its shields at a different
+/// intensity than the live ship from the first tick after the restore. The duel
+/// cruiser held WEAPONS at level 3 (a `PhaserDamage` of 1.25); the resumed one
+/// reverted to level 2 (1.0), so its beam accumulated a fifth less damage per
+/// tick, applied one fewer whole point two ticks later, and the hull the digest
+/// folds parted company — exactly the lagged, opt-level-independent divergence
+/// #997 measured.
+///
+/// The battery reserve and the lock travel too: the reserve because
+/// `PowerSystem::tick` integrates the modifiers off the *current* charge and
+/// browns the reactor out at zero, and the lock because a reactor restored
+/// unlocked would let its allocation controls move on a tick the live ship had
+/// them frozen.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PowerState {
+    /// `(power group id, level)` in the reactor's own insertion order — the
+    /// order `PowerSystem` walks for deterministic wire output, preserved so the
+    /// restore rebuilds the same order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allocations: Vec<(String, u8)>,
+    pub battery_charge: f32,
+    /// The exhaustion lock — see [`PowerState`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 /// A ship's **active control state**: what its helm was being told to do.
@@ -476,6 +655,18 @@ pub struct ControlState {
     /// `LastShipAttacker` — who last shot this ship, the AI's fallback target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_attacker: Option<String>,
+    /// `SensorRadarSelection` — the uuid this ship's Sensors radar has locked as
+    /// its **Science Target**, or `None`. The sibling of [`Self::target_lock`]
+    /// (which is the Tactical radar's Combat Lock): both are per-ship radar
+    /// selections a run *chose*, and both feed the ship's own AI through the
+    /// frozen viewscreen read surface. `PublishAggregate` lifts this into
+    /// `ViewscreenBlackboard::science_target` (issue #829), which
+    /// `helm_shared_target_view` and the weapons doctrine both decide from — so a
+    /// resumed ship whose Sensors radar came back empty resolves a different
+    /// shared target on its first cadence tick and steers differently, the same
+    /// silent one-tick divergence `target_lock` was captured to close.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensor_lock: Option<String>,
     /// The three stateful helm policies' runtime state, in the fixed order
     /// `(engines, steering, boost)` — see [`PolicyState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -850,6 +1041,10 @@ fn capture_controls(world: &World) -> Vec<(String, ControlState)> {
                         last_helm: last.map_or([0.0; 3], |l| [l.thrust, l.steering, l.lateral]),
                         target_lock: lock.and_then(|l| l.0.clone()),
                         last_attacker: attacker.and_then(|a| a.0.clone()),
+                        // Joined in by uuid in `capture_entities` — see
+                        // `capture_sensor_locks`; the helm-axes query is at
+                        // Bevy's width already.
+                        sensor_lock: None,
                         helm_policies: Some([
                             policy_state(engines_policy.map(|p| &p.0)),
                             policy_state(steering_policy.map(|p| &p.0)),
@@ -866,6 +1061,25 @@ fn capture_controls(world: &World) -> Vec<(String, ControlState)> {
                 )
             },
         )
+        .collect()
+}
+
+/// The Sensors radar's Science Target lock, in a query of its own.
+///
+/// Kept out of [`capture_controls`]' tuple — which is already at Bevy's query
+/// width — and joined back by uuid, the rule the module keeps. A row is emitted
+/// only for a ship whose Sensors radar actually holds a lock, so an unlocked
+/// radar stores nothing rather than a `Some(None)` that restore would have to
+/// distinguish from absence.
+fn capture_sensor_locks(world: &World) -> Vec<(String, String)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::sensors::SensorRadarSelection)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .filter_map(|(uuid, lock)| lock.0.clone().map(|target| (uuid.0.clone(), target)))
         .collect()
 }
 
@@ -908,6 +1122,7 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
         Option<&RepairHumanAlerted>,
         Option<&crate::server_app::ShipSystemBlackboards>,
         Option<&crate::ai::server::ObjectiveCursors>,
+        Option<&crate::console::weapons::blaster::BlasterSystemResource>,
     )>() else {
         return Vec::new();
     };
@@ -925,15 +1140,19 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
                 alerted,
                 blackboards,
                 cursors,
+                blasters,
             )| {
                 // A row is emitted only for an entity that carries at least one
                 // of these, for `capture_controls`' reason: an all-defaults
                 // `WeaponState` and a genuinely idle one are the same bytes, so
                 // storing one for every entity would make an asteroid look like
                 // a ship with its weapons cold.
-                let weapons =
-                    (beam.is_some() || cooldown.is_some() || torpedoes.is_some() || arcs.is_some())
-                        .then(|| weapon_state(beam, cooldown, torpedoes, arcs));
+                let weapons = (beam.is_some()
+                    || cooldown.is_some()
+                    || torpedoes.is_some()
+                    || arcs.is_some()
+                    || blasters.is_some())
+                .then(|| weapon_state(beam, cooldown, torpedoes, arcs, blasters));
                 let repair = (teams.is_some() || queue.is_some() || alerted.is_some())
                     .then(|| repair_state(teams, queue, alerted));
                 let mut boards: Vec<(String, crate::messages::SystemBlackboard)> = blackboards
@@ -965,11 +1184,98 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
         .collect()
 }
 
+/// The Weapons→Helm arc-bearing seam, in a query of its own.
+///
+/// Separate from [`capture_weapons_and_repair`] for that helper's reason — the
+/// query tuple is already at its limit — and joined back by uuid. A row is
+/// emitted only when at least one half of the seam carries something the restore
+/// must put back, so an idle ship (no debounce, no pending bearing) stores
+/// nothing rather than a default `ArcRequestState`.
+fn capture_arc_requests(world: &World) -> Vec<(String, ArcRequestState)> {
+    let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        Option<&crate::weapons_plugin::WeaponsArcRequestState>,
+        Option<&crate::ship_plugin::PendingArcBearingRequest>,
+    )>() else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .filter_map(|(uuid, weapons_state, pending)| {
+            let last = weapons_state.and_then(|s| {
+                s.last
+                    .as_ref()
+                    .map(|(family, target, arcs)| (*family, target.clone(), arcs.clone()))
+            });
+            let pending_target = pending.and_then(|p| p.target.map(|t| t.to_string()));
+            let pending_arcs = pending.map(|p| p.arcs.clone()).unwrap_or_default();
+            (last.is_some() || pending_target.is_some() || !pending_arcs.is_empty()).then(|| {
+                (
+                    uuid.0.clone(),
+                    ArcRequestState {
+                        last,
+                        pending_target,
+                        pending_arcs,
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+/// The reactor allocation, in a query of its own, joined back by uuid.
+///
+/// A row is emitted for every ship carrying a [`ShipPowerSystem`] — unlike the
+/// weapon and arc rows there is no "all defaults look idle" ambiguity to guard
+/// against, because a ship either has a reactor or it does not, and a defaulted
+/// reactor (every group at 2, full battery, unlocked) is a genuinely different
+/// state from the boosted one this restore exists to reinstate.
+fn capture_power(world: &World) -> Vec<(String, PowerState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::ship::power::ShipPowerSystem)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, power)| {
+            (
+                uuid.0.clone(),
+                PowerState {
+                    allocations: power
+                        .0
+                        .iter()
+                        .map(|(id, level)| (id.0.clone(), level))
+                        .collect(),
+                    battery_charge: power.0.battery_charge,
+                    locked: power.0.locked(),
+                },
+            )
+        })
+        .collect()
+}
+
+/// The helm pass surface, in a query of its own, joined by uuid — see
+/// [`EntityState::pass_surface`]. A row is emitted for every ship carrying one;
+/// the planner reads it every tick, so there is no "idle looks default"
+/// ambiguity to guard against.
+fn capture_pass_surfaces(world: &World) -> Vec<(String, crate::ship::helm_ai::HelmPassSurface)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship::helm_ai::HelmPassSurface)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, surface)| (uuid.0.clone(), *surface))
+        .collect()
+}
+
 fn weapon_state(
     beam: Option<&ActiveBeam>,
     cooldown: Option<&PhaserCooldown>,
     torpedoes: Option<&TorpedoSystemResource>,
     arcs: Option<&EntityShipArcHull>,
+    blasters: Option<&crate::console::weapons::blaster::BlasterSystemResource>,
 ) -> WeaponState {
     let system = torpedoes.map(|t| &t.0);
     WeaponState {
@@ -1067,6 +1373,43 @@ fn weapon_state(
                     .collect()
             })
             .unwrap_or_default(),
+        blasters: blasters
+            .map(|b| {
+                b.0.iter()
+                    .map(|bank| {
+                        let v = &bank.volley;
+                        BlasterRuntime {
+                            pending_volley: v.pending_volley,
+                            schedule: v.schedule.clone(),
+                            next_step: v.next_step as u32,
+                            volley_elapsed: v.volley_elapsed,
+                            active_barrels: v.active_barrels.clone(),
+                            current_step: v.current_step,
+                            on_cooldown: v.on_cooldown,
+                            cooldown_remaining: v.cooldown_remaining,
+                            charging: v.charging,
+                            charge_elapsed: v.charge_elapsed,
+                            in_flight: bank
+                                .in_flight
+                                .iter()
+                                .map(|p| BlasterBolt {
+                                    id: p.id.clone(),
+                                    x: p.x,
+                                    z: p.z,
+                                    heading: p.heading,
+                                    speed: p.speed,
+                                    lifespan_remaining: p.lifespan_remaining,
+                                    collision_radius: p.collision_radius,
+                                    damage: p.damage,
+                                    shield_pierce: p.shield_pierce,
+                                    source_uuid: p.source_uuid.clone(),
+                                })
+                                .collect(),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -1107,6 +1450,10 @@ fn repair_state(
 fn capture_entities(world: &World) -> Vec<EntityState> {
     let controls = capture_controls(world);
     let machines = capture_weapons_and_repair(world);
+    let arc_requests = capture_arc_requests(world);
+    let power = capture_power(world);
+    let sensor_locks = capture_sensor_locks(world);
+    let pass_surfaces = capture_pass_surfaces(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
         Option<&ShipPhysics>,
@@ -1121,7 +1468,14 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
             control: controls
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
-                .map(|(_, state)| state.clone()),
+                .map(|(_, state)| {
+                    let mut state = state.clone();
+                    state.sensor_lock = sensor_locks
+                        .iter()
+                        .find(|(id, _)| id == &uuid.0)
+                        .map(|(_, target)| target.clone());
+                    state
+                }),
             weapons: machines
                 .iter()
                 .find(|(id, ..)| id == &uuid.0)
@@ -1130,6 +1484,18 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .iter()
                 .find(|(id, ..)| id == &uuid.0)
                 .and_then(|(_, _, repair, ..)| repair.clone()),
+            arc_request: arc_requests
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            power: power
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            pass_surface: pass_surfaces
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, surface)| *surface),
             blackboards: machines
                 .iter()
                 .find(|(id, ..)| id == &uuid.0)
@@ -1784,6 +2150,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
             if let Some(mut lock) = entity_mut.get_mut::<TacticalRadarSelection>() {
                 lock.0 = control.target_lock.clone();
             }
+            if let Some(mut sensor_lock) =
+                entity_mut.get_mut::<crate::ship::sensors::SensorRadarSelection>()
+            {
+                sensor_lock.0 = control.sensor_lock.clone();
+            }
             if let Some(mut attacker) = entity_mut.get_mut::<LastShipAttacker>() {
                 // `set_if_neq` semantics matter here: `LastShipAttacker`'s
                 // change detection is the rising-edge latch behind
@@ -1801,6 +2172,26 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         }
         if let Some(repair) = &row.repair {
             apply_repair(&mut entity_mut, repair);
+        }
+        if let Some(arc) = &row.arc_request {
+            apply_arc_request(&mut entity_mut, arc);
+        }
+        if let Some(power) = &row.power {
+            if let Some(mut reactor) = entity_mut.get_mut::<crate::ship::power::ShipPowerSystem>() {
+                let allocations: Vec<(crate::messages::PowerGroupId, u8)> = power
+                    .allocations
+                    .iter()
+                    .map(|(id, level)| (crate::messages::PowerGroupId(id.clone()), *level))
+                    .collect();
+                reactor
+                    .0
+                    .restore(&allocations, power.battery_charge, power.locked);
+            }
+        }
+        if let Some(surface) = row.pass_surface {
+            if let Some(mut pass) = entity_mut.get_mut::<crate::ship::helm_ai::HelmPassSurface>() {
+                *pass = surface;
+            }
         }
         if !row.patrol_cursors.is_empty() {
             if let Some(mut cursors) = entity_mut.get_mut::<crate::ai::server::ObjectiveCursors>() {
@@ -1939,6 +2330,44 @@ fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
             })
             .collect();
     }
+    if let Some(mut blasters) =
+        entity.get_mut::<crate::console::weapons::blaster::BlasterSystemResource>()
+    {
+        // Joined by authored bank order, the order the component keeps and the
+        // capture walked. A bank the save does not reach (fewer stored than the
+        // hull carries) is left alone, `apply_hull`'s rule: an unmentioned bank
+        // is a save written against a different hull, which the content digest
+        // refuses.
+        for (bank, row) in blasters.0.iter_mut().zip(stored.blasters.iter()) {
+            let v = &mut bank.volley;
+            v.pending_volley = row.pending_volley;
+            v.schedule = row.schedule.clone();
+            v.next_step = row.next_step as usize;
+            v.volley_elapsed = row.volley_elapsed;
+            v.active_barrels = row.active_barrels.clone();
+            v.current_step = row.current_step;
+            v.on_cooldown = row.on_cooldown;
+            v.cooldown_remaining = row.cooldown_remaining;
+            v.charging = row.charging;
+            v.charge_elapsed = row.charge_elapsed;
+            bank.in_flight = row
+                .in_flight
+                .iter()
+                .map(|p| crate::weapons::blaster::BlasterProjectile {
+                    id: p.id.clone(),
+                    x: p.x,
+                    z: p.z,
+                    heading: p.heading,
+                    speed: p.speed,
+                    lifespan_remaining: p.lifespan_remaining,
+                    collision_radius: p.collision_radius,
+                    damage: p.damage,
+                    shield_pierce: p.shield_pierce,
+                    source_uuid: p.source_uuid.clone(),
+                })
+                .collect();
+        }
+    }
 }
 
 /// Put a ship's repair crew back where it was standing.
@@ -1962,6 +2391,31 @@ fn apply_repair(entity: &mut EntityWorldMut<'_>, stored: &RepairState) {
     }
     if let Some(mut alerted) = entity.get_mut::<RepairHumanAlerted>() {
         alerted.0 = stored.alerted.iter().cloned().collect();
+    }
+}
+
+/// Put the Weapons→Helm arc-bearing seam back — see [`ArcRequestState`].
+///
+/// Both halves are wholesale replacements, [`apply_weapons`]' rule: a settled
+/// debounce is restored so the first cadence tick after the restore does not
+/// re-fire a request the capture had already spent, and the pending bearing is
+/// restored so Helm resumes folding the same bias it was folding at the capture
+/// rather than steering as though no request were outstanding.
+fn apply_arc_request(entity: &mut EntityWorldMut<'_>, stored: &ArcRequestState) {
+    if let Some(mut weapons_state) =
+        entity.get_mut::<crate::weapons_plugin::WeaponsArcRequestState>()
+    {
+        weapons_state.last = stored
+            .last
+            .as_ref()
+            .map(|(family, target, arcs)| (*family, target.clone(), arcs.clone()));
+    }
+    if let Some(mut pending) = entity.get_mut::<crate::ship_plugin::PendingArcBearingRequest>() {
+        pending.target = stored
+            .pending_target
+            .as_deref()
+            .and_then(|t| uuid::Uuid::parse_str(t).ok());
+        pending.arcs = stored.pending_arcs.clone();
     }
 }
 

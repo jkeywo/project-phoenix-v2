@@ -95,6 +95,7 @@
     .modes button { flex: 1; padding: 6px 0; }
     .check { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--text); }
     .check input { accent-color: var(--accent); }
+    .hidden { display: none; }
     #hint { margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.6; }
     #status {
       position: fixed; bottom: 12px; left: 12px;
@@ -147,11 +148,24 @@
   <div id="panel" class="panel">
     <h1>Model Viewer</h1>
 
-    <label for="model">Model</label>
-    <select id="model"></select>
+    <label for="subjectKind">Subject</label>
+    <select id="subjectKind">
+      <option value="model">Model</option>
+      <option value="entity">Entity</option>
+    </select>
 
-    <label for="variant">Rig variant</label>
-    <select id="variant"><option value="">(base)</option></select>
+    <div id="modelFields">
+      <label for="model">Model</label>
+      <select id="model"></select>
+
+      <label for="variant">Rig variant</label>
+      <select id="variant"><option value="">(base)</option></select>
+    </div>
+
+    <div id="entityFields" class="hidden">
+      <label for="entity">Entity</label>
+      <select id="entity"></select>
+    </div>
 
     <fieldset>
       <legend>Lighting</legend>
@@ -210,7 +224,7 @@
 
   <div id="lodPanel" class="panel">
     <h1>Level of Detail</h1>
-    <fieldset>
+    <fieldset id="lodControls">
       <legend>Ladder</legend>
       <div class="modes" id="lodModes">
         <button data-lod="base" aria-pressed="true">Base</button>
@@ -341,9 +355,26 @@
     // ── Model dropdown, from the generated index ───────────────────────────
     const modelSelect = document.getElementById('model');
     const variantSelect = document.getElementById('variant');
+    const subjectKindSelect = document.getElementById('subjectKind');
+    const entitySelect = document.getElementById('entity');
+    const modelFields = document.getElementById('modelFields');
+    const entityFields = document.getElementById('entityFields');
+    const lodControls = document.getElementById('lodControls');
     const copyFrom = document.getElementById('copyFrom');
     let models = [];
+    let entities = [];
     let ladderIndex = {};
+    let subjectKind = params.has('entity') ? 'entity' : (session.subjectKind ?? 'model');
+
+    function showSubjectKind() {
+      const model = subjectKind === 'model';
+      subjectKindSelect.value = subjectKind;
+      modelFields.classList.toggle('hidden', !model);
+      entityFields.classList.toggle('hidden', model);
+      // Entity templates render through the game path but do not own a model
+      // sidecar ladder to author in this tool.
+      lodControls.disabled = !model;
+    }
 
     function populateVariants(model) {
       variantSelect.innerHTML = '<option value="">(base)</option>';
@@ -407,11 +438,40 @@
       setStatus(`LOD API unavailable: ${err.message}`, true);
     }
 
+    try {
+      const index = await fetch('assets/entities/index.json').then((r) => r.json());
+      entities = index.entities;
+      const current = params.get('entity') ?? session.entity ?? 'assets/entities/star_sun.toml';
+      for (const entity of entities) {
+        const option = document.createElement('option');
+        option.value = entity.path;
+        option.textContent = `${entity.name} · ${entity.kind}`;
+        entitySelect.append(option);
+      }
+      entitySelect.value = entities.some((entity) => entity.path === current)
+        ? current
+        : entities[0]?.path ?? '';
+    } catch {
+      setStatus('Could not read assets/entities/index.json — run the build once', true);
+    }
+
     const loadCurrent = () => {
+      subjectKind = 'model';
+      showSubjectKind();
       wasm.viewer_load_model(modelSelect.value, variantSelect.value || undefined);
       setStatus(`Loading ${modelSelect.value}…`);
-      remember({ model: modelSelect.value, variant: variantSelect.value });
+      remember({ subjectKind, model: modelSelect.value, variant: variantSelect.value });
       loadLadder();
+    };
+
+    const loadEntity = () => {
+      subjectKind = 'entity';
+      showSubjectKind();
+      wasm.viewer_load_entity(entitySelect.value);
+      setStatus(`Loading ${entitySelect.value}…`);
+      remember({ subjectKind, entity: entitySelect.value });
+      ladderEl.replaceChildren();
+      setNote(ladderNote, 'Entity templates do not expose model LOD authoring.', '');
     };
 
     modelSelect.addEventListener('change', () => {
@@ -419,6 +479,12 @@
       loadCurrent();
     });
     variantSelect.addEventListener('change', loadCurrent);
+    subjectKindSelect.addEventListener('change', () => {
+      if (subjectKindSelect.value === 'entity') loadEntity();
+      else loadCurrent();
+    });
+    entitySelect.addEventListener('change', loadEntity);
+    showSubjectKind();
 
     // ── LOD ladder ─────────────────────────────────────────────────────────
     //
@@ -506,6 +572,11 @@
       element.textContent = text;
       element.className = `note ${kind}`.trim();
     };
+
+    // URL parameters are the shareable source of truth and Rust consumes them
+    // before this panel starts. A remembered entity selection has no URL
+    // parameter, so replay it once the DOM side of the LOD panel exists.
+    if (subjectKind === 'entity' && !params.has('entity')) loadEntity();
 
     async function loadLadder() {
       ladderEl.replaceChildren();
@@ -1333,12 +1404,13 @@
       cost.largest.textContent = stats.largestTexture ? `${stats.largestTexture} px` : '—';
       // The status line tracks the load rather than staying on "Loading…"
       // forever, which is what it did before there was anything watching.
+      const subjectPath = subjectKind === 'entity' ? entitySelect.value : modelSelect.value;
       if (!status.classList.contains('error')) {
         setStatus(stats.settled
-          ? `${modelSelect.value}${level === null ? '' : ` · LOD ${level}`}`
-          : `Loading ${modelSelect.value}…`);
+          ? `${subjectPath}${subjectKind === 'model' && level !== null ? ` · LOD ${level}` : ''}`
+          : `Loading ${subjectPath}…`);
       }
-      const bytes = level === null
+      const bytes = subjectKind === 'entity' ? null : level === null
         ? ladder.state?.source?.bytes
         : ladder.state?.files?.[level]?.bytes;
       cost.bytes.textContent = fmtBytes(bytes);

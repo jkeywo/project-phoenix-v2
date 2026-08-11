@@ -594,21 +594,23 @@ assetServer.on('error', (err) => {
   throw err;
 });
 
-// Write the model index before Trunk starts, not only from its pre_build hook.
+// Write the viewer indexes before Trunk starts, not only from their pre_build hooks.
 // Trunk canonicalises every [watch] ignore path while it is starting up, and
-// assets/models/index.json is on that list *and* gitignored — so in a fresh
+// assets/models/index.json and assets/entities/index.json are on that list *and* gitignored — so in a fresh
 // checkout Trunk exits with "error taking the canonical path to the watch
 // ignore path" before the hook that creates it ever runs.
-await new Promise((resolve, reject) => {
-  const index = spawn(process.execPath, [path.join(ROOT, 'scripts', 'generate-model-index.mjs')], {
-    cwd: ROOT,
-    stdio: 'inherit',
+for (const script of ['generate-model-index.mjs', 'generate-entity-index.mjs']) {
+  await new Promise((resolve, reject) => {
+    const index = spawn(process.execPath, [path.join(ROOT, 'scripts', script)], {
+      cwd: ROOT,
+      stdio: 'inherit',
+    });
+    index.on('error', reject);
+    index.on('close', (code) =>
+      code === 0 ? resolve() : reject(new Error(`${script} exited ${code}`)),
+    );
   });
-  index.on('error', reject);
-  index.on('close', (code) =>
-    code === 0 ? resolve() : reject(new Error(`generate-model-index exited ${code}`)),
-  );
-});
+}
 
 // Both proxies (/assets/ and /api/) are declared in viewer-trunk.toml, so the
 // page reaches this server through Trunk's own origin and needs no CORS.

@@ -85,6 +85,12 @@ pub enum ViewerCommand {
         path: String,
         variant: Option<String>,
     },
+    /// Render a complete entity template rather than a bare GLB. This is how
+    /// the viewer reaches authored star and planet materials without creating a
+    /// second celestial render path.
+    LoadEntity {
+        path: String,
+    },
     SetLodMode(LodMode),
     /// Put the camera at a given distance from the subject — how the panel
     /// jumps to a LOD band's switch distance.
@@ -265,11 +271,27 @@ fn apply_commands(
                 args.model = Some(path);
                 args.variant = variant;
                 args.entity = None;
+                subject_state.showing = subject::Showing::Base;
                 // A different model wants framing again — a 12 m courier and a
                 // 400 m starbase do not share a usable camera distance. Only an
                 // explicit model switch does this: a LOD swap must leave the
                 // camera exactly where the person put it, or the ladder could
                 // never be judged at a fixed distance.
+                for mut orbit in &mut cameras {
+                    orbit.framed = false;
+                }
+                subject_state.respawn(&mut commands);
+            }
+            ViewerCommand::LoadEntity { path } => {
+                args.model = None;
+                args.variant = None;
+                args.entity = Some(path);
+                subject_state.showing = subject::Showing::Base;
+                // Entity templates do not own a model LOD ladder. Clear the
+                // previous model immediately, rather than leaving its levels
+                // live until `refresh_ladder` observes `model = None`.
+                *ladder = lod::LadderState::default();
+                *lod_mode = LodMode::Base;
                 for mut orbit in &mut cameras {
                     orbit.framed = false;
                 }
@@ -472,6 +494,15 @@ pub fn viewer_load_model(path: String, variant: Option<String>) {
     });
 }
 
+/// Switch the viewer to an entity TOML. The subject renderer dispatches its
+/// `[star]`, `[planet]`, or `[mesh]` visual through the same constructors used
+/// by the game.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_load_entity(path: String) {
+    push_command(ViewerCommand::LoadEntity { path });
+}
+
 /// The game's skybox brightness, so the HTML panel can seed its slider from
 /// the real value rather than a duplicated constant.
 #[cfg(target_arch = "wasm32")]
@@ -627,6 +658,13 @@ mod tests {
                 ("gizmos".to_string(), "1".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn parses_entity_query() {
+        let got = parse_query("?entity=assets%2Fentities%2Fmoon_luna.toml");
+        assert_eq!(got[0].0, "entity");
+        assert_eq!(got[0].1, "assets/entities/moon_luna.toml");
     }
 
     #[test]

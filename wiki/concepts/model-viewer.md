@@ -2,8 +2,8 @@
 title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
-sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/viewer-lods.mjs, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
-updated: 2026-08-03
+sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/generate-entity-index.mjs, scripts/viewer-lods.mjs, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
+updated: 2026-08-11
 ---
 
 # Model Viewer
@@ -31,10 +31,16 @@ start-viewer.bat       # Windows: same, plus a compile check and opens the brows
 
 An HTML control panel drives the same settings live (`viewer_set_lighting`,
 `viewer_set_ambient`, `viewer_set_directional`, `viewer_set_skybox_brightness`,
-`viewer_set_gizmos`, `viewer_load_model`, `viewer_set_lod_mode`,
+`viewer_set_gizmos`, `viewer_load_model`, `viewer_load_entity`, `viewer_set_lod_mode`,
 `viewer_set_camera_distance`, `viewer_stats` — all `#[wasm_bindgen]` in
 `src/viewer/mod.rs`). The panel lives in JS so tweaking a slider costs an HTML
 edit rather than a wasm rebuild.
+
+The **Subject** selector switches between the model/variant workflow and an
+entity picker generated from top-level `assets/entities/*.toml` files. Entity
+mode uses the authored `[star]`, `[planet]`, or `[mesh]` visual and deliberately
+disables model-LOD authoring; the existing model picker, variants and LOD tools
+are otherwise unchanged.
 
 ## The LOD panel
 

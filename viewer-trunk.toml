@@ -31,13 +31,13 @@ public_url = "./"
 # underneath you every time it saves.
 watch_path = ["assets/shaders/", "viewer.html", "src/"]
 include = "*.toml"
-# The pre_build hook regenerates this inside assets/models/. Now that the
-# directory is unwatched it cannot start a build at all, but the ignore stays as
-# a second line of defence — and it is NOT what broke the build→build loop:
+# The pre_build hooks regenerate these inside assets/. Now that the entity/model
+# directories are unwatched they cannot start a build at all, but the ignores
+# stay as a second line of defence — and they are NOT what broke the build→build loop:
 # it does not suppress the rebuild in trunk 0.21 (observed: every build queued
 # the next one, ~60-105s apart, forever). What stops it is the hook itself,
 # which now writes only when the content differs — see generate-model-index.mjs.
-ignore = ["assets/models/index.json"]
+ignore = ["assets/models/index.json", "assets/entities/index.json"]
 
 [serve]
 port = 8081
@@ -60,3 +60,9 @@ rewrite = "/api/"
 stage = "pre_build"
 command = "node"
 command_arguments = ["scripts/generate-model-index.mjs"]
+
+# Keeps the entity picker in step with the authored top-level templates.
+[[hooks]]
+stage = "pre_build"
+command = "node"
+command_arguments = ["scripts/generate-entity-index.mjs"]

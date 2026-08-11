@@ -2,8 +2,8 @@
 title: Station
 type: entity
 tags: [station, lobby, roster, rating, ai]
-sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship/components.rs, src/ship/rating_systems.rs, assets/entities/alliance_battleship.toml]
-updated: 2026-07-16
+sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship/components.rs, src/ship/rating_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/station_axiom.toml]
+updated: 2026-08-11
 ---
 
 # Station
@@ -78,6 +78,11 @@ active round, via `SetStationRating`. The host validates that the sender holds
 the station and that the requested name is authored for it, applies the new
 automated-system set immediately, then broadcasts `RatingChanged` to every
 client. This is shared game authority, not a local settings preference.
+
+Static world entities may also be configured as AI-only combatants without
+declaring any player station. Axiom Station uses this shape: its Tactical radar
+and 360-degree phaser are ownerless AI-only systems, providing local point
+defence while leaving the station absent from the lobby roster.
 
 ## Lobby flow
 

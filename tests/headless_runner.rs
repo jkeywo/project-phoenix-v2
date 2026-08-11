@@ -22,6 +22,15 @@ use project_phoenix::headless::args::ticks_for_sim_seconds;
 use project_phoenix::headless::{build_headless_app, build_report, run, HeadlessArgs};
 use project_phoenix::messages::GamePhase;
 use project_phoenix::server_app::LocalShip;
+
+#[test]
+fn axiom_station_defence_config_parses() {
+    let source =
+        project_phoenix::entity_includes::resolve_from_disk("assets/entities/station_axiom.toml")
+            .expect("Axiom Station template should resolve its shared AI policy declarations");
+    project_phoenix::entity_config::EntityConfig::from_toml(&source.toml)
+        .expect("Axiom Station's autonomous defence should be a valid entity config");
+}
 use project_phoenix::ship::control_source::ControlSource;
 use project_phoenix::ship::state::ShipPhysics;
 use project_phoenix::ship_plugin::{

@@ -99,6 +99,13 @@ pub fn inventory(root: &Path) -> Result<Inventory, InventoryError> {
         if path.extension().and_then(|e| e.to_str()) != Some("glb") {
             continue;
         }
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".remesh.glb"))
+        {
+            continue;
+        }
         let bytes = std::fs::metadata(&path)
             .map_err(|e| InventoryError::Io(path.display().to_string(), e))?
             .len();
@@ -301,6 +308,26 @@ max_distance = 100.0
     #[test]
     fn a_missing_tree_is_an_error_not_an_empty_inventory() {
         assert!(inventory(Path::new("no/such/root")).is_err());
+    }
+
+    #[test]
+    fn remesh_intermediates_are_not_shipped_glb_inventory() {
+        let root = std::env::temp_dir().join(format!(
+            "phoenix_perf_assets_remesh_fixture_{}",
+            std::process::id()
+        ));
+        let models = root.join("assets/models");
+        let entities = root.join("assets/entities");
+        std::fs::create_dir_all(&models).expect("fixture models directory");
+        std::fs::create_dir_all(&entities).expect("fixture entities directory");
+        std::fs::write(models.join("rock.glb"), [0u8; 7]).expect("runtime model fixture");
+        std::fs::write(models.join("rock.remesh.glb"), [0u8; 19])
+            .expect("generator intermediate fixture");
+
+        let found = inventory(&root).expect("fixture inventory");
+        assert_eq!(found.glb_bytes, BTreeMap::from([("rock.glb".into(), 7)]));
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     /// The generated LOD files and this budget agree about their size

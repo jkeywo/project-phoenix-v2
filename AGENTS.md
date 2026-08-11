@@ -151,9 +151,12 @@ npx playwright test                            # from tests/smoke/
 cargo run --release --features perf --bin phoenix-perf -- assets --capture target/perf/assets.json
 cargo run --release --features perf --bin phoenix-perf -- mesh   --capture target/perf/mesh.json
 cargo run --release --features perf --bin phoenix-perf -- report --capture target/perf/assets.json --gate
-#   `mesh` loads every assets/models/*.glb through Bevy's own loader (headless,
-#   one model at a time) and counts triangles and texture pixels. Minutes, not
-#   seconds — it decodes every embedded texture.
+#   `mesh` resolves top-level entity templates (including composed fragments),
+#   follows each selected rig sidecar, and loads every runtime-reachable GLB
+#   level through Bevy's own loader (headless, one model at a time). Remesh
+#   intermediates and unrelated files are excluded; the aggregate triangle
+#   population counts only each model's deduplicated first/near level. Minutes,
+#   not seconds — it decodes every embedded texture in the reachable levels.
 #
 # Re-recording a baseline from the runner that compares against it. CI cannot
 # commit, so the perf job uploads the baselines it WOULD record and a human

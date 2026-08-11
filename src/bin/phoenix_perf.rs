@@ -32,7 +32,8 @@ assets      Walk assets/models and assets/entities and write a capture of the
     --root <DIR>       Repository root to walk [default: .]
     --capture <PATH>   Where to write the capture JSON ('-' for stdout)
 
-mesh        Load every assets/models/*.glb through Bevy's own asset loader and
+mesh        Resolve entity templates and their rig sidecars, then load every
+            runtime-reachable GLB level through Bevy's own asset loader and
             write a capture of the triangle and texture counts it produced.
             Headless — no window, no renderer, no simulation — but the loader
             really runs, so this reads what the engine makes of a file rather

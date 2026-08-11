@@ -18,9 +18,11 @@
 //!
 //! What is measured, and why it is only this:
 //!
-//! - `assets.mesh.triangles` — one sample per `.glb`, its whole triangle
-//!   count. `max` finds the model that dominates a draw.
-//! - `assets.mesh.triangles.total` — one sample: the whole shipped set.
+//! - `assets.mesh.triangles` — one sample per runtime-reachable GLB level, its
+//!   whole triangle count. `max` finds the level that dominates a draw.
+//! - `assets.mesh.triangles.total` — one sample: the deduplicated first (near)
+//!   GLB level of each runtime model. Mutually-exclusive lower levels do not
+//!   inflate this population budget.
 //! - `assets.texture.count` — one sample per `.glb`: how many distinct images
 //!   the loader produced for it.
 //! - `assets.texture.pixels` — one sample per loaded image, width × height.
@@ -49,7 +51,7 @@
 //! loads models to *render* them, and a page that also counted them would be
 //! measuring the thing it is part of.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -67,7 +69,7 @@ use vellum_perf::{Capture, Profile, Recorder, Unit};
 
 /// One sample per `.glb`: its whole triangle count.
 pub const TRIANGLES_METRIC: &str = "assets.mesh.triangles";
-/// One sample: triangles across the whole shipped set.
+/// One sample: triangles across the deduplicated first/near runtime levels.
 pub const TRIANGLES_TOTAL_METRIC: &str = "assets.mesh.triangles.total";
 /// One sample per `.glb`: how many distinct images the loader produced.
 pub const TEXTURE_COUNT_METRIC: &str = "assets.texture.count";
@@ -106,8 +108,11 @@ pub struct ModelInterior {
 /// megabytes of GLB.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Interior {
-    /// `.glb` file name → what the loader made of it.
+    /// Asset-server-relative GLB path → what the loader made of it.
     pub models: BTreeMap<String, ModelInterior>,
+    /// Runtime model paths whose first/near level contributes to the aggregate
+    /// triangle population. Shared levels are deliberately deduplicated.
+    pub base_models: BTreeSet<String>,
 }
 
 #[derive(Debug)]
@@ -142,8 +147,8 @@ impl std::fmt::Display for MeasureError {
 // a triangle is.
 pub use crate::entities::mesh_stats::{pixels_in, triangles_in};
 
-/// Load every `assets/models/*.glb` under `root` through Bevy and report what
-/// came out.
+/// Discover the GLBs reachable from top-level entity templates and load them
+/// through Bevy.
 ///
 /// Builds a Bevy app with the asset server, the glTF loader and nothing else —
 /// no window, no renderer, no simulation. The app is driven by hand for the
@@ -159,8 +164,7 @@ pub use crate::entities::mesh_stats::{pixels_in, triangles_in};
 /// serially bounds the peak at one model and makes a failure name the file
 /// that caused it.
 pub fn measure(root: &Path) -> Result<Interior, MeasureError> {
-    let models_dir = root.join("assets/models");
-    let files = glb_files(&models_dir)?;
+    let reachable = reachable_models(root)?;
 
     // Absolute, because Bevy resolves a relative asset root against the
     // executable's directory (or `CARGO_MANIFEST_DIR`), neither of which is
@@ -188,12 +192,12 @@ pub fn measure(root: &Path) -> Result<Interior, MeasureError> {
     app.finish();
     app.cleanup();
 
-    let mut found = Interior::default();
-    for name in &files {
-        let handle: Handle<Gltf> = app
-            .world()
-            .resource::<AssetServer>()
-            .load(format!("models/{name}"));
+    let mut found = Interior {
+        base_models: reachable.base_models,
+        ..default()
+    };
+    for name in &reachable.models {
+        let handle: Handle<Gltf> = app.world().resource::<AssetServer>().load(name.clone());
         wait_for(&mut app, name, &handle)?;
         // Every requested model gets an entry even if the loader produced
         // nothing for it, so a model that quietly stopped contributing
@@ -265,7 +269,7 @@ fn collect_one(app: &App, name: &str) -> ModelInterior {
     let owns = |id: bevy::asset::UntypedAssetId| -> bool {
         server
             .get_path(id)
-            .and_then(|path| Some(path.path().file_name()?.to_str()? == name))
+            .map(|path| path.path() == Path::new(name))
             .unwrap_or(false)
     };
 
@@ -290,21 +294,105 @@ fn collect_one(app: &App, name: &str) -> ModelInterior {
     interior
 }
 
-/// The `.glb` file names under `dir`, sorted so the sample order — and
-/// therefore the capture bytes — is the same on every filesystem.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ReachableModels {
+    models: BTreeSet<String>,
+    base_models: BTreeSet<String>,
+}
+
+/// Filesystem source rooted at the repository selected by `--root`.
 ///
-/// A missing directory is an error rather than an empty list, for the reason
-/// [`super::assets::inventory`] gives: a pass that silently measured nothing
-/// would read as every model having lost its geometry.
-fn glb_files(dir: &Path) -> Result<Vec<String>, MeasureError> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .map_err(|e| MeasureError::Io(dir.display().to_string(), e))?
+/// Production's native source reads the same canonical asset paths relative to
+/// the process working directory. The perf command permits another repository
+/// root, so it supplies that root at this I/O seam while retaining the exact
+/// runtime include resolver and final `EntityConfig` parser.
+struct RootedFragmentSource<'a> {
+    root: &'a Path,
+}
+
+impl crate::entity_includes::FragmentSource for RootedFragmentSource<'_> {
+    fn read(&self, path: &str) -> Option<String> {
+        std::fs::read_to_string(self.root.join(path)).ok()
+    }
+
+    fn absence_is_final(&self) -> bool {
+        true
+    }
+}
+
+/// Follow the runtime route: a top-level entity's model+variant selects one
+/// sidecar, and only that sidecar's `[[lod]]` list supplies visual levels.
+fn reachable_models(root: &Path) -> Result<ReachableModels, MeasureError> {
+    let entities = root.join("assets/entities");
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&entities)
+        .map_err(|e| MeasureError::Io(entities.display().to_string(), e))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("glb"))
-        .filter_map(|path| path.file_name()?.to_str().map(str::to_string))
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("toml"))
         .collect();
-    names.sort();
-    Ok(names)
+    paths.sort();
+
+    let mut found = ReachableModels::default();
+    let source = RootedFragmentSource { root };
+    for path in paths {
+        let template_path = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let config = crate::entity_includes::resolve_template(&template_path, &source)
+            .and_then(|resolved| resolved.parse())
+            .map_err(|error| {
+                MeasureError::Failed(format!("entity template {template_path}: {error}"))
+            })?;
+        let Some(mesh) = config.mesh else {
+            continue;
+        };
+        let Some(flat_model) = mesh.model.filter(|model| model.ends_with(".glb")) else {
+            continue;
+        };
+        let variant = mesh.variant;
+        let flat_model = asset_server_model_path(&flat_model);
+        let sidecar =
+            crate::model_rig::sidecar_path(&format!("assets/{flat_model}"), variant.as_deref());
+        let rig = std::fs::read_to_string(root.join(&sidecar))
+            .ok()
+            .and_then(|text| crate::model_rig::ModelRig::from_toml(&text).ok());
+
+        let Some(rig) = rig.filter(|rig| !rig.lod.is_empty()) else {
+            if !is_remesh_model(&flat_model) {
+                found.models.insert(flat_model.clone());
+                found.base_models.insert(flat_model);
+            }
+            continue;
+        };
+
+        for (index, level) in rig.lod.iter().enumerate() {
+            let Some(model) = level.model.as_deref() else {
+                continue;
+            };
+            let model = asset_server_model_path(model);
+            if is_remesh_model(&model) {
+                continue;
+            }
+            found.models.insert(model.clone());
+            if index == 0 {
+                found.base_models.insert(model);
+            }
+        }
+    }
+    Ok(found)
+}
+
+fn asset_server_model_path(model: &str) -> String {
+    let normalized = model.replace('\\', "/");
+    normalized
+        .strip_prefix("assets/")
+        .unwrap_or(&normalized)
+        .to_string()
+}
+
+fn is_remesh_model(model: &str) -> bool {
+    model.ends_with(".remesh.glb")
 }
 
 fn absolute(path: &Path) -> Result<PathBuf, MeasureError> {
@@ -320,9 +408,11 @@ fn absolute(path: &Path) -> Result<PathBuf, MeasureError> {
 pub fn capture(found: &Interior, profile: Profile) -> Capture {
     let mut recorder = Recorder::new();
     let mut total = 0u64;
-    for interior in found.models.values() {
+    for (name, interior) in &found.models {
         recorder.sample(TRIANGLES_METRIC, Unit::Count, interior.triangles as f64);
-        total += interior.triangles;
+        if found.base_models.contains(name) {
+            total += interior.triangles;
+        }
         recorder.sample(
             TEXTURE_COUNT_METRIC,
             Unit::Count,
@@ -404,13 +494,11 @@ mod tests {
                 texture_pixels: vec![256 * 256],
             },
         );
+        found.base_models.insert("big.glb".into());
 
         let capture = capture(&found, profile(RUNTIME));
         assert_eq!(capture.scenario, SCENARIO);
-        assert_eq!(
-            capture.summaries[TRIANGLES_TOTAL_METRIC].summary.max,
-            1000.0
-        );
+        assert_eq!(capture.summaries[TRIANGLES_TOTAL_METRIC].summary.max, 900.0);
         assert_eq!(capture.summaries[TRIANGLES_METRIC].summary.count, 2);
         assert_eq!(capture.summaries[TRIANGLES_METRIC].summary.max, 900.0);
         // Three images across two models, largest 4K square.
@@ -686,13 +774,20 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("phoenix_perf_mesh_fixture_{}", std::process::id()));
         let models = root.join("assets/models");
+        let entities = root.join("assets/entities");
         std::fs::create_dir_all(&models).expect("the fixture tree is creatable");
+        std::fs::create_dir_all(&entities).expect("the fixture tree is creatable");
         std::fs::write(models.join("one_triangle.glb"), one_triangle_glb())
             .expect("the fixture is writable");
+        std::fs::write(
+            entities.join("triangle.toml"),
+            "[mesh]\nmodel = \"assets/models/one_triangle.glb\"\nshape = \"sphere\"\ncolour = []\n",
+        )
+        .expect("the fixture is writable");
 
         let found = measure(&root).expect("Bevy loads the fixture");
 
-        let interior = &found.models["one_triangle.glb"];
+        let interior = &found.models["models/one_triangle.glb"];
         assert_eq!(interior.triangles, 1);
         assert_eq!(interior.texture_pixels, vec![4]);
 
@@ -724,15 +819,27 @@ mod tests {
             std::process::id()
         ));
         let models = root.join("assets/models");
+        let entities = root.join("assets/entities");
         std::fs::create_dir_all(&models).expect("the fixture tree is creatable");
+        std::fs::create_dir_all(&entities).expect("the fixture tree is creatable");
         std::fs::write(models.join("one_triangle.glb"), one_triangle_glb())
             .expect("the fixture is writable");
         std::fs::write(models.join("two_triangle.glb"), two_triangle_glb())
             .expect("the fixture is writable");
+        std::fs::write(
+            entities.join("one.toml"),
+            "[mesh]\nmodel = \"assets/models/one_triangle.glb\"\nshape = \"sphere\"\ncolour = []\n",
+        )
+        .expect("the fixture is writable");
+        std::fs::write(
+            entities.join("two.toml"),
+            "[mesh]\nmodel = \"assets/models/two_triangle.glb\"\nshape = \"sphere\"\ncolour = []\n",
+        )
+        .expect("the fixture is writable");
 
         let found = measure(&root).expect("Bevy loads both fixtures");
 
-        let one = &found.models["one_triangle.glb"];
+        let one = &found.models["models/one_triangle.glb"];
         assert_eq!(
             one.triangles, 1,
             "one_triangle.glb picked up a triangle that isn't its own"
@@ -743,7 +850,7 @@ mod tests {
             "one_triangle.glb picked up a texture that isn't its own"
         );
 
-        let two = &found.models["two_triangle.glb"];
+        let two = &found.models["models/two_triangle.glb"];
         assert_eq!(
             two.triangles, 2,
             "two_triangle.glb picked up a triangle that isn't its own"
@@ -759,12 +866,105 @@ mod tests {
 
     /// The real tree, because a pass that has never met the shipped models is
     /// a pass that budgets nothing. Names only — this asserts on what the
-    /// directory holds, not on what a loader would make of it, so it costs no
-    /// GLB decode.
+    /// entity/sidecar graph names, not on what a loader would make of them, so
+    /// it costs no GLB decode.
     #[test]
     fn the_repository_ships_models_for_this_pass_to_measure() {
-        let files = glb_files(Path::new("assets/models")).expect("the model directory exists");
-        assert!(!files.is_empty(), "no .glb files found under assets/models");
-        assert!(files.windows(2).all(|w| w[0] <= w[1]), "names are sorted");
+        let found = reachable_models(Path::new(".")).expect("the asset graph is readable");
+        assert!(!found.models.is_empty(), "no runtime GLBs are reachable");
+        assert!(
+            !found.base_models.is_empty(),
+            "no first/base GLBs are reachable"
+        );
+        assert!(found.base_models.is_subset(&found.models));
+        assert!(found.models.iter().all(|model| !is_remesh_model(model)));
+    }
+
+    #[test]
+    fn discovery_follows_only_top_level_sidecars_and_deduplicates_base_levels() {
+        let root = std::env::temp_dir().join(format!(
+            "phoenix_perf_mesh_graph_fixture_{}",
+            std::process::id()
+        ));
+        let models = root.join("assets/models");
+        let entities = root.join("assets/entities");
+        std::fs::create_dir_all(&models).expect("fixture models directory");
+        std::fs::create_dir_all(&entities).expect("fixture entities directory");
+
+        for entity in ["one", "two"] {
+            std::fs::write(
+                entities.join(format!("{entity}.toml")),
+                "[mesh]\nmodel = \"assets/models/ship.glb\"\nvariant = \"large\"\nshape = \"sphere\"\ncolour = []\n",
+            )
+            .expect("entity fixture");
+        }
+        std::fs::write(
+            models.join("ship.large.toml"),
+            "[[lod]]\nmodel = \"assets/models/ship.glb\"\n\n[[lod]]\nmodel = \"assets/models/ship_lod1.glb\"\n",
+        )
+        .expect("sidecar fixture");
+        // If discovery incorrectly follows a level's sidecar recursively, this
+        // unrelated file would become reachable.
+        std::fs::write(
+            models.join("ship_lod1.model.toml"),
+            "[[lod]]\nmodel = \"assets/models/not_runtime_reachable.glb\"\n",
+        )
+        .expect("nested sidecar fixture");
+        std::fs::write(
+            entities.join("broken.toml"),
+            "[mesh]\nmodel = \"assets/models/fallback.glb\"\nshape = \"sphere\"\ncolour = []\n",
+        )
+        .expect("fallback entity fixture");
+        std::fs::write(models.join("fallback.model.toml"), "[[lod]\n")
+            .expect("malformed sidecar fixture");
+
+        let found = reachable_models(&root).expect("fixture graph is readable");
+        assert_eq!(
+            found.models,
+            BTreeSet::from([
+                "models/fallback.glb".to_string(),
+                "models/ship.glb".to_string(),
+                "models/ship_lod1.glb".to_string(),
+            ])
+        );
+        assert_eq!(
+            found.base_models,
+            BTreeSet::from([
+                "models/fallback.glb".to_string(),
+                "models/ship.glb".to_string(),
+            ])
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovery_reads_a_mesh_inherited_entirely_from_an_include() {
+        let root = std::env::temp_dir().join(format!(
+            "phoenix_perf_mesh_include_fixture_{}",
+            std::process::id()
+        ));
+        let entities = root.join("assets/entities");
+        let fragments = entities.join("fragments");
+        std::fs::create_dir_all(&fragments).expect("fixture fragments directory");
+        std::fs::write(
+            entities.join("composed.toml"),
+            "includes = [\"fragments/visual.toml\"]\n",
+        )
+        .expect("composed entity fixture");
+        std::fs::write(
+            fragments.join("visual.toml"),
+            "[mesh]\nmodel = \"assets/models/inherited.glb\"\nshape = \"sphere\"\ncolour = []\n",
+        )
+        .expect("visual fragment fixture");
+
+        let found = reachable_models(&root).expect("included mesh resolves");
+        assert_eq!(
+            found.models,
+            BTreeSet::from(["models/inherited.glb".to_string()])
+        );
+        assert_eq!(found.base_models, found.models);
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

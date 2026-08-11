@@ -2,8 +2,8 @@
 title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
-sources: [scripts/generate-lods.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/perf/assets.rs, tests/client/generate-lods.test.js, tests/client/viewer-lods.test.js]
-updated: 2026-08-03
+sources: [scripts/generate-lods.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/viewer-lods.test.js]
+updated: 2026-08-11
 ---
 
 # LOD Generation
@@ -73,7 +73,16 @@ byte-identical across CLI versions, so a regenerate-and-diff gate would go red
 for reasons that are not drift. The recorded `output_bytes` is asserted against
 `src/perf/assets.rs`'s own inventory (issue #868) by a Rust test, so file size
 has one measurement and two readers. Triangle and texture budgets belong to
-issue #905.
+issue #905. Both performance inventories exclude checked-in `.remesh.glb`
+intermediates: they are generator inputs, not files the runtime can select.
+
+The mesh-interior pass follows the runtime graph from top-level entity
+templates into the selected model+variant sidecar. It loads every GLB named by
+that sidecar so an oversized lower level still affects the per-level maximum,
+but its aggregate triangle population sums only the deduplicated first/near
+GLB level. Lower levels are mutually exclusive at runtime, and their sidecars
+do not recursively introduce another ladder. A missing, malformed, or empty
+ladder falls back to the entity's flat `[mesh] model`, matching rendering.
 
 ## Per-level runs
 

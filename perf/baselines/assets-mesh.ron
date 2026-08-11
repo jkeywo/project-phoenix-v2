@@ -6,14 +6,15 @@
 // way. A number that disagrees with the engine is worse than no number — see
 // src/perf/mesh.rs for why this repository carries no `gltf` dependency.
 //
-// Recorded at 22 models, 1,436,266 triangles in total, largest model 138,790
+// Originally recorded at 22 models, 1,436,266 triangles in total, largest model 138,790
 // triangles (alliance_destroyer.glb), three textures per model, largest sheet
 // 1024×1024.
 //
 // Machine-independent in the same sense as the asset budgets: the loader is
 // the same code on every host, so any checkout of this commit reproduces these
-// numbers. The tolerances are therefore tight — a drift here is a real change
-// to what a GPU is asked to draw, never runner noise.
+// numbers. The tolerances are therefore tight — a drift here is a real asset
+// change, never runner noise. The collector now discovers only runtime-reachable
+// GLB levels; `.remesh.glb` generator intermediates are excluded.
 //
 // THIS SCENARIO DOES NOT GATE YET, and the reason is provenance rather than
 // doubt: it was recorded on a developer desktop, and no CI runner has ever
@@ -25,11 +26,10 @@
 //
 // Metric by metric:
 //
-// - assets.mesh.triangles.total — the whole shipped set. A browser game that
-//   streams 1.4 M triangles of models is worth watching; 5% is 70,000
-//   triangles.
-// - assets.mesh.triangles — the single heaviest model, the one that dominates
-//   a draw when it is on screen.
+// - assets.mesh.triangles.total — the deduplicated first/near GLB level of each
+//   runtime model. Lower LODs are mutually exclusive and are not added again.
+// - assets.mesh.triangles — the single heaviest runtime-reachable GLB level,
+//   the one that dominates a draw when it is on screen.
 // - assets.texture.pixels — the largest sheet, in pixels. Bytes are not
 //   measured: what a GPU allocates depends on the compressed format it is
 //   uploaded in, and a headless pass has no GPU and therefore no formats.

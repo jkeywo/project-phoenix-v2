@@ -87,6 +87,38 @@ describe('PhBatteryBar', () => {
     expect(marker.style.left).toBe('25%');
   });
 
+  it('renders vertical orientation with height-based fill and bottom marker', () => {
+    const { el } = setup('<ph-battery-bar id="test-panel" orientation="vertical"></ph-battery-bar>');
+    el.state = { level_pct: 60, emergency_threshold_pct: 20 };
+    const fill = el.shadowRoot.getElementById('bar-fill');
+    const marker = el.shadowRoot.getElementById('threshold-marker');
+    expect(fill.style.height).toBe('60%');
+    expect(fill.style.width).toBe('');
+    expect(marker.style.bottom).toBe('20%');
+    expect(marker.style.left).toBe('');
+    expect(queryText(el, '#bar-label')).toBe('60%');
+  });
+
+  it('switches to vertical when the orientation attribute changes', () => {
+    const { el } = setup();
+    el.state = { level_pct: 40, emergency_threshold_pct: 20 };
+    const fill = el.shadowRoot.getElementById('bar-fill');
+    expect(fill.style.width).toBe('40%');
+    el.setAttribute('orientation', 'vertical');
+    expect(fill.style.height).toBe('40%');
+    expect(fill.style.width).toBe('');
+    el.removeAttribute('orientation');
+    expect(fill.style.width).toBe('40%');
+  });
+
+  it('keeps left-to-right fill when orientation is not vertical', () => {
+    const { el } = setup();
+    el.state = { level_pct: 90, emergency_threshold_pct: 20 };
+    const fill = el.shadowRoot.getElementById('bar-fill');
+    expect(fill.style.width).toBe('90%');
+    expect(fill.style.height).toBe('');
+  });
+
   it('computes level_pct from charge/capacity when level_pct absent', () => {
     const { el } = setup();
     el.state = { charge: 30, capacity: 120, charging: false, emergency_threshold_pct: 20 };

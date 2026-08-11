@@ -16,6 +16,15 @@
 // change, never runner noise. The collector now discovers only runtime-reachable
 // GLB levels; `.remesh.glb` generator intermediates are excluded.
 //
+// Re-recorded after issues #999-#1001 changed both the content and the meaning
+// of the aggregate. The capture contains 63 runtime-reachable GLB levels. Its
+// maximum is 131,560 triangles, its largest texture is 1024x1024, and the
+// deduplicated closest/base levels total 1,968,208 triangles. The previous
+// 1,436,266 total was recorded before the fleet-wide LOD rebuild; the later
+// 2,978,584 finding incorrectly added every mutually-exclusive LOD and nine
+// `.remesh.glb` generator intermediates together. The 1,968,208 value accepts
+// the real post-rebuild base-model growth without retaining that population bug.
+//
 // THIS SCENARIO DOES NOT GATE YET, and the reason is provenance rather than
 // doubt: it was recorded on a developer desktop, and no CI runner has ever
 // measured it. The gating rule in src/perf/mod.rs wants a scenario proven
@@ -43,7 +52,7 @@
 //
 // ── Recorded from a capture ─────────────────────────────────
 // Written by `phoenix-perf adopt` from a bevy-loader capture of scenario "assets-mesh".
-// build: release   device: developer desktop (Windows, x86_64)
+// build: dev   device: (unrecorded)
 // rev:   (unrecorded)
 //
 // Edit the prose ABOVE this block; re-recording rewrites from here down, and
@@ -55,7 +64,7 @@
         "assets.mesh.triangles": (
             unit: count,
             statistic: max,
-            expected: 138790.0,
+            expected: 131560.0,
             tolerance: (
                 warn: 0.1,
                 fail: 0.5,
@@ -64,7 +73,7 @@
         "assets.mesh.triangles.total": (
             unit: count,
             statistic: max,
-            expected: 1436266.0,
+            expected: 1968208.0,
             tolerance: (
                 warn: 0.05,
                 fail: 0.25,

@@ -76,9 +76,17 @@
 // gated number" note above still holds: b78bf9ff moved them, the band restore
 // did not.
 //
-// These are a record, not a target. 228 MB of models is a great deal for a
-// browser game to fetch — considerably worse than the 156 MB the first record
-// already called a great deal — and the point of committing it is that the
+// Re-recorded after issues #998-#1001 at 66 runtime GLBs and 175,619,464 bytes.
+// The collector no longer charges the nine `.remesh.glb` generator
+// intermediates to a visitor: Trunk publishes them because it copies the whole
+// assets directory, but no runtime sidecar requests them. The remaining drop
+// comes from tuned generated LODs, the reduced uncommon-4 base, and the two
+// courier diffuse maps moving from 2048 to 1024. Lower-is-better drift now
+// passes directionally, but adopting the reduction makes the tighter number
+// the budget future growth is compared against.
+//
+// These are a record, not a target. 175.6 MB of models is still a great deal
+// for a browser game to fetch, and the point of committing it is that the
 // number is visible in every CI run and moves in a diff someone reads.
 //
 // THIS SCENARIO GATES (issue #905). The CI perf job runs its report with
@@ -97,8 +105,8 @@
 //
 // Metric by metric, since the tolerances now decide a build:
 //
-// - assets.glb.total.bytes — the whole download. Warns on any 5% move, because
-//   at this size 5% is 11 MB.
+// - assets.glb.total.bytes — all runtime GLBs on disk, excluding build-only
+//   `.remesh.glb` intermediates. Warns when growth exceeds 5%; reductions pass.
 // - assets.glb.bytes — the single largest model, the one that dominates a cold
 //   load.
 // - assets.glb.without_lod — LOD coverage, counted as templates with no ladder
@@ -117,7 +125,7 @@
 //
 // ── Recorded from a capture ─────────────────────────────────
 // Written by `phoenix-perf adopt` from a static-inventory capture of scenario "assets".
-// build: release   device: (unrecorded)
+// build: dev   device: (unrecorded)
 // rev:   (unrecorded)
 //
 // Edit the prose ABOVE this block; re-recording rewrites from here down, and
@@ -138,7 +146,7 @@
         "assets.glb.total.bytes": (
             unit: bytes,
             statistic: max,
-            expected: 232630348.0,
+            expected: 175619464.0,
             tolerance: (
                 warn: 0.05,
                 fail: 0.25,

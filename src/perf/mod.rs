@@ -403,7 +403,13 @@ mod tests {
     fn deeper_lod_ladder_passes_but_shallower_ladder_fails() {
         let deeper = capture_with("assets.lod.levels", Unit::Count, &[30.0]);
         let shallower = capture_with("assets.lod.levels", Unit::Count, &[1.0]);
-        let baseline = baseline_with("assets.lod.levels", Unit::Count, 10.0);
+        let mut baseline = baseline_with("assets.lod.levels", Unit::Count, 10.0);
+        baseline
+            .expectations
+            .get_mut("assets.lod.levels")
+            .expect("the fixture inserts this expectation")
+            .tolerance
+            .fail = 0.5;
 
         let (deeper_findings, _) = report(&deeper, &baseline);
         let (shallower_findings, _) = report(&shallower, &baseline);
@@ -423,7 +429,13 @@ mod tests {
     #[test]
     fn unknown_metrics_keep_symmetric_comparison() {
         let capture = capture_with("unknown.metric", Unit::Count, &[1.0]);
-        let baseline = baseline_with("unknown.metric", Unit::Count, 10.0);
+        let mut baseline = baseline_with("unknown.metric", Unit::Count, 10.0);
+        baseline
+            .expectations
+            .get_mut("unknown.metric")
+            .expect("the fixture inserts this expectation")
+            .tolerance
+            .fail = 0.5;
         let (findings, _) = report(&capture, &baseline);
         assert_eq!(findings[0].verdict, Verdict::Fail);
         assert!(gates(&findings));

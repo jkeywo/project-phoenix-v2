@@ -34,8 +34,19 @@ pub fn station_for_system(
     config: &crate::ship::config::ShipConfig,
     target: &crate::messages::SystemId,
 ) -> Option<StationId> {
-    // Step 1: shield-arc prefix (arcs are not in `config.systems`).
+    // Step 1: shield-arc prefix. Arcs are synthesised into `config.systems`
+    // by the entity-config layer (`EntityConfig::from_toml_in_mode`, which
+    // appends a `kind = "shield_arc"` entry per `[[shield_arc]]`) carrying
+    // the owning station of the ship's `kind = "shields"` system — e.g. the
+    // destroyer's arcs live on "engineering". Resolve through the config so
+    // the holder of THAT station is authoritative. Ownerless NPC arcs carry
+    // `station: None`, which correctly denies humans. Only when the config
+    // has no arc entry at all (legacy/test fixtures whose `ShipConfigComponent`
+    // predates arc synthesis) fall back to a literal "shields" station.
     if target.0.starts_with("shield-arc-") {
+        if let Some(system) = config.system(target) {
+            return system.station.clone();
+        }
         return Some(StationId("shields".into()));
     }
     // Step 2: direct system lookup.
@@ -248,6 +259,116 @@ station = "repair"
             &sessions_with_repair_holder("t1"),
             &config(),
         ));
+    }
+
+    // ── Shield-arc station resolution ─────────────────────────────────────
+    //
+    // `station_for_system` must resolve `shield-arc-*` to the station that
+    // owns THIS ship's shields, not a hardcoded "shields" — the destroyer's
+    // arcs live on "engineering", the cruiser's on "science", the courier's
+    // on "captain". Only the battleship has a literal "shields" station.
+
+    /// A hull whose `kind = "shields"` system is owned by the engineering
+    /// station, with synthesised per-arc entries mirroring what
+    /// `EntityConfig::from_toml_in_mode` appends.
+    fn config_with_shields_on_engineering() -> crate::ship::config::ShipConfig {
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "Shields and power."
+rank = "Ltn."
+
+[[system]]
+id = "shields-system"
+kind = "shields"
+station = "engineering"
+
+[[system]]
+id = "shield-arc-fore"
+kind = "shield_arc"
+station = "engineering"
+
+[[system]]
+id = "shield-arc-aft"
+kind = "shield_arc"
+station = "engineering"
+"#,
+            &["shields", "shield_arc"],
+        )
+        .unwrap()
+    }
+
+    /// A hull whose arcs are ownerless AI-only systems, as synthesised for an
+    /// NPC ship with no `kind = "shields"` system and no "shields" station.
+    fn config_with_ownerless_arcs() -> crate::ship::config::ShipConfig {
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[system]]
+id = "shield-arc-all"
+kind = "shield_arc"
+ai_only = true
+"#,
+            &["shield_arc"],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn station_for_system_resolves_shield_arcs_to_the_ships_owning_station() {
+        assert_eq!(
+            station_for_system(
+                &config_with_shields_on_engineering(),
+                &SystemId("shield-arc-fore".into()),
+            ),
+            Some(StationId("engineering".into())),
+            "a hull whose shields live on engineering must authorise that station's holder"
+        );
+        assert_eq!(
+            station_for_system(
+                &config_with_shields_on_engineering(),
+                &SystemId("shield-arc-aft".into()),
+            ),
+            Some(StationId("engineering".into())),
+        );
+    }
+
+    #[test]
+    fn station_for_system_resolves_ownerless_arcs_to_none() {
+        assert_eq!(
+            station_for_system(
+                &config_with_ownerless_arcs(),
+                &SystemId("shield-arc-all".into())
+            ),
+            None,
+            "an NPC's ownerless arc must not resolve to a human-held station"
+        );
+    }
+
+    #[test]
+    fn station_for_system_falls_back_to_literal_shields_station_when_config_has_no_arc() {
+        let empty = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "shields"
+name = "Shields"
+description = "Defensive grid."
+rank = "Ltn."
+
+[[system]]
+id = "repair"
+kind = "repair_control"
+station = "shields"
+"#,
+            &["repair_control"],
+        )
+        .unwrap();
+        assert_eq!(
+            station_for_system(&empty, &SystemId("shield-arc-fore".into())),
+            Some(StationId("shields".into())),
+            "legacy fixtures with no synthesised arcs keep the historical shields-station mapping"
+        );
     }
 
     /// An unknown system id is denied outright — the router never sees it.

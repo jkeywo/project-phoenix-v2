@@ -1,6 +1,5 @@
 name = "entity.station_axiom.name"
 tags = [ "station", "comms_contact", "allied" ]
-includes = ["fragments/ai/fleet_baseline.toml"]
 
 # The Federation (issue #936). This station is tagged `allied` in every world
 # that fields it, and until now it belonged to nobody: a factionless entity is
@@ -24,10 +23,6 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # player stations. Its omni phaser covers the immediate defence perimeter,
 # buying the defenders time to meet the clocked Harrow raid rather than
 # replacing them.
-[behaviour]
-
-[captain_console.ai]
-idle = true
 
 [[system]]
 id = "tactical-radar"

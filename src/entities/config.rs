@@ -4350,6 +4350,24 @@ pub struct EntityConfig {
 }
 
 impl EntityConfig {
+    /// A stationary, ownerless phaser platform. Unlike a behaviour-driven NPC
+    /// it has no helm or doctrine, but its AI-only Tactical systems need the
+    /// shared combat substrate to acquire and fire.
+    pub fn is_static_point_defence(&self) -> bool {
+        self.behaviour.is_none()
+            && self
+                .weapons_console
+                .as_ref()
+                .is_some_and(|weapons| !weapons.phaser_banks.is_empty())
+            && self.ship_config.as_ref().is_some_and(|ship| {
+                ship.systems.iter().any(|system| {
+                    system.ai_only && system.kind == crate::system_registry::TACTICAL_RADAR_KIND
+                }) && ship.systems.iter().any(|system| {
+                    system.ai_only && system.kind == crate::system_registry::PHASER_BANK_KIND
+                })
+            })
+    }
+
     /// Parse and validate an entity TOML in the default AI-declaration mode.
     ///
     /// That mode is [`AiDeclarationMode::DEFAULT`], and since #885b stage 5d it

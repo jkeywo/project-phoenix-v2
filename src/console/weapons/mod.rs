@@ -1180,7 +1180,10 @@ fn ai_target_selection(
             &Transform,
             Option<&FactionComponent>,
         ),
-        With<crate::server_app::Ship>,
+        (
+            With<crate::server_app::Ship>,
+            Without<crate::entity_spawner::StaticPointDefence>,
+        ),
     >,
 ) {
     let registry_default = crate::faction::FactionRegistry::default();

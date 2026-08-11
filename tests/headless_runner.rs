@@ -27,9 +27,13 @@ use project_phoenix::server_app::LocalShip;
 fn axiom_station_defence_config_parses() {
     let source =
         project_phoenix::entity_includes::resolve_from_disk("assets/entities/station_axiom.toml")
-            .expect("Axiom Station template should resolve its shared AI policy declarations");
-    project_phoenix::entity_config::EntityConfig::from_toml(&source.toml)
+            .expect("Axiom Station template should resolve");
+    let config = project_phoenix::entity_config::EntityConfig::from_toml(&source.toml)
         .expect("Axiom Station's autonomous defence should be a valid entity config");
+    assert!(
+        config.is_static_point_defence(),
+        "Axiom Station's ownerless Tactical systems must activate static point defence"
+    );
 }
 use project_phoenix::ship::control_source::ControlSource;
 use project_phoenix::ship::state::ShipPhysics;

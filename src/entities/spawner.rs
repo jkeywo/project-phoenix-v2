@@ -66,6 +66,12 @@ pub struct RegionEffectsSection(pub Vec<RegionEffectKind>);
 #[derive(Component, Clone, Debug)]
 pub struct BehaviourSection(pub crate::entity_config::BehaviourConfig);
 
+/// Marks an ownerless, stationary weapons platform. It uses the shared ship
+/// combat substrate for its own target selection and beams, but is excluded
+/// from ordinary ship-versus-ship hostile acquisition.
+#[derive(Component, Clone, Debug)]
+pub struct StaticPointDefence;
+
 /// Present when the EntityConfig has a non-empty `tags` list.
 /// Mirrors the TOML tags onto the ECS entity so snapshot builders can include them.
 #[derive(Component, Clone, Debug)]
@@ -239,11 +245,15 @@ pub fn spawn_entity(
 
     // Behaviour section — the "this entity is AI-driven" predicate; ai_plugin
     // registers an AI token for any entity carrying it.
-    if let Some(behaviour) = &config.behaviour {
-        entity_commands.insert((
-            BehaviourSection(behaviour.clone()),
-            crate::server_app::ShipSystemBlackboards::default(),
-        ));
+    let static_point_defence = config.is_static_point_defence();
+    if config.behaviour.is_some() || static_point_defence {
+        if let Some(behaviour) = &config.behaviour {
+            entity_commands.insert(BehaviourSection(behaviour.clone()));
+        }
+        if static_point_defence {
+            entity_commands.insert(StaticPointDefence);
+        }
+        entity_commands.insert(crate::server_app::ShipSystemBlackboards::default());
 
         // Build the ship's ShipConfigComponent from its own TOML [[station]]/
         // [[system]]/[power_groups] blocks, parsed the same way ship entity TOMLs

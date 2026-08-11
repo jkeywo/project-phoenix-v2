@@ -520,7 +520,7 @@ pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slo
         // The one kind with an out-of-band idle lever, so the three states are
         // genuinely distinguishable here.
         FineSystemKey::TacticalSelector => {
-            if c.behaviour.is_none() {
+            if c.behaviour.is_none() && !c.is_static_point_defence() {
                 return Vec::new();
             }
             let wc = c.weapons_console.as_ref();
@@ -1053,12 +1053,12 @@ mod tests {
     /// Scenery is not an AI actor, and strict mode must never demand
     /// declarations from it.
     #[test]
-    fn an_entity_with_no_behaviour_and_no_weapons_has_no_slots() {
-        let station = parse("assets/entities/station_axiom.toml");
+    fn an_unarmed_static_entity_has_no_slots() {
+        let station = parse("assets/entities/station_outpost.toml");
         assert!(station.behaviour.is_none(), "precondition");
         assert!(
             manifest(&station).is_empty(),
-            "Axiom Station is hailable and damageable but not an AI actor: no \
+            "an unarmed station is hailable and damageable but not an AI actor: no \
              `[behaviour]`, no weapons ⇒ no AI-capable fine system at all."
         );
         assert!(strict_error(&station).is_none());
@@ -1245,8 +1245,8 @@ base_priority = 40.0
             rollup.push((kind.key.as_str(), declared, slots));
         }
         assert_eq!(
-            total, 181,
-            "the shipped hulls carry 181 AI-capable fine-system slots in total"
+            total, 184,
+            "the shipped hulls carry 184 AI-capable fine-system slots in total"
         );
         assert_eq!(
             rollup,
@@ -1258,16 +1258,16 @@ base_priority = 40.0
                 ("vertical", 9, 9),
                 ("impulse", 9, 9),
                 ("boost", 9, 9),
-                ("phaser_bank", 11, 11),
+                ("phaser_bank", 12, 12),
                 ("blaster_bank", 7, 7),
                 ("torpedo_tube", 14, 14),
-                ("weapons_doctrine", 9, 9),
+                ("weapons_doctrine", 10, 10),
                 ("torpedo_magazine", 5, 5),
                 ("shields_focus", 9, 9),
                 ("power", 9, 9),
                 ("comms_response", 9, 9),
                 ("sensors_selector", 9, 9),
-                ("tactical_selector", 9, 9),
+                ("tactical_selector", 10, 10),
                 ("navigation_selector", 9, 9),
                 ("repair_selector", 9, 9),
                 ("comms_selector", 9, 9),
@@ -1411,7 +1411,7 @@ base_priority = 40.0
 
     #[test]
     fn strict_mode_accepts_scenery() {
-        let src = shipped_toml("assets/entities/station_axiom.toml");
+        let src = shipped_toml("assets/entities/station_outpost.toml");
         EntityConfig::from_toml_in_mode(&src, AiDeclarationMode::Strict)
             .expect("scenery has no AI-capable fine system, so strict mode has nothing to demand");
     }
@@ -1664,7 +1664,7 @@ base_priority = 40.0
     #[test]
     fn an_entity_with_no_slots_gets_no_ai_declaration_attached() {
         // Resolved first (issue #906) — `spawn` below is handed this same text.
-        let src = shipped_toml("assets/entities/station_axiom.toml");
+        let src = shipped_toml("assets/entities/station_outpost.toml");
         let config = EntityConfig::from_toml(&src).expect("station parses");
         assert!(manifest(&config).is_empty(), "precondition");
 

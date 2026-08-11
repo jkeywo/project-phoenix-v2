@@ -1423,11 +1423,14 @@ export function buildNavigationConsoleState(state) {
   const navSelects = (bb ? (bb.nav_chart_selects ?? state.navChartSelects ?? [])
                          : (state.navChartSelects || [])).map(t => String(t).toLowerCase());
   const entities = withObjectiveTargets(state.asteroids, state.objectives);
-  // Filter to navigational entities only.
+  // Filter to entities the hull author elected to show. Objective markers and
+  // objective regions are purposeful chart annotations. Other objective
+  // targets (including hostile ships) must not bypass the authored filter.
   const navEntities = entities.filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
-    if (tags.includes('objective_marker') && !e.objective_target) return false;
-    return e.objective_target || tags.some(t => navShowsLower.includes(t));
+    if (tags.includes('objective_marker')) return !!e.objective_target;
+    if (e.objective_target && e.region_colour) return true;
+    return tags.some(t => navShowsLower.includes(t));
   });
 
   const blips = buildBlips(

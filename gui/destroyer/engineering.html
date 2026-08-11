@@ -16,8 +16,12 @@
     .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     ph-shield-facings, ph-power-controls, ph-repair-teams, ph-hull-integrity { flex: 1; min-height: 0; }
-    /* Battery bar sits at the bottom of the Power column, under the (growing) power controls. */
-    ph-battery-bar { flex: 0 0 auto; margin-top: 8px; }
+    /* The Power column lays its controls and battery side by side: the battery
+       is a vertical gauge on the right edge, so the controls' buttons never
+       run under it. The controls scroll internally when the column is short. */
+    .power-row { flex: 1; min-height: 0; display: flex; flex-direction: row; gap: 10px; align-items: stretch; }
+    .power-row ph-power-controls { flex: 1; min-width: 0; overflow-y: auto; }
+    .power-row ph-battery-bar { flex: 0 0 auto; }
     /* Compact threat-bearing readout (issue #926) — same standing fact the
        battleship's dedicated Shields console shows, condensed to one line
        for this column's tighter layout. Hidden when Sensors holds no threat. */
@@ -47,8 +51,10 @@
         </div>
         <div class="col">
           <h2 data-i18n="console.engineering.power">Power</h2>
-          <ph-power-controls id="power-controls"></ph-power-controls>
-          <ph-battery-bar id="battery-bar"></ph-battery-bar>
+          <div class="power-row">
+            <ph-power-controls id="power-controls"></ph-power-controls>
+            <ph-battery-bar id="battery-bar" orientation="vertical"></ph-battery-bar>
+          </div>
         </div>
         <div class="col">
           <h2 data-i18n="console.engineering.repair">Repair</h2>

@@ -29,7 +29,7 @@ use crate::render_setup::{
     SpaceSkyboxPlugin,
 };
 use crate::server::pfx::PfxPlugin;
-use crate::ship_state::ShipPhysics;
+use crate::ship_state::{ShipPhysics, ShipViewMode};
 use crate::simulation::AsteroidDestroyedVfx;
 
 // ── VFX Components ────────────────────────────────────────────────
@@ -83,6 +83,8 @@ impl Plugin for RendererPlugin {
             .init_resource::<NebulaFogState>()
             .init_resource::<NebulaCloudState>()
             .init_resource::<CinematicCameraState>()
+            .add_systems(FixedFirst, restore_authoritative_local_ship_transform)
+            .add_systems(FixedLast, capture_local_ship_render_pose)
             .add_systems(Startup, setup)
             .add_systems(
                 PostStartup,
@@ -101,12 +103,15 @@ impl Plugin for RendererPlugin {
                     update_view_screen_text,
                     update_view_direction_label,
                     toggle_ship_model_visibility,
+                    apply_local_ship_render_interpolation,
                     // No `.after(SimSet::Physics)` edges since issue #895: the
                     // sim runs in `FixedUpdate`, which always completes before
                     // `Update`, so this frame's camera work reads the latest
                     // stepped `Transform`s without an explicit edge.
                     hull_camera.run_if(in_state(GamePhase::InProgress)),
-                    cinematic_camera.run_if(in_state(GamePhase::InProgress)),
+                    cinematic_camera
+                        .after(apply_local_ship_render_interpolation)
+                        .run_if(in_state(GamePhase::InProgress)),
                     sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
                 ),
             )
@@ -122,6 +127,115 @@ impl Plugin for RendererPlugin {
             )
             .add_systems(OnExit(GamePhase::InProgress), cleanup_nebula_fog);
     }
+}
+
+/// Presentation-only snapshots bracketing the latest committed simulation tick.
+///
+/// The authoritative [`ShipPhysics`] and root [`Transform`] remain exact at every
+/// fixed-tick boundary. During variable-rate rendering, the local hull is drawn
+/// between the previous and current poses so a smoothly moving cinematic camera
+/// does not expose the simulation's discrete tick steps.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct RenderInterp {
+    previous: ShipPhysics,
+    current: ShipPhysics,
+}
+
+impl RenderInterp {
+    fn new(pose: ShipPhysics) -> Self {
+        Self {
+            previous: pose,
+            current: pose,
+        }
+    }
+
+    fn capture(&mut self, pose: ShipPhysics) {
+        self.previous = self.current;
+        self.current = pose;
+    }
+
+    fn pose(&self, alpha: f32) -> ShipPhysics {
+        let alpha = alpha.clamp(0.0, 1.0);
+        ShipPhysics {
+            x: self.previous.x.lerp(self.current.x, alpha),
+            y: self.previous.y.lerp(self.current.y, alpha),
+            z: self.previous.z.lerp(self.current.z, alpha),
+            yaw: lerp_angle(self.previous.yaw, self.current.yaw, alpha),
+            forward_speed: self
+                .previous
+                .forward_speed
+                .lerp(self.current.forward_speed, alpha),
+            roll: lerp_angle(self.previous.roll, self.current.roll, alpha),
+            lateral_speed: self
+                .previous
+                .lateral_speed
+                .lerp(self.current.lateral_speed, alpha),
+            vertical_speed: self
+                .previous
+                .vertical_speed
+                .lerp(self.current.vertical_speed, alpha),
+        }
+    }
+}
+
+fn lerp_angle(from: f32, to: f32, alpha: f32) -> f32 {
+    let delta =
+        (to - from + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    from + delta * alpha
+}
+
+fn write_ship_pose(transform: &mut Transform, pose: ShipPhysics) {
+    transform.translation = Vec3::new(pose.x, pose.y, pose.z);
+    transform.rotation = Quat::from_euler(EulerRot::YXZ, -pose.yaw, 0.0, pose.roll);
+}
+
+/// Fixed-tick capture point: called after the simulation has committed its pose.
+fn capture_local_ship_render_pose(
+    mut commands: Commands,
+    mut ship_q: Query<
+        (Entity, &ShipPhysics, Option<&mut RenderInterp>),
+        With<crate::simulation::LocalShip>,
+    >,
+) {
+    let Ok((entity, physics, interp)) = ship_q.single_mut() else {
+        return;
+    };
+    if let Some(mut interp) = interp {
+        interp.capture(*physics);
+    } else {
+        commands.entity(entity).insert(RenderInterp::new(*physics));
+    }
+}
+
+/// Remove last frame's presentation pose before any authoritative fixed system
+/// can read the root transform.
+fn restore_authoritative_local_ship_transform(
+    mut ship_q: Query<(&RenderInterp, &mut Transform), With<crate::simulation::LocalShip>>,
+) {
+    if let Ok((interp, mut transform)) = ship_q.single_mut() {
+        write_ship_pose(&mut transform, interp.current);
+    }
+}
+
+/// Draw the local hull one fixed interval behind the authoritative pose. This is
+/// active only in Cinematic mode; first-person and overlay modes keep their exact
+/// tick transform because the local hull is hidden there.
+fn apply_local_ship_render_interpolation(
+    fixed_time: Res<Time<Fixed>>,
+    mut ship_q: Query<
+        (&ShipViewMode, &RenderInterp, &mut Transform),
+        With<crate::simulation::LocalShip>,
+    >,
+) {
+    let Ok((view_mode, interp, mut transform)) = ship_q.single_mut() else {
+        return;
+    };
+    let pose = if view_mode.view_mode == ViewMode::Cinematic {
+        interp.pose(fixed_time.overstep_fraction())
+    } else {
+        interp.current
+    };
+    write_ship_pose(&mut transform, pose);
 }
 
 // ── Setup ─────────────────────────────────────────────────────────
@@ -457,19 +571,20 @@ fn hull_camera(
 /// nearby entities with hysteresis (enemy > friendly > closest).
 fn cinematic_camera(
     view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
-    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    physics_q: Query<(&ShipPhysics, Option<&RenderInterp>), With<crate::simulation::LocalShip>>,
     cinematic_q: Query<&CinematicCameraSection, With<crate::simulation::LocalShip>>,
     local_q: Query<&EntityUuid, With<crate::simulation::LocalShip>>,
     all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>), Without<GameCamera>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     time: Res<Time>,
+    fixed_time: Res<Time<Fixed>>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
     mut state: ResMut<CinematicCameraState>,
 ) {
     let Ok(mut transform) = cam_query.single_mut() else {
         return;
     };
-    let Ok(physics) = physics_q.single().copied() else {
+    let Ok((physics, interp)) = physics_q.single() else {
         return;
     };
     let Ok(cam_cfg) = cinematic_q.single() else {
@@ -486,13 +601,20 @@ fn cinematic_camera(
         return;
     }
 
-    let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
+    let presentation_pose = interp
+        .map(|interp| interp.pose(fixed_time.overstep_fraction()))
+        .unwrap_or(*physics);
+    let ship_origin = Vec3::new(
+        presentation_pose.x,
+        presentation_pose.y,
+        presentation_pose.z,
+    );
 
     // Lag the camera's yaw toward the ship's actual heading instead of
     // locking to it exactly — a rigid lock keeps the ship at an identical
     // angle in frame at all times, which reads as "the ship never turns".
-    let current_yaw = state.camera_yaw.unwrap_or(physics.yaw);
-    let target_delta = (physics.yaw - current_yaw + std::f32::consts::PI)
+    let current_yaw = state.camera_yaw.unwrap_or(presentation_pose.yaw);
+    let target_delta = (presentation_pose.yaw - current_yaw + std::f32::consts::PI)
         .rem_euclid(std::f32::consts::TAU)
         - std::f32::consts::PI;
     let max_step = cfg.yaw_follow_deg_per_sec.to_radians() * time.delta_secs();
@@ -1124,6 +1246,75 @@ mod tests {
     use super::*;
     use crate::ship_state::ShipViewMode;
     use crate::simulation::LocalShip;
+
+    #[test]
+    fn render_interp_blends_between_committed_ship_poses() {
+        let previous = ShipPhysics {
+            x: 10.0,
+            y: 2.0,
+            z: -4.0,
+            yaw: 0.2,
+            roll: -0.1,
+            ..default()
+        };
+        let current = ShipPhysics {
+            x: 14.0,
+            y: 4.0,
+            z: -8.0,
+            yaw: 0.6,
+            roll: 0.3,
+            ..default()
+        };
+        let mut interp = RenderInterp::new(previous);
+        interp.capture(current);
+
+        let pose = interp.pose(0.25);
+
+        assert!((pose.x - 11.0).abs() < 1e-6);
+        assert!((pose.y - 2.5).abs() < 1e-6);
+        assert!((pose.z + 5.0).abs() < 1e-6);
+        assert!((pose.yaw - 0.3).abs() < 1e-6);
+        assert!(pose.roll.abs() < 1e-6);
+    }
+
+    #[test]
+    fn render_interp_takes_short_path_across_yaw_wrap() {
+        let previous = ShipPhysics {
+            yaw: 179.0_f32.to_radians(),
+            ..default()
+        };
+        let current = ShipPhysics {
+            yaw: (-179.0_f32).to_radians(),
+            ..default()
+        };
+        let mut interp = RenderInterp::new(previous);
+        interp.capture(current);
+
+        let halfway = interp.pose(0.5).yaw.to_degrees();
+
+        assert!((halfway.abs() - 180.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn restoring_authoritative_pose_discards_frame_interpolation() {
+        let committed = ShipPhysics {
+            x: 20.0,
+            y: 3.0,
+            z: -12.0,
+            yaw: 0.75,
+            roll: 0.1,
+            ..default()
+        };
+        let mut transform = Transform::from_xyz(19.5, 2.5, -11.5);
+
+        write_ship_pose(&mut transform, committed);
+
+        assert_eq!(transform.translation, Vec3::new(20.0, 3.0, -12.0));
+        assert_eq!(
+            transform.rotation,
+            Quat::from_euler(EulerRot::YXZ, -0.75, 0.0, 0.1)
+        );
+    }
 
     fn camera_test_app() -> App {
         let mut app = App::new();

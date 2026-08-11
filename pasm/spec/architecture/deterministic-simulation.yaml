@@ -153,7 +153,7 @@ entities:
       summary: A digest folds INSIDE the RenderInterp bracket — after `SimSet` has fully advanced the tick and before any frame-time interpolation of positions for smooth rendering at a variable frame rate — never at frame time itself. RenderInterp is presentation and is explicitly excluded from the fold (see the exclusion classes below); it is named here separately because, unlike an ordinary excluded UI widget, it lives directly on simulation entities and carries transform-shaped data, making it the single easiest exclusion to get wrong by accident.
       rationale:
         - "Issue #895 settled fixed-tick simulation: `SimSet` runs in Bevy's `FixedUpdate` at the authored `sim_tick_hz`, counted by `SimTick` (`src/sim_tick.rs`). A frame at 144Hz and a frame at 30Hz both observe the SAME committed tick state between two `FixedUpdate` steps; what differs between them is how far a renderer has interpolated a transform TOWARD the next not-yet-committed tick for smooth on-screen motion. Folding at frame time would hash that interpolated, frame-rate-dependent position — two instances that agree on every simulation tick would still produce different digests purely because they render at different frame rates, which is exactly backwards for a mechanism whose entire purpose is telling two AGREEING instances apart from two DIVERGING ones."
-        - "[ai] 'RenderInterp bracket' names the point in the tick/frame relationship where the fold must sit: after the authoritative tick has fully committed (all of `SimSet` has run) and before rendering has interpolated anything derived from it. No literal `RenderInterp` type exists in this repository as of this issue — it is the exclusion-worthy CONCEPT this record pins in advance of any interpolation system being built, so that whoever builds frame-time smoothing inherits an already-settled exclusion rather than discovering the trap by shipping a digest that intermittently disagrees between a 30Hz and a 144Hz instance of the same seed."
+        - "[ai] 'RenderInterp bracket' names the point in the tick/frame relationship where the fold must sit: after the authoritative tick has fully committed (all of `SimSet` has run) and before rendering has interpolated anything derived from it. `RenderInterp` now exists in `src/server/renderer.rs` for the local cinematic hull: `FixedLast` captures committed poses, `Update` interpolates presentation, and `FixedFirst` restores the exact authoritative transform before simulation can read it. It remains explicitly outside the digest."
     architecture:
       kind: design-policy
       authority: authoritative
@@ -161,8 +161,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/sim_tick.rs, src/sim_sets.rs]
-      symbols: [SimTick, SimSet]
+      paths: [src/sim_tick.rs, src/sim_sets.rs, src/server/renderer.rs]
+      symbols: [SimTick, SimSet, RenderInterp]
 
   - component: digest-exclusion-classes
     core:

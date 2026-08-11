@@ -167,10 +167,9 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
 /// reviewer reading the PASM record, not re-proven here.
 #[rustfmt::skip]
 const EXCLUSIONS: &[(&str, &str)] = &[
-    // Presentation — RenderInterp does not exist as a literal type as of this
-    // issue (see `digest-render-interp-fold-point` in
-    // deterministic-simulation.yaml); nothing to list here until it is built,
-    // at which point it belongs on this line with reason "presentation".
+    // Presentation — the local hull's frame-time interpolation lives directly
+    // on the simulation entity but never feeds authoritative fixed-tick state.
+    ("RenderInterp", "presentation"),
     //
     // The debug overlay flags (`src/debug_overlay.rs`) are presentation in the
     // strictest sense: each one decides whether a wireframe, a log or an

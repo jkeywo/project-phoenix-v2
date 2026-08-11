@@ -5,8 +5,9 @@ compatibility_date = "2024-09-23"
 [vars]
 # Your Metered.ca app subdomain — the part before ".metered.live"
 METERED_APP = "projectphoenix"
-# The origin of your deployed site, used for CORS.
-ALLOWED_ORIGIN = "https://jkeywo.github.io"
+# The canonical public dev origin, used for CORS. GitHub Pages serves this
+# site behind the custom domain configured in .github/workflows/ci.yml.
+ALLOWED_ORIGIN = "https://pp-dev.kiwigamedesign.co.uk"
 
 # METERED_KEY is NOT here — set it with:
 #   wrangler secret put METERED_KEY

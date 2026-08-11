@@ -3,7 +3,7 @@ title: Project Overview
 type: concept
 tags: [overview, intro]
 sources: [README.md, AGENTS.md]
-updated: 2026-05-08
+updated: 2026-08-11
 ---
 
 # Project Overview
@@ -14,7 +14,7 @@ updated: 2026-05-08
 - Each player joins from their own phone by **scanning a QR code**. No app install. No network setup.
 - The view screen is the authoritative server; phones are stateless spokes connected over **WebRTC (PeerJS)** in a star topology.
 
-Live: https://jkeywo.github.io/project-phoenix-v2/
+Live: https://pp-dev.kiwigamedesign.co.uk/
 
 ## Why this exists
 

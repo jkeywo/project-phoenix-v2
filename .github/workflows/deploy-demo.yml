@@ -202,7 +202,7 @@ jobs:
       # in server.html (trunk renames the build target to dist/index.html)
       # and the copied gui/connection-manager.js (client.html's module,
       # copied verbatim by scripts/build-client.mjs to dist/client/gui/).
-      # worker/wrangler.toml (the dev worker) and its github.io
+      # worker/wrangler.toml (the dev worker) and its pp-dev custom-domain
       # ALLOWED_ORIGIN are never touched by this workflow.
       - name: Patch TURN credential endpoint to the demo worker
         env:

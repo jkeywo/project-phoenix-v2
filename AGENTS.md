@@ -349,9 +349,9 @@ server = []   # host build → server.html (bridge.rs compiled in)
 
 ## Deployed URLs
 
-- Server: `https://jkeywo.github.io/project-phoenix-v2/`
-- Client: `https://jkeywo.github.io/project-phoenix-v2/client/`
-- Server QR encodes: `https://jkeywo.github.io/project-phoenix-v2/client/index.html#<peerId>`
+- Server: `https://pp-dev.kiwigamedesign.co.uk/`
+- Client: `https://pp-dev.kiwigamedesign.co.uk/client/`
+- Server QR encodes: `https://pp-dev.kiwigamedesign.co.uk/client/index.html#<peerId>`
 
 ---
 

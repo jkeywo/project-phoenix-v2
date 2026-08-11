@@ -3,7 +3,7 @@ title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, ci]
 sources: [Trunk.toml, scripts/build-client.mjs, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml]
-updated: 2026-08-02
+updated: 2026-08-11
 ---
 
 # Build & Deployment
@@ -76,9 +76,9 @@ Pages, alongside (not instead of) the GitHub Pages dev host above.
 | | Dev (this file's sections above) | Demo |
 |---|---|---|
 | Trigger | `ci.yml` `deploy` job, automatic on push to `main` | `.github/workflows/deploy-demo.yml`, `workflow_dispatch` only — **never** on push |
-| Host | GitHub Pages (`jkeywo.github.io`) | Cloudflare Pages, `https://project-phoenix-demo.pages.dev` |
+| Host | GitHub Pages behind `https://pp-dev.kiwigamedesign.co.uk` | Cloudflare Pages behind `https://pp-demo.kiwigamedesign.co.uk` |
 | Scenario manifest | `dist/assets/scenarios.toml` as authored (full catalogue) | overwritten with `assets/scenarios.demo.toml` (issue #917 curation — bare URL serves `combat_test` + the Alliance Destroyer only; mod-pack upload stays enabled) |
-| TURN worker | `worker/wrangler.toml` → `phoenix-turn-credentials`, `ALLOWED_ORIGIN = jkeywo.github.io` | `worker/wrangler.demo.toml` → `phoenix-turn-credentials-demo`, `ALLOWED_ORIGIN = project-phoenix-demo.pages.dev` — a **separate worker**, deployed by the same run; `wrangler.toml` and the dev worker are never touched by the demo workflow |
+| TURN worker | `worker/wrangler.toml` → `phoenix-turn-credentials`, `ALLOWED_ORIGIN = pp-dev.kiwigamedesign.co.uk` | `worker/wrangler.demo.toml` → `phoenix-turn-credentials-demo`, `ALLOWED_ORIGIN = pp-demo.kiwigamedesign.co.uk` — a **separate worker**, deployed by the same run; `wrangler.toml` and the dev worker are never touched by the demo workflow |
 
 **Trigger procedure**: Actions tab → *Deploy Demo* → Run workflow. The
 `turn_worker_url` input defaults to the projected `workers.dev` URL

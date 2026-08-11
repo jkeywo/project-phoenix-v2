@@ -2,13 +2,13 @@
 
 A browser-based spaceship bridge simulator for groups. One browser tab on a shared screen shows a 3D view of space. Players join from their phones by scanning a QR code — no app install required.
 
-**[Play it live →](https://jkeywo.github.io/project-phoenix-v2/)**
+**[Play it live →](https://pp-dev.kiwigamedesign.co.uk/)**
 
 ---
 
 ## How to Play
 
-1. Open the **[view screen](https://jkeywo.github.io/project-phoenix-v2/)** in a browser tab on a shared monitor or TV.
+1. Open the **[view screen](https://pp-dev.kiwigamedesign.co.uk/)** in a browser tab on a shared monitor or TV.
 2. Players scan the QR code on screen with their phones and open the link.
 3. Each player sets a name and claims a console (Captain's Chair or Helm).
 4. The game starts once the connected crew is ready.

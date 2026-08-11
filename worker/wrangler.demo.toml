@@ -7,10 +7,10 @@ compatibility_date = "2024-09-23"
 # demo build proxies the same Metered.ca account, just from a second worker
 # with a demo-scoped CORS origin.
 METERED_APP = "projectphoenix"
-# The demo Pages origin, used for CORS. The dev worker (wrangler.toml) keeps
-# ALLOWED_ORIGIN pointed at https://jkeywo.github.io and is untouched by this
-# file (issue #931).
-ALLOWED_ORIGIN = "https://project-phoenix-demo.pages.dev"
+# The canonical public demo origin, used for CORS. Cloudflare Pages serves
+# this site behind its pp-demo.kiwigamedesign.co.uk custom domain. The dev
+# worker (wrangler.toml) has its own origin and is untouched by this file.
+ALLOWED_ORIGIN = "https://pp-demo.kiwigamedesign.co.uk"
 
 # METERED_KEY is NOT here — it is a secret, scoped per worker name. Set it
 # once, before the first deploy of this worker, with:

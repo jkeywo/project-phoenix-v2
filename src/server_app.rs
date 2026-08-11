@@ -168,9 +168,6 @@ pub struct CaptainPriorityBoost {
 }
 
 impl CaptainPriorityBoost {
-    /// Score bonus added to the boosted objective's utility score.
-    pub const BOOST_AMOUNT: f32 = 15.0;
-
     /// Scope key for a ship that has no assigned UUID (single-ship sessions and
     /// bare test fixtures). A real multi-ship session keys every ship by its own
     /// UUID, so boosts never collide across ships.
@@ -197,10 +194,10 @@ impl CaptainPriorityBoost {
         }
     }
 
-    /// The `(id, bonus)` argument to pass to `scored_pool_with_boost` for
-    /// `scope`, or `None` when nothing is boosted in that scope.
-    pub fn boost_arg<'a>(&'a self, scope: &str) -> Option<(&'a str, f32)> {
-        self.boosted_for(scope).map(|id| (id, Self::BOOST_AMOUNT))
+    /// The selected objective ID to pass to `scored_pool_with_boost` for
+    /// `scope`, or `None` when nothing is selected in that scope.
+    pub fn boost_arg(&self, scope: &str) -> Option<&str> {
+        self.boosted_for(scope)
     }
 
     /// Remove any boost (in any scope) that points at objective `id` — called

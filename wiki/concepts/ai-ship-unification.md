@@ -82,7 +82,7 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 
 ## Objective-driven Backfill bridge
 
-The player ship's Backfill AI is the same code path as NPC AI: `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries into the ship's viewscreen blackboard; the per-axis helm AI systems consume Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. `ai_target_selection` uses the same pool to lock the top positive Destroy target before the phaser/torpedo automation runs.
+The player ship's Backfill AI is the same code path as NPC AI: `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries into the ship's viewscreen blackboard; the per-axis helm AI systems consume Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. A Captain priority selection ranks its objective ahead of every other active objective in that ship's pool, so Helm, Tactical, Navigation, and other relevant Backfill systems converge on the selected directive. `ai_target_selection` uses the same pool to lock the top positive Destroy target before the phaser/torpedo automation runs.
 
 This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anchors around Starbase Alpha, while each spawned `wave_N` gets a higher-scored Destroy objective that resolves through the runtime `wave_N -> uuid` mapping. Missing named targets are ignored rather than falling back to an arbitrary hostile.
 

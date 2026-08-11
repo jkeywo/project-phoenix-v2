@@ -191,7 +191,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Captain Objective Priority Boost
-      summary: Captain can toggle one objective ID as a global score boost; it affects the shared scored pool and Captain projection, including otherwise zero-gated doctrine objectives.
+      summary: Captain can toggle one objective ID as a ship-scoped priority selection; it ranks ahead of every active objective in that ship's shared scored pool and Captain projection, including otherwise zero-gated doctrine objectives.
     architecture:
       kind: control-handler
       authority: authoritative

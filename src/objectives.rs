@@ -311,13 +311,17 @@ impl ObjectiveManager {
         self.scored_pool_with_boost(conditions, None)
     }
 
-    /// Like `scored_pool` but applies an optional captain priority boost.
-    /// `boost` is `Some((objective_id, bonus_score))` — the named objective gets
-    /// `bonus_score` added to its computed utility score before sorting.
+    /// Like `scored_pool` but applies an optional captain priority selection.
+    ///
+    /// A captain's selected objective must outrank every other active objective:
+    /// it is an explicit command decision, not a small utility preference that
+    /// a sufficiently large authored score may ignore. The selected objective
+    /// therefore receives the greatest finite score before the deterministic
+    /// sort. Keeping it finite preserves the wire codec's JSON number contract.
     pub fn scored_pool_with_boost(
         &self,
         conditions: &WorldConditions,
-        boost: Option<(&str, f32)>,
+        boost: Option<&str>,
     ) -> Vec<ScoredObjective> {
         let mut pool: Vec<ScoredObjective> = self
             .objectives
@@ -325,9 +329,9 @@ impl ObjectiveManager {
             .filter(|o| o.status == ObjectiveStatus::Active)
             .map(|o| {
                 let mut score = o.utility.score(o.mandatory, conditions);
-                if let Some((boost_id, bonus)) = boost {
+                if let Some(boost_id) = boost {
                     if o.id == boost_id {
-                        score += bonus;
+                        score = f32::MAX;
                     }
                 }
                 let relevance = directive_relevance(&o.directive);
@@ -760,6 +764,46 @@ mod tests {
         let pool = mgr.scored_pool(&WorldConditions::default());
         assert_eq!(pool[0].id, "high");
         assert_eq!(pool[1].id, "low");
+    }
+
+    #[test]
+    fn captain_priority_selection_outranks_a_higher_authored_score() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "patrol",
+            "Patrol",
+            false,
+            vec![],
+            AiDirective::Patrol {
+                anchors: vec!["alpha".into()],
+                loop_path: true,
+            },
+            UtilityConfig {
+                base_priority: 90.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        mgr.add_full(
+            "destroy-priority",
+            "Destroy priority target",
+            false,
+            vec!["priority-target".into()],
+            AiDirective::Destroy {
+                target: "priority-target".into(),
+            },
+            UtilityConfig {
+                base_priority: 10.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+
+        let pool =
+            mgr.scored_pool_with_boost(&WorldConditions::default(), Some("destroy-priority"));
+
+        assert_eq!(pool[0].id, "destroy-priority");
+        assert_eq!(pool[0].score, f32::MAX);
     }
 
     #[test]

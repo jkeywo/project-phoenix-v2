@@ -2327,13 +2327,7 @@ mod tests {
         );
         assert!(boost.boost_arg("ship-b").is_none());
         // ...and ship-a's own consumer still sees it.
-        assert_eq!(
-            boost.boost_arg("ship-a"),
-            Some((
-                "destroy-hostiles",
-                crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT
-            ))
-        );
+        assert_eq!(boost.boost_arg("ship-a"), Some("destroy-hostiles"));
     }
 
     #[test]

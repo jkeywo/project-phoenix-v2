@@ -148,7 +148,7 @@ entities:
       # handle itself is deliberately NOT a symbol here — it is exactly the
       # unstable-across-instances handle #894 and this slice name as the
       # thing fold order must never key on.
-      symbols: [EntityUuid, EntityId, EntityName]
+      symbols: [EntityUuid, EntityId, EntityName, StaticPointDefence]
       messages: [EntitySpawned, EntityDespawned]
 
   - component: model-marker-contract

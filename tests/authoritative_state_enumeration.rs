@@ -118,7 +118,7 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "ShipIntentNarration", "ShipModifiers", "ShipPhysics", "ShipRedAlert", "SimRng",
     "SimRngState", "SimulationPaused", "SourceLocation", "StationConfig", "SteeringInput",
     "SystemBlackboard",
-    "SystemHull", "TacticalRadarSelection", "TeamSlot", "ThrustInput", "Torpedo",
+    "StaticPointDefence", "SystemHull", "TacticalRadarSelection", "TeamSlot", "ThrustInput", "Torpedo",
     "TorpedoDetonation", "TorpedoSystem", "TorpedoTube", "TubeBurstState", "VerticalMovementMode",
     "ViewscreenArbiter", "ViewscreenResolution", "WaypointMode", "WeaponsDoctrineAiPolicy",
     "WorldConfig", "WorldEntity",

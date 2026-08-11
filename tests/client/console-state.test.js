@@ -1631,14 +1631,28 @@ describe('buildNavigationConsoleState', () => {
   it('draws a radar_icon star as a star on the navigation chart', () => {
     const state = {
       shipX: 0, shipZ: 0,
+      navChartShows: ['star'],
       asteroids: [
-        { uuid: 'sun', name: 'Sun', x: 0, z: 50, tags: ['unknown'], radar_icon: 'star', objective_target: true },
+        { uuid: 'sun', name: 'Sun', x: 0, z: 50, tags: ['star'], radar_icon: 'star', objective_target: true },
       ],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
     expect(blips).toHaveLength(1);
     expect(blips[0].kind).toBe('star');
     expect(blips[0].icon).toBe('star');
+  });
+
+  it('does not show a ship merely because it is an active objective target', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      navChartShows: ['station', 'objective_marker'],
+      objectives: [{ id: 'obj-destroy-wave-1', status: 'Active', targets: ['wave_1'] }],
+      asteroids: [
+        { uuid: 'wave-1', name: 'wave_1', x: 100, z: 0, tags: ['ship'], radar_icon: 'ship' },
+      ],
+    };
+
+    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
   });
 
   it('excludes bare asteroid entities', () => {

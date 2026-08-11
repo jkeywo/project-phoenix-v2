@@ -3,7 +3,7 @@
 //! Replaces the legacy gizmos-based `draw_radar_overlay` with the same
 //! `GuiRadarPlugin` + `GenericRadarWidget` + `RadarAppearance` pipeline used
 //! by all client phone consoles.  Configuration is sourced from
-//! `assets/entities/alliance_cruiser.toml` via the `config_cache` — the same path
+//! the selected player hull via the `config_cache` — the same path
 //! `lobby/server.rs` uses — so the viewscreen and the phones always reflect the
 //! same TOML values.
 //!
@@ -84,6 +84,15 @@ impl Plugin for ServerViewscreenRadarPlugin {
 fn radar_filter_from_shows(shows: &[crate::entity_tags::EntityTag]) -> RadarFilter {
     let set: HashSet<String> = shows.iter().map(|t| t.as_str().to_string()).collect();
     RadarFilter(set)
+}
+
+/// The hull selected before `wasm_init` is the source of the viewscreen's
+/// presentation config. Keep the legacy cruiser fallback for worlds without a
+/// ship catalogue and for small bare-`App` fixtures.
+fn viewscreen_ship_config_path(selected_ship: Option<&crate::lobby::SelectedShipResource>) -> &str {
+    selected_ship
+        .map(|selected| selected.0.as_str())
+        .unwrap_or("assets/entities/alliance_cruiser.toml")
 }
 
 /// Map a `ViewMode` to the `ConsoleRadar` variant of the widget that should
@@ -169,9 +178,12 @@ struct ViewscreenRadarSpec {
     auto_scale: Option<AutoScaleRadar>,
 }
 
-fn spawn_viewscreen_radar_widgets(mut commands: Commands) {
+fn spawn_viewscreen_radar_widgets(
+    mut commands: Commands,
+    selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
+) {
     let config_cache = crate::config_cache::get_config_cache();
-    let ship_config = config_cache.get("assets/entities/alliance_cruiser.toml");
+    let ship_config = config_cache.get(viewscreen_ship_config_path(selected_ship.as_deref()));
 
     let helm_radar = ship_config
         .and_then(|c| c.helm_console.as_ref())
@@ -426,6 +438,20 @@ mod tests {
         assert_eq!(
             backdrop_for_mode(RadarContainerMode::Nav),
             RadarBackdropMode::FullScreen
+        );
+    }
+
+    #[test]
+    fn viewscreen_radar_uses_the_selected_hull_config_path() {
+        let selected =
+            crate::lobby::SelectedShipResource("assets/entities/alliance_battleship.toml".into());
+        assert_eq!(
+            viewscreen_ship_config_path(Some(&selected)),
+            "assets/entities/alliance_battleship.toml"
+        );
+        assert_eq!(
+            viewscreen_ship_config_path(None),
+            "assets/entities/alliance_cruiser.toml"
         );
     }
 }

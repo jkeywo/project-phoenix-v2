@@ -10,8 +10,8 @@ use bevy_rapier3d::prelude::ReadRapierContext;
 use crate::entity_spawner::{EntitySystemHull, FactionComponent};
 use crate::lobby::{Target, WorldResource};
 use crate::messages::{
-    AdmittedCommands, GamePhase, InterSystemMsg, InterSystemPayload, InterSystemQueue,
-    ModifierSlot, PhaserBank, PhaserMode, ServerMessage, SystemBlackboard, SystemControlPayload,
+    AdmittedCommands, GamePhase, ModifierSlot, PhaserBank, PhaserMode, ServerMessage,
+    SystemBlackboard, SystemControlPayload,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
@@ -32,10 +32,6 @@ use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIU
 // must read the resource.
 pub const BEAM_DAMAGE_PER_SEC: f32 =
     crate::entity_config::PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC;
-
-/// Battery energy drained from the Power system each second while a phaser
-/// beam is active. Sent via the inter-system command channel (issue #559).
-pub const PHASER_BATTERY_DRAIN_PER_SEC: f32 = 5.0;
 
 /// The currently locked target UUID on the Weapons console. `None` means no
 /// lock is active.
@@ -2053,36 +2049,6 @@ pub(crate) fn handle_set_phaser_frequency(
             if let Some(mut freq) = freq_q.iter_mut().next() {
                 freq.0 = frequency.clamp(0.0, 1.0);
             }
-        }
-    }
-}
-
-/// Drains each ship's Power battery via the inter-system command channel
-/// while its own phaser beam is active. Runs in `SimSet::Physics` (one
-/// phase before `tick_beams` in `SimSet::Damage`); the Power system
-/// consumes the drain in `SimSet::Modifiers` per-entity via `source_entity`.
-///
-/// Iterates every ship so NPC beams drain their own power grid the same
-/// way the player's do. The target is the **battery** fine system
-/// (`POWER_BATTERY_SYSTEM_ID` — issue #513); a Disabled/Destroyed battery
-/// refuses the drain via `handle_power_inter_system`'s offline gate.
-pub fn drain_power_for_active_beam(
-    beam_q: Query<(Entity, &ActiveBeam), With<crate::server_app::Ship>>,
-    time: Res<Time>,
-    mut inter_system: ResMut<InterSystemQueue>,
-) {
-    let amount = PHASER_BATTERY_DRAIN_PER_SEC * time.delta_secs();
-    for (source_entity, beam) in beam_q.iter() {
-        // One drain per LIVE BANK (issue #790). A ship burning both broadsides
-        // is running two emitters and pays for two: keeping this ship-level
-        // would have made the second beam free, which is the kind of silent
-        // discount a "just make it per-bank" rework leaves behind.
-        for _ in 0..beam.live_bank_count() {
-            inter_system.0.push(InterSystemMsg {
-                target: crate::system_registry::power_battery_system_id(),
-                payload: InterSystemPayload::DrainWeaponsBattery { amount },
-                source_entity: Some(source_entity),
-            });
         }
     }
 }

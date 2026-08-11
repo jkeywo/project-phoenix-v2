@@ -11776,8 +11776,8 @@ fn npc_without_its_own_torpedo_system_cannot_fire_from_the_player_ships_magazine
 // its `ClaimTorpedoRound` message. `handle_torpedo_magazine_inter_system`
 // then queried `With<LocalShip>` only, so an NPC's claim would either
 // be ignored entirely or misroute to the player ship. Post-fix, both
-// sides route by source_entity (mirroring `handle_power_inter_system`)
-// so each ship's claims mutate that ship's own magazine.
+// the magazine consumer routes by source_entity so each ship's claims mutate
+// that ship's own magazine.
 
 #[test]
 fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
@@ -14301,14 +14301,13 @@ fn each_live_broadside_bank_announces_its_own_beam_on_the_wire() {
     );
 }
 
-/// Both live beams draw power, one drain per burning bank.
+/// Phaser activity does not mutate the Power battery directly.
 ///
-/// A ship running two emitters pays for two. Keeping the drain ship-level would
-/// have made the second broadside free — exactly the sort of silent discount a
-/// per-bank rework leaves behind if nobody looks.
+/// The reactor's authored allocation-rate curve is the sole source of battery
+/// charge movement. Keep two banks live here so a future per-bank drain cannot
+/// slip back in unnoticed.
 #[test]
-fn every_live_broadside_bank_draws_its_own_power() {
-    use crate::messages::InterSystemPayload;
+fn live_phaser_banks_do_not_emit_power_battery_commands() {
     let mut app = test_app();
     app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc_at(
@@ -14321,19 +14320,16 @@ fn every_live_broadside_bank_draws_its_own_power() {
     app.update();
     assert_eq!(live_banks_of(&app, npc).len(), 2, "precondition: two beams");
     app.update();
-    let drains = app
+    let battery_commands = app
         .world()
         .resource::<crate::messages::InterSystemQueue>()
         .0
         .iter()
-        .filter(|m| {
-            matches!(m.payload, InterSystemPayload::DrainWeaponsBattery { .. })
-                && m.source_entity == Some(npc)
-        })
+        .filter(|m| m.target == crate::system_registry::power_battery_system_id())
         .count();
     assert_eq!(
-        drains, 2,
-        "two burning banks must draw two battery drains, not one"
+        battery_commands, 0,
+        "live phaser banks must not send commands to the Power battery"
     );
 }
 

@@ -255,9 +255,8 @@ pub const TORPEDO_MAGAZINE_SYSTEM_ID: &str = "torpedo-magazine";
 // `POWER_SYSTEM_ID = "power"` remains as a stable string constant so tests
 // and legacy readers (e.g. the JS panel's aggregate `blackboards['power']`
 // entry) can still address the aggregate surface. All admission /
-// allocation logic now targets the fine `power_reactor` kind; battery drain
-// (channel-2 `DrainWeaponsBattery`) targets `power_battery`. Both fine
-// systems live on the `power` station and are held by the single
+// allocation logic now targets the fine `power_reactor` kind. Both fine
+// Power systems live on the `power` station and are held by the single
 // power-station holder — the split is invisible to the human but grants
 // per-instance damage semantics (reactor disabled → no allocation input;
 // battery disabled → no emergency reserves).
@@ -273,10 +272,9 @@ pub const POWER_REACTOR_SYSTEM_ID: &str = "power-reactor";
 
 /// Wire `SystemId` for the Power Battery fine system.
 ///
-/// The battery is the target for `InterSystemPayload::DrainWeaponsBattery`
-/// (channel-2). A Disabled/Destroyed battery refuses the drain — the pool
-/// is treated as immovable/0-reserves so magazine-style weapons draws
-/// (phaser beams) cannot consume from it.
+/// The battery owns the emergency-reserve state published to the Power console.
+/// Its charge is integrated from the reactor's authored allocation-rate curve;
+/// weapon activity does not mutate it directly.
 pub const POWER_BATTERY_KIND: &str = "power_battery";
 pub const POWER_BATTERY_SYSTEM_ID: &str = "power-battery";
 

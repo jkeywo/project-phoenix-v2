@@ -187,7 +187,7 @@ impl PowerSystem {
     /// Construct a `PowerSystem` seeded from a ship's authored power groups
     /// (issue #762). Each `(group, level)` is inserted at the given level,
     /// clamped to `[1, 4]`, in the order supplied — so a ship that authors an
-    /// `ops` group beyond the canonical three gets it seeded and therefore
+    /// extra group beyond the canonical three gets it seeded and therefore
     /// allocatable (otherwise `set_group_allocation` returns `UnknownGroup`
     /// and any authored rule targeting it silently no-ops).
     ///
@@ -470,7 +470,8 @@ pub struct AllocationBid {
 ///
 /// * Groups with no bid are RESERVED at their current commanded level. The
 ///   policy has authored no verb for them, so there is nothing that says they
-///   may be cut; `ops` on the Alliance hulls sits here.
+///   may be cut; this preserves an authored auxiliary group a policy does not
+///   bid for.
 /// * Every bidding group is guaranteed [`GROUP_LEVEL_MIN`], because that is the
 ///   floor the setter API clamps to and no distribution can go under it.
 /// * What is left over — `MAX_COMMANDED_TOTAL - reserved - one per bidder` — is
@@ -923,8 +924,8 @@ mod tests {
 
     // ── Budget-aware allocation planning (issue #959) ────────────────────────
 
-    fn ops() -> PowerGroupId {
-        PowerGroupId("ops".into())
+    fn auxiliary() -> PowerGroupId {
+        PowerGroupId("auxiliary".into())
     }
 
     /// A bid at the shipped fleet's ordering: every elevation rule authored at
@@ -940,10 +941,15 @@ mod tests {
 
     /// The four-group Alliance shape: `ops` outside the canonical trio, seeded
     /// at 1, with nothing in the policy bidding for it.
-    fn alliance_reactor() -> PowerSystem {
+    fn reactor_with_auxiliary_group() -> PowerSystem {
         PowerSystem::from_authored_groups(
             90.0,
-            &[(helm(), 2), (weapons(), 2), (shields(), 1), (ops(), 1)],
+            &[
+                (helm(), 2),
+                (weapons(), 2),
+                (shields(), 1),
+                (auxiliary(), 1),
+            ],
         )
     }
 
@@ -952,7 +958,7 @@ mod tests {
     /// exactly, and every planned level is inside the group's own ceiling.
     #[test]
     fn plan_allocation_spends_the_budget_without_exceeding_it() {
-        let ps = alliance_reactor();
+        let ps = reactor_with_auxiliary_group();
         let plan = plan_allocation(&ps, &[bid(helm(), 3, 10), bid(weapons(), 3, 10)]);
 
         let mut after = ps.clone();
@@ -974,7 +980,7 @@ mod tests {
     /// on asking for a level the hull had already ruled out.
     #[test]
     fn plan_allocation_trims_a_bid_to_the_groups_authored_max_level() {
-        let mut ps = alliance_reactor();
+        let mut ps = reactor_with_auxiliary_group();
         ps.set_group_allocation(&weapons(), 1).unwrap();
         let capped = AllocationBid {
             max_level: 2,
@@ -998,7 +1004,7 @@ mod tests {
     /// the last lands on its minimum. Nothing is refused by the applier.
     #[test]
     fn plan_allocation_rations_a_budget_collision_by_authored_priority() {
-        let ps = alliance_reactor();
+        let ps = reactor_with_auxiliary_group();
         let plan = plan_allocation(
             &ps,
             &[
@@ -1019,7 +1025,7 @@ mod tests {
         assert_eq!(after.commanded_level_for(&shields()), 2);
         assert_eq!(after.commanded_level_for(&helm()), 1);
         assert_eq!(
-            after.commanded_level_for(&ops()),
+            after.commanded_level_for(&auxiliary()),
             1,
             "un-bid groups are reserved"
         );
@@ -1042,7 +1048,7 @@ mod tests {
     /// secondary authored key left, so this fallback is the whole tie-break.
     #[test]
     fn plan_allocation_breaks_a_priority_tie_on_the_callers_group_order() {
-        let ps = alliance_reactor();
+        let ps = reactor_with_auxiliary_group();
         // Both at priority 10, both asking for 4, only 4 discretionary points.
         let plan = plan_allocation(&ps, &[bid(helm(), 4, 10), bid(weapons(), 4, 10)]);
         let mut after = ps.clone();
@@ -1064,7 +1070,7 @@ mod tests {
     /// every decision arm for ever.
     #[test]
     fn plan_allocation_settles_and_stops_emitting() {
-        let mut ps = alliance_reactor();
+        let mut ps = reactor_with_auxiliary_group();
         let bids = [
             bid(helm(), 4, 10),
             bid(weapons(), 4, 10),
@@ -1094,7 +1100,7 @@ mod tests {
     #[test]
     fn plan_allocation_orders_decreases_before_the_increases_they_pay_for() {
         // Commanded at the cap already: helm 4 / weapons 2 / shields 1 / ops 1.
-        let mut ps = alliance_reactor();
+        let mut ps = reactor_with_auxiliary_group();
         ps.set_group_allocation(&helm(), 4).unwrap();
         assert_eq!(ps.commanded_total(), MAX_COMMANDED_TOTAL);
 
@@ -1123,7 +1129,7 @@ mod tests {
     /// would starve a real group of a point that was never spent.
     #[test]
     fn plan_allocation_ignores_a_bid_for_an_untracked_group() {
-        let ps = alliance_reactor();
+        let ps = reactor_with_auxiliary_group();
         let plan = plan_allocation(
             &ps,
             &[
@@ -1156,7 +1162,7 @@ mod tests {
                 (helm(), 2),
                 (weapons(), 2),
                 (shields(), 2),
-                (ops(), 2),
+                (auxiliary(), 2),
                 (life_support.clone(), 2),
             ],
         );

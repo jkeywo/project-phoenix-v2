@@ -300,12 +300,10 @@ yaw_follow_deg_per_sec = 45
 [shields_console]
 # What a reactor point spent on `shields` buys: `ModifierSlot::ShieldRegen`
 # (issue #952). Index 0 is 0.0 rather than the fleet default's -0.5 because
-# this hull RESTS `[power_groups.shields]` at 1 to keep its four groups inside
-# the reactor's sustainable total — so level 1 has to mean "the regen every
-# `[[shield_arc]]` below authors", not a permanent two-thirds penalty on a
-# group nothing ever raises. The rungs above it are what the Power officer buys
-# by taking a point off helm or weapons.
-power_multipliers = [ 0, 0.25, 0.5, 1 ]
+# Shields rest at level 2, alongside Helm and Weapons: each `[[shield_arc]]`
+# therefore regenerates at its authored rate. The rungs either side trade a
+# reactor point for slower or faster shield recovery.
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 focus_bonus_max_hp = 0
 focus_bonus_regen = 4
 focus_penalty_max_hp = 0
@@ -338,7 +336,7 @@ hull_max_hp = 4
 [power]
 capacity = 35
 # Index 3 (a ship-wide total of 6) is +1, not a 0. 6 is this hull's RESTING
-# total (`ops 1 + helm 2 + weapons 2 + shields 1`), so a 0 rate there would mean
+# total (`helm 2 + weapons 2 + shields 2`), so a 0 rate there would mean
 # a courier sitting quietly at anchor never recovers a point of charge — the
 # resting draw must recharge, however slowly.
 rates = [ 3, 2, 1, 1, -1, -3 ]
@@ -385,14 +383,6 @@ when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
 
-[power_groups.ops]
-label = "entity.alliance_courier.power_groups.ops.label"
-# Rests at 1 so the four authored groups sum to a sustainable total (<=6): the
-# reactor recharges at idle and the AI/human spends up only on demand (#762).
-default_level = 1
-min_level = 1
-max_level = 4
-
 [power_groups.helm]
 label = "entity.alliance_courier.power_groups.helm.label"
 # `min_level = 2` is the allocation lower bound the console and AI budget clamp
@@ -415,13 +405,10 @@ max_level = 4
 
 [power_groups.shields]
 label = "entity.alliance_courier.power_groups.shields.label"
-# Rests at 1 (the seat the retired `sensors` group used to occupy) so the four
-# authored groups still sum to a sustainable total. Level 1 is the ×1.0 rung on
-# this hull's `[shields_console] power_multipliers`, so resting here costs the
-# arcs nothing — spending UP is what buys regen, a human Power officer's trade
-# against helm or weapons.
-default_level = 1
-min_level = 1
+# Nominal at 2 alongside Helm and Weapons: those three groups make the
+# sustainable resting total of 6. Higher levels buy shield regeneration.
+default_level = 2
+min_level = 2
 max_level = 4
 
 # ── Stations ─────────────────────────────────────────────────────────────────
@@ -458,7 +445,6 @@ automated_systems = []
 id = "captain"
 kind = "captain"
 station = "captain"
-power_group = "ops"
 
 # The wire target of set_view is `viewscreen`, but authorisation resolves
 # through source_system_for_view_mode to `captain` for both Camera and
@@ -467,25 +453,21 @@ power_group = "ops"
 id = "viewscreen"
 kind = "viewscreen"
 station = "captain"
-power_group = "ops"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
 station = "captain"
-power_group = "ops"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
 station = "tactical"
-power_group = "ops"
 
 [[system]]
 id = "sensor-radar"
 kind = "sensor_radar"
 station = "tactical"
-power_group = "ops"
 
 # Per-axis helm systems (issue #701; thrust/steering declared in #800,
 # impulse/boost/lateral in #703/#704/#801 — no coarse `helm` system remains).
@@ -562,13 +544,11 @@ power_group = "weapons"
 id = "navigation"
 kind = "navigation"
 station = "captain"
-power_group = "ops"
 
 [[system]]
 id = "comms"
 kind = "comms"
 station = "captain"
-power_group = "ops"
 
 [[system]]
 id = "shields-system"
@@ -580,19 +560,16 @@ power_group = "shields"
 id = "repair"
 kind = "repair"
 station = "captain"
-power_group = "ops"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
 station = "captain"
-power_group = "ops"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
 station = "captain"
-power_group = "ops"
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 # Every sound this ship makes. Playback is server-side only (the host page's

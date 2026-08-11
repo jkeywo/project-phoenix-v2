@@ -3125,14 +3125,12 @@ station = "sensors"
         assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 1);
     }
 
-    /// The shipped fleet's own allocation is unchanged by all of this: combat
-    /// stations on a four-group Alliance hull still lands helm 3 / weapons 3
-    /// against `ops` 1 and `shields` 1, and still settles.
+    /// The shipped fleet's combat allocation settles with its three intended
+    /// groups: helm 3 / weapons 3 / shields 2.
     ///
     /// All four groups are pinned individually, not just jointly by the total —
-    /// `ops` and `shields` are the un-bid pair `plan_allocation` RESERVES, and a
-    /// planner that cut them to `GROUP_LEVEL_MIN` to buy the bidders more would
-    /// still sum to 8.
+    /// Shields receive no combat bid, so their authored resting level is
+    /// reserved rather than cut to buy another group an extra point.
     ///
     /// The settle is the second half of the name, and it is assertable here
     /// without a per-tick `AdmittedCommands` clear: `handle_power_messages` does
@@ -3156,10 +3154,9 @@ station = "sensors"
         assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
         assert_eq!(
             commanded(&app, e, SHIELDS_POWER_GROUP),
-            1,
+            2,
             "reserved, not cut"
         );
-        assert_eq!(commanded(&app, e, "ops"), 1, "reserved, not cut");
         assert_eq!(
             commanded_total(&app, e),
             crate::modifiers::power_system::MAX_COMMANDED_TOTAL

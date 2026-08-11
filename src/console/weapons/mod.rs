@@ -218,7 +218,7 @@ impl Plugin for WeaponsPlugin {
                     // Explicit `.chain()` edges keep the three deterministic
                     // within `SimSet::Damage`. Instance-based `.chain()` rather
                     // than type-set `.after(...)` edges (the
-                    // `drain_power_for_active_beam` style below) because the
+                    // system-type ordering style) because the
                     // weapons test harness registers a second instance of each
                     // phase, which would make a `SystemTypeSet` ordering
                     // ambiguous and panic at schedule build.
@@ -240,9 +240,6 @@ impl Plugin for WeaponsPlugin {
                     handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Physics),
                     handle_load_tube.in_set(crate::sim_sets::SimSet::Physics),
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Physics),
-                    drain_power_for_active_beam
-                        .in_set(crate::sim_sets::SimSet::Physics)
-                        .after(handle_fire_phaser),
                     // Torpedo tick split into two phases (issue #724),
                     // connected by the one-tick `TorpedoTargetSnapshot`
                     // resource: the builder writes it, the lifecycle reads
@@ -309,20 +306,17 @@ pub(crate) use blaster::{
 pub use blaster::{seed_blaster_bank_facts, BlasterBankAiPolicies, BlasterSystemResource};
 
 // Beam (phaser) types and systems extracted to `beam.rs` (issue #727). The
-// types and `drain_power_for_active_beam` stay `pub` here for external
-// consumers (`src/server_app.rs` chained re-exports, `src/ship/power.rs`,
-// `src/server/pfx.rs`, and friends); the systems are re-exported so the
-// plugin build fn and the test module keep resolving them.
+// public types stay re-exported here for external consumers; the systems are
+// re-exported so the plugin build fn and the test module keep resolving them.
 pub(crate) use beam::{
     ai_phaser_auto_fire, handle_fire_phaser, handle_set_phaser_frequency, handle_set_phaser_mode,
     handle_set_target, on_beam_ended, on_beam_started, tick_beams_apply_damage, tick_beams_prepare,
     tick_beams_tick_lifetimes,
 };
 pub use beam::{
-    drain_power_for_active_beam, seed_phaser_bank_facts, ActiveBeam, BeamEndedEvent,
-    BeamStartedEvent, CurrentPhaserMode, LastShipAttacker, PhaserBankAiPolicies,
-    PhaserCombatConfigResource, PhaserCooldown, TacticalRadarSelection, TacticalTargetSelector,
-    BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
+    seed_phaser_bank_facts, ActiveBeam, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
+    LastShipAttacker, PhaserBankAiPolicies, PhaserCombatConfigResource, PhaserCooldown,
+    TacticalRadarSelection, TacticalTargetSelector, BEAM_DAMAGE_PER_SEC,
 };
 
 // Torpedo systems extracted to `torpedo.rs` (issue #728). `TorpedoSystemResource`

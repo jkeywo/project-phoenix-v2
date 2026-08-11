@@ -2,9 +2,8 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    CoordinationPayload, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard,
-    PowerBlackboard, PowerGroupEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage,
-    SystemBlackboard, SystemId,
+    CoordinationPayload, PowerBatteryBlackboard, PowerBlackboard, PowerGroupEntry, PowerGroupId,
+    PowerReactorBlackboard, ServerMessage, SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
     power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
@@ -241,9 +240,7 @@ impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         // Admitted-command consumer (issue #833): `handle_power_messages` reads
-        // the `power-reactor` system's admitted commands. (The `power-battery`
-        // read in `handle_power_inter_system` is off the InterSystemQueue, a
-        // separate bus outside admitted routing.)
+        // the `power-reactor` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::POWER_REACTOR_SYSTEM_ID,
         ));
@@ -278,7 +275,6 @@ impl Plugin for ShipPowerPlugin {
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(tick_power_system),
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
-                    handle_power_inter_system.in_set(crate::sim_sets::SimSet::Modifiers),
                     tick_power_brownout_advisory.in_set(crate::sim_sets::SimSet::Modifiers),
                     publish_power_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
@@ -401,147 +397,6 @@ pub fn handle_power_messages(
         if is_local {
             if let (Some(pc), Some(pr)) = (power_comp.as_deref(), power_res.as_deref_mut()) {
                 pr.0 = pc.0.clone();
-            }
-        }
-    }
-}
-
-/// Apply inter-system commands (e.g. `DrainWeaponsBattery` from Weapons).
-///
-/// Invariant-gated: no control-state check. Runs in `SimSet::Modifiers`,
-/// after physics ticks have emitted their inter-system messages.
-///
-/// Routes by `source_entity` so every ship's own inter-system messages
-/// mutate that ship's own per-entity `ShipPowerSystem` component. Falls
-/// back to the LocalShip's Component (or the global Resource for legacy
-/// test paths) when `source_entity` is `None`.
-///
-/// **Issue #513 battery offline gate.** Drain messages target the
-/// [`crate::system_registry::POWER_BATTERY_SYSTEM_ID`] fine system. If the
-/// battery is in `ShipSystemControlSources.offline_systems` (i.e. hull
-/// damage put it into Disabled/Destroyed tier), the drain is refused —
-/// the reserve pool is treated as inaccessible so weapons draws cannot
-/// consume from it. The gate applies uniformly whether the mutation
-/// would land on a per-entity `ShipPowerSystem` component or on the
-/// fallback `ShipPowerSystem` Resource — `ShipSystemControlSources` is
-/// consulted on the same ship entity in both paths.
-pub fn handle_power_inter_system(
-    queue: Res<InterSystemQueue>,
-    mut ship_q: Query<
-        (
-            Entity,
-            &mut ShipPowerSystem,
-            Option<&PowerConfigResource>,
-            Option<&crate::ship_plugin::ShipSystemControlSources>,
-            Has<crate::server_app::LocalShip>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-    cs_only_q: Query<
-        (
-            Entity,
-            &crate::ship_plugin::ShipSystemControlSources,
-            Has<crate::server_app::LocalShip>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-    power_res: Option<ResMut<ShipPowerSystem>>,
-    config_res: Option<Res<PowerConfigResource>>,
-) {
-    let mut power_res = power_res;
-    let battery_id = crate::system_registry::power_battery_system_id();
-    // Snapshot the LocalShip entity so `source_entity: None` (legacy path)
-    // resolves to the player. Collect per-entity references once so we can
-    // dispatch a mutable borrow per message inside the loop.
-    let local_ship_entity: Option<Entity> = ship_q
-        .iter()
-        .find_map(|(e, _, _, _, is_local)| if is_local { Some(e) } else { None })
-        .or_else(|| {
-            cs_only_q
-                .iter()
-                .find_map(|(e, _, is_local)| if is_local { Some(e) } else { None })
-        });
-    // Pre-collect the set of ships whose battery is offline (via the
-    // control-sources-only query). Used to gate both the per-entity path
-    // and the Resource fallback path so a Disabled/Destroyed battery
-    // refuses drains regardless of where the mutation would land.
-    let battery_offline_ships: std::collections::HashSet<Entity> = cs_only_q
-        .iter()
-        .filter_map(|(e, cs, _)| {
-            if cs.0.is_offline(&battery_id) {
-                Some(e)
-            } else {
-                None
-            }
-        })
-        .collect();
-    let mut applied_local = false;
-
-    for msg in queue.for_target(crate::system_registry::POWER_BATTERY_SYSTEM_ID) {
-        let target_entity = msg.source_entity.or(local_ship_entity);
-        match &msg.payload {
-            InterSystemPayload::DrainWeaponsBattery { amount } => {
-                // Offline gate applies uniformly (per-entity + Resource paths).
-                if let Some(target) = target_entity {
-                    if battery_offline_ships.contains(&target) {
-                        continue;
-                    }
-                }
-                if let Some(target) = target_entity {
-                    if let Ok((_, mut power_comp, cfg_comp, _cs_comp, is_local)) =
-                        ship_q.get_mut(target)
-                    {
-                        let cfg_default;
-                        let config: &PowerConfigResource = match cfg_comp {
-                            Some(c) => c,
-                            None => match config_res.as_deref() {
-                                Some(c) => c,
-                                None => {
-                                    cfg_default = PowerConfigResource::default();
-                                    &cfg_default
-                                }
-                            },
-                        };
-                        power_comp.0.battery_charge =
-                            (power_comp.0.battery_charge - amount).clamp(0.0, config.0.capacity);
-                        if is_local {
-                            applied_local = true;
-                        }
-                        continue;
-                    }
-                }
-                // Resource-only fallback for tests without a Ship entity
-                // (or without a ShipPowerSystem component on the ship).
-                let cfg_default;
-                let config: &PowerConfigResource = match config_res.as_deref() {
-                    Some(c) => c,
-                    None => {
-                        cfg_default = PowerConfigResource::default();
-                        &cfg_default
-                    }
-                };
-                if let Some(pr) = power_res.as_deref_mut() {
-                    pr.0.battery_charge =
-                        (pr.0.battery_charge - amount).clamp(0.0, config.0.capacity);
-                }
-            }
-            // JoystickState messages are produced by the Helm fine systems (issue #511)
-            // and are not relevant to the Power system — ignore them.
-            InterSystemPayload::JoystickState { .. } => {}
-            // ClaimTorpedoRound messages are produced by the Torpedo Tube fine systems
-            // (issue #512) and consumed by the magazine handler — ignore them here.
-            InterSystemPayload::ClaimTorpedoRound { .. } => {}
-        }
-    }
-
-    // Dual-write: keep the Resource in sync with the LocalShip's Component
-    // when both exist (legacy Resource path for tests).
-    if applied_local {
-        if let Some(local) = local_ship_entity {
-            if let Ok((_, pc, _, _, _)) = ship_q.get(local) {
-                if let Some(pr) = power_res.as_deref_mut() {
-                    pr.0 = pc.0.clone();
-                }
             }
         }
     }
@@ -1455,175 +1310,10 @@ mod tests {
         );
     }
 
-    // ── Inter-system command channel tests (issue #559) ───────────────────────
-    //
-    // `operate_power_ai`'s tests were removed in issue #693 along with the
-    // system itself. System-level coverage for the replacement
-    // `ai_power_allocation` (which since issue #831 emits admitted commands
-    // applied by `handle_power_messages`) lives in `console_ai::server`'s test
-    // module.
-    //
-    // These tests exercise the full weapons→power inter-system drain flow.
-    // A minimal combined app registers both `drain_power_for_active_beam`
-    // (Weapons, Physics) and `handle_power_inter_system` (Power, Modifiers)
-    // with SimSets chained, so we can set an active beam and verify the
-    // Power battery decreases in the same tick.
-
-    fn inter_system_test_app() -> App {
-        use crate::console::weapons::{drain_power_for_active_beam, ActiveBeam};
-        let mut app = App::new();
-        app.add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(100),
-            ))
-            // Power resources and handler.
-            .insert_resource(ShipPowerSystem(PowerSystem::default()))
-            .init_resource::<PowerConfigResource>()
-            .init_resource::<crate::messages::InterSystemQueue>()
-            // Chain emitter before consumer so the queue is populated before it's read.
-            .add_systems(
-                Update,
-                (drain_power_for_active_beam, handle_power_inter_system).chain(),
-            );
-        // Spawn a LocalShip entity carrying the per-entity ActiveBeam component.
-        // After PR-7 (issue #597) `ActiveBeam` is a per-entity `Component`, not a `Resource`.
-        app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
-            ActiveBeam::default(),
-        ));
-        // Warm up the time plugin so delta_secs is non-zero on the first real tick.
-        app.update();
-        app
-    }
-
-    /// Helper: mutate the LocalShip's `ActiveBeam` component in tests.
-    fn set_beam_target(app: &mut App, uuid: Option<String>) {
-        use crate::console::weapons::ActiveBeam;
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();
-        if let Ok(mut b) = q.single_mut(app.world_mut()) {
-            // Per-bank since issue #790; this fixture drives the legacy single
-            // implicit bank (`""`), which is what a ship with no authored banks
-            // fires from.
-            match uuid {
-                Some(u) => b.start("", u, 1.0),
-                None => {
-                    b.end_bank("");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn active_beam_drains_power_battery_via_inter_system_channel() {
-        use crate::console::weapons::PHASER_BATTERY_DRAIN_PER_SEC;
-        let mut app = inter_system_test_app();
-
-        // Simulate an active phaser beam.
-        set_beam_target(&mut app, Some("target-asteroid".into()));
-
-        let charge_before = app.world().resource::<ShipPowerSystem>().0.battery_charge;
-        app.update();
-        let charge_after = app.world().resource::<ShipPowerSystem>().0.battery_charge;
-
-        // dt = 100ms → expected drain ≈ PHASER_BATTERY_DRAIN_PER_SEC * 0.1
-        let expected_drain = PHASER_BATTERY_DRAIN_PER_SEC * 0.1;
-        assert!(
-            charge_after < charge_before,
-            "active beam must drain battery (before={charge_before}, after={charge_after})"
-        );
-        assert!(
-            (charge_before - charge_after - expected_drain).abs() < 0.1,
-            "drain should be ~{expected_drain} (before={charge_before}, after={charge_after})"
-        );
-    }
-
-    #[test]
-    fn no_beam_does_not_drain_power_battery() {
-        let mut app = inter_system_test_app();
-        // ActiveBeam defaults to target_uuid = None.
-        let charge_before = app.world().resource::<ShipPowerSystem>().0.battery_charge;
-        app.update();
-        let charge_after = app.world().resource::<ShipPowerSystem>().0.battery_charge;
-
-        assert_eq!(
-            charge_before, charge_after,
-            "no active beam must not drain battery (before={charge_before}, after={charge_after})"
-        );
-    }
-
-    #[test]
-    fn inter_system_drain_clamps_battery_to_zero() {
-        let mut app = inter_system_test_app();
-
-        // Set battery nearly empty (less than one tick of drain).
-        app.world_mut()
-            .resource_mut::<ShipPowerSystem>()
-            .0
-            .battery_charge = 0.1;
-        set_beam_target(&mut app, Some("target-asteroid".into()));
-
-        app.update();
-
-        let charge = app.world().resource::<ShipPowerSystem>().0.battery_charge;
-        assert_eq!(
-            charge, 0.0,
-            "battery must clamp at zero, not go negative (got {charge})"
-        );
-    }
-
     // ── Fine Power system tests (issue #513) ───────────────────────────────────
     //
-    // Cover the reactor / battery offline gates and the fine-system blackboard
-    // publication. Uses the same inter_system_test_app scaffold but adds
-    // ShipSystemControlSources so `offline_systems` can be seeded.
-
-    /// Variant of `inter_system_test_app` whose Ship entity carries
-    /// `ShipSystemControlSources` so tests can seed `offline_systems`
-    /// (mirrors what `sync_console_damage_tiers` would do on Disabled hull).
-    fn inter_system_test_app_with_control_sources() -> App {
-        use crate::console::weapons::{drain_power_for_active_beam, ActiveBeam};
-        let mut app = App::new();
-        app.add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(100),
-            ))
-            .insert_resource(ShipPowerSystem(PowerSystem::default()))
-            .init_resource::<PowerConfigResource>()
-            .init_resource::<crate::messages::InterSystemQueue>()
-            .add_systems(
-                Update,
-                (drain_power_for_active_beam, handle_power_inter_system).chain(),
-            );
-        app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
-            ActiveBeam::default(),
-            crate::ship_plugin::ShipSystemControlSources::default(),
-        ));
-        app.update(); // warm up TimePlugin
-        app
-    }
-
-    fn set_beam_target_on(app: &mut App, uuid: Option<String>) {
-        use crate::console::weapons::ActiveBeam;
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();
-        if let Ok(mut b) = q.single_mut(app.world_mut()) {
-            // Per-bank since issue #790; this fixture drives the legacy single
-            // implicit bank (`""`), which is what a ship with no authored banks
-            // fires from.
-            match uuid {
-                Some(u) => b.start("", u, 1.0),
-                None => {
-                    b.end_bank("");
-                }
-            }
-        }
-    }
+    // Cover the reactor offline gate and the reactor/battery blackboard
+    // publication.
 
     fn mark_offline(app: &mut App, system_id: SystemId) {
         let ship = app
@@ -1756,41 +1446,6 @@ mod tests {
                 .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
             4,
             "reactor offline must refuse allocation input (sensors should stay at 4)"
-        );
-    }
-
-    #[test]
-    fn battery_offline_refuses_drain_from_channel_2() {
-        let mut app = inter_system_test_app_with_control_sources();
-        // Mark battery offline via offline_systems (mirrors sync_console_damage_tiers).
-        mark_offline(&mut app, crate::system_registry::power_battery_system_id());
-
-        set_beam_target_on(&mut app, Some("target-asteroid".into()));
-        // Snapshot both the Resource and the per-entity Component charge; the
-        // ship spawn used here has no ShipPowerSystem component so the fallback
-        // Resource path is what gets exercised. Set the resource charge to a
-        // known baseline so we can verify no change.
-        app.world_mut()
-            .resource_mut::<ShipPowerSystem>()
-            .0
-            .battery_charge = 50.0;
-
-        // Also ensure the per-entity charge (if any) matches.
-        {
-            let mut q = app
-                .world_mut()
-                .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
-            if let Ok(mut pc) = q.single_mut(app.world_mut()) {
-                pc.0.battery_charge = 50.0;
-            }
-        }
-
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.battery_charge,
-            50.0,
-            "battery offline must refuse channel-2 drain (charge should stay at 50.0)"
         );
     }
 

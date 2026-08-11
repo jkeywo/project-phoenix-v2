@@ -809,8 +809,7 @@ pub(crate) fn handle_fire_torpedo(
 /// messages (issue #512).
 ///
 /// Runs in `SimSet::Physics` on ANY ship carrying a `TorpedoSystemResource`
-/// component (`With<Ship>`) — routing by `source_entity` mirrors the
-/// [`crate::ship::power::handle_power_inter_system`] pattern so multiple
+/// component (`With<Ship>`) — routing by `source_entity` ensures multiple
 /// ships with magazines each mutate their own state. Falls back to the
 /// LocalShip when `source_entity` is `None` (legacy path), and to the
 /// global `TorpedoSystemResource` when no matching Ship entity exists at

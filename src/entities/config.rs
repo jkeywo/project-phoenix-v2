@@ -4497,9 +4497,6 @@ impl EntityConfig {
             let effective_shields_station = shields_system
                 .and_then(|s| s.station.clone())
                 .unwrap_or(shields_station_id);
-            let ops_group = crate::messages::PowerGroupId("ops".into());
-            let has_ops_group = ship_config.power_groups.contains_key(&ops_group);
-
             for arc in &config.shield_arcs {
                 let sid =
                     crate::system_registry::shield_arc_system_id(&arc.id).ok_or_else(|| {
@@ -4537,11 +4534,10 @@ impl EntityConfig {
                             None
                         },
                         ai_only: !has_shields_station,
-                        power_group: if has_ops_group {
-                            Some(ops_group.clone())
-                        } else {
-                            None
-                        },
+                        // Shield arcs are governed by the shields group as a
+                        // whole through ShieldRegen; they are not an extra
+                        // allocatable Operations channel.
+                        power_group: None,
                         marker: None,
                         config: Some(toml::Value::Table(synthesised_config)),
                     });
@@ -7094,12 +7090,12 @@ automated_systems = []
         );
         assert!(config.torpedoes.is_none(), "courier has no torpedoes");
 
-        // Power is fully authored, including every canonical group.
+        // Power is fully authored, with the three canonical groups.
         assert!(
             config.power.is_some(),
             "courier has an authored [power] block"
         );
-        assert_eq!(ship_config.power_groups.len(), 4);
+        assert_eq!(ship_config.power_groups.len(), 3);
 
         // Every system is owned by Captain or Tactical. Ownerless + ai_only
         // would be inert on the player spawn path.
@@ -7163,10 +7159,7 @@ automated_systems = []
                 sys.station,
                 Some(crate::messages::StationId("shields".into()))
             );
-            assert_eq!(
-                sys.power_group,
-                Some(crate::messages::PowerGroupId("ops".into()))
-            );
+            assert_eq!(sys.power_group, None);
         }
     }
 

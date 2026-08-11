@@ -2737,10 +2737,9 @@ pub struct PowerReactorBlackboard {
 /// Raw sim truth for the Power Battery fine system, published each tick into
 /// the ship blackboard (issue #513).
 ///
-/// The battery is the target for channel-2 drain messages (e.g. active
-/// phaser beams via `InterSystemPayload::DrainWeaponsBattery`). When
-/// `is_online: false` the battery refuses drains — the emergency reserve
-/// pool is effectively 0 and downstream consumers cannot pull from it.
+/// The battery exposes the ship's emergency reserve. Its charge changes only
+/// through the reactor's authored allocation-rate curve; weapons do not draw
+/// from it directly.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct PowerBatteryBlackboard {
     /// Current battery charge (0.0 – `capacity`).
@@ -2748,7 +2747,6 @@ pub struct PowerBatteryBlackboard {
     /// Maximum battery capacity (from ship TOML `[power] capacity`).
     pub capacity: f32,
     /// True when the battery is operational (not disabled or destroyed).
-    /// When `false`, channel-2 drain messages are refused.
     pub is_online: bool,
     /// Emergency-reserve threshold expressed as a fraction of `capacity`
     /// (0.0 – 1.0). Sourced from ship TOML `[power] emergency_threshold`
@@ -2987,10 +2985,6 @@ impl AdmittedCommands {
 /// state; the target mutates only its own.
 #[derive(Clone, Debug)]
 pub enum InterSystemPayload {
-    /// The Weapons system is drawing energy from the Power battery while a
-    /// phaser beam is active. Applied once per tick during `SimSet::Physics`;
-    /// consumed by the Power system during `SimSet::Modifiers`.
-    DrainWeaponsBattery { amount: f32 },
     /// Joystick input published by the Helm Joystick fine system (issue #511)
     /// for consumption by each Helm Engine fine system. Channels thrust and
     /// steering so each engine can independently gate on its own online state.
@@ -3015,8 +3009,8 @@ pub enum InterSystemPayload {
 /// state this tick. See [`InterSystemPayload`] for invariants.
 ///
 /// `source_entity` identifies which ship the message applies to so
-/// per-entity handlers (e.g. `handle_power_inter_system`) can route the
-/// mutation to the correct ship's per-entity state. `None` means "target
+/// per-entity handlers can route the mutation to the correct ship's
+/// per-entity state. `None` means "target
 /// the LocalShip" — used by legacy paths and tests that never spawned a
 /// specific ship.
 #[derive(Clone, Debug)]

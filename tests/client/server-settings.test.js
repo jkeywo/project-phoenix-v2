@@ -73,6 +73,8 @@ function makeBindings(overrides = {}) {
     __hostSaveSnapshot: record('__hostSaveSnapshot'),
     __hostResumeSnapshot: record('__hostResumeSnapshot'),
     __hostReturnToLobby: record('__hostReturnToLobby'),
+    __hostToggleQrCode: () => { calls.push(['__hostToggleQrCode']); state.qr = !state.qr; },
+    __hostIsQrVisible: () => !!state.qr,
     __getMasterVolume: () => state.master,
     __setMasterVolume: (v) => { calls.push(['__setMasterVolume', v]); state.master = v; },
   };
@@ -340,6 +342,26 @@ describe('the Gameplay tab', () => {
     control('exit-to-lobby').click();
     expect(bindings.calls.map((c) => c[0])).toContain('__hostReturnToLobby');
     expect(mounted.isOpen()).toBe(false);
+  });
+
+  it('toggles the viewscreen join QR from Gameplay and paints its state', () => {
+    let bindings;
+    ({ menu: mounted, bindings } = mount());
+    mounted.open();
+    mounted.selectTab('gameplay');
+
+    expect(control('qr-code').textContent).toBe(t('settings.toggle_qr'));
+    expect(control('qr-code').getAttribute('aria-pressed')).toBe('false');
+
+    control('qr-code').click();
+
+    expect(bindings.calls.map((c) => c[0])).toContain('__hostToggleQrCode');
+    expect(control('qr-code').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('replaces the invisible viewscreen hotspot with the Gameplay control', () => {
+    expect(SRC).not.toContain('id="qr-toggle-btn"');
+    expect(SRC).toContain('window.__hostToggleQrCode');
   });
 });
 

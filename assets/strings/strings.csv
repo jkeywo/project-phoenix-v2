@@ -802,7 +802,6 @@ server.conn_error_refresh,"Host connection banner on unrecoverable error","[Erro
 server.upload_mod_pack,"Host scenario picker — button that opens the mod-pack ZIP file chooser","[Upload mod pack]"
 server.launch_ai_ship,"Host lobby button that starts the scenario with no human crew. The glyph is part of the label",⬡ Launch AI Ship
 server.launch_ai_ship_tip,"Tooltip on the host lobby AI-only launch button",Launch with fully AI-controlled crew
-server.qr_toggle_tip,"Tooltip on the host viewscreen corner target that shows or hides the join QR code",Toggle QR code
 server.mod_pack_reading,"Host scenario picker — status while an uploaded mod pack is being read and validated","[Validating mod pack…]"
 server.mod_pack_applied,"Host scenario picker — status when an uploaded mod pack passed validation and its scenarios were added","[Mod pack applied]"
 server.mod_pack_rejected,"Host scenario picker — status heading when an uploaded mod pack failed validation and nothing was applied","[Mod pack rejected — nothing applied]"

@@ -102,7 +102,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Host Settings Menu Tabs
-      summary: The server page carries a single settings cog, top-left, with three tabs — Debug/Cheat (demo-gated), Audio, and Gameplay. Audio offers one master volume that scales the authored per-sound volumes rather than replacing them. Gameplay offers pause/unpause and exit-to-lobby, the latter honoured mid-mission for the host page only, so a phone cannot abandon a mission the rest of the crew is flying. "Host page only" is decided by the local-console token, which is therefore reserved - a network peer that identifies under it, or under the ai operator prefix, has its connection refused rather than being dispatched under host authority.
+      summary: The server page carries a single settings cog, top-left, with three tabs — Debug/Cheat (demo-gated), Audio, and Gameplay. Audio offers one master volume that scales the authored per-sound volumes rather than replacing them. Gameplay offers pause/unpause, the viewscreen join QR toggle, and exit-to-lobby. The QR control replaces the server page's invisible bottom-left hotspot and shares the same viewscreen state changed by a phone's Gameplay control. Exit-to-lobby is honoured mid-mission for the host page only, so a phone cannot abandon a mission the rest of the crew is flying. "Host page only" is decided by the local-console token, which is therefore reserved - a network peer that identifies under it, or under the ai operator prefix, has its connection refused rather than being dispatched under host authority.
     game_design:
       enforcement_links: [host-debug-simulation-controls]
       owner_role: host-debug-operator

@@ -105,6 +105,11 @@ ships in the demo build where the Debug/Cheat tab is absent. The resource it
 flips is `SimulationPaused` (was `DebugPaused`) for the same reason. The cog is
 its only driver — there is no keyboard binding for it.
 
+The same Gameplay tab also exposes the viewscreen join QR toggle. Phones carry
+the matching control in their Gameplay settings; the old invisible bottom-left
+viewscreen hotspot no longer exists. Both routes change the host page's shared
+QR overlay state.
+
 Since issue #895 moved **lobby** (countdown, ready-check,
 `drain_lobby_outbox`) and **command admission** into `FixedUpdate` alongside
 the `SimSet` chain (see "Per-tick work" above), pausing now also freezes the

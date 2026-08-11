@@ -15,8 +15,12 @@ struct PlanetSurfaceParams {
     atmosphere_strength: f32,
     // x: has_normal, y: has_roughness, z: has_emissive, w: emissive_night_only
     flags: vec4<f32>,
-    // x: has_emissive_mask, y: ambient_floor, z/w: reserved
+    // x: has_emissive_mask, y: ambient_floor, z: reserved, w: directional_strength
     misc: vec4<f32>,
+    texture_x: vec4<f32>,
+    texture_y: vec4<f32>,
+    texture_z: vec4<f32>,
+    planet_center: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
@@ -34,22 +38,44 @@ var<uniform> params: PlanetSurfaceParams;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let n_geo = normalize(in.world_normal);
+    // A sphere's exact geometric normal is radial. Derive it from position
+    // instead of using the mesh-normal varying, whose duplicated UV seam can
+    // interpolate differently on the two longitude strips in WebGL.
+    let n_geo = normalize(in.world_position.xyz - params.planet_center.xyz);
     let light_dir = normalize(params.light_dir);
     let ambient_floor = params.misc.y;
+    let texture_normal = vec3<f32>(
+        dot(n_geo, params.texture_x.xyz),
+        dot(n_geo, params.texture_y.xyz),
+        dot(n_geo, params.texture_z.xyz),
+    );
+    // The UV sphere duplicates its vertices at u = 0/1, so interpolation stays
+    // continuous inside every triangle and the repeat sampler performs the one
+    // wrap.
+    let uv = in.uv;
 
     // Shading normal: perturb by the tangent-space normal map using an
     // analytic TBN. The mesh (uv_sphere_mesh) has no tangent attribute, but
     // for a Y-up UV sphere dPos/du is proportional to (-n.z, 0, n.x).
     var n = n_geo;
     if (params.flags.x > 0.5) {
-        let t_raw = vec3<f32>(-n_geo.z, 0.0, n_geo.x);
-        let t_len = length(t_raw);
+        let local_t_raw = vec3<f32>(-texture_normal.z, 0.0, texture_normal.x);
+        let t_len = length(local_t_raw);
         // Degenerate at the exact poles — skip perturbation there.
         if (t_len > 1e-4) {
-            let t = t_raw / t_len;
-            let b = cross(n_geo, t);
-            let nm = textureSample(normal_tex, normal_smp, in.uv).xyz * 2.0 - 1.0;
+            let local_t = local_t_raw / t_len;
+            let local_b = cross(texture_normal, local_t);
+            let t = normalize(
+                params.texture_x.xyz * local_t.x
+                + params.texture_y.xyz * local_t.y
+                + params.texture_z.xyz * local_t.z,
+            );
+            let b = normalize(
+                params.texture_x.xyz * local_b.x
+                + params.texture_y.xyz * local_b.y
+                + params.texture_z.xyz * local_b.z,
+            );
+            let nm = textureSample(normal_tex, normal_smp, uv).xyz * 2.0 - 1.0;
             n = normalize(t * nm.x + b * nm.y + n_geo * nm.z);
         }
     }
@@ -58,12 +84,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Soft terminator so the day/night boundary doesn't alias.
     let day = smoothstep(-0.05, 0.15, ndotl);
 
-    let albedo = textureSample(albedo_tex, albedo_smp, in.uv).rgb;
-    var colour = albedo * (ambient_floor + day * max(ndotl, 0.0));
+    let albedo = textureSample(albedo_tex, albedo_smp, uv).rgb;
+    var colour = albedo * (ambient_floor + day * max(ndotl, 0.0) * params.misc.w);
 
     // Roughness-modulated specular glint (oceans, ice). Subtle by design.
     if (params.flags.y > 0.5) {
-        let roughness = textureSample(rough_tex, rough_smp, in.uv).r;
+        let roughness = textureSample(rough_tex, rough_smp, uv).r;
         let view_dir = normalize(view.world_position - in.world_position.xyz);
         let half_dir = normalize(light_dir + view_dir);
         let gloss = 1.0 - roughness;
@@ -82,9 +108,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         var mask = 1.0;
         if (params.misc.x > 0.5) {
-            mask = textureSample(emask_tex, emask_smp, in.uv).r;
+            mask = textureSample(emask_tex, emask_smp, uv).r;
         }
-        let emissive = textureSample(emissive_tex, emissive_smp, in.uv).rgb;
+        let emissive = textureSample(emissive_tex, emissive_smp, uv).rgb;
         colour += emissive * mask * params.emissive_strength * night_gate;
     }
 

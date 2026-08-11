@@ -8,8 +8,12 @@
 struct PlanetCloudParams {
     light_dir: vec3<f32>,
     time: f32,
-    // x: drift_speed (UV wraps/sec), y: has_opacity, z: ambient_floor, w: reserved
+    // x: drift_speed (UV wraps/sec), y: has_opacity, z: ambient_floor, w: directional_strength
     misc: vec4<f32>,
+    texture_x: vec4<f32>,
+    texture_y: vec4<f32>,
+    texture_z: vec4<f32>,
+    planet_center: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
@@ -21,7 +25,7 @@ var<uniform> params: PlanetCloudParams;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let n = normalize(in.world_normal);
+    let n = normalize(in.world_position.xyz - params.planet_center.xyz);
     let light_dir = normalize(params.light_dir);
     let ambient_floor = params.misc.z;
 
@@ -38,7 +42,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let ndotl = dot(n, light_dir);
     let day = smoothstep(-0.05, 0.15, ndotl);
-    let lit = ambient_floor + day * max(ndotl, 0.0);
+    let lit = ambient_floor + day * max(ndotl, 0.0) * params.misc.w;
 
     return vec4<f32>(albedo * lit, alpha);
 }

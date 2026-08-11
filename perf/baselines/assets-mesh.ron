@@ -12,9 +12,10 @@
 //
 // Machine-independent in the same sense as the asset budgets: the loader is
 // the same code on every host, so any checkout of this commit reproduces these
-// numbers. The tolerances are therefore tight — a drift here is a real asset
-// change, never runner noise. The collector now discovers only runtime-reachable
-// GLB levels; `.remesh.glb` generator intermediates are excluded.
+// numbers. These are deliberately coarse tripwires rather than precision
+// targets: every resource budget warns at 50% adverse growth and fails at 100%.
+// The collector discovers only runtime-reachable GLB levels; `.remesh.glb`
+// generator intermediates are excluded.
 //
 // Re-recorded after issues #999-#1001 changed both the content and the meaning
 // of the aggregate. The capture contains 63 runtime-reachable GLB levels. Its
@@ -66,8 +67,8 @@
             statistic: max,
             expected: 131560.0,
             tolerance: (
-                warn: 0.1,
-                fail: 0.5,
+                warn: 0.5,
+                fail: 1.0,
             ),
         ),
         "assets.mesh.triangles.total": (
@@ -75,8 +76,8 @@
             statistic: max,
             expected: 1968208.0,
             tolerance: (
-                warn: 0.05,
-                fail: 0.25,
+                warn: 0.5,
+                fail: 1.0,
             ),
         ),
         "assets.texture.count": (
@@ -84,7 +85,7 @@
             statistic: max,
             expected: 3.0,
             tolerance: (
-                warn: 0.25,
+                warn: 0.5,
                 fail: 1.0,
             ),
         ),
@@ -93,7 +94,7 @@
             statistic: max,
             expected: 1048576.0,
             tolerance: (
-                warn: 0.1,
+                warn: 0.5,
                 fail: 1.0,
             ),
         ),

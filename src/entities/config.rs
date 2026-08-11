@@ -1421,6 +1421,14 @@ pub struct EnginePfxConfig {
     /// Optional rig-marker names used as exhaust origins.
     #[serde(default)]
     pub markers: Vec<String>,
+    /// Twist, in degrees, applied around the direction of marker-attached trail emitters.
+    /// When omitted, attached trails retain their default orientation.
+    #[serde(default)]
+    pub roll_degrees: Option<f32>,
+    /// Uniform width multiplier for marker-attached trail emitters.
+    /// When omitted, attached trails retain their default size.
+    #[serde(default)]
+    pub scale: Option<f32>,
     /// Seconds each trail segment remains alive. When omitted, renderer defaults are used.
     #[serde(default)]
     pub trail_lifetime_secs: Option<f32>,
@@ -5268,6 +5276,8 @@ max_speed = 50.0
 [helm_console.engine_pfx]
 color = [0.2, 0.7, 1.0, 0.8]
 markers = ["engine_port", "engine_starboard"]
+roll_degrees = 20.0
+scale = 1.25
 trail_lifetime_secs = 0.45
 trail_spawn_interval_secs = 0.04
 "##;
@@ -5283,6 +5293,8 @@ trail_spawn_interval_secs = 0.04
             pfx.markers,
             vec!["engine_port".to_string(), "engine_starboard".to_string()]
         );
+        assert_eq!(pfx.roll_degrees, Some(20.0));
+        assert_eq!(pfx.scale, Some(1.25));
         assert_eq!(pfx.trail_lifetime_secs, Some(0.45));
         assert_eq!(pfx.trail_spawn_interval_secs, Some(0.04));
     }
@@ -5304,6 +5316,8 @@ max_speed = 50.0
 
         assert_eq!(pfx.color, None);
         assert!(pfx.markers.is_empty());
+        assert_eq!(pfx.roll_degrees, None);
+        assert_eq!(pfx.scale, None);
         assert_eq!(pfx.trail_lifetime_secs, None);
         assert_eq!(pfx.trail_spawn_interval_secs, None);
     }

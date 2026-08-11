@@ -2507,8 +2507,10 @@ fn update_engine_trail(
     materials: &mut Assets<EngineTrailMaterial>,
 ) {
     let emitters = engine_emitters(transform, markers, cfg);
-    for (emitter_idx, (origin, direction)) in emitters.iter().enumerate() {
+    for (emitter_idx, emitter) in emitters.iter().enumerate() {
         let key = format!("{}:{}", key_base, emitter_idx);
+        let geometry = settings.geometry_for(emitter.is_marker_attached);
+        let width = ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35) * geometry.scale;
 
         // Lazily create the ribbon entity and mesh for this emitter.
         if !state.emitters.contains_key(&key) {
@@ -2553,8 +2555,8 @@ fn update_engine_trail(
         if normalized_speed > 0.05 {
             upsert_engine_head_crumb(
                 &mut trail.crumbs,
-                *origin,
-                ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35),
+                emitter.origin,
+                width,
                 settings.lifetime_secs,
             );
         }
@@ -2564,15 +2566,15 @@ fn update_engine_trail(
             let render_crumbs = if normalized_speed > 0.05 {
                 render_crumbs_from_marker(
                     &trail.crumbs,
-                    *origin,
-                    *direction,
-                    ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35),
+                    emitter.origin,
+                    emitter.direction,
+                    width,
                     settings.lifetime_secs,
                 )
             } else {
                 trail.crumbs.clone()
             };
-            build_ribbon_into_mesh(mesh, &render_crumbs);
+            build_ribbon_into_mesh(mesh, &render_crumbs, geometry.roll_radians);
         }
     }
 }
@@ -2683,7 +2685,7 @@ fn trail_ribbon_material(
 
 /// Rebuilds the ribbon geometry in-place from the ordered breadcrumb deque.
 /// crumbs[0] is the newest point (near the ship), crumbs[n-1] is the oldest.
-fn build_ribbon_into_mesh(mesh: &mut Mesh, crumbs: &VecDeque<TrailCrumb>) {
+fn build_ribbon_into_mesh(mesh: &mut Mesh, crumbs: &VecDeque<TrailCrumb>, roll_radians: f32) {
     if crumbs.len() < 2 {
         let empty_pos: Vec<[f32; 3]> = vec![];
         let empty_uv: Vec<[f32; 2]> = vec![];
@@ -2727,6 +2729,11 @@ fn build_ribbon_into_mesh(mesh: &mut Mesh, crumbs: &VecDeque<TrailCrumb>) {
             }
         } else {
             Vec3::X
+        };
+        let perp = if tangent.length_squared() > 1e-6 {
+            Quat::from_axis_angle(tangent.normalize(), roll_radians) * perp
+        } else {
+            perp
         };
 
         let age_frac = (crumb.age / crumb.lifetime.max(0.001)).clamp(0.0, 1.0);
@@ -3936,15 +3943,30 @@ fn spawn_trail_segment(
         .id()
 }
 
+#[derive(Clone, Copy, Debug)]
+struct EngineEmitter {
+    origin: Vec3,
+    direction: Vec3,
+    is_marker_attached: bool,
+}
+
 fn engine_emitters(
     transform: &Transform,
     markers: Option<&ModelMarkers>,
     cfg: Option<&EnginePfxConfig>,
-) -> Vec<(Vec3, Vec3)> {
-    let marker_emitters: Vec<(Vec3, Vec3)> = cfg
+) -> Vec<EngineEmitter> {
+    let marker_emitters: Vec<EngineEmitter> = cfg
         .into_iter()
         .flat_map(|cfg| cfg.markers.iter())
-        .filter_map(|name| marker_emitter(transform, markers, Some(name.as_str())))
+        .filter_map(|name| {
+            marker_emitter(transform, markers, Some(name.as_str())).map(|(origin, direction)| {
+                EngineEmitter {
+                    origin,
+                    direction,
+                    is_marker_attached: true,
+                }
+            })
+        })
         .collect();
     if !marker_emitters.is_empty() {
         return marker_emitters;
@@ -3952,12 +3974,24 @@ fn engine_emitters(
 
     let forward = transform.rotation * Vec3::NEG_Z;
     let aft = -forward.normalize_or_zero();
-    vec![(transform.translation + aft * 3.0, aft)]
+    vec![EngineEmitter {
+        origin: transform.translation + aft * 3.0,
+        direction: aft,
+        is_marker_attached: false,
+    }]
 }
 
 struct EnginePfxSettings {
     color: [f32; 4],
     lifetime_secs: f32,
+    roll_radians: f32,
+    scale: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EngineTrailGeometry {
+    roll_radians: f32,
+    scale: f32,
 }
 
 impl EnginePfxSettings {
@@ -3968,6 +4002,22 @@ impl EnginePfxSettings {
                 .and_then(|c| c.trail_lifetime_secs)
                 .unwrap_or(ENGINE_TRAIL_CRUMB_LIFETIME_SECS)
                 .max(0.05),
+            roll_radians: cfg.and_then(|c| c.roll_degrees).unwrap_or(0.0).to_radians(),
+            scale: cfg.and_then(|c| c.scale).unwrap_or(1.0).max(0.0),
+        }
+    }
+
+    fn geometry_for(&self, is_marker_attached: bool) -> EngineTrailGeometry {
+        if is_marker_attached {
+            EngineTrailGeometry {
+                roll_radians: self.roll_radians,
+                scale: self.scale,
+            }
+        } else {
+            EngineTrailGeometry {
+                roll_radians: 0.0,
+                scale: 1.0,
+            }
         }
     }
 }
@@ -4578,6 +4628,8 @@ mod tests {
         let settings = EnginePfxSettings::from_config(Some(&cfg));
         assert_eq!(settings.color, ENGINE_DEFAULT_COLOR);
         assert_eq!(settings.lifetime_secs, ENGINE_TRAIL_CRUMB_LIFETIME_SECS);
+        assert_eq!(settings.geometry_for(true).roll_radians, 0.0);
+        assert_eq!(settings.geometry_for(true).scale, 1.0);
     }
 
     #[test]
@@ -4585,12 +4637,65 @@ mod tests {
         let cfg = EnginePfxConfig {
             color: Some([0.1, 0.2, 0.3, 0.4]),
             markers: vec![],
+            roll_degrees: Some(90.0),
+            scale: Some(1.25),
             trail_lifetime_secs: Some(0.8),
             trail_spawn_interval_secs: Some(0.03),
         };
         let settings = EnginePfxSettings::from_config(Some(&cfg));
         assert_eq!(settings.color, [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(settings.lifetime_secs, 0.8);
+        assert!((settings.roll_radians - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(settings.scale, 1.25);
+        assert_eq!(
+            settings.geometry_for(true),
+            EngineTrailGeometry {
+                roll_radians: std::f32::consts::FRAC_PI_2,
+                scale: 1.25,
+            }
+        );
+        assert_eq!(
+            settings.geometry_for(false),
+            EngineTrailGeometry {
+                roll_radians: 0.0,
+                scale: 1.0,
+            },
+            "synthetic fallback emitters retain their unmodified geometry"
+        );
+    }
+
+    #[test]
+    fn attached_trail_roll_rotates_ribbon_width_about_its_direction() {
+        let crumbs = VecDeque::from([
+            TrailCrumb {
+                pos: Vec3::ZERO,
+                width: 2.0,
+                age: 0.0,
+                lifetime: 1.0,
+            },
+            TrailCrumb {
+                pos: Vec3::Z,
+                width: 2.0,
+                age: 0.0,
+                lifetime: 1.0,
+            },
+        ]);
+        let mut mesh = empty_ribbon_mesh();
+
+        build_ribbon_into_mesh(&mut mesh, &crumbs, std::f32::consts::FRAC_PI_2);
+
+        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) => positions,
+            other => panic!("expected Float32x3 positions, got {other:?}"),
+        };
+        assert!(
+            positions.iter().all(|position| position[1].abs() < 0.051),
+            "a 90-degree roll moves this Z-aligned ribbon out of its default vertical plane"
+        );
+        assert!(
+            positions.iter().any(|position| position[0].abs() > 0.9),
+            "the rolled ribbon retains its authored width on the horizontal axis"
+        );
     }
 
     #[test]
@@ -4780,6 +4885,8 @@ position = [0.5, -0.1, 0.25]
         let cfg = EnginePfxConfig {
             color: None,
             markers: vec!["aft_exhaust".to_string()],
+            roll_degrees: None,
+            scale: None,
             trail_lifetime_secs: None,
             trail_spawn_interval_secs: None,
         };
@@ -4791,8 +4898,9 @@ position = [0.5, -0.1, 0.25]
         );
 
         assert_eq!(emitters.len(), 1);
-        assert_eq!(emitters[0].0, Vec3::new(11.0, 0.5, 18.0));
-        assert_eq!(emitters[0].1, Vec3::NEG_Z);
+        assert_eq!(emitters[0].origin, Vec3::new(11.0, 0.5, 18.0));
+        assert_eq!(emitters[0].direction, Vec3::NEG_Z);
+        assert!(emitters[0].is_marker_attached);
     }
 
     #[test]
@@ -4809,6 +4917,8 @@ position = [0.5, -0.1, 0.25]
         let cfg = EnginePfxConfig {
             color: None,
             markers: vec!["aft_exhaust".to_string()],
+            roll_degrees: None,
+            scale: None,
             trail_lifetime_secs: None,
             trail_spawn_interval_secs: None,
         };
@@ -4818,7 +4928,7 @@ position = [0.5, -0.1, 0.25]
         let emitters = engine_emitters(&transform, Some(&markers), Some(&cfg));
 
         let expected = transform.rotation * Vec3::NEG_Z;
-        assert!((emitters[0].1 - expected).length() < 1e-6);
+        assert!((emitters[0].direction - expected).length() < 1e-6);
     }
 
     #[test]
@@ -4830,8 +4940,9 @@ position = [0.5, -0.1, 0.25]
         );
 
         assert_eq!(emitters.len(), 1);
-        assert_eq!(emitters[0].0, Vec3::new(1.0, 0.0, 5.0));
-        assert_eq!(emitters[0].1, Vec3::Z);
+        assert_eq!(emitters[0].origin, Vec3::new(1.0, 0.0, 5.0));
+        assert_eq!(emitters[0].direction, Vec3::Z);
+        assert!(!emitters[0].is_marker_attached);
     }
 
     // ── Integration: does the beam PFX actually track ship movement? ──────

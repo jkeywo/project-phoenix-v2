@@ -7664,11 +7664,6 @@ hull_max_hp = 6
         .collect::<Vec<_>>();
         let mut cruises = hulls.iter().map(|hc| hc.max_speed).collect::<Vec<_>>();
         cruises.sort_by(f32::total_cmp);
-        let fastest_cruise = *cruises.last().expect("hulls resolve");
-        assert!(
-            fastest_cruise > 0.0,
-            "precondition: a reference speed must resolve"
-        );
         let half_arc = bolt.fire_arc_deg * 0.5;
         let lead_angle = |v: f32| simmath::asin(v / bolt.projectile_speed).to_degrees();
 
@@ -7692,11 +7687,11 @@ hull_max_hp = 6
         );
         let admits_crossing = bolt.projectile_speed * simmath::sin(half_arc.to_radians());
 
-        // Every shipped hull EXCEPT the fastest is admitted at square-on cruise.
+        // Every shipped hull is admitted at square-on cruise.
         // This is the property that actually has to hold, and a content change
         // that broke it — a slower bolt, a tighter cone, a general speed-up of the
         // fleet — fails here.
-        for &v in &cruises[..cruises.len() - 1] {
+        for &v in &cruises {
             assert!(
                 half_arc > lead_angle(v),
                 "the bow cone ({} deg) must admit the {} deg lead a {v} u/s \
@@ -7728,11 +7723,9 @@ hull_max_hp = 6
         // arc, or speed the bolt up — and it should be made on purpose, not
         // acquired by an assertion quietly relaxing.
         assert!(
-            fastest_cruise > admits_crossing,
+            cruises.iter().all(|&v| v <= admits_crossing),
             "the bow cone ({} deg) admits square-on crossers up to \
-             {admits_crossing} u/s. If the fastest shipped cruise \
-             ({fastest_cruise} u/s) now fits, the finding recorded here is stale: \
-             re-read this comment and delete it rather than editing the number.",
+             {admits_crossing} u/s, so every shipped cruise must fit inside it.",
             bolt.fire_arc_deg
         );
         let fastest_boosted = hulls

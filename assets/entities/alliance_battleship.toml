@@ -60,7 +60,7 @@ movable = true
 # Engage priority stays LOW (45) so scenario `spawn_entity` overrides (Destroy at
 # 80) merge by id and dominate (#842 AC3). No Retreat — a capital defender holds
 # the line. `maintain_range = 38` is the widest of the four hulls: the battleship
-# is slow (max_speed 6.7) and stands off, keeping the enemy inside its 40-unit
+# is slow (max_speed 10) and stands off, keeping the enemy inside its 40-unit
 # phasers and 50-unit heavy blaster rather than closing to knife-fight range.
 #
 # `imminent_collision_facing_threshold = 0.6` (issue #780 AC4): see the fuller
@@ -69,7 +69,7 @@ movable = true
 # actually turned the ship's facing away from a closing obstacle — the fix for
 # the "AI flies through asteroid fields" report against the backfilled player
 # hull. Worth watching on the battleship specifically: it is the slowest hull
-# (max_speed 6.7), so an override that fires only just in time has the least
+# (max_speed 10), so an override that fires only just in time has the least
 # room here to actually out-turn what it is dodging.
 [behaviour]
 imminent_collision_facing_threshold = 0.6
@@ -679,7 +679,7 @@ selects = [ "ship", "station", "planet" ]
 # helm is flying by, so this alpha is the only thing keeping them legible
 # through it. It must read as a hint, not as a second radar.
 hostile_arc_color = [ 1, 0.3, 0.3, 0.07 ]
-max_speed = 6.7
+max_speed = 10
 max_reverse_speed = 2.7
 acceleration = 2.7
 deceleration = 6.7
@@ -689,7 +689,7 @@ max_yaw_rate = 0.27
 low_speed_turn_boost = 0.0
 max_bank_deg = 8
 impulse_charge_duration = 3
-impulse_speed_multiplier = 8
+impulse_speed_multiplier = 6
 impulse_acceleration_multiplier = 4
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 

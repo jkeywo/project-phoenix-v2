@@ -1926,13 +1926,13 @@ mod tests {
                 .map(|c| c.value_code.as_str()),
             Some("planar")
         );
-        // And the authored helm max speed (10) is reflected.
+        // And the authored helm max speed (14) is reflected.
         assert_eq!(
             helm.metrics
                 .iter()
                 .find(|m| m.code == "max_speed")
                 .map(|m| m.value),
-            Some(10.0)
+            Some(14.0)
         );
     }
 

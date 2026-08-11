@@ -234,7 +234,7 @@ selects = [ "ship", "station", "planet" ]
 # No [helm_console.radar]: Tactical renders its combat radar separately.
 
 [helm_console]
-max_speed = 20
+max_speed = 22
 max_reverse_speed = 8
 acceleration = 9
 deceleration = 18
@@ -244,7 +244,7 @@ max_yaw_rate = 0.9
 low_speed_turn_boost = 0.5
 max_bank_deg = 18
 impulse_charge_duration = 2.0
-impulse_speed_multiplier = 14
+impulse_speed_multiplier = 6
 impulse_acceleration_multiplier = 9
 
 [helm_console.engine_pfx]

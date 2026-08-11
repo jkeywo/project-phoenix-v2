@@ -518,7 +518,7 @@ selects = [ "ship", "station", "planet" ]
 # helm is flying by, so this alpha is the only thing keeping them legible
 # through it. It must read as a hint, not as a second radar.
 hostile_arc_color = [ 1, 0.3, 0.3, 0.07 ]
-max_speed = 15
+max_speed = 18
 max_reverse_speed = 6
 acceleration = 6
 deceleration = 15
@@ -529,7 +529,7 @@ max_yaw_rate = 0.6
 low_speed_turn_boost = 0.5
 max_bank_deg = 10
 impulse_charge_duration = 2.5
-impulse_speed_multiplier = 12
+impulse_speed_multiplier = 6
 impulse_acceleration_multiplier = 7.5
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 

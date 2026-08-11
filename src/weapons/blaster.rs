@@ -1555,6 +1555,19 @@ mod tests {
         .max_speed
     }
 
+    fn courier_cruise() -> f32 {
+        crate::entity_config::EntityConfig::from_toml(
+            crate::entity_includes::resolve_from_disk("assets/entities/alliance_courier.toml")
+                .expect("alliance_courier must resolve")
+                .toml
+                .as_str(),
+        )
+        .expect("alliance_courier must parse")
+        .helm_console
+        .expect("courier must have helm")
+        .max_speed
+    }
+
     /// Closest a straight bolt fired from the origin toward `aim` ever comes to
     /// a target that starts at `start` and holds `vel`, within the bolt's own
     /// lifespan.
@@ -1615,10 +1628,9 @@ mod tests {
     fn a_straight_line_crosser_is_hit_at_the_shipped_hold_range() {
         let bank = warhawk_artillery_bank().config;
         let hold = warhawk_hold_range();
-        // A 45 deg closing diagonal at the destroyer's authored cruise: the
-        // speed is the tuning's, the split between crossing and closing is this
-        // test's.
-        let component = destroyer_cruise() / std::f32::consts::SQRT_2;
+        // A 45 deg closing diagonal at the courier's authored cruise: the speed
+        // is the tuning's, the split between crossing and closing is this test's.
+        let component = courier_cruise() / std::f32::consts::SQRT_2;
         let vel = (component, component);
 
         let t = solve_intercept_time(0.0, -hold, vel.0, vel.1, bank.projectile_speed)

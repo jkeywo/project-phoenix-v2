@@ -8,8 +8,9 @@
  *     entirely in the public demo build (see `isDemo` below).
  *   - **Audio** — master volume, which SCALES the per-sound volumes authored
  *     in the ship/world TOML rather than replacing them.
- *   - **Gameplay** — pause/resume and exit-to-lobby. Deliberately NOT
- *     build-gated, so nothing on this tab may reach for debug-only plumbing.
+ *   - **Gameplay** — pause/resume, the viewscreen join QR, and exit-to-lobby.
+ *     Deliberately NOT build-gated, so nothing on this tab may reach for
+ *     debug-only plumbing.
  *
  * Two behaviours are new rather than moved:
  *
@@ -156,7 +157,10 @@ export function mountServerSettings(opts = {}) {
   let outputs = { enabled: [], viewing: null };
   let activeTab = null;
   let rafHandle = null;
-  const controls = { toggles: {}, commands: {}, outputs: {}, pause: null, volumeReadout: null };
+  const controls = {
+    toggles: {}, commands: {}, outputs: {}, pause: null, qr: null,
+    volumeReadout: null,
+  };
 
   // ── Elements ───────────────────────────────────────────────────────────────
 
@@ -362,6 +366,17 @@ export function mountServerSettings(opts = {}) {
     sim.appendChild(simRow);
     body.appendChild(sim);
 
+    const qrSection = section('settings.qr_code');
+    const qrRow = rowHost();
+    const qr = control('qr-code', 'settings.toggle_qr', () => {
+      invoke('__hostToggleQrCode');
+      refresh();
+    });
+    controls.qr = qr;
+    qrRow.appendChild(qr);
+    qrSection.appendChild(qrRow);
+    body.appendChild(qrSection);
+
     const sessionSection = section('settings.gameplay.session');
     const sessionRow = rowHost();
     sessionRow.appendChild(
@@ -388,6 +403,7 @@ export function mountServerSettings(opts = {}) {
     controls.commands = {};
     controls.outputs = {};
     controls.pause = null;
+    controls.qr = null;
     controls.volumeReadout = null;
 
     overlay.innerHTML = '';
@@ -458,6 +474,11 @@ export function mountServerSettings(opts = {}) {
       );
       controls.pause.classList.toggle('active', paused);
       controls.pause.setAttribute('aria-pressed', paused ? 'true' : 'false');
+    }
+    if (controls.qr) {
+      const visible = !!invoke('__hostIsQrVisible');
+      controls.qr.classList.toggle('active', visible);
+      controls.qr.setAttribute('aria-pressed', visible ? 'true' : 'false');
     }
     // The output panel keeps streaming while it is open, panel or no panel.
     if (outputs.viewing) paintOutput();

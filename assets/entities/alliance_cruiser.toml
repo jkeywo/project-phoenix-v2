@@ -547,7 +547,7 @@ selects = [ "ship", "station", "planet" ]
 # helm is flying by, so this alpha is the only thing keeping them legible
 # through it. It must read as a hint, not as a second radar.
 hostile_arc_color = [ 1, 0.3, 0.3, 0.07 ]
-max_speed = 10
+max_speed = 14
 max_reverse_speed = 4
 acceleration = 4
 deceleration = 10
@@ -557,7 +557,7 @@ max_yaw_rate = 0.4
 low_speed_turn_boost = 0.2
 max_bank_deg = 8
 impulse_charge_duration = 3
-impulse_speed_multiplier = 8
+impulse_speed_multiplier = 6
 impulse_acceleration_multiplier = 4
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
@@ -594,12 +594,10 @@ range = 1200
 [shields_console]
 # What a reactor point spent on `shields` buys: `ModifierSlot::ShieldRegen`
 # (issue #952). Index 0 is 0.0 rather than the fleet default's -0.5 because
-# this hull RESTS `[power_groups.shields]` at 1 to keep its four groups inside
-# the reactor's sustainable total — so level 1 has to mean "the regen every
-# `[[shield_arc]]` below authors", not a permanent two-thirds penalty on a
-# group nothing ever raises. The rungs above it are what the Power officer buys
-# by taking a point off helm or weapons.
-power_multipliers = [ 0, 0.25, 0.5, 1 ]
+# Shields rest at level 2, alongside Helm and Weapons: each `[[shield_arc]]`
+# therefore regenerates at its authored rate. The rungs either side trade a
+# reactor point for slower or faster shield recovery.
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 focus_bonus_max_hp = 0
 focus_bonus_regen = 5
 focus_penalty_max_hp = 0
@@ -657,14 +655,6 @@ size = 6
 # own ship gets the `playerShip` icon injected at spawn (see cruiser tags note).
 icon = "ship"
 
-[power_groups.ops]
-label = "entity.alliance_cruiser.power_groups.ops.label"
-# Rests at 1 so the four authored groups sum to a sustainable total (<=6): the
-# reactor recharges at idle and the AI/human spends up only on demand (#762).
-default_level = 1
-min_level = 1
-max_level = 4
-
 [power_groups.helm]
 label = "entity.alliance_cruiser.power_groups.helm.label"
 # `min_level = 2` is the allocation lower bound the console and AI budget clamp
@@ -687,13 +677,10 @@ max_level = 4
 
 [power_groups.shields]
 label = "entity.alliance_cruiser.power_groups.shields.label"
-# Rests at 1 (the seat the retired `sensors` group used to occupy) so the four
-# authored groups still sum to a sustainable total. Level 1 is the ×1.0 rung on
-# this hull's `[shields_console] power_multipliers`, so resting here costs the
-# arcs nothing — spending UP is what buys regen, a human Power officer's trade
-# against helm or weapons.
-default_level = 1
-min_level = 1
+# Nominal at 2 alongside Helm and Weapons: those three groups make the
+# sustainable resting total of 6. Higher levels buy shield regeneration.
+default_level = 2
+min_level = 2
 max_level = 4
 
 [[station]]
@@ -794,13 +781,11 @@ automated_systems = []
 id = "captain"
 kind = "captain"
 station = "captain"
-power_group = "ops"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
 station = "captain"
-power_group = "ops"
 
 # Per-axis helm systems (issue #701; thrust/steering declared in #800,
 # impulse/boost/lateral in #703/#704/#801 — no coarse `helm` system remains).
@@ -924,13 +909,11 @@ power_group = "weapons"
 id = "sensors"
 kind = "sensors"
 station = "science"
-power_group = "ops"
 
 [[system]]
 id = "sensor-radar"
 kind = "sensor_radar"
 station = "science"
-power_group = "ops"
 
 [[system]]
 id = "shields-system"
@@ -942,37 +925,31 @@ power_group = "shields"
 id = "navigation"
 kind = "navigation"
 station = "comms"
-power_group = "ops"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
 station = "engineering"
-power_group = "ops"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
 station = "engineering"
-power_group = "ops"
 
 [[system]]
 id = "repair"
 kind = "repair"
 station = "engineering"
-power_group = "ops"
 
 [[system]]
 id = "comms"
 kind = "comms"
 station = "comms"
-power_group = "ops"
 
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
 station = "captain"
-power_group = "ops"
 
 [cinematic_camera]
 position = [0, 8, 15]

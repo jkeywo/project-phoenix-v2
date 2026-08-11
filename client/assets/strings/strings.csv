@@ -5,7 +5,6 @@ entity.alliance_battleship.hull.system_hull.power_battery.display_name,assets/en
 entity.alliance_battleship.hull.system_hull.core.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Core
 entity.alliance_battleship.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_battleship.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Starboard)
-entity.alliance_battleship.power_groups.ops.label,assets/entities/alliance_battleship.toml → [power_groups.ops] label,Operations
 entity.alliance_battleship.power_groups.helm.label,assets/entities/alliance_battleship.toml → [power_groups.helm] label,Propulsion
 entity.alliance_battleship.power_groups.weapons.label,assets/entities/alliance_battleship.toml → [power_groups.weapons] label,Weapons
 entity.alliance_battleship.power_groups.shields.label,assets/entities/alliance_battleship.toml → [power_groups.shields] label,Shields
@@ -25,7 +24,6 @@ entity.alliance_courier.hull.system_hull.helm_engine_starboard.display_name,asse
 entity.alliance_courier.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Lateral Thrusters
 entity.alliance_courier.hull.system_hull.power_reactor.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Reactor
 entity.alliance_courier.hull.system_hull.power_battery.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Battery
-entity.alliance_courier.power_groups.ops.label,assets/entities/alliance_courier.toml → [power_groups.ops] label,Operations
 entity.alliance_courier.power_groups.helm.label,assets/entities/alliance_courier.toml → [power_groups.helm] label,Propulsion
 entity.alliance_courier.power_groups.weapons.label,assets/entities/alliance_courier.toml → [power_groups.weapons] label,Weapons
 entity.alliance_courier.power_groups.shields.label,assets/entities/alliance_courier.toml → [power_groups.shields] label,Shields
@@ -39,7 +37,6 @@ entity.alliance_cruiser.hull.system_hull.core.display_name,assets/entities/allia
 entity.alliance_cruiser.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_cruiser.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Starboard)
 entity.alliance_cruiser.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Lateral Thrusters
-entity.alliance_cruiser.power_groups.ops.label,assets/entities/alliance_cruiser.toml → [power_groups.ops] label,Operations
 entity.alliance_cruiser.power_groups.helm.label,assets/entities/alliance_cruiser.toml → [power_groups.helm] label,Propulsion
 entity.alliance_cruiser.power_groups.weapons.label,assets/entities/alliance_cruiser.toml → [power_groups.weapons] label,Weapons
 entity.alliance_cruiser.power_groups.shields.label,assets/entities/alliance_cruiser.toml → [power_groups.shields] label,Shields
@@ -56,7 +53,6 @@ entity.alliance_destroyer.hull.system_hull.core.display_name,assets/entities/all
 entity.alliance_destroyer.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_destroyer.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Engine (Starboard)
 entity.alliance_destroyer.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Lateral Thrusters
-entity.alliance_destroyer.power_groups.ops.label,assets/entities/alliance_destroyer.toml → [power_groups.ops] label,Operations
 entity.alliance_destroyer.power_groups.helm.label,assets/entities/alliance_destroyer.toml → [power_groups.helm] label,Propulsion
 entity.alliance_destroyer.power_groups.weapons.label,assets/entities/alliance_destroyer.toml → [power_groups.weapons] label,Weapons
 entity.alliance_destroyer.power_groups.shields.label,assets/entities/alliance_destroyer.toml → [power_groups.shields] label,Shields
@@ -802,7 +798,6 @@ server.conn_error_refresh,"Host connection banner on unrecoverable error","[Erro
 server.upload_mod_pack,"Host scenario picker — button that opens the mod-pack ZIP file chooser","[Upload mod pack]"
 server.launch_ai_ship,"Host lobby button that starts the scenario with no human crew. The glyph is part of the label",⬡ Launch AI Ship
 server.launch_ai_ship_tip,"Tooltip on the host lobby AI-only launch button",Launch with fully AI-controlled crew
-server.qr_toggle_tip,"Tooltip on the host viewscreen corner target that shows or hides the join QR code",Toggle QR code
 server.mod_pack_reading,"Host scenario picker — status while an uploaded mod pack is being read and validated","[Validating mod pack…]"
 server.mod_pack_applied,"Host scenario picker — status when an uploaded mod pack passed validation and its scenarios were added","[Mod pack applied]"
 server.mod_pack_rejected,"Host scenario picker — status heading when an uploaded mod pack failed validation and nothing was applied","[Mod pack rejected — nothing applied]"

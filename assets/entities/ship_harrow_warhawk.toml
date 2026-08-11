@@ -227,7 +227,7 @@ colour = [0.9, 0.2, 0.05]
 # `max_yaw_rate` is the one figure #792 moved (0.12 → 0.20), and it is the
 # doctrine's own requirement rather than a rebalance. The hold turns and does
 # nothing else, and the angular rate it has to sustain is the target's crossing
-# speed over the holding radius: the fastest hull the game ships crosses at 26
+# speed over the holding radius: the fastest hull the game ships crosses at 22
 # units/s, which at 180 units is 0.145 rad/s, and a boosted one is faster still.
 # At 0.12 the battleship could not follow its own
 # intercept solution round, so the bow would lag every crosser and the artillery
@@ -235,8 +235,9 @@ colour = [0.9, 0.2, 0.05]
 # set by a wide margin — the cruiser turns at 0.30 — and still far too slow to
 # fly anything but a gun line.
 [helm_console]
-max_speed = 9.0
+max_speed = 8.0
 max_reverse_speed = 4.5
+impulse_speed_multiplier = 6
 acceleration = 3.0
 deceleration = 9.0
 max_yaw_rate = 0.20
@@ -418,17 +419,14 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
 #   gate reads the target's CURRENT bearing while the hull is pointed at the LEAD,
 #   and the angle between those two is real. The exact square-on lead is
 #   asin(v/c), not atan(v/c) — the bolt has to cover the hypotenuse, not the
-#   opposite side — so the fastest hull the game ships, CRUISING at 26 units/s
-#   against a 35-unit/s bolt, wants 48 degrees. That is OUTSIDE this 45-degree
-#   half-arc: the square-on shot at full destroyer cruise is DECLINED, and the
-#   battleship holds its round rather than loosing a mis-aimed bolt. Admitting it
-#   would take a 96-degree cone, which is a turret rather than the bow mount this
-#   weapon is. Every other shipped hull (15, 15, 20, 20) is inside. The pinning
-#   test derives all of this rather than trusting this comment.
+#   opposite side — so the fastest hull the game ships, CRUISING at 22 units/s
+#   against a 35-unit/s bolt, wants about 39 degrees. That is inside this
+#   45-degree half-arc, so every shipped hull is admitted at square-on cruise.
+#   The pinning test derives this rather than trusting this comment.
 #
 #   Any radial component shortens the lead back inside the cone, so this only
 #   bites dead-square crossings. The boosted case is not a cone question at all:
-#   the destroyer authors a 2.4x boost, and 62.4 units/s exceeds the bolt's own
+#   the destroyer authors a 2.4x boost, and 38.4 units/s exceeds the bolt's own
 #   35 — there is no intercept to aim at, at any cone width.
 #
 # No `[weapons_console.blaster_banks.ai]` policy is authored, so the canonical

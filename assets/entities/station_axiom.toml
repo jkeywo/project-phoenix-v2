@@ -18,6 +18,65 @@ tags = [ "station", "comms_contact", "allied" ]
 # authors.
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
+# Autonomous point defence. The station is an AI-operated static combatant: it
+# carries only the Tactical systems needed to acquire and fire, never Helm or
+# player stations. Its omni phaser covers the immediate defence perimeter,
+# buying the defenders time to meet the clocked Harrow raid rather than
+# replacing them.
+
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+ai_only = true
+
+[[system]]
+id = "phaser-defence"
+kind = "phaser_bank"
+ai_only = true
+
+[weapons_console]
+
+[weapons_console.radar]
+range = 75
+shows = ["ship", "station"]
+selects = ["ship"]
+
+[weapons_console.selector]
+sources = ["radar-contacts"]
+horizon = 75
+switch_margin = 0
+eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_radar) > 0"
+weight = 1
+
+[weapons_console.ai]
+
+[[weapons_console.ai.rule]]
+priority = 0
+channel = "arc_bearing_first"
+when = "true"
+verb = "bring_phasers_to_bear"
+
+[[weapons_console.phaser_banks]]
+id = "defence"
+facing_deg = 0
+fire_arc_deg = 360
+auto_arc_deg = 360
+beam_range = 60
+beam_damage_per_sec = 5
+beam_duration_secs = 4
+cooldown_secs = 4
+
+  [weapons_console.phaser_banks.ai]
+
+  [[weapons_console.phaser_banks.ai.rule]]
+  priority = 0
+  channel = "phaser_fire"
+  when = "true"
+  verb = "fire_phaser"
+
 [target]
 tags = [ "station" ]
 threat_level = "none"

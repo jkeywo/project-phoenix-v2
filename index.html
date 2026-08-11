@@ -143,7 +143,6 @@
     }
     #canvas { display: block; width: 100%; height: 100%; background: #000; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
-    #qr-toggle-btn { position: absolute; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 200; opacity: 0.01; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     #qr { display: none; }
     #top-bar {
       position: absolute; top: 0.75rem; right: 0.75rem; z-index: 20;
@@ -958,7 +957,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-a3d42233b3a71b2a.js" crossorigin="anonymous" integrity="sha384-MxPzsH3IilJicP/aJ+yS+ZOJ/0iwkhvaVPYNDJfqKjfiJaGY7sU26MewV+Yl7D1f"><link rel="preload" href="./project-phoenix-a3d42233b3a71b2a_bg.wasm" crossorigin="anonymous" integrity="sha384-BM81WvJqYSTWSnnOw6oINlDz4QZyf/nPzRTCP6F3IfuoowY6up3HmAgMMv8y7Uj/" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b0553a5835292971.js" crossorigin="anonymous" integrity="sha384-MXf6aXcZwEf67kbNBtfRaM5/WKk1zx7Cg68tNj8irx1DNq765D3B0ZgV+xSFiAZ1"><link rel="preload" href="./project-phoenix-b0553a5835292971_bg.wasm" crossorigin="anonymous" integrity="sha384-J7R8Myg9Tu8sHX8VS6S0lXL/inDdztEE7HWftrSpCNCEntSkkVBwTKmjHJBVO87/" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1291,9 +1290,6 @@
         </div>
       </div>
 
-      <!-- Invisible click-target in bottom-left corner to toggle QR mid-game -->
-      <button id="qr-toggle-btn" title="Toggle QR code" data-i18n-attr="title:server.qr_toggle_tip"></button>
-
       <div id="top-bar">
         <div id="top-bar-row">
           <span id="conn-label"></span>
@@ -1329,8 +1325,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-a3d42233b3a71b2a.js';
-const wasm = await init({ module_or_path: './project-phoenix-a3d42233b3a71b2a_bg.wasm' });
+import init, * as bindings from './project-phoenix-b0553a5835292971.js';
+const wasm = await init({ module_or_path: './project-phoenix-b0553a5835292971_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1409,6 +1405,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
   // ── QR code toggle state (global, shared across handlers) ─────────────
   let qrVisible = false;
+  window.__hostToggleQrCode = function() {
+    const qrOverlay = document.getElementById('overlay');
+    qrVisible = !qrVisible;
+    if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
+  };
+  window.__hostIsQrVisible = function() { return qrVisible; };
 
   // ── HTML viewscreen HUD overlay (issue #422) ───────────────────────────
   //
@@ -1586,12 +1588,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     if (qrOverlay) {
       if (isLobby) { qrVisible = true; qrOverlay.style.display = 'block'; }
       else if (s.phase === 'Loading' || s.phase === 'GameOver') { qrVisible = false; qrOverlay.style.display = 'none'; }
-      // During InProgress the toggle button is the sole controller
+      // During InProgress the settings menus are the sole controllers.
     }
-    // The GameOver screen never shows the QR code (issue: no mid-game join
-    // prompt over the end-of-scenario summary), so hide its toggle target too.
-    const qrToggleBtn = document.getElementById('qr-toggle-btn');
-    if (qrToggleBtn) qrToggleBtn.style.display = s.phase === 'GameOver' ? 'none' : '';
 
     // ── Game-over overlay: force-hidden once the phase leaves GameOver ──
     // (the HUD push that normally drives this overlay only fires while
@@ -3186,13 +3184,6 @@ function finishInit() {
   // tests sample it to prove the sim advances on the authored fixed tick
   // rather than the rendered frame.
   window.wasm_sim_tick = wasmBindings.wasm_sim_tick;
-
-  // ── QR toggle (bottom-left invisible button for mid-game join) ───────
-  document.getElementById('qr-toggle-btn').addEventListener('click', function() {
-    const qrOverlay = document.getElementById('overlay');
-    qrVisible = !qrVisible;
-    qrOverlay.style.display = qrVisible ? 'block' : 'none';
-  });
 
   // ── Return to Lobby ────────────────────────────────────────────────────
   // Two callers, one behaviour: the GameOver overlay's button, and the

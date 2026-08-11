@@ -31,8 +31,9 @@ size = [4.0, 1.5, 6.0]
 colour = [0.2, 0.6, 0.9]
 
 [helm_console]
-max_speed = 12.5
+max_speed = 20
 max_reverse_speed = 6.25
+impulse_speed_multiplier = 6
 acceleration = 4.1665
 deceleration = 12.5
 max_yaw_rate = 0.196

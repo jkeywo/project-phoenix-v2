@@ -24,6 +24,7 @@ use bevy::prelude::*;
 
 use crate::entities::mesh_stats::{pixels_in, triangles_in};
 
+use super::camera::OrbitCamera;
 use super::lod::{LadderState, LodMode};
 use super::subject::SubjectState;
 
@@ -124,13 +125,15 @@ pub fn publish_stats(
     ladder: Res<LadderState>,
     mode: Res<LodMode>,
     subject: Res<SubjectState>,
+    cameras: Query<&OrbitCamera>,
 ) {
     // The subject's largest world extent. Distance is in absolute world units —
     // the same units `select_lod` compares — so 5 is a close-up of a courier and
     // the inside of a starbase. Reporting the size next to it is what makes the
     // distance readable rather than arbitrary.
     let extent = subject.extents.map(|e| e.max_element()).unwrap_or(0.0);
-    let json = render_stats(&stats, &ladder, *mode, subject.settled, extent);
+    let camera = cameras.iter().next().copied();
+    let json = render_stats(&stats, &ladder, *mode, subject.settled, extent, camera);
     STATS_JSON.with(|cell| *cell.borrow_mut() = json);
 }
 
@@ -145,6 +148,7 @@ pub fn render_stats(
     mode: LodMode,
     settled: bool,
     extent: f32,
+    camera: Option<OrbitCamera>,
 ) -> String {
     let level = match ladder.current {
         Some(i) => i.to_string(),
@@ -154,7 +158,7 @@ pub fn render_stats(
         concat!(
             r#"{{"triangles":{},"meshes":{},"textures":{},"measuredTextures":{},"#,
             r#""texturePixels":{},"largestTexture":{},"distance":{:.2},"extent":{:.2},"#,
-            r#""mode":"{}","level":{},"levels":{},"settled":{}}}"#
+            r#""mode":"{}","level":{},"levels":{},"settled":{},"camera":{}}}"#
         ),
         stats.triangles,
         stats.meshes,
@@ -168,6 +172,18 @@ pub fn render_stats(
         level,
         ladder.levels.len(),
         settled,
+        camera.map_or_else(
+            || "null".to_string(),
+            |camera| format!(
+                r#"{{"focus":[{:.4},{:.4},{:.4}],"radius":{:.4},"yaw":{:.4},"pitch":{:.4}}}"#,
+                camera.focus.x,
+                camera.focus.y,
+                camera.focus.z,
+                camera.radius,
+                camera.yaw,
+                camera.pitch,
+            ),
+        ),
     )
 }
 
@@ -202,7 +218,7 @@ mod tests {
             levels: vec![Default::default(), Default::default()],
             ..Default::default()
         };
-        let json = render_stats(&stats, &ladder, LodMode::Auto, true, 8.0);
+        let json = render_stats(&stats, &ladder, LodMode::Auto, true, 8.0, None);
         assert!(json.contains(r#""triangles":138790"#), "{json}");
         assert!(json.contains(r#""distance":87.50"#), "{json}");
         assert!(json.contains(r#""mode":"auto""#), "{json}");
@@ -221,6 +237,7 @@ mod tests {
             LodMode::Base,
             false,
             0.0,
+            None,
         );
         assert!(json.contains(r#""level":null"#), "{json}");
     }

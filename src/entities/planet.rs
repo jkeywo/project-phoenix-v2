@@ -15,7 +15,7 @@ use bevy::{
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
     reflect::TypePath,
-    render::render_resource::{AsBindGroup, ShaderType},
+    render::render_resource::{AsBindGroup, Face, ShaderType},
     shader::ShaderRef,
 };
 
@@ -26,7 +26,27 @@ const PLANET_SURFACE_SHADER: &str = "shaders/planet_surface.wgsl";
 const PLANET_CLOUDS_SHADER: &str = "shaders/planet_clouds.wgsl";
 
 /// Ambient light floor so the nightside silhouette stays faintly readable.
-const AMBIENT_FLOOR: f32 = 0.03;
+pub const AMBIENT_FLOOR: f32 = 0.03;
+
+/// Presentation-only light controls for a standalone celestial-material view.
+/// The game leaves this resource absent and derives planet lighting from its
+/// authored star instead.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct PlanetLightingOverride {
+    pub light_dir: Vec3,
+    pub ambient_floor: f32,
+    pub directional_strength: f32,
+}
+
+impl Default for PlanetLightingOverride {
+    fn default() -> Self {
+        Self {
+            light_dir: Vec3::X,
+            ambient_floor: AMBIENT_FLOOR,
+            directional_strength: 1.0,
+        }
+    }
+}
 
 // ── Materials ──────────────────────────────────────────────────────────────
 
@@ -49,6 +69,14 @@ pub struct PlanetSurfaceParams {
     pub flags: Vec4,
     /// x: has_emissive_mask, y: ambient_floor, z/w: reserved.
     pub misc: Vec4,
+    /// World-space axes of the planet's local texture frame. These let the
+    /// shader derive seam-free spherical UVs without world-locking a rotated
+    /// planet.
+    pub texture_x: Vec4,
+    pub texture_y: Vec4,
+    pub texture_z: Vec4,
+    /// World-space centre used to derive an exact radial geometric normal.
+    pub planet_center: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -86,6 +114,10 @@ pub struct PlanetCloudParams {
     pub time: f32,
     /// x: drift_speed (UV wraps/sec), y: has_opacity, z: ambient_floor, w: reserved.
     pub misc: Vec4,
+    pub texture_x: Vec4,
+    pub texture_y: Vec4,
+    pub texture_z: Vec4,
+    pub planet_center: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -107,6 +139,19 @@ impl Material for PlanetCloudMaterial {
 
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
+    }
+
+    fn specialize(
+        _pipeline: &bevy::pbr::MaterialPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _layout: &bevy::mesh::MeshVertexBufferLayoutRef,
+        _key: bevy::pbr::MaterialPipelineKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        // A transparent sphere must not blend its far hemisphere back through
+        // the near one. Apart from darkening the globe, that ordering failure
+        // made the longitude wrap look like an opaque black seam.
+        descriptor.primitive.cull_mode = Some(Face::Back);
+        Ok(())
     }
 }
 
@@ -197,7 +242,11 @@ pub fn surface_material_from_config(
                 flag(s.emissive_colour.is_some()),
                 flag(s.emissive_night_only),
             ),
-            misc: Vec4::new(flag(s.emissive_mask.is_some()), AMBIENT_FLOOR, 0.0, 0.0),
+            misc: Vec4::new(flag(s.emissive_mask.is_some()), AMBIENT_FLOOR, 0.0, 1.0),
+            texture_x: Vec4::X,
+            texture_y: Vec4::Y,
+            texture_z: Vec4::Z,
+            planet_center: Vec4::ZERO,
         },
         albedo: load_planet_image(asset_server, &s.albedo, true),
         normal: load(&s.normal, false),
@@ -220,8 +269,12 @@ pub fn cloud_material_from_config(
                 clouds.drift_speed,
                 flag(clouds.opacity.is_some()),
                 AMBIENT_FLOOR,
-                0.0,
+                1.0,
             ),
+            texture_x: Vec4::X,
+            texture_y: Vec4::Y,
+            texture_z: Vec4::Z,
+            planet_center: Vec4::ZERO,
         },
         albedo: load_planet_image(asset_server, &clouds.albedo, true),
         opacity: clouds
@@ -251,6 +304,7 @@ impl Plugin for PlanetRenderPlugin {
 fn update_planet_materials(
     time: Res<Time>,
     star: Query<&GlobalTransform, With<StarSection>>,
+    lighting_override: Option<Res<PlanetLightingOverride>>,
     surfaces: Query<(&GlobalTransform, &MeshMaterial3d<PlanetSurfaceMaterial>)>,
     clouds: Query<(&GlobalTransform, &MeshMaterial3d<PlanetCloudMaterial>)>,
     mut surface_assets: ResMut<Assets<PlanetSurfaceMaterial>>,
@@ -262,15 +316,58 @@ fn update_planet_materials(
         .map(|t| t.translation())
         .unwrap_or(Vec3::ZERO);
     let elapsed = time.elapsed_secs();
+    let light_dir = lighting_override
+        .as_ref()
+        .map(|lighting| lighting.light_dir)
+        .unwrap_or_else(|| (star_pos - Vec3::ZERO).normalize_or(Vec3::X));
+    let ambient_floor = lighting_override
+        .as_ref()
+        .map(|lighting| lighting.ambient_floor)
+        .unwrap_or(AMBIENT_FLOOR);
+    let directional_strength = lighting_override
+        .as_ref()
+        .map(|lighting| lighting.directional_strength)
+        .unwrap_or(1.0);
+
+    let texture_axes = |transform: &GlobalTransform| {
+        let (_, rotation, _) = transform.to_scale_rotation_translation();
+        (
+            (rotation * Vec3::X).extend(0.0),
+            (rotation * Vec3::Y).extend(0.0),
+            (rotation * Vec3::Z).extend(0.0),
+        )
+    };
 
     for (transform, mat_handle) in &surfaces {
         if let Some(material) = surface_assets.get_mut(&mat_handle.0) {
-            material.params.light_dir = (star_pos - transform.translation()).normalize_or(Vec3::X);
+            let (texture_x, texture_y, texture_z) = texture_axes(transform);
+            material.params.light_dir = if lighting_override.is_some() {
+                light_dir
+            } else {
+                (star_pos - transform.translation()).normalize_or(Vec3::X)
+            };
+            material.params.misc.y = ambient_floor;
+            material.params.misc.w = directional_strength;
+            material.params.texture_x = texture_x;
+            material.params.texture_y = texture_y;
+            material.params.texture_z = texture_z;
+            material.params.planet_center = transform.translation().extend(0.0);
         }
     }
     for (transform, mat_handle) in &clouds {
         if let Some(material) = cloud_assets.get_mut(&mat_handle.0) {
-            material.params.light_dir = (star_pos - transform.translation()).normalize_or(Vec3::X);
+            let (texture_x, texture_y, texture_z) = texture_axes(transform);
+            material.params.light_dir = if lighting_override.is_some() {
+                light_dir
+            } else {
+                (star_pos - transform.translation()).normalize_or(Vec3::X)
+            };
+            material.params.misc.z = ambient_floor;
+            material.params.misc.w = directional_strength;
+            material.params.texture_x = texture_x;
+            material.params.texture_y = texture_y;
+            material.params.texture_z = texture_z;
+            material.params.planet_center = transform.translation().extend(0.0);
             material.params.time = elapsed;
         }
     }

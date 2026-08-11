@@ -128,7 +128,6 @@ pub fn uv_sphere_mesh(radius: f32, longitude_segments: u32, latitude_segments: u
     let radius = radius.max(0.1);
     let longitudes = longitude_segments.max(8);
     let latitudes = latitude_segments.max(4);
-
     let mut positions = Vec::with_capacity(((longitudes + 1) * (latitudes + 1)) as usize);
     let mut normals = Vec::with_capacity(positions.capacity());
     let mut uvs = Vec::with_capacity(positions.capacity());
@@ -156,7 +155,8 @@ pub fn uv_sphere_mesh(radius: f32, longitude_segments: u32, latitude_segments: u
         for lon in 0..longitudes {
             let a = lat * stride + lon;
             let b = a + stride;
-            indices.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
+            // Counter-clockwise when viewed from outside.
+            indices.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
         }
     }
 

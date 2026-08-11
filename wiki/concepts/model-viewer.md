@@ -2,7 +2,7 @@
 title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
-sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/generate-entity-index.mjs, scripts/viewer-lods.mjs, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
+sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
 updated: 2026-08-11
 ---
 
@@ -115,6 +115,17 @@ adds `Visibility::Hidden` + `NoFrustumCulling` that way
 - **Directional** — ambient plus a steerable key light, for normal maps,
   specular response and self-shadowing.
 
+The planet materials do their star-relative lighting in custom WGSL rather
+than through Bevy's scene lights. In the viewer, `PlanetLightingOverride`
+therefore receives the same off/ambient/directional controls so the buttons and
+sliders drive both GLB materials and celestial materials.
+
+Planet maps are authored as periodic equirectangular textures. The checked-in
+maps have their generator-feathered vertical border removed and a clean periodic
+join rebuilt by `scripts/stitch-planet-textures.mjs`; every aligned map in a
+texture set (surface, clouds, normal, roughness, emissive and masks) receives the
+same longitude remap. Normal vectors are renormalised after resampling.
+
 ## Notes
 
 - The `viewer` cargo feature depends on `server`, because the simulation
@@ -138,8 +149,10 @@ adds `Visibility::Hidden` + `NoFrustumCulling` that way
   for `AssetEvent::Modified`, because the old value stays in `Assets<Scene>`
   until the new one arrives). Hand-editing a sidecar now needs a manual browser
   reload; editing a `.wgsl` still reloads on its own.
-- The panel keeps its model, variant and LOD mode in `sessionStorage`, and picks
-  a running generator's transcript back up if the page does reload.
+- The panel keeps its subject kind, model/entity, variant, LOD mode, complete
+  orbit camera state, lighting controls, skybox brightness and gizmo toggle in
+  `sessionStorage`, and picks a running generator's transcript back up if the
+  page does reload.
 - `start-viewer.bat` waits for port 8081 to accept a connection before opening
   the browser. Trunk does not bind it until the first wasm build finishes,
   which is minutes from cold.

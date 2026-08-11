@@ -299,8 +299,18 @@
     // bundle is instantiated. Same handshake as server.html — don't import the
     // generated .js by name, its filename is content-hashed.
     const wasm = await new Promise((resolve) => {
-      if (window.wasmBindings) return resolve(window.wasmBindings);
-      addEventListener('TrunkApplicationStarted', () => resolve(window.wasmBindings), { once: true });
+      let poll;
+      const finish = () => {
+        if (!window.wasmBindings) return;
+        clearInterval(poll);
+        resolve(window.wasmBindings);
+      };
+      // A Trunk live reload can dispatch the event just before this module
+      // installs its listener. Polling closes that one-shot event race rather
+      // than leaving the entire panel below suspended (including its lists).
+      finish();
+      addEventListener('TrunkApplicationStarted', finish, { once: true });
+      poll = setInterval(finish, 50);
     });
 
     // TOML fetching: rig sidecars and entity configs are requested by Rust and
@@ -351,6 +361,25 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    // The dev server swaps its asset proxy while Trunk is rebuilding. Ask for
+    // the current generated index explicitly and retry once if the request
+    // happened during that hand-off; an empty native <select> is otherwise a
+    // particularly unhelpful failure mode.
+    const fetchIndex = async (path, field) => {
+      let lastError;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await fetch(`${path}?viewer-index=${Date.now()}`, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const index = await response.json();
+          if (!Array.isArray(index[field])) throw new Error(`missing ${field} array`);
+          return index[field];
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError;
+    };
 
     // ── Model dropdown, from the generated index ───────────────────────────
     const modelSelect = document.getElementById('model');
@@ -399,8 +428,7 @@
     }
 
     try {
-      const index = await fetch('assets/models/index.json').then((r) => r.json());
-      models = index.models;
+      models = await fetchIndex('assets/models/index.json', 'models');
       const current = params.get('model') ?? session.model ?? 'assets/models/alliance_cruiser.glb';
       // A `_lod<n>.glb` or a `.remesh.glb` is something this repo produced from
       // a model, not a model to choose — the ladder's own Level dropdown is how
@@ -439,8 +467,7 @@
     }
 
     try {
-      const index = await fetch('assets/entities/index.json').then((r) => r.json());
-      entities = index.entities;
+      entities = await fetchIndex('assets/entities/index.json', 'entities');
       const current = params.get('entity') ?? session.entity ?? 'assets/entities/star_sun.toml';
       for (const entity of entities) {
         const option = document.createElement('option');
@@ -572,11 +599,6 @@
       element.textContent = text;
       element.className = `note ${kind}`.trim();
     };
-
-    // URL parameters are the shareable source of truth and Rust consumes them
-    // before this panel starts. A remembered entity selection has no URL
-    // parameter, so replay it once the DOM side of the LOD panel exists.
-    if (subjectKind === 'entity' && !params.has('entity')) loadEntity();
 
     async function loadLadder() {
       ladderEl.replaceChildren();
@@ -1332,6 +1354,7 @@
       distanceInput.value = String(Math.round(value));
       distanceOut.textContent = distanceInput.value;
       wasm.viewer_set_camera_distance(Number(distanceInput.value));
+      remember({ distance: Number(distanceInput.value) });
     }
 
     /** Fit the slider's range to the ladder, so its full sweep is the ladder. */
@@ -1426,6 +1449,7 @@
           distanceOut.textContent = rounded;
         }
       }
+      if (stats.camera) remember({ camera: stats.camera, distance: stats.camera.radius });
     }, 250);
 
     // ── Lighting ───────────────────────────────────────────────────────────
@@ -1439,6 +1463,7 @@
       // Rust side, so push the panel's current values back down after it.
       pushAmbient();
       pushDirectional();
+      remember({ lighting: mode });
     };
     for (const button of modeButtons) {
       button.addEventListener('click', () => setMode(button.dataset.mode));
@@ -1462,10 +1487,12 @@
     function pushAmbient() {
       const [r, g, b] = hexToRgb(ambientColor.value);
       wasm.viewer_set_ambient(r, g, b, Number(ambientBrightness.value));
+      remember({ ambientColor: ambientColor.value, ambientBrightness: Number(ambientBrightness.value) });
     }
     function pushDirectional() {
       wasm.viewer_set_directional(
         Number(illuminance.value), Number(yaw.value), Number(pitch.value));
+      remember({ illuminance: Number(illuminance.value), yaw: Number(yaw.value), pitch: Number(pitch.value) });
     }
 
     // Wire each slider to its readout and its wasm setter.
@@ -1484,24 +1511,46 @@
     bind(yaw, document.getElementById('yawOut'), pushDirectional, fixed2);
     bind(pitch, document.getElementById('pitchOut'), pushDirectional, fixed2);
     bind(skybox, document.getElementById('skyboxOut'),
-         () => wasm.viewer_set_skybox_brightness(Number(skybox.value)));
+         () => {
+           wasm.viewer_set_skybox_brightness(Number(skybox.value));
+           remember({ skybox: Number(skybox.value) });
+         });
     ambientColor.addEventListener('input', pushAmbient);
-    gizmos.addEventListener('change', () => wasm.viewer_set_gizmos(gizmos.checked));
+    gizmos.addEventListener('change', () => {
+      wasm.viewer_set_gizmos(gizmos.checked);
+      remember({ gizmos: gizmos.checked });
+    });
 
     // Seed the panel from the URL and the engine's own defaults, so it opens
     // showing what is actually on screen.
-    skybox.value = wasm.viewer_default_skybox_brightness();
+    if (typeof session.ambientColor === 'string') ambientColor.value = session.ambientColor;
+    if (Number.isFinite(session.ambientBrightness)) ambientBrightness.value = session.ambientBrightness;
+    if (Number.isFinite(session.illuminance)) illuminance.value = session.illuminance;
+    if (Number.isFinite(session.yaw)) yaw.value = session.yaw;
+    if (Number.isFinite(session.pitch)) pitch.value = session.pitch;
+    skybox.value = Number.isFinite(session.skybox)
+      ? session.skybox
+      : wasm.viewer_default_skybox_brightness();
     document.getElementById('skyboxOut').textContent = skybox.value;
-    gizmos.checked = params.get('gizmos') === '1';
-    setMode(params.get('lighting') ?? 'ambient');
+    gizmos.checked = params.has('gizmos') ? params.get('gizmos') === '1' : Boolean(session.gizmos);
+    wasm.viewer_set_gizmos(gizmos.checked);
+    setMode(params.get('lighting') ?? session.lighting ?? 'ambient');
 
     // The model the panel restored is not necessarily the one Rust parsed out
     // of the URL, so tell it explicitly, then bring the ladder up.
-    loadCurrent();
+    if (subjectKind === 'entity') loadEntity();
+    else loadCurrent();
     setLodMode(lodMode, lodIndex);
     // Back to where the camera was, so a rebuild does not send you to the
     // default framing every time.
     if (session.distance) setDistance(session.distance);
+    if (session.camera) {
+      const { focus, radius, yaw: savedYaw, pitch: savedPitch } = session.camera;
+      if (Array.isArray(focus) && focus.length === 3
+          && [radius, savedYaw, savedPitch, ...focus].every(Number.isFinite)) {
+        wasm.viewer_set_camera(focus[0], focus[1], focus[2], radius, savedYaw, savedPitch);
+      }
+    }
   </script>
 </body>
 </html>

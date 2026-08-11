@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use super::subject::SubjectState;
 
 /// Spherical orbit state around a focus point.
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct OrbitCamera {
     pub focus: Vec3,
     pub radius: f32,

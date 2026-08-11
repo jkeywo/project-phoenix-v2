@@ -13,6 +13,7 @@
 
 use bevy::prelude::*;
 
+use crate::entity_planet::{PlanetLightingOverride, AMBIENT_FLOOR};
 use crate::render_setup::default_ambient_light;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -84,6 +85,7 @@ pub struct ViewerLight;
 pub fn apply_lighting(
     mut commands: Commands,
     lighting: Res<LightingMode>,
+    mut celestial_lighting: ResMut<PlanetLightingOverride>,
     existing: Query<Entity, With<ViewerLight>>,
 ) {
     if !lighting.is_changed() {
@@ -102,6 +104,30 @@ pub fn apply_lighting(
         brightness: lighting.ambient_brightness,
         ..default()
     };
+
+    let default_ambient_brightness = default_ambient_light().brightness.max(f32::EPSILON);
+    let ambient_floor = match lighting.mode {
+        Mode::Off => 0.0,
+        Mode::Ambient | Mode::Directional => {
+            AMBIENT_FLOOR * (lighting.ambient_brightness / default_ambient_brightness)
+        }
+    };
+    let directional_strength = match lighting.mode {
+        Mode::Directional => {
+            lighting.directional_illuminance / DirectionalLight::default().illuminance
+        }
+        Mode::Off | Mode::Ambient => 0.0,
+    };
+    // Directional lights shine along local -Z. The planet shader needs the
+    // inverse: the direction from the subject toward the light source.
+    celestial_lighting.light_dir = Quat::from_euler(
+        EulerRot::YXZ,
+        lighting.directional_yaw,
+        lighting.directional_pitch,
+        0.0,
+    ) * Vec3::Z;
+    celestial_lighting.ambient_floor = ambient_floor;
+    celestial_lighting.directional_strength = directional_strength;
 
     match lighting.mode {
         Mode::Off => {

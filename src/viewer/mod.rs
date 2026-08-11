@@ -95,6 +95,14 @@ pub enum ViewerCommand {
     /// Put the camera at a given distance from the subject — how the panel
     /// jumps to a LOD band's switch distance.
     SetCameraDistance(f32),
+    /// Restore the complete orbit state after a live-reload.  Distance alone
+    /// loses the user's orbit heading and pan offset.
+    SetCamera {
+        focus: Vec3,
+        radius: f32,
+        yaw: f32,
+        pitch: f32,
+    },
     /// Replace the ladder with the panel's working copy, so an edited switch
     /// distance takes effect before it is saved to the sidecar.
     SetLadder(Vec<crate::entity_config::LodLevel>),
@@ -181,6 +189,7 @@ impl Plugin for ViewerPlugin {
             .add_plugins(crate::entity_star::StarRenderPlugin)
             .add_plugins(crate::entity_planet::PlanetRenderPlugin)
             .init_resource::<LightingMode>()
+            .init_resource::<crate::entity_planet::PlanetLightingOverride>()
             .init_resource::<subject::SubjectState>()
             .init_resource::<lod::LadderState>()
             .init_resource::<lod::LodMode>()
@@ -312,6 +321,23 @@ fn apply_commands(
                     orbit.radius = distance.max(MIN_CAMERA_DISTANCE);
                     // Distance came from the panel, so framing must not
                     // overwrite it when the next level's extents arrive.
+                    orbit.framed = true;
+                }
+            }
+            ViewerCommand::SetCamera {
+                focus,
+                radius,
+                yaw,
+                pitch,
+            } => {
+                for mut orbit in &mut cameras {
+                    orbit.focus = focus;
+                    orbit.radius = radius.max(MIN_CAMERA_DISTANCE);
+                    orbit.yaw = yaw;
+                    orbit.pitch = pitch.clamp(
+                        -std::f32::consts::FRAC_PI_2 + 0.01,
+                        std::f32::consts::FRAC_PI_2 - 0.01,
+                    );
                     orbit.framed = true;
                 }
             }
@@ -524,6 +550,26 @@ pub fn viewer_set_lod_mode(mode: &str, index: usize) {
 #[wasm_bindgen]
 pub fn viewer_set_camera_distance(distance: f32) {
     push_command(ViewerCommand::SetCameraDistance(distance));
+}
+
+/// Restore the orbit heading, pan, and distance saved by the viewer panel
+/// before Trunk reloaded the page.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn viewer_set_camera(
+    focus_x: f32,
+    focus_y: f32,
+    focus_z: f32,
+    radius: f32,
+    yaw: f32,
+    pitch: f32,
+) {
+    push_command(ViewerCommand::SetCamera {
+        focus: Vec3::new(focus_x, focus_y, focus_z),
+        radius,
+        yaw,
+        pitch,
+    });
 }
 
 /// Start a new ladder draft. Levels are pushed one at a time and applied by

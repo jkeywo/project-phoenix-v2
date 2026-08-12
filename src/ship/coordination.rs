@@ -49,6 +49,35 @@ pub fn route_coordination(
     }
 }
 
+/// Resolves a channel-3 target to the station that should receive a popup.
+///
+/// Coordination uses both fine system ids and console-level keys. Unlike
+/// command admission, the latter are valid delivery addresses: Helm and
+/// Tactical are not `[[system]]` ids, while legacy aggregate targets can name
+/// an authored station directly. An unresolved target remains ownerless so the
+/// existing fallback delivery policy can decide what to do with it.
+pub fn station_for_target(
+    config: &crate::ship::config::ShipConfig,
+    target: &SystemId,
+) -> Option<StationId> {
+    if let Some(system) = config.system(target) {
+        return system.station.clone();
+    }
+
+    if *target == crate::system_registry::helm_station_key() {
+        return config
+            .system(&crate::system_registry::helm_steering_system_id())
+            .and_then(|system| system.station.clone());
+    }
+
+    if *target == crate::system_registry::tactical_station_key() {
+        return config.weapons_station();
+    }
+
+    let station = StationId(target.0.clone());
+    config.station(&station).map(|_| station)
+}
+
 // ── Ship-wide broadcast (issue #879) ──────────────────────────────────────────
 
 /// One crew seat on the source ship, as the ship-broadcast router sees it.
@@ -199,6 +228,26 @@ mod tests {
         assert_eq!(
             route_coordination(ControlSource::Human, ControlSource::Human),
             DeliverAction::Suppress
+        );
+    }
+
+    #[test]
+    fn station_for_target_resolves_console_keys_and_ownerless_targets() {
+        let config = crate::ship::components::ShipConfigComponent::default().0;
+
+        assert_eq!(
+            station_for_target(&config, &crate::system_registry::helm_station_key()),
+            config
+                .system(&crate::system_registry::helm_steering_system_id())
+                .and_then(|system| system.station.clone())
+        );
+        assert_eq!(
+            station_for_target(&config, &crate::system_registry::tactical_station_key()),
+            config.weapons_station()
+        );
+        assert_eq!(
+            station_for_target(&config, &SystemId("not-a-real-target".into())),
+            None
         );
     }
 

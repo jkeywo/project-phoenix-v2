@@ -238,6 +238,13 @@ process_coordination_lag (SimSet::Modifiers)
 LobbyOutbox → OutboundMessage → routeOutbound → PeerJS
 ```
 
+Popup delivery resolves console-level Helm and Tactical targets through their
+authored owning systems, then directs the popup to that station holder. It does
+not use the ownerless all-client fallback for those valid coordination
+addresses. The host's `AiChatterEvent` surface is narrower: it records only
+AI-to-AI consumed coordination; human-to-AI requests are delivered to the AI
+but do not appear on the viewscreen.
+
 New in #684: `detect_damage_tier_crossings` emits a `CoordinationPayload::Alert { title, body }` targeting `captain_system_id()` when a system crosses into `DamageTier::Destroyed`. The `sender_origin` is the destroyed system's control source, so:
 - AI-controlled system destroyed → alert shown as popup to human captain.
 - Human-controlled system destroyed → alert suppressed (the player at that station can observe the destruction directly).

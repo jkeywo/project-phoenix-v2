@@ -434,7 +434,7 @@ pub fn process_coordination_lag(
                     // string id (or a player name) resolved on the client;
                     // `to_label` is the raw target key, shown as-is so the
                     // viewscreen and the popup agree.
-                    if is_local {
+                    if is_local && msg.sender_origin == ControlSource::Ai {
                         let from_label = if msg.sender_label.is_empty() {
                             coordination::CHATTER_SENDER_AI.to_string()
                         } else {
@@ -482,14 +482,13 @@ pub fn process_coordination_lag(
                         msg.sender_label
                     };
 
-                    let system = ship_config.0.system(&msg.target);
-                    let station_opt = system.and_then(|s| s.station.as_ref());
-
-                    if let Some(station_id) = station_opt {
-                        if ship_config.0.station(station_id).is_some() {
+                    if let Some(station_id) =
+                        coordination::station_for_target(&ship_config.0, &msg.target)
+                    {
+                        if ship_config.0.station(&station_id).is_some() {
                             let token: Option<String> = sessions
                                 .0
-                                .holder_for_station(station_id)
+                                .holder_for_station(&station_id)
                                 .map(|t| t.to_string());
 
                             if let Some(token) = token {
@@ -500,7 +499,7 @@ pub fn process_coordination_lag(
                                         payload: coarsen_repair_request(
                                             &msg.payload,
                                             repair_vis.as_ref(),
-                                            Some(station_id),
+                                            Some(&station_id),
                                         ),
                                         sender_label: label,
                                     },
@@ -942,6 +941,26 @@ mod tests {
         );
     }
 
+    fn seat_human_on_tactical(app: &mut App) {
+        push(
+            app,
+            "tactical",
+            ClientMessage::Identify {
+                token: "tactical".into(),
+                name: "Uhura".into(),
+            },
+        );
+        tick(app);
+        push(
+            app,
+            "tactical",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
+        tick(app);
+    }
+
     /// Put every tactical FINE system (phaser banks, torpedo tubes, the
     /// magazine) on `source` — the set `any_tactical_system_operates_ai`
     /// inspects, moved as one, which is what claiming or vacating the Tactical
@@ -1159,6 +1178,13 @@ mod tests {
             });
     }
 
+    fn drain_chatter(app: &mut App) -> Vec<AiChatterEvent> {
+        app.world_mut()
+            .resource_mut::<Messages<AiChatterEvent>>()
+            .drain()
+            .collect()
+    }
+
     /// AC5, end to end in ONE app. A human sits at Sensors; Tactical is unmanned
     /// and backfilled to AI. The ship's own Sensors emitter derives a frequency
     /// advisory from authoritative state, the bus routes it, and the AI running
@@ -1219,6 +1245,44 @@ mod tests {
             coordination_popups(&app),
             0,
             "an advisory consumed by an AI station must not also raise a popup"
+        );
+    }
+
+    #[test]
+    fn only_ai_to_ai_coordination_reaches_viewscreen_chatter() {
+        let mut human_sender = routing_test_app();
+        start_game_with_sensors_officer(&mut human_sender);
+        backfill_tactical_to_ai(&mut human_sender);
+        give_ship_tactical_frequency_surface(&mut human_sender);
+        enqueue_coordination(
+            &mut human_sender,
+            ControlSource::Human,
+            crate::system_registry::tactical_station_key(),
+            CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        );
+        tick(&mut human_sender);
+        tick(&mut human_sender);
+        assert!(
+            drain_chatter(&mut human_sender).is_empty(),
+            "human→AI coordination belongs to the AI receiver, not viewscreen chatter"
+        );
+
+        let mut ai_sender = routing_test_app();
+        start_game_with_sensors_officer(&mut ai_sender);
+        backfill_tactical_to_ai(&mut ai_sender);
+        give_ship_tactical_frequency_surface(&mut ai_sender);
+        enqueue_coordination(
+            &mut ai_sender,
+            ControlSource::Ai,
+            crate::system_registry::tactical_station_key(),
+            CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        );
+        tick(&mut ai_sender);
+        tick(&mut ai_sender);
+        assert_eq!(
+            drain_chatter(&mut ai_sender).len(),
+            1,
+            "AI→AI coordination remains visible on the viewscreen"
         );
     }
 
@@ -1345,6 +1409,7 @@ mod tests {
     fn a_human_held_tactical_still_routes_an_ai_advisory_to_a_popup() {
         let mut app = routing_test_app();
         start_game_with_sensors_officer(&mut app);
+        seat_human_on_tactical(&mut app);
         give_ship_tactical_frequency_surface(&mut app);
         // No `backfill_tactical_to_ai` — every tactical fine system stays on
         // the default Human source.
@@ -1358,9 +1423,37 @@ mod tests {
         tick(&mut app);
         tick(&mut app);
 
+        let popup_targets: Vec<_> = app
+            .world()
+            .resource::<crate::lobby::LobbyOutbox>()
+            .0
+            .iter()
+            .filter_map(|(target, msg)| match (target, msg) {
+                (
+                    crate::lobby_handler::Target::Token(token),
+                    crate::messages::ServerMessage::CoordinationPopup { .. },
+                ) => Some(token.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            popup_targets,
+            vec!["tactical"],
+            "an advisory addressed to Tactical must reach only Tactical, never Target::All"
+        );
         assert!(
-            coordination_popups(&app) > 0,
-            "a human Tactical must still be shown an AI-origin advisory"
+            app.world()
+                .resource::<crate::lobby::LobbyOutbox>()
+                .0
+                .iter()
+                .all(|(target, msg)| !matches!(
+                    (target, msg),
+                    (
+                        crate::lobby_handler::Target::All,
+                        crate::messages::ServerMessage::CoordinationPopup { .. },
+                    )
+                )),
+            "an addressed Tactical popup must not fall back to a broadcast"
         );
         let ship = find_ship_entity(&mut app);
         assert_eq!(

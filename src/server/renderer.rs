@@ -505,14 +505,12 @@ fn update_view_screen_text(
 /// forward.
 fn hull_camera(
     view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
-    markers_q: Query<&ModelMarkers, With<crate::simulation::LocalShip>>,
-    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    ship_q: Query<(&Transform, Option<&ModelMarkers>), With<crate::simulation::LocalShip>>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
     let Ok(mut transform) = cam_query.single_mut() else {
         return;
     };
-    let physics = physics_q.single().ok().copied().unwrap_or_default();
     let view_mode = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
@@ -532,34 +530,20 @@ fn hull_camera(
 
     const LOOK_DIST: f32 = 100.0;
 
-    // Physics heading uses positive-yaw = CW from above, but
-    // Quat::from_rotation_y uses CCW (right-hand rule). Negate to match.
-    let yaw_rot = Quat::from_rotation_y(-physics.yaw);
-    let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
-
-    // All current models apply Ry(π) as their base rotation (see
-    // base rotation in each model's .toml). Camera markers are authored
-    // in the raw-GLB frame (+Z = forward); the base rotation brings them
-    // into the game frame (-Z = forward).
-    let base_rot = Quat::from_rotation_y(std::f32::consts::PI);
-
-    let (pos_offset, dir_offset) = markers_q
-        .single()
-        .ok()
-        .and_then(|mm| mm.get(marker_name))
-        .map(|m| {
-            (
-                base_rot * Vec3::from_array(m.position),
-                base_rot * Vec3::from_array(m.direction),
-            )
+    let Ok((ship_transform, markers)) = ship_q.single() else {
+        return;
+    };
+    let (camera_pos, look_dir) = markers
+        .and_then(|markers| {
+            Some((
+                markers.resolve_world_position(ship_transform, marker_name)?,
+                markers.resolve_world_direction(ship_transform, marker_name)?,
+            ))
         })
-        .unwrap_or_else(|| {
-            // Fallback: ship centre, game-forward direction.
-            (Vec3::ZERO, Vec3::NEG_Z)
-        });
-
-    let camera_pos = ship_origin + yaw_rot * pos_offset;
-    let look_dir = yaw_rot * dir_offset;
+        .unwrap_or((
+            ship_transform.translation,
+            ship_transform.rotation * Vec3::NEG_Z,
+        ));
 
     if look_dir.length_squared() > 1e-6 {
         transform.translation = camera_pos;

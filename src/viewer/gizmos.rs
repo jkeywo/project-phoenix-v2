@@ -1,10 +1,9 @@
 //! Rig overlay: draws what a `.model.toml` sidecar claims, on top of the model
 //! it claims it about.
 //!
-//! Markers are authored in post-base-rig space, which is the space the
-//! `SceneRoot` child lives in — so the gizmos hang off the subject's transform
-//! and land wherever the sidecar says, making an authoring mistake visible
-//! rather than silently wrong at runtime.
+//! Markers are authored in raw-GLB space. Their shared resolvers compose the
+//! sidecar base rig just like the `SceneRoot` child, so the gizmos land at the
+//! same place as runtime attachments.
 
 use bevy::prelude::*;
 
@@ -49,14 +48,12 @@ pub fn draw_rig_gizmos(
     };
 
     for name in markers.marker_names() {
-        let Some(marker) = markers.get(name) else {
+        let Some(position) = markers.resolve_world_position(transform, name) else {
             continue;
         };
-        let position = transform.transform_point(Vec3::from_array(marker.position));
-        let direction = transform
-            .rotation
-            .mul_vec3(Vec3::from_array(marker.direction))
-            .normalize_or_zero();
+        let direction = markers
+            .resolve_world_direction(transform, name)
+            .unwrap_or(Vec3::ZERO);
 
         // Cross marking the mount point…
         gizmos.line(
@@ -86,10 +83,9 @@ pub fn draw_rig_gizmos(
 
     // Target points: where incoming phaser beams may land.
     for index in 0..markers.target_point_count() {
-        let Some(point) = markers.target_point(index) else {
+        let Some(position) = markers.resolve_target_point_world_position(transform, index) else {
             continue;
         };
-        let position = transform.transform_point(Vec3::from_array(point.position));
         gizmos.sphere(
             Isometry3d::from_translation(position),
             tick * 0.6,

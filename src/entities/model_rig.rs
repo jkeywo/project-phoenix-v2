@@ -16,7 +16,7 @@
 //! min = [-4.0,-1.2,-6.0]
 //! max = [4.0,1.2,6.0]
 //! size = [8.0,2.4,12.0]
-//! [markers.fore_emitter]  # free-form name -> single point (post-base-rig space)
+//! [markers.fore_emitter]  # free-form name -> single point (raw-GLB space)
 //! position = [0.0,0.0,-6.0]
 //! direction = [0.0,0.0,-1.0]  # unit vector, forward basis (0,0,-1)
 //!
@@ -64,7 +64,7 @@
 //! while the per-entity `Transform` (spawn position + per-entity scale /
 //! rotation) stays on the parent. Net world transform of the model is
 //! `entityTransform ∘ baseRig ∘ model`. Marker positions are authored in
-//! post-base-rig (model-local, base-applied) space, so resolving a marker to
+//! raw-GLB space, so resolving a marker to
 //! world space means applying `entityTransform ∘ baseRig` to the marker point.
 
 use serde::{Deserialize, Serialize};
@@ -117,8 +117,8 @@ pub struct Extents {
     pub size: [f32; 3],
 }
 
-/// A single named mount point in post-base-rig (model-local, base-applied)
-/// space. `direction` is a unit vector with forward basis `(0,0,-1)`.
+/// A single named mount point in raw-GLB space. `direction` is a unit vector
+/// with forward basis `(0,0,-1)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Marker {
@@ -126,7 +126,7 @@ pub struct Marker {
     pub direction: [f32; 3],
 }
 
-/// A single anonymous target point in post-base-rig space.
+/// A single anonymous target point in raw-GLB space.
 ///
 /// Phaser PFX can resolve one of these points on the target model so beams hit
 /// plausible hull positions instead of always converging on the entity centre.
@@ -257,6 +257,27 @@ impl ModelMarkers {
     pub fn resolve_world_position(&self, transform: &Transform, name: &str) -> Option<Vec3> {
         let marker = self.get(name)?;
         let local = self.base.transform_point(Vec3::from_array(marker.position));
+        Some(transform.transform_point(local))
+    }
+
+    /// Resolve a marker direction to world space through the same composed
+    /// transform as its position. Scale is included because it changes the
+    /// direction of non-axis-aligned vectors under a non-uniform base rig.
+    pub fn resolve_world_direction(&self, transform: &Transform, name: &str) -> Option<Vec3> {
+        let marker = self.get(name)?;
+        let local = self.base.rotation * (self.base.scale * Vec3::from_array(marker.direction));
+        let direction = transform.rotation * (transform.scale * local);
+        (direction.length_squared() > 1e-6).then_some(direction.normalize())
+    }
+
+    /// Resolve an anonymous phaser target point to world space.
+    pub fn resolve_target_point_world_position(
+        &self,
+        transform: &Transform,
+        index: usize,
+    ) -> Option<Vec3> {
+        let point = self.target_point(index)?;
+        let local = self.base.transform_point(Vec3::from_array(point.position));
         Some(transform.transform_point(local))
     }
 

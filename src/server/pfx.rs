@@ -2975,8 +2975,7 @@ fn target_point_position(
     markers: Option<&ModelMarkers>,
     target_point_index: Option<usize>,
 ) -> Option<Vec3> {
-    let marker = markers?.target_point(target_point_index?)?;
-    Some(transform.transform_point(Vec3::from_array(marker.position)))
+    markers?.resolve_target_point_world_position(transform, target_point_index?)
 }
 
 fn marker_origin(
@@ -2995,10 +2994,12 @@ fn marker_emitter(
     markers: Option<&ModelMarkers>,
     marker_name: Option<&str>,
 ) -> Option<(Vec3, Vec3)> {
-    let marker = markers?.get(marker_name?)?;
-    let origin = transform.transform_point(Vec3::from_array(marker.position));
-    let direction = transform.rotation * Vec3::from_array(marker.direction);
-    (direction.length_squared() > 1e-6).then_some((origin, direction.normalize()))
+    let markers = markers?;
+    let name = marker_name?;
+    Some((
+        markers.resolve_world_position(transform, name)?,
+        markers.resolve_world_direction(transform, name)?,
+    ))
 }
 
 /// Bank-aware fallback beam origin when the bank has no named marker.
@@ -4768,6 +4769,11 @@ mod tests {
     fn target_point_position_transforms_model_point() {
         let rig = crate::model_rig::ModelRig::from_toml(
             r#"
+[base]
+offset = [1.0, 0.0, 0.0]
+rotation = [0.0, 3.1415927, 0.0]
+scale = [2.0, 2.0, 2.0]
+
 [[target_points]]
 position = [0.5, -0.1, 0.25]
 "#,
@@ -4778,7 +4784,10 @@ position = [0.5, -0.1, 0.25]
 
         let point = target_point_position(&transform, Some(&markers), Some(0)).unwrap();
 
-        assert_eq!(point, Vec3::new(10.5, 1.9, -2.75));
+        assert!(
+            (point - Vec3::new(10.0, 1.8, -3.5)).length() < 1e-5,
+            "target point must include the sidecar base rig, got {point:?}"
+        );
     }
 
     #[test]
@@ -4951,15 +4960,20 @@ position = [0.5, -0.1, 0.25]
 
     #[test]
     fn engine_emitters_use_marker_direction() {
-        let mut map = HashMap::new();
-        map.insert(
-            "aft_exhaust".to_string(),
-            crate::model_rig::Marker {
-                position: [1.0, 0.5, -2.0],
-                direction: [0.0, 0.0, -1.0],
-            },
-        );
-        let markers = ModelMarkers::from_markers(map);
+        let rig = crate::model_rig::ModelRig::from_toml(
+            r#"
+[base]
+offset = [1.0, 0.0, 0.0]
+rotation = [0.0, 3.1415927, 0.0]
+scale = [2.0, 1.0, 2.0]
+
+[markers.aft_exhaust]
+position = [1.0, 0.5, -2.0]
+direction = [0.0, 0.0, -1.0]
+"#,
+        )
+        .unwrap();
+        let markers = ModelMarkers::from_rig(&rig);
         let cfg = EnginePfxConfig {
             color: None,
             markers: vec!["aft_exhaust".to_string()],
@@ -4976,8 +4990,8 @@ position = [0.5, -0.1, 0.25]
         );
 
         assert_eq!(emitters.len(), 1);
-        assert_eq!(emitters[0].origin, Vec3::new(11.0, 0.5, 18.0));
-        assert_eq!(emitters[0].direction, Vec3::NEG_Z);
+        assert!((emitters[0].origin - Vec3::new(9.0, 0.5, 24.0)).length() < 1e-5);
+        assert!((emitters[0].direction - Vec3::Z).length() < 1e-5);
         assert!(emitters[0].is_marker_attached);
     }
 

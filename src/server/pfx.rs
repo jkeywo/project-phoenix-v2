@@ -2452,7 +2452,6 @@ fn spawn_engine_trails(
         };
         live_key_bases.insert(key_base.clone());
         let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
-        let normalized = (physics.forward_speed / max_speed).clamp(0.0, 1.0);
         let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
         let settings = EnginePfxSettings::from_config(cfg);
         update_engine_trail(
@@ -2460,7 +2459,8 @@ fn spawn_engine_trails(
             transform,
             markers,
             cfg,
-            normalized,
+            physics.forward_speed,
+            max_speed,
             dt,
             &settings,
             &textures,
@@ -2497,7 +2497,8 @@ fn update_engine_trail(
     transform: &Transform,
     markers: Option<&ModelMarkers>,
     cfg: Option<&EnginePfxConfig>,
-    normalized_speed: f32,
+    forward_speed: f32,
+    max_speed: f32,
     dt: f32,
     settings: &EnginePfxSettings,
     textures: &EngineTrailTextures,
@@ -2506,9 +2507,29 @@ fn update_engine_trail(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<EngineTrailMaterial>,
 ) {
+    let motion = classify_engine_trail_motion(forward_speed, max_speed);
     let emitters = engine_emitters(transform, markers, cfg);
     for (emitter_idx, emitter) in emitters.iter().enumerate() {
         let key = format!("{}:{}", key_base, emitter_idx);
+
+        // An astern-moving ship has no forward exhaust trail. Keep an idle
+        // ship's existing fade behaviour, but clear a previously forward trail
+        // immediately as soon as its signed forward speed goes negative.
+        if motion == EngineTrailMotion::Reverse {
+            if let Some(trail) = state.emitters.get_mut(&key) {
+                clear_engine_trail_crumbs(&mut trail.crumbs);
+                if let Some(mesh) = meshes.get_mut(&trail.mesh_handle) {
+                    build_ribbon_into_mesh(mesh, &trail.crumbs, 0.0);
+                }
+            }
+            continue;
+        }
+
+        let normalized_speed = match motion {
+            EngineTrailMotion::Forward(normalized_speed) => normalized_speed,
+            EngineTrailMotion::Idle | EngineTrailMotion::Reverse => 0.0,
+        };
+
         let geometry = settings.geometry_for(emitter.is_marker_attached);
         let width = ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35) * geometry.scale;
 
@@ -2607,6 +2628,10 @@ fn upsert_engine_head_crumb(
     while crumbs.len() > ENGINE_TRAIL_MAX_CRUMBS {
         crumbs.pop_back();
     }
+}
+
+fn clear_engine_trail_crumbs(crumbs: &mut VecDeque<TrailCrumb>) {
+    crumbs.clear();
 }
 
 fn render_crumbs_from_marker(
@@ -3994,6 +4019,26 @@ struct EngineTrailGeometry {
     scale: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EngineTrailMotion {
+    Reverse,
+    Idle,
+    Forward(f32),
+}
+
+fn classify_engine_trail_motion(forward_speed: f32, max_speed: f32) -> EngineTrailMotion {
+    if forward_speed < 0.0 {
+        EngineTrailMotion::Reverse
+    } else {
+        let normalized_speed = (forward_speed / max_speed.max(0.1)).clamp(0.0, 1.0);
+        if normalized_speed > 0.05 {
+            EngineTrailMotion::Forward(normalized_speed)
+        } else {
+            EngineTrailMotion::Idle
+        }
+    }
+}
+
 impl EnginePfxSettings {
     fn from_config(cfg: Option<&EnginePfxConfig>) -> Self {
         Self {
@@ -4869,6 +4914,39 @@ position = [0.5, -0.1, 0.25]
         assert_eq!(render.len(), 2);
         assert_eq!(render[0].pos, Vec3::ZERO);
         assert_eq!(render[1].pos, Vec3::Z * ENGINE_TRAIL_MIN_CRUMB_DIST);
+    }
+
+    #[test]
+    fn reverse_engine_trail_is_not_created_or_retained() {
+        assert_eq!(
+            classify_engine_trail_motion(-0.01, 12.5),
+            EngineTrailMotion::Reverse
+        );
+        assert_eq!(
+            classify_engine_trail_motion(6.25, 12.5),
+            EngineTrailMotion::Forward(0.5)
+        );
+        assert_eq!(
+            classify_engine_trail_motion(0.0, 12.5),
+            EngineTrailMotion::Idle,
+            "a stopped ship keeps the existing idle trail-fade behaviour"
+        );
+
+        let mut crumbs = VecDeque::from([TrailCrumb {
+            pos: Vec3::ZERO,
+            width: 0.5,
+            age: 0.0,
+            lifetime: 1.5,
+        }]);
+
+        // This is the state transition `update_engine_trail` applies to a
+        // pre-existing ribbon when `forward_speed` becomes negative.
+        clear_engine_trail_crumbs(&mut crumbs);
+
+        assert!(
+            crumbs.is_empty(),
+            "reverse motion must leave no engine trail crumbs"
+        );
     }
 
     #[test]

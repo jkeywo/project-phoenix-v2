@@ -104,7 +104,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Presentation Effects
-      summary: Renders configured engine trails (including marker-attached roll and uniform scale), phaser beams, torpedo and blaster effects, explosions, dust, nebula particles, star visuals, and viewscreen alert effects from authoritative events and entities.
+      summary: Renders configured forward-only engine trails (including marker-attached roll and uniform scale), phaser beams, torpedo and blaster effects, explosions, dust, nebula particles, star visuals, and viewscreen alert effects from authoritative events and entities.
     architecture:
       kind: presentation-effects
       authority: derived

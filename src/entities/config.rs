@@ -9871,6 +9871,89 @@ count = 10
 
     // ── Inline fine-system AI policy (issue #775) ────────────────────────────
 
+    #[test]
+    fn shipped_alliance_and_harrow_hulls_share_authored_visual_colours() {
+        // Faction colours are designer-authored TOML, not Rust constants. Sweep
+        // top-level hulls through the include resolver and compare each faction
+        // against its own first authored value: this catches missing values,
+        // fallback colours, and per-hull drift without re-pinning the palette
+        // in code when a designer deliberately retunes it.
+        const FACTIONS: [(&str, &str, usize); 2] = [
+            ("Alliance", "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", 4),
+            ("Harrow", "cccccccc-3333-4333-8333-cccccccccccc", 4),
+        ];
+
+        for (name, faction_id, minimum_hulls) in FACTIONS {
+            let mut trail_colours: Vec<(String, [f32; 3])> = Vec::new();
+            let mut phaser_colours: Vec<(String, [f32; 4])> = Vec::new();
+            let entries = std::fs::read_dir("assets/entities").expect("assets/entities exists");
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|extension| extension.to_str()) != Some("toml") {
+                    continue;
+                }
+                let file = path.to_string_lossy().replace('\\', "/");
+                let Ok(cfg) = crate::entity_includes::load_entity_config(&file) else {
+                    continue;
+                };
+                if cfg.faction.map(|faction| faction.to_string()) != Some(faction_id.to_string()) {
+                    continue;
+                }
+
+                let trail_colour = cfg
+                    .helm_console
+                    .as_ref()
+                    .and_then(|helm| helm.engine_pfx.as_ref())
+                    .and_then(|pfx| pfx.color)
+                    .unwrap_or_else(|| panic!("{file}: {name} hull has no engine_pfx.color"));
+                trail_colours.push((
+                    file.clone(),
+                    trail_colour[..3].try_into().expect("RGBA has RGB"),
+                ));
+
+                if let Some(weapons) = cfg.weapons_console.as_ref() {
+                    for bank in &weapons.phaser_banks {
+                        let colour: [f32; 4] =
+                            bank.beam_color.clone().try_into().unwrap_or_else(|_| {
+                                panic!(
+                                    "{file}: {name} phaser bank {} has no RGBA beam_color",
+                                    bank.id
+                                )
+                            });
+                        phaser_colours.push((format!("{file}:{}", bank.id), colour));
+                    }
+                }
+            }
+
+            assert!(
+                trail_colours.len() >= minimum_hulls,
+                "expected at least {minimum_hulls} shipped {name} hulls, found {}",
+                trail_colours.len()
+            );
+            assert!(
+                !phaser_colours.is_empty(),
+                "expected at least one shipped {name} phaser bank"
+            );
+
+            let (trail_baseline_file, trail_baseline) = &trail_colours[0];
+            for (file, colour) in &trail_colours[1..] {
+                assert_eq!(
+                    colour, trail_baseline,
+                    "{file}: engine trail RGB {colour:?} does not match {trail_baseline_file}'s {trail_baseline:?}"
+                );
+            }
+
+            let (phaser_baseline_file, phaser_baseline) = &phaser_colours[0];
+            for (file, colour) in &phaser_colours[1..] {
+                assert_eq!(
+                    colour, phaser_baseline,
+                    "{file}: phaser beam colour {colour:?} does not match {phaser_baseline_file}'s {phaser_baseline:?}"
+                );
+            }
+        }
+    }
+
     const CHANNELS: &[&str] = &[CAPTAIN_RED_ALERT_CHANNEL];
     const VERBS: &[&str] = &[CAPTAIN_SET_RED_ALERT_VERB];
 

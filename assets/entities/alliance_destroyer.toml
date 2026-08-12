@@ -242,6 +242,7 @@ beam_range = 30
 beam_damage_per_sec = 3
 beam_duration_secs = 4
 cooldown_secs = 4
+beam_color = [ 0.25, 0.75, 1, 1 ]
 marker = "phasers_omni"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -601,6 +602,8 @@ hull_max_hp = 5
 
 [power]
 capacity = 70
+sustainable_total = 6
+max_commanded_total = 8
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 20
 

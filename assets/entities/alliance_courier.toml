@@ -335,6 +335,8 @@ hull_max_hp = 4
 # Small-hull values are authored here rather than inferred from ship class.
 [power]
 capacity = 35
+sustainable_total = 6
+max_commanded_total = 8
 # Index 3 (a ship-wide total of 6) is +1, not a 0. 6 is this hull's RESTING
 # total (`helm 2 + weapons 2 + shields 2`), so a 0 rate there would mean
 # a courier sitting quietly at anchor never recovers a point of charge — the

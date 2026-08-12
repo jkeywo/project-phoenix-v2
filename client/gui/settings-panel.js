@@ -45,8 +45,10 @@
 
 import { t, has } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
-import { visibleTabs, resolveActiveTab } from './settings-tabs.js';
+import { visibleClientTabs, resolveClientActiveTab } from './settings-tabs.js';
 import { controlSystemEnvelope } from './command-gateway.js';
+import { renderStationHelp } from './help-panel.js';
+import { renderManual } from './manual-panel.js';
 
 /** localStorage key for the master volume. Unchanged from the pre-#940 slider. */
 const STORAGE_KEY = 'phoenix-settings-volume';
@@ -211,8 +213,8 @@ export function buildSettingsState(opts = {}) {
   const flags = (debug && debug.flags) || {};
 
   return {
-    tabs: visibleTabs(demo).map((tab) => ({ id: tab.id, labelId: tab.labelId })),
-    activeTab: resolveActiveTab(opts.activeTab || null, demo),
+    tabs: visibleClientTabs(demo).map((tab) => ({ id: tab.id, labelId: tab.labelId })),
+    activeTab: resolveClientActiveTab(opts.activeTab || null, demo),
     stationId,
     ratings,
     debugFlags: CLIENT_DEBUG_FLAGS.map((entry) => ({
@@ -321,6 +323,7 @@ export function mountSettings({
   getState,
   audioEl,
   audioEls,
+  getManual,
   myToken,
   doc: _doc,
   isDemo: _isDemo,
@@ -548,6 +551,25 @@ export function mountSettings({
     }
   }
 
+  function buildStationHelpTab(body, view) {
+    const host = doc.createElement('div');
+    host.className = 'settings-documentation';
+    if (!view.stationId || !renderStationHelp(host, view.stationId)) {
+      const unavailable = doc.createElement('div');
+      unavailable.className = 'settings-section-hint';
+      unavailable.textContent = t('settings.station_help.unavailable');
+      host.appendChild(unavailable);
+    }
+    body.appendChild(host);
+  }
+
+  function buildShipManualTab(body) {
+    const host = doc.createElement('div');
+    host.className = 'settings-documentation';
+    renderManual(host, typeof getManual === 'function' ? getManual() : null);
+    body.appendChild(host);
+  }
+
   // ── Panel ────────────────────────────────────────────────────────────────
 
   function buildContent() {
@@ -588,6 +610,8 @@ export function mountSettings({
     if (activeTab === 'debug') buildDebugTab(body, view);
     else if (activeTab === 'audio') buildAudioTab(body);
     else if (activeTab === 'gameplay') buildGameplayTab(body, view);
+    else if (activeTab === 'station-help') buildStationHelpTab(body, view);
+    else if (activeTab === 'ship-manual') buildShipManualTab(body);
   }
 
   function selectTab(id) {

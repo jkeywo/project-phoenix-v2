@@ -223,24 +223,18 @@ world.combat_test.trigger.action.obj_destroy_wave_8.text,assets/worlds/combat_te
 world.combat_test.trigger.action.18.message,assets/worlds/combat_test.toml → [trigger.action] message,[VICTORY: all eight waves broken. Starbase Alpha holds.]
 world.combat_test.trigger.action.21.message,assets/worlds/combat_test.toml → [trigger.action] message,[DEFEAT: Starbase Alpha lost. The Harrow strike fleet has secured the system.]
 world.combat_test.trigger.action.obj_defend.text,assets/worlds/combat_test.toml → [trigger.action] text,[Defend Starbase Alpha against the incoming Harrow fleet.]
-world.combat_test.comms.0.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.0.message,assets/worlds/combat_test.toml → [comms] message,"[USS Phoenix, intelligence reports a Harrow strike fleet inbound on Starbase Alpha. Eight waves, mixed class, launching on a fixed schedule — they will not wait for you to finish the last one. Every hull is running at the station. Hold the line. Command out.]"
-world.combat_test.comms.1.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.1.message,assets/worlds/combat_test.toml → [comms] message,"[Wave one away, bearing north-northwest: Harrow cruiser, running at Starbase Alpha.]"
-world.combat_test.comms.2.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.2.message,assets/worlds/combat_test.toml → [comms] message,"[Wave two launching southeast: Harrow destroyer, same target. Clock is running whether or not wave one is dead.]"
-world.combat_test.comms.3.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.3.message,assets/worlds/combat_test.toml → [comms] message,"[Wave three launching due east: another cruiser on the station. Do not let them stack up on you.]"
-world.combat_test.comms.4.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.4.message,assets/worlds/combat_test.toml → [comms] message,"[Wave four launching northeast: destroyer. Half the raid still to come, and the schedule does not slip.]"
-world.combat_test.comms.5.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.5.message,assets/worlds/combat_test.toml → [comms] message,"[Wave five launching — they are doubling up, Phoenix. TWO cruisers, east and east-northeast. All hands brace.]"
-world.combat_test.comms.6.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] message,"[Wave six launching: two destroyers, north and south, both on the station. Ninety seconds of raid left after this one.]"
-world.combat_test.comms.7.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,"[Wave seven launching east: a cruiser and a destroyer, both on the station. Do not let them split you.]"
-world.combat_test.comms.8.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,"[FLASH: last of the raid launching due east — an Ironveil-class patrol cruiser, committed like the rest. Break it and the system is ours.]"
+world.combat_test.comms.0.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha to USS Phoenix: a Harrow strike fleet is inbound. Eight waves, mixed class, all running on this station. Hold the line.]"
+world.combat_test.comms.1.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave one has launched north-northwest. Harrow cruiser inbound.]"
+world.combat_test.comms.2.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave two has launched southeast. Harrow destroyer inbound.]"
+world.combat_test.comms.3.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave three has launched due east. Harrow cruiser inbound.]"
+world.combat_test.comms.4.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave four has launched northeast. Harrow destroyer inbound.]"
+world.combat_test.comms.5.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave five has launched. Two Harrow cruisers inbound from east and east-northeast.]"
+world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave six has launched. Two Harrow destroyers inbound from north and south.]"
+world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave seven has launched east. Harrow cruiser and destroyer inbound.]"
+world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: final wave has launched due east. Ironveil-class patrol cruiser inbound.]"
+world.combat_test.comms.9.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: hull integrity below 75 percent. Defensive support requested.]"
+world.combat_test.comms.10.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: hull integrity below 50 percent. We need immediate support.]"
+world.combat_test.comms.11.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: critical hull integrity below 10 percent. Phoenix, defend the station.]"
 world.default.global.title,assets/worlds/default.toml → [global] title,Starbase Alpha
 world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
 world.entity.luna.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),luna
@@ -422,6 +416,10 @@ console.navigation.waypoint,"navigation console — ""Waypoint"" metric label",W
 console.navigation.contacts,"navigation console — ""Contacts"" metric label",Contacts
 console.navigation.on_screen,"navigation console — ""On Screen"" button",On Screen
 console.navigation.clear_waypoint,"navigation console — ""Clear Waypoint"" button",Clear Waypoint
+console.navigation.set_waypoint,"navigation console — ""Set Waypoint"" button that starts tap-to-place mode (free waypoint)",Set Waypoint
+console.navigation.set_as_waypoint,"navigation console — ""Set as Waypoint"" button that anchors the waypoint to the selected chart contact",Set as Waypoint
+console.navigation.tap_to_place,"navigation console — toast prompt shown while tap-to-place waypoint mode is armed","TAP MAP TO PLACE WAYPOINT"
+console.navigation.waypoint_set,"navigation console — toast confirming a waypoint was set",WAYPOINT SET
 console.power.doc_title,Browser-tab title of the power console page,[Project Phoenix - Power Console]
 console.power.screen_label,Phone-frame screen label of the power console,Power Console
 console.power.title,power console — main hero heading,POWER
@@ -625,6 +623,8 @@ help.navigation.1.heading,"Help modal — navigation station, section 2 heading"
 help.navigation.1.body,"Help modal — navigation station, section 2 body text",[Overlay the nav chart on the main screen so the Captain and Helm see the strategic picture.]
 help.navigation.2.heading,"Help modal — navigation station, section 3 heading",Cancel Impulse
 help.navigation.2.body,"Help modal — navigation station, section 3 body text",[Abort an active impulse charge if Helm is about to overshoot or fly into a hazard.]
+help.navigation.3.heading,"Help modal — navigation station, section 4 heading",Waypoints
+help.navigation.3.body,"Help modal — navigation station, section 4 body text","[Tap a contact on the chart to select it, then ""Set as Waypoint"" to mark it as the destination. ""Set Waypoint"" lets you place a destination anywhere on the map, and ""Clear Waypoint"" removes it.]"
 help.comms.0.heading,"Help modal — comms station, section 1 heading",Comms Officer
 help.comms.0.body,"Help modal — comms station, section 1 body text","[Connect the ship to the outside world. You are the first to know about orders, threats, and opportunities.]"
 help.comms.1.heading,"Help modal — comms station, section 2 heading",Contacts
@@ -658,6 +658,9 @@ settings.leave_station,"Settings — button that releases the player's claimed s
 settings.tab.debug,"Server settings menu — name of the Debug/Cheat tab (hidden in a release build)","[Debug / Cheat]"
 settings.tab.audio,"Server settings menu — name of the Audio tab","Audio"
 settings.tab.gameplay,"Server settings menu — name of the Gameplay tab","Gameplay"
+settings.tab.station_help,"Phone client settings menu — name of the current station help tab","Station Help"
+settings.tab.ship_manual,"Phone client settings menu — name of the ship manual tab","Ship Manual"
+settings.station_help.unavailable,"Phone client Settings Station Help tab — shown when the player has no station or it has no authored help","[Station help is unavailable until you take a station.]"
 settings.master_volume,"Server settings menu — Audio tab, master volume section heading","Master Volume"
 settings.master_volume_value,"Server settings menu — master volume readout as a percentage. {value} is the whole-number percentage.","{value}%"
 settings.master_volume_hint,"Server settings menu — explains that master volume scales the per-sound volumes authored in the ship and world TOML rather than replacing them","[Scales every authored sound volume.]"

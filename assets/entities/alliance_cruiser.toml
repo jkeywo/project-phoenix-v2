@@ -331,7 +331,7 @@ beam_range = 40
 beam_damage_per_sec = 4
 beam_duration_secs = 6
 cooldown_secs = 6
-beam_color = [ 1, 0.4, 0.1, 1 ]
+beam_color = [ 0.25, 0.75, 1, 1 ]
 marker = "phasers_fore"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -364,7 +364,7 @@ beam_range = 40
 beam_damage_per_sec = 4
 beam_duration_secs = 6
 cooldown_secs = 6
-beam_color = [ 1, 0.4, 0.1, 1 ]
+beam_color = [ 0.25, 0.75, 1, 1 ]
 marker = "phasers_aft"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -641,6 +641,8 @@ hull_max_hp = 6
 
 [power]
 capacity = 90
+sustainable_total = 6
+max_commanded_total = 8
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25
 

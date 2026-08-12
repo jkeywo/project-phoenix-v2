@@ -394,7 +394,7 @@ beam_damage_per_sec = 6
 beam_duration_secs = 5
 cooldown_secs = 4
 shield_pierce = 0.1
-beam_color = [1.0, 0.35, 0.08, 1.0]
+beam_color = [1.0, 0.22, 0.08, 1.0]
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
   # synthesised (#885b). One unconditional rule: when the host offers the bank a
@@ -426,7 +426,7 @@ beam_damage_per_sec = 6
 beam_duration_secs = 5
 cooldown_secs = 4
 shield_pierce = 0.1
-beam_color = [1.0, 0.35, 0.08, 1.0]
+beam_color = [1.0, 0.22, 0.08, 1.0]
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
   # synthesised (#885b). One unconditional rule: when the host offers the bank a

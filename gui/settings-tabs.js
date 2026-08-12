@@ -2,10 +2,9 @@
  * gui/settings-tabs.js — the settings menu's tab list, shared by both pages.
  *
  * The host page's cog (issue #939, `gui/server-settings.js`) and the phone
- * client's (issue #940, `gui/settings-panel.js`) offer the same three tabs and
- * hide the same one in the public demo build. That agreement is the whole
- * point: a player looking at a phone and the host looking at the viewscreen
- * must not disagree about which controls exist.
+ * client's (issue #940, `gui/settings-panel.js`) share the operational tabs
+ * and hide the same debug tab in the public demo build. The phone also owns
+ * two documentation tabs; they deliberately do not appear on the host.
  *
  * So the list lives here rather than twice, and `server-settings.js` re-exports
  * it under its original names so nothing that already imported it had to move.
@@ -32,6 +31,12 @@ export const TABS = [
   { id: 'gameplay', labelId: 'settings.tab.gameplay', gated: false },
 ];
 
+/** Client-only documentation tabs, always available including in demo builds. */
+export const CLIENT_DOCUMENTATION_TABS = [
+  { id: 'station-help', labelId: 'settings.tab.station_help', gated: false },
+  { id: 'ship-manual', labelId: 'settings.tab.ship_manual', gated: false },
+];
+
 /**
  * Which tabs this build actually shows.
  *
@@ -40,6 +45,11 @@ export const TABS = [
  */
 export function visibleTabs(demo) {
   return TABS.filter((tab) => !(tab.gated && demo));
+}
+
+/** The phone client's operational and documentation tabs in display order. */
+export function visibleClientTabs(demo) {
+  return visibleTabs(demo).concat(CLIENT_DOCUMENTATION_TABS);
 }
 
 /**
@@ -55,6 +65,13 @@ export function visibleTabs(demo) {
  */
 export function resolveActiveTab(wanted, demo) {
   const tabs = visibleTabs(demo);
+  if (tabs.some((tab) => tab.id === wanted)) return wanted;
+  return tabs.length > 0 ? tabs[0].id : null;
+}
+
+/** Resolve the selected tab against the phone client's complete tab list. */
+export function resolveClientActiveTab(wanted, demo) {
+  const tabs = visibleClientTabs(demo);
   if (tabs.some((tab) => tab.id === wanted)) return wanted;
   return tabs.length > 0 ? tabs[0].id : null;
 }

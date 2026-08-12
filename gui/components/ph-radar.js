@@ -7,6 +7,8 @@ export class PhRadar extends HTMLElement {
   #resizeObserver = null;
   #needsRender = true;
   #icons = {};
+  #backgroundImage = null;
+  #surroundImage = null;
   #projectedBlips = [];
 
   constructor() {
@@ -23,6 +25,8 @@ export class PhRadar extends HTMLElement {
     this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.#canvas = this.shadowRoot.querySelector('canvas');
     this.#ctx = this.#canvas.getContext('2d', { alpha: false });
+    this.#backgroundImage = this.#loadImage('../../assets/helm_console/radar-bg.png');
+    this.#surroundImage = this.#loadImage('../../assets/helm_console/radar-surround.png');
     this.#initResize();
     this.#rafLoop();
   }
@@ -92,6 +96,18 @@ export class PhRadar extends HTMLElement {
     return img;
   }
 
+  #loadImage(src) {
+    if (typeof Image === 'undefined') return null;
+    const img = new Image();
+    img.onload = () => { this.#needsRender = true; };
+    img.src = src;
+    return img;
+  }
+
+  #imageIsLoaded(img) {
+    return img && img.complete && img.naturalWidth > 0;
+  }
+
   #render() {
     const canvas = this.#canvas;
     if (!canvas) return;
@@ -114,10 +130,25 @@ export class PhRadar extends HTMLElement {
     octx.fillStyle = '#07080c';
     octx.fillRect(0, 0, W, H);
 
-    octx.fillStyle = 'rgba(5,8,22,0.52)';
-    octx.beginPath();
-    octx.arc(cx, cy, R, 0, Math.PI * 2);
-    octx.fill();
+    // The surround is fixed console chrome. The radar screen is the rotating,
+    // ship-relative backdrop; blips remain above both layers.
+    if (this.#imageIsLoaded(this.#surroundImage)) {
+      octx.drawImage(this.#surroundImage, 0, 0, W, H);
+    }
+
+    if (this.#imageIsLoaded(this.#backgroundImage)) {
+      const heading = state.ship_heading || 0;
+      octx.save();
+      octx.translate(cx, cy);
+      octx.rotate(-heading * Math.PI / 180);
+      octx.drawImage(this.#backgroundImage, -R, -R, R * 2, R * 2);
+      octx.restore();
+    } else {
+      octx.fillStyle = 'rgba(5,8,22,0.52)';
+      octx.beginPath();
+      octx.arc(cx, cy, R, 0, Math.PI * 2);
+      octx.fill();
+    }
 
     if (this.#offscreen) {
       this.#ctx.drawImage(this.#offscreen, 0, 0);

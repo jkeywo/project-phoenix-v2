@@ -16,6 +16,12 @@ export class PhNavigationMap extends HTMLElement {
   #projectedBlips = [];
   #selectedBlip = null;
   #overlay = null;
+  #toast = null;
+  #toastTimer = null;
+  #btnSetWaypoint = null;
+  #btnSetSelected = null;
+  #btnClearWaypoint = null;
+  #picking = false;
 
   #zoom = 1;
   #panX = 0;
@@ -44,6 +50,7 @@ export class PhNavigationMap extends HTMLElement {
       '<style>',
       ':host { display: block; position: relative; touch-action: none; }',
       'canvas { display: block; width: 100%; height: 100%; touch-action: none; }',
+      'canvas.picking { cursor: crosshair; }',
       '#overlay {',
       '  position: absolute; bottom: 0; left: 0; right: 0;',
       '  padding: 10px 14px 14px;',
@@ -53,15 +60,28 @@ export class PhNavigationMap extends HTMLElement {
       '  pointer-events: none; display: none;',
       '}',
       '#overlay.show { display: block; }',
-      '#overlay .ov-name { font-size: 13px; color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
-      '#overlay .ov-detail { font-size: 9px; color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
+      '#overlay .ov-name { font-size: 16px; color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
+      '#overlay .ov-detail { font-size: 11px; color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
       '.st-hostile { color: #ff6040; }',
       '.st-friendly { color: var(--loaded); }',
       '.st-neutral { color: #7a90c0; }',
       '.st-unknown { color: var(--ink-dim); }',
+      '.wp-bar { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: flex-end; gap: 8px; z-index: 2; pointer-events: none; }',
+      '.wp-btn { pointer-events: auto; font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan, #6cb6d0); background: rgba(10,14,28,0.88); border: 1px solid rgba(70,95,165,0.5); padding: 6px 12px; cursor: pointer; display: none; white-space: nowrap; }',
+      '.wp-btn.show { display: block; }',
+      '.wp-btn.active { color: #d4a820; border-color: #d4a820; }',
+      '.wp-btn:active { opacity: 0.7; }',
+      '.toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.3em; color: var(--tactical, #d4a820); background: rgba(5,8,24,0.92); border: 1px solid var(--tactical, #d4a820); box-shadow: 0 0 24px rgba(240,132,56,0.25); padding: 10px 24px; pointer-events: none; opacity: 0; transition: opacity 0.22s ease; z-index: 3; }',
+      '.toast.show { opacity: 1; }',
       '</style>',
       '<div style="position:relative;width:100%;height:100%">',
       '  <canvas></canvas>',
+      '  <div class="wp-bar">',
+      '    <button type="button" class="wp-btn" id="btn-set-waypoint">' + t('console.navigation.set_waypoint') + '</button>',
+      '    <button type="button" class="wp-btn" id="btn-set-selected">' + t('console.navigation.set_as_waypoint') + '</button>',
+      '    <button type="button" class="wp-btn" id="btn-clear-waypoint">' + t('console.navigation.clear_waypoint') + '</button>',
+      '  </div>',
+      '  <div class="toast" id="toast" role="status"></div>',
       '  <div id="overlay">',
       '    <div class="ov-name" id="ov-name"></div>',
       '    <div class="ov-detail">',
@@ -75,6 +95,13 @@ export class PhNavigationMap extends HTMLElement {
     this.#canvas = this.shadowRoot.querySelector('canvas');
     this.#ctx = this.#canvas.getContext('2d', { alpha: false });
     this.#overlay = this.shadowRoot.getElementById('overlay');
+    this.#toast = this.shadowRoot.getElementById('toast');
+    this.#btnSetWaypoint = this.shadowRoot.getElementById('btn-set-waypoint');
+    this.#btnSetSelected = this.shadowRoot.getElementById('btn-set-selected');
+    this.#btnClearWaypoint = this.shadowRoot.getElementById('btn-clear-waypoint');
+    this.#btnSetWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#beginPick(); });
+    this.#btnSetSelected.addEventListener('click', (e) => { e.stopPropagation(); this.#setToSelected(); });
+    this.#btnClearWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#clearWaypoint(); });
     this.#initResize();
     this.#rafLoop();
   }
@@ -198,6 +225,24 @@ export class PhNavigationMap extends HTMLElement {
     const headingRad = shipHeading * Math.PI / 180;
     const scale = R / rangeClamped;
 
+    // The canvas buffer is sized rect × devicePixelRatio, so fonts and blips
+    // live in buffer space while the browser maps them back to CSS pixels at
+    // 1/dpr. Label fonts must therefore scale with the buffer→CSS ratio or
+    // they render dpr-times smaller (unreadably tiny on phones).
+    const cssW = this.getBoundingClientRect ? this.getBoundingClientRect().width : 0;
+    const px = (cssW > 0) ? W / cssW : 1;
+    const zoomFont = Math.min(1.3, Math.max(0.85, this.#zoom));
+    const namePx = Math.round(12 * px * zoomFont);
+    const wpPx = Math.round(10 * px * zoomFont);
+
+    // Drop a selection whose blip left the chart (it may have despawned or
+    // fallen outside the refresh). Emit only on a change.
+    if (this.#selectedBlip && !blips.some((b) => b.uuid === this.#selectedBlip.uuid)) {
+      this.#selectedBlip = null;
+      this.#showOverlay(null);
+      this.#dispatch('navselect', null);
+    }
+
     let octx = this.#ctx;
     if (typeof document !== 'undefined') {
       if (!this.#offscreen || this.#offscreen.width !== W || this.#offscreen.height !== H) {
@@ -218,7 +263,7 @@ export class PhNavigationMap extends HTMLElement {
     this.#drawGrid(octx, cx, cy, scale, 0, 0, 0, W, H, rangeClamped);
 
     if (waypoint && Number.isFinite(waypoint.x) && Number.isFinite(waypoint.z)) {
-      this.#drawWaypoint(octx, waypoint, cx, cy, scale);
+      this.#drawWaypoint(octx, waypoint, cx, cy, scale, wpPx);
     }
 
     const [shipSx, shipSy] = this.#worldToScreen(shipPos.x, shipPos.z, 0, 0, 0, scale, cx, cy);
@@ -226,13 +271,14 @@ export class PhNavigationMap extends HTMLElement {
 
     this.#projectedBlips = [];
     const blipR = Math.max(3, R * 0.015);
+    const showNames = this.#zoom >= 0.4;
     for (const b of blips) {
       const [sx, sy] = this.#worldToScreen(b.world_x, b.world_z, 0, 0, 0, scale, cx, cy);
       if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) continue;
       const color = this.#blipColor(b.stance);
       this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
-      if (b.name) {
-        octx.font = '10px "JetBrains Mono", monospace';
+      if (showNames && b.name) {
+        octx.font = namePx + 'px "JetBrains Mono", monospace';
         octx.fillStyle = color;
         octx.fillText(b.name, sx + blipR + 4, sy + 4);
       }
@@ -243,6 +289,7 @@ export class PhNavigationMap extends HTMLElement {
       this.#ctx.drawImage(this.#offscreen, 0, 0);
     }
 
+    this.#updateBar();
     this.#needsRender = false;
   }
 
@@ -320,7 +367,7 @@ export class PhNavigationMap extends HTMLElement {
     octx.restore();
   }
 
-  #drawWaypoint(octx, wp, cx, cy, scale) {
+  #drawWaypoint(octx, wp, cx, cy, scale, wpPx) {
     const [px, py] = this.#worldToScreen(wp.x, wp.z, 0, 0, 0, scale, cx, cy);
     const d = 8;
     octx.save();
@@ -335,10 +382,12 @@ export class PhNavigationMap extends HTMLElement {
     octx.closePath();
     octx.fill(); octx.stroke();
     octx.shadowBlur = 0;
-    octx.font = '8px "JetBrains Mono", monospace';
-    octx.fillStyle = '#d4a820';
-    octx.textAlign = 'left';
-    octx.fillText('WP', px + d + 4, py + 3);
+    if (this.#zoom >= 0.5) {
+      octx.font = wpPx + 'px "JetBrains Mono", monospace';
+      octx.fillStyle = '#d4a820';
+      octx.textAlign = 'left';
+      octx.fillText('WP', px + d + 4, py + 3);
+    }
     octx.restore();
   }
 
@@ -418,7 +467,6 @@ export class PhNavigationMap extends HTMLElement {
   }
 
   #handleTap(bufX, bufY) {
-    const hit = this.#getBlipAt(bufX, bufY);
     const state = this.#state || {};
     const range = state.range || 50000;
     const rangeClamped = range > 0 ? range : 50000;
@@ -431,15 +479,92 @@ export class PhNavigationMap extends HTMLElement {
     // coordinate (camera fixed on the origin, north-up), matching #render.
     const [wx, wz] = this.#screenToWorld(bufX, bufY, 0, 0, 0, scale, cx, cy);
 
-    if (hit && this.sendAction) {
-      this.#selectedBlip = hit.blip;
-      this.#showOverlay(hit.blip);
-      this.sendAction('set_navigation_waypoint', { x: hit.blip.world_x, z: hit.blip.world_z, source_uuid: hit.uuid });
-    } else if (this.sendAction) {
+    // Explicit pick mode: the next tap places a free waypoint wherever it
+    // lands, regardless of whether a blip is underneath (legacy behaviour).
+    if (this.#picking) {
+      this.#picking = false;
+      this.#canvas.classList.remove('picking');
       this.#selectedBlip = null;
       this.#showOverlay(null);
-      this.sendAction('set_navigation_waypoint', { x: wx, z: wz });
+      this.#dispatch('navselect', null);
+      this.#updateBar();
+      if (this.sendAction) {
+        this.sendAction('set_navigation_waypoint', { x: wx, z: wz });
+        this.#showToast(t('console.navigation.waypoint_set'));
+      }
+      return;
     }
+
+    // Tapping a chart blip selects it (opens the info overlay); it does NOT
+    // set the waypoint — that is an explicit command (bar buttons), matching
+    // the former navigation console. Tapping empty space clears selection.
+    const hit = this.#getBlipAt(bufX, bufY);
+    if (hit) {
+      if (this.#selectedBlip && this.#selectedBlip.uuid === hit.blip.uuid) return;
+      this.#selectedBlip = hit.blip;
+      this.#showOverlay(hit.blip);
+    } else {
+      if (!this.#selectedBlip) return;
+      this.#selectedBlip = null;
+      this.#showOverlay(null);
+    }
+    this.#updateBar();
+    this.#dispatch('navselect', this.#selectedBlip);
+  }
+
+  #beginPick() {
+    this.#picking = !this.#picking;
+    if (this.#picking) {
+      this.#selectedBlip = null;
+      this.#showOverlay(null);
+      this.#dispatch('navselect', null);
+      this.#canvas.classList.add('picking');
+      this.#showToast(t('console.navigation.tap_to_place'), 4000);
+    } else {
+      this.#canvas.classList.remove('picking');
+    }
+    this.#updateBar();
+  }
+
+  #setToSelected() {
+    const b = this.#selectedBlip;
+    if (!b || !this.sendAction) return;
+    // Anchor the waypoint to the selected entity's UUID; the server refreshes
+    // x/z from the entity's live transform each tick and auto-clears the
+    // waypoint if the entity despawns (matching the former console).
+    this.sendAction('set_navigation_waypoint', {
+      x: b.world_x,
+      z: b.world_z,
+      source_uuid: b.uuid,
+    });
+    this.#showToast(t('console.navigation.waypoint_set'));
+  }
+
+  #clearWaypoint() {
+    if (this.sendAction) this.sendAction('clear_navigation_waypoint', {});
+  }
+
+  #updateBar() {
+    const state = this.#state || {};
+    const wp = state.waypoint;
+    const hasWp = !!(wp && Number.isFinite(wp.x) && Number.isFinite(wp.z));
+    const hasSel = !!this.#selectedBlip;
+    this.#btnSetWaypoint.classList.toggle('show', !hasWp);
+    this.#btnSetSelected.classList.toggle('show', hasSel);
+    this.#btnClearWaypoint.classList.toggle('show', hasWp);
+    this.#btnSetWaypoint.classList.toggle('active', this.#picking);
+  }
+
+  #showToast(msg, duration) {
+    if (!this.#toast) return;
+    this.#toast.textContent = msg;
+    this.#toast.classList.add('show');
+    clearTimeout(this.#toastTimer);
+    this.#toastTimer = setTimeout(() => this.#toast.classList.remove('show'), duration || 1900);
+  }
+
+  #dispatch(type, detail) {
+    this.dispatchEvent(new CustomEvent(type, { bubbles: true, composed: true, detail: detail }));
   }
 
   #onPointerTap(e) {

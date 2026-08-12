@@ -345,6 +345,8 @@ struct RawTriggerEntry {
     #[serde(default)]
     after_secs: Option<f32>,
     #[serde(default)]
+    threshold: Option<f32>,
+    #[serde(default)]
     name: Option<String>,
     #[serde(default)]
     when: Option<String>,
@@ -554,6 +556,8 @@ struct RawCommsFollowUp {
     /// world load.
     #[serde(default)]
     after_secs: Option<f32>,
+    #[serde(default)]
+    threshold: Option<f32>,
     /// Flag name for `on_flag_set` / `on_flag_cleared`.
     #[serde(default)]
     name: Option<String>,
@@ -602,6 +606,8 @@ struct RawCommsEntry {
     /// Elapsed-seconds threshold for `on_timer` root triggers.
     #[serde(default)]
     after_secs: Option<f32>,
+    #[serde(default)]
+    threshold: Option<f32>,
     /// Flag name for `on_flag_set` / `on_flag_cleared` root triggers.
     #[serde(default)]
     name: Option<String>,
@@ -727,6 +733,9 @@ pub enum TriggerCondition {
     OnAllDestroyed { group: String, after_secs: f32 },
     /// Fires when the named entity is attacked.
     OnAttacked { entity_name: String },
+    /// Fires when the named entity's aggregate hull fraction crosses strictly
+    /// below the authored threshold.
+    OnHullBelow { entity_name: String, threshold: f32 },
     /// Fires once when `elapsed_secs` crosses `after_secs`.
     OnTimer { after_secs: f32 },
     /// Fires when a `Hail` message arrives for the named entity.
@@ -1568,6 +1577,7 @@ fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode,
             raw_fu.entity.clone(),
             raw_fu.group.clone(),
             raw_fu.after_secs,
+            raw_fu.threshold,
             raw_fu.name.clone(),
             // Comms follow-ups have no `waypoint` field; an
             // `on_waypoint_reached` follow-up fires on any waypoint.
@@ -1608,6 +1618,7 @@ fn parse_trigger_condition_from_string(
     entity: Option<String>,
     group: Option<String>,
     after_secs: Option<f32>,
+    threshold: Option<f32>,
     flag_name: Option<String>,
     waypoint: Option<String>,
     ctx: &str,
@@ -1629,6 +1640,20 @@ fn parse_trigger_condition_from_string(
             entity_name: entity
                 .ok_or_else(|| format!("{ctx} 'on_attacked' requires an 'entity' field"))?,
         }),
+        "on_hull_below" => {
+            let threshold = threshold
+                .ok_or_else(|| format!("{ctx} 'on_hull_below' requires a 'threshold' field"))?;
+            if !(0.0 < threshold && threshold <= 1.0) {
+                return Err(format!(
+                    "{ctx} 'on_hull_below' threshold must be in (0, 1], got {threshold}"
+                ));
+            }
+            Ok(TriggerCondition::OnHullBelow {
+                entity_name: entity
+                    .ok_or_else(|| format!("{ctx} 'on_hull_below' requires an 'entity' field"))?,
+                threshold,
+            })
+        }
         "on_timer" => Ok(TriggerCondition::OnTimer {
             after_secs: after_secs
                 .ok_or_else(|| format!("{ctx} 'on_timer' requires an 'after_secs' field"))?,
@@ -1889,6 +1914,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             raw_trigger.entity,
             raw_trigger.group,
             raw_trigger.after_secs,
+            raw_trigger.threshold,
             raw_trigger.name,
             raw_trigger.waypoint,
             "Trigger",
@@ -1951,6 +1977,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             raw_comms.entity,
             raw_comms.group,
             raw_comms.after_secs,
+            raw_comms.threshold,
             raw_comms.name,
             // Comms blocks have no `waypoint` field; an
             // `on_waypoint_reached` template fires on any waypoint.
@@ -3898,6 +3925,51 @@ message = "MAYDAY!"
     }
 
     #[test]
+    fn parse_world_reads_on_hull_below_comms_template_and_rejects_missing_fields() {
+        let cfg = parse_world(
+            r#"
+[[comms]]
+from = "station"
+trigger = "on_hull_below"
+entity = "station"
+threshold = 0.75
+message = "Hull warning"
+"#,
+        )
+        .expect("valid hull threshold comms must parse");
+        assert_eq!(
+            cfg.comms[0].trigger,
+            TriggerCondition::OnHullBelow {
+                entity_name: "station".into(),
+                threshold: 0.75,
+            }
+        );
+
+        for (label, toml) in [
+            (
+                "missing entity",
+                r#"[[comms]]
+from = "station"
+trigger = "on_hull_below"
+threshold = 0.75
+message = "Hull warning"
+"#,
+            ),
+            (
+                "missing threshold",
+                r#"[[comms]]
+from = "station"
+trigger = "on_hull_below"
+entity = "station"
+message = "Hull warning"
+"#,
+            ),
+        ] {
+            assert!(parse_world(toml).is_err(), "{label} must be rejected");
+        }
+    }
+
+    #[test]
     fn scripted_comms_block_parses_to_metadata_only() {
         // Issue #982 (M4): a `[[comms]] script = "fn"` block moves its dialogue
         // tree to script and reduces to metadata. It lands in `scripted_comms`,
@@ -5441,8 +5513,8 @@ entity    = "raider"
         // schedule still gets the warning.
         assert_eq!(
             cfg.comms.len(),
-            9,
-            "combat_test must have 9 comms templates"
+            12,
+            "combat_test must have 12 comms templates"
         );
         let timed: Vec<f32> = cfg
             .comms
@@ -5454,8 +5526,8 @@ entity    = "raider"
             .collect();
         assert_eq!(
             timed,
-            vec![0.5, 37.0, 82.0, 127.0, 172.0, 217.0, 262.0, 307.0],
-            "every wave call rides the clock, ahead of its own wave"
+            vec![0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0],
+            "every wave call fires with its matching wave release"
         );
         assert!(
             cfg.comms
@@ -5465,12 +5537,20 @@ entity    = "raider"
         );
         // Each call lands before the wave it announces — the ordering that
         // makes it a warning rather than a running commentary.
-        for (call, wave_at) in timed.iter().skip(1).zip(timer_starts.iter().skip(1)) {
-            assert!(
-                call < wave_at,
-                "a wave call at {call}s cannot announce a wave that arrives at {wave_at}s"
-            );
-        }
+        assert_eq!(timed, timer_starts);
+        assert!(cfg
+            .comms
+            .iter()
+            .all(|c| c.from == "world.entity.starbase_alpha.name"));
+        let hull_thresholds: Vec<f32> = cfg
+            .comms
+            .iter()
+            .filter_map(|c| match c.trigger {
+                TriggerCondition::OnHullBelow { threshold, .. } => Some(threshold),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(hull_thresholds, vec![0.75, 0.5, 0.1]);
     }
 
     // -- entity_template_paths ---------------------------------------------

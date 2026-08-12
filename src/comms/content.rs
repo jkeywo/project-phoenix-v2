@@ -257,6 +257,22 @@ pub fn follow_up_trigger_holds(
                     .any(|e| matches!(e, WorldEvent::Attacked { uuid, .. } if uuid == u))
             })
             .unwrap_or(false),
+        TriggerCondition::OnHullBelow {
+            entity_name,
+            threshold,
+        } => name_to_uuid
+            .get(entity_name)
+            .map(|u| {
+                events.iter().any(|e| matches!(
+                    e,
+                    WorldEvent::HullDroppedBelow {
+                        uuid,
+                        previous_fraction,
+                        current_fraction,
+                    } if uuid == u && previous_fraction >= threshold && current_fraction < threshold
+                ))
+            })
+            .unwrap_or(false),
         TriggerCondition::OnHailed { entity_name } => name_to_uuid
             .get(entity_name)
             .map(|u| {
@@ -408,6 +424,67 @@ mod tests {
         let second = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
         assert_eq!(first.len(), 1);
         assert!(second.is_empty());
+    }
+
+    #[test]
+    fn hull_threshold_templates_are_strict_single_shot_and_share_a_large_hit() {
+        let mut states = [0.75, 0.50, 0.10]
+            .into_iter()
+            .map(|threshold| CommsTemplateState {
+                template: CommsTemplate {
+                    from: "station".into(),
+                    trigger: TriggerCondition::OnHullBelow {
+                        entity_name: "station".into(),
+                        threshold,
+                    },
+                    node: CommsDialogueNode {
+                        body: format!("{threshold}"),
+                        responses: vec![],
+                        speaker: None,
+                        trigger: None,
+                    },
+                    thread_id: None,
+                    urgent: true,
+                    root_follow_up: None,
+                    display_name: None,
+                },
+                fired: false,
+            })
+            .collect::<Vec<_>>();
+        let name_to_uuid = HashMap::from([("station".into(), "station-uuid".into())]);
+
+        let exactly_at_threshold = vec![WorldEvent::HullDroppedBelow {
+            uuid: "station-uuid".into(),
+            previous_fraction: 1.0,
+            current_fraction: 0.75,
+        }];
+        assert!(
+            evaluate_comms_templates(&mut states, &exactly_at_threshold, &name_to_uuid).is_empty()
+        );
+
+        let large_hit = vec![WorldEvent::HullDroppedBelow {
+            uuid: "station-uuid".into(),
+            previous_fraction: 0.75,
+            current_fraction: 0.05,
+        }];
+        let fired = evaluate_comms_templates(&mut states, &large_hit, &name_to_uuid);
+        assert_eq!(
+            fired
+                .iter()
+                .map(|message| message.node.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["0.75", "0.5", "0.1"]
+        );
+
+        let repaired_then_hit_again = vec![WorldEvent::HullDroppedBelow {
+            uuid: "station-uuid".into(),
+            previous_fraction: 1.0,
+            current_fraction: 0.01,
+        }];
+        assert!(
+            evaluate_comms_templates(&mut states, &repaired_then_hit_again, &name_to_uuid)
+                .is_empty()
+        );
     }
 
     #[test]

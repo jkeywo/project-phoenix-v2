@@ -34,6 +34,13 @@ pub enum WorldEvent {
     Destroyed { uuid: String },
     /// An entity (by UUID) was attacked; `attacker_uuid` is the attacker.
     Attacked { uuid: String, attacker_uuid: String },
+    /// An entity's aggregate hull fraction crossed downward. Both samples are
+    /// retained so several authored thresholds can match one large hit.
+    HullDroppedBelow {
+        uuid: String,
+        previous_fraction: f32,
+        current_fraction: f32,
+    },
     /// Simulation time has advanced. `elapsed_secs` is total elapsed time.
     TimerElapsed { elapsed_secs: f32 },
     /// A `Hail` message arrived for `target_uuid`.
@@ -151,6 +158,7 @@ pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String
     match condition {
         TriggerCondition::OnDestroyed { entity_name }
         | TriggerCondition::OnAttacked { entity_name }
+        | TriggerCondition::OnHullBelow { entity_name, .. }
         | TriggerCondition::OnHailed { entity_name }
         | TriggerCondition::OnEnteredRegion { entity_name }
         | TriggerCondition::OnExitedRegion { entity_name }
@@ -453,6 +461,24 @@ pub(crate) fn condition_matches(
                 .get(entity_name)
                 .map(|u| u == uuid)
                 .unwrap_or(false)
+        }
+        (
+            TriggerCondition::OnHullBelow {
+                entity_name,
+                threshold,
+            },
+            WorldEvent::HullDroppedBelow {
+                uuid,
+                previous_fraction,
+                current_fraction,
+            },
+        ) => {
+            previous_fraction >= threshold
+                && current_fraction < threshold
+                && name_to_uuid
+                    .get(entity_name)
+                    .map(|u| u == uuid)
+                    .unwrap_or(false)
         }
         (TriggerCondition::OnTimer { after_secs }, WorldEvent::TimerElapsed { elapsed_secs }) => {
             elapsed_secs >= after_secs

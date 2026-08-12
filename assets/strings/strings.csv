@@ -223,24 +223,18 @@ world.combat_test.trigger.action.obj_destroy_wave_8.text,assets/worlds/combat_te
 world.combat_test.trigger.action.18.message,assets/worlds/combat_test.toml → [trigger.action] message,[VICTORY: all eight waves broken. Starbase Alpha holds.]
 world.combat_test.trigger.action.21.message,assets/worlds/combat_test.toml → [trigger.action] message,[DEFEAT: Starbase Alpha lost. The Harrow strike fleet has secured the system.]
 world.combat_test.trigger.action.obj_defend.text,assets/worlds/combat_test.toml → [trigger.action] text,[Defend Starbase Alpha against the incoming Harrow fleet.]
-world.combat_test.comms.0.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.0.message,assets/worlds/combat_test.toml → [comms] message,"[USS Phoenix, intelligence reports a Harrow strike fleet inbound on Starbase Alpha. Eight waves, mixed class, launching on a fixed schedule — they will not wait for you to finish the last one. Every hull is running at the station. Hold the line. Command out.]"
-world.combat_test.comms.1.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.1.message,assets/worlds/combat_test.toml → [comms] message,"[Wave one away, bearing north-northwest: Harrow cruiser, running at Starbase Alpha.]"
-world.combat_test.comms.2.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.2.message,assets/worlds/combat_test.toml → [comms] message,"[Wave two launching southeast: Harrow destroyer, same target. Clock is running whether or not wave one is dead.]"
-world.combat_test.comms.3.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.3.message,assets/worlds/combat_test.toml → [comms] message,"[Wave three launching due east: another cruiser on the station. Do not let them stack up on you.]"
-world.combat_test.comms.4.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.4.message,assets/worlds/combat_test.toml → [comms] message,"[Wave four launching northeast: destroyer. Half the raid still to come, and the schedule does not slip.]"
-world.combat_test.comms.5.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.5.message,assets/worlds/combat_test.toml → [comms] message,"[Wave five launching — they are doubling up, Phoenix. TWO cruisers, east and east-northeast. All hands brace.]"
-world.combat_test.comms.6.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] message,"[Wave six launching: two destroyers, north and south, both on the station. Ninety seconds of raid left after this one.]"
-world.combat_test.comms.7.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,"[Wave seven launching east: a cruiser and a destroyer, both on the station. Do not let them split you.]"
-world.combat_test.comms.8.from,assets/worlds/combat_test.toml → [comms] from,Federation Command
-world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,"[FLASH: last of the raid launching due east — an Ironveil-class patrol cruiser, committed like the rest. Break it and the system is ours.]"
+world.combat_test.comms.0.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha to USS Phoenix: a Harrow strike fleet is inbound. Eight waves, mixed class, all running on this station. Hold the line.]"
+world.combat_test.comms.1.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave one has launched north-northwest. Harrow cruiser inbound.]"
+world.combat_test.comms.2.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave two has launched southeast. Harrow destroyer inbound.]"
+world.combat_test.comms.3.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave three has launched due east. Harrow cruiser inbound.]"
+world.combat_test.comms.4.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave four has launched northeast. Harrow destroyer inbound.]"
+world.combat_test.comms.5.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave five has launched. Two Harrow cruisers inbound from east and east-northeast.]"
+world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave six has launched. Two Harrow destroyers inbound from north and south.]"
+world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave seven has launched east. Harrow cruiser and destroyer inbound.]"
+world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: final wave has launched due east. Ironveil-class patrol cruiser inbound.]"
+world.combat_test.comms.9.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: hull integrity below 75 percent. Defensive support requested.]"
+world.combat_test.comms.10.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: hull integrity below 50 percent. We need immediate support.]"
+world.combat_test.comms.11.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: critical hull integrity below 10 percent. Phoenix, defend the station.]"
 world.default.global.title,assets/worlds/default.toml → [global] title,Starbase Alpha
 world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
 world.entity.luna.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),luna

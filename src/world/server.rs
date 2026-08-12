@@ -59,6 +59,10 @@ pub struct WorldContentRuntime {
     /// without duplicating the dispatch logic that lives inside
     /// `tick_trigger_pipeline`.
     pub pending_world_events: Vec<WorldEvent>,
+    /// Last aggregate hull fraction observed for every live entity. A damaged
+    /// entity only emits an event on a downward crossing; healing never re-arms
+    /// a scenario's single-shot `on_hull_below` templates.
+    pub observed_hull_fractions: HashMap<String, f32>,
     /// Time zero for the mission clock: the `Time::elapsed_secs()` reading taken
     /// on the first simulation tick of `GamePhase::InProgress`. `on_timer`
     /// triggers fire when `time.elapsed_secs() - mission_clock_anchor_secs >=
@@ -1353,6 +1357,10 @@ pub(crate) fn collect_world_events(
     mut runtime: ResMut<WorldContentRuntime>,
     mut buffer: ResMut<WorldEventBuffer>,
     time: Option<Res<bevy::time::Time>>,
+    hulls: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::entities::spawner::EntitySystemHull,
+    )>,
 ) {
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in ai_events.attacked.read() {
@@ -1375,6 +1383,30 @@ pub(crate) fn collect_world_events(
             waypoint: ev.waypoint.clone(),
         });
     }
+    let mut live_hulls = HashSet::new();
+    for (uuid, hull) in &hulls {
+        let max = hull.0.total_max();
+        if max <= 0.0 {
+            continue;
+        }
+        let current_fraction = (hull.0.total_current() / max).clamp(0.0, 1.0);
+        live_hulls.insert(uuid.0.clone());
+        if let Some(previous_fraction) = runtime
+            .observed_hull_fractions
+            .insert(uuid.0.clone(), current_fraction)
+        {
+            if current_fraction < previous_fraction {
+                world_events.push(WorldEvent::HullDroppedBelow {
+                    uuid: uuid.0.clone(),
+                    previous_fraction,
+                    current_fraction,
+                });
+            }
+        }
+    }
+    runtime
+        .observed_hull_fractions
+        .retain(|uuid, _| live_hulls.contains(uuid));
     // Drain any externally-queued world events (e.g. WorldLoaded pushed by
     // init_world_runtime or apply_world_layer_changes). The emptiness check
     // is a read: it keeps event-free ticks from marking WorldContentRuntime

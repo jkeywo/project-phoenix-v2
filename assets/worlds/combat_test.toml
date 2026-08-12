@@ -1100,67 +1100,88 @@ condition = "on_world_loaded"
 
 # ── Comms ────────────────────────────────────────────────────────────────────
 #
-# Federation Command opens with an urgent flash brief, then calls each wave as
-# it is detected forming. Since #960 the waves are on a CLOCK, so every call is
-# too: each one is authored eight seconds ahead of its wave's own `after_secs`,
-# which is Command warning the bridge that the next wave has launched rather
-# than reporting that the last one died. Nothing here waits on a kill any more,
-# because a player who is behind the schedule still gets the warning.
+# Starbase Alpha is the scenario's real, hailable Comms endpoint. It gives the
+# opening brief, reports each wave when that wave is released, and sends urgent
+# one-way reports when its aggregate hull crosses the authored integrity bands.
 
 [[comms]]
-from    = "world.combat_test.comms.0.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_world_loaded"
 urgent  = true
 message = "world.combat_test.comms.0.message"
 
 [[comms]]
-from    = "world.combat_test.comms.1.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 0.5
+after_secs = 0.0
 message = "world.combat_test.comms.1.message"
 
 [[comms]]
-from    = "world.combat_test.comms.2.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 37.0
+after_secs = 45.0
 message = "world.combat_test.comms.2.message"
 
 [[comms]]
-from    = "world.combat_test.comms.3.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 82.0
+after_secs = 90.0
 message = "world.combat_test.comms.3.message"
 
 [[comms]]
-from    = "world.combat_test.comms.4.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 127.0
+after_secs = 135.0
 message = "world.combat_test.comms.4.message"
 
 [[comms]]
-from    = "world.combat_test.comms.5.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 172.0
+after_secs = 180.0
 urgent  = true
 message = "world.combat_test.comms.5.message"
 
 [[comms]]
-from    = "world.combat_test.comms.6.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 217.0
+after_secs = 225.0
 urgent  = true
 message = "world.combat_test.comms.6.message"
 
 [[comms]]
-from    = "world.combat_test.comms.7.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 262.0
+after_secs = 270.0
 urgent  = true
 message = "world.combat_test.comms.7.message"
 
 [[comms]]
-from    = "world.combat_test.comms.8.from"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_timer"
-after_secs = 307.0
+after_secs = 315.0
 urgent  = true
 message = "world.combat_test.comms.8.message"
+
+[[comms]]
+from      = "world.entity.starbase_alpha.name"
+trigger   = "on_hull_below"
+entity    = "world.entity.starbase_alpha.name"
+threshold = 0.75
+urgent    = true
+message   = "world.combat_test.comms.9.message"
+
+[[comms]]
+from      = "world.entity.starbase_alpha.name"
+trigger   = "on_hull_below"
+entity    = "world.entity.starbase_alpha.name"
+threshold = 0.50
+urgent    = true
+message   = "world.combat_test.comms.10.message"
+
+[[comms]]
+from      = "world.entity.starbase_alpha.name"
+trigger   = "on_hull_below"
+entity    = "world.entity.starbase_alpha.name"
+threshold = 0.10
+urgent    = true
+message   = "world.combat_test.comms.11.message"

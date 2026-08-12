@@ -57,7 +57,7 @@ A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/render
 - `handle_respond_to_message` — player picks a response, may emit follow-up dialogue, runs response actions (also in `src/console/comms/server.rs`)
 - `handle_clear_comms` — drops orphaned and read messages (also in `src/console/comms/server.rs`)
 - `broadcast_comms_state` (`src/comms/server.rs`) / `broadcast_objective_summary` — push deltas on change
-- Trigger pipeline (issues #707–#719), chained in `SimSet::Physics`: `tick_pending_follow_ups` (`src/comms/server.rs`) → `collect_world_events` (`src/world/server.rs`, drains queued `WorldEvent`s — attacked, destroyed, hailed, timer, region, flag — into the per-tick `WorldEventBuffer` resource) → `inject_comms_templates` (`src/comms/server.rs`, fires matching `[[comms]]` templates) → `tick_trigger_pipeline` (`src/world/server.rs`, evaluates `[[trigger]]` conditions and dispatches the matching trigger actions). `tick_delayed_actions` runs after the pipeline, firing queued delayed actions through the same dispatch table. Comms systems live in `CommsWorldPlugin` (`src/comms/server.rs`), added by `WorldPlugin` (#816)
+- Trigger pipeline (issues #707–#719), chained in `SimSet::Physics`: `tick_pending_follow_ups` (`src/comms/server.rs`) → `collect_world_events` (`src/world/server.rs`, drains queued `WorldEvent`s — attacked, destroyed, hull-threshold crossings, hailed, timer, region, flag — into the per-tick `WorldEventBuffer` resource) → `inject_comms_templates` (`src/comms/server.rs`, fires matching `[[comms]]` templates) → `tick_trigger_pipeline` (`src/world/server.rs`, evaluates `[[trigger]]` conditions and dispatches the matching trigger actions). `tick_delayed_actions` runs after the pipeline, firing queued delayed actions through the same dispatch table. Comms systems live in `CommsWorldPlugin` (`src/comms/server.rs`), added by `WorldPlugin` (#816)
 
 ## Trigger conditions
 
@@ -68,6 +68,7 @@ Triggers in `[[trigger]]` blocks are matched against `WorldEvent`s by `evaluate_
 | `on_destroyed` | `entity = "<name>"` | `WorldEvent::Destroyed { uuid }` whose `uuid` resolves to the named entity. |
 | `on_all_destroyed` | `entities = ["<name>", ...]` | The tick the **last** named entity is destroyed. Stateful: tracks observed `Destroyed` events in `TriggerState.seen_destroyed`. Names that are never registered in `name_to_uuid` cause the trigger to never fire (#470). |
 | `on_attacked` | `entity = "<name>"` | `WorldEvent::Attacked` for the named entity. |
+| `on_hull_below` | `entity = "<name>"`, `threshold = <fraction>` | The named entity's aggregate hull crosses strictly from at/above the threshold to below it. |
 | `on_timer` | `after_secs = <f32>` | `WorldEvent::TimerElapsed` once `elapsed_secs >= after_secs`. |
 | `on_hailed` | `entity = "<name>"` | `WorldEvent::Hailed` for the named entity. |
 | `on_flag_set` / `on_flag_cleared` | `name = "<flag>"` | False→true / true→false transitions of a world flag (with `parent:` walks for sub-world layers). |

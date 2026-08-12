@@ -216,7 +216,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Ship Manual Surface
-      summary: Read-only client manual (book button + overlay) with tabs for every authored station, showing the ship-authored overview followed by generated vessel-specific system sections. Labels resolve through the string table via t(); the surface never sends or dispatches.
+      summary: Read-only client manual within the phone Settings menu, with tabs for every authored station and vessel-specific generated system sections. The client-only Station Help tab presents the held station's static controls reference; neither documentation surface sends or dispatches.
     architecture:
       kind: client-documentation-surface
       authority: non-authoritative

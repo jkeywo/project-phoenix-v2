@@ -27,7 +27,7 @@ import {
   GOD_MODE_SYSTEM_ID,
 } from '../../gui/settings-panel.js';
 import { setBuildFlags, isDemoBuild } from '../../gui/build-flags.js';
-import { TABS } from '../../gui/settings-tabs.js';
+import { TABS, CLIENT_DOCUMENTATION_TABS } from '../../gui/settings-tabs.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 
 const repoFile = (rel) =>
@@ -185,11 +185,11 @@ describe('mountSettings — cog and overlay', () => {
     expect(overlay.hidden).toBe(true);
   });
 
-  it('opens on the three tabs, Debug first', () => {
+  it('opens on the client controls and documentation tabs, Debug first', () => {
     const inst = mount(doc);
     inst.open();
     const labels = tabBarOf(doc).children.map((c) => c.getAttribute('data-tab'));
-    expect(labels).toEqual(['debug', 'audio', 'gameplay']);
+    expect(labels).toEqual(['debug', 'audio', 'gameplay', 'station-help', 'ship-manual']);
     expect(tabBarOf(doc).children[0].classList.contains('active')).toBe(true);
   });
 
@@ -200,6 +200,50 @@ describe('mountSettings — cog and overlay', () => {
     expect(findOverlay(doc).hidden).toBe(false);
     const active = tabBarOf(doc).children.find((c) => c.classList.contains('active'));
     expect(active.getAttribute('data-tab')).toBe('audio');
+  });
+});
+
+function allText(el) {
+  let text = el.textContent ? [el.textContent] : [];
+  for (const child of el.children || []) text = text.concat(allText(child));
+  return text;
+}
+
+describe('documentation tabs', () => {
+  it('renders help only for the station held by this client', () => {
+    const doc = makeDoc();
+    const inst = mount(doc, {
+      getState: () => ({
+        stations: [{ id: 'helm', holder_token: 'tok1', ratings: ['Std'] }],
+        stationRatings: {},
+      }),
+    });
+    inst.open();
+    inst.selectTab('station-help');
+    const text = allText(bodyOf(doc)).join('\n');
+    expect(text).toContain(t('station.helm.name'));
+    expect(text).toContain(t('help.helm.0.heading'));
+    expect(text).not.toContain(t('help.repair.0.heading'));
+  });
+
+  it('shows the localized unavailable state outside a held station', () => {
+    const doc = makeDoc();
+    const inst = mount(doc);
+    inst.open();
+    inst.selectTab('station-help');
+    expect(allText(bodyOf(doc))).toContain(t('settings.station_help.unavailable'));
+  });
+
+  it('renders the replicated ship manual within Settings without a book trigger', () => {
+    const doc = makeDoc();
+    const inst = mount(doc, {
+      getManual: () => ({ stations: [{ station_id: 'helm', overview: 'Fly the ship.', sections: [] }] }),
+    });
+    inst.open();
+    inst.selectTab('ship-manual');
+    expect(allText(bodyOf(doc))).toContain('Fly the ship.');
+    expect(doc.getElementById('manual-btn')).toBeNull();
+    expect(doc.getElementById('manual-overlay')).toBeNull();
   });
 });
 
@@ -309,13 +353,15 @@ describe('the demo build gate', () => {
   it('hides exactly the Debug/Cheat tab in a demo build and nothing in a dev build', () => {
     const dev = buildSettingsState({ demo: false }).tabs.map((tb) => tb.id);
     const demo = buildSettingsState({ demo: true }).tabs.map((tb) => tb.id);
-    expect(dev).toEqual(TABS.map((tb) => tb.id));
-    expect(demo).toEqual(TABS.filter((tb) => !tb.gated).map((tb) => tb.id));
+    expect(dev).toEqual(TABS.concat(CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
+    expect(demo).toEqual(TABS.filter((tb) => !tb.gated).concat(CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
     expect(dev).toContain('debug');
     expect(demo).not.toContain('debug');
     // Audio and Gameplay are not build-gated — the demo needs both.
     expect(demo).toContain('audio');
     expect(demo).toContain('gameplay');
+    expect(demo).toContain('station-help');
+    expect(demo).toContain('ship-manual');
   });
 
   it('falls back off a tab the build gated away instead of rendering nothing', () => {
@@ -342,7 +388,7 @@ describe('the demo build gate', () => {
     const inst = mount(doc, { isDemo: () => true });
     inst.open();
     expect(tabBarOf(doc).children.map((c) => c.getAttribute('data-tab')))
-      .toEqual(['audio', 'gameplay']);
+      .toEqual(['audio', 'gameplay', 'station-help', 'ship-manual']);
     // …and nothing in the body offers a debug control.
     for (const entry of CLIENT_DEBUG_FLAGS) {
       expect(bodyButtons(doc).some((b) => b.getAttribute('data-control') === entry.id))
@@ -407,6 +453,11 @@ describe('the demo build gate', () => {
 // ── The page the cog lives on ────────────────────────────────────────────────
 
 describe('client.html', () => {
+  it('uses fullscreen and exit glyphs rather than a help glyph', () => {
+    expect(CLIENT_HTML).toMatch(/id="fullscreen-btn"[^>]*>⛶<\/button>/);
+    expect(CLIENT_HTML).toMatch(/document\.fullscreenElement \? '✕' : '⛶'/);
+  });
+
   const zIndexOf = (pattern) => {
     const m = CLIENT_HTML.match(pattern);
     expect(m, `pattern not found in client.html: ${pattern}`).not.toBeNull();

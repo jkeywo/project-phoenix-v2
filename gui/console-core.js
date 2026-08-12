@@ -49,7 +49,6 @@
 // In Node tests strings-boot is a no-op; setup-strings.js loads the table.
 import './strings-boot.js';
 import { applyToDom } from './strings.js';
-import { mountHelp } from './help-panel.js';
 // Registers <ph-tutorial-overlay> (issue #916) so every console gets the
 // contextual tutorial overlay without per-file HTML; Node-safe (guarded
 // definition), so plain-Node test imports of this module stay fine.
@@ -182,20 +181,6 @@ export function initConsole({ name, render }) {
       document.addEventListener('DOMContentLoaded', _wireComponents);
     } else {
       _wireComponents();
-    }
-  }
-
-  // ── Help system (issue #462) ───────────────────────────────────────────
-  // Mount the shared "?" help button + click-to-dismiss modal for this
-  // console. `name` is the lowercase station id (post issue #618), which
-  // doubles as the HelpPanel key. Runs only in a real DOM (guarded inside
-  // mountHelp); a no-op in Node tests. Deferred until the DOM is ready so
-  // the trigger host (`.frame`) exists.
-  if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function() { mountHelp(name); });
-    } else {
-      mountHelp(name);
     }
   }
 

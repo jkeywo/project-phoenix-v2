@@ -5,9 +5,6 @@ import {
   renderSection,
   formatMetricValue,
   ratingCaption,
-  mountManual,
-  openManual,
-  isManualOpen,
 } from '../../gui/manual-panel.js';
 
 // ── Minimal DOM stub (same shape as settings-panel.test.js) ─────────────────
@@ -210,35 +207,5 @@ describe('renderManual', () => {
     const hasButton = (node) =>
       node.tagName === 'BUTTON' || node.children.some(hasButton);
     expect(hasButton(el)).toBe(false);
-  });
-});
-
-describe('mountManual overlay', () => {
-  beforeEach(() => setTable(TABLE));
-
-  it('creates a book button and hidden overlay, and opens on demand', () => {
-    const doc = makeDoc();
-    let queried = 0;
-    const inst = mountManual({ getManual: () => { queried += 1; return fixtureManual(); }, doc });
-    const btn = doc.getElementById('manual-btn');
-    expect(btn).not.toBeNull();
-    expect(btn.textContent).toBe('\u{1F4D6}');
-    const overlay = doc.getElementById('manual-overlay');
-    expect(overlay.hidden).toBe(true);
-    inst.open();
-    expect(isManualOpen(doc)).toBe(true);
-    expect(queried).toBeGreaterThan(0);
-    inst.close();
-    expect(isManualOpen(doc)).toBe(false);
-  });
-
-  it('openManual pulls the current replica from getManual each time', () => {
-    const doc = makeDoc();
-    openManual(() => fixtureManual(), doc);
-    const overlay = doc.getElementById('manual-overlay');
-    const text = allText(overlay).join('\n');
-    expect(text).toContain('SHIP MANUAL');
-    expect(text).toContain('Captain');
-    expect(text).toContain('Science');
   });
 });

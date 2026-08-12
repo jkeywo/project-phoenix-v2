@@ -3,7 +3,7 @@ title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, state, vitest]
 sources: [client.html, gui/mount-plan.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, tests/client/]
-updated: 2026-07-20
+updated: 2026-08-12
 ---
 
 ## Summary
@@ -53,7 +53,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `phone-bezel.js` | Diegetic phone bezel chrome |
 | `radar-math.js` | Client-side radar blip projection |
 | `console-ui.js` | Shared iframe UI primitives (`reconcileRows`, `setBtn`, `setBar`, `setAutoState`, `setText`, keyed rebuild) |
-| `console-core.js`, `device-orientation.js`, `help-panel.js` | Iframe boot glue, orientation handling, help overlay |
+| `console-core.js`, `device-orientation.js`, `help-panel.js`, `manual-panel.js`, `settings-panel.js` | Iframe boot glue, orientation handling, and the phone Settings menu, including current-station help and the ship manual |
 
 Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gui/cruiser/science.html`, …) loaded as an iframe; the URL comes from the station's TOML `console` field via `gui/console-resolver.js`, and the section/iframe DOM ids from `gui/mount-plan.js`. See [Console UI Authoring Library](./console-ui-library.md) for the authoring pattern.
 

@@ -505,7 +505,14 @@ fn update_view_screen_text(
 /// forward.
 fn hull_camera(
     view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
-    ship_q: Query<(&Transform, Option<&ModelMarkers>), With<crate::simulation::LocalShip>>,
+    // The ship and the camera both have a `Transform`, so make their entity
+    // sets explicitly disjoint. Without this, Bevy rejects the system at
+    // schedule initialisation even though normal spawning never gives the
+    // player ship a `GameCamera` marker (B0001).
+    ship_q: Query<
+        (&Transform, Option<&ModelMarkers>),
+        (With<crate::simulation::LocalShip>, Without<GameCamera>),
+    >,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
     let Ok(mut transform) = cam_query.single_mut() else {
@@ -1298,6 +1305,20 @@ mod tests {
             transform.rotation,
             Quat::from_euler(EulerRot::YXZ, -0.75, 0.0, 0.1)
         );
+    }
+
+    #[test]
+    fn hull_camera_queries_are_disjoint() {
+        let mut app = App::new();
+        app.add_systems(Update, hull_camera);
+        app.world_mut()
+            .spawn((LocalShip, ShipViewMode::default(), Transform::default()));
+        app.world_mut().spawn((GameCamera, Transform::default()));
+
+        // Initialising the schedule is the regression check: overlapping
+        // `Transform` queries panic with Bevy error B0001 before the system
+        // body runs.
+        app.update();
     }
 
     fn camera_test_app() -> App {

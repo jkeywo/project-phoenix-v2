@@ -40,7 +40,6 @@
         <div class="map-col">
           <div class="btn-row">
             <button class="btn" id="btn-on-screen" type="button"><span class="btn-bg"></span><span class="label" data-i18n="console.navigation.on_screen">On Screen</span></button>
-            <button class="btn" id="btn-clear-waypoint" type="button"><span class="btn-bg"></span><span class="label" data-i18n="console.navigation.clear_waypoint">Clear Waypoint</span></button>
           </div>
           <div class="map-wrap" id="map-canvas">
             <ph-navigation-map id="navigation-map"></ph-navigation-map>
@@ -74,12 +73,10 @@
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
 
-    var currentState = {};
     var consoleApi = initConsole({
       name: 'navigation',
       // s is a NavigationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
-        currentState = s || {};
         document.getElementById('navigation-map').state = { blips: s.blips || [], range: s.radar_range || 5000, ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0, waypoint: s.waypoint || null };
         document.getElementById('objective-list').state = { objectives: s.objectives || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
@@ -92,21 +89,15 @@
     });
 
     var navMap = document.getElementById('navigation-map');
-    var originalSendAction = navMap.sendAction;
-    navMap.sendAction = function(action, payload) {
-      if (action === 'set_navigation_waypoint' && payload && payload.source_uuid) {
-        var match = (currentState.blips || []).find(function(b) { return b.uuid === payload.source_uuid; });
-        document.getElementById('ent-name').textContent = match && match.name ? match.name : payload.source_uuid;
-      } else if (action === 'set_navigation_waypoint') {
-        document.getElementById('ent-name').textContent = t('console.navigation.custom');
-      }
-      return originalSendAction.call(this, action, payload);
-    };
-
-    document.getElementById('btn-clear-waypoint').addEventListener('click', function() {
-      consoleApi.sendAction('clear_navigation_waypoint', {});
-      document.getElementById('ent-name').textContent = t('console.navigation.none');
+    // The map selects a chart contact on tap (navselect event); it does not set
+    // the waypoint itself — that is the map's own Set Waypoint / Set as
+    // Waypoint / Clear Waypoint bar, which round-trips through the same action
+    // map (set_navigation_waypoint / clear_navigation_waypoint).
+    navMap.addEventListener('navselect', function(e) {
+      var b = e.detail || null;
+      document.getElementById('ent-name').textContent = b && b.name ? b.name : t('console.navigation.none');
     });
+
     document.getElementById('btn-on-screen').addEventListener('click', function() {
       consoleApi.sendAction('set_navigation_chart', {});
     });

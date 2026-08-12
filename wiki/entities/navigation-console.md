@@ -3,7 +3,7 @@ title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
 sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/destroyer/tactical.html, gui/components/ph-navigation-map.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/core/messages.rs, src/entities/config.rs, assets/entities/alliance_battleship.toml]
-updated: 2026-07-15
+updated: 2026-08-12
 ---
 
 # Navigation Console
@@ -18,7 +18,7 @@ The chart is overhead, north-up, and world-anchored. It uses authored radar icon
 
 ## Selection and waypoint placement
 
-Tapping a chart blip selects it locally, opens its information overlay, and sends `set_navigation_waypoint` with the blip's coordinates and `source_uuid`. This creates an anchored waypoint. Tapping empty chart space clears the local selection and sends the same action without `source_uuid`, creating a free waypoint at that world position. The Battleship page also exposes an explicit Clear Waypoint button.
+Tapping a chart blip selects it locally and opens its information overlay; tapping empty chart space clears that selection. Selection alone never changes the shared waypoint. Every host of `ph-navigation-map` renders the component's explicit waypoint controls: **Set Waypoint** arms a pick mode whose next map tap creates a free waypoint, **Set as Waypoint** creates an anchored waypoint for the selected blip, and **Clear Waypoint** removes the shared waypoint. The component emits `navselect` whenever its local selection changes so a host may mirror that state in its own readout.
 
 The server owns one waypoint per ship:
 

@@ -3,12 +3,24 @@ import { ts } from './strings';
 
 const CONSOLE_URL = '/gui/battleship/navigation.html';
 
-test('navigation console: tapping the map sends set_navigation_waypoint', async ({ page }) => {
+test('navigation console: tapping the map alone never sends a waypoint action', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];
     window.__sendAction = (json) => window.__sent.push(json);
   });
+  await page.locator('ph-navigation-map').locator('canvas').click();
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(0);
+});
+
+test('navigation console: Set Waypoint pick mode places a free waypoint on tap', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(json);
+  });
+  await page.locator('ph-navigation-map').locator('#btn-set-waypoint').click();
   await page.locator('ph-navigation-map').locator('canvas').click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
@@ -17,6 +29,7 @@ test('navigation console: tapping the map sends set_navigation_waypoint', async 
   expect(parsed.console).toBe('navigation');
   expect(typeof parsed.x).toBe('number');
   expect(typeof parsed.z).toBe('number');
+  expect(parsed.source_uuid).toBeUndefined();
 });
 
 test('navigation console: clear waypoint sends clear_navigation_waypoint', async ({ page }) => {
@@ -34,7 +47,7 @@ test('navigation console: clear waypoint sends clear_navigation_waypoint', async
       radar_range: 5000,
     }));
   });
-  await page.locator('#btn-clear-waypoint').click();
+  await page.locator('ph-navigation-map').locator('#btn-clear-waypoint').click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
   const parsed = JSON.parse(sent[0]);
@@ -60,7 +73,7 @@ test('navigation console: selected entity name stays NONE until the operator tap
   await expect(page.locator('#ent-name')).toHaveText(ts('console.navigation.none'));
 });
 
-test('navigation console: tapping a visible entity sends source_uuid for that target', async ({ page }) => {
+test('navigation console: tapping a visible entity selects it and Set as Waypoint anchors it', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];
@@ -78,13 +91,18 @@ test('navigation console: tapping a visible entity sends source_uuid for that ta
     }));
   });
   await page.locator('ph-navigation-map').locator('canvas').click();
-  const sent = await page.evaluate(() => window.__sent);
+  // Selecting alone does not set the waypoint.
+  await expect(page.locator('#ent-name')).toHaveText('Alpha Station');
+  let sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(0);
+
+  await page.locator('ph-navigation-map').locator('#btn-set-selected').click();
+  sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
   const parsed = JSON.parse(sent[0]);
   expect(parsed.action).toBe('set_navigation_waypoint');
   expect(parsed.console).toBe('navigation');
   expect(parsed.source_uuid).toBe('station-alpha');
-  await expect(page.locator('#ent-name')).toHaveText('Alpha Station');
 });
 
 test('navigation console: waypoint state renders waypoint labels in the side panel and footer', async ({ page }) => {

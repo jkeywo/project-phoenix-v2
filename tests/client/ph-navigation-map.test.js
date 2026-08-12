@@ -21,7 +21,7 @@ function makeFakeCtx() {
     stroke: () => calls.stroke.push(true),
     moveTo: (...a) => calls.moveTo.push(a),
     lineTo: (...a) => calls.lineTo.push(a),
-    fillText: (...a) => calls.fillText.push(a),
+    fillText: (...a) => calls.fillText.push({ text: a[0], x: a[1], y: a[2], font: ctx.font }),
     save: vi.fn(),
     restore: vi.fn(),
     closePath: vi.fn(),
@@ -213,7 +213,7 @@ describe('PhNavigationMap', () => {
     expect(h.fakeCtx._calls.moveTo.length).toBeGreaterThan(0);
   });
 
-  it('tap on empty space dispatches set_navigation_waypoint with world coordinates', () => {
+  it('tap on empty space does NOT set a waypoint (selection-only)', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
     h.el.state = {
@@ -225,10 +225,11 @@ describe('PhNavigationMap', () => {
     h.tickRaf();
 
     click(h.canvas, 150, 150);
-    expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 0 });
+    expect(sendAction).not.toHaveBeenCalled();
+    expect(h.el.shadowRoot.getElementById('overlay').classList.contains('show')).toBe(false);
   });
 
-  it('tap on empty space at known position uses correct world coords', () => {
+  it('Set Waypoint pick mode places a free waypoint at the tapped world position', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
     h.el.state = {
@@ -239,16 +240,52 @@ describe('PhNavigationMap', () => {
     };
     h.tickRaf();
 
+    h.el.shadowRoot.getElementById('btn-set-waypoint').click();
+
     // Click at CSS (150, 75) → buffer (300, 150)
     // cx=300, cy=300, scale=0.06 (R=300, range=5000)
     // World-anchored (camera on origin, north-up), zoom=1, pan=(0,0):
     // nx = (300-300)/(0.06*1) = 0, ny = (150-300)/(0.06*1) = -2500
     // wx = 0, wz = -(-2500) = 2500 (independent of ship_pos)
     click(h.canvas, 150, 75);
+    expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 2500 });
   });
 
-  it('tap on blip dispatches set_navigation_waypoint with source_uuid', () => {
+  it('pick mode places a free waypoint even when a blip is underneath the tap', () => {
+    const sendAction = vi.fn();
+    const h = setup({ sendAction });
+    h.el.state = {
+      blips: [
+        { uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' },
+      ],
+      range: 5000,
+      ship_pos: { x: 0, z: 0 },
+      ship_heading: 0,
+    };
+    h.tickRaf();
+    h.el.shadowRoot.getElementById('btn-set-waypoint').click();
+    click(h.canvas, 180, 150);
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction.mock.calls[0][0]).toBe('set_navigation_waypoint');
+    expect(sendAction.mock.calls[0][1].source_uuid).toBeUndefined();
+  });
+
+  it('tapping Set Waypoint again cancels pick mode', () => {
+    const sendAction = vi.fn();
+    const h = setup({ sendAction });
+    h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
+    h.tickRaf();
+    const btn = h.el.shadowRoot.getElementById('btn-set-waypoint');
+    btn.click();
+    expect(h.canvas.classList.contains('picking')).toBe(true);
+    btn.click();
+    expect(h.canvas.classList.contains('picking')).toBe(false);
+    click(h.canvas, 150, 150);
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('tap on blip selects it and Set as Waypoint sends an anchored waypoint', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
     h.el.state = {
@@ -264,6 +301,12 @@ describe('PhNavigationMap', () => {
     // Blip at (1000, 0) → buffer: sx = 300+1000*0.06 = 360, sy = 300
     // CSS: x=180, y=150
     click(h.canvas, 180, 150);
+
+    // Selecting must not set the waypoint on its own.
+    expect(sendAction).not.toHaveBeenCalled();
+
+    h.el.shadowRoot.getElementById('btn-set-selected').click();
+    expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', {
       x: 1000,
       z: 0,
@@ -317,6 +360,127 @@ describe('PhNavigationMap', () => {
     expect(overlay.classList.contains('show')).toBe(false);
   });
 
+  it('waypoint control bar shows Set with no waypoint and hides Clear', () => {
+    const h = setup();
+    h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
+    h.tickRaf();
+    const setBtn = h.el.shadowRoot.getElementById('btn-set-waypoint');
+    const selectedBtn = h.el.shadowRoot.getElementById('btn-set-selected');
+    const clearBtn = h.el.shadowRoot.getElementById('btn-clear-waypoint');
+    expect(setBtn.classList.contains('show')).toBe(true);
+    expect(selectedBtn.classList.contains('show')).toBe(false);
+    expect(clearBtn.classList.contains('show')).toBe(false);
+  });
+
+  it('waypoint control bar shows Clear once a waypoint is set', () => {
+    const h = setup();
+    h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0, waypoint: { x: 100, z: 200 } };
+    h.tickRaf();
+    expect(h.el.shadowRoot.getElementById('btn-set-waypoint').classList.contains('show')).toBe(false);
+    expect(h.el.shadowRoot.getElementById('btn-clear-waypoint').classList.contains('show')).toBe(true);
+  });
+
+  it('Clear Waypoint button sends clear_navigation_waypoint', () => {
+    const sendAction = vi.fn();
+    const h = setup({ sendAction });
+    h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0, waypoint: { x: 100, z: 200 } };
+    h.tickRaf();
+    h.el.shadowRoot.getElementById('btn-clear-waypoint').click();
+    expect(sendAction).toHaveBeenCalledWith('clear_navigation_waypoint', {});
+  });
+
+  it('selecting a blip emits navselect and an empty tap clears it', () => {
+    const h = setup();
+    const onSelect = vi.fn();
+    h.el.addEventListener('navselect', onSelect);
+    h.el.state = {
+      blips: [{ uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' }],
+      range: 5000,
+      ship_pos: { x: 0, z: 0 },
+      ship_heading: 0,
+    };
+    h.tickRaf();
+
+    click(h.canvas, 180, 150);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect.mock.calls[0][0].detail.uuid).toBe('abc');
+
+    click(h.canvas, 0, 0);
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(onSelect.mock.calls[1][0].detail).toBeNull();
+  });
+
+  it('selection is dropped when the selected blip disappears on state refresh', () => {
+    const h = setup();
+    let selected = null;
+    h.el.addEventListener('navselect', (e) => { selected = e.detail; });
+    h.el.state = {
+      blips: [{ uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' }],
+      range: 5000,
+      ship_pos: { x: 0, z: 0 },
+      ship_heading: 0,
+    };
+    h.tickRaf();
+    click(h.canvas, 180, 150);
+    expect(selected && selected.uuid).toBe('abc');
+
+    h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
+    h.tickRaf();
+    expect(selected).toBeNull();
+    expect(h.el.shadowRoot.getElementById('overlay').classList.contains('show')).toBe(false);
+  });
+
+  describe('label font scaling', () => {
+    it('blip name font scales with the buffer/CSS ratio (devicePixelRatio)', () => {
+      const h = setup();
+      h.el.state = {
+        blips: [{ uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' }],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+      // Canvas buffer is 600 wide for a 300 CSS rect (dpr 2) → 12*2 = 24px.
+      const draws = h.fakeCtx._calls.fillText.filter((f) => f.text === 'Alpha');
+      expect(draws.length).toBeGreaterThan(0);
+      expect(draws[0].font).toBe('24px "JetBrains Mono", monospace');
+    });
+
+    it('waypoint WP label font scales with the buffer/CSS ratio', () => {
+      const h = setup();
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+        waypoint: { x: 2000, z: 1000 },
+      };
+      h.tickRaf();
+      // 10*2 = 20px at dpr 2.
+      const draws = h.fakeCtx._calls.fillText.filter((f) => f.text === 'WP');
+      expect(draws.length).toBeGreaterThan(0);
+      expect(draws[0].font).toBe('20px "JetBrains Mono", monospace');
+    });
+
+    it('blip names are not drawn when zoomed out below the label floor', () => {
+      const h = setup();
+      h.el.state = {
+        blips: [{ uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' }],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+      const before = h.fakeCtx._calls.fillText.filter((f) => f.text === 'Alpha').length;
+      for (let i = 0; i < 20; i++) {
+        h.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, clientX: 150, clientY: 150, bubbles: true, cancelable: true }));
+      }
+      h.tickRaf();
+      const after = h.fakeCtx._calls.fillText.filter((f) => f.text === 'Alpha').length;
+      expect(after).toBe(before);
+    });
+  });
+
   it('ResizeObserver updates canvas size on host element resize', () => {
     const h = setup();
     const canvas = h.canvas;
@@ -359,6 +523,8 @@ describe('PhNavigationMap', () => {
       };
       h.tickRaf();
 
+      // A <5px drag is a tap; with pick mode armed it places a free waypoint.
+      h.el.shadowRoot.getElementById('btn-set-waypoint').click();
       drag(h.canvas, 100, 100, 101, 100);
       // mousedown at CSS (100,100) → buf (200,200), <5px movement → tap at (200,200)
       // nx=(200-300)/0.06=-1666.67, ny=(200-300)/0.06=-1666.67
@@ -391,6 +557,7 @@ describe('PhNavigationMap', () => {
       // nx = (400 - 300 - 200) / 0.06 = -100/0.06 = -1666.67
       // ny = (200 - 300 - 0) / 0.06 = -1666.67
       // heading=0: wx = -1666.67, wz = 1666.67
+      h.el.shadowRoot.getElementById('btn-set-waypoint').click();
       click(h.canvas, 200, 100);
       expect(sendAction).toHaveBeenCalledTimes(1);
       const call = sendAction.mock.calls[0][1];
@@ -409,7 +576,8 @@ describe('PhNavigationMap', () => {
       };
       h.tickRaf();
 
-      // Baseline: tap top-left to get world coords at zoom=1
+      // Baseline: arm pick mode and tap top-left to get world coords at zoom=1
+      h.el.shadowRoot.getElementById('btn-set-waypoint').click();
       click(h.canvas, 0, 0);
       const baselineCall = sendAction.mock.calls[0][1];
 
@@ -425,6 +593,7 @@ describe('PhNavigationMap', () => {
       }));
 
       // Now tap top-left again — it should map to a different world position (closer to ship)
+      h.el.shadowRoot.getElementById('btn-set-waypoint').click();
       click(h.canvas, 0, 0);
       const zoomedCall = sendAction.mock.calls[0][1];
 
@@ -471,9 +640,10 @@ describe('PhNavigationMap', () => {
 
       // Tap at center CSS (150,150) → buf (300,300)
       // World-anchored (camera on origin), zoom=1.13, panX=100, panY=0:
-      //   nx = (300-300-100)/(0.06*1.13) = -100/0.0678 = -1474.93
+// nx = (300-300-100)/(0.06*1.13) = -100/0.0678 = -1474.93
       //   ny = (300-300-0)/(0.06*1.13) = 0
       //   wx = -1474.93, wz = 0 (independent of ship_pos)
+      h.el.shadowRoot.getElementById('btn-set-waypoint').click();
       click(h.canvas, 150, 150);
       expect(sendAction).toHaveBeenCalledTimes(1);
       const call = sendAction.mock.calls[0][1];
@@ -496,6 +666,7 @@ describe('PhNavigationMap', () => {
       h.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200, bubbles: true }));
 
       // Tap should still work with default pan
+      h.el.shadowRoot.getElementById('btn-set-waypoint').click();
       click(h.canvas, 150, 150);
       expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 0 });
     });
@@ -526,6 +697,7 @@ describe('PhNavigationMap', () => {
       // 1 * 0.885^20 ≈ 0.089, clamped to 0.25
       // Tap at top-left after extreme zoom out
       sendAction.mockClear();
+      h.el.shadowRoot.getElementById('btn-set-waypoint').click();
       click(h.canvas, 0, 0);
       const call = sendAction.mock.calls[0][1];
       // At zoom=0.25 (clamped), top-left maps to:

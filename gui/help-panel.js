@@ -68,6 +68,7 @@ const HELP_SECTIONS = {
     ['help.navigation.0.heading', 'help.navigation.0.body'],
     ['help.navigation.1.heading', 'help.navigation.1.body'],
     ['help.navigation.2.heading', 'help.navigation.2.body'],
+    ['help.navigation.3.heading', 'help.navigation.3.body'],
   ],
   comms: [
     ['help.comms.0.heading', 'help.comms.0.body'],

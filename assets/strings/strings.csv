@@ -422,6 +422,10 @@ console.navigation.waypoint,"navigation console — ""Waypoint"" metric label",W
 console.navigation.contacts,"navigation console — ""Contacts"" metric label",Contacts
 console.navigation.on_screen,"navigation console — ""On Screen"" button",On Screen
 console.navigation.clear_waypoint,"navigation console — ""Clear Waypoint"" button",Clear Waypoint
+console.navigation.set_waypoint,"navigation console — ""Set Waypoint"" button that starts tap-to-place mode (free waypoint)",Set Waypoint
+console.navigation.set_as_waypoint,"navigation console — ""Set as Waypoint"" button that anchors the waypoint to the selected chart contact",Set as Waypoint
+console.navigation.tap_to_place,"navigation console — toast prompt shown while tap-to-place waypoint mode is armed","TAP MAP TO PLACE WAYPOINT"
+console.navigation.waypoint_set,"navigation console — toast confirming a waypoint was set",WAYPOINT SET
 console.power.doc_title,Browser-tab title of the power console page,[Project Phoenix - Power Console]
 console.power.screen_label,Phone-frame screen label of the power console,Power Console
 console.power.title,power console — main hero heading,POWER
@@ -625,6 +629,8 @@ help.navigation.1.heading,"Help modal — navigation station, section 2 heading"
 help.navigation.1.body,"Help modal — navigation station, section 2 body text",[Overlay the nav chart on the main screen so the Captain and Helm see the strategic picture.]
 help.navigation.2.heading,"Help modal — navigation station, section 3 heading",Cancel Impulse
 help.navigation.2.body,"Help modal — navigation station, section 3 body text",[Abort an active impulse charge if Helm is about to overshoot or fly into a hazard.]
+help.navigation.3.heading,"Help modal — navigation station, section 4 heading",Waypoints
+help.navigation.3.body,"Help modal — navigation station, section 4 body text","[Tap a contact on the chart to select it, then ""Set as Waypoint"" to mark it as the destination. ""Set Waypoint"" lets you place a destination anywhere on the map, and ""Clear Waypoint"" removes it.]"
 help.comms.0.heading,"Help modal — comms station, section 1 heading",Comms Officer
 help.comms.0.body,"Help modal — comms station, section 1 body text","[Connect the ship to the outside world. You are the first to know about orders, threats, and opportunities.]"
 help.comms.1.heading,"Help modal — comms station, section 2 heading",Contacts

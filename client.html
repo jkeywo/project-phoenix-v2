@@ -207,7 +207,7 @@
      #phone-bezel[aria-hidden="true"] { display: none; }
     #coordination-popup {
       display: none;
-      position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+      position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
       z-index: 180;
       background: #1a2a3a;
       border: 1px solid #4af;
@@ -216,13 +216,13 @@
       max-width: 320px;
       color: #d0e4f0;
       font-family: 'Chakra Petch', monospace;
-      font-size: 0.85rem;
+      font-size: 1.275rem;
       box-shadow: 0 4px 20px rgba(0,0,0,0.6);
       cursor: pointer;
       user-select: none;
     }
     #coordination-popup .popup-sender {
-      font-size: 0.7rem;
+      font-size: 1.05rem;
       color: #8af;
       margin-bottom: 4px;
       text-transform: uppercase;
@@ -233,7 +233,7 @@
       margin-bottom: 2px;
     }
     #coordination-popup .popup-body {
-      font-size: 0.8rem;
+      font-size: 1.2rem;
       color: #a0b8c8;
     }
 
@@ -870,7 +870,7 @@
     <div id="scenario-picker-body"></div>
   </div>
 
-  <!-- Coordination popup overlay (issue #494). Shown for AI-to-human
+  <!-- Top-centre coordination popup overlay (issue #494). Shown for AI-to-human
        coordination messages. Click-to-dismiss, auto-dismiss after 8s. -->
   <div id="coordination-popup" onclick="dismissCoordinationPopup()">
     <div class="popup-sender" id="popup-sender"></div>

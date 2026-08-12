@@ -2,13 +2,21 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
-sources: [gui/console-state.js, gui/radar-widget.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-tactical-radar.js, client.html, src/radar.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
-updated: 2026-08-08
+sources: [gui/console-state.js, gui/radar-widget.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, client.html, src/radar.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
+updated: 2026-08-12
 ---
 
 # Radar Projection
 
 A single pure iterator that turns 3D asteroid positions into 2D radar dots, ship-relative.
+
+## Shared radar artwork
+
+The phone-console radar component (`ph-radar`) paints its opaque base, then the
+static `radar-surround.png` console frame, then `radar-bg.png` as the full-size
+circular screen rotated opposite `ship_heading`. Pre-projected blips, markers,
+and console-specific SVG overlays remain above those artwork layers. The
+navigation chart is a separate north-up world map and does not use this treatment.
 
 ## API
 

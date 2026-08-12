@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-radar.js';
 
 function makeFakeCtx() {
-  const calls = { fillRect: [], arc: [], fill: [], drawImage: [], fillText: [] };
+  const calls = { fillRect: [], arc: [], fill: [], drawImage: [], fillText: [], save: [], restore: [], translate: [], rotate: [] };
   const ctx = {
     _calls: calls,
     fillStyle: '',
@@ -14,6 +14,10 @@ function makeFakeCtx() {
     fill: () => calls.fill.push(true),
     drawImage: (...a) => calls.drawImage.push(a),
     fillText: (...a) => calls.fillText.push(a),
+    save: () => calls.save.push(true),
+    restore: () => calls.restore.push(true),
+    translate: (...a) => calls.translate.push(a),
+    rotate: (...a) => calls.rotate.push(a),
     font: '',
   };
   return ctx;
@@ -28,6 +32,7 @@ let origCARAF;
 let origRO;
 let origImage;
 let roCallback;
+let imageSources;
 
 beforeEach(() => {
   fakeCtx = makeFakeCtx();
@@ -53,8 +58,11 @@ beforeEach(() => {
 
   // Image mock: always "loaded"
   origImage = window.Image;
+  imageSources = [];
   window.Image = class {
     constructor() { this.naturalWidth = 64; this.naturalHeight = 64; this.complete = true; }
+    set src(value) { this._src = value; imageSources.push(value); }
+    get src() { return this._src; }
   };
 
   // devicePixelRatio
@@ -166,6 +174,38 @@ describe('PhRadar', () => {
       h.el.state = { blips: undefined, range: 500 };
       h.tickRaf();
     }).not.toThrow();
+  });
+
+  it('layers the static surround below a rotating radar screen and blips', () => {
+    const h = setup();
+    expect(imageSources).toEqual(expect.arrayContaining([
+      '../../assets/helm_console/radar-bg.png',
+      '../../assets/helm_console/radar-surround.png',
+    ]));
+
+    h.el.state = {
+      ship_heading: 90,
+      blips: [{ uuid: 'contact', radar_x: 0, radar_y: 0.5, icon: 'warbird' }],
+    };
+    h.tickRaf();
+
+    const images = h.fakeCtx._calls.drawImage.map(args => args[0]?.src);
+    const surround = images.indexOf('../../assets/helm_console/radar-surround.png');
+    const background = images.indexOf('../../assets/helm_console/radar-bg.png');
+    const blip = images.lastIndexOf('../../assets/radar_icons/Icon-Warbird.png');
+    expect(surround).toBeGreaterThanOrEqual(0);
+    expect(background).toBeGreaterThan(surround);
+    expect(blip).toBeGreaterThan(background);
+    expect(h.fakeCtx._calls.rotate).toContainEqual([-Math.PI / 2]);
+  });
+
+  it('renders artwork even when there are no blips', () => {
+    const h = setup();
+    h.el.state = { blips: [] };
+    h.tickRaf();
+    const images = h.fakeCtx._calls.drawImage.map(args => args[0]?.src);
+    expect(images).toContain('../../assets/helm_console/radar-surround.png');
+    expect(images).toContain('../../assets/helm_console/radar-bg.png');
   });
 
   // ── Hit testing / target selection ───────────────────────────────
@@ -315,7 +355,8 @@ describe('PhRadar', () => {
       }],
     };
     h.tickRaf();
-    // Should have at least 2 arcs: disc background + blip
-    expect(h.fakeCtx._calls.arc.length).toBeGreaterThanOrEqual(2);
+    // The supplied background artwork replaces the fallback disc; the blip
+    // itself still draws as a canvas arc.
+    expect(h.fakeCtx._calls.arc.length).toBeGreaterThanOrEqual(1);
   });
 });

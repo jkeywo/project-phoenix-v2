@@ -14,6 +14,10 @@ function makeFakeCtx() {
     fill: () => calls.fill.push(true),
     drawImage: (...a) => calls.drawImage.push(a),
     fillText: (...a) => calls.fillText.push(a),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    rotate: vi.fn(),
     font: '',
   };
 }

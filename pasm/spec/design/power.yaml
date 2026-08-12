@@ -63,7 +63,9 @@ entities:
       status: accepted
       confidence: confirmed
       title: Power Grid Information
-      summary: Power sees group allocation, total supply, battery reserve, allocation lock state, and fine reactor and battery availability.
+      summary: Power sees group allocation, total supply, battery reserve, allocation lock state, and fine reactor and battery availability. Alliance hulls author a six-pip sustainable allocation that recharges slowly plus a two-pip battery reserve; allocations above six drain the reserve.
+      rationale:
+        - "[ai] Alliance reactors explicitly author sustainable_total = 6 and max_commanded_total = 8 so the six-base plus two-battery budget cannot remain an implicit global constant."
     game_design:
       enforcement_links: [ship-power-state]
       visibility: role-visible
@@ -97,5 +99,5 @@ entities:
     implementation:
       status: declared
       paths: [src/console_ai/server.rs, src/entities/config.rs, src/ship/power.rs, src/ai/policy.rs, src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
-      symbols: [ai_power_allocation, AiPolicy, resolve_channel, resolve_channel_ranked, seed_power_facts, POWER_SET_ALLOCATION_VERB, PowerAiPolicy, authored_power_group_seed, plan_allocation, AllocationBid, MAX_COMMANDED_TOTAL]
+      symbols: [ai_power_allocation, AiPolicy, resolve_channel, resolve_channel_ranked, seed_power_facts, POWER_SET_ALLOCATION_VERB, PowerAiPolicy, authored_power_group_seed, plan_allocation, AllocationBid, max_commanded_total]
       tests: [cargo test]

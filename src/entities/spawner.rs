@@ -374,7 +374,7 @@ pub fn spawn_entity(
         entity_commands.insert(crate::console::repair::server::RepairRequestQueue::default());
         entity_commands.insert(crate::power_plugin::ShipPowerSystem(
             crate::modifiers::power_system::PowerSystem::from_authored_groups(
-                crate::modifiers::power_system::PowerConfig::default().capacity,
+                &crate::modifiers::power_system::PowerConfig::default(),
                 &power_group_seed,
             ),
         ));
@@ -390,11 +390,19 @@ pub fn spawn_entity(
                 crate::modifiers::power_system::PowerConfig {
                     capacity: pc.capacity,
                     rates: pc.rates,
+                    sustainable_total: pc.sustainable_total,
+                    max_commanded_total: pc.max_commanded_total,
                     emergency_threshold: pc.emergency_threshold,
                 },
             ),
             None => crate::power_plugin::PowerConfigResource::default(),
         };
+        entity_commands.insert(crate::power_plugin::ShipPowerSystem(
+            crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                &power_config.0,
+                &power_group_seed,
+            ),
+        ));
         entity_commands.insert(power_config);
         // Inline stateless Power allocation AI policy (issue #784) — from the
         // ship's `[power.ai_policy]` block. Since #885b stage 5d there is no

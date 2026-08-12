@@ -601,6 +601,8 @@ hull_max_hp = 5
 
 [power]
 capacity = 70
+sustainable_total = 6
+max_commanded_total = 8
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 20
 

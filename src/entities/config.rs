@@ -3585,6 +3585,10 @@ fn check_history_windows(
 pub struct PowerConfigSection {
     pub capacity: f32,
     pub rates: [f32; 6],
+    #[serde(default = "default_sustainable_power_total")]
+    pub sustainable_total: u8,
+    #[serde(default = "default_max_commanded_power_total")]
+    pub max_commanded_total: u8,
     pub emergency_threshold: f32,
     /// Inline stateless AI policy for the Power reactor fine system (issue
     /// #784), loaded from `[power.ai_policy]`. Replaces the retired stateful
@@ -3600,6 +3604,14 @@ pub struct PowerConfigSection {
     /// from the ship's `[power_groups.*]` keys (AC1 — no fixed catalogue).
     #[serde(default)]
     pub ai_policy: Option<FineSystemAiConfigToml>,
+}
+
+const fn default_sustainable_power_total() -> u8 {
+    6
+}
+
+const fn default_max_commanded_power_total() -> u8 {
+    8
 }
 
 /// AI tuning parameters for the shields focus controller.
@@ -4461,6 +4473,9 @@ impl EntityConfig {
         };
         let mut config: EntityConfig = value.try_into()?;
         config.shield_arcs = shield_arcs;
+        if let Some(power) = config.power.as_ref() {
+            validate_power_config(power).map_err(SerdeError::custom)?;
+        }
 
         // Parse the ship_config sub-block via the shared ShipConfig code path.
         // If the ship declares `[[shield_arc]]` blocks, they auto-generate
@@ -5091,6 +5106,35 @@ impl EntityConfig {
     }
 }
 
+fn validate_power_config(power: &PowerConfigSection) -> Result<(), String> {
+    let minimum = power
+        .max_commanded_total
+        .checked_sub(power.rates.len().saturating_sub(1) as u8)
+        .ok_or_else(|| "power.max_commanded_total is too small for its rates ladder".to_string())?;
+    if power.sustainable_total < minimum || power.sustainable_total > power.max_commanded_total {
+        return Err(format!(
+            "power.sustainable_total {} must fall within the rates ladder {}..={}",
+            power.sustainable_total, minimum, power.max_commanded_total
+        ));
+    }
+    for (offset, rate) in power.rates.iter().enumerate() {
+        let total = minimum + offset as u8;
+        if total <= power.sustainable_total && *rate < 0.0 {
+            return Err(format!(
+                "power rate at total {total} drains below sustainable_total {}",
+                power.sustainable_total
+            ));
+        }
+        if total > power.sustainable_total && *rate >= 0.0 {
+            return Err(format!(
+                "power rate at total {total} must drain above sustainable_total {}",
+                power.sustainable_total
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::field_reassign_with_default)]
@@ -5696,6 +5740,27 @@ emergency_threshold = 30.0
             config.power.is_none(),
             "power should be None when not specified"
         );
+    }
+
+    #[test]
+    fn alliance_hulls_author_the_six_plus_two_reactor_budget() {
+        for path in [
+            "assets/entities/alliance_courier.toml",
+            "assets/entities/alliance_destroyer.toml",
+            "assets/entities/alliance_cruiser.toml",
+            "assets/entities/alliance_battleship.toml",
+        ] {
+            let config = crate::entity_includes::load_entity_config(path)
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            let power = config.power.expect("Alliance hull authors [power]");
+            assert_eq!(power.sustainable_total, 6, "{path}");
+            assert_eq!(power.max_commanded_total, 8, "{path}");
+            let minimum = power.max_commanded_total - (power.rates.len() as u8 - 1);
+            for (offset, rate) in power.rates.into_iter().enumerate() {
+                let total = minimum + offset as u8;
+                assert_eq!(rate < 0.0, total > 6, "{path}: total {total}");
+            }
+        }
     }
 
     #[test]

@@ -20,7 +20,7 @@ After PR 6 of PRD #597 (2026-07-02), `ShipPowerSystem`, `PowerConfigResource`, `
 
 | System | Responsibility |
 |---|---|
-| `handle_power_messages` | Single applier for admitted `SetPowerGroupAllocation` payloads (from both the Power console holder and `ai_power_allocation`); forwards to `PowerSystem::increase` / `decrease`, which enforce the 6-base + 2-battery cap against the COMMANDED total |
+| `handle_power_messages` | Single applier for admitted `SetPowerGroupAllocation` payloads (from both the Power console holder and `ai_power_allocation`); forwards to `PowerSystem::increase` / `decrease`, which enforce the hull's authored `max_commanded_total` |
 | `tick_power_system` | Advances battery charge each frame from the total allocation, then handles the exhaustion lock — at a flat battery it forces every group to 1 and locks, unlocking once the charge recovers past `emergency_threshold` — and forwards the lock-changed edge into `PowerBrownoutState::locked_changed` |
 | `tick_power_brownout_advisory` | Sends `CoordinationPayload::PowerBrownout` to Helm / Tactical / Shields for any group above idle while the reserve is draining; debounced per group and re-armed by the lock-changed edge |
 
@@ -29,7 +29,7 @@ After PR 6 of PRD #597 (2026-07-02), `ShipPowerSystem`, `PowerConfigResource`, `
 | Resource | Purpose |
 |---|---|
 | `ShipPowerSystem` | Wraps the pure-Rust `PowerSystem` (helm / weapons / shields levels 1–4, battery charge, and the exhaustion-lock flag) |
-| `PowerConfigResource` | Config for battery drain/recharge rates; defaults from `PowerConfig::default()` |
+| `PowerConfigResource` | Config for battery drain/recharge rates plus sustainable and maximum commanded totals; defaults from `PowerConfig::default()` |
 | `PowerMultiplierResource` | Per-console `[f32; 4]` bonus arrays indexed by power level (1→index 0 … 4→index 3); defaults to `[-0.5, 0.0, 0.25, 0.5]` for Helm, Weapons, Shields |
 
 ## Registration
@@ -71,7 +71,7 @@ Tests live in `src/ship/power.rs` under `#[cfg(test)] mod tests`.
 | `power_system::tests::exhaustion_forces_groups_to_one_and_locks` | Nothing degrades until the battery hits zero, then every group is forced to 1 and the reactor locks in the same instant |
 | `power_system::tests::recovery_unlocks_at_the_emergency_threshold` | A locked reactor stays locked (controls frozen) until the charge climbs back to `emergency_threshold`, then unfreezes |
 | `power_system::tests::increase_when_locked_is_noop` / `decrease_when_locked_is_noop` | While locked, the allocation controls no-op — the operator cannot spend power the reserve cannot pay for |
-| `power_increase_respects_total_cap_of_eight` | Total allocation cap of 8 (6 base + 2 battery) is enforced |
+| `power_system::tests::alliance_reactor_has_six_free_pips_and_refuses_a_ninth` | Six pips recharge, seven/eight drain, and the authored eight-pip ceiling refuses a ninth |
 
 ## Sources
 

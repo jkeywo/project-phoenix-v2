@@ -545,7 +545,7 @@ pub(crate) fn ai_shield_focus(
 ///
 /// That is the fix for the silent cap-refusal loop. The applier's re-clamp to
 /// `[1, 4]` and to the ship-wide
-/// [`crate::modifiers::power_system::MAX_COMMANDED_TOTAL`] is still there as the
+/// reactor's authored `max_commanded_total` is still there as the
 /// backstop it always was, but it no longer has anything to catch: a plan that
 /// cannot be refused cannot be re-emitted for ever either.
 fn ai_power_allocation(
@@ -2706,6 +2706,8 @@ station = "sensors"
             crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
                 capacity: reactor.capacity,
                 rates: reactor.rates,
+                sustainable_total: reactor.sustainable_total,
+                max_commanded_total: reactor.max_commanded_total,
                 emergency_threshold: reactor.emergency_threshold,
             });
         let seed = crate::ship::power::authored_power_group_seed(&power_groups);
@@ -2746,7 +2748,7 @@ station = "sensors"
                 control_sources,
                 crate::ship::power::ShipPowerSystem(
                     crate::modifiers::power_system::PowerSystem::from_authored_groups(
-                        reactor.capacity,
+                        &power_config.0,
                         &seed,
                     ),
                 ),
@@ -2963,7 +2965,10 @@ station = "sensors"
                 crate::server_app::Ship,
                 control_sources,
                 crate::ship::power::ShipPowerSystem(
-                    crate::modifiers::power_system::PowerSystem::from_authored_groups(100.0, &seed),
+                    crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                        &crate::modifiers::power_system::PowerConfig::default(),
+                        &seed,
+                    ),
                 ),
                 crate::ship_state::ShipRedAlert(true),
                 crate::ship_plugin::LastHelmInput::default(),
@@ -3027,7 +3032,7 @@ station = "sensors"
     #[test]
     fn an_over_budget_power_policy_settles_in_one_arm_and_stops_re_emitting() {
         use crate::modifiers::power_system::{
-            HELM_POWER_GROUP, MAX_COMMANDED_TOTAL, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
         };
         let policy = power_policy(
             &[],
@@ -3055,10 +3060,7 @@ station = "sensors"
             .unwrap()
             .0
             .commanded_total();
-        assert_eq!(
-            total, MAX_COMMANDED_TOTAL,
-            "the budget is spent, and not overspent"
-        );
+        assert_eq!(total, 8, "the budget is spent, and not overspent");
 
         // The emitted ORDER is load-bearing, not incidental: the applier tests
         // the budget one command at a time, so weapons 2 → 4 is only affordable
@@ -3157,10 +3159,7 @@ station = "sensors"
             2,
             "reserved, not cut"
         );
-        assert_eq!(
-            commanded_total(&app, e),
-            crate::modifiers::power_system::MAX_COMMANDED_TOTAL
-        );
+        assert_eq!(commanded_total(&app, e), 8);
 
         let first_arm = emitted_allocations(&app, e);
         assert_eq!(
@@ -3233,7 +3232,7 @@ default_level = 2
     #[test]
     fn the_authored_group_max_level_caps_a_grant_and_the_rest_falls_through() {
         use crate::modifiers::power_system::{
-            HELM_POWER_GROUP, MAX_COMMANDED_TOTAL, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
         };
         let policy = power_policy(
             &[],
@@ -3264,7 +3263,7 @@ default_level = 2
         );
         assert_eq!(commanded(&app, e, SHIELDS_POWER_GROUP), 1);
         assert_eq!(commanded(&app, e, "ops"), 1);
-        assert_eq!(commanded_total(&app, e), MAX_COMMANDED_TOTAL);
+        assert_eq!(commanded_total(&app, e), 8);
     }
 
     #[test]
@@ -3507,7 +3506,8 @@ default_level = 2
                     cs,
                     crate::ship::power::ShipPowerSystem(
                         crate::modifiers::power_system::PowerSystem::from_authored_groups(
-                            100.0, &seed,
+                            &crate::modifiers::power_system::PowerConfig::default(),
+                            &seed,
                         ),
                     ),
                     crate::ship_state::ShipRedAlert::default(),

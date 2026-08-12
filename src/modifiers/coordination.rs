@@ -559,7 +559,14 @@ mod tests {
                  Alliance hulls, whose 8-point cap is what makes the red-alert \
                  allocation load-bearing"
             );
-            let mut power = PowerSystem::from_authored_groups(reactor.capacity, &seed);
+            let power_config = crate::modifiers::power_system::PowerConfig {
+                capacity: reactor.capacity,
+                rates: reactor.rates,
+                sustainable_total: reactor.sustainable_total,
+                max_commanded_total: reactor.max_commanded_total,
+                emergency_threshold: reactor.emergency_threshold,
+            };
+            let mut power = PowerSystem::from_authored_groups(&power_config, &seed);
 
             // (2) Combat stations: red alert, a full battery, under way.
             //
@@ -773,8 +780,18 @@ mod tests {
                     .map(|s| s.power_groups.clone())
                     .unwrap_or_default(),
             );
-            let capacity = config.power.as_ref().map(|p| p.capacity).unwrap_or(100.0);
-            let mut power = PowerSystem::from_authored_groups(capacity, &seed);
+            let power_config = config
+                .power
+                .as_ref()
+                .map(|p| crate::modifiers::power_system::PowerConfig {
+                    capacity: p.capacity,
+                    rates: p.rates,
+                    sustainable_total: p.sustainable_total,
+                    max_commanded_total: p.max_commanded_total,
+                    emergency_threshold: p.emergency_threshold,
+                })
+                .unwrap_or_default();
+            let mut power = PowerSystem::from_authored_groups(&power_config, &seed);
             if let Some(authored) = config.power.as_ref().and_then(|p| p.ai_policy.as_ref()) {
                 let policy = authored
                     .to_policy()

@@ -3250,7 +3250,7 @@ fn spawn_game_start_entities(
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .insert(crate::power_plugin::ShipPowerSystem(
                     crate::modifiers::power_system::PowerSystem::from_authored_groups(
-                        crate::modifiers::power_system::PowerConfig::default().capacity,
+                        &crate::modifiers::power_system::PowerConfig::default(),
                         &power_group_seed,
                     ),
                 ))
@@ -3821,11 +3821,21 @@ fn spawn_game_start_entities(
                 PowerConfigResource(crate::power_system::PowerConfig {
                     capacity: pc.capacity,
                     rates: pc.rates,
+                    sustainable_total: pc.sustainable_total,
+                    max_commanded_total: pc.max_commanded_total,
                     emergency_threshold: pc.emergency_threshold,
                 })
             } else {
                 PowerConfigResource::default()
             };
+            commands
+                .entity(spawned)
+                .insert(crate::power_plugin::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                        &power_config.0,
+                        &power_group_seed,
+                    ),
+                ));
             commands.entity(spawned).insert(power_config.clone());
             commands.insert_resource(power_config);
 

@@ -84,6 +84,8 @@ pub struct PowerSystem {
     /// back to [`PowerConfig::emergency_threshold`]. While locked, `increase`
     /// and `decrease` are no-ops.
     locked: bool,
+    /// The ship-wide allocation budget copied from its authored reactor config.
+    max_commanded_total: u8,
     pub battery_charge: f32,
 }
 
@@ -91,6 +93,10 @@ pub struct PowerSystem {
 pub struct PowerConfig {
     pub capacity: f32,
     pub rates: [f32; 6],
+    /// Highest allocation total that must leave the reserve non-draining.
+    pub sustainable_total: u8,
+    /// Ship-wide allocation ceiling enforced by human and AI commands.
+    pub max_commanded_total: u8,
     /// Emergency recovery threshold, in the same ABSOLUTE units as `capacity`.
     /// Once the reactor has locked out at a flat battery it stays locked until
     /// the charge climbs back to this level, at which point the allocation
@@ -130,45 +136,41 @@ pub const GROUP_LEVEL_MAX: u8 = crate::ship::config::default_max_power_level();
 /// across every caller of the allocation API rather than a tuning change.
 /// Authoring it is a separate piece of work; stating it once is the
 /// precondition for that work, not a substitute for it.
-pub const MAX_COMMANDED_TOTAL: u8 = 8;
-
-/// The lowest total [`PowerConfig::rates`] describes a rate for: the table's
-/// first entry is the battery rate at an EFFECTIVE total of `3` and its last is
-/// the rate at [`MAX_COMMANDED_TOTAL`], which is why every hull authors exactly
-/// six of them.
-///
-/// A DIFFERENT quantity from [`GROUP_LEVEL_MIN`], and not a budget of any kind:
-/// it is the authoring shape of the `rates` table, the number the index is
-/// offset by. It happens to equal the smallest total a three-group hull can
-/// reach, which is where it came from; a four-group hull cannot go under 4 at
-/// all. The clamp against it exists so a hull with fewer groups still indexes
-/// the table rather than underflowing it.
-pub const MIN_RATED_TOTAL: u8 = 3;
-
 impl Default for PowerConfig {
     fn default() -> Self {
         Self {
             capacity: 100.0,
             rates: [6.0, 5.0, 4.0, 2.0, -2.0, -6.0],
+            sustainable_total: 6,
+            max_commanded_total: 8,
             emergency_threshold: 25.0,
         }
     }
 }
 
+impl PowerConfig {
+    /// The lowest allocation represented by the rate ladder. Its final rung is
+    /// always the authored command ceiling.
+    pub fn minimum_rated_total(&self) -> u8 {
+        self.max_commanded_total
+            .saturating_sub(self.rates.len().saturating_sub(1) as u8)
+    }
+}
+
 impl Default for PowerSystem {
     fn default() -> Self {
-        Self::seeded_with_defaults(100.0)
+        Self::new(&PowerConfig::default())
     }
 }
 
 impl PowerSystem {
     pub fn new(config: &PowerConfig) -> Self {
-        Self::seeded_with_defaults(config.capacity)
+        Self::seeded_with_defaults(config)
     }
 
     /// Internal helper: construct a PowerSystem with the three canonical
     /// groups pre-seeded at level 2 and the requested battery charge.
-    fn seeded_with_defaults(battery_charge: f32) -> Self {
+    fn seeded_with_defaults(config: &PowerConfig) -> Self {
         let mut groups = HashMap::with_capacity(3);
         let mut order = Vec::with_capacity(3);
         for &name in POWER_GROUP_ORDER {
@@ -180,7 +182,8 @@ impl PowerSystem {
             groups,
             order,
             locked: false,
-            battery_charge,
+            max_commanded_total: config.max_commanded_total,
+            battery_charge: config.capacity,
         }
     }
 
@@ -194,9 +197,9 @@ impl PowerSystem {
     /// Falls back to [`Self::seeded_with_defaults`] (the canonical `helm` /
     /// `weapons` / `shields` at level 2) when `groups` is empty, so ships and
     /// fixtures without a `[power_groups.*]` block are unchanged.
-    pub fn from_authored_groups(battery_charge: f32, groups: &[(PowerGroupId, u8)]) -> Self {
+    pub fn from_authored_groups(config: &PowerConfig, groups: &[(PowerGroupId, u8)]) -> Self {
         if groups.is_empty() {
-            return Self::seeded_with_defaults(battery_charge);
+            return Self::seeded_with_defaults(config);
         }
         let mut map = HashMap::with_capacity(groups.len());
         let mut order = Vec::with_capacity(groups.len());
@@ -211,7 +214,8 @@ impl PowerSystem {
             groups: map,
             order,
             locked: false,
-            battery_charge,
+            max_commanded_total: config.max_commanded_total,
+            battery_charge: config.capacity,
         }
     }
 
@@ -244,6 +248,11 @@ impl PowerSystem {
     /// True while the reactor is locked out after exhausting its battery.
     pub fn locked(&self) -> bool {
         self.locked
+    }
+
+    /// The allocation ceiling copied from the ship's authored reactor config.
+    pub fn max_commanded_total(&self) -> u8 {
+        self.max_commanded_total
     }
 
     /// True if the system tracks the given power group.
@@ -335,7 +344,7 @@ impl PowerSystem {
     /// Increase the allocation for `group` by 1. Clamped to `4` per group and
     /// to `8` for the total. No-op when the reactor is locked.
     pub fn increase(&mut self, group: &PowerGroupId) {
-        if self.locked || self.total() >= MAX_COMMANDED_TOTAL {
+        if self.locked || self.total() >= self.max_commanded_total {
             return;
         }
         if let Some(v) = self.groups.get_mut(group) {
@@ -362,8 +371,9 @@ impl PowerSystem {
     /// the total allocation. Negative means the ship is spending its reserve
     /// faster than the reactor makes it.
     pub fn battery_rate(&self, config: &PowerConfig) -> f32 {
-        let total = self.total().clamp(MIN_RATED_TOTAL, MAX_COMMANDED_TOTAL) as usize;
-        config.rates[total - MIN_RATED_TOTAL as usize]
+        let minimum = config.minimum_rated_total();
+        let total = self.total().clamp(minimum, self.max_commanded_total) as usize;
+        config.rates[total - minimum as usize]
     }
 
     /// True when the battery is falling at the current draw. Published so the
@@ -458,7 +468,7 @@ pub struct AllocationBid {
 ///
 /// The AI decider used to resolve each group's channel in isolation and emit
 /// that group's absolute target with no idea what the others had asked for.
-/// [`PowerSystem::increase`] refuses past [`MAX_COMMANDED_TOTAL`] SILENTLY and
+/// [`PowerSystem::increase`] refuses past its authored ceiling SILENTLY and
 /// drops the surplus with no error, so a policy whose targets summed past the
 /// budget got some groups served, the rest left where they were — and, because
 /// the decider only skips an emit when the commanded level already MATCHES its
@@ -474,7 +484,7 @@ pub struct AllocationBid {
 ///   bid for.
 /// * Every bidding group is guaranteed [`GROUP_LEVEL_MIN`], because that is the
 ///   floor the setter API clamps to and no distribution can go under it.
-/// * What is left over — `MAX_COMMANDED_TOTAL - reserved - one per bidder` — is
+/// * What is left over — `max_commanded_total - reserved - one per bidder` — is
 ///   the DISCRETIONARY budget, handed out in authored-priority order until it
 ///   runs out. A group that cannot be paid in full lands as high as the budget
 ///   reaches, never at a level the applier would refuse.
@@ -538,7 +548,7 @@ pub fn plan_allocation(power: &PowerSystem, bids: &[AllocationBid]) -> Vec<(Powe
     ranked.sort_by_key(|b| std::cmp::Reverse(b.rule_priority));
 
     let mins = ranked.len() as u16 * GROUP_LEVEL_MIN as u16;
-    let mut spare = (MAX_COMMANDED_TOTAL as u16).saturating_sub(reserved + mins);
+    let mut spare = (power.max_commanded_total as u16).saturating_sub(reserved + mins);
 
     let mut planned: Vec<(PowerGroupId, u8)> = Vec::with_capacity(ranked.len());
     for bid in ranked {
@@ -716,6 +726,29 @@ mod tests {
     }
 
     #[test]
+    fn alliance_reactor_has_six_free_pips_and_refuses_a_ninth() {
+        let config = PowerConfig {
+            capacity: 70.0,
+            rates: [5.0, 4.0, 3.0, 2.0, -2.0, -5.0],
+            sustainable_total: 6,
+            max_commanded_total: 8,
+            emergency_threshold: 20.0,
+        };
+        let mut power = PowerSystem::new(&config);
+        assert_eq!(power.total(), 6);
+        assert!(power.is_charging(&config));
+
+        power.increase(&helm());
+        assert_eq!(power.total(), 7);
+        assert!(power.is_draining(&config));
+        power.increase(&weapons());
+        assert_eq!(power.total(), 8);
+        assert!(power.is_draining(&config));
+        power.increase(&shields());
+        assert_eq!(power.total(), 8, "a ninth pip is refused");
+    }
+
+    #[test]
     fn tick_recharges_below_base() {
         let config = PowerConfig::default();
         let mut ps = PowerSystem::default();
@@ -855,6 +888,8 @@ mod tests {
         let config = PowerConfig {
             capacity: 50.0,
             rates: [1.0, 1.0, 1.0, -1.0, -2.0, -3.0],
+            sustainable_total: 5,
+            max_commanded_total: 8,
             emergency_threshold: 10.0,
         };
         let ps = PowerSystem::new(&config);
@@ -943,7 +978,7 @@ mod tests {
     /// at 1, with nothing in the policy bidding for it.
     fn reactor_with_auxiliary_group() -> PowerSystem {
         PowerSystem::from_authored_groups(
-            90.0,
+            &PowerConfig::default(),
             &[
                 (helm(), 2),
                 (weapons(), 2),
@@ -967,7 +1002,7 @@ mod tests {
         }
         assert_eq!(after.commanded_level_for(&helm()), 3);
         assert_eq!(after.commanded_level_for(&weapons()), 3);
-        assert_eq!(after.commanded_total(), MAX_COMMANDED_TOTAL);
+        assert_eq!(after.commanded_total(), ps.max_commanded_total());
         assert!(
             plan.iter().all(|(_, l)| *l <= GROUP_LEVEL_MAX),
             "no planned level may exceed the per-group ceiling"
@@ -1029,7 +1064,7 @@ mod tests {
             1,
             "un-bid groups are reserved"
         );
-        assert_eq!(after.commanded_total(), MAX_COMMANDED_TOTAL);
+        assert_eq!(after.commanded_total(), ps.max_commanded_total());
         // And every level the plan asked for is the level the reactor actually
         // holds — the whole point: no silent refusal anywhere in the plan.
         for (group, level) in &plan {
@@ -1082,7 +1117,7 @@ mod tests {
         for (group, level) in &first {
             ps.set_group_allocation(group, *level).unwrap();
         }
-        assert!(ps.commanded_total() <= MAX_COMMANDED_TOTAL);
+        assert!(ps.commanded_total() <= ps.max_commanded_total());
 
         for arm in 0..5 {
             let again = plan_allocation(&ps, &bids);
@@ -1102,7 +1137,7 @@ mod tests {
         // Commanded at the cap already: helm 4 / weapons 2 / shields 1 / ops 1.
         let mut ps = reactor_with_auxiliary_group();
         ps.set_group_allocation(&helm(), 4).unwrap();
-        assert_eq!(ps.commanded_total(), MAX_COMMANDED_TOTAL);
+        assert_eq!(ps.commanded_total(), ps.max_commanded_total());
 
         // The policy now wants the two swapped over.
         let plan = plan_allocation(&ps, &[bid(helm(), 2, 10), bid(weapons(), 4, 20)]);
@@ -1142,7 +1177,7 @@ mod tests {
 
     /// **The qualifier on "the returned total fits."** A hull whose
     /// `[power_groups.*] default_level` values already sum past
-    /// [`MAX_COMMANDED_TOTAL`] is not something this function can undo, and
+    /// the authored `max_commanded_total` is not something this function can undo, and
     /// nothing rejects that authoring at load — so the doc claim is "never
     /// rises above the budget", not "always fits", and this is the case that
     /// makes the difference.
@@ -1157,7 +1192,7 @@ mod tests {
         // Five groups seeded at 2: an authoring nothing rejects, and a commanded
         // total of 10 against a budget of 8.
         let over = PowerSystem::from_authored_groups(
-            90.0,
+            &PowerConfig::default(),
             &[
                 (helm(), 2),
                 (weapons(), 2),
@@ -1166,7 +1201,7 @@ mod tests {
                 (life_support.clone(), 2),
             ],
         );
-        assert!(over.commanded_total() > MAX_COMMANDED_TOTAL);
+        assert!(over.commanded_total() > over.max_commanded_total());
 
         // Only helm bids. The other four hold 8 between them, so there is no
         // discretionary budget at all and nothing licenses cutting them.
@@ -1197,6 +1232,6 @@ mod tests {
         for (group, level) in plan_allocation(&over, &all_bid) {
             after_all.set_group_allocation(&group, level).unwrap();
         }
-        assert_eq!(after_all.commanded_total(), MAX_COMMANDED_TOTAL);
+        assert_eq!(after_all.commanded_total(), after_all.max_commanded_total());
     }
 }

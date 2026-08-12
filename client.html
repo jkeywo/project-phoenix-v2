@@ -381,29 +381,6 @@
     #lobby-mods .mods-active-version { color: #8a98c4; margin-left: 6px; }
 
 
-    /* Console title label — fixed strip at the top center of the game
-       shell (issue #827: the tab bar that used to host it is gone). */
-    #phase-title {
-      position: fixed;
-      top: 0.4rem;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 20;
-      font-family: 'Chakra Petch', monospace;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: var(--signal-cyan);
-      text-transform: uppercase;
-      white-space: nowrap;
-      pointer-events: none;
-      line-height: 1;
-    }
-    #phase-title[aria-hidden="true"] { display: none; }
-    @media (orientation: landscape) {
-      #phase-title { font-size: 1rem; }
-    }
-
     /* -- Lobby section: full-viewport when active ------------------------ */
     #lobby-ui.active {
       display: flex !important;
@@ -830,10 +807,6 @@
 
   <div id="status" data-i18n="client.connecting">Connecting…</div>
 
-  <!-- Console title strip: fixed at top center in-game; hidden in the lobby
-       (render() toggles aria-hidden). -->
-  <span id="phase-title" aria-hidden="true"></span>
-
   <div id="top-bar">
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
@@ -1149,9 +1122,6 @@
       return name;
     }
 
-    // Persistent reference to the fixed console title strip.
-    const _consoleTitleEl = document.getElementById('phase-title');
-
     // Defer re-render so rapid server messages don't steal pointer events.
     let _renderFrame = null;
     function scheduleRender() {
@@ -1334,16 +1304,6 @@
         : (window.innerWidth >= window.innerHeight ? 'landscape' : 'portrait');
       const container = $('console-container');
       if (container) container.dataset.orientation = orientation;
-
-      // Console title strip: fixed at top center in-game (issue #827 — the
-      // tab bar that used to host it is gone).
-      if (_consoleTitleEl) {
-        _consoleTitleEl.setAttribute('aria-hidden', inGame ? 'false' : 'true');
-        if (inGame) {
-          _consoleTitleEl.textContent = activeConsole
-            ? consoleLabel(activeConsole) : t('client.bridge_title');
-        }
-      }
 
       // Game-over overlay: covers the game shell when phase is GameOver.
       const gameOverEl = document.getElementById('game-over-overlay');

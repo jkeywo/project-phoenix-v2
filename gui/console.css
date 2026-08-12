@@ -65,10 +65,10 @@ html, body {
 .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
 
 @media (orientation: portrait) {
-  :root { font-size: clamp(10px, 2.5vw, 14px); }
+  :root { font-size: clamp(11px, 3vw, 15px); }
 }
 @media (orientation: landscape) {
-  :root { font-size: clamp(12px, 1.5vw, 16px); }
+  :root { font-size: clamp(13px, 1.65vw, 16px); }
 }
 
 /* ── Frame ──────────────────────────────────────────────────── */
@@ -82,11 +82,16 @@ html, body {
   overflow: hidden;
 }
 
+/* Pin every iframe shell to its viewport. Several console pages set
+   `.frame { height: 100% }`, which otherwise lets a tall flex/grid child grow
+   the document instead of scrolling within its designated content region. */
+body .frame { height: 100dvh; }
+
 /* ── Chamfered panel — outer thin light stroke + inner dark fill ── */
 .panel {
   position: absolute;
   inset: 0;
-  --cham: 1.75rem;
+  --cham: 0.875rem;
   background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
   clip-path: polygon(
     var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
@@ -96,8 +101,8 @@ html, body {
 }
 .panel-inner {
   position: absolute;
-  inset: 1.5px;
-  --cham: 1.6875rem;
+  inset: 1px;
+  --cham: 0.8125rem;
   background:
     radial-gradient(ellipse at 50% 0%, rgba(80,110,170,0.18) 0%, transparent 55%),
     linear-gradient(180deg, #131a3a 0%, #0a0f28 45%, #050918 100%);
@@ -114,7 +119,7 @@ html, body {
    2rem square at a 0.5rem inset, so it reaches 40px in from the top and 40px
    in from the left of whatever console is showing. A console must therefore
    start its content past that, or the gear sits on the first glyphs of the
-   station title.
+   console's own title.
 
    Reserved here once rather than in 22 per-console <style> blocks, and on the
    LEFT rather than the top because vertical space is the scarce axis on a
@@ -130,54 +135,10 @@ html, body {
    8px short of clearing. tests/client/settings-panel.test.js recomputes the
    cog's reach from client.html and fails if either value stops clearing it. */
 @media (orientation: portrait) {
-  body .panel-inner { padding-left: 44px; }
+  body .panel-inner { padding: 14px 16px 12px 44px; gap: 10px; }
 }
 @media (orientation: landscape) {
-  body .panel-inner { padding-left: 52px; }
-}
-
-/* tactical tick marks down the side edges (echoes captain_console) */
-.panel-inner::before,
-.panel-inner::after {
-  content: "";
-  position: absolute;
-  top: 80px;
-  bottom: 80px;
-  width: 1px;
-  background: repeating-linear-gradient(
-    180deg,
-    var(--line-soft) 0px,
-    var(--line-soft) 1px,
-    transparent 1px,
-    transparent 24px
-  );
-  background-size: 1px 24px;
-}
-.panel-inner::before { left: 10px;
-  background:
-    linear-gradient(90deg, var(--line-soft) 0, var(--line-soft) 6px, transparent 6px) 0 0 / 100% 24px repeat-y;
-}
-.panel-inner::after { right: 10px;
-  background:
-    linear-gradient(90deg, transparent calc(100% - 6px), var(--line-soft) calc(100% - 6px)) 0 0 / 100% 24px repeat-y;
-}
-
-/* the title arrow indent that captain panel has */
-.panel-arrow {
-  position: absolute;
-  top: 1.5rem; left: 50%;
-  width: 1.75rem; height: 0.875rem;
-  transform: translateX(-50%);
-  border-left: 1.5px solid var(--line);
-  border-bottom: 1.5px solid var(--line);
-  transform-origin: center;
-  transform: translateX(-50%) rotate(-45deg) skew(0);
-}
-.panel-arrow-line {
-  position: absolute;
-  top: 2.375rem; left: 2rem; right: 2rem;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--line) 12%, var(--line) 88%, transparent);
+  body .panel-inner { padding: 16px 20px 14px 44px; gap: 12px; }
 }
 
 /* ── Header / footer strips ─────────────────────────────────── */

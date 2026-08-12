@@ -453,6 +453,11 @@ describe('the demo build gate', () => {
 // ── The page the cog lives on ────────────────────────────────────────────────
 
 describe('client.html', () => {
+  it('does not add a duplicate fixed station title above the active console', () => {
+    expect(CLIENT_HTML).not.toMatch(/id="phase-title"/);
+    expect(CLIENT_HTML).not.toMatch(/_consoleTitleEl/);
+  });
+
   it('uses fullscreen and exit glyphs rather than a help glyph', () => {
     expect(CLIENT_HTML).toMatch(/id="fullscreen-btn"[^>]*>⛶<\/button>/);
     expect(CLIENT_HTML).toMatch(/document\.fullscreenElement \? '✕' : '⛶'/);
@@ -557,12 +562,12 @@ describe('client.html', () => {
       const m = CONSOLE_CSS.match(
         new RegExp(
           `@media\\s*\\(orientation:\\s*${orientation}\\)\\s*\\{\\s*` +
-            `body\\s+\\.panel-inner\\s*\\{[^}]*padding-left:\\s*(\\d+)px`,
+            `body\\s+\\.panel-inner\\s*\\{[^}]*padding:\\s*\\d+px\\s+\\d+px\\s+\\d+px\\s+(\\d+)px`,
         ),
       );
       expect(
         m,
-        `console.css reserves no ${orientation} gutter for the cog ` +
+        `console.css reserves no ${orientation} compact gutter for the cog ` +
           '(or reserves it with a selector a console can outrank)',
       ).not.toBeNull();
       expect(

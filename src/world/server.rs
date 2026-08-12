@@ -1404,9 +1404,13 @@ pub(crate) fn collect_world_events(
             }
         }
     }
-    runtime
-        .observed_hull_fractions
-        .retain(|uuid, _| live_hulls.contains(uuid));
+    // Avoid a no-op mutable dereference on an empty cache: in a minimal app
+    // with no hulls, this keeps an otherwise event-free tick unchanged.
+    if !live_hulls.is_empty() || !runtime.observed_hull_fractions.is_empty() {
+        runtime
+            .observed_hull_fractions
+            .retain(|uuid, _| live_hulls.contains(uuid));
+    }
     // Drain any externally-queued world events (e.g. WorldLoaded pushed by
     // init_world_runtime or apply_world_layer_changes). The emptiness check
     // is a read: it keeps event-free ticks from marking WorldContentRuntime

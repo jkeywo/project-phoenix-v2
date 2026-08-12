@@ -9901,6 +9901,13 @@ count = 10
                     continue;
                 }
 
+                // Static faction-owned entities (such as Station Axiom) share
+                // the faction palette but are not mobile hulls and therefore
+                // have no Helm trail to compare.
+                if cfg.helm_console.is_none() {
+                    continue;
+                }
+
                 let trail_colour = cfg
                     .helm_console
                     .as_ref()

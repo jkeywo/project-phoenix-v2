@@ -120,6 +120,8 @@ entities:
       confidence: confirmed
       title: On-Site Repair Priority
       summary: Engineering decides the order of subsystem repairs once the assigned team is on site.
+      rationale:
+        - "[ai] Issue #1013 gave this decision something to decide, and it stays inside must_not_be fully-automated. Before it, a team repaired the one system it was dispatched to and walked home, so SetRepairPriority was stored on the team slot and read by nothing — the decision existed on the console and nowhere in the simulation. An on-site team now sweeps every non-Operational system at its station, and the priority is the ORDINAL PICK over that remaining work ranked worst-first (1 = the worst job, 2 = the second worst, clamped to what is left). The host picks a DEFAULT ORDER, not the order: absent a tap the sweep takes the worst job, and Engineering's tap overrides it at any point mid-sweep, re-ordering whatever the team has yet to do. That is the same shape as repair-team-dispatch — the host never originates the decision, it only continues working when nobody has said otherwise, which is a default rather than automation. It is also still committed-after-arrival: set_priority only reaches a Repairing slot, so a tap before the team is on site does nothing, exactly as committed-before-team-arrival requires."
     game_design:
       enforcement_links:
         - host-repair-router

@@ -6934,6 +6934,49 @@ station = "pilot"
         matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Idle)
     }
 
+    /// Damage the named systems on the LocalShip's hull, adding a row for any
+    /// this fixture's coarse hull does not already carry.
+    ///
+    /// The ids are systems the shipped battleship config OWNS from the station
+    /// each dispatch test addresses, so `resolve_repair_target` resolves through
+    /// `systems_for_station`. Since the issue #1013 review it will NOT fall back
+    /// to `SystemId(station_id)` when that name is also a hull row — this
+    /// fixture's `helm`/`tactical`/`power`/`shields` rows are exactly that
+    /// shape, and such a row is ownerless (bucketed under `core`), so sweeping
+    /// from it would walk the team out of the station it was sent to.
+    ///
+    /// HP lands at 80% of max: below max, so it is a resolvable repair target,
+    /// but still `Operational`, so no tier crossing fires.
+    fn damage_owned_fine_systems(app: &mut App, systems: &[&str]) {
+        let ship = {
+            let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
+            q.single(app.world()).expect("one LocalShip")
+        };
+        let mut rows: Vec<(SystemId, f32)> = app
+            .world()
+            .get::<crate::entity_spawner::EntitySystemHull>(ship)
+            .expect("LocalShip must carry EntitySystemHull")
+            .0
+            .iter()
+            .map(|(sid, entry)| (sid.clone(), entry.max))
+            .collect();
+        for id in systems {
+            let sid = SystemId((*id).into());
+            if !rows.iter().any(|(existing, _)| *existing == sid) {
+                rows.push((sid, 25.0));
+            }
+        }
+        let mut hull = crate::damage::SystemHull::from_config(&rows);
+        for id in systems {
+            let sid = SystemId((*id).into());
+            let max = hull.get(&sid).expect("just built this row").max;
+            hull.set_hp(&sid, max * 0.8);
+        }
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entity_spawner::EntitySystemHull(hull));
+    }
+
     // -- Repair dispatch tests --------------------------------------
 
     #[test]
@@ -6963,6 +7006,7 @@ station = "pilot"
     fn repair_holder_can_dispatch_team() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
+        damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
         push(
             &mut app,
             "eng",
@@ -6986,6 +7030,11 @@ station = "pilot"
     fn all_busy_teams_ignore_further_dispatches() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
+        // One owned fine system per station this test addresses.
+        damage_owned_fine_systems(
+            &mut app,
+            &["helm-engine-port", "tactical-radar", "power-reactor"],
+        );
         push(
             &mut app,
             "eng",
@@ -7035,6 +7084,7 @@ station = "pilot"
     fn repair_state_broadcast_after_dispatch() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
+        damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
         push(
             &mut app,
             "eng",

@@ -3735,6 +3735,11 @@ fn repair_deficit_ladder_discriminates_within_a_tier() {
 /// false is dead code, and a clause on a misspelled fact silently stops the
 /// system repairing anything at all. Each case below removes exactly one
 /// qualification from an otherwise-perfect candidate.
+///
+/// The `tier_ordinal == 3` row is the deliberate exception: it is a POSITIVE
+/// case since issue #1013, pinning that the worst candidate possible is
+/// eligible rather than refused. The tier clause is still proved gating by the
+/// Operational (`tier_ordinal == 0`) row above it.
 #[test]
 fn repair_eligibility_clauses_each_gate_independently() {
     let sel = fleet_selector("repair");
@@ -3816,12 +3821,16 @@ fn repair_eligibility_clauses_each_gate_independently() {
                 ("damage_fraction", 1.0),
             ]),
             None
-        ),
-        None,
-        "a DESTROYED station (tier 3) is excluded — a repair team alone cannot lift \
-         the latch, so dispatching one would waste the team indefinitely. Note the \
-         asymmetry: this is the worst-damaged candidate possible and it is the one the \
-         guard refuses."
+        )
+        .as_deref(),
+        Some("station"),
+        "a DESTROYED station (tier 3) IS selected since issue #1013. The old guard \
+         `tier_ordinal < 3` refused exactly the worst-damaged candidate possible, \
+         because a repair team could not then lift the latch; the on-site sweep \
+         repairs destroyed systems now, so refusing them would strand a station \
+         nothing else in the game can clear. The `tier_ordinal > 0` clause still \
+         gates the tier reading independently — the Operational row above is the \
+         case that reads it false."
     );
     assert_eq!(
         pick(&sel, &ctx, &station(&[]), None),

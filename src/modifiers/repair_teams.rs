@@ -1,5 +1,6 @@
-use crate::damage::SystemHull;
-use crate::messages::{SystemId, TeamSlot};
+use crate::damage::{DamageTier, SystemHull};
+use crate::messages::{StationId, SystemId, TeamSlot};
+use crate::ship::config::ShipConfig;
 
 /// Tunable timings for the repair-team state machine.
 ///
@@ -201,6 +202,24 @@ impl RepairTeams {
     /// team is in `Repairing` state. Returns `true` if the priority was set,
     /// `false` if the team is not in `Repairing` state (or the index is out of
     /// range).
+    ///
+    /// # What the priority DOES (issue #1013)
+    ///
+    /// Before #1013 this value was written and never read — a repair team fixed
+    /// the one system it was sent to and went home, so there was no second
+    /// choice for a priority to steer. Now that an on-site team SWEEPS every
+    /// non-Operational system at its station (see [`Self::tick`]), the priority
+    /// is the sweep's order selector and [`next_sweep_target`] consumes it:
+    /// the remaining work is ranked worst-first and `Some(n)` picks the `n`th
+    /// entry of that ranking, 1-based and clamped to the list; `None` (and
+    /// `Some(0)`) pick the first. Changing it mid-sweep therefore re-orders the
+    /// work the team has left, which is the lever the repair console's priority
+    /// taps pull.
+    ///
+    /// It is deliberately NOT a score added to the ranking: an ordinal pick
+    /// over a ranking the host already computes stays a pure function of
+    /// observable damage, and a console showing the same ranked list can label
+    /// its taps 1..n with no second copy of the comparator.
     pub fn set_priority(&mut self, team_idx: usize, priority: u8) -> bool {
         let Some(slot) = self.slots.get_mut(team_idx) else {
             return false;
@@ -217,16 +236,60 @@ impl RepairTeams {
     /// Advance all active timers by `dt` seconds.
     ///
     /// - `Travelling` advances its `elapsed` toward `travel_duration`, then
-    ///   transitions to `Repairing`. If the target system is already at full
-    ///   HP on arrival, the team skips straight to `Returning`.
+    ///   transitions to `Repairing`. If the target system is already at full HP
+    ///   on arrival, the team sweeps (below) for other work at the same station
+    ///   and only goes `Returning` when there is none.
     /// - `Repairing` calls `hull.restore(&sid, dt * repair_rate_hp_per_sec)`
-    ///   each tick. Once the system is at full HP, the team transitions to
-    ///   `Returning`.
+    ///   each tick. Once the system is at full HP the team SWEEPS: it stays
+    ///   `Repairing` and moves to the next system its station still needs
+    ///   fixing, and only transitions to `Returning` when the station is clean.
     /// - `Returning` decrements `remaining` toward 0. On completion:
     ///   - If `queued_system_id = Some(sid)`: auto-dispatch to
     ///     `Travelling { system_id: sid, elapsed: 0 }`.
     ///   - Otherwise: → `Idle`.
-    pub fn tick(&mut self, dt: f32, hull: &mut SystemHull) {
+    ///
+    /// # The sweep (issue #1013)
+    ///
+    /// A team that has walked to a station is AT that station: making it hike
+    /// home after one system and be re-dispatched to its neighbour was a state
+    /// machine artefact, not a rule anybody wanted. So the "system is at max HP"
+    /// edge no longer ends the visit — it hands off to [`next_sweep_target`],
+    /// which picks the next non-Operational system in the same station group and
+    /// writes it into the SAME `Repairing` slot in place. No new `TeamSlot`
+    /// variant is involved, so the wire shape, the `on_site_systems` gate
+    /// (issue #737 — a sweeping team's on-site detail simply follows it from
+    /// system to system) and the client's slot rendering all carry over
+    /// untouched.
+    ///
+    /// The team's `priority` survives the in-place hand-off rather than being
+    /// reset, because it is a standing instruction about the station ("work the
+    /// second-worst thing"), not a fact about one system. [`Self::set_priority`]
+    /// documents what it selects.
+    ///
+    /// `config` supplies the ONLY thing this module cannot derive from a hull:
+    /// which systems share a station. Mirrors
+    /// [`crate::modifiers::power_system::PowerSystem::tick`]'s `&PowerConfig`
+    /// parameter — a pure tick reading pure authored config. `None` means the
+    /// caller has no ship config to offer (bare fixtures, and any ship spawned
+    /// without a `ShipConfigComponent`); with no station membership there is no
+    /// group to sweep, so the team reverts to the pre-#1013 behaviour of fixing
+    /// its one system and going home. Repairing a Destroyed system does NOT
+    /// depend on `config` — that happens either way.
+    ///
+    /// The other route back to that pre-#1013 bounce is an arrival that is not a
+    /// hull row at all — see [`sweep_from`], the entry point both arms below call
+    /// rather than [`next_sweep_target`] directly.
+    ///
+    /// # Destroyed systems are repairable by the sweep
+    ///
+    /// The two guards that bounced a team off a `Destroyed` system are gone.
+    /// `SystemHull::restore` has never had a tier gate, and `tier_for` checks
+    /// `current == 0.0` FIRST, so the first fraction of an HP restored lifts the
+    /// latch on its own — a Destroyed system is `Disabled` again the instant the
+    /// team touches it. The old rule ("a repair team alone cannot lift the
+    /// latch") left destroyed systems permanently stuck with nothing else in the
+    /// game able to clear them.
+    pub fn tick(&mut self, dt: f32, hull: &mut SystemHull, config: Option<&ShipConfig>) {
         let travel_duration = self.timings.travel_duration;
         let repair_rate = self.timings.repair_rate_hp_per_sec;
         for slot in self.slots.iter_mut() {
@@ -249,9 +312,6 @@ impl RepairTeams {
                             };
                             continue;
                         };
-                        let is_full = hull.is_at_max(&sid);
-                        let is_destroyed =
-                            hull.tier_for(&sid) == crate::damage::DamageTier::Destroyed;
                         // Carry the display name forward from the current
                         // `Travelling` slot so the human-readable label the
                         // caller supplied at dispatch time survives the
@@ -260,27 +320,47 @@ impl RepairTeams {
                         // had a label (e.g. legacy on-wire messages without
                         // the new field).
                         let label = display_name.clone().or_else(|| Some(sid.0.clone()));
-                        if is_full || is_destroyed {
-                            *slot = TeamSlot::Returning {
-                                remaining: 0.0,
-                                system_id: Some(sid),
-                                display_name: label,
-                                queued_system_id: None,
-                                queued_display_name: None,
-                            };
-                        } else {
+                        if !hull.is_at_max(&sid) {
+                            // Includes a Destroyed target since #1013: the
+                            // arrival bounce off `tier == Destroyed` is gone.
                             *slot = TeamSlot::Repairing {
                                 system_id: Some(sid),
                                 display_name: label,
                                 priority: None,
                             };
+                            continue;
+                        }
+                        // Arrived to find the target already whole — someone
+                        // else fixed it, or the dispatch resolved to a healthy
+                        // fallback. Sweep the station before walking home; the
+                        // team is standing right there. An arriving team has no
+                        // priority yet (`set_priority` only reaches a
+                        // `Repairing` slot), so this takes the top-ranked
+                        // candidate.
+                        match sweep_from(&sid, None, hull, config) {
+                            Some((next_sid, next_label)) => {
+                                *slot = TeamSlot::Repairing {
+                                    system_id: Some(next_sid),
+                                    display_name: Some(next_label),
+                                    priority: None,
+                                };
+                            }
+                            None => {
+                                *slot = TeamSlot::Returning {
+                                    remaining: 0.0,
+                                    system_id: Some(sid),
+                                    display_name: label,
+                                    queued_system_id: None,
+                                    queued_display_name: None,
+                                };
+                            }
                         }
                     }
                 }
                 TeamSlot::Repairing {
                     system_id,
                     display_name,
-                    priority: _,
+                    priority,
                 } => {
                     let Some(sid) = system_id.clone() else {
                         *slot = TeamSlot::Returning {
@@ -296,28 +376,36 @@ impl RepairTeams {
                     // through the Returning transition for the same reason
                     // as the Travelling arm above.
                     let carried_label = display_name.clone().or_else(|| Some(sid.0.clone()));
-                    // Do not repair a Destroyed system — the latch is
-                    // unrepairable by a repair team alone.
-                    if hull.tier_for(&sid) == crate::damage::DamageTier::Destroyed {
-                        *slot = TeamSlot::Returning {
-                            remaining: travel_duration,
-                            system_id: Some(sid),
-                            display_name: carried_label,
-                            queued_system_id: None,
-                            queued_display_name: None,
-                        };
+                    // The standing "which of the remaining jobs" instruction,
+                    // carried across the sweep hand-off below (issue #1013).
+                    let carried_priority = *priority;
+                    let hp_to_restore = dt * repair_rate;
+                    // No tier gate: a Destroyed system is repaired like any
+                    // other, and the first restored HP un-latches it because
+                    // `tier_for` tests `current == 0.0` before anything else.
+                    hull.restore(&sid, hp_to_restore);
+                    if !hull.is_at_max(&sid) {
                         continue;
                     }
-                    let hp_to_restore = dt * repair_rate;
-                    hull.restore(&sid, hp_to_restore);
-                    if hull.is_at_max(&sid) {
-                        *slot = TeamSlot::Returning {
-                            remaining: travel_duration,
-                            system_id: Some(sid),
-                            display_name: carried_label,
-                            queued_system_id: None,
-                            queued_display_name: None,
-                        };
+                    // This system is whole. Sweep to the next thing the station
+                    // needs, in place, without walking home first.
+                    match sweep_from(&sid, carried_priority, hull, config) {
+                        Some((next_sid, next_label)) => {
+                            *slot = TeamSlot::Repairing {
+                                system_id: Some(next_sid),
+                                display_name: Some(next_label),
+                                priority: carried_priority,
+                            };
+                        }
+                        None => {
+                            *slot = TeamSlot::Returning {
+                                remaining: travel_duration,
+                                system_id: Some(sid),
+                                display_name: carried_label,
+                                queued_system_id: None,
+                                queued_display_name: None,
+                            };
+                        }
                     }
                 }
                 TeamSlot::Returning {
@@ -351,6 +439,139 @@ impl Default for RepairTeams {
     fn default() -> Self {
         Self::new(2)
     }
+}
+
+/// The sweep group a hull system belongs to: `Some(station)` when the ship
+/// config gives it an owning station, `None` for the ownerless `core` bucket.
+///
+/// A hull entry the config does not describe at all is ownerless, not a group of
+/// its own — the shipped example being the synthesised `core` entry, which is a
+/// `[[hull.system_hull]]` row with no `[[system]]` behind it (a station named
+/// `core` is forbidden by `ShipConfig` validation). That is the same rule
+/// `HullVisibility::can_see_station` uses to bucket a hull row for the repair
+/// console and the same one `damage_sync` uses to address a `RepairRequest`, so
+/// "the station a console tapped", "the rows Engineering can see" and "the
+/// systems a team sweeps" cannot drift apart.
+fn sweep_group(sid: &SystemId, config: &ShipConfig) -> Option<StationId> {
+    config.system(sid).and_then(|s| s.station.clone())
+}
+
+/// The sweep entry point: [`next_sweep_target`], but only from a system the
+/// hull ACTUALLY TRACKS.
+///
+/// `resolve_repair_target` falls back to `SystemId(station_id)` when a station
+/// has no repairable system — the battleship's `helm` station resolves to
+/// `SystemId("helm")`, which is a station name and not a hull row. Every hull
+/// lookup answers such an id permissively (`is_at_max` → true for an untracked
+/// id, `restore` → no-op), which is exactly right for "walk there and find
+/// nothing to do": before issue #1013 the team bounced straight to `Returning`.
+///
+/// Without this guard the sweep inherits that permissive `true` and then asks
+/// [`sweep_group`] which station the id belongs to — and an id the config does
+/// not describe is deliberately the OWNERLESS `core` bucket, so the team would
+/// walk off its station and start repairing `core`. A dispatch that resolved to
+/// a station name must bounce exactly as it did before, so the sweep is gated on
+/// the arrival being a real hull row rather than on the hull's fallback answers.
+///
+/// This gate and the fallback are a COMPLEMENTARY PAIR, and both halves are
+/// needed: "the hull tracks this row" is not by itself the same predicate as
+/// "this is not a station name", because a hull row and a station can share an
+/// id (`alliance_cruiser` authors both a `science` hull row and a `science`
+/// station). `resolve_repair_target` therefore emits its fallback only for a
+/// name the hull does NOT track, so an arrival here that is a hull row is always
+/// a genuine system and never a colliding station name that would sweep the
+/// wrong group.
+fn sweep_from(
+    sid: &SystemId,
+    priority: Option<u8>,
+    hull: &SystemHull,
+    config: Option<&ShipConfig>,
+) -> Option<(SystemId, String)> {
+    hull.get(sid)?;
+    config.and_then(|c| next_sweep_target(sid, priority, hull, c))
+}
+
+/// Pick the next system for an on-site team to work on, or `None` when nothing
+/// else in its station group needs a repair team.
+///
+/// Returns the chosen `(SystemId, display_name)`. The label comes from the
+/// hull entry, exactly as `handle_dispatch_repair_team` sources it for a
+/// console-ordered dispatch, so a swept-to system is labelled identically to a
+/// dispatched-to one.
+///
+/// # Candidates
+///
+/// Every OTHER hull system in the same [`sweep_group`] whose tier is not
+/// `Operational`. That predicate is deliberately the same one the AI dispatch
+/// prune uses (`console::repair::server::operate_repair_ai`), so the sweep never
+/// chases damage the dispatcher would not have sent a team for in the first
+/// place — a system merely below max HP but still `Operational` is left alone.
+/// `Destroyed` counts as a candidate since issue #1013.
+///
+/// A candidate must additionally be BELOW max HP, so the team only picks work
+/// it can finish. See the guard at the filter for why that is not implied by the
+/// tier test: a `max = 0` hull row is Destroyed and at max simultaneously, and a
+/// group holding two of them would livelock the sweep.
+///
+/// # Ranking, and what `priority` selects
+///
+/// Candidates are ranked worst-first: tier severity descending
+/// (`Destroyed` > `Disabled` > `Damaged`), then damage fraction
+/// (`1 - current/max`) descending, then `SystemId` ascending. The last key is
+/// there purely so the answer cannot depend on hull iteration order — a repair
+/// choice feeds the sim digest like any other.
+///
+/// `priority` is then an ORDINAL PICK over that ranking, 1-based and clamped to
+/// the candidate count: `Some(2)` takes the second-worst job, `None` (and
+/// `Some(0)`) the worst. This is the semantic issue #1013 gives
+/// `TeamSlot::priority` — previously written by `SetRepairPriority` and read by
+/// nothing — and the one issue #1015's console taps drive.
+fn next_sweep_target(
+    current: &SystemId,
+    priority: Option<u8>,
+    hull: &SystemHull,
+    config: &ShipConfig,
+) -> Option<(SystemId, String)> {
+    let group = sweep_group(current, config);
+    let mut candidates: Vec<(DamageTier, f32, &SystemId, &str)> = hull
+        .iter()
+        .filter(|(sid, _)| *sid != current && sweep_group(sid, config) == group)
+        .filter_map(|(sid, entry)| {
+            // Only work the team can actually PROGRESS. A row already at max HP
+            // has nothing to restore, and the two predicates are not redundant:
+            // a `max = 0` row is permanently `Destroyed` (`tier_for` tests
+            // `current == 0.0` before it looks at any ratio) AND permanently at
+            // max, so it is a candidate that can never stop being one. Two of
+            // them in a group make a team hand off from one to the other and
+            // back forever, never finishing and never going home — a livelock,
+            // not a slow repair. `restore` clamps to `max`, so no amount of
+            // repair rate changes it.
+            if entry.current >= entry.max {
+                return None;
+            }
+            let tier = hull.tier_for(sid);
+            if tier == DamageTier::Operational {
+                return None;
+            }
+            let fraction = if entry.max > 0.0 {
+                1.0 - entry.current / entry.max
+            } else {
+                0.0
+            };
+            Some((tier, fraction, sid, entry.display_name.as_str()))
+        })
+        .collect();
+    candidates.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.total_cmp(&a.1))
+            .then_with(|| a.2.cmp(b.2))
+    });
+    if candidates.is_empty() {
+        return None;
+    }
+    let rank = usize::from(priority.unwrap_or(1).max(1)).min(candidates.len());
+    let (_, _, sid, label) = candidates[rank - 1];
+    Some((sid.clone(), label.to_string()))
 }
 
 #[cfg(test)]
@@ -456,7 +677,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(20.0); // not at max
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull);
+        teams.tick(5.0, &mut hull, None);
         let expected = Some(sid("helm"));
         assert!(matches!(
             &teams.slots()[0],
@@ -469,7 +690,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(20.0);
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(4.9, &mut hull);
+        teams.tick(4.9, &mut hull, None);
         assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { .. }));
     }
 
@@ -478,7 +699,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_full(); // system already at full HP
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull);
+        teams.tick(5.0, &mut hull, None);
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
     }
 
@@ -487,9 +708,9 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed)
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel
-                                    // Now repairing; restore for 2s should give 1 more HP (0.5 HP/s)
-        teams.tick(2.0, &mut hull);
+        teams.tick(5.0, &mut hull, None); // travel
+                                          // Now repairing; restore for 2s should give 1 more HP (0.5 HP/s)
+        teams.tick(2.0, &mut hull, None);
         let hp = hull.current_for(&sid("helm")).unwrap();
         assert!(
             (hp - 2.0).abs() < 1e-4,
@@ -497,14 +718,16 @@ mod tests {
         );
     }
 
+    /// With no station context (`config: None`) the "system reached max HP"
+    /// edge still ends the visit, exactly as it did before the #1013 sweep.
     #[test]
     fn repairing_transitions_to_returning_when_console_full() {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(24.9); // almost full
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel
-                                    // One tick of 1s restores 0.5 HP — enough to max at 25
-        teams.tick(1.0, &mut hull);
+        teams.tick(5.0, &mut hull, None); // travel
+                                          // One tick of 1s restores 0.5 HP — enough to max at 25
+        teams.tick(1.0, &mut hull, None);
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
     }
 
@@ -515,9 +738,9 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_full();
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel (arrives full → Returning with remaining=0)
-                                    // remaining is already 0 from arriving at full hp; tick 0.1 to trigger idle
-        teams.tick(0.1, &mut hull);
+        teams.tick(5.0, &mut hull, None); // travel (arrives full → Returning with remaining=0)
+                                          // remaining is already 0 from arriving at full hp; tick 0.1 to trigger idle
+        teams.tick(0.1, &mut hull, None);
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
     }
 
@@ -526,14 +749,18 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(24.9); // not full
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel → Repairing
-        teams.tick(1.0, &mut hull); // repair → full → Returning { remaining: 5.0 }
-        teams.tick(4.9, &mut hull); // remaining not yet expired
+        teams.tick(5.0, &mut hull, None); // travel → Repairing
+        teams.tick(1.0, &mut hull, None); // repair → full → Returning { remaining: 5.0 }
+        teams.tick(4.9, &mut hull, None); // remaining not yet expired
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
     }
 
     // ── Full lifecycle ────────────────────────────────────────────────────────
 
+    /// The whole Idle → Travelling → Repairing → Returning → Idle walk, with no
+    /// station context and so no sweep. The `Some(config)` counterpart — a team
+    /// that keeps working instead of going home — is
+    /// `sweep_repairs_every_damaged_system_at_the_station_in_one_visit`.
     #[test]
     fn full_lifecycle_travel_repair_return_idle() {
         let mut teams = RepairTeams::new(1);
@@ -541,15 +768,15 @@ mod tests {
         teams.dispatch(0, sid("helm"), "Helm".to_string());
 
         // Travelling
-        teams.tick(5.0, &mut hull);
+        teams.tick(5.0, &mut hull, None);
         assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
 
         // Repairing until full (24 HP remaining at 0.5 HP/s = 48s)
-        teams.tick(50.0, &mut hull);
+        teams.tick(50.0, &mut hull, None);
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
 
         // Returning (remaining starts at TRAVEL_DURATION = 5s)
-        teams.tick(5.1, &mut hull);
+        teams.tick(5.1, &mut hull, None);
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
     }
 
@@ -580,7 +807,7 @@ mod tests {
         ));
 
         // After 5s both transition
-        teams.tick(5.0, &mut hull);
+        teams.tick(5.0, &mut hull, None);
         let s0 = &teams.slots()[0];
         let s1 = &teams.slots()[1];
         assert!(
@@ -615,8 +842,8 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_full();
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel → Returning (remaining=0, full HP)
-        teams.tick(0.1, &mut hull); // → Idle
+        teams.tick(5.0, &mut hull, None); // travel → Returning (remaining=0, full HP)
+        teams.tick(0.1, &mut hull, None); // → Idle
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
         teams.dispatch(0, sid("helm"), "Helm".to_string());
         assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { .. }));
@@ -630,7 +857,7 @@ mod tests {
         let mut hull = hull_damaged(10.0);
         teams.dispatch(0, sid("helm"), "Helm".to_string());
         // Advance 2s into travel
-        teams.tick(2.0, &mut hull);
+        teams.tick(2.0, &mut hull, None);
         assert!(
             matches!(&teams.slots()[0], TeamSlot::Travelling { elapsed, .. } if (*elapsed - 2.0).abs() < 1e-4)
         );
@@ -653,7 +880,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(10.0);
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(3.0, &mut hull);
+        teams.tick(3.0, &mut hull, None);
         teams.dispatch(0, sid("helm"), "Helm".to_string()); // same system = recall
         assert!(matches!(
             &teams.slots()[0],
@@ -669,7 +896,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed — repairable)
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel → Repairing
+        teams.tick(5.0, &mut hull, None); // travel → Repairing
         assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
         teams.dispatch(0, sid("tactical"), "Tactical".to_string());
         let expected = Some(sid("tactical"));
@@ -688,7 +915,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed — repairable)
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel → Repairing
+        teams.tick(5.0, &mut hull, None); // travel → Repairing
         teams.dispatch(0, sid("helm"), "Helm".to_string()); // recall
         assert!(matches!(
             &teams.slots()[0],
@@ -704,8 +931,8 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed — repairable)
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel → Repairing
-        teams.tick(2.0, &mut hull); // restore 1 HP (0.5 HP/s * 2s = 1 HP → now 2 HP)
+        teams.tick(5.0, &mut hull, None); // travel → Repairing
+        teams.tick(2.0, &mut hull, None); // restore 1 HP (0.5 HP/s * 2s = 1 HP → now 2 HP)
         let hp_before_recall = hull.current_for(&sid("helm")).unwrap();
         assert!(
             (hp_before_recall - 2.0).abs() < 1e-4,
@@ -722,9 +949,9 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(10.0);
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(2.0, &mut hull); // elapsed=2
+        teams.tick(2.0, &mut hull, None); // elapsed=2
         teams.dispatch(0, sid("tactical"), "Tactical".to_string()); // redirect → Returning { remaining:2, queued:Tactical }
-        teams.tick(2.1, &mut hull); // remaining expires → auto-dispatch to Tactical
+        teams.tick(2.1, &mut hull, None); // remaining expires → auto-dispatch to Tactical
         let expected = Some(sid("tactical"));
         assert!(matches!(
             &teams.slots()[0],
@@ -741,9 +968,9 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(10.0);
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(2.0, &mut hull);
+        teams.tick(2.0, &mut hull, None);
         teams.dispatch(0, sid("helm"), "Helm".to_string()); // recall → Returning { remaining:2, queued:None }
-        teams.tick(2.1, &mut hull); // expires → Idle
+        teams.tick(2.1, &mut hull, None); // expires → Idle
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
     }
 
@@ -763,10 +990,16 @@ mod tests {
 
     // ── Destroyed latch tests ─────────────────────────────────────────────────
 
-    /// A repair team dispatched to a Destroyed system (hp == 0) must NOT
-    /// restore any HP — the Destroyed latch is unrepairable.
+    /// The direct inverse of the pre-#1013 rule: a repair team dispatched to a
+    /// Destroyed system (hp == 0) works on it like any other, and the first
+    /// restored HP un-latches the tier — `tier_for` tests `current == 0.0`
+    /// before it looks at any threshold, so there is nothing further to clear.
+    ///
+    /// This is the "un-stuck" acceptance criterion: before #1013 a destroyed
+    /// system stayed destroyed forever, because the team bounced off it and
+    /// nothing else in the game restores HP.
     #[test]
-    fn destroyed_console_is_not_repaired_by_repair_tick() {
+    fn destroyed_system_is_repaired_and_unlatched_by_repair_tick() {
         let mut teams = RepairTeams::new(1);
         // Build a hull with helm at 0 HP (Destroyed).
         let mut hull = SystemHull::from_config(&[(sid("helm"), 25.0)]);
@@ -774,27 +1007,654 @@ mod tests {
         hull.apply_damage(1000.0, &mut rng); // wipe to 0
         assert_eq!(
             hull.tier_for(&sid("helm")),
-            crate::damage::DamageTier::Destroyed,
+            DamageTier::Destroyed,
             "precondition: helm must be Destroyed"
         );
-        let hp_before = hull.current_for(&sid("helm")).unwrap();
-        assert!((hp_before - 0.0).abs() < 1e-6, "precondition: 0 HP");
+        assert_eq!(hull.current_for(&sid("helm")), Some(0.0));
 
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        // Travel to system.
-        teams.tick(5.0, &mut hull);
-        // Team should not enter Repairing — it should bounce directly to Returning.
+        teams.tick(5.0, &mut hull, None); // travel
         assert!(
-            !matches!(&teams.slots()[0], TeamSlot::Repairing { .. }),
-            "team should not enter Repairing state for a Destroyed system"
+            matches!(&teams.slots()[0], TeamSlot::Repairing { .. }),
+            "a team must now go to work on a Destroyed system, got {:?}",
+            teams.slots()[0]
         );
-        // Simulate several seconds of what would have been repair time.
-        teams.tick(10.0, &mut hull);
+
+        teams.tick(2.0, &mut hull, None); // 0.5 HP/s * 2s = 1 HP
         let hp_after = hull.current_for(&sid("helm")).unwrap();
         assert!(
-            (hp_after - 0.0).abs() < 1e-6,
-            "Destroyed system HP must remain 0 after repair tick (got {hp_after})"
+            (hp_after - 1.0).abs() < 1e-4,
+            "the team must restore HP to a Destroyed system (got {hp_after})"
         );
+        assert_eq!(
+            hull.tier_for(&sid("helm")),
+            DamageTier::Disabled,
+            "any positive HP un-latches Destroyed"
+        );
+    }
+
+    // ── The station sweep (issue #1013) ───────────────────────────────────────
+
+    /// A ship config built from `(system id, owning station)` pairs. `None`
+    /// leaves the system ownerless, which is the `core` bucket group.
+    /// Constructed struct-first rather than through TOML: these tests are about
+    /// station MEMBERSHIP and nothing else in `ShipConfig` matters to the sweep.
+    fn config_with(systems: &[(&str, Option<&str>)]) -> ShipConfig {
+        use crate::ship::config::SystemInstanceConfig;
+        ShipConfig {
+            stations: vec![],
+            systems: systems
+                .iter()
+                .map(|(id, station)| SystemInstanceConfig {
+                    id: sid(id),
+                    kind: "generic".into(),
+                    station: station.map(|s| StationId(s.into())),
+                    ai_only: station.is_none(),
+                    power_group: None,
+                    marker: None,
+                    config: None,
+                })
+                .collect(),
+            power_groups: Default::default(),
+            coordination_lag_secs: 2.0,
+        }
+    }
+
+    /// A hull built from `(system id, max hp, current hp)` triples.
+    fn hull_at(entries: &[(&str, f32, f32)]) -> SystemHull {
+        let mut hull = SystemHull::from_config(
+            &entries
+                .iter()
+                .map(|(id, max, _)| (sid(id), *max))
+                .collect::<Vec<_>>(),
+        );
+        for (id, _, current) in entries {
+            hull.set_hp(&sid(id), *current);
+        }
+        hull
+    }
+
+    /// The three-system `helm` station every sweep test below works over, plus
+    /// one `tactical` system and one ownerless `core` entry that must never be
+    /// swept from `helm`. Tiers (defaults: <0.75 Damaged, <0.25 Disabled,
+    /// 0 Destroyed) are therefore, worst first:
+    /// `helm-c` Destroyed, `helm-b` Disabled, `helm-a` Damaged.
+    fn station_hull() -> SystemHull {
+        hull_at(&[
+            ("helm-a", 10.0, 7.0),     // Damaged (0.70)
+            ("helm-b", 10.0, 2.0),     // Disabled (0.20)
+            ("helm-c", 10.0, 0.0),     // Destroyed
+            ("tactical-x", 10.0, 1.0), // Disabled, but a different station
+            ("core", 10.0, 5.0),       // Damaged, ownerless bucket
+        ])
+    }
+
+    fn station_config() -> ShipConfig {
+        config_with(&[
+            ("helm-a", Some("helm")),
+            ("helm-b", Some("helm")),
+            ("helm-c", Some("helm")),
+            ("tactical-x", Some("tactical")),
+            // `core` is deliberately absent: the shipped hulls declare it as a
+            // `[[hull.system_hull]]` row with no `[[system]]` behind it.
+        ])
+    }
+
+    /// The system team 0 is currently working on, if any.
+    fn repairing_at(teams: &RepairTeams) -> Option<String> {
+        match &teams.slots()[0] {
+            TeamSlot::Repairing {
+                system_id: Some(s), ..
+            } => Some(s.0.clone()),
+            _ => None,
+        }
+    }
+
+    /// Drive team 0 in small steps, recording each system it works on in order.
+    /// Stops the moment the team goes `Returning` (or runs out of steps), so the
+    /// returned flag distinguishes "swept everything then went home" from "was
+    /// still working when we gave up".
+    fn walk_sweep(
+        teams: &mut RepairTeams,
+        hull: &mut SystemHull,
+        config: Option<&ShipConfig>,
+        steps: usize,
+    ) -> (Vec<String>, bool) {
+        let mut visited: Vec<String> = vec![];
+        let mut returned = false;
+        for _ in 0..steps {
+            teams.tick(0.5, hull, config);
+            match &teams.slots()[0] {
+                TeamSlot::Repairing {
+                    system_id: Some(s), ..
+                } if visited.last() != Some(&s.0) => {
+                    visited.push(s.0.clone());
+                }
+                TeamSlot::Returning { .. } => {
+                    returned = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        (visited, returned)
+    }
+
+    /// AC1: one team, one station, three damaged systems — all three are
+    /// repaired in worst-first order, in one visit, with no trip home between
+    /// them. The team only heads back once the station is clean.
+    #[test]
+    fn sweep_repairs_every_damaged_system_at_the_station_in_one_visit() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = station_hull();
+        let config = station_config();
+        teams.dispatch(0, sid("helm-c"), "Helm C".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 400);
+
+        assert_eq!(
+            visited,
+            vec!["helm-c", "helm-b", "helm-a"],
+            "the team must work the station worst-first without going home \
+             between systems"
+        );
+        assert!(returned, "the team goes home once the station is clean");
+        for id in ["helm-a", "helm-b", "helm-c"] {
+            assert!(
+                hull.is_at_max(&sid(id)),
+                "{id} must be fully repaired by the sweep"
+            );
+        }
+    }
+
+    /// The sweep is bounded by the station: a damaged system another station
+    /// owns is not the sweeping team's business, and neither is the ownerless
+    /// `core` bucket.
+    #[test]
+    fn sweep_does_not_cross_into_another_station_or_the_core_bucket() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = station_hull();
+        let config = station_config();
+        teams.dispatch(0, sid("helm-c"), "Helm C".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 400);
+
+        assert!(returned);
+        assert!(
+            !visited.iter().any(|v| v == "tactical-x" || v == "core"),
+            "a helm team must not sweep other stations' work, got {visited:?}"
+        );
+        assert_eq!(hull.current_for(&sid("tactical-x")), Some(1.0));
+        assert_eq!(hull.current_for(&sid("core")), Some(5.0));
+    }
+
+    /// The ownerless bucket is a sweep group of its own: a team at `core`
+    /// (a hull row with no `[[system]]` behind it) sweeps on to other
+    /// station-less systems, and stops at the station boundary the same way.
+    #[test]
+    fn sweep_covers_the_ownerless_core_bucket_group() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[
+            ("core", 10.0, 5.0),       // Damaged, ownerless
+            ("aux-sensor", 10.0, 0.0), // Destroyed, ownerless (`ai_only`)
+            ("helm-a", 10.0, 2.0),     // Disabled, but owned by `helm`
+        ]);
+        let config = config_with(&[("aux-sensor", None), ("helm-a", Some("helm"))]);
+        teams.dispatch(0, sid("core"), "Core".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 400);
+
+        assert_eq!(
+            visited,
+            vec!["core", "aux-sensor"],
+            "an ownerless-bucket team sweeps the other ownerless systems only"
+        );
+        assert!(returned);
+        assert_eq!(hull.current_for(&sid("helm-a")), Some(2.0));
+    }
+
+    /// A single-damaged-system station behaves exactly as it did before the
+    /// sweep existed: repair it, then go home.
+    #[test]
+    fn single_damaged_system_station_still_repairs_one_and_returns() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[("helm-a", 10.0, 2.0), ("helm-b", 10.0, 10.0)]);
+        let config = config_with(&[("helm-a", Some("helm")), ("helm-b", Some("helm"))]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 200);
+
+        assert_eq!(visited, vec!["helm-a"]);
+        assert!(returned);
+    }
+
+    /// A system that is below max HP but still `Operational` is not swept to:
+    /// the sweep's damage predicate is the same `tier != Operational` the AI
+    /// dispatch prune uses, so the team never chases work the dispatcher would
+    /// not have sent it for.
+    #[test]
+    fn sweep_ignores_a_below_max_but_operational_system() {
+        let mut teams = RepairTeams::new(1);
+        // helm-b at 9/10 → ratio 0.9 → Operational despite the missing HP.
+        let mut hull = hull_at(&[("helm-a", 10.0, 2.0), ("helm-b", 10.0, 9.0)]);
+        let config = config_with(&[("helm-a", Some("helm")), ("helm-b", Some("helm"))]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 200);
+
+        assert_eq!(visited, vec!["helm-a"]);
+        assert!(returned);
+        assert_eq!(hull.current_for(&sid("helm-b")), Some(9.0));
+    }
+
+    /// Without a ship config there is no station membership to sweep over, so a
+    /// team falls back to the pre-#1013 behaviour: fix the one system it was
+    /// sent to and walk home, even with more damage sitting next to it.
+    #[test]
+    fn without_config_a_team_repairs_one_system_and_returns() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = station_hull();
+        teams.dispatch(0, sid("helm-c"), "Helm C".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, None, 400);
+
+        assert_eq!(visited, vec!["helm-c"]);
+        assert!(returned);
+        assert_eq!(
+            hull.current_for(&sid("helm-b")),
+            Some(2.0),
+            "with no station context the team cannot know helm-b is its neighbour"
+        );
+    }
+
+    /// A team that arrives to find its target already whole sweeps the station
+    /// rather than turning straight around — it is standing right there.
+    #[test]
+    fn arrival_at_a_whole_system_sweeps_the_station_instead_of_returning() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[("helm-a", 10.0, 10.0), ("helm-b", 10.0, 2.0)]);
+        let config = config_with(&[("helm-a", Some("helm")), ("helm-b", Some("helm"))]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+
+        teams.tick(5.0, &mut hull, Some(&config));
+
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("helm-b"),
+            "arriving at a healthy system must hand off to the station's real \
+             work, got {:?}",
+            teams.slots()[0]
+        );
+    }
+
+    /// With nothing else to do at the station, the arrival bounce is unchanged.
+    #[test]
+    fn arrival_at_a_whole_system_returns_when_the_station_is_clean() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[("helm-a", 10.0, 10.0), ("helm-b", 10.0, 10.0)]);
+        let config = config_with(&[("helm-a", Some("helm")), ("helm-b", Some("helm"))]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+
+        teams.tick(5.0, &mut hull, Some(&config));
+
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
+    }
+
+    /// The swept-to system carries the hull entry's display name, the same
+    /// source `handle_dispatch_repair_team` uses for a console-ordered dispatch.
+    ///
+    /// The hull is built through `from_config_with_display_names` — the spawner's
+    /// own path — so the label and the raw SystemId are DIFFERENT strings.
+    /// `from_config` sets `display_name = sid.0`, which makes "labelled from the
+    /// hull entry" and "fell back to the raw id" indistinguishable and lets the
+    /// fallback pass a test written for the label.
+    #[test]
+    fn sweep_labels_the_next_system_from_its_hull_entry() {
+        use crate::damage::ConsoleTierConfig;
+        let mut teams = RepairTeams::new(1);
+        let mut hull = SystemHull::from_config_with_display_names(vec![
+            (
+                sid("helm-a"),
+                "Helm Alpha".to_string(),
+                10.0,
+                ConsoleTierConfig::default(),
+            ),
+            (
+                sid("helm-b"),
+                "Helm Beta".to_string(),
+                10.0,
+                ConsoleTierConfig::default(),
+            ),
+        ]);
+        hull.set_hp(&sid("helm-b"), 2.0);
+        let config = config_with(&[("helm-a", Some("helm")), ("helm-b", Some("helm"))]);
+        teams.dispatch(0, sid("helm-a"), "Helm Alpha".to_string());
+        teams.tick(5.0, &mut hull, Some(&config));
+
+        assert!(
+            matches!(
+                &teams.slots()[0],
+                TeamSlot::Repairing { display_name: Some(d), .. } if d == "Helm Beta"
+            ),
+            "the swept-to slot must carry the hull entry's display name, not the \
+             raw id `helm-b`; got {:?}",
+            teams.slots()[0]
+        );
+    }
+
+    /// A hull row that can never be progressed is not swept to, and — the point
+    /// of the guard — two of them do not trap the team forever.
+    ///
+    /// A `max_hp = 0` row is `Destroyed` (`tier_for` tests `current == 0.0`
+    /// first) AND at max HP at the same time, so it satisfies the sweep's damage
+    /// predicate while `restore` can never change it. Before the `current < max`
+    /// guard the team handed off from one ghost row to the other and back,
+    /// forever: never finishing, never returning, and never releasing the slot
+    /// for the next dispatch.
+    #[test]
+    fn sweep_skips_zero_max_hp_rows_and_still_finishes_the_real_work() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[
+            ("helm-a", 10.0, 2.0),      // real work: Disabled, repairable
+            ("helm-ghost-a", 0.0, 0.0), // permanently Destroyed AND at max
+            ("helm-ghost-b", 0.0, 0.0), // ditto — the pair is what livelocked
+        ]);
+        assert_eq!(
+            hull.tier_for(&sid("helm-ghost-a")),
+            DamageTier::Destroyed,
+            "fixture precondition: a zero-max row reads Destroyed"
+        );
+        assert!(
+            hull.is_at_max(&sid("helm-ghost-a")),
+            "fixture precondition: it is simultaneously at max HP"
+        );
+        let config = config_with(&[
+            ("helm-a", Some("helm")),
+            ("helm-ghost-a", Some("helm")),
+            ("helm-ghost-b", Some("helm")),
+        ]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 400);
+
+        assert_eq!(
+            visited,
+            vec!["helm-a"],
+            "the sweep must only pick work it can progress, got {visited:?}"
+        );
+        assert!(
+            returned,
+            "the team must go home once the repairable work is done rather than \
+             alternating between the two unfinishable rows forever"
+        );
+        assert!(hull.is_at_max(&sid("helm-a")));
+    }
+
+    /// A dispatch that resolved to a STATION NAME rather than a hull row bounces
+    /// exactly as it did before the sweep existed — it does not walk off into
+    /// the ownerless `core` bucket.
+    ///
+    /// `resolve_repair_target` falls back to `SystemId(station_id)` when no
+    /// system of the station is repairable. That id is untracked, so `is_at_max`
+    /// answers the permissive `true` and the arrival lands on the sweep branch;
+    /// `sweep_group` then buckets an id the config does not describe as
+    /// OWNERLESS, which is `core`'s own group. Without the hull-row gate the team
+    /// sent to `helm` would arrive and start repairing `core`.
+    ///
+    /// The COLLIDING case — a station name that is also a hull row, which would
+    /// pass this gate — is now impossible at the source rather than caught here:
+    /// `resolve_repair_target` produces the fallback only for a name the hull
+    /// does not track and returns `None` otherwise, so no such dispatch is ever
+    /// applied. This test pins the other half of that pair, the arrival that IS
+    /// untracked.
+    #[test]
+    fn arrival_at_a_station_name_returns_instead_of_sweeping_the_core_bucket() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[("core", 10.0, 5.0), ("helm-a", 10.0, 2.0)]);
+        let config = config_with(&[("helm-a", Some("helm"))]);
+        assert!(
+            hull.get(&sid("helm")).is_none(),
+            "fixture precondition: `helm` is a station name, not a hull row"
+        );
+        teams.dispatch(0, sid("helm"), "Helm".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 400);
+
+        assert!(
+            visited.is_empty(),
+            "a team that arrived at a non-hull id must repair nothing, got {visited:?}"
+        );
+        assert!(returned, "it must bounce straight back to Returning");
+        assert_eq!(
+            hull.current_for(&sid("core")),
+            Some(5.0),
+            "the ownerless core bucket must be untouched — it is not this team's \
+             station and the arrival id never belonged to a group at all"
+        );
+    }
+
+    /// A destroyed system is swept to like any other, and comes out the far
+    /// side at full HP and Operational.
+    #[test]
+    fn sweep_repairs_a_destroyed_neighbour_back_to_operational() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[("helm-a", 10.0, 2.0), ("helm-b", 10.0, 0.0)]);
+        let config = config_with(&[("helm-a", Some("helm")), ("helm-b", Some("helm"))]);
+        assert_eq!(hull.tier_for(&sid("helm-b")), DamageTier::Destroyed);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+
+        let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 400);
+
+        assert_eq!(
+            visited,
+            vec!["helm-a", "helm-b"],
+            "the team works the system it was actually sent to first — the \
+             ranking only chooses among what is LEFT — and then sweeps on to \
+             the Destroyed neighbour"
+        );
+        assert!(returned);
+        assert!(hull.is_at_max(&sid("helm-b")));
+        assert_eq!(hull.tier_for(&sid("helm-b")), DamageTier::Operational);
+    }
+
+    // ── Priority: the sweep's order selector (issue #1013) ────────────────────
+
+    /// Set up a `helm` station with four systems and put team 0 on site at
+    /// `helm-a`, so the remaining work ranks `helm-d` (Destroyed),
+    /// `helm-c` (Disabled), `helm-b` (Damaged) worst-first.
+    fn team_on_site_with_three_jobs_left() -> (RepairTeams, SystemHull, ShipConfig) {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[
+            ("helm-a", 10.0, 7.0), // Damaged — the system the team is sent to
+            ("helm-b", 10.0, 6.0), // Damaged, less hurt than helm-a
+            ("helm-c", 10.0, 2.0), // Disabled
+            ("helm-d", 10.0, 0.0), // Destroyed
+        ]);
+        let config = config_with(&[
+            ("helm-a", Some("helm")),
+            ("helm-b", Some("helm")),
+            ("helm-c", Some("helm")),
+            ("helm-d", Some("helm")),
+        ]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+        teams.tick(5.0, &mut hull, Some(&config));
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("helm-a"),
+            "fixture precondition: the team is on site at helm-a"
+        );
+        (teams, hull, config)
+    }
+
+    /// Finish the system team 0 is on (3 HP at most) and land on whatever the
+    /// sweep picks next.
+    fn finish_current_system(teams: &mut RepairTeams, hull: &mut SystemHull, config: &ShipConfig) {
+        teams.tick(30.0, hull, Some(config));
+    }
+
+    /// No priority set → the sweep takes the worst remaining job.
+    #[test]
+    fn sweep_without_priority_takes_the_worst_remaining_job() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(repairing_at(&teams).as_deref(), Some("helm-d"));
+    }
+
+    /// AC2: `priority` is READ by the sweep. The identical fixture, differing
+    /// only in the priority the console set, sends the team to a different
+    /// system — 1 to the worst, 2 to the second worst, 3 to the third.
+    #[test]
+    fn priority_selects_which_remaining_job_the_sweep_takes() {
+        for (priority, expected) in [(1_u8, "helm-d"), (2, "helm-c"), (3, "helm-b")] {
+            let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+            assert!(teams.set_priority(0, priority));
+            finish_current_system(&mut teams, &mut hull, &config);
+            assert_eq!(
+                repairing_at(&teams).as_deref(),
+                Some(expected),
+                "priority {priority} must select the {priority}-ranked remaining job"
+            );
+        }
+    }
+
+    /// `None` and `0` both mean "the worst job" — the ordinal is 1-based and
+    /// clamped at the bottom, so a console that sends 0 does something sane.
+    #[test]
+    fn priority_zero_means_the_worst_job_like_no_priority_at_all() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+        assert!(teams.set_priority(0, 0));
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(repairing_at(&teams).as_deref(), Some("helm-d"));
+    }
+
+    /// A priority past the end of the remaining work clamps to the last job
+    /// rather than stranding the team.
+    #[test]
+    fn priority_beyond_the_remaining_jobs_clamps_to_the_last_one() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+        assert!(teams.set_priority(0, 9));
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(repairing_at(&teams).as_deref(), Some("helm-b"));
+    }
+
+    /// AC2, the live version: changing the priority MID-SWEEP re-orders the work
+    /// the team has left. The first hand-off takes the worst job (no priority);
+    /// the console then taps priority 2, and the second hand-off takes the
+    /// second-worst of what remains instead of the worst.
+    #[test]
+    fn priority_change_mid_sweep_reorders_the_remaining_work() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("helm-d"),
+            "first hand-off, no priority: the worst job"
+        );
+
+        assert!(teams.set_priority(0, 2));
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("helm-b"),
+            "with priority 2 the team must take the SECOND worst of the \
+             remaining {{helm-c, helm-b}}, not helm-c"
+        );
+    }
+
+    /// The priority is a standing instruction about the station, so it survives
+    /// the sweep's in-place system hand-off instead of resetting to `None`.
+    #[test]
+    fn priority_survives_the_sweep_hand_off() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+        assert!(teams.set_priority(0, 2));
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert!(
+            matches!(
+                &teams.slots()[0],
+                TeamSlot::Repairing {
+                    priority: Some(2),
+                    ..
+                }
+            ),
+            "got {:?}",
+            teams.slots()[0]
+        );
+    }
+
+    /// The tier key dominates the damage-fraction key. `helm-disabled` and
+    /// `helm-damaged` are a rounding error apart in HP — 2.4 and 2.6 of 10 — but
+    /// they land either side of the 0.25 Disabled threshold, and the worse tier
+    /// wins even though the Damaged one is barely less hurt.
+    #[test]
+    fn sweep_prefers_a_worse_tier_over_a_larger_damage_fraction() {
+        let config = config_with(&[
+            ("helm-here", Some("helm")),
+            ("helm-disabled", Some("helm")),
+            ("helm-damaged", Some("helm")),
+        ]);
+        let hull = hull_at(&[
+            ("helm-here", 10.0, 5.0),
+            ("helm-disabled", 10.0, 2.4), // 0.24 → Disabled, fraction 0.76
+            ("helm-damaged", 10.0, 2.6),  // 0.26 → Damaged, fraction 0.74
+        ]);
+        assert_eq!(hull.tier_for(&sid("helm-disabled")), DamageTier::Disabled);
+        assert_eq!(hull.tier_for(&sid("helm-damaged")), DamageTier::Damaged);
+
+        let (winner, _) = next_sweep_target(&sid("helm-here"), None, &hull, &config).unwrap();
+        assert_eq!(winner.0, "helm-disabled");
+    }
+
+    /// Within one tier, the larger damage fraction goes first.
+    #[test]
+    fn sweep_prefers_the_larger_damage_fraction_within_a_tier() {
+        let config = config_with(&[
+            ("helm-here", Some("helm")),
+            ("helm-worse", Some("helm")),
+            ("helm-better", Some("helm")),
+        ]);
+        let hull = hull_at(&[
+            ("helm-here", 10.0, 5.0),
+            ("helm-worse", 10.0, 3.0),  // fraction 0.70
+            ("helm-better", 10.0, 7.0), // fraction 0.30
+        ]);
+        assert_eq!(hull.tier_for(&sid("helm-worse")), DamageTier::Damaged);
+        assert_eq!(hull.tier_for(&sid("helm-better")), DamageTier::Damaged);
+
+        let (winner, _) = next_sweep_target(&sid("helm-here"), None, &hull, &config).unwrap();
+        assert_eq!(winner.0, "helm-worse");
+    }
+
+    /// A full tie resolves to the smallest system id, so hull iteration order
+    /// cannot reach the decision — a repair choice feeds the sim digest like
+    /// any other. `helm-tie-b` is declared FIRST in both the hull and the
+    /// config, so an order-sensitive comparator would pick it.
+    #[test]
+    fn sweep_breaks_a_full_tie_on_the_smallest_system_id() {
+        let config = config_with(&[
+            ("helm-here", Some("helm")),
+            ("helm-tie-b", Some("helm")),
+            ("helm-tie-a", Some("helm")),
+        ]);
+        let hull = hull_at(&[
+            ("helm-here", 10.0, 5.0),
+            ("helm-tie-b", 10.0, 5.0),
+            ("helm-tie-a", 10.0, 5.0),
+        ]);
+
+        let (first, _) = next_sweep_target(&sid("helm-here"), None, &hull, &config).unwrap();
+        assert_eq!(first.0, "helm-tie-a");
+        let (second, _) = next_sweep_target(&sid("helm-here"), Some(2), &hull, &config).unwrap();
+        assert_eq!(second.0, "helm-tie-b");
+    }
+
+    /// Nothing left at the station → no sweep target, which is what puts the
+    /// team on the road home.
+    #[test]
+    fn next_sweep_target_is_none_when_the_station_is_clean() {
+        let config = config_with(&[("helm-here", Some("helm")), ("helm-other", Some("helm"))]);
+        let hull = hull_at(&[("helm-here", 10.0, 5.0), ("helm-other", 10.0, 10.0)]);
+        assert!(next_sweep_target(&sid("helm-here"), None, &hull, &config).is_none());
     }
 
     // ── Display-name propagation (regression for reviewer's #617 finding) ──
@@ -827,7 +1687,7 @@ mod tests {
         let mut teams = RepairTeams::new(2);
         let mut hull = hull_damaged(10.0);
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel → Repairing
+        teams.tick(5.0, &mut hull, None); // travel → Repairing
         assert!(teams.set_priority(0, 3));
         let slot = &teams.slots()[0];
         assert!(matches!(
@@ -863,7 +1723,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_full();
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull);
+        teams.tick(5.0, &mut hull, None);
         // After arriving at full hull the team becomes Returning.
         assert!(!teams.set_priority(0, 3));
     }
@@ -876,7 +1736,7 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_damaged(10.0);
         teams.dispatch(0, sid("helm"), "Helm".to_string());
-        teams.tick(5.0, &mut hull); // travel → Repairing
+        teams.tick(5.0, &mut hull, None); // travel → Repairing
         let slot = &teams.slots()[0];
         assert!(
             matches!(

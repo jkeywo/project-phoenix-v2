@@ -881,7 +881,7 @@ mod tests {
         teams.dispatch(0, system_id.clone(), system_id.0.clone());
         // Travel completes → `Repairing`, which is what `on_site_systems()`
         // counts. Same state machine the wire projection reads.
-        teams.tick(60.0, &mut scratch);
+        teams.tick(60.0, &mut scratch, None);
         assert!(
             teams.on_site_systems().any(|s| s == system_id),
             "test setup must actually put the team on site"

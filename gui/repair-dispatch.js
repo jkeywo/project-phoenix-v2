@@ -75,7 +75,11 @@ export function dispatchRepairTeam(teamIdx, target, send) {
  * can assert on the exact wire shape.
  *
  * @param {number} teamIdx repair team slot index
- * @param {number} priority priority value (higher = more urgent)
+ * @param {number} priority 1-based ordinal into the station's remaining repair
+ *   work, ranked worst-first: 1 (and 0) means "take the worst job next", 2 the
+ *   second worst, clamped to however many jobs are left (issue #1013). NOT a
+ *   magnitude — a larger number is a job further down the list, not a more
+ *   urgent one.
  * @returns {{type: string, data: object}}
  */
 export function setRepairPriorityPayload(teamIdx, priority) {

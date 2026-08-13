@@ -96,7 +96,15 @@ pub fn handle_dispatch_repair_team(
                 target: repair_target,
             } = &cmd.payload
             {
-                let sid = resolve_repair_target(repair_target, ship_config, hull_ref);
+                // `None` ⇒ the order names no work: a station with no damaged
+                // owned system whose own name is a hull row (see
+                // `resolve_repair_target`). Skip the command and leave the slot
+                // exactly as it was — an Idle team stays Idle, a working team is
+                // not recalled — which is the same nothing-happens a dispatch to
+                // an undamaged station has always produced.
+                let Some(sid) = resolve_repair_target(repair_target, ship_config, hull_ref) else {
+                    continue;
+                };
                 let display = display_name_for(&sid);
                 teams.0.dispatch(*team_idx as usize, sid, display);
             }
@@ -123,38 +131,180 @@ pub fn handle_set_repair_priority(
     }
 }
 
-/// Resolve a station-level repair order to a concrete hull system.
+/// Resolve a station-level repair order to a concrete hull system, or `None`
+/// when the order names nothing a team could be sent to.
 ///
 /// The repair console deliberately addresses stations, while repair teams heal
 /// a single `SystemHull` entry. Prefer the most damaged repairable system the
 /// ship configuration assigns to that station. The station-id fallback keeps
 /// older/coarse hull layouts working until they migrate to fine system hulls.
+///
+/// Only the FIRST system is resolved here. Since issue #1013 an arrived team
+/// sweeps the rest of the station itself (`RepairTeams::tick`), so this picks
+/// where the walk starts, not the whole job.
+///
+/// # The fallback and the sweep gate are a complementary PAIR
+///
+/// The `SystemId(station_id)` fallback below is a STATION NAME, and it is
+/// produced ONLY for a name the hull does not track as a row. That is the exact
+/// complement of `repair_teams::sweep_from`'s gate, which runs a sweep only from
+/// an arrival the hull DOES track: between them, a dispatch that fell back to a
+/// station name always bounces home exactly as it did before the sweep existed,
+/// and never gets bucketed as ownerless and walks off to repair `core`.
+///
+/// The `is_none()` guard is what makes that a guarantee rather than a
+/// coincidence of the shipped hulls. A station name CAN collide with a hull
+/// row: `alliance_cruiser` authors a `science` `[[hull.system_hull]]` with no
+/// `[[system]]` behind it (so the row is ownerless, bucketed under `core`) AND a
+/// `science` STATION whose three systems carry no hull rows of their own — so
+/// that station can never produce a repairable system here and the fallback is
+/// the only path out. Emitting `SystemId("science")` would pass `sweep_from`'s
+/// hull-row gate and let the team sweep the ownerless bucket. Refusing to
+/// dispatch is the honest answer: the station has no damaged owned system, so
+/// there is no work at it to send anyone to.
+///
+/// Destroyed systems (0 HP) were excluded until #1013 — a team could not lift
+/// the latch, so sending it to the worst system on the station would have been
+/// sending it to the one system it could not touch. The sweep repairs them now,
+/// and a destroyed system's damage fraction is 1.0, so it naturally sorts to the
+/// front of the ranking below: the team walks to the worst thing first.
 fn resolve_repair_target(
     target: &RepairTarget,
     ship_config: &crate::ship_plugin::ShipConfigComponent,
     hull: Option<&crate::damage::SystemHull>,
-) -> SystemId {
+) -> Option<SystemId> {
     match target {
-        RepairTarget::Core => SystemId("core".into()),
+        RepairTarget::Core => Some(SystemId("core".into())),
         RepairTarget::Station(station_id) => {
             let Some(hull) = hull else {
-                return SystemId(station_id.0.clone());
+                // No hull at all ⇒ no row can collide, and the coarse layout
+                // this fallback exists for is the only thing left to name.
+                return Some(SystemId(station_id.0.clone()));
             };
 
-            ship_config
+            let best = ship_config
                 .0
                 .systems_for_station(station_id)
                 .filter_map(|system| {
                     let entry = hull.get(&system.id)?;
-                    if entry.current <= 0.0 || entry.current >= entry.max {
+                    if entry.current >= entry.max {
                         return None;
                     }
                     let damage_fraction = 1.0 - entry.current / entry.max;
                     Some((system.id.clone(), damage_fraction))
                 })
                 .max_by(|left, right| left.1.total_cmp(&right.1))
-                .map(|(system_id, _)| system_id)
-                .unwrap_or_else(|| SystemId(station_id.0.clone()))
+                .map(|(system_id, _)| system_id);
+            best.or_else(|| {
+                let fallback = SystemId(station_id.0.clone());
+                hull.get(&fallback).is_none().then_some(fallback)
+            })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::damage::SystemHull;
+    use crate::messages::StationId;
+    use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+
+    fn system(id: &str, station: Option<&str>) -> SystemInstanceConfig {
+        SystemInstanceConfig {
+            id: SystemId(id.into()),
+            kind: "generic".into(),
+            station: station.map(|s| StationId(s.into())),
+            ai_only: false,
+            power_group: None,
+            marker: None,
+            config: None,
+        }
+    }
+
+    fn config(systems: Vec<SystemInstanceConfig>) -> crate::ship_plugin::ShipConfigComponent {
+        crate::ship_plugin::ShipConfigComponent(ShipConfig {
+            stations: vec![],
+            systems,
+            power_groups: Default::default(),
+            coordination_lag_secs: 2.0,
+        })
+    }
+
+    /// The `alliance_cruiser` collision: `science` is BOTH a station and an
+    /// OWNERLESS hull row (a `[[hull.system_hull]]` with no `[[system]]` behind
+    /// it, so it lives in the `core` sweep bucket), while the three systems the
+    /// `science` station owns carry no hull rows at all.
+    ///
+    /// A dispatch to that station therefore finds no repairable owned system and
+    /// falls through to the station-name fallback — where emitting
+    /// `SystemId("science")` would hand `repair_teams::sweep_from` a real hull
+    /// row, pass its gate, and let the team sweep the OWNERLESS bucket instead of
+    /// bouncing. `None` is the honest answer: nothing the station owns is
+    /// damaged, so there is no work to send a team to.
+    #[test]
+    fn station_name_colliding_with_a_hull_row_resolves_to_no_dispatch() {
+        let cfg = config(vec![
+            system("sensor-array", Some("science")),
+            system("sensor-probe", Some("science")),
+            system("sensor-lab", Some("science")),
+        ]);
+        // The hull tracks the ownerless `science` row and the ship-wide `core`
+        // row — and NONE of the science station's own systems.
+        let hull = SystemHull::from_config(&[
+            (SystemId("core".into()), 100.0_f32),
+            (SystemId("science".into()), 58.0),
+        ]);
+
+        assert_eq!(
+            resolve_repair_target(
+                &RepairTarget::Station(StationId("science".into())),
+                &cfg,
+                Some(&hull),
+            ),
+            None,
+            "a station whose own name is a hull row must not fall back to it"
+        );
+    }
+
+    /// The complementary half: a station name the hull does NOT track still
+    /// falls back, so the pre-#1013 bounce behaviour for coarse hull layouts is
+    /// untouched. `repair_teams::sweep_from` rejects exactly these arrivals.
+    #[test]
+    fn station_name_that_is_not_a_hull_row_still_falls_back() {
+        let cfg = config(vec![system("helm-engine-port", Some("helm"))]);
+        // `helm-engine-port` is at full HP, so no owned system is repairable.
+        let hull = SystemHull::from_config(&[(SystemId("helm-engine-port".into()), 100.0_f32)]);
+
+        assert_eq!(
+            resolve_repair_target(
+                &RepairTarget::Station(StationId("helm".into())),
+                &cfg,
+                Some(&hull),
+            ),
+            Some(SystemId("helm".into())),
+            "an untracked station name is still the coarse-layout fallback"
+        );
+    }
+
+    /// A damaged owned system is picked as before — the collision guard only
+    /// governs the fallback arm.
+    #[test]
+    fn a_damaged_owned_system_still_wins_over_the_fallback() {
+        let cfg = config(vec![system("science-scope", Some("science"))]);
+        let mut hull = SystemHull::from_config(&[
+            (SystemId("science".into()), 58.0_f32),
+            (SystemId("science-scope".into()), 40.0),
+        ]);
+        hull.set_hp(&SystemId("science-scope".into()), 10.0);
+
+        assert_eq!(
+            resolve_repair_target(
+                &RepairTarget::Station(StationId("science".into())),
+                &cfg,
+                Some(&hull),
+            ),
+            Some(SystemId("science-scope".into())),
+        );
     }
 }

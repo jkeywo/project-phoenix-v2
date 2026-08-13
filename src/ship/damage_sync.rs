@@ -83,8 +83,14 @@ pub fn sync_console_damage_tiers(
 /// with both `EntitySystemHull` and `LastSystemTiers`, compares the current
 /// tier (via `tier_for`) against the last-seen tier.  On a crossing to a
 /// *worse* tier, enqueues a `RepairRequest` for the system's owning station
-/// (or `"core"` for ownerless systems).  Destroyed systems are skipped —
-/// they are unrepairable.
+/// (or `"core"` for ownerless systems).
+///
+/// A crossing INTO `Destroyed` files a `RepairRequest` like any other, and
+/// additionally raises the captain Alert. Until issue #1013 it filed nothing —
+/// a destroyed system was unrepairable, so the alert was all there was to say —
+/// which meant a system knocked from `Operational` straight to `Destroyed` by
+/// one hit was never reported to Repair at all and no team was ever sent. The
+/// sweep repairs destroyed systems now, so the request is the one that matters.
 pub fn detect_damage_tier_crossings(
     mut ships: Query<(
         Entity,
@@ -169,7 +175,22 @@ pub fn detect_damage_tier_crossings(
                         },
                         sender_label: system_id.0.clone(),
                     });
-                    continue;
+                    // NO `continue` here (issue #1013). The Alert is an
+                    // addition to the RepairRequest below, not a replacement
+                    // for it: a system that crosses straight from Operational
+                    // to Destroyed in one hit passes through no intermediate
+                    // tier, so this is its ONLY chance to be reported to
+                    // Repair, and skipping it left the station unrepairable in
+                    // practice however capable the sweep was.
+                    //
+                    // A consequence, deliberate and bounded: a system a team
+                    // keeps un-latching under sustained fire re-crosses INTO
+                    // Destroyed each cycle and so re-raises this Alert each
+                    // cycle, where pre-#1013 the crossing could only happen
+                    // once. That is the truthful report — it really was
+                    // destroyed again — and the repeat traffic is bounded
+                    // because `push_or_merge` merges the accompanying
+                    // RepairRequest rather than growing the queue.
                 }
 
                 let system_config = config.0.system(system_id);
@@ -1046,6 +1067,122 @@ mod tests {
             Some("the-enemy"),
             "a Disabled (not Destroyed) tactical radar must NOT clear the standing \
              lock — only Destroyed does"
+        );
+    }
+
+    // ── Issue #1013: a destruction is repair work, so it files a request ─────
+
+    /// A system knocked from `Operational` straight to `Destroyed` by one hit
+    /// files a `RepairRequest` naming its station at tier `Destroyed`, AND
+    /// raises the captain Alert.
+    ///
+    /// This is the one-hit case, and it is the one that used to fall through
+    /// the floor: the Destroyed arm `continue`d after the Alert, so a system
+    /// that never passed through Damaged or Disabled was never reported to
+    /// Repair at all. However capable the on-site sweep is, a station nobody
+    /// files a request for gets no team — the AI queue is fed by these
+    /// requests and nothing else (#830 removed the raw hull poll).
+    #[test]
+    fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
+        use crate::messages::SystemId;
+        use bevy::ecs::message::Messages;
+
+        let mut app = App::new();
+        app.add_message::<CoordinationEnqueue>()
+            .add_systems(Update, detect_damage_tier_crossings);
+
+        let sid = SystemId("helm-drive".into());
+        let mut config = ShipConfigComponent::default();
+        config.0.systems.clear();
+        config
+            .0
+            .systems
+            .push(crate::ship::config::SystemInstanceConfig {
+                id: sid.clone(),
+                kind: "generic".into(),
+                station: Some(crate::messages::StationId("helm".into())),
+                ai_only: false,
+                power_group: None,
+                marker: None,
+                config: None,
+            });
+
+        let hull = crate::damage::SystemHull::from_config(&[(sid.clone(), 100.0)]);
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("raider".into()),
+                crate::entity_spawner::EntitySystemHull(hull),
+                LastSystemTiers::default(),
+                config,
+                ShipSystemControlSources::default(),
+            ))
+            .id();
+
+        // Seed LastSystemTiers at full HP (Operational), then discard.
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<CoordinationEnqueue>>()
+            .clear();
+
+        // One hit, full HP to zero: Operational → Destroyed with no tier in
+        // between for an earlier request to have covered.
+        {
+            let mut e = app.world_mut().entity_mut(ship);
+            let mut hull = e
+                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .unwrap();
+            hull.0.set_hp(&sid, 0.0);
+        }
+        app.update();
+
+        let messages = app.world().resource::<Messages<CoordinationEnqueue>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<CoordinationEnqueue> = cursor.read(messages).cloned().collect();
+
+        let requests: Vec<&CoordinationEnqueue> = emitted
+            .iter()
+            .filter(|e| matches!(&e.payload, CoordinationPayload::RepairRequest { .. }))
+            .collect();
+        assert_eq!(
+            requests.len(),
+            1,
+            "a one-hit destruction must file exactly one RepairRequest, got {emitted:?}"
+        );
+        let CoordinationPayload::RepairRequest {
+            system_id,
+            station_id,
+            tier,
+            deficit,
+            ..
+        } = &requests[0].payload
+        else {
+            unreachable!("filtered above");
+        };
+        assert_eq!(system_id, &sid);
+        assert_eq!(
+            station_id, "helm",
+            "the request must name the owning station"
+        );
+        assert_eq!(
+            *tier,
+            DamageTier::Destroyed,
+            "the request must carry the Destroyed tier the AI queue ranks on"
+        );
+        assert_eq!(*deficit, Some(100.0), "the whole hull row is the deficit");
+        assert_eq!(
+            requests[0].target,
+            crate::ship::system_registry::repair_system_id(),
+            "the request must be addressed to Repair"
+        );
+
+        assert!(
+            emitted
+                .iter()
+                .any(|e| matches!(&e.payload, CoordinationPayload::Alert { .. })
+                    && e.target == crate::ship::system_registry::captain_system_id()),
+            "the captain Alert is KEPT — the request is an addition to it, not a \
+             replacement, got {emitted:?}"
         );
     }
 }

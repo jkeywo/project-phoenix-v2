@@ -820,8 +820,12 @@ weight = 1.0
 # comparator. `assigned < 1` is what makes N free teams pick N DISTINCT
 # stations. `tier_ordinal` is the DamageTier discriminant (Operational 0,
 # Damaged 1, Disabled 2, Destroyed 3) — a structural enum ordinal, which is why
-# its bounds are literals rather than params; Destroyed is excluded because a
-# repair team alone cannot lift the latch.
+# its lower bound is a literal rather than a param. The Destroyed rung (3) is
+# REACHABLE: since issue #1013 an on-site team repairs a destroyed system like
+# any other — `SystemHull::restore` has no tier gate and the first restored HP
+# un-latches it — so a destroyed station is real repair work and the eligibility
+# must not refuse it. The only tier excluded is Operational (0), which has
+# nothing to repair.
 #
 # Authored on every hull whether or not it crews repair teams: the teams gate
 # dispatch, so a ship that gains them later already has its ranking.
@@ -829,7 +833,7 @@ weight = 1.0
 sources = ["damaged-stations", "core-bucket"]
 horizon = 1e9
 switch_margin = 0.0
-eligibility = "candidate_fact(source_repair_request) > 0 and candidate_fact(assigned) < 1 and candidate_fact(tier_ordinal) > 0 and candidate_fact(tier_ordinal) < 3"
+eligibility = "candidate_fact(source_repair_request) > 0 and candidate_fact(assigned) < 1 and candidate_fact(tier_ordinal) > 0"
 
 # The bands sit INSIDE the urgent range and deliberately NOT at the DamageTier
 # thresholds — because tier strictly dominates, the deficit ladder only ever

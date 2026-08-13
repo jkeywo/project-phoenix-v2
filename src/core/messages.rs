@@ -554,20 +554,29 @@ pub enum TeamSlot {
         #[serde(default)]
         display_name: Option<String>,
         elapsed: f32,
-        /// On-site repair priority (0 = default, higher = preferred). Only
-        /// meaningful when the team is `Repairing`; set via
-        /// `SetRepairPriority` command.
+        /// On-site repair priority. Only meaningful once the team is
+        /// `Repairing`; see that variant's field.
         #[serde(default)]
         priority: Option<u8>,
     },
     /// Team is at the system performing repairs.
+    ///
+    /// A team stays in this variant for its whole visit to a station: since
+    /// issue #1013 it sweeps every non-Operational system there, rewriting
+    /// `system_id` / `display_name` in place as it moves from one to the next,
+    /// and only leaves for `Returning` when the station has nothing left.
     Repairing {
         #[serde(default)]
         system_id: Option<SystemId>,
         #[serde(default)]
         display_name: Option<String>,
-        /// On-site repair priority (0 = default, higher = preferred). Set
-        /// via `SetRepairPriority` command while the team is on site.
+        /// Which of the station's remaining repair jobs this team takes next:
+        /// a 1-based ordinal into the worst-first ranking of what is still
+        /// broken, clamped to the list, with `None` and `0` both meaning "the
+        /// worst one" (issue #1013). Set via the `SetRepairPriority` command
+        /// while the team is on site, and carried across the sweep's in-place
+        /// system hand-offs — it is a standing instruction about the station,
+        /// not a fact about one system.
         #[serde(default)]
         priority: Option<u8>,
     },
@@ -1506,10 +1515,21 @@ pub enum SystemControlPayload {
     SetTorpedoVolleyTarget {
         count: u32,
     },
-    /// Set the on-site repair priority for a specific repair team (issue #739).
-    /// Only takes effect when the team is in `Repairing` state. `priority`
-    /// is a `u8` interpreted as higher = more urgent; the host validates
-    /// through normal admission and the repair AI ignores it.
+    /// Set the on-site repair priority for a specific repair team (issue #739),
+    /// which selects where in its station's remaining work the team goes next
+    /// (issue #1013).
+    ///
+    /// Only takes effect when the team is in `Repairing` state. Since #1013 an
+    /// on-site team sweeps every non-Operational system at its station instead
+    /// of fixing one and walking home, and `priority` is the ORDINAL PICK over
+    /// that remaining work, ranked worst-first: `1` (and `0`) means "take the
+    /// worst job next", `2` "the second worst", clamped to however many jobs are
+    /// actually left. Sending a new value mid-sweep re-orders what the team has
+    /// yet to do. See `RepairTeams::set_priority` for the ranking keys.
+    ///
+    /// Until #1013 nothing read this value at all — it was stored on the slot
+    /// and dropped there, because a team that fixed exactly one system had no
+    /// next choice for a priority to steer.
     SetRepairPriority {
         team_idx: u8,
         priority: u8,

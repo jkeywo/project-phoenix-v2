@@ -41,10 +41,17 @@ pub struct RepairQueueEntry {
 }
 
 impl RepairRequestQueue {
+    /// Queue a repair request, merging into an existing entry for the same
+    /// station (worst tier and largest deficit win).
+    ///
+    /// A `Destroyed`-tier entry used to be dropped on the floor here, back when
+    /// a repair team could not lift the Destroyed latch. Issue #1013 made the
+    /// on-site sweep repair destroyed systems, so a destroyed station is a real
+    /// repair job and is queued like any other — and, just as importantly, a
+    /// station already queued at a lighter tier now takes the tier UPGRADE
+    /// through the merge below instead of the whole call returning early and
+    /// leaving a stale reading behind.
     pub fn push_or_merge(&mut self, entry: RepairQueueEntry) {
-        if entry.tier == DamageTier::Destroyed {
-            return;
-        }
         if let Some(existing) = self
             .entries
             .iter_mut()
@@ -201,6 +208,12 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 /// a `[repair]` block) tick their own teams against their own
 /// `EntitySystemHull`. Each ship applies its own `ShipModifiers.RepairRate`
 /// multiplier.
+///
+/// The ship's own `ShipConfigComponent` rides along because the sweep (issue
+/// #1013) needs to know which systems share a station. It is `Option` for the
+/// same reason the teams component is: a ship spawned without one still ticks,
+/// its teams simply falling back to the pre-sweep "fix one system, walk home"
+/// behaviour — see `RepairTeams::tick`.
 pub fn tick_repair_teams(
     time: Res<Time>,
     mut ship_q: Query<
@@ -209,6 +222,7 @@ pub fn tick_repair_teams(
             &ShipModifiers,
             &mut crate::entity_spawner::EntitySystemHull,
             Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -218,7 +232,7 @@ pub fn tick_repair_teams(
 ) {
     let dt = time.delta_secs();
 
-    for (teams_comp, modifiers, mut hull, ship_uuid) in ship_q.iter_mut() {
+    for (teams_comp, modifiers, mut hull, ship_uuid, config) in ship_q.iter_mut() {
         let Some(mut teams) = teams_comp else {
             continue;
         };
@@ -228,7 +242,9 @@ pub fn tick_repair_teams(
         // This is the only path that actually ticks a ship's teams — the global
         // `ShipRepairTeams` resource is publish-only, never ticked.
         let before = hull.0.total_current();
-        teams.0.tick(dt * repair_mult, &mut hull.0);
+        teams
+            .0
+            .tick(dt * repair_mult, &mut hull.0, config.map(|c| &c.0));
         let restored = hull.0.total_current() - before;
         if restored > 0.0 {
             if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
@@ -504,9 +520,35 @@ pub fn seed_repair_self_facts(
 /// AI-owned component (the AC5 reset invariant — see [`operate_repair_ai`]).
 /// `Returning` deliberately does not count: the team has left, so its station is
 /// free to be re-picked, exactly as before #785.
+///
+/// Issue #1013 lengthens how long a commitment lasts without changing this rule:
+/// a sweeping team stays `Repairing` while it works through its station's
+/// systems, so the station stays excluded for the whole visit rather than
+/// freeing up between systems. That is the same answer the pre-sweep code gave
+/// while a team was en route or working, just held for longer — and it is the
+/// right one, since a second team sent to a station the first is already
+/// sweeping would duplicate the trip.
+///
+/// # Why the hull is needed to answer this
+///
+/// A sweeping team MOVES between systems inside its group, and in the ownerless
+/// group it can move OFF the literal `core` row: a hull that carries two
+/// ownerless rows (the shipped `alliance_cruiser` carries `core` and `science`)
+/// buckets both under [`REPAIR_CORE_BUCKET_KEY`], so a team dispatched to
+/// `RepairTarget::Core` may legitimately be found `Repairing` `science`. The
+/// config cannot name that group — an ownerless row is by definition one
+/// `ShipConfig` does not describe, so `config.system(..)` is `None` — which is
+/// exactly why the hull decides it: a HULL-TRACKED id the config does not
+/// describe is the core bucket, and only an id the hull does not track at all
+/// (a station NAME, the `resolve_repair_target` fallback shape) is no
+/// commitment. Answering `None` for a swept-to ownerless row would drop the
+/// core bucket out of `excluded` mid-visit and let a second team be dispatched
+/// to the group the first is already sweeping — the #785 AC4 "N free teams pick
+/// N DISTINCT stations" guarantee, broken by the sweep.
 fn committed_station_for_slot(
     slot: &TeamSlot,
     config: &crate::ship_plugin::ShipConfigComponent,
+    hull: &crate::damage::SystemHull,
 ) -> Option<String> {
     let system_id = match slot {
         TeamSlot::Travelling { system_id, .. } | TeamSlot::Repairing { system_id, .. } => {
@@ -517,11 +559,20 @@ fn committed_station_for_slot(
     if system_id.0 == REPAIR_CORE_BUCKET_KEY {
         return Some(REPAIR_CORE_BUCKET_KEY.to_string());
     }
-    config
+    if let Some(station) = config
         .0
         .system(system_id)
         .and_then(|sc| sc.station.as_ref())
-        .map(|s| s.0.clone())
+    {
+        return Some(station.0.clone());
+    }
+    // Ownerless: the config gives this id no station (either it describes no
+    // such system, or it describes one with no `station`), which is the same
+    // test `repair_teams::sweep_group` and `damage_sync` use to bucket a row.
+    // Committed to the core bucket iff the hull actually tracks the row; an
+    // untracked id is a station name, which commits to nothing.
+    hull.get(system_id)
+        .map(|_| REPAIR_CORE_BUCKET_KEY.to_string())
 }
 
 /// Aggregate a station's observable hull damage: `(damage_fraction,
@@ -603,9 +654,11 @@ fn station_damage_readings(
 ///
 /// Policies are stateless and #785 adds NO new AI state component. The two
 /// carriers of retained state are both authoritative:
-///   1. `RepairRequestQueue.entries`, pruned below the moment a station has no
-///      non-Operational / non-Destroyed system — so a completed repair's target
-///      disappears (AC4).
+///   1. `RepairRequestQueue.entries`, pruned below the moment every system in
+///      the request's group is Operational — so a completed repair's target
+///      disappears (AC4). "Group" is the station's own systems, or every
+///      ownerless hull row for the `core` bucket. Since issue #1013 a Destroyed
+///      system counts as work remaining rather than as a reason to give up.
 ///   2. The selector's hysteresis `current`, derived PER TICK from the
 ///      authoritative [`TeamSlot`] via [`committed_station_for_slot`] and never
 ///      cached. A completed repair returns the slot to `Idle` ⇒ `current` is
@@ -697,17 +750,49 @@ pub fn operate_repair_ai(
             continue;
         };
 
+        // Retain a request while ANY system in its GROUP still needs a team —
+        // the systems the config gives to that station, or, for the `core`
+        // bucket, every ownerless hull row (see the branch below; the two are
+        // one rule wearing two lookups, because a station is named by the config
+        // and the ownerless bucket can only be named by the hull).
+        //
+        // The tier predicate was `!= Operational && != Destroyed` until issue
+        // #1013: a station whose systems had all been shot to 0 HP had its
+        // request evicted, because a repair team could not lift the Destroyed
+        // latch and sending one would have been a pointless trip. The on-site
+        // sweep now repairs destroyed systems, so evicting them is what would
+        // strand them — nothing else in the game clears a Destroyed latch.
+        // `!= Operational` is now the whole test, and it is the same predicate
+        // `repair_teams::next_sweep_target` ranks candidates by, so what the
+        // dispatcher keeps sending teams for and what an arrived team works on
+        // are one rule.
         rq.entries.retain(|entry| {
             // The `core` bucket owns NO station in `ShipConfig` — validation
             // actively forbids a station with that id, and `damage_sync` files
-            // ownerless systems under it — so the station-owned scan below would
-            // find zero systems and prune every core request. Prune it against
-            // its own hull entry instead, the same repairable-tier test.
+            // EVERY ownerless system under it — so the station-owned scan below
+            // would find zero systems and prune every core request. Prune it
+            // against the hull instead, over the whole ownerless GROUP.
+            //
+            // The group, not just the `core` row: `damage_sync` addresses a
+            // request for any system the config gives no station to under this
+            // one id, and a hull may carry several such rows (the shipped
+            // `alliance_cruiser` carries `core` and `science`). Testing only the
+            // literal `core` row evicted the request whenever `core` itself was
+            // Operational, so a destroyed sibling was never dispatched for and
+            // stayed destroyed forever — nothing else in the game clears the
+            // latch. This is deliberately the same set `repair_teams::
+            // sweep_group` calls ownerless and the same `!= Operational` test
+            // `next_sweep_target` ranks by, so what the dispatcher keeps sending
+            // teams for and what an arrived team works on are one rule.
             if entry.station_id == REPAIR_CORE_BUCKET_KEY {
-                let t = hull
-                    .0
-                    .tier_for(&SystemId(REPAIR_CORE_BUCKET_KEY.to_string()));
-                return t != DamageTier::Operational && t != DamageTier::Destroyed;
+                return hull.0.iter().any(|(sid, _)| {
+                    config
+                        .0
+                        .system(sid)
+                        .and_then(|s| s.station.as_ref())
+                        .is_none()
+                        && hull.0.tier_for(sid) != DamageTier::Operational
+                });
             }
             config
                 .0
@@ -716,10 +801,7 @@ pub fn operate_repair_ai(
                 .filter(|s| {
                     s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
                 })
-                .any(|s| {
-                    let t = hull.0.tier_for(&s.id);
-                    t != DamageTier::Operational && t != DamageTier::Destroyed
-                })
+                .any(|s| hull.0.tier_for(&s.id) != DamageTier::Operational)
         });
 
         // Free team indices, ASCENDING — the deterministic visit order (AC4).
@@ -744,7 +826,7 @@ pub fn operate_repair_ai(
             .0
             .slots()
             .iter()
-            .filter_map(|slot| committed_station_for_slot(slot, config))
+            .filter_map(|slot| committed_station_for_slot(slot, config, &hull.0))
             .collect();
 
         // No authored `[repair.selector]` ⇒ no component ⇒ no dispatch ranking.
@@ -881,7 +963,7 @@ pub fn operate_repair_ai(
                 .0
                 .slots()
                 .get(team_idx)
-                .and_then(|slot| committed_station_for_slot(slot, config));
+                .and_then(|slot| committed_station_for_slot(slot, config, &hull.0));
 
             let Some(winner) = selector_comp.selector.select(
                 &self_ctx,
@@ -1059,6 +1141,58 @@ mod tests {
             .dispatch(idx, sid, name.to_string());
     }
 
+    /// Damage the named systems on the LocalShip's hull, adding a row for any
+    /// the fixture hull does not already carry.
+    ///
+    /// The ids passed here are always systems the shipped battleship config
+    /// (`ShipConfigComponent::default()`) OWNS from the station under test, so a
+    /// `RepairTarget::Station` dispatch resolves through `systems_for_station`
+    /// rather than through the station-name fallback.
+    ///
+    /// That matters since the issue #1013 review: `resolve_repair_target` no
+    /// longer falls back to `SystemId(station_id)` when the station's own name
+    /// is also a hull row, because such a row is OWNERLESS (bucketed under
+    /// `core`) and sweeping from it would walk the team out of the station it
+    /// was sent to. This fixture's coarse `helm`/`tactical`/`power`/`shields`
+    /// rows are exactly that shape, so the dispatch tests below name the fine
+    /// systems a production console would — the console's target list is built
+    /// from the ship's fine hull rows.
+    ///
+    /// HP is set to 80% of max: below max, so the system is a resolvable repair
+    /// target, but still `Operational`, so no tier crossing fires and no
+    /// unrelated console is taken offline.
+    fn damage_owned_fine_systems(app: &mut App, systems: &[&str]) {
+        let local_ship = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+            q.single(app.world()).expect("one LocalShip")
+        };
+        let mut rows: Vec<(SystemId, f32)> = app
+            .world()
+            .get::<crate::entity_spawner::EntitySystemHull>(local_ship)
+            .expect("LocalShip must carry EntitySystemHull")
+            .0
+            .iter()
+            .map(|(sid, entry)| (sid.clone(), entry.max))
+            .collect();
+        for id in systems {
+            let sid = SystemId((*id).into());
+            if !rows.iter().any(|(existing, _)| *existing == sid) {
+                rows.push((sid, 25.0));
+            }
+        }
+        let mut hull = SystemHull::from_config(&rows);
+        for id in systems {
+            let sid = SystemId((*id).into());
+            let max = hull.get(&sid).expect("just built this row").max;
+            hull.set_hp(&sid, max * 0.8);
+        }
+        app.world_mut()
+            .entity_mut(local_ship)
+            .insert(crate::entity_spawner::EntitySystemHull(hull));
+    }
+
     fn repair_bb(app: &mut App) -> RepairBlackboard {
         let mut q = app
             .world_mut()
@@ -1181,6 +1315,7 @@ mod tests {
     fn dispatch_sends_team_to_travelling() {
         let mut app = test_app();
         start_game(&mut app);
+        damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
 
         push(
             &mut app,
@@ -1279,6 +1414,12 @@ mod tests {
     fn all_busy_teams_ignore_further_dispatches() {
         let mut app = test_app();
         start_game(&mut app);
+        // One owned fine system per station this test addresses, so each
+        // dispatch resolves without the (now refused) station-name fallback.
+        damage_owned_fine_systems(
+            &mut app,
+            &["helm-engine-port", "tactical-radar", "power-reactor"],
+        );
 
         // Dispatch both teams (default is 2).
         push(
@@ -1334,6 +1475,7 @@ mod tests {
     fn repair_state_broadcast_includes_team_slots() {
         let mut app = test_app();
         start_game(&mut app);
+        damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
 
         push(
             &mut app,
@@ -1366,6 +1508,7 @@ mod tests {
     fn control_system_dispatch_authorized_sends_team_to_travelling() {
         let mut app = test_app();
         start_game(&mut app);
+        damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
 
         push(
             &mut app,
@@ -1567,9 +1710,21 @@ mod tests {
     }
 
     /// A queue entry whose station's only system transitions Disabled→Destroyed
-    /// must be evicted by the retain predicate (zombie-entry regression).
+    /// must be RETAINED by the retain predicate (issue #1013 — the direct
+    /// inverse of the pre-#1013 eviction).
+    ///
+    /// A destroyed system used to be treated as a lost cause, so its station's
+    /// request was dropped and no team was ever sent again. Now the on-site
+    /// sweep repairs destroyed systems, so dropping the request is precisely
+    /// what would strand them: nothing else in the game clears a Destroyed
+    /// latch.
+    ///
+    /// The predicate below is a copy of `operate_repair_ai`'s `rq.entries.retain`
+    /// body. Change one and change the other — see
+    /// `prune_retains_an_all_destroyed_station_through_the_ai_loop` for the test
+    /// that runs the production copy.
     #[test]
-    fn queue_entry_evicted_when_all_systems_destroyed() {
+    fn queue_entry_retained_when_all_systems_destroyed() {
         use crate::damage::SystemHull;
         use crate::ship::config::{ShipConfig, SystemInstanceConfig};
 
@@ -1616,16 +1771,30 @@ mod tests {
                 .filter(|s| {
                     s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
                 })
-                .any(|s| {
-                    let t = hull.tier_for(&s.id);
-                    t != crate::damage::DamageTier::Operational
-                        && t != crate::damage::DamageTier::Destroyed
-                })
+                .any(|s| hull.tier_for(&s.id) != crate::damage::DamageTier::Operational)
         });
 
+        assert_eq!(
+            rq.entries.len(),
+            1,
+            "queue entry must be retained when all station systems are Destroyed \
+             — the sweep can repair them"
+        );
+
+        // …and it IS dropped once the station is genuinely fixed.
+        hull.set_hp(&system_id, 25.0);
+        rq.entries.retain(|entry| {
+            config
+                .systems
+                .iter()
+                .filter(|s| {
+                    s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
+                })
+                .any(|s| hull.tier_for(&s.id) != crate::damage::DamageTier::Operational)
+        });
         assert!(
             rq.entries.is_empty(),
-            "queue entry must be evicted when all station systems are Destroyed"
+            "a fully repaired station's entry must still be evicted"
         );
     }
 
@@ -1909,18 +2078,12 @@ mod tests {
     fn set_repair_priority_on_repairing_team_sets_priority() {
         let mut app = test_app();
         start_game(&mut app);
-        // Use the hull with helm at reduced HP so the team doesn't immediately
-        // leave when it arrives.
-        {
-            let mut q = app.world_mut().query_filtered::<
-                &mut crate::entity_spawner::EntitySystemHull,
-                With<crate::simulation::LocalShip>,
-            >();
-            if let Ok(mut hull) = q.single_mut(app.world_mut()) {
-                hull.0
-                    .set_hp(&crate::messages::SystemId("helm".into()), 10.0);
-            }
-        }
+        // Damage a system the `helm` station OWNS so the dispatch resolves to
+        // it and the team has work to do on arrival rather than leaving again.
+        // (Damaging the bare `helm` hull ROW no longer works: it is a station
+        // NAME, and since the #1013 review `resolve_repair_target` refuses to
+        // fall back to a name that is also an ownerless hull row.)
+        damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
 
         // Dispatch team 0 to helm.
         push(
@@ -2035,8 +2198,12 @@ mod tests {
             ("alpha", "alpha-sys", alpha_hp),
             ("bravo", "bravo-sys", bravo_hp),
         ] {
+            // Everything non-Operational is queued, Destroyed included: since
+            // issue #1013 a destroyed station is a real repair job, and the
+            // production enqueue (`RepairRequestQueue::push_or_merge`) no
+            // longer drops it either.
             let tier = hull.tier_for(&SystemId(sid.into()));
-            if tier == DamageTier::Operational || tier == DamageTier::Destroyed {
+            if tier == DamageTier::Operational {
                 continue;
             }
             queue.push_or_merge(RepairQueueEntry {
@@ -2541,6 +2708,190 @@ mod tests {
         );
     }
 
+    // ── The ownerless GROUP, not just the `core` row (issue #1013 review) ─────
+
+    /// A CRUISER-SHAPED hull: two ownerless rows, not one.
+    ///
+    /// `alliance_cruiser` authors a `science` `[[hull.system_hull]]` with no
+    /// `[[system]]` behind it, so it joins `core` in the ownerless bucket —
+    /// every other shipped hull's ownerless group is `{core}` alone, which is
+    /// why unit fixtures never exposed this. `hull` carries `core` at full HP,
+    /// the ownerless `science` row destroyed, and a station-owned `helm-sys` at
+    /// full HP that must NOT be mistaken for ownerless.
+    fn spawn_two_ownerless_rows(
+        app: &mut App,
+        team_count: usize,
+        core_hp: f32,
+        science_max: f32,
+    ) -> Entity {
+        use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+        let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
+        resolver.set(
+            repair_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+
+        let mut hull = crate::damage::SystemHull::from_config(&[
+            (SystemId(REPAIR_CORE_BUCKET_KEY.into()), 20.0_f32),
+            (SystemId("science".into()), science_max),
+            (SystemId("helm-sys".into()), 20.0),
+        ]);
+        hull.set_hp(&SystemId(REPAIR_CORE_BUCKET_KEY.into()), core_hp);
+        hull.set_hp(&SystemId("science".into()), 0.0);
+
+        // `damage_sync` files EVERY ownerless system's request under this one
+        // id, so the destroyed `science` row is reported as a `core` request.
+        let mut queue = RepairRequestQueue::default();
+        queue.push_or_merge(RepairQueueEntry {
+            station_id: REPAIR_CORE_BUCKET_KEY.into(),
+            station_label: REPAIR_CORE_BUCKET_KEY.into(),
+            tier: DamageTier::Destroyed,
+            deficit: science_max,
+        });
+
+        // Only `helm-sys` is described; `core` and `science` are ownerless.
+        let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
+            stations: vec![],
+            systems: vec![SystemInstanceConfig {
+                id: SystemId("helm-sys".into()),
+                kind: "generic".into(),
+                station: Some(StationId("helm".into())),
+                ai_only: false,
+                power_group: None,
+                marker: None,
+                config: None,
+            }],
+            power_groups: Default::default(),
+            coordination_lag_secs: 2.0,
+        });
+
+        app.world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                crate::entity_spawner::EntityUuid("npc-two-ownerless".into()),
+                ShipSystemControlSources(resolver),
+                ShipRepairTeams(crate::repair_teams::RepairTeams::new(team_count)),
+                crate::entity_spawner::EntitySystemHull(hull),
+                crate::modifiers::ShipModifiers::new(),
+                queue,
+                config,
+                crate::messages::AdmittedCommands::default(),
+                RepairTargetSelector {
+                    selector: crate::entities::authored_ai_pins::shipped_selector_toml("repair")
+                        .to_selector()
+                        .expect("the shipped Repair selector decodes"),
+                    power_rating: None,
+                },
+            ))
+            .id()
+    }
+
+    fn queue_station_ids(app: &App, entity: Entity) -> Vec<String> {
+        app.world()
+            .get::<RepairRequestQueue>(entity)
+            .expect("ship must carry RepairRequestQueue")
+            .entries
+            .iter()
+            .map(|e| e.station_id.clone())
+            .collect()
+    }
+
+    /// The core request must survive while ANY ownerless row still needs a team,
+    /// not just while the literal `core` row does — and the team it keeps alive
+    /// must actually reach and repair that row.
+    ///
+    /// Before the fix the prune tested `tier_for(SystemId("core"))` alone, so a
+    /// cruiser with `core` Operational and `science` destroyed had the entry
+    /// evicted on the first tick: no request, no candidate, no team, and nothing
+    /// else in the game clears a Destroyed latch — the row stayed destroyed for
+    /// the rest of the match.
+    #[test]
+    fn core_request_survives_while_a_non_core_ownerless_row_is_damaged() {
+        let mut app = npc_repair_app();
+        // `core` at FULL HP — the whole point: the literal core row is
+        // Operational and only its ownerless sibling needs work.
+        let npc = spawn_two_ownerless_rows(&mut app, 1, 20.0, 4.0);
+
+        app.update();
+
+        assert_eq!(
+            queue_station_ids(&app, npc),
+            vec![REPAIR_CORE_BUCKET_KEY.to_string()],
+            "the core request must be retained while a non-core ownerless row \
+             is non-Operational, even with `core` itself Operational"
+        );
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some(REPAIR_CORE_BUCKET_KEY),
+            "and a team must be dispatched for it"
+        );
+
+        // 5 s travel, then the sweep on to `science` and 8 s to restore 4 HP at
+        // 0.5 HP/s.
+        // The virtual clock is clamped to its 0.25 s `max_delta`, so an update is
+        // 0.25 s: 20 ticks of travel, then 4 HP at 0.5 HP/s is 32 more.
+        for _ in 0..120 {
+            app.update();
+        }
+
+        let hull = &app
+            .world()
+            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .expect("hull")
+            .0;
+        assert!(
+            hull.current_for(&SystemId("science".into())).unwrap() > 0.0,
+            "the dispatched team must have swept from `core` on to the destroyed \
+             ownerless `science` row and restored it"
+        );
+        assert_eq!(
+            hull.tier_for(&SystemId("science".into())),
+            DamageTier::Operational,
+            "and worked it back to Operational"
+        );
+        assert!(
+            queue_station_ids(&app, npc).is_empty(),
+            "only once EVERY ownerless row is Operational is the request pruned"
+        );
+    }
+
+    /// AC4 ("N free teams pick N DISTINCT stations") must hold for the WHOLE
+    /// visit, including after the team sweeps off the literal `core` row.
+    ///
+    /// A team that walks from `core` to the ownerless `science` row is still
+    /// committed to the core bucket, but the config cannot say so — an ownerless
+    /// row is by definition one the config does not describe. Before the fix
+    /// `committed_station_for_slot` returned `None` for it, the core bucket
+    /// dropped out of `excluded`, and a second team was dispatched to the group
+    /// the first was already sweeping.
+    #[test]
+    fn a_second_team_is_not_dispatched_to_a_core_bucket_being_swept() {
+        let mut app = npc_repair_app();
+        // `core` damaged but cheap to finish (2 of 20 HP missing ⇒ 4 s of work
+        // after 5 s of travel), so the team sweeps on to the long `science` job
+        // (40 HP ⇒ 80 s) well inside the run and is still on it at the end.
+        let npc = spawn_two_ownerless_rows(&mut app, 2, 18.0, 40.0);
+
+        let mut team_zero_reached_science = false;
+        for tick_idx in 0..120 {
+            app.update();
+            let systems = team_systems(&app, npc);
+            assert_eq!(
+                systems[1], None,
+                "team 1 must stay idle while team 0 sweeps the core bucket \
+                 (tick {tick_idx}, slots {systems:?})"
+            );
+            if systems[0].as_deref() == Some("science") {
+                team_zero_reached_science = true;
+            }
+        }
+        assert!(
+            team_zero_reached_science,
+            "fixture precondition: team 0 must actually sweep off the `core` row \
+             on to `science`, or the regression is not being exercised"
+        );
+    }
+
     /// `pop_worst` / `peek` must not depend on queue insertion order when two
     /// entries tie on tier and deficit (the residual `max_by` last-wins edge).
     #[test]
@@ -2595,5 +2946,258 @@ mod tests {
         near(self_facts.get("total_hull_health_fraction"), 0.75);
         assert_eq!(self_facts.get("power_rating"), Some(3.0));
         assert_eq!(self_facts.get("red_alert"), Some(1.0));
+    }
+
+    // ── Destroyed systems are repair work now (issue #1013) ──────────────────
+
+    /// The PRODUCTION prune, not the copy in
+    /// `queue_entry_retained_when_all_systems_destroyed`: `operate_repair_ai`'s
+    /// `rq.entries.retain` must keep an all-Destroyed station's request, because
+    /// the on-site sweep can repair it. Before #1013 this entry was evicted on
+    /// the first AI tick and the station was stranded.
+    ///
+    /// Retention alone is not the property that matters, so this also asserts
+    /// the free team is actually DISPATCHED to the destroyed station. A queue
+    /// entry the AUTHORED eligibility then refuses (the retired
+    /// `candidate_fact(tier_ordinal) < 3` clause) is a queue entry that survives
+    /// the prune and steers nothing — the team sits idle beside a station only
+    /// it can fix. That is the assertion the sweep's own tests could not make,
+    /// because they never run the selector.
+    #[test]
+    fn prune_retains_an_all_destroyed_station_through_the_ai_loop() {
+        let mut app = npc_repair_app();
+        // alpha flattened to 0 → Destroyed; bravo untouched.
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            0.0,
+            100.0,
+            1,
+            None,
+        );
+        assert_eq!(
+            app.world()
+                .get::<crate::entity_spawner::EntitySystemHull>(npc)
+                .unwrap()
+                .0
+                .tier_for(&SystemId("alpha-sys".into())),
+            DamageTier::Destroyed,
+            "fixture precondition: alpha must be Destroyed"
+        );
+        assert_eq!(
+            app.world().get::<RepairRequestQueue>(npc).unwrap().len(),
+            1,
+            "fixture precondition: the destroyed station is queued"
+        );
+
+        app.update();
+
+        let stations: Vec<String> = app
+            .world()
+            .get::<RepairRequestQueue>(npc)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|e| e.station_id.clone())
+            .collect();
+        assert_eq!(
+            stations,
+            vec!["alpha".to_string()],
+            "an all-Destroyed station's request must survive the prune"
+        );
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some("alpha-sys"),
+            "the free team must actually be dispatched to the destroyed station — \
+             a retained request the authored eligibility refuses would leave the \
+             team idle and the station stranded exactly as before #1013"
+        );
+    }
+
+    /// `push_or_merge` no longer drops a Destroyed-tier request on the floor,
+    /// and a station already queued at a lighter tier takes the UPGRADE instead
+    /// of the whole call bailing out.
+    #[test]
+    fn destroyed_tier_requests_are_queued_and_merged() {
+        let mut rq = RepairRequestQueue::default();
+        rq.push_or_merge(RepairQueueEntry {
+            station_id: "alpha".into(),
+            station_label: "Alpha".into(),
+            tier: DamageTier::Destroyed,
+            deficit: 100.0,
+        });
+        assert_eq!(rq.len(), 1, "a Destroyed request must be queued");
+
+        let mut rq = RepairRequestQueue::default();
+        rq.push_or_merge(RepairQueueEntry {
+            station_id: "alpha".into(),
+            station_label: "Alpha".into(),
+            tier: DamageTier::Disabled,
+            deficit: 40.0,
+        });
+        rq.push_or_merge(RepairQueueEntry {
+            station_id: "alpha".into(),
+            station_label: "Alpha".into(),
+            tier: DamageTier::Destroyed,
+            deficit: 100.0,
+        });
+        assert_eq!(rq.len(), 1, "same station, so still one entry");
+        assert_eq!(rq.peek().unwrap().tier, DamageTier::Destroyed);
+        assert_eq!(rq.peek().unwrap().deficit, 100.0);
+    }
+
+    /// End-to-end through the human dispatch path: a station whose only system
+    /// is Destroyed accepts a team, which arrives, repairs it, and un-latches
+    /// the tier. Before #1013 `resolve_repair_target` skipped the 0-HP system
+    /// and the team bounced off it on arrival.
+    #[test]
+    fn destroyed_station_is_dispatched_to_and_repaired_end_to_end() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        let destroyed = SystemId("helm-engine-port".into());
+        {
+            let mut query = app.world_mut().query_filtered::<
+                &mut crate::entity_spawner::EntitySystemHull,
+                With<crate::simulation::LocalShip>,
+            >();
+            let mut hull = query
+                .single_mut(app.world_mut())
+                .expect("test fixture must contain one LocalShip hull");
+            hull.0.set_hp(&destroyed, 0.0);
+            assert_eq!(hull.0.tier_for(&destroyed), DamageTier::Destroyed);
+        }
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId(REPAIR_SYSTEM_ID.into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+        tick(&mut app);
+
+        {
+            let teams = local_teams(&mut app);
+            let TeamSlot::Travelling { system_id, .. } = &teams.0.slots()[0] else {
+                panic!(
+                    "team 0 must be sent to the Destroyed system, got {:?}",
+                    teams.0.slots()[0]
+                );
+            };
+            assert_eq!(
+                system_id.as_ref(),
+                Some(&destroyed),
+                "the worst system on the station is the Destroyed one"
+            );
+        }
+
+        // 5 s travel at 0.2 s per update, then a few ticks of repair.
+        for _ in 0..30 {
+            tick(&mut app);
+        }
+
+        let mut query = app.world_mut().query_filtered::<
+            &crate::entity_spawner::EntitySystemHull,
+            With<crate::simulation::LocalShip>,
+        >();
+        let hull = query
+            .single(app.world())
+            .expect("test fixture must contain one LocalShip hull");
+        assert!(
+            hull.0.current_for(&destroyed).unwrap() > 0.0,
+            "the arrived team must restore HP to the Destroyed system"
+        );
+        assert_ne!(
+            hull.0.tier_for(&destroyed),
+            DamageTier::Destroyed,
+            "any positive HP un-latches the Destroyed tier"
+        );
+    }
+
+    /// The sweep through the real Bevy tick: `tick_repair_teams` hands its
+    /// ship's own `ShipConfigComponent` to `RepairTeams::tick`, so a team that
+    /// finishes one system moves to the next one its station needs without
+    /// going `Returning` in between.
+    #[test]
+    fn tick_repair_teams_sweeps_the_station_using_the_ship_config() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // `helm-engine-port` and `helm-engine-starboard` are BOTH owned by the
+        // `helm` station in the shipped battleship config
+        // `ShipConfigComponent::default()` loads, so they share a sweep group.
+        // The fixture REPLACES the hull with exactly those two rows: the shipped
+        // battleship authors 13 `[[hull.system_hull]]` rows and none of them is
+        // named `helm` (a station name is not a hull row), so nothing in this
+        // fixture touches the ownerless bucket at all.
+        let first = SystemId("helm-engine-port".into());
+        let second = SystemId("helm-engine-starboard".into());
+        {
+            let local_ship = {
+                let mut query = app
+                    .world_mut()
+                    .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+                query.single(app.world()).expect("one LocalShip")
+            };
+            // Rebuild the hull so it carries both helm engines.
+            app.world_mut()
+                .entity_mut(local_ship)
+                .insert(crate::entity_spawner::EntitySystemHull(
+                    SystemHull::from_config(&[(first.clone(), 10.0), (second.clone(), 10.0)]),
+                ));
+            let mut hull = app
+                .world_mut()
+                .get_mut::<crate::entity_spawner::EntitySystemHull>(local_ship)
+                .unwrap();
+            hull.0.set_hp(&first, 1.0);
+            hull.0.set_hp(&second, 0.0);
+        }
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId(REPAIR_SYSTEM_ID.into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+
+        // Walk the whole visit, recording every system the team works on and
+        // whether it ever heads home mid-way.
+        let mut visited: Vec<String> = vec![];
+        let mut returned = false;
+        for _ in 0..400 {
+            tick(&mut app);
+            match &local_teams(&mut app).0.slots()[0] {
+                TeamSlot::Repairing {
+                    system_id: Some(s), ..
+                } if visited.last() != Some(&s.0) => {
+                    visited.push(s.0.clone());
+                }
+                TeamSlot::Returning { .. } => {
+                    returned = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            visited,
+            vec![
+                "helm-engine-starboard".to_string(),
+                "helm-engine-port".to_string()
+            ],
+            "the team must sweep both helm engines in one visit, worst first"
+        );
+        assert!(returned, "and only then head home");
     }
 }

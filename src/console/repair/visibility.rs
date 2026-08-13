@@ -1074,7 +1074,7 @@ mod tests {
         hull.set_hp(&SystemId("helm-radar".into()), 40.0);
         teams.dispatch(0, SystemId("helm-radar".into()), "Helm Radar".into());
         // Part-way through travel: en route is not on site.
-        teams.tick(1.0, &mut hull);
+        teams.tick(1.0, &mut hull, None);
 
         let v = vis_with_teams(&teams);
         assert!(!v.can_see(Some(&eng()), &SystemId("helm-radar".into())));
@@ -1090,7 +1090,7 @@ mod tests {
         assert!(!vis_with_teams(&teams).can_see(Some(&eng()), &SystemId("helm-radar".into())));
 
         // Travel completes (default travel_duration is 5s) → Repairing.
-        teams.tick(6.0, &mut hull);
+        teams.tick(6.0, &mut hull, None);
         let v = vis_with_teams(&teams);
         assert!(
             v.can_see(Some(&eng()), &SystemId("helm-radar".into())),
@@ -1108,13 +1108,13 @@ mod tests {
         let mut hull = hull_with(&[("helm-radar", 100.0)]);
         hull.set_hp(&SystemId("helm-radar".into()), 40.0);
         teams.dispatch(0, SystemId("helm-radar".into()), "Helm Radar".into());
-        teams.tick(2.0, &mut hull);
+        teams.tick(2.0, &mut hull, None);
         // Dispatching to the same system while Travelling is a recall.
         teams.dispatch(0, SystemId("helm-radar".into()), "Helm Radar".into());
 
         // Walk the whole return leg: at no point may the detail appear.
         for _ in 0..10 {
-            teams.tick(1.0, &mut hull);
+            teams.tick(1.0, &mut hull, None);
             assert!(
                 !vis_with_teams(&teams).can_see(Some(&eng()), &SystemId("helm-radar".into())),
                 "a recalled team never arrives, so it must never reveal detail"
@@ -1128,7 +1128,7 @@ mod tests {
         let mut hull = hull_with(&[("helm-radar", 100.0)]);
         hull.set_hp(&SystemId("helm-radar".into()), 40.0);
         teams.dispatch(0, SystemId("helm-radar".into()), "Helm Radar".into());
-        teams.tick(6.0, &mut hull);
+        teams.tick(6.0, &mut hull, None);
         assert!(vis_with_teams(&teams).can_see(Some(&eng()), &SystemId("helm-radar".into())));
 
         // Recall from Repairing → Returning: detail goes away immediately.
@@ -1347,7 +1347,7 @@ station = "engineering"
         let mut hull = hull_with(&[("helm-radar", 100.0)]);
         hull.set_hp(&SystemId("helm-radar".into()), 30.0);
         teams.dispatch(0, SystemId("helm-radar".into()), "Radar".into());
-        teams.tick(6.0, &mut hull); // arrive
+        teams.tick(6.0, &mut hull, None); // arrive
 
         let mut app = world_app(teams);
         let sent = sent_hull(&mut app);

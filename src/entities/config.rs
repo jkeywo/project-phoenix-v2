@@ -242,8 +242,13 @@ pub struct AiProfileConfig {
     /// decay is *on* out of the box, not an opt-in a designer has to remember.
     #[serde(default = "default_low_lod_cruise_fraction")]
     pub low_lod_cruise_fraction: f32,
-    /// Rate (world-units/s²) at which the low-LOD fallback's dead-reckoned
-    /// speed decays toward `low_lod_cruise_fraction * max_speed`. Issue #933.
+    /// Rate (world-units/s²) at which the low-LOD fallback moves a ship's
+    /// speed toward `low_lod_cruise_fraction * max_speed`. Bidirectional
+    /// despite the name: it is the *decay* rate for a hull demoted mid-boost
+    /// (issue #933) and equally the *ramp* rate for a parked hull getting under
+    /// way again when a completed route diverts it onto a scored `Destroy`
+    /// (issue #1012). Only route-following acceleration uses a different rate
+    /// (`LOW_LOD_ACCEL_PER_SEC` in `ai::server`, a fixed 10 u/s²).
     #[serde(default = "default_low_lod_speed_decay_per_sec")]
     pub low_lod_speed_decay_per_sec: f32,
     /// Fraction of this hull's authored `max_yaw_rate` the low-LOD fallback

@@ -1285,30 +1285,91 @@ pub(crate) fn advance_objective_cursors(
 /// which holding station would hide rather than fix. Arrival is different in
 /// kind: there the route *did* resolve and the ship is where it was sent.
 ///
+/// ## …unless the ship still has an order to carry out (issue #1012)
+///
+/// A completed route parks the ship *only* when there is nothing else scored
+/// for it to fly at. `active_waypoint_route` sees a hull's `Patrol`/`Reach`
+/// entries and nothing else, so a doctrine that authors BOTH kinds gets its
+/// route flown and its `Destroy` silently dropped on arrival. That is exactly
+/// what `combat_test.toml`'s assault waves author — `assault-starbase`
+/// (Destroy @50) *and* `close-on-starbase` (Reach @35, the run-in to
+/// `harrow_assault_point`) — and parking on the run-in point, 100 units off a
+/// station the wave was sent to kill, with its top-scoring directive unserved,
+/// is the loiter the playtest reported. So a finished route yields to a scored
+/// `Destroy` whose target resolves in the `WorldSnapshot`: the ship commits to
+/// the target instead of coasting to a stop, on the same authored turn rate and
+/// cruise fraction the dead-reckoning fallback below uses. One thing the
+/// divert does not do: honour `maintain_range` — it steers straight at the
+/// target's position with no stand-off, so a low-LOD hull that catches up
+/// overflies or circles the target at cruise speed instead of holding at the
+/// authored range, harmless at production numbers since the high-fidelity
+/// path takes over on promotion. With no such Destroy — the Requiem Courier,
+/// whose whole behaviour is one `Reach` — the coast-to-stop is untouched.
+///
+/// This reaches the unknown-anchor case too, and deliberately: a route whose
+/// anchors the world never defines reads as *completed* from the tick after the
+/// cursor skips past them (see "What "finished" does and does not mean" on
+/// `route_completed`), so post-#1012 such a ship commits to its scored Destroy
+/// rather than parking where it happened to be standing. That is the better
+/// failure mode for the same reason the warhawk paragraph gives: the content
+/// defect is an undeclared anchor, and a wave that still flies at the thing it
+/// was sent to kill is both closer to the authored intent and louder about the
+/// missing anchor than one parked in empty space.
+///
 /// # A demoted ship's frozen exit speed does not dead-reckon forever (issue #933)
 ///
 /// A ship *demoted* from high LOD mid-manoeuvre used to carry whatever
 /// `forward_speed`/`yaw` it had at that instant into the dumb drift above and
 /// keep it forever — any hull demoted while moving fast (boosted or otherwise)
 /// left the scenario permanently. Two authored corrections now apply in the
-/// dumb-drift branch, gated on `LodTransitionTimer` being present (i.e. this
-/// ship has been through at least one High↔Low transition already — a ship
-/// still in its very first Low stretch since spawn, never yet promoted, is
-/// closing on its authored spawn heading for the first time, not dead-
-/// reckoning a frozen exit velocity, and is left on the pre-#933 drift so an
-/// assault wave's scripted approach is untouched). Both corrections read off
-/// the ship's own `AiProfile` and are pure functions of tick + state (no RNG):
-/// the frozen speed decays toward `AiProfile::low_lod_cruise_fraction *
-/// max_speed` at `AiProfile::low_lod_speed_decay_per_sec`
-/// (`ai::lod::decay_speed_toward`), and a ship whose doctrine carries a
-/// standing `Destroy` directive naming a target that resolves in the
-/// (possibly stale) `WorldSnapshot` turns its dead-reckoned heading toward it
-/// at `AiProfile::low_lod_turn_rate_fraction * max_yaw_rate`
+/// dumb-drift branch. Both read off the ship's own `AiProfile` and are pure
+/// functions of tick + state (no RNG): the frozen speed moves toward
+/// `AiProfile::low_lod_cruise_fraction * max_speed` at
+/// `AiProfile::low_lod_speed_decay_per_sec` (`ai::lod::decay_speed_toward`,
+/// which ramps a stopped ship UP to the cruise fraction as readily as it decays
+/// a boosted one down to it), and a ship whose doctrine carries a standing
+/// `Destroy` directive naming a target that resolves in the (possibly stale)
+/// `WorldSnapshot` turns its heading toward it at
+/// `AiProfile::low_lod_turn_rate_fraction * max_yaw_rate`
 /// (`ai::lod::step_yaw_toward`). An untargeted Destroy (empty `target`, the
 /// same "no hostile in range" case the warhawk's routeless drift already
-/// covers) gets the cruise decay only — there is no single position to turn
-/// toward. A bare test entity with no `AiProfile` component at all keeps the
-/// pre-#933 unmodified drift regardless of transition history.
+/// covers), and any Destroy its own `zero_gates` have scored to 0, get the
+/// cruise decay only — there is no single position to turn toward. A bare test
+/// entity with no `AiProfile` component at all keeps the pre-#933 unmodified
+/// drift regardless of transition history.
+///
+/// ## Which ships the corrections reach (#933's gate, corrected by #1012)
+///
+/// Issue #933 gated both corrections on `LodTransitionTimer` being present —
+/// i.e. on the ship having been through at least one High↔Low transition —
+/// reasoning that a ship still in its first Low stretch since spawn was
+/// "closing on whatever heading/speed its template or a `spawn_entity` override
+/// set", deliberate authored content rather than a frozen exit velocity.
+/// **That premise was false.** `entity_spawner::spawn_entity` — the function
+/// that actually seeds `ShipPhysics` — takes no rotation parameter at all;
+/// the authored value never enters it, and the `Quat` it builds there is made
+/// from hardcoded zero literals, unrelated to any authored data. Every
+/// spawner-path ship's `ShipPhysics` comes up at `yaw: 0.0`,
+/// `forward_speed: 0.0` regardless. A `spawn_entity` trigger action's
+/// `rotation` is applied separately: the effect in `world/server.rs`
+/// overwrites the render `Transform` *after* `spawn_entity` returns, so it
+/// turns the rendered hull and nothing else. A static `[[entity]]` row's
+/// `rotation` is parsed but never applied anywhere —
+/// `spawn_world_entities` resolves position only. (The one authored rotation
+/// that *does* reach `ShipPhysics.yaw` is the player ship's
+/// `[mission.player_spawn].rotation` in `server_app.rs`, not a spawner-path
+/// hull.) A first-Low ship was never flying an authored approach; it was
+/// sitting still, facing -Z.
+///
+/// The exemption therefore survives only where it says something true: a
+/// first-Low ship with nothing scored to fly at keeps the pre-#933 drift — bare
+/// fixtures, and hulls whose authored drift is all the content there is. A
+/// *scored* `Destroy` that resolves in the snapshot is explicit authored intent
+/// and overrides the exemption, so such a ship gets the turn and the cruise ramp
+/// from its very first tick, promoted or not (issue #1012). A zero-gated Destroy
+/// is not scored intent and changes nothing: `active_destroy_target` filters on
+/// `score > 0.0`, so a first-Low ship already under fire still will not chase a
+/// target its own doctrine has given up on.
 ///
 /// Read-only with respect to the cursor: arrival detection and advancement
 /// belong to `advance_objective_cursors` in `SimSet::Modifiers`.
@@ -1407,7 +1468,38 @@ fn simulate_low_lod_ships(
         let self_uuid = entity_uuid
             .and_then(|u| uuid::Uuid::parse_str(&u.0).ok())
             .unwrap_or_default();
+        let max_yaw_rate = helm_section
+            .map(|h| h.0.max_yaw_rate)
+            .filter(|&r| r > 0.0)
+            .unwrap_or(LOW_LOD_DEFAULT_MAX_YAW_RATE);
         let route = blackboards.and_then(active_waypoint_route);
+
+        // Where this ship's *top-scoring, still-qualifying* standing `Destroy`
+        // directive points, if it names a target that resolves in the (possibly
+        // stale) `WorldSnapshot`. Resolved through the scored pool
+        // (`active_destroy_target`) rather than the first `directive_kind ==
+        // "Destroy"` entry in authoring order, so this agrees with
+        // `plan_helm_travel`/`score_doctrine_pool` instead of steering at a
+        // target the high-LOD Helm has already given up on (issue #933 review
+        // follow-up). Untargeted Destroy directives (auto-acquire, empty
+        // target) and zero-gated ones resolve to `None` — there is nothing
+        // deterministic to turn toward.
+        //
+        // A closure rather than a value: a ship following a live route never
+        // asks, so the snapshot scan is paid only where it can change the
+        // outcome.
+        let resolve_destroy_target = || -> Option<[f32; 3]> {
+            blackboards
+                .and_then(active_destroy_target)
+                .and_then(|target_name| {
+                    world_snapshot.as_ref().and_then(|snap| {
+                        snap.entities
+                            .iter()
+                            .find(|e| e.name.as_deref() == Some(target_name.as_str()))
+                            .map(|e| e.position)
+                    })
+                })
+        };
 
         // Steer along the route only when we have a Patrol/Reach objective AND
         // a `ObjectiveCursors` component tracking the waypoint index. A low-LOD
@@ -1460,12 +1552,37 @@ fn simulate_low_lod_ships(
                 continue;
             }
             // Route flown to its end: the ship is where its objective sent it.
-            // Coast to a stop on the same ramp it accelerated on rather than
-            // drifting on forever — see "Arriving is not the same as having
-            // nowhere to go" above.
             if crate::ai::patrol_cursor::route_completed(index, &waypoints, loop_path) {
-                physics.forward_speed =
-                    (physics.forward_speed - LOW_LOD_ACCEL_PER_SEC * dt).max(0.0);
+                // The `ai_profile` test is the OUTER one, and `and_then` is
+                // lazy, so a hull with no `AiProfile` never pays for
+                // `resolve_destroy_target`'s snapshot scan: it has no authored
+                // cruise/turn tuning to commit with, so the answer could not
+                // change what it does. Matching on the `(ai_profile, ...)` pair
+                // would evaluate the scan for every such ship every tick.
+                if let Some((profile, target_pos)) =
+                    ai_profile.and_then(|p| resolve_destroy_target().map(|pos| (p, pos)))
+                {
+                    // …but arriving is not the same as being done. A scored
+                    // `Destroy` outranks a finished run-in: the route was the
+                    // approach, the Destroy is the point of it, and parking on
+                    // the anchor is the loiter issue #1012 is about. Commit —
+                    // same authored turn rate and cruise fraction the
+                    // dead-reckoning fallback below uses.
+                    low_lod_objective_steer(
+                        &mut physics,
+                        Some(target_pos),
+                        profile,
+                        max_speed,
+                        max_yaw_rate,
+                        dt,
+                    );
+                } else {
+                    // Nothing left to fly at: coast to a stop on the same ramp
+                    // it accelerated on rather than drifting on forever — see
+                    // "Arriving is not the same as having nowhere to go" above.
+                    physics.forward_speed =
+                        (physics.forward_speed - LOW_LOD_ACCEL_PER_SEC * dt).max(0.0);
+                }
                 physics.yaw = low_lod_avoid_yaw(
                     physics.yaw,
                     [physics.x, 0.0, physics.z],
@@ -1495,70 +1612,41 @@ fn simulate_low_lod_ships(
         // moment of demotion, it kept forever, so a hull demoted mid-manoeuvre
         // at boosted speed left the scenario permanently (issue #933). Two
         // authored, deterministic corrections apply now, both driven off this
-        // ship's own `AiProfile`, and both gated on `LodTransitionTimer` being
-        // present — i.e. this ship has been through at least one LOD
-        // transition already. A ship in its very first Low-fidelity stretch
-        // since spawn (no timer yet: it has never been High) has not been
-        // "demoted" in the sense issue #933 means and keeps the old drift
-        // unmodified — it is still closing distance for the first time on
-        // whatever heading/speed its template or a `spawn_entity` override
-        // set, which is deliberate authored content (e.g. an assault wave
-        // flying in from its spawn anchor), not a frozen exit velocity. Only
-        // once a ship has actually been promoted and demoted does the
-        // dead-reckoning correction apply. A bare test entity with no
-        // `AiProfile` at all is left alone regardless, preserving existing
-        // coverage that never opted into low-LOD authoring:
-        if let (Some(profile), true) = (ai_profile, lod_timer.is_some()) {
-            // (1) Decay the frozen speed toward a sane cruise fraction of this
-            // hull's authored max_speed rather than dead-reckoning at whatever
-            // speed it happened to be going the moment it was demoted.
-            let cruise_speed = max_speed * profile.low_lod_cruise_fraction;
-            physics.forward_speed = crate::ai::lod::decay_speed_toward(
-                physics.forward_speed,
-                cruise_speed,
-                profile.low_lod_speed_decay_per_sec,
-                dt,
-            );
-
-            // (2) A ship carrying a *top-scoring, still-qualifying* standing
-            // `Destroy` directive with a named (non-empty) target that
-            // resolves in the (possibly stale) `WorldSnapshot` gently turns
-            // its dead-reckoned heading back toward it, instead of coasting
-            // on its frozen exit heading. Untargeted Destroy directives
-            // (auto-acquire, empty target) — and any Destroy that scores 0
-            // under its own `zero_gates` (e.g. `not_attacked` once this ship
-            // has taken fire) — have no single position to turn toward and
-            // get the cruise decay above only. Resolved through the scored
-            // pool (`active_destroy_target`) rather than the first
-            // `directive_kind == "Destroy"` entry in authoring order, so this
-            // agrees with `plan_helm_travel`/`score_doctrine_pool` instead of
-            // steering a demoted ship at a target the high-LOD Helm has
-            // already given up on (issue #933 review follow-up).
-            let destroy_target_pos =
-                blackboards
-                    .and_then(active_destroy_target)
-                    .and_then(|target_name| {
-                        world_snapshot.as_ref().and_then(|snap| {
-                            snap.entities
-                                .iter()
-                                .find(|e| e.name.as_deref() == Some(target_name.as_str()))
-                                .map(|e| e.position)
-                        })
-                    });
-
-            if let Some(target_pos) = destroy_target_pos {
-                let dx = target_pos[0] - physics.x;
-                let dz = target_pos[2] - physics.z;
-                if dx * dx + dz * dz > f32::EPSILON {
-                    let desired_yaw = simmath::atan2(dx, -dz);
-                    let max_yaw_rate = helm_section
-                        .map(|h| h.0.max_yaw_rate)
-                        .filter(|&r| r > 0.0)
-                        .unwrap_or(LOW_LOD_DEFAULT_MAX_YAW_RATE);
-                    let max_step = max_yaw_rate * profile.low_lod_turn_rate_fraction * dt;
-                    physics.yaw =
-                        crate::ai::lod::step_yaw_toward(physics.yaw, desired_yaw, max_step);
-                }
+        // ship's own `AiProfile`, and they reach a ship for either of two
+        // reasons:
+        //
+        //   * `LodTransitionTimer` is present — the ship has been through at
+        //     least one LOD transition, so its speed and heading really are a
+        //     frozen exit velocity. That is issue #933's case.
+        //   * a scored `Destroy` resolves — the ship has an order to carry out.
+        //     A ship in its very first Low stretch since spawn used to be
+        //     exempt outright, on the since-disproved premise that its heading
+        //     was authored content worth protecting. `entity_spawner::spawn_entity`
+        //     takes no rotation parameter — the authored value never reaches
+        //     it, and `ShipPhysics` is seeded at `yaw: 0.0` regardless. A
+        //     `spawn_entity` trigger's `rotation` and a static `[[entity]]`
+        //     row's `rotation` both land on the render `Transform` only,
+        //     applied after the sim state is already set — so every
+        //     spawner-path ship starts facing -Z at zero speed and there was
+        //     never an authored approach there to preserve. A wave told to
+        //     kill something must be allowed to turn and go (issue #1012).
+        //
+        // A first-Low ship with NOTHING scored to fly at still keeps the
+        // pre-#933 drift — that is the half of the exemption that was true —
+        // and a bare test entity with no `AiProfile` at all is left alone
+        // either way, preserving existing coverage that never opted into
+        // low-LOD authoring:
+        if let Some(profile) = ai_profile {
+            let destroy_target_pos = resolve_destroy_target();
+            if lod_timer.is_some() || destroy_target_pos.is_some() {
+                low_lod_objective_steer(
+                    &mut physics,
+                    destroy_target_pos,
+                    profile,
+                    max_speed,
+                    max_yaw_rate,
+                    dt,
+                );
             }
         }
 
@@ -1573,6 +1661,52 @@ fn simulate_low_lod_ships(
         );
         physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
         physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
+    }
+}
+
+/// The low-LOD "carry out the standing order" correction: bring `forward_speed`
+/// to this hull's authored cruise fraction and, when a scored `Destroy` target
+/// resolved, turn the heading toward it at the authored fraction of the hull's
+/// `max_yaw_rate`.
+///
+/// One function so the two callers in [`simulate_low_lod_ships`] — a ship that
+/// has flown its run-in to the end (issue #1012) and a ship dead-reckoning with
+/// no route at all (issue #933) — cannot drift apart on how hard a low-LOD ship
+/// commits. `destroy_target_pos` is `None` for an untargeted or zero-gated
+/// Destroy, in which case the speed correction applies alone: there is no single
+/// position to turn toward.
+///
+/// `decay_speed_toward` is bidirectional, so this is a *ramp* for a ship parked
+/// on its arrival anchor at zero speed just as much as it is a decay for one
+/// demoted mid-boost. Pure function of tick + state: no RNG, no hidden clock.
+fn low_lod_objective_steer(
+    physics: &mut ShipPhysics,
+    destroy_target_pos: Option<[f32; 3]>,
+    profile: &AiProfile,
+    max_speed: f32,
+    max_yaw_rate: f32,
+    dt: f32,
+) {
+    let cruise_speed = max_speed * profile.low_lod_cruise_fraction;
+    physics.forward_speed = crate::ai::lod::decay_speed_toward(
+        physics.forward_speed,
+        cruise_speed,
+        profile.low_lod_speed_decay_per_sec,
+        dt,
+    );
+
+    let Some(target_pos) = destroy_target_pos else {
+        return;
+    };
+    let dx = target_pos[0] - physics.x;
+    let dz = target_pos[2] - physics.z;
+    if dx * dx + dz * dz > f32::EPSILON {
+        // The forward vector is (sin(yaw), -cos(yaw)), so the bearing that
+        // faces `target_pos` is `dx.atan2(-dz)` — the same world-bearing
+        // convention the route-steering branch above uses.
+        let desired_yaw = simmath::atan2(dx, -dz);
+        let max_step = max_yaw_rate * profile.low_lod_turn_rate_fraction * dt;
+        physics.yaw = crate::ai::lod::step_yaw_toward(physics.yaw, desired_yaw, max_step);
     }
 }
 
@@ -1614,7 +1748,17 @@ fn simulate_low_lod_ships(
 /// the threat, up to the hull's authored
 /// [`BehaviourConfig::low_lod_avoidance_deviation_rad`](crate::entity_config::BehaviourConfig::low_lod_avoidance_deviation_rad).
 /// A ship at full threat flies the tangent — around the obstacle — and eases
-/// back onto its route as it clears. Stateless, so nothing has to be unwound.
+/// back onto its route as it clears. Stateless, so nothing has to be unwound
+/// — true for the route branch above, where `physics.yaw` is re-snapped to
+/// the route bearing by `atan2` every tick before this runs, so the bend
+/// never accumulates. On the divert and dead-reckoning branches, though,
+/// there is no snap: this function's output IS next tick's `physics.yaw`, so
+/// a bent heading only relaxes at `low_lod_objective_steer`'s rate-limited
+/// `step_yaw_toward` — the doctrine turn rate, e.g. ~5.7s to unwind a
+/// full-magnitude bend on a Harrow destroyer diverting at full threat. That
+/// is bounded and self-correcting, not divergent — the same pre-#933
+/// property this module already relies on elsewhere, now shared by the
+/// divert as well.
 ///
 /// One consequence worth naming: the hull's `max_yaw_rate` no longer bounds this
 /// manoeuvre. The old form stepped toward a heading at `max_yaw_rate * dt`; this
@@ -4306,6 +4450,573 @@ verb = "fire_blaster"
         );
     }
 
+    // ── Low-LOD ships advance on their destroy objectives (issue #1012) ───────
+    //
+    // Two gates used to strand a Harrow assault wave short of the station:
+    //
+    //   1. a ship still in its FIRST Low stretch since spawn (no
+    //      `LodTransitionTimer`) was exempt from both dead-reckoning
+    //      corrections, on the premise that its heading was authored content.
+    //      `spawner.rs` seeds every ship at `yaw: 0.0`, `forward_speed: 0.0`,
+    //      so the premise was false and the exemption froze it in place;
+    //   2. a wave that flew its `close-on-starbase` Reach to the run-in anchor
+    //      hit `route_completed`, which is true forever after on a non-looping
+    //      route, and parked — `continue`ing before the destroy-steer could be
+    //      reached at all, timer or no timer.
+    //
+    // Both now yield to a *scored* Destroy. Neither yields to anything else.
+
+    /// The engagement geometry these tests share, mirroring `combat_test.toml`:
+    /// a starbase the wave was told to kill, at a bearing the spawn heading
+    /// (yaw 0, facing -Z) does not point at.
+    ///
+    /// Two fields are set explicitly because their defaults are traps:
+    ///
+    /// * **`uuid`** — a fixture ship whose `EntityUuid` is unparseable (or
+    ///   absent) resolves its `self_uuid` to `Uuid::nil()` via `unwrap_or_default`,
+    ///   and `avoidance_steering` skips `entity.uuid == excluded_uuid`. A nil
+    ///   uuid here would therefore delete the objective from every fixture
+    ///   ship's hazard picture — a silent exemption these tests never asked for.
+    /// * **`dangerous`** — `AiWorldEntity`'s hand-written `Default` sets it
+    ///   `true`, which is right for an obstacle and wrong for a destination.
+    ///   The low-LOD scan does not read the flag today (see "What this path
+    ///   does NOT share with `assess_hazards`" on `low_lod_avoid_yaw`), so what
+    ///   actually keeps avoidance out of these tests is distance — the ship
+    ///   never closes to within a buffer of the target. Stating it anyway
+    ///   records the intent for the day the filters do reach this path.
+    fn snapshot_with_named_entity(name: &str, position: [f32; 3]) -> WorldSnapshot {
+        WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::from_u128(0x51a7),
+                name: Some(name.to_string()),
+                position,
+                dangerous: false,
+                ..Default::default()
+            }],
+        }
+    }
+
+    /// A `HelmConsoleSection` with the authored limits the low-LOD corrections
+    /// scale off: cruise is `max_speed * low_lod_cruise_fraction` (0.5 by
+    /// parse default → 50) and the turn ceiling is `max_yaw_rate *
+    /// low_lod_turn_rate_fraction` (→ 0.5 rad/s).
+    fn test_helm_section(
+        max_speed: f32,
+        max_yaw_rate: f32,
+    ) -> crate::entities::spawner::HelmConsoleSection {
+        crate::entities::spawner::HelmConsoleSection(
+            crate::entity_config::EntityConfig::from_toml(&format!(
+                "[helm_console]\nmax_speed = {max_speed}\nmax_yaw_rate = {max_yaw_rate}\n"
+            ))
+            .unwrap()
+            .helm_console
+            .unwrap(),
+        )
+    }
+
+    /// AC1/AC2: a Harrow spawned straight into low LOD, carrying a scored
+    /// `Destroy`, steers at the objective rather than sitting on the canned
+    /// spawn heading.
+    ///
+    /// The pre-fix baseline is exact and this test is not vacuous against it:
+    /// the ship spawns exactly as `spawner.rs` seeds one (`yaw: 0.0`,
+    /// `forward_speed: 0.0`) and has no `LodTransitionTimer`, so under the old
+    /// `(ai_profile, lod_timer.is_some())` gate NEITHER correction applied —
+    /// yaw stayed 0.0, speed stayed 0.0, and the distance to the objective
+    /// stayed 1500.0 for every tick of the run. That is the loiter.
+    #[test]
+    fn first_low_ship_with_a_scored_destroy_steers_at_it_instead_of_its_spawn_heading() {
+        const TARGET: [f32; 3] = [1500.0, 0.0, 0.0];
+        let mut app = build_lod_test_app();
+        app.insert_resource(snapshot_with_named_entity("starbase-alpha", TARGET));
+        // Far enough that `lod_ai_ships` runs and still never promotes: the ship
+        // under test spawns at the origin, so a player there would put it inside
+        // its own sensor range on tick 1 and take it off this path entirely.
+        spawn_player(&mut app, 0.0, 50_000.0);
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                // Exactly what `spawner.rs` seeds: facing -Z, stationary.
+                ShipPhysics::default(),
+                AiProfile {
+                    aggression: 0.5,
+                    // Small enough that the ship never promotes over the run.
+                    sensor_range: 10.0,
+                    ..Default::default()
+                },
+                BehaviourSection(BehaviourConfig::default()),
+                blackboards_with_destroy_pool(&[("assault-starbase", 50.0, "starbase-alpha")]),
+                test_helm_section(100.0, 1.0),
+            ))
+            .id();
+
+        assert!(
+            app.world().get::<LodTransitionTimer>(npc).is_none(),
+            "test setup: this ship must never have been promoted — the whole \
+             point is the FIRST Low stretch since spawn"
+        );
+
+        let distance_to_target = |app: &App| -> f32 {
+            let p = app.world().get::<ShipPhysics>(npc).unwrap();
+            ((TARGET[0] - p.x).powi(2) + (TARGET[2] - p.z).powi(2)).sqrt()
+        };
+        let start_distance = distance_to_target(&app);
+        assert!((start_distance - 1500.0).abs() < 0.001);
+
+        // 10 simulated seconds: ~3.1 s to swing 90° at 0.5 rad/s, then cruise.
+        for _ in 0..100 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        let physics = *app.world().get::<ShipPhysics>(npc).unwrap();
+        // Target bearing from ~the origin to (1500, 0, 0) is π/2.
+        assert!(
+            (physics.yaw - std::f32::consts::FRAC_PI_2).abs() < 0.05,
+            "yaw must converge on the objective's bearing (π/2), not hold the \
+             spawn heading of 0.0; got {}",
+            physics.yaw
+        );
+        assert!(
+            physics.forward_speed > 1.0,
+            "a ship with an order to carry out must get under way — the \
+             cruise ramp is the other half of the correction; got {}",
+            physics.forward_speed
+        );
+        assert!(
+            distance_to_target(&app) < start_distance - 300.0,
+            "the ship must have closed meaningfully on its objective; started \
+             at {start_distance}, ended at {} (pre-fix it never moved at all)",
+            distance_to_target(&app)
+        );
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "this must be the cheap low-LOD path throughout, never a promotion"
+        );
+    }
+
+    /// AC1 for the shape `combat_test.toml` actually ships: a wave authoring
+    /// BOTH `assault-starbase` (Destroy @50) and `close-on-starbase` (Reach
+    /// @35) flies the run-in, and then *diverts to the Destroy* instead of
+    /// parking on the anchor.
+    ///
+    /// This is the gate a relaxed `LodTransitionTimer` check alone would not
+    /// have opened: `route_completed` is true forever once a non-looping route
+    /// runs past its end, and the coast-to-stop branch `continue`d before any
+    /// destroy-steering code could run.
+    #[test]
+    fn low_lod_ship_diverts_to_its_scored_destroy_when_the_run_in_route_completes() {
+        const RUN_IN: [f32; 3] = [600.0, 0.0, 100.0];
+        const TARGET: [f32; 3] = [2600.0, 0.0, 100.0];
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world
+            .anchors
+            .insert("harrow_assault_point".to_string(), RUN_IN);
+        app.insert_resource(world);
+        app.insert_resource(snapshot_with_named_entity("starbase-alpha", TARGET));
+        spawn_player(&mut app, 0.0, 0.0);
+
+        // Spawned 300 units +Z of the run-in point, so the approach itself is
+        // flown on the spawn heading (yaw 0 = -Z) and the divert is a clean 90°
+        // turn onto the objective's bearing.
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(600.0, 0.0, 400.0),
+                ShipPhysics {
+                    x: 600.0,
+                    z: 400.0,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 10.0,
+                    ..Default::default()
+                },
+                EntityUuid("wave_1".to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                ObjectiveCursors::default(),
+                with_reach_objective(
+                    blackboards_with_destroy_pool(&[("assault-starbase", 50.0, "starbase-alpha")]),
+                    "close-on-starbase",
+                    35.0,
+                    "harrow_assault_point",
+                ),
+                test_helm_section(100.0, 1.0),
+            ))
+            .id();
+
+        let distance_to_target = |app: &App| -> f32 {
+            let p = app.world().get::<ShipPhysics>(npc).unwrap();
+            ((TARGET[0] - p.x).powi(2) + (TARGET[2] - p.z).powi(2)).sqrt()
+        };
+
+        // Fly the run-in until the cursor runs past the end of the one-waypoint
+        // Reach — from here on `route_completed` is permanently true.
+        let mut completed_after = None;
+        for tick in 0..300 {
+            tick_with_dt(&mut app, 0.1);
+            if cursor_state(&app, npc) == vec![("close-on-starbase".to_string(), 1)] {
+                completed_after = Some(tick);
+                break;
+            }
+        }
+        assert!(
+            completed_after.is_some(),
+            "test setup: the ship must actually reach the run-in anchor first"
+        );
+        let distance_on_arrival = distance_to_target(&app);
+
+        // 15 more seconds, well past the ~4 s the old coast-to-stop needed to
+        // bring a 40 u/s run-in to a dead halt.
+        for _ in 0..150 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        let physics = *app.world().get::<ShipPhysics>(npc).unwrap();
+        assert!(
+            physics.forward_speed > 1.0,
+            "a completed run-in must NOT park a ship that still has a scored \
+             Destroy to serve; forward_speed was {}",
+            physics.forward_speed
+        );
+        // 0.1 rad, not the 0.05 the geometry happens to land inside: the ship
+        // overshoots the target's z during its ~3 s turn and settles a hair
+        // PAST π/2 aiming back, ~0.04 rad off. That margin is deterministic but
+        // coincidental — the claim is "turned from 0.0 onto the objective's
+        // bearing", not "landed within 0.04 of it".
+        assert!(
+            (physics.yaw - std::f32::consts::FRAC_PI_2).abs() < 0.1,
+            "yaw must turn from the run-in heading (0.0) onto the objective's \
+             bearing (π/2); got {}",
+            physics.yaw
+        );
+        assert!(
+            distance_to_target(&app) < distance_on_arrival - 300.0,
+            "the ship must close on the objective after the run-in completes; \
+             was {distance_on_arrival} on arrival, now {}",
+            distance_to_target(&app)
+        );
+    }
+
+    /// The divert is not a hole in collision avoidance. Issue #1012 added a
+    /// SECOND `low_lod_objective_steer` call site, and the `low_lod_avoid_yaw`
+    /// bend that follows it has to still apply there — otherwise a wave that
+    /// diverts onto its Destroy flies through whatever lies between it and the
+    /// station, which is the failure issue #968 fixed on the other branches.
+    ///
+    /// Run twice on identical geometry, once with a rock parked on the divert
+    /// bearing, and compare. An absolute yaw assertion could not carry this
+    /// claim: the ~3 s slew onto the objective's bearing puts yaw far from π/2
+    /// all by itself. The two runs must also be bit-identical over the run-in,
+    /// which pins the divergence to the divert rather than to the route branch.
+    #[test]
+    fn low_lod_divert_still_avoids_a_hazard_on_the_objective_bearing() {
+        const RUN_IN: [f32; 3] = [600.0, 0.0, 100.0];
+        const TARGET: [f32; 3] = [2600.0, 0.0, 100.0];
+        // The run-in takes ~9 s; sample well inside it for the "same route,
+        // either way" half of the comparison.
+        const RUN_IN_TICKS: usize = 80;
+
+        // Yaw after every tick, so the comparison sees the whole manoeuvre
+        // rather than one instant the ship may already have flown past.
+        let run = |rock: Option<crate::ai::AiWorldEntity>| -> Vec<f32> {
+            let mut app = build_lod_test_app();
+            let mut world = crate::world::config::WorldConfig::default();
+            world
+                .anchors
+                .insert("harrow_assault_point".to_string(), RUN_IN);
+            app.insert_resource(world);
+            let mut snapshot = snapshot_with_named_entity("starbase-alpha", TARGET);
+            snapshot.entities.extend(rock);
+            app.insert_resource(snapshot);
+            spawn_player(&mut app, 0.0, 0.0);
+
+            let npc = app
+                .world_mut()
+                .spawn((
+                    Ship,
+                    Transform::from_xyz(600.0, 0.0, 400.0),
+                    ShipPhysics {
+                        x: 600.0,
+                        z: 400.0,
+                        ..Default::default()
+                    },
+                    AiProfile {
+                        aggression: 0.5,
+                        sensor_range: 10.0,
+                        ..Default::default()
+                    },
+                    EntityUuid("wave_1".to_string()),
+                    BehaviourSection(BehaviourConfig::default()),
+                    ObjectiveCursors::default(),
+                    with_reach_objective(
+                        blackboards_with_destroy_pool(&[(
+                            "assault-starbase",
+                            50.0,
+                            "starbase-alpha",
+                        )]),
+                        "close-on-starbase",
+                        35.0,
+                        "harrow_assault_point",
+                    ),
+                    test_helm_section(100.0, 1.0),
+                ))
+                .id();
+
+            (0..200)
+                .map(|_| {
+                    tick_with_dt(&mut app, 0.1);
+                    app.world().get::<ShipPhysics>(npc).unwrap().yaw
+                })
+                .collect()
+        };
+
+        let clear = run(None);
+        // Downrange of the divert and 300 units clear of the run-in leg, so it
+        // is out of reach until the ship turns onto the objective's bearing.
+        // Its own uuid must differ from the fixture ship's (which resolves to
+        // nil — `EntityUuid("wave_1")` does not parse) or `avoidance_steering`
+        // would skip it as the ship's own snapshot entry.
+        let obstructed = run(Some(crate::ai::AiWorldEntity {
+            uuid: uuid::Uuid::from_u128(0x0c1a),
+            position: [900.0, 0.0, 20.0],
+            radius: 40.0,
+            ..Default::default()
+        }));
+
+        assert_eq!(
+            clear[..RUN_IN_TICKS],
+            obstructed[..RUN_IN_TICKS],
+            "test setup: the rock must be irrelevant until the divert — a \
+             difference during the run-in would mean this test pins the route \
+             branch's avoidance, which is already covered"
+        );
+        let max_divergence = clear
+            .iter()
+            .zip(&obstructed)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_divergence > 0.1,
+            "a hazard on the divert bearing must bend the heading off it — the \
+             avoidance pass has to run on the #1012 branch too; the largest \
+             difference from the clear run was {max_divergence} rad"
+        );
+    }
+
+    /// The other half of the divert: with nothing *scored* in the Destroy pool,
+    /// a completed route still parks the ship exactly as it did before #1012.
+    /// This is the Requiem Courier case — a hull whose whole behaviour is one
+    /// `Reach` — and the regression #1012's change could most easily cause.
+    ///
+    /// The pool holds a zero-scored `Destroy` naming an entity the snapshot
+    /// really does carry, rather than being empty: an empty pool cannot tell
+    /// "`active_destroy_target`'s `score > 0.0` filter held" from "there was
+    /// nothing to filter", and the divert's brand-new call site would never see
+    /// a zero-scored Destroy at all. Post-#1010 that is the live case — an
+    /// assault wave under fire has its `assault-starbase` gated to 0 — so a
+    /// wave that has flown its run-in and then taken a hit must park, not
+    /// charge on at a target its own doctrine has given up on.
+    #[test]
+    fn low_lod_ship_still_parks_on_a_completed_route_with_a_zero_gated_destroy() {
+        const RUN_IN: [f32; 3] = [600.0, 0.0, 100.0];
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world
+            .anchors
+            .insert("harrow_assault_point".to_string(), RUN_IN);
+        app.insert_resource(world);
+        // The Destroy's target IS in the snapshot and 2000 units away: the park
+        // must come from the zero gate alone, not from a target that fails to
+        // resolve or a snapshot with nothing in it.
+        app.insert_resource(snapshot_with_named_entity(
+            "starbase-alpha",
+            [2600.0, 0.0, 100.0],
+        ));
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(600.0, 0.0, 400.0),
+                ShipPhysics {
+                    x: 600.0,
+                    z: 400.0,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 10.0,
+                    ..Default::default()
+                },
+                EntityUuid("courier".to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                ObjectiveCursors::default(),
+                with_reach_objective(
+                    blackboards_with_destroy_pool(&[("assault-starbase", 0.0, "starbase-alpha")]),
+                    "close-on-starbase",
+                    35.0,
+                    "harrow_assault_point",
+                ),
+                test_helm_section(100.0, 1.0),
+            ))
+            .id();
+
+        for _ in 0..450 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        let arrived = *app.world().get::<ShipPhysics>(npc).unwrap();
+        assert_eq!(
+            arrived.forward_speed, 0.0,
+            "with nothing scored to fly at, a finished route must still coast \
+             to a stop"
+        );
+        for _ in 0..50 {
+            tick_with_dt(&mut app, 0.1);
+        }
+        let later = *app.world().get::<ShipPhysics>(npc).unwrap();
+        assert_eq!(
+            (later.x, later.z),
+            (arrived.x, arrived.z),
+            "a parked ship must hold station, not resume drifting"
+        );
+        // The 20-unit arrival radius plus the coast: 40 u/s (max_speed * the
+        // 0.4 route fraction) shed at LOW_LOD_ACCEL_PER_SEC = 10 u/s² is 80
+        // units. Unchanged by #1012 — the bound is "parked at the anchor",
+        // not "sailed across the map at cruise".
+        let drift = ((later.x - RUN_IN[0]).powi(2) + (later.z - RUN_IN[2]).powi(2)).sqrt();
+        assert!(
+            drift < 120.0,
+            "the ship must park near the anchor it arrived at, {drift} units off"
+        );
+    }
+
+    /// AC: the zero-gate interaction survives the relaxed first-Low gate.
+    ///
+    /// The no-timer twin of
+    /// `demoted_attacked_ship_does_not_steer_toward_a_zero_gated_destroy_target`:
+    /// post-#1010 an attacked wave's `assault-starbase` scores 0, and
+    /// `active_destroy_target` filters on `score > 0.0`. A first-Low ship under
+    /// fire must therefore resolve nothing, keep the pre-#933 exemption, and
+    /// drift on untouched — neither the turn nor the cruise ramp may fire.
+    #[test]
+    fn first_low_ship_does_not_steer_toward_a_zero_gated_destroy_target() {
+        let mut app = build_lod_test_app();
+        app.insert_resource(snapshot_with_named_entity(
+            "starbase-alpha",
+            [1500.0, 0.0, 0.0],
+        ));
+        // Far away, so the ship under test is never promoted off this path —
+        // a promoted ship would hold yaw and speed for want of being simulated
+        // at all, and pass this test vacuously.
+        spawn_player(&mut app, 0.0, 50_000.0);
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                ShipPhysics {
+                    forward_speed: 10.0,
+                    yaw: 0.0,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 10.0,
+                    ..Default::default()
+                },
+                BehaviourSection(BehaviourConfig::default()),
+                // The gate has already fired: this ship has taken a hit.
+                blackboards_with_destroy_pool(&[("assault-starbase", 0.0, "starbase-alpha")]),
+                test_helm_section(100.0, 1.0),
+            ))
+            .id();
+
+        for _ in 0..100 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        let physics = *app.world().get::<ShipPhysics>(npc).unwrap();
+        assert!(
+            physics.yaw.abs() < 1e-6,
+            "a zero-scored Destroy is not authored intent and must not turn a \
+             first-Low ship; yaw was {}",
+            physics.yaw
+        );
+        assert_eq!(
+            physics.forward_speed, 10.0,
+            "with nothing resolving, the first-Low exemption stands and the \
+             cruise ramp must not fire either"
+        );
+        assert!(
+            physics.x.abs() < 1e-3,
+            "the ship must still be drifting straight down -Z, x was {}",
+            physics.x
+        );
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "guard against a vacuous pass: a promoted ship is not simulated by \
+             this path at all and would hold yaw and speed for the wrong reason"
+        );
+    }
+
+    /// A ship with no `AiProfile` at all is outside low-LOD authoring entirely
+    /// and keeps its unmodified drift, scored `Destroy` or not. Pins the one
+    /// arm of the gate #1012 deliberately did not widen.
+    #[test]
+    fn first_low_ship_without_an_ai_profile_keeps_its_unmodified_drift() {
+        let mut app = build_lod_test_app();
+        app.insert_resource(snapshot_with_named_entity(
+            "starbase-alpha",
+            [1500.0, 0.0, 0.0],
+        ));
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                ShipPhysics {
+                    forward_speed: 10.0,
+                    yaw: 0.0,
+                    ..Default::default()
+                },
+                BehaviourSection(BehaviourConfig::default()),
+                blackboards_with_destroy_pool(&[("assault-starbase", 50.0, "starbase-alpha")]),
+                test_helm_section(100.0, 1.0),
+            ))
+            .id();
+
+        for _ in 0..100 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        let physics = *app.world().get::<ShipPhysics>(npc).unwrap();
+        assert!(
+            physics.yaw.abs() < 1e-6,
+            "no AiProfile means no authored low-LOD tuning to steer by; yaw \
+             was {}",
+            physics.yaw
+        );
+        assert_eq!(
+            physics.forward_speed, 10.0,
+            "no AiProfile means no cruise fraction to ramp toward either"
+        );
+        assert!(
+            (physics.z + 100.0).abs() < 0.1,
+            "10 u/s down -Z for 10 s is z = -100; got {}",
+            physics.z
+        );
+    }
+
     // ── Low-LOD patrol wiring (ObjectiveCursors / advance_cursor) ───────────────
 
     /// Build a `ShipSystemBlackboards` carrying a single Helm-relevant Patrol
@@ -4381,6 +5092,45 @@ verb = "fire_blaster"
                 ..Default::default()
             }),
         );
+        bb
+    }
+
+    /// Push a Helm-relevant `Reach` entry onto an existing fixture blackboard.
+    ///
+    /// Composes with [`blackboards_with_destroy_pool`] to author the MIXED
+    /// doctrine `combat_test.toml`'s Harrow assault waves carry — a
+    /// high-scoring `Destroy` on the starbase plus a lower-scoring `Reach` on
+    /// the run-in anchor. That mix is the whole of issue #1012:
+    /// `active_waypoint_route` filters to Patrol/Reach and so only ever sees
+    /// the Reach, which used to let a completed run-in park the wave with its
+    /// top-scoring directive unserved.
+    fn with_reach_objective(
+        mut bb: crate::server_app::ShipSystemBlackboards,
+        id: &str,
+        score: f32,
+        anchor: &str,
+    ) -> crate::server_app::ShipSystemBlackboards {
+        if let Some(crate::messages::SystemBlackboard::Viewscreen(v)) =
+            bb.0.get_mut(&crate::system_registry::viewscreen_system_id())
+        {
+            v.scored_objectives.push(crate::messages::ScoredObjective {
+                id: id.to_string(),
+                score,
+                directive: crate::messages::AiDirective::Reach {
+                    anchor: anchor.to_string(),
+                },
+                source: crate::messages::ObjectiveSource::Doctrine,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: id.to_string(),
+                    text: "Reach".to_string(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Doctrine,
+                },
+            });
+        }
         bb
     }
 

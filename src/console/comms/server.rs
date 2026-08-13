@@ -285,20 +285,16 @@ pub(crate) fn handle_hail(
             );
             let available = current_sender_in_range(&comms, &sender_uuid);
             let responses = crate::comms::content::response_views(&f.node.responses, available);
-            let msg = CommsMessage {
-                id: msg_id.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name: sender_name.clone(),
-                subject: f.node.body.chars().take(40).collect(),
-                body: f.node.body.clone(),
+            let msg = CommsMessage::injected(
+                msg_id.clone(),
+                sender_uuid.clone(),
+                sender_name.clone(),
+                f.node.body.clone(),
                 responses,
-                selected_response: None,
-                is_read: false,
-                is_orphaned: false,
-                sender_in_range: available,
-                thread_id: thread_id.clone(),
-                is_urgent: f.urgent,
-            };
+                thread_id.clone(),
+                available,
+                f.urgent,
+            );
             channel2_writer.write(CommsChannel2Event { message: msg });
             comms.active_dialogues.insert(
                 msg_id,
@@ -579,20 +575,19 @@ pub(crate) fn handle_respond_to_message(
                     aux.id_mint.as_deref(),
                     crate::world_id::IdNamespace::Message,
                 );
-                let placeholder = CommsMessage {
-                    id: placeholder_id.clone(),
-                    sender_uuid: sender_uuid.clone(),
-                    sender_name: sender_name.clone(),
-                    subject: "...".to_string(),
-                    body: "...".to_string(),
-                    responses: vec![],
-                    selected_response: None,
-                    is_read: false,
-                    is_orphaned: false,
-                    sender_in_range: current_sender_in_range(&comms, &sender_uuid),
-                    thread_id: thread_id.clone(),
-                    is_urgent: false,
-                };
+                // The `...` placeholder is an injection like any other: its body
+                // IS its subject, and it offers no responses until the real
+                // follow-up replaces it.
+                let placeholder = CommsMessage::injected(
+                    placeholder_id.clone(),
+                    sender_uuid.clone(),
+                    sender_name.clone(),
+                    "...".to_string(),
+                    vec![],
+                    thread_id.clone(),
+                    current_sender_in_range(&comms, &sender_uuid),
+                    false,
+                );
                 channel2_writer.write(CommsChannel2Event {
                     message: placeholder,
                 });
@@ -614,20 +609,16 @@ pub(crate) fn handle_respond_to_message(
                 let available = current_sender_in_range(&comms, &sender_uuid);
                 let new_responses =
                     crate::comms::content::response_views(&follow_up.responses, available);
-                let new_msg = CommsMessage {
-                    id: new_msg_id.clone(),
-                    sender_uuid: sender_uuid.clone(),
+                let new_msg = CommsMessage::injected(
+                    new_msg_id.clone(),
+                    sender_uuid.clone(),
                     sender_name,
-                    subject: follow_up.body.chars().take(40).collect(),
-                    body: follow_up.body.clone(),
-                    responses: new_responses,
-                    selected_response: None,
-                    is_read: false,
-                    is_orphaned: false,
-                    sender_in_range: available,
-                    thread_id: thread_id.clone(),
-                    is_urgent: false,
-                };
+                    follow_up.body.clone(),
+                    new_responses,
+                    thread_id.clone(),
+                    available,
+                    false,
+                );
                 channel2_writer.write(CommsChannel2Event { message: new_msg });
                 comms.active_dialogues.insert(
                     new_msg_id,

@@ -470,20 +470,16 @@ pub(crate) fn tick_pending_follow_ups(
         );
         let available = current_sender_in_range(&comms, &pfu.sender_uuid);
         let responses = crate::comms::content::response_views(&pfu.node.responses, available);
-        let new_msg = CommsMessage {
-            id: new_msg_id.clone(),
-            sender_uuid: pfu.sender_uuid.clone(),
-            sender_name: pfu.sender_name.clone(),
-            subject: pfu.node.body.chars().take(40).collect(),
-            body: pfu.node.body.clone(),
+        let new_msg = CommsMessage::injected(
+            new_msg_id.clone(),
+            pfu.sender_uuid.clone(),
+            pfu.sender_name.clone(),
+            pfu.node.body.clone(),
             responses,
-            selected_response: None,
-            is_read: false,
-            is_orphaned: false,
-            sender_in_range: available,
-            thread_id: pfu.thread_id.clone(),
-            is_urgent: pfu.urgent,
-        };
+            pfu.thread_id.clone(),
+            available,
+            pfu.urgent,
+        );
         channel2_writer.write(CommsChannel2Event { message: new_msg });
         comms.active_dialogues.insert(
             new_msg_id,
@@ -813,20 +809,16 @@ pub(crate) fn inject_comms_templates(
         );
         let available = current_sender_in_range(comms, &sender_uuid);
         let responses = crate::comms::content::response_views(&fc.node.responses, available);
-        let msg = crate::messages::CommsMessage {
-            id: msg_id.clone(),
-            sender_uuid: sender_uuid.clone(),
-            sender_name: sender_name.clone(),
-            subject: fc.node.body.chars().take(40).collect(),
-            body: fc.node.body.clone(),
+        let msg = crate::messages::CommsMessage::injected(
+            msg_id.clone(),
+            sender_uuid.clone(),
+            sender_name.clone(),
+            fc.node.body.clone(),
             responses,
-            selected_response: None,
-            is_read: false,
-            is_orphaned: false,
-            sender_in_range: available,
-            thread_id: thread_id.clone(),
-            is_urgent: fc.urgent,
-        };
+            thread_id.clone(),
+            available,
+            fc.urgent,
+        );
         channel2_writer.write(CommsChannel2Event { message: msg });
         comms.active_dialogues.insert(
             msg_id,

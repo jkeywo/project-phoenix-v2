@@ -767,6 +767,52 @@ pub struct CommsMessage {
     pub is_urgent: bool,
 }
 
+impl CommsMessage {
+    /// How many leading body characters the derived `subject` keeps.
+    const SUBJECT_CHARS: usize = 40;
+
+    /// Build a freshly-injected inbox message.
+    ///
+    /// The ONE constructor behind every server-side injection — the hail root
+    /// (`console::comms::server::handle_hail`), the immediate and the triggered
+    /// follow-up (`handle_respond_to_message`, including its `...` placeholder),
+    /// the queued follow-up (`comms::server::tick_pending_follow_ups`) and the
+    /// fired template (`inject_comms_templates`). Each was an identical
+    /// twelve-field literal differing only in these arguments, which is how a
+    /// wire field could be added to the struct and missed at one site.
+    ///
+    /// The four derived fields are the injection invariants: `subject` is the
+    /// first [`SUBJECT_CHARS`](Self::SUBJECT_CHARS) characters of `body` (chars,
+    /// not bytes — the body is authored text), nothing is selected or read yet,
+    /// and a message is only ever orphaned later, when its scenario unloads.
+    #[allow(clippy::too_many_arguments)] // one arg per non-derived wire field
+    pub fn injected(
+        id: String,
+        sender_uuid: String,
+        sender_name: String,
+        body: String,
+        responses: Vec<CommsResponseView>,
+        thread_id: String,
+        sender_in_range: bool,
+        is_urgent: bool,
+    ) -> Self {
+        Self {
+            id,
+            sender_uuid,
+            sender_name,
+            subject: body.chars().take(Self::SUBJECT_CHARS).collect(),
+            body,
+            responses,
+            selected_response: None,
+            is_read: false,
+            is_orphaned: false,
+            sender_in_range,
+            thread_id,
+            is_urgent,
+        }
+    }
+}
+
 /// A contact the Comms operator can hail.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CommsContact {

@@ -37,6 +37,7 @@ use project_phoenix::snapshot::{
     capture, load_from, ready_to_restore, restore, run_for, save_to, versions, LoadRefusal,
     PhoenixSnapshot, SavedGame, SIMULATION_RULES, SNAPSHOT_FORMAT,
 };
+use project_phoenix::world::script::load::script_ledger_key;
 use vellum_save::{FileStore, Moved, Verdict, Versions};
 
 /// The duel arena: a fixed roster spawned at t=0 and no asteroid field at all.
@@ -983,6 +984,370 @@ fn the_content_ledger_resets_between_loads() {
         after_second_load, via_stale_then_reload,
         "a stale entry recorded before a real load must not survive into that \
          load's frozen digest"
+    );
+}
+
+// ── Scripted scenario progression (issue #864) ───────────────────────────────
+
+/// The scripted fixture world — see `tests/fixtures/worlds/scripted_resume.toml`
+/// for why its two events are timed where they are.
+const SCRIPTED: &str = "tests/fixtures/worlds/scripted_resume.toml";
+
+/// Frames the scripted world runs before its capture: past the ~tick-60 timer
+/// that fires `relay_signal`, and well short of the ~tick-300 callback that
+/// handler schedules. The capture therefore sits *between* the two, which is the
+/// only window in which either half of this issue is observable.
+const SCRIPT_CAPTURE_AT: u64 = 150;
+
+/// Frames both worlds are stepped after the restore — enough to carry them
+/// across the callback's fire tick and out the other side.
+const SCRIPT_CONTINUE_FOR: u64 = 220;
+
+fn scripted_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: SCRIPTED.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+fn world_counter(app: &bevy::prelude::App, name: &str) -> i64 {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .counter(name)
+}
+
+fn queued_callbacks(app: &bevy::prelude::App) -> usize {
+    app.world()
+        .get_resource::<project_phoenix::world::server::WorldScriptRuntime>()
+        .map_or(0, |script| script.pending_callbacks.len())
+}
+
+fn phase_of(app: &bevy::prelude::App) -> GamePhase {
+    app.world().resource::<State<GamePhase>>().get().clone()
+}
+
+/// The scenario state a scripted world resumes from, named rather than left
+/// inside a digest that folds none of it.
+fn scenario_of(payload: &PhoenixSnapshot) -> &project_phoenix::snapshot::ScenarioState {
+    payload
+        .scenario
+        .as_ref()
+        .expect("a world with a content runtime captures its scenario state")
+}
+
+/// AC "restoring preserves each pending action's remaining timing and identity",
+/// and "resumed actions fire once according to the scenario contract".
+///
+/// The capture is taken while a scripted `after(4, |ctx| …)` callback is still
+/// in flight — scheduled by a timer handler the fresh app has not reached, so
+/// the fresh app has no callback of its own for the restore to accidentally
+/// agree with. The callback ends the run in a declared victory, which moves
+/// `GamePhase`, so the two worlds' digests part company on the fire tick if the
+/// queue did not travel.
+#[test]
+fn a_pending_script_callback_survives_a_resume_and_fires_on_its_own_tick() {
+    let mut live = boot(&scripted_args());
+    step(&mut live, SCRIPT_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+    let scenario = scenario_of(&payload);
+
+    // The capture is genuinely mid-schedule: one callback queued, and its fire
+    // tick is still in the future. A capture taken after the fire would satisfy
+    // every assertion below without carrying anything.
+    assert_eq!(
+        scenario.script_callbacks.len(),
+        1,
+        "the timer handler should have left exactly one callback queued"
+    );
+    assert!(
+        scenario.script_callbacks[0].fire_tick > payload.tick,
+        "the captured callback should still be pending: fire_tick {} vs capture tick {}",
+        scenario.script_callbacks[0].fire_tick,
+        payload.tick
+    );
+    assert_eq!(
+        world_counter(&live, "beacon_pulses"),
+        1,
+        "the timer handler should have run exactly once before the capture"
+    );
+    assert_eq!(
+        world_counter(&live, "relief_arrived"),
+        0,
+        "the deferred callback must NOT have fired before the capture"
+    );
+
+    let mut resumed = boot_to_restore_point(&scripted_args(), &payload);
+    // The fresh app has reached neither event — so every claim below is about
+    // what the payload carried, not about what the bootstrap happened to redo.
+    assert_eq!(
+        world_counter(&resumed, "beacon_pulses"),
+        0,
+        "the fresh app should still be short of the 1 s timer at the restore point"
+    );
+    assert_eq!(
+        queued_callbacks(&resumed),
+        0,
+        "the fresh app has scheduled no callback of its own, so a resumed one \
+         can only have come from the save"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        queued_callbacks(&resumed),
+        1,
+        "the restore should have queued the captured callback"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did"
+    );
+
+    // Both worlds now step across the callback's fire tick together.
+    let mut live_fired_at = None;
+    let mut resumed_fired_at = None;
+    for frame in 1..=SCRIPT_CONTINUE_FOR {
+        live.update();
+        resumed.update();
+        if live_fired_at.is_none() && phase_of(&live) == GamePhase::GameOver {
+            live_fired_at = Some(frame);
+        }
+        if resumed_fired_at.is_none() && phase_of(&resumed) == GamePhase::GameOver {
+            resumed_fired_at = Some(frame);
+        }
+        assert_eq!(
+            world_digest(resumed.world()),
+            world_digest(live.world()),
+            "the two worlds diverged {frame} frame(s) after the restore"
+        );
+    }
+
+    assert!(
+        live_fired_at.is_some(),
+        "the live callback should have fired within {SCRIPT_CONTINUE_FOR} frames \
+         of the capture — retune SCRIPT_CONTINUE_FOR if the fixture's delay moved"
+    );
+    assert_eq!(
+        resumed_fired_at, live_fired_at,
+        "the resumed callback fired on a different frame than the live one"
+    );
+    assert_eq!(
+        world_counter(&resumed, "relief_arrived"),
+        1,
+        "the resumed callback fired exactly once"
+    );
+    assert_eq!(
+        world_counter(&live, "relief_arrived"),
+        world_counter(&resumed, "relief_arrived"),
+        "and the live world agrees on how many times it fired"
+    );
+}
+
+/// AC "resumed actions fire once rather than duplicating, disappearing, or
+/// restarting" — the *already spent* half of it.
+///
+/// The scripted `on_timer(1, …)` trigger has fired before the save and must not
+/// fire again. Nothing about the resumed world makes that automatic: the restore
+/// also puts the mission clock back to the capture's ~2.5 s, so a re-armed
+/// single-shot latch would find its 1 s threshold already met and fire on the
+/// very next tick. `beacon_pulses` reading 2 is what that looks like.
+#[test]
+fn a_scripted_trigger_that_already_fired_does_not_fire_again_after_a_resume() {
+    let mut live = boot(&scripted_args());
+    step(&mut live, SCRIPT_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let scenario = scenario_of(&payload);
+    assert!(
+        scenario.triggers.iter().any(|t| t.fired),
+        "the capture should record the timer trigger as fired"
+    );
+    let captured_elapsed = scenario
+        .mission_elapsed_secs
+        .expect("a running mission has an anchored clock");
+    assert!(
+        captured_elapsed > 1.0,
+        "the capture should be past the 1 s timer threshold, got {captured_elapsed}"
+    );
+    assert_eq!(world_counter(&live, "beacon_pulses"), 1);
+
+    let mut resumed = boot_to_restore_point(&scripted_args(), &payload);
+    assert_eq!(
+        world_counter(&resumed, "beacon_pulses"),
+        0,
+        "the fresh app has not reached the timer, so a post-restore reading of 1 \
+         can only have been restored and a reading of 2 can only be a re-fire"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        world_counter(&resumed, "beacon_pulses"),
+        1,
+        "the flag counter came back with the rest of the scenario"
+    );
+
+    // The mission clock came back too — the thing that makes the re-fire
+    // temptation real rather than theoretical.
+    let after = capture(resumed.world());
+    let resumed_elapsed = scenario_of(&after)
+        .mission_elapsed_secs
+        .expect("the restore re-anchored the mission clock");
+    assert!(
+        (resumed_elapsed - captured_elapsed).abs() < 1e-3,
+        "the resumed mission clock reads {resumed_elapsed}s, the capture's was \
+         {captured_elapsed}s"
+    );
+    assert_eq!(
+        scenario_of(&after).triggers,
+        scenario_of(&payload).triggers,
+        "every trigger's latch, destroyed-set and cooldown clock round-tripped"
+    );
+
+    // And it stays fired: 120 frames of a mission clock reading well past the
+    // threshold, with the counter never moving.
+    for frame in 1..=120u64 {
+        resumed.update();
+        assert_eq!(
+            world_counter(&resumed, "beacon_pulses"),
+            1,
+            "the spent timer re-fired {frame} frame(s) after the restore"
+        );
+    }
+}
+
+/// A save whose **scripts** moved is refused, on the same dimension an edited
+/// entity template moves — the mirror of
+/// `a_save_whose_entity_template_changed_is_refused_on_content`.
+///
+/// The binding is `WorldScriptRuntime::content_hash`, the compiled script set's
+/// own digest, recorded into the content ledger by `load_world_scripts` under
+/// `script_ledger_key`. This test proves the binding is really that number and
+/// not an accident of the world TOML's text riding along: re-recording the key
+/// with the value the live runtime is holding is a *no-op* on the digest, and
+/// moving only that one entry is what refuses the save.
+#[test]
+fn a_save_whose_script_content_changed_is_refused_on_content() {
+    let mut live = boot(&scripted_args());
+    step(&mut live, 30);
+
+    let compiled_hash = live
+        .world()
+        .resource::<project_phoenix::world::server::WorldScriptRuntime>()
+        .content_hash;
+    let baseline = current_versions(SCRIPTED);
+    let run = run_for(
+        capture(live.world()),
+        world_digest(live.world()),
+        SEED,
+        SCRIPTED,
+        baseline.clone(),
+    );
+    let store = FileStore::new(scratch("script_content"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    // Re-freezing the ledger the real load built, untouched, must not move the
+    // digest — otherwise the "only the script entry changed" claim below would
+    // be measuring whatever 30 frames of stepping happened to record.
+    content_ledger::freeze();
+    assert_eq!(
+        versions(&content_ledger::frozen_or_live()).content,
+        baseline.content,
+        "stepping the world recorded new content, so this test cannot isolate \
+         the script edit"
+    );
+
+    // Recording the compiled set's OWN hash under the loader's key changes
+    // nothing — which is the proof the load already bound the save to it.
+    content_ledger::record_digest(&script_ledger_key(SCRIPTED), compiled_hash);
+    content_ledger::freeze();
+    assert_eq!(
+        versions(&content_ledger::frozen_or_live()).content,
+        baseline.content,
+        "the world load should already have recorded WorldScriptRuntime's own \
+         content_hash under this key"
+    );
+
+    // Now move only that entry, the way editing a handler body would.
+    content_ledger::record_digest(
+        &script_ledger_key(SCRIPTED),
+        compiled_hash ^ 0x9e37_79b9_7f4a_7c15,
+    );
+    content_ledger::freeze();
+    let edited = versions(&content_ledger::frozen_or_live());
+    assert_ne!(
+        edited.content, baseline.content,
+        "an edited script set must move the content digest"
+    );
+
+    let refusal = load_from(&store, "autosave", &edited).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Content { .. })),
+        "got {refusal}"
+    );
+    content_ledger::reset();
+}
+
+/// A **script-free** world's payload carries the scenario's declarative
+/// progression and nothing script-shaped — the compatibility half of this
+/// issue, stated rather than assumed.
+///
+/// Combat Test authors no `[script]` block, so it compiles no
+/// `WorldScriptRuntime` at all. Its capture must still carry trigger latches and
+/// a mission clock (those are not a scripting feature), and must leave the
+/// script-only field empty so the payload is shaped exactly as it was before
+/// this issue.
+#[test]
+fn a_script_free_world_captures_scenario_state_without_a_script_runtime() {
+    let mut live = boot(&combat_test_args());
+    step(&mut live, 120);
+    assert!(
+        live.world()
+            .get_resource::<project_phoenix::world::server::WorldScriptRuntime>()
+            .is_none(),
+        "combat_test authors no scripts, so it must compile no script runtime"
+    );
+
+    let payload = capture(live.world());
+    let scenario = scenario_of(&payload);
+    assert!(
+        scenario.script_callbacks.is_empty(),
+        "a script-free world queues no callbacks"
+    );
+    assert!(
+        !scenario.triggers.is_empty(),
+        "combat_test's declarative triggers should still be captured"
+    );
+    assert!(
+        scenario.mission_elapsed_secs.is_some(),
+        "a running mission has an anchored clock whether or not it is scripted"
+    );
+
+    // And the payload still round-trips through the artifact unchanged.
+    let run = run_for(
+        payload.clone(),
+        world_digest(live.world()),
+        SEED,
+        COMBAT_TEST,
+        current_versions(COMBAT_TEST),
+    );
+    let store = FileStore::new(scratch("script-free"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let reloaded = load_from(&store, "autosave", &current_versions(COMBAT_TEST))
+        .expect("the save reloads")
+        .snapshot
+        .expect("a saved game carries a snapshot");
+    assert_eq!(
+        reloaded.state.scenario, payload.scenario,
+        "the scenario state round-trips through RON"
     );
 }
 

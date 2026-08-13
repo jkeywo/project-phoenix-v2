@@ -1,0 +1,59 @@
+# Fixture world for issue #864 — scripted scenario progression across a resume.
+#
+# A test fixture rather than a shipped `assets/worlds/` probe, for the reason
+# `tests/fixtures/layer_declarative_triggers.toml` is one: nothing plays this,
+# it exists to be booted by `tests/snapshot_resume.rs` and its whole shape is
+# chosen to make one measurement discriminating.
+#
+# ── What the timings are for ─────────────────────────────────────────────────
+#
+# One player cruiser, no hostiles, and exactly one scripted trigger. At the
+# default 60 Hz `sim_tick_hz`:
+#
+#   * `on_timer(1, "relay_signal")` fires ~1 s (~tick 60) into the mission. It
+#     is the trigger whose SINGLE-SHOT LATCH the resume has to preserve: it
+#     bumps `beacon_pulses`, so a re-armed latch is a counter reading 2.
+#   * The handler schedules `after(4, |ctx| …)`, so the callback becomes due
+#     ~5 s in (~tick 300). It is the PENDING DEFERRED WORK the resume has to
+#     carry: it bumps `relief_arrived` and ends the run in a declared victory,
+#     which moves `GamePhase` — a value `world_digest` folds — so a resumed
+#     world that lost the callback parts from the live one measurably.
+#
+# The callback is scheduled from the TIMER handler and not from
+# `on_world_loaded`, and that is the load-bearing detail. A capture taken at
+# ~tick 150 sits between the two events; the fresh app restored into is stepped
+# only far enough for its roster to exist (a handful of ticks), so it has
+# reached NEITHER — it has scheduled no callback of its own for a restore to
+# accidentally agree with. Schedule the same callback at world load and both
+# apps would arm it on the same tick, and the test would pass with the payload's
+# callback queue deleted.
+#
+# `message` is omitted from `game_over` (it is optional), so this world needs no
+# strings.csv entry — the same reason `assets/worlds/probe_victory.toml` gives.
+
+[global]
+seed = 864
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_timer(1, "relay_signal");
+
+fn relay_signal(ctx) {
+    ctx.flags.increment("beacon_pulses", 1);
+    ctx.schedule.after(4, |ctx| {
+        ctx.flags.increment("relief_arrived", 1);
+        ctx.effects.game_over("", "victory");
+    });
+}
+"""

@@ -2693,7 +2693,30 @@ station = "sensors"
     ///
     /// Nothing is hand-written: everything the ladder depends on comes off the
     /// file the fleet actually flies.
+    ///
+    /// The queue is NOT cleared between ticks, which
+    /// `the_shipped_combat_stations_allocation_is_unchanged_and_settles`
+    /// documents needing. Anything running more than a handful of ticks wants
+    /// [`shipped_hull_power_app_clearing`] instead.
     fn shipped_hull_power_app(path: &str) -> (App, Entity) {
+        shipped_hull_power_app_inner(path, false)
+    }
+
+    /// [`shipped_hull_power_app`] plus the per-tick `AdmittedCommands` clear
+    /// production's admission seam performs — the same mechanism
+    /// [`over_budget_power_app`] uses, and for the same two reasons.
+    ///
+    /// Correctness first: without it `handle_power_messages` replays the WHOLE
+    /// accumulated queue on every tick, so a thousand-tick probe re-applies
+    /// every decision the ship has ever taken, a thousand times over. Then
+    /// observability: with the clear in place `emitted_allocations` reports what
+    /// THIS arm decided rather than the run's whole history, which is what makes
+    /// "the AI stopped re-deciding" assertable at all.
+    fn shipped_hull_power_app_clearing(path: &str) -> (App, Entity) {
+        shipped_hull_power_app_inner(path, true)
+    }
+
+    fn shipped_hull_power_app_inner(path: &str, clear_admitted: bool) -> (App, Entity) {
         let config = crate::entity_includes::load_entity_config(path)
             .unwrap_or_else(|e| panic!("{path}: {e}"));
         let reactor = config.power.as_ref().expect("hull authors [power]");
@@ -2725,8 +2748,20 @@ station = "sensors"
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .insert_resource(crate::lobby::Sessions(
                 crate::lobby::session::SessionManager::new(),
-            ))
-            .add_systems(
+            ));
+        if clear_admitted {
+            app.add_systems(
+                Update,
+                (
+                    clear_admitted_each_tick,
+                    ai_power_allocation,
+                    crate::ship::power::handle_power_messages,
+                    crate::ship::power::tick_power_system,
+                )
+                    .chain(),
+            );
+        } else {
+            app.add_systems(
                 Update,
                 (
                     ai_power_allocation,
@@ -2735,6 +2770,7 @@ station = "sensors"
                 )
                     .chain(),
             );
+        }
 
         let mut control_sources = ShipSystemControlSources::default();
         control_sources.0.set(
@@ -2759,6 +2795,17 @@ station = "sensors"
                     ..Default::default()
                 },
                 policy,
+                // The hull's OWN `[[station]]`/`[[system]]` roster. Present so
+                // the group `max_level` ceilings are read off the file like
+                // production's, and so a human command can be put through
+                // `command_admission::validate_and_admit`, which resolves the
+                // Power station from exactly this config.
+                crate::ship_plugin::ShipConfigComponent(
+                    config
+                        .ship_config
+                        .clone()
+                        .expect("a shipped hull authors its stations and systems"),
+                ),
                 AdmittedCommands::default(),
                 AiHighFidelity,
             ))
@@ -2770,8 +2817,8 @@ station = "sensors"
     fn baseline_default_reallocates_toward_weapons_on_red_alert() {
         // Baseline preservation: the synthesised default policy reproduces the
         // retired red-alert→weapons behaviour. Under red alert with a full
-        // battery (well above the 10% weapons reserve) weapons rises to its
-        // elevated level 3.
+        // battery (well above the authored `min_reserve_weapons` shed floor —
+        // 25 % since issue #1003) weapons rises to its elevated level 3.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
         app.world_mut()
@@ -2846,11 +2893,14 @@ station = "sensors"
 
     #[test]
     fn reserve_gate_blocks_elevation_below_the_authored_floor() {
-        // AC2 + AC5: with the battery drained below the helm 50% reserve, the
-        // elevate guard cannot fire even under full thrust at red alert, so the
-        // baseline fallback holds helm at level 2 — allocation never rises when
-        // the battery can't sustain it (no avoidable brownout). Above the
-        // reserve it elevates.
+        // AC2 + AC5: with the battery drained below the helm's 60% RESTORE
+        // floor, the elevate guard cannot fire even under full thrust at red
+        // alert, so the baseline fallback holds helm at level 2 — allocation
+        // never rises when the battery can't sustain it (no avoidable
+        // brownout). Above the restore floor it elevates. 50% is the SEPARATE
+        // shed floor the hold rule reads once a channel is already up — this
+        // test's helm starts at the default (unelevated) level, so nothing
+        // here exercises that boundary; it is pinned separately below.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
         app.world_mut()
@@ -2864,22 +2914,37 @@ station = "sensors"
             .unwrap()
             .0 = true;
 
-        // 40% battery is below the 50% helm reserve → held at baseline 2.
+        // 40% battery is below the 60% helm RESTORE floor → held at baseline 2.
         set_battery(&mut app, e, 40.0);
         power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
             power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
             2,
-            "below-reserve thrust must NOT elevate helm (brownout avoidance)"
+            "below-restore-floor thrust must NOT elevate helm (brownout avoidance)"
         );
 
-        // Recharge above the reserve → the same thrust now elevates.
+        // Recharge above the 60% restore floor → the same thrust now elevates.
         set_battery(&mut app, e, 80.0);
         power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
             power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
             3,
-            "above-reserve thrust must elevate helm"
+            "above-restore-floor thrust must elevate helm"
+        );
+
+        // Now pin the boundary the test's NAME actually promises: with helm
+        // already elevated (as it is now, from the arm above), a battery under
+        // the 50% SHED floor — but nowhere near zero — must give the point
+        // back. This is the HOLD rule's `min_reserve_helm` guard, distinct from
+        // the ELEVATE rule's `min_restore_helm` exercised above; 45% sits below
+        // the shed floor but above both the weapons floors, so only helm moves.
+        set_battery(&mut app, e, 45.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            2,
+            "below the 50% shed floor an already-elevated helm must shed — the \
+             authored floor this test is named for"
         );
     }
 
@@ -2920,8 +2985,8 @@ station = "sensors"
 
     // ── Budget-aware allocation (issue #959) ─────────────────────────────────
 
-    /// A four-group Alliance-shaped reactor (`ops` outside the canonical trio)
-    /// crewed by `policy`, with the production decide→apply pair and a per-tick
+    /// A four-group reactor (`ops` outside the canonical trio) crewed by
+    /// `policy`, with the production decide→apply pair and a per-tick
     /// `AdmittedCommands` clear so each arm's emits can be counted on their own.
     ///
     /// Commanded at the 8-point cap on arrival — helm 3 / weapons 2 / shields 2
@@ -3130,7 +3195,7 @@ station = "sensors"
     /// The shipped fleet's combat allocation settles with its three intended
     /// groups: helm 3 / weapons 3 / shields 2.
     ///
-    /// All four groups are pinned individually, not just jointly by the total —
+    /// All three groups are pinned individually, not just jointly by the total —
     /// Shields receive no combat bid, so their authored resting level is
     /// reserved rather than cut to buy another group an extra point.
     ///
@@ -3139,11 +3204,16 @@ station = "sensors"
     /// not drain the queue, so a second arm that decides to emit nothing leaves
     /// the emitted list byte-identical.
     ///
-    /// The emitted ORDER is pinned too: helm and weapons both win at
-    /// `priority = 10`, so with the battery floors reverted there is no
-    /// secondary authored key, and the stable sort falls back to the reactor's
-    /// own seed order (`POWER_GROUP_ORDER`: helm before weapons). Both are paid
-    /// in full either way.
+    /// The emitted ORDER is pinned too, and it holds only because this is the
+    /// FIRST arm: both channels seed from spawn at level 2 (their authored
+    /// `default_level`), so each channel's `priority = 15` HOLD rule — gated on
+    /// `fact(power_<group>) >= 3` — reads false and cannot yet outrank the
+    /// `priority = 10` ELEVATE that actually wins the channel. With both
+    /// channels bidding at that same priority, the stable sort falls back to
+    /// the reactor's own seed order (`POWER_GROUP_ORDER`: helm before weapons).
+    /// Both are paid in full either way; on a later arm, once a channel is
+    /// already elevated, its `priority = 15` HOLD would win outright instead —
+    /// this test pins only the spawn-time tie.
     #[test]
     fn the_shipped_combat_stations_allocation_is_unchanged_and_settles() {
         use crate::modifiers::power_system::{
@@ -3177,6 +3247,709 @@ station = "sensors"
             emitted_allocations(&app, e),
             first_arm,
             "the shipped allocation re-emitted after it had settled"
+        );
+    }
+
+    // ── The AI shed ladder (issue #1003) ─────────────────────────────────────
+
+    /// Every shipped hull that authors its own reactor AND its own power
+    /// policy — the four Alliance hulls (which take the policy from
+    /// `fragments/ai/fleet_baseline.toml`, except the courier which owns a
+    /// copy) and the five that re-author it inline.
+    ///
+    /// Listed so the set is READABLE at the probe that walks it, and checked
+    /// against [`globbed_power_hull_paths`] there, so it can only ever be the
+    /// whole set. A hand-list alone would let a tenth hull ship with a reactor
+    /// nobody had ever run the no-lock probe against, silently — which is the
+    /// one failure mode a list of hulls has.
+    const SHIPPED_POWER_HULLS: &[&str] = &[
+        "assets/entities/alliance_battleship.toml",
+        "assets/entities/alliance_courier.toml",
+        "assets/entities/alliance_cruiser.toml",
+        "assets/entities/alliance_destroyer.toml",
+        "assets/entities/ship_harrow_cruiser.toml",
+        "assets/entities/ship_harrow_destroyer.toml",
+        "assets/entities/ship_harrow_patrol.toml",
+        "assets/entities/ship_harrow_warhawk.toml",
+        "assets/entities/ship_requiem_courier.toml",
+    ];
+
+    /// [`SHIPPED_POWER_HULLS`] re-derived from disk: every
+    /// `assets/entities/*.toml` that authors both `[power]` and
+    /// `[power.ai_policy]`, sorted.
+    ///
+    /// The glob idiom is `entities::authored_ai_pins::entity_stems`': TOP LEVEL
+    /// ONLY, because `fragments/` holds the partial documents hulls compose FROM
+    /// and `test/` holds one world's fixtures, and neither is a hull the fleet
+    /// flies. Loaded through the real include-resolving path, so a hull that
+    /// takes its reactor policy from a fragment counts as authoring one.
+    fn globbed_power_hull_paths() -> Vec<String> {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/entities");
+        let mut out: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("assets/entities must be readable") {
+            let path = entry.expect("readable dir entry").path();
+            if path.extension().is_none_or(|e| e != "toml") {
+                continue;
+            }
+            let key = format!(
+                "assets/entities/{}",
+                path.file_name()
+                    .expect("toml file has a name")
+                    .to_string_lossy()
+            );
+            let config = crate::entity_includes::load_entity_config(&key)
+                .unwrap_or_else(|e| panic!("{key}: {e}"));
+            if config.power.as_ref().is_some_and(|p| p.ai_policy.is_some()) {
+                out.push(key);
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// One hull's authored shed ladder, in battery percentages.
+    ///
+    /// Each channel has TWO floors since issue #1003 and the gap between them is
+    /// the whole mechanism, so they travel together rather than as four loose
+    /// numbers.
+    #[derive(Debug, Clone, Copy)]
+    struct ShedLadder {
+        /// Below this, helm gives its elevated point back.
+        helm_shed: f64,
+        /// …and it may not take the point again until the charge is back here.
+        helm_restore: f64,
+        /// Below this, weapons gives its elevated point back — the rung that
+        /// turns the battery around.
+        weapons_shed: f64,
+        /// …and the charge weapons re-elevates at.
+        weapons_restore: f64,
+    }
+
+    /// The hull's own ladder, read off the spawned policy rather than restated,
+    /// so a retune in TOML retunes every probe below with it (AGENTS.md rule
+    /// #11).
+    fn authored_shed_ladder(app: &App, e: Entity) -> ShedLadder {
+        use crate::entities::config::{
+            POWER_HELM_RESERVE_PARAM, POWER_HELM_RESTORE_PARAM, POWER_WEAPONS_RESERVE_PARAM,
+            POWER_WEAPONS_RESTORE_PARAM,
+        };
+        let policy = app
+            .world()
+            .entity(e)
+            .get::<PowerAiPolicy>()
+            .expect("the shipped hull spawned with its authored power policy");
+        let param = |name: &str| {
+            policy
+                .0
+                .params
+                .get(name)
+                .unwrap_or_else(|| panic!("the shipped policy authors `{name}`"))
+        };
+        ShedLadder {
+            helm_shed: param(POWER_HELM_RESERVE_PARAM),
+            helm_restore: param(POWER_HELM_RESTORE_PARAM),
+            weapons_shed: param(POWER_WEAPONS_RESERVE_PARAM),
+            weapons_restore: param(POWER_WEAPONS_RESTORE_PARAM),
+        }
+    }
+
+    /// This ship's battery, as a percentage of its authored capacity.
+    ///
+    /// Deliberately the SAME arithmetic in the same order as
+    /// `ai_power_allocation`'s `fact(battery_pct)` seeding: the whole quotient
+    /// is taken in `f32` and only then widened, which is not the same number as
+    /// widening first when the assertion is a comparison against a floor the
+    /// charge is sitting exactly on.
+    fn battery_pct(app: &App, e: Entity) -> f64 {
+        let charge = app
+            .world()
+            .entity(e)
+            .get::<crate::ship::power::ShipPowerSystem>()
+            .unwrap()
+            .0
+            .battery_charge;
+        let capacity = app
+            .world()
+            .entity(e)
+            .get::<crate::ship::power::PowerConfigResource>()
+            .unwrap()
+            .0
+            .capacity;
+        ((charge / capacity) * 100.0) as f64
+    }
+
+    /// Seat a human Power officer on this ship and return their session token.
+    ///
+    /// Flips the reactor's control source to Human and registers a connected
+    /// player holding the station THIS hull's own `[[system]]` roster assigns
+    /// the reactor to — `engineering` on the destroyer, but resolved through
+    /// `command_admission::station_for_system` rather than named, because that
+    /// is the resolution the admission gate itself performs and a hull is free
+    /// to put the reactor anywhere.
+    fn seat_human_power_officer(app: &mut App, e: Entity) -> String {
+        let reactor = crate::system_registry::power_reactor_system_id();
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<ShipSystemControlSources>()
+            .unwrap()
+            .0
+            .set(reactor.clone(), ControlSource::Human);
+
+        let station = {
+            let config = &app
+                .world()
+                .entity(e)
+                .get::<crate::ship_plugin::ShipConfigComponent>()
+                .expect("the shipped hull spawned with its own ShipConfig")
+                .0;
+            crate::command_admission::station_for_system(config, &reactor)
+                .expect("the hull's reactor belongs to one of its stations")
+        };
+
+        let token = "power-officer".to_string();
+        let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+        sessions
+            .0
+            .register(token.clone(), "Power Officer".into())
+            .expect("a fresh token registers");
+        sessions.0.set_station(&token, Some(station));
+        token
+    }
+
+    /// Put one human `SetPowerGroupAllocation` through the REAL admission seam
+    /// and into this ship's queue, returning whether admission accepted it.
+    ///
+    /// The queue is replaced rather than appended to, standing in for
+    /// `admit_system_commands`' own clear-and-refill: `handle_power_messages`
+    /// does not drain what it applies, so the AI's earlier emits would otherwise
+    /// re-apply a decision the human has taken over from.
+    fn admit_human_power_command(
+        app: &mut App,
+        e: Entity,
+        token: &str,
+        group: &str,
+        level: u8,
+    ) -> bool {
+        // Cloned out of the world so the admission call can hold `&Sessions`
+        // (a resource) and `&mut AdmittedCommands` (a component) at once.
+        let sources = app
+            .world()
+            .entity(e)
+            .get::<ShipSystemControlSources>()
+            .unwrap()
+            .clone();
+        let config = app
+            .world()
+            .entity(e)
+            .get::<crate::ship_plugin::ShipConfigComponent>()
+            .expect("the shipped hull spawned with its own ShipConfig")
+            .0
+            .clone();
+        let mut admitted = AdmittedCommands::default();
+        let ok = crate::command_admission::validate_and_admit(
+            token,
+            crate::system_registry::power_reactor_system_id(),
+            crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                group: crate::messages::PowerGroupId(group.into()),
+                level,
+            },
+            &sources,
+            app.world().resource::<crate::lobby::Sessions>(),
+            &config,
+            &mut admitted,
+        );
+        *app.world_mut()
+            .entity_mut(e)
+            .get_mut::<AdmittedCommands>()
+            .unwrap() = admitted;
+        ok
+    }
+
+    /// Put the battery at an exact percentage of this hull's own capacity.
+    fn set_battery_pct(app: &mut App, e: Entity, pct: f64) {
+        let capacity = app
+            .world()
+            .entity(e)
+            .get::<crate::ship::power::PowerConfigResource>()
+            .unwrap()
+            .0
+            .capacity;
+        set_battery(app, e, (pct as f32 / 100.0) * capacity);
+    }
+
+    /// **The two-step shed ladder, on the hull the fleet flies (issue #1003).**
+    ///
+    /// The four authored floors are one staircase rather than four unrelated
+    /// brownout guards, and the emergent ship-wide total is what walks down it.
+    /// Nothing demotes anything: when a channel's hold AND elevate guards both
+    /// read false it falls to its own `priority = 0` baseline at level 2, and
+    /// THAT is the shed. There is no ship-wide "total" rule anywhere in the
+    /// authored policy, which is exactly why the total is worth asserting.
+    ///
+    /// This is the FALLING walk, at the shed floors. The rising walk is
+    /// [`the_shed_ladder_re_elevates_only_once_the_restore_floors_are_back`],
+    /// and it happens at different, higher charges — which is the whole point of
+    /// there being two numbers per channel.
+    ///
+    /// `shields` never bids on any rung, so its authored 2 is reserved rather
+    /// than cut to buy another group a point — pinned on every rung, because a
+    /// planner that cut it would land on the same totals for the wrong reason.
+    #[test]
+    fn the_shipped_power_policy_sheds_one_group_at_each_authored_floor() {
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let (mut app, e) =
+            shipped_hull_power_app_clearing("assets/entities/alliance_destroyer.toml");
+        let ladder = authored_shed_ladder(&app, e);
+        assert!(
+            ladder.weapons_shed < ladder.helm_shed && ladder.weapons_shed > 0.0,
+            "the ladder needs weapons to be the LOWER step and every floor to be a \
+             live threshold; read {ladder:?}"
+        );
+        assert!(
+            ladder.weapons_shed < ladder.weapons_restore && ladder.helm_shed < ladder.helm_restore,
+            "each channel must restore ABOVE where it sheds, or the shed floor is \
+             also the re-elevate floor and the channel flips every tick the charge \
+             rests on it; read {ladder:?}"
+        );
+
+        // Rung 1 — a full battery at combat stations: both elevations paid.
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 3);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
+        assert_eq!(commanded(&app, e, SHIELDS_POWER_GROUP), 2);
+        assert_eq!(commanded_total(&app, e), 8, "the combat-stations burst");
+
+        // Rung 2 — between the two shed floors: helm gives its point back,
+        // weapons keeps its own. Helm is the cheaper thing to lose; the ship is
+        // still shooting at full damage.
+        set_battery_pct(&mut app, e, (ladder.helm_shed + ladder.weapons_shed) / 2.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, HELM_POWER_GROUP),
+            2,
+            "below `min_reserve_helm` the helm hold guard reads false too and the \
+             priority-0 baseline takes the channel back — that IS the shed"
+        );
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            3,
+            "the weapons floor has NOT been crossed yet, so this elevation stands"
+        );
+        assert_eq!(
+            commanded(&app, e, SHIELDS_POWER_GROUP),
+            2,
+            "reserved, not cut"
+        );
+        assert_eq!(commanded_total(&app, e), 7);
+
+        // Rung 2b — under the weapons RESTORE floor but still over its shed
+        // floor. The elevate rule could not fire here; the hold rule can, and
+        // does, because weapons is already up. Falling through this band without
+        // a change is what a rising ship may NOT do.
+        let hold_band = (ladder.weapons_shed + ladder.weapons_restore) / 2.0;
+        assert!(hold_band < ladder.weapons_restore && hold_band > ladder.weapons_shed);
+        set_battery_pct(&mut app, e, hold_band);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            3,
+            "inside the hysteresis band a channel that is already elevated HOLDS: \
+             only `min_reserve_weapons` sheds it, and that is still below"
+        );
+        assert_eq!(commanded_total(&app, e), 7);
+
+        // Rung 3 — under the lower shed floor: weapons follows, and the ship is
+        // at the resting total its own `rates` recharge from. The charging
+        // control is the point of the whole ladder: this is the rung that turns
+        // the battery around before it can reach the exhaustion lock at 0.
+        set_battery_pct(&mut app, e, ladder.weapons_shed / 2.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 2);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            2,
+            "below `min_reserve_weapons` the last elevation is shed too"
+        );
+        assert_eq!(
+            commanded(&app, e, SHIELDS_POWER_GROUP),
+            2,
+            "reserved, not cut"
+        );
+        assert_eq!(commanded_total(&app, e), 6);
+
+        let (power, cfg) = {
+            let ent = app.world().entity(e);
+            (
+                ent.get::<crate::ship::power::ShipPowerSystem>()
+                    .unwrap()
+                    .0
+                    .clone(),
+                ent.get::<crate::ship::power::PowerConfigResource>()
+                    .unwrap()
+                    .0
+                    .clone(),
+            )
+        };
+        assert!(
+            power.is_charging(&cfg),
+            "the bottom rung must be a rung the reactor RECHARGES from, or the \
+             ladder only slows the walk to the exhaustion lock instead of \
+             stopping it. This hull's `rates` say {:?} at total {}",
+            cfg.rates,
+            power.commanded_total()
+        );
+        assert!(!power.locked(), "nothing on this ladder reaches the lock");
+    }
+
+    /// The ladder is climbed as well as descended — but NOT at the charges it
+    /// was descended at. Each channel comes back at its `min_restore_*`, ten
+    /// battery-percent above the floor it shed at, and holds its shed level
+    /// throughout the band between the two.
+    ///
+    /// Worth its own test rather than a tail on the one above, for two
+    /// independent failures. The shed is a guard reading false, so a stuck shed
+    /// would need nothing more exotic than a fact that stopped being re-seeded —
+    /// and a ship that gave its combat allocation back for good after one dip is
+    /// a worse bug than the lock this issue is about. The opposite failure is
+    /// the one #1003's review found: a channel that re-elevates the moment it is
+    /// back over the floor it shed at flips every tick, because the lower total
+    /// recharges past that floor inside a single tick.
+    #[test]
+    fn the_shed_ladder_re_elevates_only_once_the_restore_floors_are_back() {
+        use crate::modifiers::power_system::{HELM_POWER_GROUP, WEAPONS_POWER_GROUP};
+        let (mut app, e) =
+            shipped_hull_power_app_clearing("assets/entities/alliance_destroyer.toml");
+        let ladder = authored_shed_ladder(&app, e);
+
+        // Arm-first, as `the_hysteresis_band_holds_steady_...` does: the ship
+        // spawns at a full battery, so the first tick actually elevates both
+        // channels rather than starting the test already at the resting total.
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 3);
+        assert_eq!(commanded_total(&app, e), 8);
+
+        // Now the real shed: dropping the battery under the floor moves the
+        // allocation down from that elevated 8, not from a total that never rose.
+        set_battery_pct(&mut app, e, ladder.weapons_shed / 2.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(commanded_total(&app, e), 6, "shed to the resting total");
+
+        // Back over the weapons SHED floor but not its restore floor. Under the
+        // single-threshold ladder this was already an elevation; now it is not.
+        set_battery_pct(
+            &mut app,
+            e,
+            (ladder.weapons_shed + ladder.weapons_restore) / 2.0,
+        );
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            2,
+            "a channel that has SHED may not come back at the floor it shed at — \
+             the hold rule needs it to be up already, and the elevate rule reads \
+             `min_restore_weapons`, which is still above"
+        );
+        assert_eq!(commanded_total(&app, e), 6);
+
+        // Over the weapons restore floor: weapons alone comes back.
+        set_battery_pct(&mut app, e, ladder.weapons_restore + 1.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 2);
+        assert_eq!(commanded_total(&app, e), 7);
+
+        // The same story one rung up: over helm's shed floor, under its restore
+        // floor, helm stays down.
+        set_battery_pct(&mut app, e, (ladder.helm_shed + ladder.helm_restore) / 2.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, HELM_POWER_GROUP),
+            2,
+            "helm's own hysteresis band, and it behaves like weapons'"
+        );
+        assert_eq!(commanded_total(&app, e), 7);
+
+        // Over both restore floors: the full combat-stations allocation.
+        set_battery_pct(&mut app, e, ladder.helm_restore + 5.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 3);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
+        assert_eq!(commanded_total(&app, e), 8);
+    }
+
+    /// **Inside the hysteresis band the decision HOLDS — it does not strobe.**
+    ///
+    /// The regression #1003's review found in the first cut of this issue. With
+    /// one threshold per channel the shed floor is also the re-elevate floor, so
+    /// a battery resting on it flips the channel EVERY TICK: shed drops the
+    /// total, the lower total recharges the battery back over the floor inside
+    /// one 30 Hz tick (a destroyer moves ±0.095 battery-percent per tick),
+    /// weapons re-elevates, the higher total drains it back under. That is a
+    /// `SetPowerGroupAllocation`, a `LogCat::Power` line, and a ×1.25/×1.0 swing
+    /// on `ModifierSlot::PhaserDamage` at tick rate — invisible to a test that
+    /// only samples the end state, and very visible to a player.
+    ///
+    /// The battery is PARKED in the band each tick rather than left to the
+    /// reactor, because the point is what the policy does at a fixed charge that
+    /// is neither above the restore floor nor below the shed floor. Both
+    /// directions of arrival are probed: the band must hold an elevated channel
+    /// up and a shed channel down, and it is the second that a single-threshold
+    /// ladder gets wrong.
+    #[test]
+    fn the_hysteresis_band_holds_steady_and_stops_the_per_tick_allocation_flip() {
+        use crate::modifiers::power_system::WEAPONS_POWER_GROUP;
+        let dt = 1.0 / 30.0;
+        let (mut app, e) =
+            shipped_hull_power_app_clearing("assets/entities/alliance_destroyer.toml");
+        let ladder = authored_shed_ladder(&app, e);
+        let band = (ladder.weapons_shed + ladder.weapons_restore) / 2.0;
+
+        // ARRIVING FROM ABOVE. One arm at a full battery puts both elevations
+        // on, then the charge is parked in the band.
+        power_tick_with_dt(&mut app, dt);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
+        for tick in 0..300 {
+            set_battery_pct(&mut app, e, band);
+            power_tick_with_dt(&mut app, dt);
+            assert_eq!(
+                commanded(&app, e, WEAPONS_POWER_GROUP),
+                3,
+                "tick {tick}: an elevated channel HOLDS through the band"
+            );
+            assert_eq!(commanded_total(&app, e), 7, "tick {tick}");
+            // Tick 0 is the helm shed (the band is below `min_reserve_helm`),
+            // which is a real decision. Everything after it must be silence.
+            if tick > 0 {
+                assert!(
+                    emitted_allocations(&app, e).is_empty(),
+                    "tick {tick}: the allocation had settled and the arm emitted \
+                     {:?} anyway — this is the per-tick flip",
+                    emitted_allocations(&app, e)
+                );
+            }
+        }
+
+        // ARRIVING FROM BELOW. Shed weapons under its floor, then park the
+        // charge back in the band: it must NOT come back until the restore
+        // floor, and it must not re-decide while it waits.
+        set_battery_pct(&mut app, e, ladder.weapons_shed / 2.0);
+        power_tick_with_dt(&mut app, dt);
+        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 2);
+        for tick in 0..300 {
+            set_battery_pct(&mut app, e, band);
+            power_tick_with_dt(&mut app, dt);
+            assert_eq!(
+                commanded(&app, e, WEAPONS_POWER_GROUP),
+                2,
+                "tick {tick}: a SHED channel stays down through the band — coming \
+                 back at `min_reserve_weapons` is exactly the flip"
+            );
+            assert_eq!(commanded_total(&app, e), 6, "tick {tick}");
+            assert!(
+                emitted_allocations(&app, e).is_empty(),
+                "tick {tick}: nothing to decide, and the arm emitted {:?}",
+                emitted_allocations(&app, e)
+            );
+        }
+    }
+
+    /// **A sustained red-alert fight cannot walk any shipped hull into the
+    /// exhaustion lock (issue #1003).**
+    ///
+    /// The reactor-level half of the acceptance criterion, run over every hull
+    /// that authors a reactor and a power policy, because the ladder is
+    /// authored in percentages while the lock is at an absolute 0: whether the
+    /// two meet is a property of each hull's own `capacity` and `rates`, not of
+    /// the policy alone. Red alert up and thrust held over the threshold for
+    /// the whole window, which is the worst case — it is the only combination
+    /// that pays for the steepest rung.
+    ///
+    /// The control matters as much as the assertion: a run that never dipped
+    /// under either floor would satisfy "never locked" without exercising a
+    /// single step of the ladder, so both floors must be crossed and the
+    /// observed minimum must sit above 0 with real margin.
+    ///
+    /// The commanded totals are counted as well as the charge, because this is
+    /// the only probe in which the battery MOVES under the reactor's own
+    /// integration. That makes it the one place a per-tick allocation flip would
+    /// show up as itself rather than as an inference, so the emitted commands
+    /// are bounded too.
+    #[test]
+    fn a_sustained_red_alert_drain_never_reaches_the_exhaustion_lock_on_any_shipped_hull() {
+        // The hand-list is the readable one; the glob is the complete one. A
+        // tenth hull that authors a reactor policy has to be added here rather
+        // than quietly shipping with an untested reactor.
+        assert_eq!(
+            SHIPPED_POWER_HULLS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            globbed_power_hull_paths(),
+            "SHIPPED_POWER_HULLS must name exactly the shipped hulls authoring \
+             `[power]` + `[power.ai_policy]`"
+        );
+
+        let dt = 1.0 / 30.0;
+        let ticks = (60.0 / dt) as u32;
+        for path in SHIPPED_POWER_HULLS {
+            let (mut app, e) = shipped_hull_power_app_clearing(path);
+            let ladder = authored_shed_ladder(&app, e);
+            let mut min_pct = f64::MAX;
+            let mut totals: Vec<u8> = Vec::new();
+            let mut emits = 0usize;
+            for tick in 0..ticks {
+                power_tick_with_dt(&mut app, dt);
+                emits += emitted_allocations(&app, e).len();
+                let pct = battery_pct(&app, e);
+                min_pct = min_pct.min(pct);
+                let total = commanded_total(&app, e);
+                if !totals.contains(&total) {
+                    totals.push(total);
+                }
+                let locked = app
+                    .world()
+                    .entity(e)
+                    .get::<crate::ship::power::ShipPowerSystem>()
+                    .unwrap()
+                    .0
+                    .locked();
+                assert!(
+                    !locked,
+                    "{path}: the reactor hit the exhaustion lock at tick {tick} \
+                     ({:.1} s in) with the battery at {pct:.2} %. The AI shed \
+                     ladder ({ladder:?}) is supposed to make that unreachable — \
+                     totals seen so far: {totals:?}",
+                    tick as f32 * dt
+                );
+            }
+
+            assert!(
+                min_pct < ladder.weapons_shed,
+                "{path}: the battery never fell under the lower shed floor \
+                 ({}) across the window — lowest reading {min_pct:.2} %. \
+                 The no-lock assertion above passed without either step of the \
+                 ladder being exercised",
+                ladder.weapons_shed
+            );
+            assert!(
+                min_pct > 0.0,
+                "{path}: the battery reached {min_pct:.2} %, which is the lock"
+            );
+            assert!(
+                totals.contains(&8) && totals.contains(&7) && totals.contains(&6),
+                "{path}: the run must walk the whole ladder — 8 at combat \
+                 stations, 7 under the helm floor, 6 under the weapons floor. \
+                 Totals actually seen: {totals:?}"
+            );
+            // The hysteresis band is ten battery-percent wide, so a free-running
+            // reactor takes SECONDS to cross it and this window holds a couple
+            // of dozen crossings at the very most. Without the band the shed and
+            // the re-elevate sit on one number and the count is one per tick, so
+            // a tenth of the tick count is a floor no chattering ladder can get
+            // under and no settled one can approach.
+            assert!(
+                emits < (ticks as usize) / 10,
+                "{path}: {emits} allocation commands over {ticks} ticks. The \
+                 shed/restore band is supposed to make each crossing a decision \
+                 taken seconds apart, not a per-tick flip"
+            );
+        }
+    }
+
+    /// **The floors are AI-shed only: a human pushes straight past them.**
+    ///
+    /// The guards live in the AI's bid stage, upstream of the admitted-command
+    /// seam. `ship::power::handle_power_messages` — the ONE applier both sides
+    /// go through (AGENTS.md rule #6) — never reads `battery_pct`, so a Power
+    /// officer who wants weapons at 3 on a battery under both floors gets
+    /// weapons at 3, and keeps it.
+    ///
+    /// That is the intended asymmetry rather than a hole in the symmetry: the
+    /// seam is symmetric, the JUDGEMENT is not. An AI that never spends its
+    /// last reserve is a doctrine; a human who does is making a decision the
+    /// game is supposed to let them make.
+    ///
+    /// The command goes in through `command_admission::validate_and_admit` with
+    /// a real session token, not by pushing an `AdmittedCommand` onto the queue
+    /// by hand. A raw push is the thing this file's own AI emitters are
+    /// forbidden from doing, and it would prove only that the APPLIER ignores
+    /// the battery. What the claim needs is that a human command below the
+    /// floors is ADMITTED and then applied, which is admission plus application
+    /// — two gates, and only one of them was being tested.
+    #[test]
+    fn a_human_power_command_pushes_past_the_ai_shed_floors() {
+        use crate::modifiers::power_system::WEAPONS_POWER_GROUP;
+        let (mut app, e) = shipped_hull_power_app("assets/entities/alliance_destroyer.toml");
+        let ladder = authored_shed_ladder(&app, e);
+        let under_both = ladder.weapons_shed / 2.0;
+
+        // Arm first: weapons spawns SEEDED at its authored `default_level`, 2 —
+        // the same number the shed baseline falls to — so shedding straight from
+        // spawn would prove nothing, the channel was never up to begin with. A
+        // full battery clears the restore floor and puts the AI's own ELEVATE
+        // rule behind the 3 that follows.
+        set_battery_pct(&mut app, e, 100.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            3,
+            "weapons must actually elevate on a full battery, or the shed below is \
+             not a real transition and the test setup is unproven all over again"
+        );
+
+        // The AI, holding the reactor, sheds both elevations at this charge — a
+        // REAL shed, down from the 3 just armed above.
+        set_battery_pct(&mut app, e, under_both);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            2,
+            "the AI must have shed first, or the human command below proves nothing"
+        );
+
+        // A human takes the Power station: the reactor's control source flips to
+        // Human and a registered session holds whatever station THIS hull's own
+        // config says owns the reactor.
+        let token = seat_human_power_officer(&mut app, e);
+
+        // …and commands the very elevation the floor just refused the AI.
+        set_battery_pct(&mut app, e, under_both);
+        assert!(
+            admit_human_power_command(&mut app, e, &token, WEAPONS_POWER_GROUP, 3),
+            "the station holder's `SetPowerGroupAllocation` must pass admission \
+             on a battery under both AI shed floors — admission consults the \
+             control source and the station tenure, never the reserve"
+        );
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            3,
+            "an admitted human `SetPowerGroupAllocation` must apply on a battery \
+             below both AI shed floors — the applier does not read `battery_pct`"
+        );
+        assert_eq!(commanded_total(&app, e), 7);
+        assert!(
+            battery_pct(&app, e) < ladder.weapons_shed,
+            "the raise must have landed while the battery was still under the \
+             floor, or this test drifted into asserting nothing"
+        );
+
+        // …and it STICKS. Nothing downstream re-reads the floor and pulls a
+        // human's allocation back down.
+        {
+            let mut ent = app.world_mut().entity_mut(e);
+            ent.get_mut::<AdmittedCommands>().unwrap().0.clear();
+        }
+        set_battery_pct(&mut app, e, under_both);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            3,
+            "the human's allocation was clawed back by a floor that is supposed \
+             to be AI-shed only"
         );
     }
 

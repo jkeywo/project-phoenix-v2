@@ -557,16 +557,78 @@ capacity = 100.0
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25.0
 
+# The AI's two-step SHED LADDER (issue #1003), the same numbers the fleet
+# baseline authors — see `fragments/ai/fleet_baseline.toml`'s param note for the
+# full reasoning. Each channel authors three rules: HOLD (priority 15), ELEVATE
+# (10), and the `priority = 0` BASELINE at level 2 that takes the channel back
+# when neither of the others fires. That fallback IS the shed; there is no
+# demote rule and no ship-wide total rule (`shields` never bids, so it is
+# reserved at its commanded 2).
+#
+# Each channel carries TWO floors and the gap between them is the point: the
+# channel sheds below `min_reserve_*` and may not rise again until the charge is
+# back over the higher `min_restore_*`. With one floor per channel the shed and
+# the re-elevate would sit on the same number, and the AI would flip that
+# channel on every tick the charge rested there. `fact(power_<group>)` — the
+# channel's CURRENT level — is what lets the hold rule tell "already up" from
+# "climbing back", so the hysteresis needs no policy state.
+#
+# A FALLING battery at combat stations under thrust (helm's elevate needs the
+# thrust, weapons' needs the alert — this hull's helm rules carry no `red_alert`
+# clause):
+#
+#   >= 50   helm 3 / weapons 3 / shields 2 = 8 — the steepest drain in `rates`
+#   25..50  helm sheds  => total 7 — a slow drain (-2/s here)
+#   < 25    weapons too => total 6 — POSITIVE (+2/s), so the reserve refills
+#
+# A RISING one climbs the same steps at 35 (weapons) and 60 (helm), so the
+# charge oscillates across the 25–35 band and — with the reactor undamaged —
+# never reaches 0, which is where `PowerSystem::tick` slams every group to 1 and
+# locks the reactor until `emergency_threshold` above is back. Under thrust with
+# the alert DOWN this hull's ordinary transit rests at total 7 rather than 6,
+# and the 50 step turns even that around.
+#
+# The hold rules carry the SAME trigger clause as the elevate they sit above —
+# helm's thrust, weapons' red alert — not only the shed floor, and that is
+# deliberate: one tick with the trigger false sheds the channel exactly as a
+# battery breach would, and it cannot climb back on the trigger returning alone
+# while the charge is under the restore floor — the elevate rule that would
+# re-raise it is gated on the RESTORE floor, not the shed one. A one-way
+# ratchet on trigger flap for as long as the reserve is in the band — elevated
+# posture belongs to combat stations, not to a throttle or an alert that
+# blinked for a single tick.
+#
+# AI-shed only: `handle_power_messages` never reads `battery_pct`, so a human
+# Power officer pushes straight past all four floors. Out of scope in the other
+# direction: a Disabled or Destroyed reactor rates `operate_ai = false`, so the
+# AI stops operating power altogether while the reactor keeps integrating at the
+# last commanded total — no floor reaches that case.
 [power.ai_policy.param]
 thrust_threshold = 0.7
+# Helm's shed/restore pair: the first point the ship gives back, and the higher
+# charge it takes the point again at.
 min_reserve_helm = 50.0
-min_reserve_weapons = 10.0
+min_restore_helm = 60.0
+# Weapons' pair, the lower step of the ladder. 25 sheds to the sustainable total
+# while a quarter of the reserve is still in hand; the 10 this shipped with
+# before issue #1003 shed with barely a tenth of it left.
+min_reserve_weapons = 25.0
+min_restore_weapons = 35.0
 min_reserve_baseline = 0.0
+
+# helm — HOLD (already at 3 and still above the shed floor), then ELEVATE
+# (climbing back past the restore floor), then the baseline.
+[[power.ai_policy.rule]]
+priority = 15
+channel = "helm"
+when = "fact(thrust) >= param(thrust_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
+verb = "set_power_group_allocation"
+level = 3
 
 [[power.ai_policy.rule]]
 priority = 10
 channel = "helm"
-when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_restore_helm)"
 verb = "set_power_group_allocation"
 level = 3
 
@@ -577,10 +639,19 @@ when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
 
+# weapons — the rung the battery actually oscillates on, and the last elevation
+# the ship gives up.
+[[power.ai_policy.rule]]
+priority = 15
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(power_weapons) >= 3 and fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
 [[power.ai_policy.rule]]
 priority = 10
 channel = "weapons"
-when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)"
+when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons)"
 verb = "set_power_group_allocation"
 level = 3
 

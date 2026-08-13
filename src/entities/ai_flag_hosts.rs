@@ -1337,12 +1337,17 @@ mod tests {
 
     /// AC: the hosts that CAN evaluate flags still accept them — same hull, same
     /// load path, a flag added to its `[power.ai_policy]` instead.
+    ///
+    /// The guard mutated is the weapons ELEVATE rule, which since issue #1003
+    /// reads the RESTORE floor (`min_restore_weapons`) — its sibling hold rule
+    /// is the one that reads `min_reserve_weapons`. Either would do; naming the
+    /// restore floor is what keeps [`with_guard`]'s exactly-once assertion true.
     #[test]
     fn a_flag_guard_on_a_plumbed_host_of_a_shipped_hull_still_loads() {
         let mutated = with_guard(
             &cruiser(),
-            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)""#,
-            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons) and flag(weapons_free)""#,
+            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons)""#,
+            r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons) and flag(weapons_free)""#,
         );
         crate::entities::config::EntityConfig::from_toml(&mutated).expect(
             "the Power reactor passes a real flag chain, so a flag() guard on it is valid content",

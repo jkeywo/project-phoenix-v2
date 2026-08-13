@@ -502,22 +502,23 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     ("ship_requiem_courier", "captain"),
     // ── The reactors whose drive is not gated by the alert ───────────────────
     //
-    // These five author `power` inline and their `helm` elevation reads
-    // `thrust >= thrust_threshold and battery_pct >= min_reserve_helm` with NO
-    // `red_alert` term; the fleet baseline's carries one. That guard exists
-    // because `plan_helm_travel` commands near-max throttle for any ordinary
+    // These five author `power` inline and their `helm` ELEVATE reads
+    // `thrust >= thrust_threshold and battery_pct >= min_restore_helm`, and the
+    // HOLD above it reads `battery_pct >= min_reserve_helm` instead — both with
+    // NO `red_alert` term; the fleet baseline's carries one on both. That guard
+    // exists because `plan_helm_travel` commands near-max throttle for any ordinary
     // transit, so an ungated rule holds an Alliance hull's drive elevated for
     // its whole cruise and browns the reactor out with no combat involved.
     //
     // The reactor arithmetic is NOT what distinguishes them, and it is worth
     // saying so because an earlier revision of this note claimed it was. An
-    // Alliance hull authors four groups resting at `ops 1 + helm 2 + weapons 2 +
-    // sensors 1` = 6; these five author no `[power_groups.*]`, so
-    // `PowerSystem::from_authored_groups` seeds the canonical trio at level 2 —
+    // Alliance hull authors the same canonical trio at `helm 2 + weapons 2 +
+    // shields 2` = 6; these five author no `[power_groups.*]` at all, so
+    // `PowerSystem::from_authored_groups` seeds that same trio at level 2 —
     // also 6. Elevating helm puts BOTH at 7, and `PowerSystem::tick` indexes
     // `config.rates[total - 3]`, which is -2 on the fleet baseline's
     // `[5, 4, 3, 2, -2, -5]` and -2 on the patrol's `[6, 5, 4, 2, -2, -6]`
-    // alike. Three groups versus four costs the same drain either way.
+    // alike. The same three groups cost the same drain either way.
     //
     // What distinguishes them is WHEN THE ALERT IS UP. An Alliance captain
     // raises it on first contact (#912), so an alert-gated helm rule still
@@ -2545,17 +2546,25 @@ fn the_composed_battleship_holds_its_impulse_drive_idle() {
 }
 
 /// Power: the elevate rules need BOTH their trigger and their battery reserve;
-/// the baseline rules hold the line whenever a battery reading exists at all.
+/// the hold rules need the channel to be elevated ALREADY; the baseline rules
+/// hold the line whenever a battery reading exists at all.
 ///
 /// The brownout property is structural rather than a separate branch: an elevate
 /// guard cannot fire below its reserve, so allocation never rises when the
 /// battery cannot sustain it.
+///
+/// Since issue #1003 each channel carries two floors instead of one, and the
+/// hysteresis section at the bottom is where the pair earns its keep: between
+/// them the answer depends on `fact(power_<group>)` — where the channel already
+/// is — and on nothing else.
 #[test]
 fn power_guard_truth_table() {
     let p = fleet_baseline_policy("power");
     let thrust_threshold = param(&p, "thrust_threshold");
     let helm_reserve = param(&p, "min_reserve_helm");
+    let helm_restore = param(&p, "min_restore_helm");
     let weapons_reserve = param(&p, "min_reserve_weapons");
+    let weapons_restore = param(&p, "min_restore_weapons");
 
     let elevated = |level: u8| Some(AiPolicyVerb::SetPowerGroupAllocation(level));
     let (hi, lo) = (3u8, 2u8);
@@ -2627,7 +2636,7 @@ fn power_guard_truth_table() {
             &facts(&[("red_alert", 1.0), ("battery_pct", weapons_reserve + 70.0)])
         ),
         elevated(hi),
-        "red alert AND battery above the weapons reserve ⇒ elevate."
+        "red alert AND battery above the weapons restore floor ⇒ elevate."
     );
     assert_eq!(
         resolve(
@@ -2646,6 +2655,219 @@ fn power_guard_truth_table() {
         ),
         elevated(lo),
         "no red alert ⇒ baseline."
+    );
+
+    // ── the hysteresis band, on both channels (issue #1003) ─────────────────
+    //
+    // Between a channel's shed floor and its restore floor the two rules
+    // disagree, and `fact(power_<group>)` is the tie-break. Every row below
+    // holds the battery at the SAME charge and changes only where the channel
+    // already is — which is exactly the property a single-threshold ladder
+    // cannot express, and the reason it flips at tick rate.
+    assert!(
+        helm_reserve < helm_restore && weapons_reserve < weapons_restore,
+        "each channel must restore above where it sheds ({helm_reserve}/{helm_restore}, \
+         {weapons_reserve}/{weapons_restore}), or there is no band to test"
+    );
+    let helm_band = (helm_reserve + helm_restore) / 2.0;
+    let weapons_band = (weapons_reserve + weapons_restore) / 2.0;
+
+    assert_eq!(
+        resolve(
+            &p,
+            "helm",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("thrust", thrust_threshold + 0.2),
+                ("battery_pct", helm_band),
+                ("power_helm", 3.0)
+            ])
+        ),
+        elevated(hi),
+        "in the band, helm ALREADY at 3 ⇒ the hold rule keeps it there. Shedding \
+         here would give the point back ten percent above the authored floor."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "helm",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("thrust", thrust_threshold + 0.2),
+                ("battery_pct", helm_band),
+                ("power_helm", 2.0)
+            ])
+        ),
+        elevated(lo),
+        "same charge, helm already SHED ⇒ baseline. It may not come back until \
+         `min_restore_helm`, which is what stops the shed and the re-elevate \
+         landing on one number and flipping every tick."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("battery_pct", weapons_band),
+                ("power_weapons", 3.0)
+            ])
+        ),
+        elevated(hi),
+        "in the band, weapons ALREADY at 3 ⇒ hold."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("battery_pct", weapons_band),
+                ("power_weapons", 2.0)
+            ])
+        ),
+        elevated(lo),
+        "same charge, weapons already SHED ⇒ baseline. This is the rung the \
+         battery actually oscillates on, so this is the row that matters."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[
+                ("red_alert", 0.0),
+                ("battery_pct", weapons_band),
+                ("power_weapons", 3.0)
+            ])
+        ),
+        elevated(lo),
+        "the hold rule carries the SAME trigger clauses as the elevate: holding is \
+         not a licence to keep the point once the alert is down."
+    );
+
+    // ── the exact boundary, on all four authored floors (issue #1003) ───────
+    //
+    // Every row above sits well clear of a floor; these sit exactly ON one, in
+    // both directions. Evaluated against the DECODED policy via the facts bag
+    // directly, like the rest of this test, rather than through the reactor's
+    // own `battery_pct` computation — that widens an f32 quotient before
+    // comparing, which is not the same number as a `param()` read as f64 when
+    // the assertion depends on landing exactly on the line.
+    let eps = 1e-6;
+
+    // helm SHED floor: the hold rule's guard is `>=`, so exactly on the floor
+    // still holds; one epsilon under it, the channel sheds.
+    assert_eq!(
+        resolve(
+            &p,
+            "helm",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("thrust", thrust_threshold + 0.2),
+                ("battery_pct", helm_reserve),
+                ("power_helm", 3.0)
+            ])
+        ),
+        elevated(hi),
+        "helm already elevated, battery exactly ON the {helm_reserve} shed floor \
+         ⇒ the `>=` hold guard still reads true."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "helm",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("thrust", thrust_threshold + 0.2),
+                ("battery_pct", helm_reserve - eps),
+                ("power_helm", 3.0)
+            ])
+        ),
+        elevated(lo),
+        "helm already elevated, battery one epsilon BELOW the {helm_reserve} \
+         shed floor ⇒ sheds."
+    );
+
+    // helm RESTORE floor: the elevate rule's guard is also `>=`.
+    assert_eq!(
+        resolve(
+            &p,
+            "helm",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("thrust", thrust_threshold + 0.2),
+                ("battery_pct", helm_restore)
+            ])
+        ),
+        elevated(hi),
+        "helm not yet elevated, battery exactly ON the {helm_restore} restore \
+         floor ⇒ the `>=` elevate guard reads true and it climbs."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "helm",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("thrust", thrust_threshold + 0.2),
+                ("battery_pct", helm_restore - eps)
+            ])
+        ),
+        elevated(lo),
+        "helm not yet elevated, battery one epsilon BELOW the {helm_restore} \
+         restore floor ⇒ stays at baseline."
+    );
+
+    // weapons SHED floor.
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("battery_pct", weapons_reserve),
+                ("power_weapons", 3.0)
+            ])
+        ),
+        elevated(hi),
+        "weapons already elevated, battery exactly ON the {weapons_reserve} \
+         shed floor ⇒ holds."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[
+                ("red_alert", 1.0),
+                ("battery_pct", weapons_reserve - eps),
+                ("power_weapons", 3.0)
+            ])
+        ),
+        elevated(lo),
+        "weapons already elevated, battery one epsilon BELOW the \
+         {weapons_reserve} shed floor ⇒ sheds."
+    );
+
+    // weapons RESTORE floor.
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_restore)])
+        ),
+        elevated(hi),
+        "weapons not yet elevated, battery exactly ON the {weapons_restore} \
+         restore floor ⇒ climbs."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "weapons",
+            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_restore - eps)])
+        ),
+        elevated(lo),
+        "weapons not yet elevated, battery one epsilon BELOW the \
+         {weapons_restore} restore floor ⇒ stays at baseline."
     );
 
     // ── the absent-battery edge, on both channels ───────────────────────────

@@ -2443,12 +2443,26 @@ pub const POWER_SET_ALLOCATION_VERB: &str = "set_power_group_allocation";
 /// Authored policy-parameter name: the forward-thrust level (0.0–1.0) above
 /// which the default helm-elevation rule considers the ship actively driving.
 pub const POWER_THRUST_THRESHOLD_PARAM: &str = "thrust_threshold";
-/// Authored policy-parameter name: the minimum battery reserve (0–100) the
-/// default helm-elevation rule requires before raising helm power (AC2).
+/// Authored policy-parameter name: the battery reserve (0–100) BELOW which the
+/// default helm channel gives its elevated point back (AC2). The shed floor: the
+/// hold rule reads it, and the channel falls to its baseline underneath it.
 pub const POWER_HELM_RESERVE_PARAM: &str = "min_reserve_helm";
-/// Authored policy-parameter name: the minimum battery reserve (0–100) the
-/// default weapons-elevation rule requires before raising weapons power (AC2).
+/// Authored policy-parameter name: the battery reserve (0–100) the default helm
+/// channel must be back OVER before it may elevate again (issue #1003).
+///
+/// The upper half of the pair, and always above [`POWER_HELM_RESERVE_PARAM`].
+/// One threshold would be both the shed floor and the re-elevate floor, and the
+/// channel would then flip on every tick the charge rested on it — the lower
+/// total recharges past a single threshold inside one tick. See
+/// `fragments/ai/fleet_baseline.toml`.
+pub const POWER_HELM_RESTORE_PARAM: &str = "min_restore_helm";
+/// Authored policy-parameter name: the battery reserve (0–100) BELOW which the
+/// default weapons channel gives its elevated point back (AC2).
 pub const POWER_WEAPONS_RESERVE_PARAM: &str = "min_reserve_weapons";
+/// Authored policy-parameter name: the battery reserve (0–100) the default
+/// weapons channel must be back OVER before it may elevate again (issue #1003).
+/// Sibling of [`POWER_HELM_RESTORE_PARAM`]; see there for what the gap buys.
+pub const POWER_WEAPONS_RESTORE_PARAM: &str = "min_restore_weapons";
 /// Authored policy-parameter name: the (zero) reserve the default LOWERING
 /// baseline rules reference so every rule declares a reserve (AC2) without ever
 /// gating a de-allocation, which can never cause a brownout.
@@ -12429,9 +12443,10 @@ default_level = 1
 
     #[test]
     fn default_power_policy_validates_and_resolves() {
-        // The shipped authored block reproduces the retired engine as four rules
-        // (helm elevate + baseline, weapons elevate + baseline), all emitting the
-        // value-carrying allocation verb, and every rule declares a reserve param.
+        // The shipped authored block is six rules since issue #1003 — hold,
+        // elevate and baseline on each of helm and weapons — all emitting the
+        // value-carrying allocation verb, and every rule declares a reserve
+        // param.
         let cfg = crate::entities::authored_ai_pins::shipped_policy_toml("power");
         // Validated against the canonical group channels.
         assert!(validate_fine_system_ai_policy(
@@ -12442,11 +12457,11 @@ default_level = 1
         .is_ok());
         let p = cfg.to_policy().expect("default power policy resolves");
         assert!(!p.idle);
-        assert_eq!(p.rules.len(), 4);
-        // The elevate rules carry the absolute magnitude in the verb payload, and
-        // the elevated level is strictly above the baseline one — the authored
-        // numbers themselves are the designer's business (#885b stage 5d deleted
-        // the Rust constants they used to have to match).
+        assert_eq!(p.rules.len(), 6);
+        // The elevate and hold rules carry the absolute magnitude in the verb
+        // payload, and the elevated level is strictly above the baseline one —
+        // the authored numbers themselves are the designer's business (#885b
+        // stage 5d deleted the Rust constants they used to have to match).
         let levels: Vec<u8> = p
             .rules
             .iter()
@@ -12455,13 +12470,30 @@ default_level = 1
                 _ => None,
             })
             .collect();
-        assert_eq!(levels.len(), 4, "every rule carries an allocation payload");
+        assert_eq!(levels.len(), 6, "every rule carries an allocation payload");
         assert!(
             levels.iter().max() > levels.iter().min(),
             "the elevate rules must raise their group above the baseline rules, or              the whole policy is a no-op: {levels:?}"
         );
         assert!(cfg.param.contains_key(POWER_HELM_RESERVE_PARAM));
         assert!(cfg.param.contains_key(POWER_WEAPONS_RESERVE_PARAM));
+        // Each channel's SHED floor has a matching RESTORE floor above it: the
+        // pair is the hysteresis, and one without the other is a ladder that
+        // flips its channel every tick the charge rests on the floor.
+        for (shed, restore) in [
+            (POWER_HELM_RESERVE_PARAM, POWER_HELM_RESTORE_PARAM),
+            (POWER_WEAPONS_RESERVE_PARAM, POWER_WEAPONS_RESTORE_PARAM),
+        ] {
+            let (lo, hi) = (
+                cfg.param
+                    .get(shed)
+                    .unwrap_or_else(|| panic!("the shipped policy authors `{shed}`")),
+                cfg.param
+                    .get(restore)
+                    .unwrap_or_else(|| panic!("the shipped policy authors `{restore}`")),
+            );
+            assert!(hi > lo, "`{restore}` ({hi}) must sit above `{shed}` ({lo})");
+        }
     }
 
     #[test]

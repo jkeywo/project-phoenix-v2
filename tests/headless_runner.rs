@@ -1385,6 +1385,14 @@ fn requiem_courier_reaches_its_destination_anchor() {
 /// path, end to end, in a real run. Before this batch that row was never
 /// present at any seed.
 ///
+/// BUDGET RAISED 400s -> 600s for #1003 (owner-approved 2026-08-13). #1003's
+/// AI power-shed/restore floors (50/25 shed, 60/35 restore) deliberately make
+/// the battery exhaustion lock unreachable under AI power — that was a
+/// fight-ending failure mode, and removing it means a seeded combat_test run
+/// legitimately takes longer to reach GameOver than the 175.9 s this test
+/// measured pre-#1003. 600 s was re-derived against the floored AI and leaves
+/// headroom the same way the old 400 s did against the old 175.9 s result.
+///
 /// WHAT THIS TEST DOES NOT PIN. The CRUISER is not a good defender on AI
 /// backfill — it dealt 106 damage in the whole run — so no run *here* clears the
 /// raid. That is a statement about the AI-backfilled cruiser, not about the
@@ -1400,7 +1408,7 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
     let args = HeadlessArgs {
         world_path: "assets/worlds/combat_test.toml".into(),
         dt,
-        max_ticks: ticks_for_sim_seconds(400.0, dt),
+        max_ticks: ticks_for_sim_seconds(600.0, dt),
         seed: Some(9),
         deterministic: true,
         ..test_args()
@@ -1412,7 +1420,7 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
     assert_eq!(
         report.final_phase,
         format!("{:?}", GamePhase::GameOver),
-        "combat_test did not resolve within 400s — final_phase {:?}, ship {:?}",
+        "combat_test did not resolve within 600s — final_phase {:?}, ship {:?}",
         report.final_phase,
         report.ship
     );
@@ -4250,6 +4258,180 @@ fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel()
          steady while the radar slot moved underneath it",
         radar_mults.len()
     );
+}
+
+/// **A sustained red-alert fight never reaches the exhaustion lock (#1003).**
+///
+/// The end-to-end half of the shed ladder. `modifiers::power_system::tick` slams
+/// every group to `GROUP_LEVEL_MIN` and LOCKS the reactor the instant the
+/// battery reaches 0, and nothing unlocks it until the charge climbs back to the
+/// hull's `emergency_threshold` — a ship that fights hard enough to flatten its
+/// own battery loses its drive, its guns and its shield regeneration at once,
+/// for as long as the recovery takes. The authored SHED floors
+/// (`min_reserve_helm` = 50, `min_reserve_weapons` = 25) exist so that an AI
+/// crew cannot walk a ship into that on its own decisions: at 50 the helm
+/// elevation is shed (total 7, a slow drain), at 25 the weapons elevation
+/// follows (total 6, which every shipped reactor authors as a POSITIVE rate),
+/// and the charge oscillates across the band between the weapons shed floor and
+/// its RESTORE floor (`min_restore_weapons` = 35, with `min_restore_helm` = 60
+/// one rung up). The gap between each pair is what makes that oscillation a
+/// decision taken seconds apart instead of a per-tick flip.
+///
+/// A unit test on the shipped hull already walks the ladder rung by rung
+/// (`console_ai::server::tests::the_shipped_power_policy_sheds_one_group_at_each_authored_floor`
+/// and its no-lock sibling). This is the one that puts the claim in front of a
+/// real fight: two hulls under their own AI crews, red alert raised by their own
+/// captains, thrust commanded by their own helm doctrine, damage taken and
+/// systems degrading — every input the ladder reads driven by the simulation
+/// rather than by the test.
+///
+/// `probe_duel` is the vehicle because its default seed deliberately does NOT
+/// resolve inside 60 s (see that world's own seed sweep): a duel that ends early
+/// stops draining, and the seed that keeps both ships shooting for the whole
+/// window is exactly the one this probe wants.
+///
+/// The control is the drain itself. A run in which no battery ever fell under
+/// the helm floor would satisfy "never locked" without exercising a single step
+/// of the ladder, so the probe insists that at least one reactor crossed it.
+#[test]
+fn neither_reactor_reaches_the_exhaustion_lock_across_a_seeded_duel() {
+    use project_phoenix::entity_config::{POWER_HELM_RESERVE_PARAM, POWER_WEAPONS_RESERVE_PARAM};
+    use project_phoenix::ship::power::{PowerAiPolicy, PowerConfigResource, ShipPowerSystem};
+    use project_phoenix::simulation::Ship;
+    use std::collections::BTreeMap;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        dt,
+        max_ticks: 0, // driven by hand below
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("probe_duel must build an app");
+    app.finish();
+    app.cleanup();
+
+    // Per-ship: lowest battery percentage seen, the set of ship-wide allocation
+    // totals seen, and each hull's own authored SHED floors.
+    //
+    // No `Default`: a derived `min_pct` would be 0.0, which reads as "this
+    // reactor flattened" and would quietly invert the `min_pct > 0.0` assertion
+    // below for any ship constructed that way. Every construction site below
+    // seeds `f64::MAX` explicitly.
+    struct Reading {
+        min_pct: f64,
+        totals: Vec<u8>,
+        floors: Option<(f64, f64)>,
+    }
+    let mut readings: BTreeMap<Entity, Reading> = BTreeMap::new();
+
+    // Built once and reused: `run` takes the world back between samples, but a
+    // `QueryState` only borrows it while it is iterating.
+    let mut reactors = app.world_mut().query_filtered::<(
+        Entity,
+        &ShipPowerSystem,
+        Option<&PowerConfigResource>,
+        Option<&PowerAiPolicy>,
+    ), With<Ship>>();
+
+    // (entity, locked, battery pct, commanded total, authored shed floors)
+    type SampledReactor = (Entity, bool, f64, u8, Option<(f64, f64)>);
+
+    let total_ticks = ticks_for_sim_seconds(60.0, dt);
+    for tick in 0..total_ticks {
+        run(&mut app, 1);
+
+        let sampled: Vec<SampledReactor> = reactors
+            .iter(app.world())
+            .map(|(e, power, cfg, policy)| {
+                let capacity = cfg.map(|c| c.0.capacity).unwrap_or(0.0);
+                let pct = if capacity > 0.0 {
+                    (power.0.battery_charge / capacity) as f64 * 100.0
+                } else {
+                    f64::NAN
+                };
+                let floors = policy.and_then(|p| {
+                    Some((
+                        p.0.params.get(POWER_HELM_RESERVE_PARAM)?,
+                        p.0.params.get(POWER_WEAPONS_RESERVE_PARAM)?,
+                    ))
+                });
+                (e, power.0.locked(), pct, power.0.commanded_total(), floors)
+            })
+            .collect();
+
+        for (ship, locked, pct, total, floors) in sampled {
+            assert!(
+                !locked,
+                "{ship} hit the reactor exhaustion lock at tick {tick} \
+                 ({:.1} s into the duel) with the battery at {pct:.2} %. The AI \
+                 shed ladder is supposed to make that unreachable: helm is given \
+                 back at `min_reserve_helm` and weapons at `min_reserve_weapons`, \
+                 and the total those leave is one the hull's own `rates` recharge \
+                 from. Totals this ship held before the lock: {:?}",
+                tick as f64 * dt,
+                readings
+                    .get(&ship)
+                    .map(|r| r.totals.clone())
+                    .unwrap_or_default()
+            );
+            let entry = readings.entry(ship).or_insert(Reading {
+                min_pct: f64::MAX,
+                totals: Vec::new(),
+                floors: None,
+            });
+            if pct.is_finite() {
+                entry.min_pct = entry.min_pct.min(pct);
+            }
+            if !entry.totals.contains(&total) {
+                entry.totals.push(total);
+            }
+            if entry.floors.is_none() {
+                entry.floors = floors;
+            }
+        }
+
+        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+            break;
+        }
+    }
+
+    assert!(
+        readings.len() >= 2,
+        "the duel should have carried two reactors; sampled {}",
+        readings.len()
+    );
+
+    // The control: the ladder must actually have been walked. At least one
+    // reactor has to have crossed its own helm floor, or "never locked" is a
+    // statement about a fight that never spent any power.
+    let crossed_helm = readings.values().any(|r| match r.floors {
+        Some((helm, _)) => r.min_pct < helm,
+        None => false,
+    });
+    let summary: Vec<String> = readings
+        .iter()
+        .map(|(ship, r)| {
+            format!(
+                "{ship}: min {:.2} %, totals {:?}, floors {:?}",
+                r.min_pct, r.totals, r.floors
+            )
+        })
+        .collect();
+    assert!(
+        crossed_helm,
+        "no reactor in the duel ever fell under its own `min_reserve_helm`, so \
+         the no-lock assertion above passed without a single step of the shed \
+         ladder being exercised. Readings: {summary:?}"
+    );
+    for (ship, r) in &readings {
+        assert!(
+            r.min_pct > 0.0,
+            "{ship} reached {:.2} % — that is the lock. Readings: {summary:?}",
+            r.min_pct
+        );
+    }
 }
 
 // ── The fixed logical tick (issue #895) ─────────────────────────────────────

@@ -36,6 +36,14 @@
 //! numeric leaf are authored as INTs and converted to the declarative `f32` /
 //! toml-float at this boundary, the same rule `after_secs`/`in_seconds` use.
 //!
+//! A FRACTIONAL leaf an int cannot express (`target_speed = 0.9`, a modifier
+//! `weight = 1.5`) is authored through the `flt("…")` marker: it carries a parsed
+//! `f64` as OPAQUE DATA (a [`RealLit`], never arithmetic), so `no_float`
+//! determinism is preserved AND the value is byte-identical to the declarative
+//! `0.9` — Rust's `f64` `FromStr` and toml's float parse agree on canonical
+//! decimals, which the parity tests pin. `map_f32` and `dynamic_to_toml` accept a
+//! `RealLit` wherever they already accept an int.
+//!
 //! [`ActionCmd`]: crate::world::dispatch::ActionCmd
 //! [`TriggerAction`]: crate::world::config::TriggerAction
 //! [`engine::RuntimeHost`]: crate::world::script::engine::RuntimeHost
@@ -45,8 +53,24 @@ use std::sync::{Arc, Mutex};
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position};
 
-use crate::world::config::{parse_action_entry, RawActionEntry, TriggerAction};
+use crate::world::config::{
+    parse_action_entry, RawActionEntry, RawModifier, RawZeroGate, TriggerAction,
+};
 use crate::world::dispatch::ActionCmd;
+
+/// A fractional literal carried as OPAQUE DATA, the `no_float`-safe fractional-leaf
+/// marker (issue #984, Rhai M6 follow-on).
+///
+/// Rhai is `no_float`, so an author cannot write `0.9` and the API is otherwise
+/// integer-only. `flt("0.9")` parses the string ONCE, at map-build time, into this
+/// wrapper; the `f64` is then only ever *read* (by [`dynamic_to_toml`] and
+/// [`map_f32`]) and never arithmetic'd in script, so determinism is untouched — a
+/// converted world does no float math, it merely transports a constant the toml
+/// crate would have parsed identically. Rust's `f64::from_str` and toml's float
+/// parse agree on canonical decimals, so `flt("0.9")` produces the SAME `f64` a
+/// declarative `0.9` does; the override / utility parity tests pin it.
+#[derive(Clone, Debug)]
+pub struct RealLit(pub f64);
 
 /// One buffered runtime effect, in authored order in the shared [`EffectSink`].
 ///
@@ -127,6 +151,22 @@ impl EffectSink {
 /// `TriggerAction` for the applier to resolve.
 pub fn register_effects(engine: &mut Engine) {
     engine.register_type_with_name::<EffectSink>("Effects");
+
+    // The `no_float`-safe fractional-leaf marker. `flt("0.9")` parses the string
+    // into a `RealLit` the effect readers unwrap; the parse happens ONCE, at
+    // map-build time, and the `f64` is never arithmetic'd in script — so a
+    // fractional constant reaches the declarative boundary with determinism
+    // intact. A bad string raises (discarding the call, settled decision 10),
+    // exactly as a malformed declarative float fails the world load.
+    engine.register_type_with_name::<RealLit>("RealLit");
+    engine.register_fn(
+        "flt",
+        |s: ImmutableString| -> Result<RealLit, Box<EvalAltResult>> {
+            s.parse::<f64>()
+                .map(RealLit)
+                .map_err(|e| raise(format!("flt(\"{s}\"): not a real number: {e}")))
+        },
+    );
 
     engine.register_fn(
         "complete_objective",
@@ -271,13 +311,19 @@ fn map_bool(spec: &Map, key: &str) -> Option<bool> {
     spec.get(key).and_then(|d| d.as_bool().ok())
 }
 
-/// Read a KNOWN-`f32` scalar (`base_priority`). `no_float`: authored as an INT,
-/// so it is read as an integer and converted at this boundary to the same `f32`
-/// the declarative float parses to (`80` → `80.0`) — the seconds→elapsed rule.
+/// Read a KNOWN-`f32` scalar (`base_priority`, a modifier `weight` / `threshold`).
+/// `no_float`: authored as an INT (`80` → `80.0`, the seconds→elapsed rule) OR — for
+/// a fractional value an int cannot express — as a [`RealLit`] via `flt("0.9")`,
+/// unwrapped `.0 as f32`. Both routes land on the SAME `f32` the declarative float
+/// parses to: an int through `as f32`, and a `flt("0.9")` through the identical
+/// `f64` → `f32` narrowing the toml `f32` deserializer applies to `0.9`. `None`
+/// when the key is absent (or present but neither an int nor a `RealLit`).
 fn map_f32(spec: &Map, key: &str) -> Option<f32> {
-    spec.get(key)
-        .and_then(|d| d.as_int().ok())
-        .map(|i| i as f32)
+    let d = spec.get(key)?;
+    if let Some(real) = d.clone().try_cast::<RealLit>() {
+        return Some(real.0 as f32);
+    }
+    d.as_int().ok().map(|i| i as f32)
 }
 
 /// Read an optional array-of-strings field (`targets` / `groups` /
@@ -331,6 +377,69 @@ fn map_f32_array3(spec: &Map, key: &str) -> Result<Option<[f32; 3]>, String> {
     Ok(Some(out))
 }
 
+/// Read an `add_objective` `modifiers` array — `[#{ condition, threshold?, weight }]`
+/// — into `Vec<RawModifier>`, so the SHARED `parse_utility_config` builds the exact
+/// same `UtilityConfig` the declarative twin does; nothing utility-specific is
+/// re-implemented here. `weight` is required and `threshold` optional, both read
+/// through [`map_f32`] so each is authored as `flt("…")` or an int and lands on the
+/// byte-identical `f32` the declarative `weight = …` / `threshold = …` parses to.
+/// `Ok(None)` when absent; `Err` — which discards the whole call (settled decision
+/// 10) — when present but not an array of well-formed maps, rather than silently
+/// dropping a modifier the declarative path would have parsed.
+fn map_modifiers(spec: &Map) -> Result<Option<Vec<RawModifier>>, String> {
+    let Some(d) = spec.get("modifiers") else {
+        return Ok(None);
+    };
+    let arr = d
+        .clone()
+        .into_array()
+        .map_err(|actual| format!("`modifiers` must be an array of maps, got {actual}"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, el) in arr.into_iter().enumerate() {
+        let ty = el.type_name();
+        let m = el
+            .try_cast::<Map>()
+            .ok_or_else(|| format!("`modifiers`[{i}] must be a map, got {ty}"))?;
+        let condition = map_str(&m, "condition")
+            .ok_or_else(|| format!("`modifiers`[{i}] requires a string `condition`"))?;
+        let weight = map_f32(&m, "weight")
+            .ok_or_else(|| format!("`modifiers`[{i}] requires a `weight` (`flt(\"…\")` or int)"))?;
+        out.push(RawModifier {
+            condition,
+            threshold: map_f32(&m, "threshold"),
+            weight,
+        });
+    }
+    Ok(Some(out))
+}
+
+/// Read an `add_objective` `zero_gates` array — `[#{ condition, threshold? }]` — into
+/// `Vec<RawZeroGate>`, the veto twin of [`map_modifiers`] (no `weight`). Same reuse,
+/// same `flt`-or-int `threshold`, same discard-on-malformed policy.
+fn map_zero_gates(spec: &Map) -> Result<Option<Vec<RawZeroGate>>, String> {
+    let Some(d) = spec.get("zero_gates") else {
+        return Ok(None);
+    };
+    let arr = d
+        .clone()
+        .into_array()
+        .map_err(|actual| format!("`zero_gates` must be an array of maps, got {actual}"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, el) in arr.into_iter().enumerate() {
+        let ty = el.type_name();
+        let m = el
+            .try_cast::<Map>()
+            .ok_or_else(|| format!("`zero_gates`[{i}] must be a map, got {ty}"))?;
+        let condition = map_str(&m, "condition")
+            .ok_or_else(|| format!("`zero_gates`[{i}] requires a string `condition`"))?;
+        out.push(RawZeroGate {
+            condition,
+            threshold: map_f32(&m, "threshold"),
+        });
+    }
+    Ok(Some(out))
+}
+
 /// Convert a `spawn_entity` `overrides` subtree (`#{ … }`) into the `toml::Value`
 /// the declarative `overrides` field carries.
 ///
@@ -360,6 +469,13 @@ fn dynamic_to_toml(value: &Dynamic) -> Result<toml::Value, String> {
     if let Ok(i) = value.as_int() {
         return Ok(toml::Value::Float(i as f64));
     }
+    if let Some(real) = value.clone().try_cast::<RealLit>() {
+        // A `flt("0.9")` marker: the `no_float`-safe fractional leaf. Renders as the
+        // SAME toml FLOAT the declarative `0.9` parses to (`f64::from_str` and toml's
+        // float parse agree on canonical decimals), so a converted override's
+        // `toml::Value` is byte-identical to its declarative twin's.
+        return Ok(toml::Value::Float(real.0));
+    }
     if let Some(s) = value.clone().try_cast::<ImmutableString>() {
         return Ok(toml::Value::String(s.to_string()));
     }
@@ -386,20 +502,13 @@ fn dynamic_to_toml(value: &Dynamic) -> Result<toml::Value, String> {
 /// Build a `TriggerAction::AddObjective` from a script `#{ … }` map, reusing the
 /// declarative `parse_action_entry` for directive / utility validation.
 ///
-/// `modifiers` / `zero_gates` (utility arrays of maps) are not yet read here.
-/// They are REJECTED loudly rather than silently dropped — silently ignoring a
-/// key the declarative twin parses would diverge the scripted `UtilityConfig`
-/// from the TOML one. The `RawActionEntry`-reuse path makes reading them later
-/// free, without touching this builder's shape.
+/// The full utility config is read here: `base_priority` (a `flt`-or-int `f32`),
+/// plus the `modifiers` and `zero_gates` arrays via [`map_modifiers`] /
+/// [`map_zero_gates`]. They are set on the `RawActionEntry` so the SHARED
+/// `parse_utility_config` (run inside `parse_action_entry`) builds the byte-identical
+/// `UtilityConfig` the declarative twin does — the scripted and TOML `add_objective`
+/// are two front-ends over one parser, not two implementations kept in sync.
 fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
-    for unsupported in ["modifiers", "zero_gates"] {
-        if spec.contains_key(unsupported) {
-            return Err(format!(
-                "scripted add_objective does not yet support '{unsupported}'; author that \
-                 objective declaratively or await the utility-config milestone"
-            ));
-        }
-    }
     let raw = RawActionEntry {
         kind: "add_objective".to_string(),
         id: map_str(spec, "id"),
@@ -413,6 +522,8 @@ fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
         directive_anchor: map_str(spec, "directive_anchor"),
         base_priority: map_f32(spec, "base_priority"),
         source: map_str(spec, "source"),
+        modifiers: map_modifiers(spec)?,
+        zero_gates: map_zero_gates(spec)?,
         ..Default::default()
     };
     parse_action_entry(&raw)
@@ -702,18 +813,118 @@ mod tests {
         assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
     }
 
-    /// Issue #984 review: `modifiers`/`zero_gates` are not yet read by the scripted
-    /// builder. Supplying one RAISES (settled decision 10) rather than silently
-    /// dropping it, which would diverge the scripted `UtilityConfig` from the
-    /// declarative twin's (the TOML path DOES parse them).
+    /// `add_objective` now READS `modifiers`/`zero_gates` (the utility-config
+    /// milestone): the script arrays-of-maps, with `flt("…")` fractional thresholds
+    /// and weights, build the identical `TriggerAction::AddObjective` — same
+    /// `UtilityConfig` — the declarative twin parses through the shared
+    /// `parse_utility_config`. This is the parity the FRACTIONAL test-infra worlds
+    /// ride on: `no_float` Rhai could not author `weight = 1.25` before `flt`.
     #[test]
-    fn add_objective_rejects_unsupported_utility_keys() {
+    fn add_objective_reads_modifiers_and_zero_gates_matching_toml() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.add_objective(#{
+                    id: "obj-utility",
+                    text: "world.obj.text",
+                    base_priority: flt("50.5"),
+                    modifiers: [
+                        #{ condition: "enemy_near", threshold: flt("0.5"), weight: flt("2.0") },
+                        #{ condition: "low_hull", weight: flt("1.25") },
+                    ],
+                    zero_gates: [
+                        #{ condition: "shields_down" },
+                        #{ condition: "power_low", threshold: flt("0.2") },
+                    ],
+                });
+            }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"add_objective\"\n\
+             id = \"obj-utility\"\n\
+             text = \"world.obj.text\"\n\
+             base_priority = 50.5\n\
+             modifiers = [{ condition = \"enemy_near\", threshold = 0.5, weight = 2.0 }, { condition = \"low_hull\", weight = 1.25 }]\n\
+             zero_gates = [{ condition = \"shields_down\" }, { condition = \"power_low\", threshold = 0.2 }]",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+    }
+
+    /// A `modifier` missing its required `weight` RAISES (discarding the call,
+    /// settled decision 10) — the same loud failure a declarative modifier without a
+    /// `weight` gives, rather than a silently degraded `UtilityConfig`.
+    #[test]
+    fn add_objective_rejects_a_modifier_without_a_weight() {
         let err = run_result(
-            r#"fn f(ctx) { ctx.effects.add_objective(#{ id: "o", text: "t", modifiers: [] }); }"#,
+            r#"fn f(ctx) {
+                ctx.effects.add_objective(#{
+                    id: "o", text: "t",
+                    modifiers: [#{ condition: "enemy_near" }],
+                });
+            }"#,
             "f",
         )
-        .expect_err("an unsupported utility key must raise");
-        assert!(err.to_string().contains("modifiers"), "{err}");
+        .expect_err("a weightless modifier must raise");
+        assert!(err.to_string().contains("weight"), "{err}");
+    }
+
+    // ── Feature A: the `flt("…")` fractional-data marker (no_float-safe) ───────
+
+    /// The sharpest `flt` parity: a `flt("0.9")` override leaf must produce the
+    /// IDENTICAL `toml::Value` the declarative `target_speed = 0.9` carries — the
+    /// byte-identity a converted FRACTIONAL world depends on (`f64::from_str` ≡ toml's
+    /// float parse for canonical decimals). This is why a fractional constant can be
+    /// transported through `no_float` script as opaque data with no determinism loss.
+    #[test]
+    fn flt_override_leaf_matches_declarative_float() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.spawn_entity(#{
+                    template_path: "assets/entities/ship.toml",
+                    name: "x",
+                    position: [0, 0, 0],
+                    overrides: #{
+                        helm_console: #{
+                            target_speed: flt("0.9"),
+                        },
+                    },
+                });
+            }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"spawn_entity\"\n\
+             template_path = \"assets/entities/ship.toml\"\n\
+             name = \"x\"\n\
+             position = [0.0, 0.0, 0.0]\n\
+             overrides = { helm_console = { target_speed = 0.9 } }",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+
+        // Pin the conversion concretely: the `flt("0.9")` leaf is the identical toml
+        // FLOAT `0.9` — so a regression in the `RealLit` branch is unmistakable.
+        let BufferedEffect::Action(TriggerAction::SpawnEntity { overrides, .. }) = &effs[0] else {
+            panic!("expected a spawn action, got {:?}", effs[0]);
+        };
+        let speed = overrides
+            .as_ref()
+            .and_then(|o| o.get("helm_console"))
+            .and_then(|h| h.get("target_speed"))
+            .expect("override target_speed present");
+        assert_eq!(speed, &toml::Value::Float(0.9));
+    }
+
+    /// An unparseable `flt("…")` RAISES (discarding the call, settled decision 10),
+    /// exactly as a malformed declarative float fails the world load. The parse
+    /// happens once, at map-build time, so the raise pre-empts the effect entirely.
+    #[test]
+    fn flt_rejects_an_unparseable_string() {
+        let err = run_result(
+            r#"fn f(ctx) { ctx.effects.add_objective(#{ id: "o", text: "t", base_priority: flt("xyz") }); }"#,
+            "f",
+        )
+        .expect_err("an unparseable flt must raise");
+        assert!(err.to_string().contains("flt"), "{err}");
     }
 
     /// `spawn_entity(#{…})` — the sharpest parity: the Rhai-int `position:

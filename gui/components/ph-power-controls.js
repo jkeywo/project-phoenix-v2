@@ -37,7 +37,11 @@ export class PhPowerControls extends HTMLElement {
     .group { border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
     .group-top { display: flex; justify-content: space-between; align-items: center; }
     .group-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.2em; color: var(--ink); }
-    .pip-row { display: flex; align-items: center; gap: 0.4rem; justify-content: center; }
+    /* One visual unit per power group: [− button] [pips] [+ button], so the
+       controls a group's stepper operates on sit right beside its gems
+       instead of floating in a detached row underneath (issue #1005). */
+    .pip-cluster { display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+    .pip-row { display: flex; align-items: center; gap: 0.4rem; }
     .pip { width: 1.2rem; height: 1.2rem; border-radius: 50%; border: 2px solid var(--line-faint); background: var(--bg-deep); cursor: pointer; transition: all 0.15s ease; }
     .pip:hover:not(.disabled) { border-color: var(--ink-dim); }
     .pip.active { background: var(--loaded); border-color: var(--loaded); box-shadow: 0 0 6px rgba(78,200,112,0.5); }
@@ -48,7 +52,6 @@ export class PhPowerControls extends HTMLElement {
     .pip.held { background: transparent; border-color: var(--reloading); box-shadow: none; }
     .pip.disabled { cursor: default; opacity: 0.3; }
     .level-text.held { color: var(--reloading); }
-    .pip-btn-row { display: flex; align-items: center; gap: 0.5rem; justify-content: center; }
     .level-text { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
@@ -110,9 +113,9 @@ export class PhPowerControls extends HTMLElement {
             <span class="group-label"></span>
             <span class="level-text"></span>
           </div>
-          <div class="pip-row"></div>
-          <div class="pip-btn-row">
+          <div class="pip-cluster">
             <button type="button" class="mini-btn" data-action="decr"><span class="mini-bg"></span><span class="lbl">−</span></button>
+            <div class="pip-row"></div>
             <button type="button" class="mini-btn" data-action="incr"><span class="mini-bg"></span><span class="lbl">+</span></button>
           </div>
         `;

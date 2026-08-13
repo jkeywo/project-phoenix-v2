@@ -148,13 +148,14 @@ impl Plugin for RepairPlugin {
             (
                 // AC4 DETERMINISM (issue #785) — pin the remaining intra-Physics
                 // edge. `operate_repair_ai` (decide/emit) →
-                // `handle_dispatch_repair_team` + `handle_set_repair_priority`
-                // (apply) → `tick_repair_teams` (advance) must run in that order
-                // every tick. #830 pinned only the first edge, so
-                // `tick_repair_teams` stayed ambiguous against the applier even
-                // though both mutate `ShipRepairTeams`: Bevy's parallel executor
-                // then serialised them run-varyingly, and a dispatch landing
-                // BEFORE the tick let a `Returning { remaining }` slot hit
+                // `handle_dispatch_repair_team` + `handle_set_repair_priority` +
+                // `handle_set_repair_target_priority` (apply) →
+                // `tick_repair_teams` (advance) must run in that order every
+                // tick. #830 pinned only the first edge, so `tick_repair_teams`
+                // stayed ambiguous against the appliers even though all three
+                // mutate `ShipRepairTeams`: Bevy's parallel executor then
+                // serialised them run-varyingly, and a dispatch landing BEFORE
+                // the tick let a `Returning { remaining }` slot hit
                 // `remaining <= 0` and flip straight to `Travelling` instead of
                 // staying `Returning`. That — not HashMap order — was the root
                 // cause of `all_busy_teams_ignore_further_dispatches` flaking.
@@ -163,7 +164,8 @@ impl Plugin for RepairPlugin {
                 tick_repair_teams
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(super::dispatch::handle_dispatch_repair_team)
-                    .after(super::dispatch::handle_set_repair_priority),
+                    .after(super::dispatch::handle_set_repair_priority)
+                    .after(super::dispatch::handle_set_repair_target_priority),
                 operate_repair_ai
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .run_if(crate::ai::cadence::ai_tick_ready),
@@ -1162,6 +1164,14 @@ mod tests {
     /// target, but still `Operational`, so no tier crossing fires and no
     /// unrelated console is taken offline.
     fn damage_owned_fine_systems(app: &mut App, systems: &[&str]) {
+        let at_80: Vec<(&str, f32)> = systems.iter().map(|id| (*id, 0.8)).collect();
+        damage_owned_fine_systems_to(app, &at_80);
+    }
+
+    /// [`damage_owned_fine_systems`] with an explicit HP fraction per system, so
+    /// a test can put a station's systems into DIFFERENT damage tiers and
+    /// observe which one a sweep or a console tap picks out of them.
+    fn damage_owned_fine_systems_to(app: &mut App, systems: &[(&str, f32)]) {
         let local_ship = {
             let mut q = app
                 .world_mut()
@@ -1176,17 +1186,17 @@ mod tests {
             .iter()
             .map(|(sid, entry)| (sid.clone(), entry.max))
             .collect();
-        for id in systems {
+        for (id, _) in systems {
             let sid = SystemId((*id).into());
             if !rows.iter().any(|(existing, _)| *existing == sid) {
                 rows.push((sid, 25.0));
             }
         }
         let mut hull = SystemHull::from_config(&rows);
-        for id in systems {
+        for (id, fraction) in systems {
             let sid = SystemId((*id).into());
             let max = hull.get(&sid).expect("just built this row").max;
-            hull.set_hp(&sid, max * 0.8);
+            hull.set_hp(&sid, max * fraction);
         }
         app.world_mut()
             .entity_mut(local_ship)
@@ -2136,6 +2146,199 @@ mod tests {
                 }
             ),
             "team 0 should have priority=2 after SetRepairPriority, got {:?}",
+            teams.0.slots()[0]
+        );
+    }
+
+    // ── Naming a system instead of an ordinal (issue #1015) ──────────────────
+
+    /// Put team 0 on site at the `helm` station with three systems in three
+    /// different states, so the remaining work has a non-trivial ranking:
+    /// the team lands on `helm-thrust` (the worst, Disabled) and what is left
+    /// ranks `helm-engine-port` first and `helm-engine-starboard` second.
+    fn team_on_site_at_helm_with_two_jobs_left(app: &mut App) {
+        damage_owned_fine_systems_to(
+            app,
+            &[
+                ("helm-thrust", 0.2),           // Disabled — the dispatch target
+                ("helm-engine-port", 0.5),      // Damaged, rank 1 of what remains
+                ("helm-engine-starboard", 0.6), // Damaged, rank 2
+            ],
+        );
+        push(
+            app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+        for _ in 0..30 {
+            tick(app);
+        }
+        let teams = local_teams(app);
+        assert!(
+            matches!(
+                &teams.0.slots()[0],
+                TeamSlot::Repairing { system_id: Some(s), .. } if s.0 == "helm-thrust"
+            ),
+            "fixture precondition: team 0 works the worst helm system first, got {:?}",
+            teams.0.slots()[0]
+        );
+    }
+
+    /// The repair console's damaged-systems tap, end to end through admission:
+    /// the client names a SYSTEM and the host records that system on the team's
+    /// slot. It records no ordinal — `priority` is #1013's standing per-team
+    /// instruction and a tap does not touch it, because a rank frozen at tap
+    /// time can select a different system by the time the hand-off consumes it
+    /// (see `RepairTeams::prioritise_system`).
+    #[test]
+    fn set_repair_target_priority_pins_the_tapped_system_host_side() {
+        let mut app = test_app();
+        start_game(&mut app);
+        team_on_site_at_helm_with_two_jobs_left(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::SetRepairTargetPriority {
+                    system_id: SystemId("helm-engine-starboard".into()),
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = local_teams(&mut app);
+        assert!(
+            matches!(
+                &teams.0.slots()[0],
+                TeamSlot::Repairing {
+                    priority: None,
+                    priority_system_id: Some(pinned),
+                    ..
+                } if pinned.0 == "helm-engine-starboard"
+            ),
+            "the tap must pin the named system and write no ordinal, got {:?}",
+            teams.0.slots()[0]
+        );
+    }
+
+    /// The sweep actually goes there: after the tapped system is prioritised the
+    /// team hands off to it rather than to the worse-ranked one it would
+    /// otherwise have taken. This is the acceptance criterion in observable
+    /// form — no assertion on the ordinal at all.
+    #[test]
+    fn set_repair_target_priority_sends_the_sweep_to_the_tapped_system() {
+        let mut app = test_app();
+        start_game(&mut app);
+        team_on_site_at_helm_with_two_jobs_left(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::SetRepairTargetPriority {
+                    system_id: SystemId("helm-engine-starboard".into()),
+                },
+            },
+        );
+        // Long enough for the team to finish `helm-thrust` and hand off.
+        for _ in 0..600 {
+            tick(&mut app);
+            let teams = local_teams(&mut app);
+            if let TeamSlot::Repairing {
+                system_id: Some(sid),
+                ..
+            } = &teams.0.slots()[0]
+            {
+                if sid.0 != "helm-thrust" {
+                    assert_eq!(
+                        sid.0, "helm-engine-starboard",
+                        "the sweep must hand off to the TAPPED system, not the \
+                         worst remaining one"
+                    );
+                    return;
+                }
+            }
+        }
+        panic!("team 0 never handed off to its next job");
+    }
+
+    /// A tap naming a system no on-site team is sweeping is a silent no-op —
+    /// the same nothing-happens a dispatch to an undamaged station produces.
+    #[test]
+    fn set_repair_target_priority_for_an_unswept_system_changes_nothing() {
+        let mut app = test_app();
+        start_game(&mut app);
+        team_on_site_at_helm_with_two_jobs_left(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::SetRepairTargetPriority {
+                    system_id: SystemId("tactical-phaser-fore".into()),
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = local_teams(&mut app);
+        assert!(
+            matches!(
+                &teams.0.slots()[0],
+                TeamSlot::Repairing {
+                    priority: None,
+                    priority_system_id: None,
+                    ..
+                }
+            ),
+            "got {:?}",
+            teams.0.slots()[0]
+        );
+    }
+
+    /// The same station-ownership gate every repair command sits behind: a token
+    /// that does not hold Engineering cannot steer the sweep. Admission decides
+    /// this from the TARGET system, so the new payload inherits it — this test
+    /// is what pins that inheritance rather than assuming it.
+    #[test]
+    fn set_repair_target_priority_from_a_non_engineering_token_is_rejected() {
+        let mut app = test_app();
+        start_game(&mut app);
+        team_on_site_at_helm_with_two_jobs_left(&mut app);
+
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::SetRepairTargetPriority {
+                    system_id: SystemId("helm-engine-starboard".into()),
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = local_teams(&mut app);
+        assert!(
+            matches!(
+                &teams.0.slots()[0],
+                TeamSlot::Repairing {
+                    priority: None,
+                    priority_system_id: None,
+                    ..
+                }
+            ),
+            "an unauthorised tap must not reach the team, got {:?}",
             teams.0.slots()[0]
         );
     }

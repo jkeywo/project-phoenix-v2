@@ -115,7 +115,7 @@
         // Ownerless "core" systems get their own click-to-expand bar that
         // hides itself entirely when there are none (issue #12).
         document.getElementById('core-damage').state = { entries: r.core_systems || [] };
-        repairTeamsEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [] };
+        repairTeamsEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [], damaged: r.damaged_systems || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
         // Station badge: the retired composite's engineering_auto meant
         // "station is Backfill-rated". The per-system equivalent is every

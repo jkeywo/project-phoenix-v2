@@ -1068,6 +1068,134 @@ describe('buildRepairConsoleState', () => {
     }));
     expect(s.overall_hull.destroyed_pct).toBe(0.5);
   });
+
+  // ── Issue #1015: the tap-to-prioritise damaged-systems list ────────────────
+
+  it('damaged_systems lists the broken visible rows worst-first', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core',       display_name: 'Core',   current: 6, max_hp: 10, tier: 'Damaged' },
+      { system_id: 'helm-radar', display_name: 'Radar',  current: 0, max_hp: 10, tier: 'Destroyed' },
+      { system_id: 'repair',     display_name: 'Repair', current: 2, max_hp: 10, tier: 'Disabled' },
+    ])));
+    expect(s.damaged_systems.map(d => d.system_id)).toEqual(['helm-radar', 'repair', 'core']);
+    expect(s.damaged_systems[0].display_name).toBe('Radar');
+    expect(s.damaged_systems[2].damage_pct).toBeCloseTo(0.4, 5);
+  });
+
+  it('damaged_systems omits Operational rows, however dented', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core',   display_name: 'Core',   current: 9, max_hp: 10, tier: 'Operational' },
+      { system_id: 'repair', display_name: 'Repair', current: 2, max_hp: 10, tier: 'Disabled' },
+    ])));
+    expect(s.damaged_systems.map(d => d.system_id)).toEqual(['repair']);
+  });
+
+  it('damaged_systems ranks a worse tier above a bigger damage fraction', () => {
+    // `repair` has lost more HP, but `core` is in the worse tier and leads.
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'repair', display_name: 'Repair', current: 3, max_hp: 10, tier: 'Damaged' },
+      { system_id: 'core',   display_name: 'Core',   current: 4, max_hp: 10, tier: 'Disabled' },
+    ])));
+    expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core', 'repair']);
+  });
+
+  it('damaged_systems can only be sourced from rows the host sent', () => {
+    // helm-radar is damageable (it is in `damageable_systems`) but has no
+    // visible hull row, so it cannot appear in a list the player can tap.
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' },
+    ])));
+    expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core']);
+  });
+
+  it('damaged_systems echoes the host pin rather than deriving a highlight', () => {
+    const s = parse(buildRepairConsoleState(projectedState(
+      [
+        { system_id: 'core',       display_name: 'Core',  current: 6, max_hp: 10, tier: 'Damaged' },
+        { system_id: 'helm-radar', display_name: 'Radar', current: 0, max_hp: 10, tier: 'Destroyed' },
+      ],
+      {
+        teams: [{
+          Repairing: {
+            system_id: 'helm-radar',
+            display_name: 'Radar',
+            priority: 2,
+            priority_system_id: 'core',
+          },
+        }],
+      },
+    )));
+    const byId = Object.fromEntries(s.damaged_systems.map(d => [d.system_id, d]));
+    // The pin is `core` even though `helm-radar` is the worse system: the host
+    // pinned the system directly (the ordinal is untouched), and the console
+    // only draws its answer.
+    expect(byId.core.prioritised).toBe(true);
+    expect(byId['helm-radar'].prioritised).toBe(false);
+    // The row a team is on site at is flagged separately.
+    expect(byId['helm-radar'].in_progress).toBe(true);
+    expect(byId.core.in_progress).toBe(false);
+  });
+
+  it('damaged_systems highlights nothing when the host pinned nothing', () => {
+    const s = parse(buildRepairConsoleState(projectedState(
+      [{ system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' }],
+      { teams: [{ Repairing: { system_id: 'core', display_name: 'Core', priority: 1 } }] },
+    )));
+    expect(s.damaged_systems[0].prioritised).toBe(false);
+  });
+
+  it('damaged_systems is empty on an intact ship', () => {
+    expect(parse(buildRepairConsoleState(EMPTY)).damaged_systems).toEqual([]);
+  });
+
+  // Mirrors the host's `current < max` candidate guard. A `max_hp = 0` row is
+  // permanently Destroyed AND permanently at max, so listing it would put a
+  // 0%-damage row on the panel that no tap could ever act on.
+  it('damaged_systems omits a zero-max row that can never be progressed', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'ghost',  display_name: 'Ghost',  current: 0, max_hp: 0,  tier: 'Destroyed' },
+      { system_id: 'repair', display_name: 'Repair', current: 2, max_hp: 10, tier: 'Disabled' },
+    ])));
+    expect(s.damaged_systems.map(d => d.system_id)).toEqual(['repair']);
+  });
+
+  // The pre-blackboard path feeds RAW wire slots. Without normalizing them the
+  // flags would be permanently false — "the host decided nothing" rather than
+  // "this path cannot tell", which is the quiet lie the flags exist to prevent.
+  it('damaged_systems reads the host flags on the legacy consoleHull fallback', () => {
+    const s = parse(buildRepairConsoleState({
+      consoleHull: [
+        { system_id: 'core',       display_name: 'Core',  current: 6, max_hp: 10, tier: 'Damaged' },
+        { system_id: 'helm-radar', display_name: 'Radar', current: 0, max_hp: 10, tier: 'Destroyed' },
+      ],
+      repairTeams: [{
+        Repairing: {
+          system_id: 'helm-radar',
+          display_name: 'Radar',
+          priority: 2,
+          priority_system_id: 'core',
+        },
+      }],
+    }));
+    const byId = Object.fromEntries(s.damaged_systems.map(d => [d.system_id, d]));
+    expect(byId.core.prioritised).toBe(true);
+    expect(byId['helm-radar'].in_progress).toBe(true);
+  });
+
+  // The same path's other input shape: `sim-state.js` pre-seeds `repairTeams`
+  // with bare `'Idle'` strings from `repair_team_count` before the first
+  // broadcast, and normalizing must survive them rather than throw.
+  it('damaged_systems survives the pre-seeded Idle placeholders', () => {
+    const s = parse(buildRepairConsoleState({
+      consoleHull: [
+        { system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' },
+      ],
+      repairTeams: ['Idle', 'Idle'],
+    }));
+    expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core']);
+    expect(s.damaged_systems[0].prioritised).toBe(false);
+    expect(s.damaged_systems[0].in_progress).toBe(false);
+  });
 });
 
 describe('overallHull', () => {

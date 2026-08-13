@@ -41,7 +41,7 @@ entities:
       title: Repair Team Cycle Policy
       summary: Repair teams travel to a target, repair at authored rate while on site, then return; Core is a valid repair target alongside station-owned systems.
       rationale:
-        - "Issue #785 pinned the cycle's intra-Physics ordering explicitly: operate_repair_ai (decide/emit) → handle_dispatch_repair_team + handle_set_repair_priority (apply) → tick_repair_teams (advance). #830 had pinned only the first edge, leaving tick_repair_teams ambiguous against the applier even though both mutate ShipRepairTeams; Bevy's parallel executor then serialised them run-varyingly, and a dispatch landing BEFORE the tick let a Returning { remaining } slot hit remaining <= 0 and flip straight to Travelling instead of staying Returning. That system-order ambiguity — not map iteration order — was the root cause of the intermittent all_busy_teams_ignore_further_dispatches failure. RepairPlugin::build now declares tick_repair_teams .after(handle_dispatch_repair_team).after(handle_set_repair_priority), matching the .chain() its own npc_repair_app fixture already used, so the cycle advances deterministically every tick."
+        - "Issue #785 pinned the cycle's intra-Physics ordering explicitly: operate_repair_ai (decide/emit) → handle_dispatch_repair_team + handle_set_repair_priority + handle_set_repair_target_priority (apply) → tick_repair_teams (advance). #830 had pinned only the first edge, leaving tick_repair_teams ambiguous against the appliers even though all three mutate ShipRepairTeams; Bevy's parallel executor then serialised them run-varyingly, and a dispatch landing BEFORE the tick let a Returning { remaining } slot hit remaining <= 0 and flip straight to Travelling instead of staying Returning. That system-order ambiguity — not map iteration order — was the root cause of the intermittent all_busy_teams_ignore_further_dispatches failure. RepairPlugin::build now declares tick_repair_teams .after(handle_dispatch_repair_team).after(handle_set_repair_priority).after(handle_set_repair_target_priority), matching the .chain() its own npc_repair_app fixture already used, so the cycle advances deterministically every tick."
     architecture:
       kind: lifecycle-policy
       authority: authoritative
@@ -372,10 +372,12 @@ entities:
       symbols:
         - handle_dispatch_repair_team
         - handle_set_repair_priority
+        - handle_set_repair_target_priority
         - register_repair_dispatch
       messages:
         - DispatchRepairTeam
         - SetRepairPriority
+        - SetRepairTargetPriority
       tests:
         - cargo test
     evidence:
@@ -882,6 +884,29 @@ entities:
       summary: Engineering command that prioritizes which internal subsystem a team repairs first after arriving on site.
       rationale:
         - Engineering should gain subsystem-level priority authority only after the team reaches the station.
+        - >-
+          [ai] Issue #1015 gave this command a SECOND payload rather than
+          replacing the first. SetRepairPriority carries an ORDINAL into the
+          team's remaining work and is a STANDING per-team order;
+          SetRepairTargetPriority names a SYSTEM and the host pins it as that
+          team's next job, leaving the ordinal untouched. The console emits only
+          the latter, because a rank is not computable from what the console can
+          see — the issue #737 projection shows Engineering the core rows, its own
+          station's rows, and the single row each team is on site at, and that
+          last row is precisely the one the sweep excludes from its candidates,
+          so a client-side rank would be a rank over a list with holes in it.
+        - >-
+          [ai] What host-side resolution does NOT buy is reach. The same
+          projection gates the LIST: a row the host did not send cannot be
+          rendered and so cannot be tapped, which in practice means the core
+          bucket and Engineering's own station. What it buys is that a tap on a
+          row the console CAN show stays correct under the projection (the host
+          ranks the whole group, not the visible slice), under re-ranking (damage
+          landing between the tap and the hand-off moves the ranking but not the
+          pinned row, so the console's [NEXT] highlight never labels a
+          destination that was quietly reassigned), and as the visible set
+          changes. Both payloads stay on the wire; the ordinal one is still the
+          right shape for anything that genuinely means "the nth job".
     architecture:
       authority: request
       producer:
@@ -902,8 +927,10 @@ entities:
         - gui/repair-dispatch.js
       messages:
         - SetRepairPriority
+        - SetRepairTargetPriority
       tests:
         - tests/client/action-map.test.js
+        - tests/client/repair-dispatch.test.js
 
   - message: ai-repair-request-signal
     core:

@@ -579,6 +579,26 @@ pub enum TeamSlot {
         /// not a fact about one system.
         #[serde(default)]
         priority: Option<u8>,
+        /// The system a console tap PINNED on this team's slot, echoed back so
+        /// the repair console can highlight the row the Engineering player
+        /// tapped (issue #1015).
+        ///
+        /// Written only by `RepairTeams::prioritise_system`, which is the
+        /// server-side resolution of `SetRepairTargetPriority`: it resolves
+        /// the tap to WHICH TEAM's sweep covers the named system and pins the
+        /// SYSTEM here. It does not touch `priority` above — the ordinal
+        /// stays whatever `SetRepairPriority` last set it to, and is
+        /// consulted only as the sweep's fallback once this pin's system
+        /// leaves the candidate list before the hand-off. The client never
+        /// computes either — see the payload's doc for why it cannot.
+        ///
+        /// Cleared at every sweep hand-off, because a pin describes ONE
+        /// hand-off: once the team has moved, the instruction has either been
+        /// honoured or been overtaken by fresh damage, and in both cases the
+        /// highlight would be a lie. `priority` deliberately does NOT clear with
+        /// it — that stays a standing instruction about the station (#1013).
+        #[serde(default)]
+        priority_system_id: Option<SystemId>,
     },
     /// Team has finished and is returning to engineering.
     /// `remaining` counts down from the travel duration.
@@ -1530,9 +1550,58 @@ pub enum SystemControlPayload {
     /// Until #1013 nothing read this value at all — it was stored on the slot
     /// and dropped there, because a team that fixed exactly one system had no
     /// next choice for a priority to steer.
+    ///
+    /// No console sends it: issue #1015 removed the per-team 1/2/3 ordinal
+    /// buttons in favour of `SetRepairTargetPriority`'s named-system taps, which
+    /// write a PIN and leave this value alone. It stays on the wire (and stays
+    /// handled) as the standing-order shape — the right payload for tooling, or
+    /// for any future caller that means "always take the nth job" rather than
+    /// "that one, next".
     SetRepairPriority {
         team_idx: u8,
         priority: u8,
+    },
+    /// Prioritise ONE named system in whichever repair team's sweep already
+    /// covers it (issue #1015) — the repair console's damaged-systems list taps.
+    ///
+    /// The host resolves everything: it finds the on-site team whose sweep group
+    /// contains `system_id` and PINS that system on the team's slot
+    /// (`TeamSlot::Repairing.priority_system_id`), which the sweep's next
+    /// hand-off prefers over the team's standing ordinal. A tap that names a
+    /// system no on-site team is sweeping — or one that is not candidate work,
+    /// e.g. a system some team is already standing on — changes nothing.
+    ///
+    /// It writes no ordinal. `priority` stays what `SetRepairPriority` made it:
+    /// #1013's standing per-team instruction. See `RepairTeams::prioritise_system`
+    /// for why a rank resolved at tap time would be wrong rather than redundant.
+    ///
+    /// # Why this exists alongside `SetRepairPriority`
+    ///
+    /// The obvious cheaper design is for the console to compute the ordinal
+    /// itself and keep sending `SetRepairPriority`. It cannot, because of issue
+    /// #737's information boundary. Engineering's `system_hull` projection
+    /// carries core rows, Engineering's own station's rows, and the single row a
+    /// team is *on site at* — and that last row is precisely the one
+    /// `sweep_candidates` EXCLUDES from its candidate list. So a rank the console
+    /// computed would be a rank over a list with holes in it.
+    ///
+    /// This does NOT mean a tap can steer a sweep the console cannot see. The
+    /// projection gates the LIST as well as the ranking: a row the console was
+    /// not sent cannot be rendered, so it cannot be tapped either, and taps
+    /// therefore only ever resolve for the core bucket and Engineering's own
+    /// station. What server-side resolution buys is that a tap on a row the
+    /// console CAN show stays correct — correct under the projection, since the
+    /// host ranks the whole group rather than the visible slice of it; correct
+    /// under re-ranking, since fresh damage between the tap and the hand-off
+    /// moves the ranking but not the pinned row; and correct as the console's
+    /// visible set changes, since nothing about the resolution depends on which
+    /// rows happened to be visible.
+    ///
+    /// `SetRepairPriority` is left on the wire untouched: it is still the right
+    /// payload for anything that genuinely means "nth job" rather than "that
+    /// one". Nothing in the UI sends it today.
+    SetRepairTargetPriority {
+        system_id: SystemId,
     },
     /// Flip the God Mode debug cheat (local ship takes no damage), issue #900.
     /// Targets `god-mode` (`system_registry::GOD_MODE_SYSTEM_ID`), an ownerless

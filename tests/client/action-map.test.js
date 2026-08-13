@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 38 expected action keys', () => {
+  it('contains exactly the 39 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -39,6 +39,7 @@ describe('ACTION_MAP', () => {
       'set_radar_view',
       'set_red_alert',
       'set_repair_priority',
+      'set_repair_target_priority',
       'set_sensors_target',
       'set_shield_focus',
       'set_target',
@@ -445,6 +446,32 @@ describe('set_repair_priority', () => {
       { action: 'set_repair_priority', team_idx: 0 },
       send,
     );
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('set_repair_target_priority', () => {
+  it('sends ControlSystem SetRepairTargetPriority with only the system id', () => {
+    const send = mkSend();
+    ACTION_MAP.set_repair_target_priority(
+      { action: 'set_repair_target_priority', system_id: 'hull-plating' },
+      send,
+    );
+    // No team_idx and no ordinal: the host resolves which team and pins the
+    // system; the ordinal is untouched. See gui/repair-dispatch.js for why
+    // the console cannot compute it.
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'repair',
+      payload: {
+        type: 'SetRepairTargetPriority',
+        data: { system_id: 'hull-plating' },
+      },
+    });
+  });
+
+  it('does nothing when system_id is missing', () => {
+    const send = mkSend();
+    ACTION_MAP.set_repair_target_priority({ action: 'set_repair_target_priority' }, send);
     expect(send).not.toHaveBeenCalled();
   });
 });

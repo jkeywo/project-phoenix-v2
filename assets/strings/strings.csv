@@ -381,7 +381,15 @@ component.repair_teams.status.idle,"Repair team status badge: waiting for dispat
 component.repair_teams.status.travelling,"Repair team status badge: moving to its target","TRAVELLING"
 component.repair_teams.status.repairing,"Repair team status badge: actively repairing","REPAIRING"
 component.repair_teams.status.returning,"Repair team status badge: returning to standby","RETURNING"
-component.repair_teams.priority,"Repair team priority label for onsite-repair priority buttons","Priority"
+component.repair_teams.damaged_title,"Repair console heading over the list of damaged systems a player can tap to prioritise","[DAMAGED SYSTEMS]"
+component.repair_teams.tier.damaged,"Damage tier chip on a damaged-systems row: lightly damaged","[DMG]"
+component.repair_teams.tier.disabled,"Damage tier chip on a damaged-systems row: badly damaged and offline","[DISABLED]"
+component.repair_teams.tier.destroyed,"Damage tier chip on a damaged-systems row: destroyed","[DESTROYED]"
+component.repair_teams.next,"Flag on the damaged-systems row a repair team has been told to fix next","[NEXT]"
+component.repair_teams.working,"Flag on the damaged-systems row a repair team is currently repairing","[ON IT]"
+component.repair_teams.prioritise_title,"Tooltip on a tappable damaged-systems row. {name} is the system name","[Fix {name} next]"
+component.repair_teams.prioritised_title,"Tooltip on the damaged-systems row already queued to be fixed next. {name} is the system name","[{name} is queued next]"
+component.repair_teams.working_title,"Tooltip on the damaged-systems row a repair team is already on site at. That row is not tappable — it is nobody's NEXT job. {name} is the system name","[A team is already on {name}]"
 component.ship_picker.class.battleship,Lobby ship picker — hull class badge on a battleship card,[BATTLESHIP]
 component.ship_picker.class.courier,Lobby ship picker — hull class badge on a courier card,[COURIER]
 component.ship_picker.class.cruiser,Lobby ship picker — hull class badge on a cruiser card,[CRUISER]

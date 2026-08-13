@@ -213,13 +213,22 @@ impl RepairTeams {
     /// the remaining work is ranked worst-first and `Some(n)` picks the `n`th
     /// entry of that ranking, 1-based and clamped to the list; `None` (and
     /// `Some(0)`) pick the first. Changing it mid-sweep therefore re-orders the
-    /// work the team has left, which is the lever the repair console's priority
-    /// taps pull.
+    /// work the team has left.
     ///
     /// It is deliberately NOT a score added to the ranking: an ordinal pick
     /// over a ranking the host already computes stays a pure function of
-    /// observable damage, and a console showing the same ranked list can label
-    /// its taps 1..n with no second copy of the comparator.
+    /// observable damage.
+    ///
+    /// # What sets it (and what does not)
+    ///
+    /// This is a STANDING PER-TEAM INSTRUCTION about a station ("always work the
+    /// second-worst thing"), which is why it survives the hand-off. Nothing in
+    /// the UI sends it: issue #1015 replaced the per-team 1/2/3 ordinal buttons
+    /// with the damaged-systems list, and a tap on that list writes
+    /// [`Self::prioritise_system`]'s PIN instead — a named system, not a rank.
+    /// `SystemControlPayload::SetRepairPriority` stays on the wire for anything
+    /// that genuinely means "the nth job" (tooling, and any future AI or console
+    /// that wants a standing order rather than a one-shot choice).
     pub fn set_priority(&mut self, team_idx: usize, priority: u8) -> bool {
         let Some(slot) = self.slots.get_mut(team_idx) else {
             return false;
@@ -231,6 +240,85 @@ impl RepairTeams {
             }
             _ => false,
         }
+    }
+
+    /// Pin `target` as the next job of whichever on-site team already covers
+    /// `target`'s station group (issue #1015). Returns the slot index that took
+    /// the order, or `None` when no team's sweep can reach that system.
+    ///
+    /// The repair console's damaged-systems taps name a SYSTEM, not a number,
+    /// because the console cannot see enough of the ship to work a number out —
+    /// `SystemControlPayload::SetRepairTargetPriority` documents that boundary.
+    /// So what is stored here is the system too: `priority_system_id`, which
+    /// [`next_sweep_target`] prefers over `priority` whenever the pinned row is
+    /// still a candidate at the hand-off.
+    ///
+    /// # Why the pin and not a resolved ordinal
+    ///
+    /// Resolving the tap to a RANK here and storing that would be a
+    /// knowingly-false UI. A tap and the hand-off it steers are separated by
+    /// however long the current system takes to finish, and combat damage in
+    /// between re-ranks the group — so an ordinal frozen at tap time can select
+    /// a DIFFERENT system by the time it is consumed, while the console goes on
+    /// highlighting the pinned row as `[NEXT]`. The pin cannot drift that way:
+    /// it names the row, and its only failure mode is leaving the candidate list
+    /// altogether, which [`next_sweep_target`]'s ordinal fallback covers.
+    ///
+    /// `priority` is therefore left alone by a tap. It stays exactly what
+    /// [`Self::set_priority`] made it: #1013's standing per-team instruction.
+    ///
+    /// Candidacy is delegated to [`sweep_candidates`] — the same list the
+    /// hand-off picks from, with the same exclusions — so a tap this accepts is
+    /// exactly a tap the hand-off can honour.
+    ///
+    /// Refusals, all silent and all leaving the slot untouched:
+    /// - no team is `Repairing` in `target`'s group (nobody is there to steer);
+    /// - the team's current system is not a hull row, the same gate
+    ///   [`sweep_from`] applies so a station-name dispatch cannot sweep;
+    /// - `target` is not among the candidates — it is `Operational`, it is not
+    ///   repairable at all, or SOME TEAM IS ALREADY ON SITE AT IT (including the
+    ///   team being asked). That last exclusion is what makes a tap on a busy row
+    ///   a refusal for the whole ship rather than a fall-through: a team's own
+    ///   system was never its own candidate, so before the exclusion existed a
+    ///   tap on team 0's current system simply moved on to team 1 and pinned it
+    ///   there, converging two teams on one row.
+    ///
+    /// Ties (two teams sweeping the same group) go to the lowest slot index, so
+    /// the choice is a pure function of state like every other repair decision.
+    pub fn prioritise_system(
+        &mut self,
+        target: &SystemId,
+        hull: &SystemHull,
+        config: &ShipConfig,
+    ) -> Option<usize> {
+        let target_group = sweep_group(target, config);
+        // Snapshot before the search: `sweep_candidates` needs the whole on-site
+        // set, and the write at the end needs `self.slots` mutably.
+        let occupied: Vec<SystemId> = self.on_site_systems().cloned().collect();
+        let idx = self.slots.iter().enumerate().find_map(|(idx, slot)| {
+            let TeamSlot::Repairing {
+                system_id: Some(current),
+                ..
+            } = slot
+            else {
+                return None;
+            };
+            hull.get(current)?;
+            if sweep_group(current, config) != target_group {
+                return None;
+            }
+            sweep_candidates(current, hull, config, &occupied)
+                .iter()
+                .any(|(sid, _)| sid == target)
+                .then_some(idx)
+        })?;
+        if let Some(TeamSlot::Repairing {
+            priority_system_id, ..
+        }) = self.slots.get_mut(idx)
+        {
+            *priority_system_id = Some(target.clone());
+        }
+        Some(idx)
     }
 
     /// Advance all active timers by `dt` seconds.
@@ -264,7 +352,19 @@ impl RepairTeams {
     /// The team's `priority` survives the in-place hand-off rather than being
     /// reset, because it is a standing instruction about the station ("work the
     /// second-worst thing"), not a fact about one system. [`Self::set_priority`]
-    /// documents what it selects.
+    /// documents what it selects. The console's `priority_system_id` PIN is the
+    /// opposite — one named row, consumed by the hand-off it steers — and
+    /// outranks the ordinal while it lasts (issue #1015).
+    ///
+    /// # No two teams on one system
+    ///
+    /// A sweep never hands off to a system another team is standing on: the slot
+    /// walk below snapshots who is where and passes it to [`sweep_candidates`]
+    /// as an exclusion set, kept in step as teams move within the tick. Without
+    /// it, two teams sweeping one station converge the moment their timings line
+    /// up — both grinding the same row while the rest of the station waits.
+    /// [`Self::prioritise_system`] leans on the same exclusion so a console tap
+    /// cannot arrange that convergence deliberately.
     ///
     /// `config` supplies the ONLY thing this module cannot derive from a hull:
     /// which systems share a station. Mirrors
@@ -292,7 +392,23 @@ impl RepairTeams {
     pub fn tick(&mut self, dt: f32, hull: &mut SystemHull, config: Option<&ShipConfig>) {
         let travel_duration = self.timings.travel_duration;
         let repair_rate = self.timings.repair_rate_hp_per_sec;
-        for slot in self.slots.iter_mut() {
+        // Which system each team is standing on, indexed by slot. Snapshotted
+        // before the `&mut` walk (which cannot ask `self` that question
+        // mid-iteration) and updated in place as teams move, so a hand-off later
+        // in the same tick sees where an earlier one actually landed rather than
+        // where it started.
+        let mut on_site: Vec<Option<SystemId>> = self
+            .slots
+            .iter()
+            .map(|slot| match slot {
+                TeamSlot::Repairing {
+                    system_id: Some(sid),
+                    ..
+                } => Some(sid.clone()),
+                _ => None,
+            })
+            .collect();
+        for (team_idx, slot) in self.slots.iter_mut().enumerate() {
             match slot {
                 TeamSlot::Travelling {
                     system_id,
@@ -323,29 +439,38 @@ impl RepairTeams {
                         if !hull.is_at_max(&sid) {
                             // Includes a Destroyed target since #1013: the
                             // arrival bounce off `tier == Destroyed` is gone.
+                            on_site[team_idx] = Some(sid.clone());
                             *slot = TeamSlot::Repairing {
                                 system_id: Some(sid),
                                 display_name: label,
                                 priority: None,
+                                priority_system_id: None,
                             };
                             continue;
                         }
                         // Arrived to find the target already whole — someone
                         // else fixed it, or the dispatch resolved to a healthy
                         // fallback. Sweep the station before walking home; the
-                        // team is standing right there. An arriving team has no
-                        // priority yet (`set_priority` only reaches a
+                        // team is standing right there. An arriving team has
+                        // neither a priority nor a pin yet (both only reach a
                         // `Repairing` slot), so this takes the top-ranked
                         // candidate.
-                        match sweep_from(&sid, None, hull, config) {
+                        let next = {
+                            let exclude = occupied_systems(&on_site);
+                            sweep_from(&sid, None, None, hull, config, &exclude)
+                        };
+                        match next {
                             Some((next_sid, next_label)) => {
+                                on_site[team_idx] = Some(next_sid.clone());
                                 *slot = TeamSlot::Repairing {
                                     system_id: Some(next_sid),
                                     display_name: Some(next_label),
                                     priority: None,
+                                    priority_system_id: None,
                                 };
                             }
                             None => {
+                                on_site[team_idx] = None;
                                 *slot = TeamSlot::Returning {
                                     remaining: 0.0,
                                     system_id: Some(sid),
@@ -361,8 +486,10 @@ impl RepairTeams {
                     system_id,
                     display_name,
                     priority,
+                    priority_system_id,
                 } => {
                     let Some(sid) = system_id.clone() else {
+                        on_site[team_idx] = None;
                         *slot = TeamSlot::Returning {
                             remaining: travel_duration,
                             system_id: None,
@@ -379,6 +506,9 @@ impl RepairTeams {
                     // The standing "which of the remaining jobs" instruction,
                     // carried across the sweep hand-off below (issue #1013).
                     let carried_priority = *priority;
+                    // The console's one-shot pin: the row Engineering actually
+                    // tapped (issue #1015). Outranks the ordinal at the hand-off.
+                    let carried_pin = priority_system_id.clone();
                     let hp_to_restore = dt * repair_rate;
                     // No tier gate: a Destroyed system is repaired like any
                     // other, and the first restored HP un-latches it because
@@ -389,15 +519,34 @@ impl RepairTeams {
                     }
                     // This system is whole. Sweep to the next thing the station
                     // needs, in place, without walking home first.
-                    match sweep_from(&sid, carried_priority, hull, config) {
+                    let next = {
+                        let exclude = occupied_systems(&on_site);
+                        sweep_from(
+                            &sid,
+                            carried_priority,
+                            carried_pin.as_ref(),
+                            hull,
+                            config,
+                            &exclude,
+                        )
+                    };
+                    match next {
                         Some((next_sid, next_label)) => {
+                            on_site[team_idx] = Some(next_sid.clone());
                             *slot = TeamSlot::Repairing {
                                 system_id: Some(next_sid),
                                 display_name: Some(next_label),
                                 priority: carried_priority,
+                                // The console's pin steered THIS hand-off and is
+                                // spent (issue #1015). `priority` survives
+                                // because it is the standing instruction; the
+                                // pin does not, because after the move it would
+                                // restate where the team already is.
+                                priority_system_id: None,
                             };
                         }
                         None => {
+                            on_site[team_idx] = None;
                             *slot = TeamSlot::Returning {
                                 remaining: travel_duration,
                                 system_id: Some(sid),
@@ -484,11 +633,24 @@ fn sweep_group(sid: &SystemId, config: &ShipConfig) -> Option<StationId> {
 fn sweep_from(
     sid: &SystemId,
     priority: Option<u8>,
+    pin: Option<&SystemId>,
     hull: &SystemHull,
     config: Option<&ShipConfig>,
+    exclude: &[SystemId],
 ) -> Option<(SystemId, String)> {
     hull.get(sid)?;
-    config.and_then(|c| next_sweep_target(sid, priority, hull, c))
+    config.and_then(|c| next_sweep_target(sid, priority, pin, hull, c, exclude))
+}
+
+/// Flatten [`RepairTeams::tick`]'s per-slot on-site snapshot into the exclusion
+/// set [`sweep_candidates`] takes.
+///
+/// The sweeping team's OWN system is left in deliberately: `sweep_candidates`
+/// already drops it as `current`, so filtering it out here would only add a
+/// second rule saying the same thing in a place that could fall out of step
+/// with the first.
+fn occupied_systems(on_site: &[Option<SystemId>]) -> Vec<SystemId> {
+    on_site.iter().flatten().cloned().collect()
 }
 
 /// Pick the next system for an on-site team to work on, or `None` when nothing
@@ -525,17 +687,74 @@ fn sweep_from(
 /// the candidate count: `Some(2)` takes the second-worst job, `None` (and
 /// `Some(0)`) the worst. This is the semantic issue #1013 gives
 /// `TeamSlot::priority` — previously written by `SetRepairPriority` and read by
-/// nothing — and the one issue #1015's console taps drive.
+/// nothing.
+///
+/// # The pin beats the ordinal
+///
+/// `pin` is [`RepairTeams::prioritise_system`]'s `priority_system_id`: the row
+/// the repair console actually tapped (issue #1015). When it is still on the
+/// candidate list it wins outright, ordinal ignored, because it is a statement
+/// about THIS system rather than about a position in a ranking that moves under
+/// it — every shell that lands between the tap and this hand-off re-ranks the
+/// group, and a rank frozen at tap time would quietly select something the
+/// console is still labelling `[NEXT]`.
+///
+/// A pin that is no longer a candidate — repaired to max by someone else, blown
+/// off the ship, or taken by another team — falls through to the ordinal rather
+/// than stranding the team. That is the one case where the console's highlight
+/// and the destination legitimately differ, and it resolves by the pin simply
+/// not existing any more.
 fn next_sweep_target(
     current: &SystemId,
     priority: Option<u8>,
+    pin: Option<&SystemId>,
     hull: &SystemHull,
     config: &ShipConfig,
+    exclude: &[SystemId],
 ) -> Option<(SystemId, String)> {
+    let candidates = sweep_candidates(current, hull, config, exclude);
+    if candidates.is_empty() {
+        return None;
+    }
+    if let Some(pinned) = pin {
+        if let Some(hit) = candidates.iter().find(|(sid, _)| sid == pinned) {
+            return Some(hit.clone());
+        }
+    }
+    let rank = usize::from(priority.unwrap_or(1).max(1)).min(candidates.len());
+    candidates.into_iter().nth(rank - 1)
+}
+
+/// The ranked worst-first list [`next_sweep_target`] picks from, and the list
+/// [`RepairTeams::prioritise_system`] looks a console tap up in.
+///
+/// One function rather than two so "a tap this ship accepts" and "a system this
+/// hand-off will go to" cannot be answered by two comparators that drift apart —
+/// see [`next_sweep_target`] for the candidate rule and the ranking keys it
+/// documents.
+///
+/// `exclude` is the systems repair teams are currently ON SITE at (issue #737's
+/// predicate, [`RepairTeams::on_site_systems`]). Two teams grinding one row
+/// while the rest of a station waits is never what anybody ordered, so a system
+/// somebody is standing on is not work anybody else can take — and, because this
+/// is the one list both the sweep and the console tap consult, that holds for
+/// the tap as well as for the automatic hand-off. The caller's own system is
+/// dropped as `current` regardless, so passing the whole set including it is
+/// correct and is what both callers do.
+fn sweep_candidates(
+    current: &SystemId,
+    hull: &SystemHull,
+    config: &ShipConfig,
+    exclude: &[SystemId],
+) -> Vec<(SystemId, String)> {
     let group = sweep_group(current, config);
     let mut candidates: Vec<(DamageTier, f32, &SystemId, &str)> = hull
         .iter()
-        .filter(|(sid, _)| *sid != current && sweep_group(sid, config) == group)
+        .filter(|(sid, _)| {
+            *sid != current
+                && sweep_group(sid, config) == group
+                && !exclude.iter().any(|busy| busy == *sid)
+        })
         .filter_map(|(sid, entry)| {
             // Only work the team can actually PROGRESS. A row already at max HP
             // has nothing to restore, and the two predicates are not redundant:
@@ -566,12 +785,10 @@ fn next_sweep_target(
             .then_with(|| b.1.total_cmp(&a.1))
             .then_with(|| a.2.cmp(b.2))
     });
-    if candidates.is_empty() {
-        return None;
-    }
-    let rank = usize::from(priority.unwrap_or(1).max(1)).min(candidates.len());
-    let (_, _, sid, label) = candidates[rank - 1];
-    Some((sid.clone(), label.to_string()))
+    candidates
+        .into_iter()
+        .map(|(_, _, sid, label)| (sid.clone(), label.to_string()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1582,6 +1799,397 @@ mod tests {
         );
     }
 
+    // ── Naming a system instead of an ordinal (issue #1015) ───────────────────
+    //
+    // The repair console's damaged-systems taps name a SYSTEM; the host pins
+    // that system on the team's slot and leaves the ordinal untouched. Every
+    // test here therefore asserts on the same observable the #1013 tests do
+    // — where the team actually goes at the hand-off — plus the pin the
+    // console highlights.
+
+    /// The headline: tapping the third-ranked job sends the team there next,
+    /// with no ordinal anywhere near the caller.
+    #[test]
+    fn prioritise_system_sends_the_sweep_to_the_named_system() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+
+        assert_eq!(
+            teams.prioritise_system(&sid("helm-b"), &hull, &config),
+            Some(0),
+            "team 0 is the one sweeping helm, so it takes the order"
+        );
+        finish_current_system(&mut teams, &mut hull, &config);
+
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("helm-b"),
+            "the tapped system must be the next job, not the worst one"
+        );
+    }
+
+    /// A tap stores the SYSTEM and nothing else. It deliberately does NOT
+    /// resolve to an ordinal: `priority` is #1013's standing per-team
+    /// instruction, and a tap is a one-shot choice about one row, so the two
+    /// never write to the same place. (`the_pin_beats_a_stale_ordinal_after_a_re_rank`
+    /// below is why storing a rank here would be wrong and not merely redundant.)
+    #[test]
+    fn prioritise_system_stores_the_pin_and_never_an_ordinal() {
+        for target in ["helm-d", "helm-c", "helm-b"] {
+            let (mut teams, hull, config) = team_on_site_with_three_jobs_left();
+            assert_eq!(
+                teams.prioritise_system(&sid(target), &hull, &config),
+                Some(0)
+            );
+            assert!(
+                matches!(
+                    &teams.slots()[0],
+                    TeamSlot::Repairing {
+                        priority: None,
+                        priority_system_id: Some(pinned),
+                        ..
+                    } if pinned.0 == target
+                ),
+                "{target} must be pinned with no ordinal written, got {:?}",
+                teams.slots()[0]
+            );
+        }
+    }
+
+    /// A tap leaves an existing standing ordinal alone — the two levers are
+    /// independent, and the pin simply outranks the ordinal while it lasts.
+    #[test]
+    fn prioritise_system_does_not_disturb_a_standing_ordinal() {
+        let (mut teams, hull, config) = team_on_site_with_three_jobs_left();
+        assert!(teams.set_priority(0, 3));
+        teams.prioritise_system(&sid("helm-c"), &hull, &config);
+        assert!(
+            matches!(
+                &teams.slots()[0],
+                TeamSlot::Repairing {
+                    priority: Some(3),
+                    priority_system_id: Some(pinned),
+                    ..
+                } if pinned.0 == "helm-c"
+            ),
+            "got {:?}",
+            teams.slots()[0]
+        );
+    }
+
+    /// The console's highlight: the resolved slot echoes WHICH system the
+    /// host pinned, because the client cannot re-derive it (issue #737 hides
+    /// most of the candidates from it).
+    #[test]
+    fn prioritise_system_echoes_the_pinned_system_for_the_console() {
+        let (mut teams, hull, config) = team_on_site_with_three_jobs_left();
+        teams.prioritise_system(&sid("helm-c"), &hull, &config);
+        assert!(
+            matches!(
+                &teams.slots()[0],
+                TeamSlot::Repairing { priority_system_id: Some(s), .. } if s.0 == "helm-c"
+            ),
+            "got {:?}",
+            teams.slots()[0]
+        );
+    }
+
+    /// The pin describes one hand-off and is spent by it — otherwise the
+    /// console would keep highlighting a row the team has already arrived at.
+    /// The ORDINAL survives untouched, because #1013 makes that a standing
+    /// instruction about the station; here it is deliberately set to something
+    /// the pin overrules (3 would take `helm-b`), so the assertion that the team
+    /// landed on `helm-c` also proves which of the two levers won.
+    #[test]
+    fn the_priority_pin_clears_at_the_hand_off_but_the_ordinal_does_not() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+        assert!(teams.set_priority(0, 3));
+        teams.prioritise_system(&sid("helm-c"), &hull, &config);
+        finish_current_system(&mut teams, &mut hull, &config);
+
+        assert_eq!(repairing_at(&teams).as_deref(), Some("helm-c"));
+        assert!(
+            matches!(
+                &teams.slots()[0],
+                TeamSlot::Repairing {
+                    priority: Some(3),
+                    priority_system_id: None,
+                    ..
+                }
+            ),
+            "got {:?}",
+            teams.slots()[0]
+        );
+    }
+
+    /// The finding this design exists for: a tap and the hand-off it steers are
+    /// separated by however long the current system takes to finish, and combat
+    /// damage in between RE-RANKS the group.
+    ///
+    /// The standing ordinal is set to 3 first, so the pin and the ordinal
+    /// fallback disagree instead of coincidentally landing on the same row:
+    /// `helm-b` is tapped while it ranks third. It is then blown to Destroyed,
+    /// which makes it rank FIRST (tied with `helm-d` on tier and fraction,
+    /// winning on the id tiebreak) and pushes `helm-c` into third — exactly
+    /// what the stale ordinal 3 would now select. The pin sends the team to
+    /// `helm-b` instead, which is the row the player actually asked for, so
+    /// the assertion below discriminates the pin from the ordinal fallback
+    /// rather than passing either way.
+    #[test]
+    fn the_pin_beats_a_stale_ordinal_after_a_re_rank() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+        assert!(teams.set_priority(0, 3));
+        assert_eq!(
+            teams.prioritise_system(&sid("helm-b"), &hull, &config),
+            Some(0)
+        );
+
+        // Fresh damage between the tap and the hand-off.
+        hull.set_hp(&sid("helm-b"), 0.0);
+        assert_eq!(hull.tier_for(&sid("helm-b")), DamageTier::Destroyed);
+        // What the stale ordinal 3 would now select, spelled out so the test
+        // fails loudly if the fixture's ranking ever shifts under it.
+        let ranked: Vec<String> = sweep_candidates(&sid("helm-a"), &hull, &config, &[])
+            .into_iter()
+            .map(|(s, _)| s.0)
+            .collect();
+        assert_eq!(ranked, vec!["helm-b", "helm-d", "helm-c"]);
+
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("helm-b"),
+            "the pinned row must win, not whatever now sits at its old rank"
+        );
+    }
+
+    /// The pin's only failure mode: the row it names stops being candidate work
+    /// before the hand-off. Then — and only then — the standing ordinal decides,
+    /// rather than the team stranding itself waiting for a job that is gone.
+    #[test]
+    fn a_pin_that_leaves_the_candidate_list_falls_back_to_the_ordinal() {
+        let (mut teams, mut hull, config) = team_on_site_with_three_jobs_left();
+        assert!(teams.set_priority(0, 2));
+        assert_eq!(
+            teams.prioritise_system(&sid("helm-b"), &hull, &config),
+            Some(0)
+        );
+
+        // Somebody else finished helm-b, so it is Operational and at max —
+        // failing both halves of the candidate test.
+        hull.set_hp(&sid("helm-b"), 10.0);
+
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("helm-c"),
+            "with the pin gone, ordinal 2 must pick the second of the remaining \
+             {{helm-d, helm-c}}"
+        );
+    }
+
+    /// A tap on a system ANOTHER team is standing on is refused outright, and
+    /// crucially does not fall through: before the on-site exclusion existed,
+    /// team 0's own system was never team 0's own candidate, so the search moved
+    /// on and pinned it on team 1 — pointing a second team at a row already
+    /// being worked while the rest of the station waited.
+    #[test]
+    fn prioritise_system_refuses_a_tap_on_a_system_another_team_is_on_site_at() {
+        let mut teams = RepairTeams::new(2);
+        let mut hull = hull_at(&[
+            ("helm-a", 10.0, 7.0),
+            ("helm-b", 10.0, 6.0),
+            ("helm-c", 10.0, 2.0),
+        ]);
+        let config = config_with(&[
+            ("helm-a", Some("helm")),
+            ("helm-b", Some("helm")),
+            ("helm-c", Some("helm")),
+        ]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+        teams.dispatch(1, sid("helm-b"), "Helm B".to_string());
+        teams.tick(5.0, &mut hull, Some(&config));
+
+        assert_eq!(
+            teams.prioritise_system(&sid("helm-a"), &hull, &config),
+            None,
+            "team 0's own system is nobody's next job"
+        );
+        assert!(
+            teams.slots().iter().all(|s| matches!(
+                s,
+                TeamSlot::Repairing {
+                    priority_system_id: None,
+                    ..
+                }
+            )),
+            "no team may be pinned by a refused tap, got {:?}",
+            teams.slots()
+        );
+    }
+
+    /// The same exclusion protecting #1013's own hand-off: a team that finishes
+    /// its system does not walk onto the one its crewmate is standing on. With
+    /// only those two systems damaged it has nothing left and goes home.
+    #[test]
+    fn a_sweep_hand_off_does_not_converge_on_another_teams_system() {
+        let mut teams = RepairTeams::new(2);
+        let mut hull = hull_at(&[
+            ("helm-a", 10.0, 9.5), // team 0: nearly done
+            ("helm-b", 10.0, 2.0), // team 1: a long job
+        ]);
+        let config = config_with(&[("helm-a", Some("helm")), ("helm-b", Some("helm"))]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+        teams.dispatch(1, sid("helm-b"), "Helm B".to_string());
+        teams.tick(5.0, &mut hull, Some(&config));
+        assert_eq!(repairing_at(&teams).as_deref(), Some("helm-a"));
+
+        // Long enough for team 0 to finish helm-a, nowhere near long enough for
+        // team 1 to finish helm-b.
+        teams.tick(2.0, &mut hull, Some(&config));
+
+        assert!(
+            matches!(&teams.slots()[0], TeamSlot::Returning { .. }),
+            "team 0 must head home rather than pile onto helm-b, got {:?}",
+            teams.slots()[0]
+        );
+        assert!(
+            matches!(
+                &teams.slots()[1],
+                TeamSlot::Repairing { system_id: Some(s), .. } if s.0 == "helm-b"
+            ),
+            "team 1 keeps its job, got {:?}",
+            teams.slots()[1]
+        );
+    }
+
+    /// A tap on the system the team is already working on is not a candidate —
+    /// `next_sweep_target` excludes the current system — so it changes nothing
+    /// rather than resolving to some neighbouring rank.
+    #[test]
+    fn prioritise_system_ignores_a_tap_on_the_system_under_repair() {
+        let (mut teams, hull, config) = team_on_site_with_three_jobs_left();
+        assert_eq!(
+            teams.prioritise_system(&sid("helm-a"), &hull, &config),
+            None
+        );
+        assert!(
+            matches!(
+                &teams.slots()[0],
+                TeamSlot::Repairing {
+                    priority: None,
+                    priority_system_id: None,
+                    ..
+                }
+            ),
+            "got {:?}",
+            teams.slots()[0]
+        );
+    }
+
+    /// A tap on another station's system finds no team standing in that group
+    /// and is refused. The sweep is station-bounded, so "prioritise it" has no
+    /// meaning until somebody is dispatched there.
+    #[test]
+    fn prioritise_system_refuses_a_system_outside_every_teams_sweep_group() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = station_hull();
+        let config = station_config();
+        teams.dispatch(0, sid("helm-b"), "Helm B".to_string());
+        teams.tick(5.0, &mut hull, Some(&config));
+        assert_eq!(repairing_at(&teams).as_deref(), Some("helm-b"));
+
+        assert_eq!(
+            teams.prioritise_system(&sid("tactical-x"), &hull, &config),
+            None,
+            "no team is sweeping `tactical`, so there is nothing to re-order"
+        );
+        assert_eq!(
+            teams.prioritise_system(&sid("core"), &hull, &config),
+            None,
+            "the ownerless bucket is its own group, and nobody is in it"
+        );
+    }
+
+    /// A team that has not arrived yet has no sweep to steer: `Travelling`
+    /// carries a `priority` field but no candidate list, exactly as
+    /// `set_priority` already refuses it.
+    #[test]
+    fn prioritise_system_refuses_a_team_that_is_still_travelling() {
+        let mut teams = RepairTeams::new(1);
+        let hull = station_hull();
+        let config = station_config();
+        teams.dispatch(0, sid("helm-c"), "Helm C".to_string());
+
+        assert_eq!(
+            teams.prioritise_system(&sid("helm-a"), &hull, &config),
+            None
+        );
+    }
+
+    /// Two teams in the same group: the order goes to the lowest slot index, so
+    /// the outcome is a pure function of state rather than of iteration luck.
+    #[test]
+    fn prioritise_system_gives_a_shared_group_to_the_lowest_team_index() {
+        let mut teams = RepairTeams::new(2);
+        let mut hull = hull_at(&[
+            ("helm-a", 10.0, 7.0),
+            ("helm-b", 10.0, 6.0),
+            ("helm-c", 10.0, 2.0),
+        ]);
+        let config = config_with(&[
+            ("helm-a", Some("helm")),
+            ("helm-b", Some("helm")),
+            ("helm-c", Some("helm")),
+        ]);
+        teams.dispatch(0, sid("helm-a"), "Helm A".to_string());
+        teams.dispatch(1, sid("helm-b"), "Helm B".to_string());
+        teams.tick(5.0, &mut hull, Some(&config));
+
+        assert_eq!(
+            teams.prioritise_system(&sid("helm-c"), &hull, &config),
+            Some(0)
+        );
+        assert!(
+            matches!(
+                &teams.slots()[1],
+                TeamSlot::Repairing {
+                    priority_system_id: None,
+                    ..
+                }
+            ),
+            "team 1 must be untouched, got {:?}",
+            teams.slots()[1]
+        );
+    }
+
+    /// The ownerless bucket is steerable too — that is the "fix the hull first"
+    /// case the playtest could not express, and core rows are the ones
+    /// Engineering can always see.
+    #[test]
+    fn prioritise_system_works_inside_the_ownerless_core_bucket() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_at(&[
+            ("core", 10.0, 5.0),         // Damaged — where the team is
+            ("aux-sensor", 10.0, 0.0),   // Destroyed — ranks first
+            ("hull-plating", 10.0, 4.0), // Damaged — ranks second
+        ]);
+        let config = config_with(&[("aux-sensor", None), ("hull-plating", None)]);
+        teams.dispatch(0, sid("core"), "Core".to_string());
+        teams.tick(5.0, &mut hull, Some(&config));
+        assert_eq!(repairing_at(&teams).as_deref(), Some("core"));
+
+        assert_eq!(
+            teams.prioritise_system(&sid("hull-plating"), &hull, &config),
+            Some(0)
+        );
+        finish_current_system(&mut teams, &mut hull, &config);
+        assert_eq!(
+            repairing_at(&teams).as_deref(),
+            Some("hull-plating"),
+            "the tapped core row must beat the Destroyed one that outranks it"
+        );
+    }
+
     /// The tier key dominates the damage-fraction key. `helm-disabled` and
     /// `helm-damaged` are a rounding error apart in HP — 2.4 and 2.6 of 10 — but
     /// they land either side of the 0.25 Disabled threshold, and the worse tier
@@ -1601,7 +2209,8 @@ mod tests {
         assert_eq!(hull.tier_for(&sid("helm-disabled")), DamageTier::Disabled);
         assert_eq!(hull.tier_for(&sid("helm-damaged")), DamageTier::Damaged);
 
-        let (winner, _) = next_sweep_target(&sid("helm-here"), None, &hull, &config).unwrap();
+        let (winner, _) =
+            next_sweep_target(&sid("helm-here"), None, None, &hull, &config, &[]).unwrap();
         assert_eq!(winner.0, "helm-disabled");
     }
 
@@ -1621,7 +2230,8 @@ mod tests {
         assert_eq!(hull.tier_for(&sid("helm-worse")), DamageTier::Damaged);
         assert_eq!(hull.tier_for(&sid("helm-better")), DamageTier::Damaged);
 
-        let (winner, _) = next_sweep_target(&sid("helm-here"), None, &hull, &config).unwrap();
+        let (winner, _) =
+            next_sweep_target(&sid("helm-here"), None, None, &hull, &config, &[]).unwrap();
         assert_eq!(winner.0, "helm-worse");
     }
 
@@ -1642,9 +2252,11 @@ mod tests {
             ("helm-tie-a", 10.0, 5.0),
         ]);
 
-        let (first, _) = next_sweep_target(&sid("helm-here"), None, &hull, &config).unwrap();
+        let (first, _) =
+            next_sweep_target(&sid("helm-here"), None, None, &hull, &config, &[]).unwrap();
         assert_eq!(first.0, "helm-tie-a");
-        let (second, _) = next_sweep_target(&sid("helm-here"), Some(2), &hull, &config).unwrap();
+        let (second, _) =
+            next_sweep_target(&sid("helm-here"), Some(2), None, &hull, &config, &[]).unwrap();
         assert_eq!(second.0, "helm-tie-b");
     }
 
@@ -1654,7 +2266,7 @@ mod tests {
     fn next_sweep_target_is_none_when_the_station_is_clean() {
         let config = config_with(&[("helm-here", Some("helm")), ("helm-other", Some("helm"))]);
         let hull = hull_at(&[("helm-here", 10.0, 5.0), ("helm-other", 10.0, 10.0)]);
-        assert!(next_sweep_target(&sid("helm-here"), None, &hull, &config).is_none());
+        assert!(next_sweep_target(&sid("helm-here"), None, None, &hull, &config, &[]).is_none());
     }
 
     // ── Display-name propagation (regression for reviewer's #617 finding) ──

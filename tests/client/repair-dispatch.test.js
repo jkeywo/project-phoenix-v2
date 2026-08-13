@@ -4,6 +4,8 @@ import {
   repairTargetFor,
   dispatchRepairTeamPayload,
   dispatchRepairTeam,
+  setRepairTargetPriorityPayload,
+  setRepairTargetPriority,
 } from '../../gui/repair-dispatch.js';
 import { ACTION_MAP } from '../../gui/action-map.js';
 
@@ -31,6 +33,23 @@ describe('repair-dispatch target mapping', () => {
       data: { team_idx: 2, target: { type: 'Station', data: 'power' } },
     });
   });
+
+  // Issue #1015: the damaged-systems taps carry a system id and NO ordinal —
+  // the host ranks the team's remaining work, because #737 hides most of the
+  // candidates from this console.
+  it('builds the SetRepairTargetPriority payload with no ordinal at all', () => {
+    const payload = setRepairTargetPriorityPayload('helm-engine-port');
+    expect(payload).toEqual({
+      type: 'SetRepairTargetPriority',
+      data: { system_id: 'helm-engine-port' },
+    });
+    expect(Object.keys(payload.data)).toEqual(['system_id']);
+  });
+
+  it('rejects an empty system id', () => {
+    expect(() => setRepairTargetPriorityPayload('')).toThrow(TypeError);
+    expect(() => setRepairTargetPriorityPayload(undefined)).toThrow(TypeError);
+  });
 });
 
 describe('repair-dispatch sends through the command gateway', () => {
@@ -46,6 +65,18 @@ describe('repair-dispatch sends through the command gateway', () => {
       },
     ]]);
     expect(env.type).toBe('ControlSystem');
+  });
+
+  it('sends SetRepairTargetPriority naming a system and nothing else', () => {
+    const calls = [];
+    setRepairTargetPriority('hull-plating', (type, data) => calls.push([type, data]));
+    expect(calls).toEqual([[
+      'ControlSystem',
+      {
+        target: 'repair',
+        payload: { type: 'SetRepairTargetPriority', data: { system_id: 'hull-plating' } },
+      },
+    ]]);
   });
 
   it('is the path the dispatch_repair_team console action takes', () => {

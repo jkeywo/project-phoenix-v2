@@ -487,6 +487,7 @@ mod tests {
                             system_id: Some(SystemId("tactical".into())),
                             display_name: Some("Tactical".into()),
                             priority: None,
+                            priority_system_id: None,
                         },
                         TeamSlot::Returning {
                             remaining: 3.0,
@@ -1501,6 +1502,67 @@ mod tests {
             encoded,
             r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"SetRepairPriority","data":{"team_idx":1,"priority":2}}}}"#,
             "SetRepairPriority wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// SetRepairTargetPriority command round-trip (issue #1015) — the repair
+    /// console's damaged-systems taps. Unlike `SetRepairPriority` above it
+    /// carries no ordinal at all: the host resolves which team's sweep covers
+    /// the named system and pins that system directly, because #737 hides
+    /// most of the candidates from the console.
+    #[test]
+    fn set_repair_target_priority_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("repair".into()),
+            payload: SystemControlPayload::SetRepairTargetPriority {
+                system_id: SystemId("helm-engine-port".into()),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        // Pin the on-the-wire JSON shape — repair-dispatch.js depends on this.
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"SetRepairTargetPriority","data":{"system_id":"helm-engine-port"}}}}"#,
+            "SetRepairTargetPriority wire shape must match what repair-dispatch.js sends"
+        );
+    }
+
+    /// The console-facing half of issue #1015: the pin the host resolved a tap
+    /// to rides home on the `Repairing` slot, so `normalizeTeamSlot` in
+    /// `gui/console-state.js` can highlight the tapped row.
+    ///
+    /// `#[serde(default)]` on the new field is what keeps a pre-#1015 snapshot
+    /// (issue #862 restores `TeamSlot`s verbatim) loadable, so the absent-field
+    /// decode is pinned here too.
+    #[test]
+    fn repairing_slot_carries_its_priority_pin() {
+        let slot = TeamSlot::Repairing {
+            system_id: Some(SystemId("helm-engine-port".into())),
+            display_name: Some("Port Engine".into()),
+            priority: Some(2),
+            priority_system_id: Some(SystemId("helm-engine-starboard".into())),
+        };
+        let encoded = serde_json::to_string(&slot).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"Repairing":{"system_id":"helm-engine-port","display_name":"Port Engine","priority":2,"priority_system_id":"helm-engine-starboard"}}"#,
+            "the repair console reads `priority_system_id` off this exact shape"
+        );
+        assert_eq!(serde_json::from_str::<TeamSlot>(&encoded).unwrap(), slot);
+
+        let legacy = r#"{"Repairing":{"system_id":"helm","display_name":"Helm","priority":1}}"#;
+        assert_eq!(
+            serde_json::from_str::<TeamSlot>(legacy).unwrap(),
+            TeamSlot::Repairing {
+                system_id: Some(SystemId("helm".into())),
+                display_name: Some("Helm".into()),
+                priority: Some(1),
+                priority_system_id: None,
+            },
+            "a slot serialised before #1015 must still decode"
         );
     }
 
@@ -2931,7 +2993,7 @@ mod tests {
                     TeamSlot::Repairing {
                         system_id,
                         display_name,
-                        priority: _,
+                        ..
                     } => {
                         assert_eq!(*system_id, Some(SystemId("phaser-fore".into())));
                         assert_eq!(display_name.as_deref(), Some("Phaser Bank (Fore)"));

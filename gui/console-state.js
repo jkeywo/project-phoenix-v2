@@ -946,6 +946,7 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
         id, label,
         status: 'travelling',
         target: data.display_name || data.system_id || '',
+        system_id: data.system_id || null,
         progress_pct: Math.min(elapsed / dur, 1),
         priority: data.priority != null ? data.priority : null,
       };
@@ -956,8 +957,13 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
         id, label,
         status: 'repairing',
         target: data.display_name || data.system_id || '',
+        system_id: data.system_id || null,
         progress_pct: 1.0,
         priority: data.priority != null ? data.priority : null,
+        // The system the host PINNED on this team's slot (issue #1015).
+        // Pass-through, never re-derived: the console cannot see the ranking
+        // the host resolved this against.
+        priority_system_id: data.priority_system_id || null,
       };
     }
     case 'Returning': {
@@ -1011,6 +1017,72 @@ export function overallHull(systemHull, aggregateFraction, destroyedFraction) {
 }
 
 /**
+ * Severity order of the wire `DamageTier` strings, worst last. Used only to
+ * SORT the damaged-systems list for display (issue #1015) — the host owns the
+ * ranking that decides where a repair team actually goes, and the console never
+ * sends an ordinal derived from this.
+ */
+const TIER_SEVERITY = { Operational: 0, Damaged: 1, Disabled: 2, Destroyed: 3 };
+
+/**
+ * The repair console's damaged-systems list (issue #1015): every visible hull
+ * row that is not `Operational`, worst-first, flagged with what the repair teams
+ * are doing about it.
+ *
+ * Built from the rows the console was already given rather than from a new fold:
+ * `systemHull` is the issue #737 projection (core rows, the Engineering
+ * station's own rows, and any row a team is on site at), so this list is exactly
+ * "the damage this player can see", which is also exactly the damage they are
+ * entitled to steer. Tapping a row sends `set_repair_target_priority` with its
+ * `system_id` and nothing else; the host decides whether any team can act on it.
+ *
+ * `prioritised` is a pure echo of the host's resolved pin, so a highlight can
+ * only ever show a choice the server actually made.
+ *
+ * The `current < max_hp` half of the filter mirrors the host's own candidate
+ * guard rather than duplicating a rule for its own sake: a `max_hp = 0` row is
+ * permanently `Destroyed` (the tier test reads `current == 0` before any ratio)
+ * AND permanently at max, so without it such a row would list forever at 0%
+ * damage as a permanent no-op — untappable by anything the host would honour.
+ * The same pairing is documented on `sweep_candidates` in
+ * `src/modifiers/repair_teams.rs`, and for the same reason: neither predicate
+ * implies the other.
+ *
+ * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
+ * @param {Array<{status,system_id,priority_system_id}>} teams normalized slots
+ */
+export function repairDamagedSystems(systemHull, teams) {
+  const rows = Array.isArray(systemHull) ? systemHull : [];
+  const slots = Array.isArray(teams) ? teams : [];
+  const pinned = new Set(slots.map(s => s && s.priority_system_id).filter(Boolean));
+  const onSite = new Set(
+    slots.filter(s => s && s.status === 'repairing').map(s => s.system_id).filter(Boolean)
+  );
+  return rows
+    .filter(h => h && h.system_id
+      && (TIER_SEVERITY[h.tier] || 0) > 0
+      && (h.current || 0) < (h.max_hp || 0))
+    .map(h => {
+      const max = h.max_hp || 0;
+      const current = h.current || 0;
+      return {
+        system_id:    h.system_id,
+        display_name: h.display_name || h.system_id,
+        tier:         h.tier,
+        current,
+        max_hp:       max,
+        damage_pct:   max > 0 ? 1 - current / max : 0,
+        prioritised:  pinned.has(h.system_id),
+        in_progress:  onSite.has(h.system_id),
+      };
+    })
+    .sort((a, b) =>
+      (TIER_SEVERITY[b.tier] || 0) - (TIER_SEVERITY[a.tier] || 0)
+      || b.damage_pct - a.damage_pct
+      || (a.system_id < b.system_id ? -1 : a.system_id > b.system_id ? 1 : 0));
+}
+
+/**
  * Payload contract for the Repair console iframe (issue #827). Rendered by
  * gui/battleship/repair.html.
  *
@@ -1020,6 +1092,10 @@ export function overallHull(systemHull, aggregateFraction, destroyedFraction) {
  *                                 current: number, max_hp: number,
  *                                 tier?: number}>,
  *             damageable_systems: Array,
+ *             damaged_systems: Array<{system_id: string, display_name: string,
+ *               tier: string, current: number, max_hp: number,
+ *               damage_pct: number, prioritised: boolean,
+ *               in_progress: boolean}>,
  *             overall_hull: {current: number, max: number, pct: number,
  *                            destroyed_pct: number},
  *             core_systems: Array, dispatch_targets: Array<{id: string,
@@ -1053,6 +1129,9 @@ export function buildRepairConsoleState(state) {
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          systemHull,
       damageable_systems:   damageableSystems,
+      // Tap-to-prioritise list (issue #1015) — the visible rows that are
+      // actually broken, worst-first.
+      damaged_systems:      repairDamagedSystems(systemHull, teams),
       // Authoritative ship-wide hull aggregate from the host — the only
       // whole-ship figures available now that `system_hull` is a projection,
       // and `destroyed_pct` is the share of it that is gone for good (#1014).
@@ -1077,10 +1156,21 @@ export function buildRepairConsoleState(state) {
   // still reads the host's `hullAggregate` rather than summing those rows.
   const legacyHull = state.consoleHull || [];
   const legacy = repairCoreAndTargets(legacyHull, state.stationSystems);
+  // `state.repairTeams` is the RAW wire shape — externally-tagged `TeamSlot`
+  // objects from `RepairState`, or the literal `'Idle'` strings `sim-state.js`
+  // pre-seeds from `repair_team_count`. Feeding those to the fold above would
+  // find no `status` and no `priority_system_id` on any of them, so every row
+  // would come out `prioritised: false, in_progress: false` — flags that read as
+  // "the host decided nothing" rather than as "this path cannot tell", which is
+  // exactly the kind of quiet lie the flags exist to prevent. Normalize first,
+  // through the same function the blackboard path uses.
+  const legacyTeams = (state.repairTeams || [])
+    .map((slot, idx) => normalizeTeamSlot(slot, idx, 5.0));
   return JSON.stringify({
     teams:                state.repairTeams || [],
     system_hull:          legacyHull,
     damageable_systems:   legacyHull.map(h => h.system_id),
+    damaged_systems:      repairDamagedSystems(legacyHull, legacyTeams),
     overall_hull:         overallHull(legacyHull, state.hullAggregate, state.hullDestroyed),
     core_systems:         legacy.coreSystems,
     dispatch_targets:     legacy.targets,

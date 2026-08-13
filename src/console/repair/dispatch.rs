@@ -37,7 +37,11 @@ pub fn register_repair_dispatch(app: &mut App) {
     app.register_admitted_consumer(ConsumerMatcher::exact(REPAIR_SYSTEM_ID));
     app.add_systems(
         FixedUpdate,
-        (handle_dispatch_repair_team, handle_set_repair_priority)
+        (
+            handle_dispatch_repair_team,
+            handle_set_repair_priority,
+            handle_set_repair_target_priority,
+        )
             .in_set(crate::sim_sets::SimSet::Physics)
             .after(super::server::operate_repair_ai)
             .after(AdmissionSet),
@@ -126,6 +130,50 @@ pub fn handle_set_repair_priority(
         for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
             if let SystemControlPayload::SetRepairPriority { team_idx, priority } = &cmd.payload {
                 teams.0.set_priority(*team_idx as usize, *priority);
+            }
+        }
+    }
+}
+
+/// Handle `SetRepairTargetPriority` messages from the Repair console's
+/// damaged-systems list (issue #1015).
+///
+/// Reads `ClientMessage::ControlSystem { target: "repair", payload:
+/// SetRepairTargetPriority { system_id } }` from `AdmittedCommands`. Admission
+/// upstream has already checked exactly what it checks for `SetRepairPriority`
+/// — same target system, therefore same station-ownership and same
+/// `accept_human_input` gate; the payload variant is not part of that decision
+/// (`command_admission::policy::is_command_authorized` turns on the target).
+///
+/// The whole point of this handler over [`handle_set_repair_priority`] is that
+/// the TEAM and SYSTEM are resolved here, from the ship's own hull and
+/// config, rather than trusted from the client — see the payload's doc for
+/// why the console cannot compute them correctly and
+/// `RepairTeams::prioritise_system` for the resolution rules. A tap naming a
+/// system no on-site team can reach is a silent no-op, like a dispatch to an
+/// undamaged station.
+///
+/// The hull and config are `Option` for the same reason they are elsewhere on
+/// the repair path: a ship spawned without them has no group membership to
+/// resolve a tap against, and simply ignores it.
+pub fn handle_set_repair_target_priority(
+    mut ship_query: Query<
+        (
+            &AdmittedCommands,
+            &mut ShipRepairTeams,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (admitted, mut teams, hull_opt, config_opt) in ship_query.iter_mut() {
+        let (Some(hull), Some(config)) = (hull_opt, config_opt) else {
+            continue;
+        };
+        for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
+            if let SystemControlPayload::SetRepairTargetPriority { system_id } = &cmd.payload {
+                teams.0.prioritise_system(system_id, &hull.0, &config.0);
             }
         }
     }

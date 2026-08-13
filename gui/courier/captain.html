@@ -121,7 +121,7 @@
       document.getElementById('power').state = { groups: power.consoles || [], auto: !!power.power_auto };
       document.getElementById('battery').state = { level_pct: power.battery_max ? power.battery_charge / power.battery_max * 100 : 0, charging: !!power.battery_online && !!power.charging, emergency_threshold_pct: 20 };
       document.getElementById('hull').state = { total_pct: repair.overall_hull?.pct ?? 1, destroyed_pct: repair.overall_hull?.destroyed_pct };
-      document.getElementById('repair').state = { teams: repair.teams || [], auto: !!repair.repair_auto, targets: repair.dispatch_targets || [] };
+      document.getElementById('repair').state = { teams: repair.teams || [], auto: !!repair.repair_auto, targets: repair.dispatch_targets || [], damaged: repair.damaged_systems || [] };
       document.getElementById('nav').state = { blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 800, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
       document.getElementById('contacts').state = { contacts: comms.contacts || [] };
       const messages = comms.messages || [];

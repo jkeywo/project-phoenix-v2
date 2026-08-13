@@ -351,6 +351,7 @@ component.sensor_panel.au,"Sensor readout unit: astronomical units, shown after 
 component.shield_facings.title,"Shield facings panel heading","SHIELD FACINGS"
 component.shield_facings.empty,"Shield facings panel when no facing telemetry is available","[NO FACING DATA]"
 component.shield_facings.off,"Shield facing readout when that facing is offline","OFF"
+component.shield_facings.auto_hint,"Shield facings panel — hint toast shown when an arc is pressed while facing selection is unstaffed (Backfill auto rating) and the press cannot be sent","[AUTO — STAFF SHIELDS TO SET FACING]"
 component.shield_panel.title,"Shield status panel heading","SHIELDS"
 component.shield_panel.grid_nominal,"Shield grid status: operating normally","GRID NOMINAL"
 component.shield_panel.grid_offline,"Shield grid status: grid down","GRID OFFLINE"

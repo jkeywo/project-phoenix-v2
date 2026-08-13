@@ -3094,8 +3094,35 @@ pub struct PowerGroupEntry {
     /// "unknown" and the client falls back to `level`.
     #[serde(default)]
     pub commanded_level: u8,
+    /// The lowest rung this group's pip row DRAWS — its authored
+    /// `[power_groups.<id>] min_level`, published so the console stops guessing
+    /// (issue #1004).
+    ///
+    /// A display floor, not an engine one: `PowerSystem` clamps every group to
+    /// [`crate::power_system::GROUP_LEVEL_MIN`] whatever a hull authors here, so
+    /// this field changes what the panel paints and nothing about what an
+    /// officer may command. Without it the client fell back to `0` and drew a
+    /// phantom rung the server can never occupy — three groups showing nine
+    /// lights instead of twelve.
+    ///
+    /// `#[serde(default = "…")]` rather than a bare `#[serde(default)]` because
+    /// the meaningful absent value is `1`, not `0`: a pre-#1004 payload came
+    /// from a server whose floor was already `GROUP_LEVEL_MIN`, and decoding it
+    /// to `0` would reinstate the very ghost pip this field exists to kill.
+    #[serde(default = "default_min_power_level")]
+    pub min_level: u8,
     /// Maximum power level for this power group.
     pub max_level: u8,
+}
+
+/// The `min_level` a payload without the field decodes to. A module-local
+/// wrapper (serde's `default = "…"` would accept the cross-module path too)
+/// so the wire default is spelled beside the struct it defaults — it forwards
+/// to [`crate::ship::config::default_min_power_level`], the same parse default
+/// the authored TOML gets and the same value `GROUP_LEVEL_MIN` is defined
+/// from, so the wire default cannot drift from the engine's floor.
+fn default_min_power_level() -> u8 {
+    crate::ship::config::default_min_power_level()
 }
 
 /// Preview of a queued repair request for blackboard publication (issue #682).

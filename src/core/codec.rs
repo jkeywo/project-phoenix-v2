@@ -2936,18 +2936,39 @@ mod tests {
             label: "HELM".into(),
             level: 1,
             commanded_level: 3,
+            min_level: 2,
             max_level: 4,
         };
         let json = serde_json::to_string(&entry).unwrap();
         let decoded: PowerGroupEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, entry);
+        // Named explicitly: the round trip above would pass just as well if
+        // `min_level` were dropped on encode and refilled by its default, and
+        // the whole point of issue #1004 is that the AUTHORED floor reaches the
+        // client rather than a value the client guessed.
+        assert!(
+            json.contains(r#""min_level":2"#),
+            "the authored floor must be ON the wire, not reconstructed: {json}"
+        );
 
-        // A pre-#952 payload has no `commanded_level`. It must still decode —
-        // the client treats the missing 0 as "unknown" and steps from `level`.
+        // A legacy payload has neither field. Both must still decode, to
+        // DIFFERENT defaults — they are different questions:
+        //   - `commanded_level` (pre-#952) has no meaningful absent value, so
+        //     its bare `#[serde(default)]` 0 reads as "unknown" and the client
+        //     steps from `level`.
+        //   - `min_level` (pre-#1004) does: any server that omitted it was
+        //     already clamping to GROUP_LEVEL_MIN, so it defaults to 1. A 0
+        //     here would draw the phantom rung this field exists to remove.
         let legacy: PowerGroupEntry =
             serde_json::from_str(r#"{"id":"helm","label":"HELM","level":2,"max_level":4}"#)
                 .unwrap();
         assert_eq!(legacy.commanded_level, 0);
+        assert_eq!(
+            legacy.min_level,
+            crate::ship::config::default_min_power_level(),
+            "a pre-#1004 entry must decode to the engine's floor, not to 0"
+        );
+        assert_eq!(legacy.min_level, 1);
     }
 
     // ── Batch inbound decode (issue #602) ────────────────────────────────

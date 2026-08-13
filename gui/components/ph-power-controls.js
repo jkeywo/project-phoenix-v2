@@ -6,6 +6,19 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 
+/**
+ * The lowest rung to draw for a group whose entry carries no `min_level`.
+ *
+ * Since issue #1004 the server publishes the authored floor on every
+ * `PowerGroupEntry`, so this only stands in for a pre-#1004 payload — and there
+ * the right answer is 1, not 0. The engine has always clamped every group to
+ * `GROUP_LEVEL_MIN` (= 1); a 0 here drew a bottom pip no order could ever light,
+ * which is what put nine lights on a three-group console instead of twelve. Same
+ * number as `ship::config::default_min_power_level`, which is also the Rust
+ * decoder's `#[serde(default)]` for the field.
+ */
+const DEFAULT_MIN_LEVEL = 1;
+
 export class PhPowerControls extends HTMLElement {
   #state = null;
   #pipCache = new Map();
@@ -125,7 +138,7 @@ export class PhPowerControls extends HTMLElement {
         decrBtn.addEventListener('click', () => {
           if (auto) return;
           const cur = this.#currentLevel(gid);
-          const min = group.min_level != null ? group.min_level : 0;
+          const min = group.min_level != null ? group.min_level : DEFAULT_MIN_LEVEL;
           if (cur > min && this.sendAction) {
             this.sendAction('set_power', { target: gid, level: cur - 1 });
           }
@@ -146,7 +159,7 @@ export class PhPowerControls extends HTMLElement {
       const level = group.level != null ? group.level : 0;
       const commanded = commandedLevel(group);
       const held = commanded > level;
-      const minLevel = group.min_level != null ? group.min_level : 0;
+      const minLevel = group.min_level != null ? group.min_level : DEFAULT_MIN_LEVEL;
       const maxLevel = group.max_level != null ? group.max_level : 4;
 
       el.querySelector('.group-label').textContent = group.label || group.id;

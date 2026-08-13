@@ -594,6 +594,15 @@ fn publish_power_blackboard(
         ),
         With<crate::server_app::LocalShip>,
     >,
+    // The authored hull, for each group's `min_level` (issue #1004). Read via
+    // its OWN query for the same reason `control_sources_q` below is: the
+    // primary `ship_q` requires a per-entity `ShipPowerSystem`, so a LocalShip
+    // running off the global resources would silently contribute nothing and
+    // every group would publish the fallback floor instead of its authored one.
+    ship_config_q: Query<
+        &crate::ship_plugin::ShipConfigComponent,
+        With<crate::server_app::LocalShip>,
+    >,
     control_sources_q: Query<
         &crate::ship_plugin::ShipSystemControlSources,
         With<crate::server_app::LocalShip>,
@@ -658,6 +667,8 @@ fn publish_power_blackboard(
         .map(|cs| !cs.0.is_offline(&battery_id))
         .unwrap_or(true);
 
+    let ship_config = ship_config_q.single().ok();
+
     let entries: Vec<PowerGroupEntry> = POWER_GROUP_ORDER
         .iter()
         .map(|name| PowerGroupId(name.to_string()))
@@ -668,6 +679,16 @@ fn publish_power_blackboard(
                 .get(&gid)
                 .map(|arr| arr.len() as u8)
                 .unwrap_or(4);
+            // This group's own authored floor — the lowest rung the pip row
+            // draws (issue #1004). A hull that declares no `[power_groups.*]`
+            // block has none to read, so the parse default stands in, which is
+            // also the floor `PowerSystem` clamps to. Read off the hull rather
+            // than off the multiplier table, since the table's LENGTH is a
+            // ceiling and says nothing about where the rungs start.
+            let min_level = ship_config
+                .and_then(|sc| sc.0.power_groups.get(&gid))
+                .map(|g| g.min_level)
+                .unwrap_or_else(crate::ship::config::default_min_power_level);
             PowerGroupEntry {
                 id: gid.0.clone(),
                 label: power_group_label(gid.0.as_str()).into(),
@@ -676,6 +697,7 @@ fn publish_power_blackboard(
                 // ASKED for rather than from what a battery floor has left the
                 // group running at (issue #952).
                 commanded_level: power.0.commanded_level_for(&gid),
+                min_level,
                 max_level,
             }
         })
@@ -1217,6 +1239,102 @@ mod tests {
         // Total 6 on the default seed, where the default `rates` are still
         // positive — the reserve is filling, not emptying.
         assert!(!bb.draining, "should not be draining at the resting total");
+    }
+
+    /// **Every published entry carries the group's display floor (issue
+    /// #1004).**
+    ///
+    /// The console draws its pip row from `min_level..=max_level`. Before this
+    /// the field did not exist, the client fell back to `0`, and the row grew a
+    /// bottom rung no order could ever light — a three-group console showed
+    /// NINE lights where twelve were expected. A hull that authors no
+    /// `[power_groups.*]` block (this fixture's `ShipConfigComponent::default`)
+    /// publishes the parse default, which is also the level `PowerSystem`
+    /// clamps every group to.
+    #[test]
+    fn publish_power_blackboard_carries_each_groups_display_floor() {
+        let mut app = test_app();
+        start_game(&mut app);
+        tick(&mut app);
+
+        let bb = power_blackboard(&mut app);
+        assert_eq!(bb.groups.len(), 3, "helm, weapons, shields");
+        for e in &bb.groups {
+            assert_eq!(
+                e.min_level,
+                crate::ship::config::default_min_power_level(),
+                "group {} must publish the parse-default floor, never 0",
+                e.id
+            );
+            assert!(
+                e.min_level <= e.max_level,
+                "group {} has an empty pip range {}..={}",
+                e.id,
+                e.min_level,
+                e.max_level
+            );
+        }
+        // The count the client will draw, computed the same way the pip loop
+        // does: three groups x levels 1..=4.
+        let pips: u16 = bb
+            .groups
+            .iter()
+            .map(|e| u16::from(e.max_level - e.min_level + 1))
+            .sum();
+        assert_eq!(pips, 12, "12 pips, never the phantom 9-light state");
+    }
+
+    /// **A hull that authors a floor above the parse default has it published
+    /// verbatim (issue #1004).**
+    ///
+    /// The floor is read off the ship's own `[power_groups.<id>]` block, not
+    /// off the multiplier table — that table's LENGTH is a ceiling and says
+    /// nothing about where the rungs start. Nothing server-side clamps to this
+    /// value; it moves where the pip row begins and nothing else.
+    #[test]
+    fn publish_power_blackboard_reads_the_authored_floor() {
+        use crate::power_system::HELM_POWER_GROUP;
+        let mut app = test_app();
+        start_game(&mut app);
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut cfg = app
+                .world_mut()
+                .entity_mut(ship)
+                .take::<crate::ship_plugin::ShipConfigComponent>()
+                .unwrap();
+            cfg.0.power_groups.insert(
+                PowerGroupId(HELM_POWER_GROUP.into()),
+                crate::ship::config::PowerGroupConfig {
+                    label: "power.group.helm".into(),
+                    default_level: 2,
+                    min_level: 3,
+                    max_level: 4,
+                },
+            );
+            app.world_mut().entity_mut(ship).insert(cfg);
+        }
+        tick(&mut app);
+
+        let bb = power_blackboard(&mut app);
+        let helm = bb
+            .groups
+            .iter()
+            .find(|e| e.id == HELM_POWER_GROUP)
+            .expect("helm entry");
+        assert_eq!(helm.min_level, 3, "the authored floor reaches the wire");
+        for other in bb.groups.iter().filter(|e| e.id != HELM_POWER_GROUP) {
+            assert_eq!(
+                other.min_level,
+                crate::ship::config::default_min_power_level(),
+                "group {} authors no block, so it keeps the parse default",
+                other.id
+            );
+        }
     }
 
     #[test]

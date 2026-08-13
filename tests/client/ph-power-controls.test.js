@@ -87,6 +87,55 @@ describe('PhPowerControls', () => {
     expect(pips[4].classList.contains('active')).toBe(false);
   });
 
+  // ── The floor comes off the wire (issue #1004) ───────────────────────────
+  //
+  // The server publishes each group's authored `min_level`. When it is absent
+  // the fallback has to be 1 — the engine's `GROUP_LEVEL_MIN` — because a 0
+  // draws a bottom rung no order can ever light. That ghost pip is what put
+  // NINE lights on a three-group console when twelve were expected.
+
+  it('draws 12 pips on a three-group console when min_level is absent', () => {
+    const { el } = setup();
+    el.state = {
+      groups: [
+        { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+        { id: 'weapons', label: 'WEAPONS', level: 3, max_level: 4 },
+        { id: 'shields', label: 'SHIELDS', level: 2, max_level: 4 },
+      ],
+    };
+    const pips = el.shadowRoot.querySelectorAll('.pip');
+    // 3 groups x levels 1..4. Fifteen would mean the ghost rung is back; the
+    // reported nine-light state was this row miscounted the other way.
+    expect(pips.length).toBe(12);
+    // Every group's row starts at 1, the lowest level that can be commanded.
+    const firstLevels = Array.from(el.shadowRoot.querySelectorAll('.pip-row'))
+      .map(row => row.querySelector('.pip').dataset.level);
+    expect(firstLevels).toEqual(['1', '1', '1']);
+  });
+
+  it('does not disable − at level 1 when min_level is absent', () => {
+    // The button gate reads the same fallback as the pip loop. A 0 fallback
+    // would leave `−` live at level 1 and offer an order the server rejects.
+    const { el } = setup();
+    el.state = {
+      groups: [{ id: 'helm', label: 'HELM', level: 1, max_level: 4 }],
+    };
+    const decr = el.shadowRoot.querySelector('.mini-btn[data-action="decr"]');
+    expect(decr.disabled).toBe(true);
+  });
+
+  it('honours an authored floor above 1', () => {
+    // A hull may still author a higher display floor; the panel draws from it
+    // rather than from the fallback.
+    const { el } = setup();
+    el.state = {
+      groups: [{ id: 'helm', label: 'HELM', level: 3, min_level: 2, max_level: 4 }],
+    };
+    const pips = el.shadowRoot.querySelectorAll('.pip');
+    expect(pips.length).toBe(3); // levels 2..4
+    expect(pips[0].dataset.level).toBe('2');
+  });
+
   it('disables increment button at max_level', () => {
     const { el } = setup();
     el.state = {

@@ -1125,6 +1125,25 @@ describe('buildPowerConsoleState', () => {
     expect(s.consoles[0].level).toBe(2);
     expect(s.consoles[0].commanded_level).toBe(4);
   });
+
+  it('carries each group\'s published floor through untouched', () => {
+    // Issue #1004: the pip row's lowest rung is the hull's authored
+    // `min_level`, published by the server. This fold passes it along verbatim
+    // — it is not the place to substitute a default, since the component owns
+    // the pre-#1004 fallback and the Rust decoder owns the wire one.
+    const s = parse(buildPowerConsoleState({
+      blackboards: {
+        power: {
+          groups: [
+            { id: 'helm',    label: 'HELM',    level: 2, min_level: 1, max_level: 4 },
+            { id: 'weapons', label: 'WEAPONS', level: 3, min_level: 2, max_level: 4 },
+          ],
+          total: 5, total_max: 8, battery_charge: 40, battery_max: 100, draining: false,
+        },
+      },
+    }));
+    expect(s.consoles.map(c => c.min_level)).toEqual([1, 2]);
+  });
 });
 
 describe('buildShieldsConsoleState', () => {

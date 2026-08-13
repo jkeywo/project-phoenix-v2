@@ -311,6 +311,7 @@ entities:
         - "There is ONE evidence contract: physical sensor readings, third-party data obtained via Comms, and derived estimates all carry confidence and provenance through the #858 dossier surface. No second epistemics system is built for physical measurement."
         - "The Skyway retrofit lands here, before campaign-continuity projection (#867) freezes expectations against mission 1's state, so the toolkit never carries two hazard representations."
         - "The complexity-ladder framework debuts here rather than with the band-D power network (superseding the earlier engineering-only timing) because its first real content is band B's sensor depth: the detail screen ships with genuine epistemics gameplay, not an empty frame, and D's power detail then lands as deeper rungs of an established ladder."
+        - "PRDs published 2026-08-13: #1016 (fields and epistemics) and #1017 (complexity-ladder framework); the later bands' foundation PRDs are #1018 (Narrow Season), #1019 (Broken Tithe), #1020 (Silent Corridor ladder content), #1021 (Patrol Mode)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -412,7 +413,7 @@ entities:
       summary: "Post-E marker, not a banded release. A patrol campaign is generated assignments: a seeded system generator produces the physical context (star, bodies, orbits, hazards, stations, traffic) and the Thin Margin machinery generates the situation (actors, needs, infrastructure, commitments, evidence, cascades) — coherent episodes, not planets for their own sake. A hand-authored exploration 'first patrol' ships as its tutorial, absorbing the standalone science-scenario concept. Ladder content: the database/ship's library — a read-only reference of known ships, systems, and hazards plus the mission log, serving as the patrol briefing surface."
       rationale:
         - "This is the stated long-term justification for the B-D physical foundations: they exist so that generated situations, not only authored missions, can use them."
-        - "Marker only by the 2026-08-13 decision: the PRD is written just-in-time when band E nears, per the per-band PRD workflow, so five bands of foundation lessons inform it."
+        - "PRD published as #1021 (2026-08-13, superseding the same-day PRD-when-E-nears deferral); its issue breakdown via /to-issues still waits for its band."
         - "Scope guard is pasm/spec/design/simulation-differentiation.yaml: Phoenix generates plausible episodes, not a galaxy."
     architecture:
       kind: roadmap-milestone

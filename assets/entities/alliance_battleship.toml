@@ -713,7 +713,7 @@ shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "
 
 [navigation_console.system_chart]
 range = 800
-shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker" ]
+shows = [ "region", "asteroid_field", "star", "planet", "moon", "station", "player", "objective_marker" ]
 selects = [ "station", "planet", "star", "region" ]
 
 [comms]

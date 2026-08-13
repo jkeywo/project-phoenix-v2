@@ -1647,6 +1647,30 @@ describe('buildNavigationConsoleState', () => {
     expect(blips.map(b => b.kind).sort()).toEqual(['planet', 'star']);
   });
 
+  it('includes moons once the hull chart shows them', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      navChartShows: ['planet', 'moon'],
+      asteroids: [
+        { uuid: 'ice-moon', name: 'Ice Moon', x: 120, z: -40, tags: ['moon'], radar_icon: 'planet' },
+      ],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips.map(b => b.uuid)).toEqual(['ice-moon']);
+    expect(blips[0].name).toBe('Ice Moon');
+  });
+
+  it('hides moons from a hull chart that does not list them', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      navChartShows: ['planet', 'star'],
+      asteroids: [
+        { uuid: 'ice-moon', name: 'Ice Moon', x: 120, z: -40, tags: ['moon'], radar_icon: 'planet' },
+      ],
+    };
+    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
+  });
+
   it('draws a radar_icon star as a star on the navigation chart', () => {
     const state = {
       shipX: 0, shipZ: 0,

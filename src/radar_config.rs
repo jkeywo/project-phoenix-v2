@@ -217,6 +217,20 @@ shows = ["asteroid", "ship", "asteroid_field", "star", "planet", "region"]
         assert!(cfg.shows.contains(&EntityTag::Region));
     }
 
+    #[test]
+    fn moon_survives_the_shows_filter() {
+        // The hulls' `[navigation_console.system_chart] shows` list carries
+        // "moon". An unparseable string is dropped in silence here, so a
+        // missing `EntityTag` variant would empty the chart of moons with no
+        // load error to show for it.
+        let toml = r#"
+range = 800.0
+shows = ["planet", "moon"]
+"#;
+        let cfg = RadarConfig::from_toml(toml).expect("parse must succeed");
+        assert_eq!(cfg.shows, vec![EntityTag::Planet, EntityTag::Moon]);
+    }
+
     // ── RadarConfig::radar_dampening_multiplier ───────────────────────────
 
     #[test]

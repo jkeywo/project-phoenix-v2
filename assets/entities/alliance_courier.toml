@@ -269,7 +269,7 @@ recharge_duration = 15.0
 
 [navigation_console.system_chart]
 range = 800
-shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker" ]
+shows = [ "region", "asteroid_field", "star", "planet", "moon", "station", "player", "objective_marker" ]
 selects = [ "station", "planet", "star", "region" ]
 
 [comms]

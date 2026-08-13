@@ -2,7 +2,7 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
-sources: [gui/console-state.js, gui/radar-widget.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, client.html, src/radar.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
+sources: [gui/console-state.js, gui/radar-widget.js, gui/battleship/navigation.html, gui/sim-state.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
 updated: 2026-08-12
 ---
 
@@ -48,7 +48,7 @@ Same input → same output → same visual semantics. This was an explicit deepe
 
 The HTML console path uses `gui/console-state.js::buildBlips()` and `buildWaypointBlip()` before passing pre-projected blips into `gui/radar-widget.js`. Navigation owns one shared custom waypoint via server `SimSnapshot.navigation_waypoint`; Helm projects it ship-relative and clamps it to radius `0.96` with `edge: true` when it is outside Helm radar range. The radar widget renders `kind: "waypoint"` as a cyan diamond/ring without a bitmap asset.
 
-`gui/battleship/navigation.html` draws only the live chart background, grid, server-derived blips, waypoint, and own-ship marker. It does not carry hardcoded sector polygons; scenario/region overlays should be data-driven rather than baked into the Navigation background.
+`gui/battleship/navigation.html` — and the other four `ph-navigation-map` hosts, `gui/cruiser/comms.html`, `gui/destroyer/tactical.html`, `gui/courier/captain.html`, and `gui/courier/pilot.html` — feed the same `blips` + `regions` state into the shared `<ph-navigation-map>` component. It draws the live chart background and grid, then region hulls (sphere/torus/box, matching the viewscreen radar's shapes) between the grid and the blips, then the waypoint, own-ship marker, and server-derived blips, with a gold ring marking `objective_target` regions and blips alike. It does not carry hardcoded sector polygons; region overlays arrive data-driven from the server via `buildRadarRegions()` rather than baked into the Navigation background. Moon-tagged contacts (`EntityTag::Moon`, now in each hull's `[navigation_console.system_chart] shows` list) ride the same blip path as any other point contact, with no bespoke chart glyph of their own.
 
 `gui/console-state.js::buildRadarRegions()` is the HTML path for shaped map overlays. It emits `region`, `asteroid_field`, and objective-marker entities as sphere/box/torus payloads for Navigation and Sensors. Region entities normally carry `shape` from the server snapshot; asteroid-field entities may be normalised from `radius` + `inner_radius` into a torus/sphere overlay so fields remain visible on the Navigation map even when they are not point blips.
 

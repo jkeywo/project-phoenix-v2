@@ -14,7 +14,7 @@ Navigation provides the shared strategic chart and desired-destination surface. 
 
 The ship entity's `[navigation_console.system_chart]` block supplies the chart range plus the `shows` and `selects` tag filters. `NavigationConsoleConfig` parses that data, the Navigation blackboard publishes it, and `buildNavigationConsoleState` turns the authoritative snapshot into the browser state used by every hull layout.
 
-The chart is overhead, north-up, and world-anchored. It uses authored radar icons and colours, plots the ship at its world position, and renders the current shared waypoint. Pan and zoom are local presentation state.
+The chart is overhead, north-up, and world-anchored. It draws region hulls — sphere, torus, and box, matching the viewscreen radar's shapes — beneath the blips, then uses authored radar icons and colours to plot the ship, waypoint, and contacts at their world positions. An `objective_target` region or blip gets a gold ring or outline instead of its own colour, so mission geometry reads apart from ordinary landmarks. Moon-tagged contacts ride the same blip path as any other point contact, with no chart glyph of their own. Pan and zoom are local presentation state.
 
 ## Selection and waypoint placement
 

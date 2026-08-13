@@ -4,9 +4,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-navigation-map.js';
 
 function makeFakeCtx() {
-  const calls = { fillRect: [], arc: [], fill: [], fillText: [], moveTo: [], lineTo: [], stroke: [], beginPath: [] };
+  const calls = { fillRect: [], strokeRect: [], arc: [], fill: [], fillText: [], moveTo: [], lineTo: [], stroke: [], beginPath: [] };
+  // Chronological op log. The style properties below are single-valued, so a
+  // test that wants to know which colour a particular fill/stroke used has to
+  // sample them at call time rather than read them back after the render.
+  const ops = [];
+  const rec = (op, args) => ops.push({
+    op,
+    args,
+    fillStyle: ctx.fillStyle,
+    strokeStyle: ctx.strokeStyle,
+    lineWidth: ctx.lineWidth,
+  });
   const ctx = {
     _calls: calls,
+    _ops: ops,
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 0,
@@ -14,11 +26,12 @@ function makeFakeCtx() {
     textAlign: 'left',
     shadowColor: '',
     shadowBlur: 0,
-    fillRect: (...a) => calls.fillRect.push(a),
+    fillRect: (...a) => { calls.fillRect.push(a); rec('fillRect', a); },
+    strokeRect: (...a) => { calls.strokeRect.push(a); rec('strokeRect', a); },
     beginPath: () => { calls.beginPath.push(true); },
-    arc: (...a) => calls.arc.push(a),
-    fill: () => calls.fill.push(true),
-    stroke: () => calls.stroke.push(true),
+    arc: (...a) => { calls.arc.push(a); rec('arc', a); },
+    fill: () => { calls.fill.push(true); rec('fill', []); },
+    stroke: () => { calls.stroke.push(true); rec('stroke', []); },
     moveTo: (...a) => calls.moveTo.push(a),
     lineTo: (...a) => calls.lineTo.push(a),
     fillText: (...a) => calls.fillText.push({ text: a[0], x: a[1], y: a[2], font: ctx.font }),
@@ -31,6 +44,25 @@ function makeFakeCtx() {
     setLineDash: vi.fn(),
   };
   return ctx;
+}
+
+/** The op that painted a shape, or undefined. */
+function findOp(ctx, op, match) {
+  return ctx._ops.find((o) => o.op === op && match(o));
+}
+
+/** The arc that defined the path the op at `index` painted. */
+function arcBefore(ctx, index) {
+  for (let i = index - 1; i >= 0; i--) {
+    if (ctx._ops[i].op === 'arc') return ctx._ops[i];
+  }
+  return null;
+}
+
+/** The arc feeding the first fill/stroke matching `match`, or null. */
+function arcFor(ctx, op, match) {
+  const i = ctx._ops.findIndex((o) => o.op === op && match(o));
+  return i === -1 ? null : arcBefore(ctx, i);
 }
 
 let fakeCtx;
@@ -494,6 +526,243 @@ describe('PhNavigationMap', () => {
 
     expect(canvas.width).toBe(800);
     expect(canvas.height).toBe(400);
+  });
+
+  // Canvas 600x600 → cx=cy=300, R=300; range 5000 → scale = 0.06 buffer px
+  // per world unit at zoom 1. World (1000, 0) → screen (360, 300).
+  describe('regions', () => {
+    const BASE = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
+
+    it('draws a sphere region as a filled, stroked circle in its authored colour', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{
+          uuid: 'r1', x: 1000, z: 0, shape: 'sphere', radius: 500,
+          color: [0.2, 0.4, 0.8], name: 'Kaleth Nebula', objective_target: false,
+        }],
+      };
+      h.tickRaf();
+
+      // [0.2, 0.4, 0.8] floats → rgb(51,102,204); fill at 0.3 alpha.
+      const fill = findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)');
+      expect(fill).toBeDefined();
+      const stroke = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(51,102,204)');
+      expect(stroke).toBeDefined();
+      expect(stroke.lineWidth).toBe(1.5);
+
+      // radius 500 world → 500 * 0.06 = 30 buffer px, centred on (360, 300).
+      const arc = arcFor(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)');
+      expect(arc.args[0]).toBeCloseTo(360, 1);
+      expect(arc.args[1]).toBeCloseTo(300, 1);
+      expect(arc.args[2]).toBeCloseTo(30, 1);
+    });
+
+    it('labels a region with its name in the blip label font', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{ uuid: 'r1', x: 1000, z: 0, shape: 'sphere', radius: 500, color: [0.2, 0.4, 0.8], name: 'Kaleth Nebula' }],
+      };
+      h.tickRaf();
+      const draws = h.fakeCtx._calls.fillText.filter((f) => f.text === 'Kaleth Nebula');
+      expect(draws.length).toBe(1);
+      // Same 12px DPR-scaled treatment as blip names (dpr 2 → 24px).
+      expect(draws[0].font).toBe('24px "JetBrains Mono", monospace');
+      // Offset clear of the 30px hull: 360 + 30 + 4.
+      expect(draws[0].x).toBeCloseTo(394, 1);
+    });
+
+    it('draws a torus region as one thick stroked ring with no fill', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{
+          uuid: 'f1', x: 0, z: 0, shape: 'torus',
+          outer_radius: 3500, inner_radius: 3000, radius: 3500,
+          color: [0.5, 0.3, 0.2], name: null, objective_target: false,
+        }],
+      };
+      h.tickRaf();
+
+      // outer 210px, inner 180px → ring centred at 195px, 30px wide.
+      const stroke = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(128,77,51)');
+      expect(stroke).toBeDefined();
+      expect(stroke.lineWidth).toBeCloseTo(30, 1);
+      const arc = arcFor(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(128,77,51)');
+      expect(arc.args[2]).toBeCloseTo(195, 1);
+
+      // A torus is an outline only — no translucent hull behind it.
+      expect(findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(128,77,51,0.3)')).toBeUndefined();
+    });
+
+    it('draws a box region as an axis-aligned filled rect, ignoring yaw', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{
+          uuid: 'b1', x: 0, z: 0, shape: 'box',
+          half_extents: [1000, 500], yaw: 0.7,
+          color: [0, 1, 0], name: null, objective_target: false,
+        }],
+      };
+      h.tickRaf();
+
+      // half extents 1000/500 world → 60/30 px, so a 120x60 rect at (240, 270).
+      // Axis-aligned despite the authored yaw, matching the viewscreen radar.
+      const rect = findOp(h.fakeCtx, 'fillRect', (o) => o.fillStyle === 'rgba(0,255,0,0.3)');
+      expect(rect).toBeDefined();
+      expect(rect.args.map((n) => Math.round(n))).toEqual([240, 270, 120, 60]);
+      const outline = findOp(h.fakeCtx, 'strokeRect', (o) => o.strokeStyle === 'rgb(0,255,0)');
+      expect(outline).toBeDefined();
+      expect(outline.args.map((n) => Math.round(n))).toEqual([240, 270, 120, 60]);
+    });
+
+    it('outlines an objective region in gold while keeping its own fill', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{
+          uuid: 'r1', x: 1000, z: 0, shape: 'sphere', radius: 500,
+          color: [0.2, 0.4, 0.8], name: null, objective_target: true,
+        }],
+      };
+      h.tickRaf();
+      expect(findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)')).toBeDefined();
+      const gold = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820');
+      expect(gold).toBeDefined();
+      expect(findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(51,102,204)')).toBeUndefined();
+    });
+
+    it('draws an objective torus as a single gold stroked ring with no fill', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{
+          uuid: 'f1', x: 0, z: 0, shape: 'torus',
+          outer_radius: 3500, inner_radius: 3000, radius: 3500,
+          color: [0.5, 0.3, 0.2], name: null, objective_target: true,
+        }],
+      };
+      h.tickRaf();
+
+      // Same ring geometry as the plain-torus case, but the stroke recolours
+      // to the waypoint gold instead of the region's own [0.5,0.3,0.2] hue —
+      // a torus has no fill to begin with, so the whole ring reads gold.
+      const stroke = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820');
+      expect(stroke).toBeDefined();
+      expect(stroke.lineWidth).toBeCloseTo(30, 1);
+      expect(findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(128,77,51)')).toBeUndefined();
+      expect(findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(128,77,51,0.3)')).toBeUndefined();
+    });
+
+    it('floors a tiny region at the 4px minimum', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        // 10 world units at 0.06 px/unit is 0.6px — floored at 4px so it
+        // stays visible instead of collapsing to nothing.
+        regions: [{ uuid: 'r1', x: 1000, z: 0, shape: 'sphere', radius: 10, color: [0.2, 0.4, 0.8] }],
+      };
+      h.tickRaf();
+      const arc = arcFor(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)');
+      expect(arc).not.toBeNull();
+      expect(arc.args[2]).toBe(4);
+    });
+
+    it('does not cull an off-screen region the way blips are culled', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        // Centre projects to sx ≈ 30300, far past the 600x600 buffer. A blip
+        // this far off-screen is skipped (ph-navigation-map.js:282); regions
+        // carry no such cull, so the shape still draws in full.
+        regions: [{ uuid: 'r1', x: 500000, z: 0, shape: 'sphere', radius: 500, color: [0.2, 0.4, 0.8] }],
+      };
+      h.tickRaf();
+      const fill = findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)');
+      expect(fill).toBeDefined();
+      const stroke = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(51,102,204)');
+      expect(stroke).toBeDefined();
+      const arc = arcFor(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)');
+      expect(arc.args[0]).toBeGreaterThan(600);
+    });
+
+    it('falls back to a neutral hull colour when no region colour was authored', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{ uuid: 'r1', x: 0, z: 0, shape: 'sphere', radius: 500, color: null }],
+      };
+      h.tickRaf();
+      expect(findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(168,176,191,0.3)')).toBeDefined();
+    });
+
+    it('skips a region whose shape the chart does not know', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        regions: [{ uuid: 'r1', x: 0, z: 0, shape: 'wormhole', radius: 500, color: [0.2, 0.4, 0.8], name: 'Nowhere' }],
+      };
+      h.tickRaf();
+      expect(findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)')).toBeUndefined();
+      expect(h.fakeCtx._calls.fillText.filter((f) => f.text === 'Nowhere').length).toBe(0);
+    });
+
+    it('draws no region geometry when the payload carries none', () => {
+      const h = setup();
+      h.el.state = { ...BASE, regions: [] };
+      h.tickRaf();
+      expect(h.fakeCtx._calls.strokeRect.length).toBe(0);
+      expect(findOp(h.fakeCtx, 'fill', (o) => /^rgba\(.*,0\.3\)$/.test(String(o.fillStyle)))).toBeUndefined();
+      // The grid and ship marker still render (the empty-state smoke path).
+      expect(h.fakeCtx._calls.fillRect.length).toBeGreaterThan(0);
+    });
+
+    it('draws regions before blips so a contact is never buried in a hull', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        blips: [{ uuid: 'm1', kind: 'planet', name: 'Ice Moon', world_x: 1000, world_z: 0, stance: 'neutral' }],
+        regions: [{ uuid: 'r1', x: 1000, z: 0, shape: 'sphere', radius: 500, color: [0.2, 0.4, 0.8] }],
+      };
+      h.tickRaf();
+      const regionAt = h.fakeCtx._ops.findIndex((o) => o.op === 'fill' && o.fillStyle === 'rgba(51,102,204,0.3)');
+      const blipAt = h.fakeCtx._ops.findIndex((o) => o.op === 'fill' && o.fillStyle === '#7a90c0');
+      expect(regionAt).toBeGreaterThanOrEqual(0);
+      expect(blipAt).toBeGreaterThan(regionAt);
+    });
+  });
+
+  describe('objective contacts', () => {
+    const BASE = { regions: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
+
+    it('rings an objective blip in gold just outside the marker', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        blips: [{ uuid: 'a', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'neutral', objective_target: true }],
+      };
+      h.tickRaf();
+      const ring = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820' && o.lineWidth === 2);
+      expect(ring).toBeDefined();
+      // blipR = max(3, 300 * 0.015) = 4.5 → ring at 10.5px around (360, 300).
+      const arc = arcFor(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820' && o.lineWidth === 2);
+      expect(arc.args[0]).toBeCloseTo(360, 1);
+      expect(arc.args[1]).toBeCloseTo(300, 1);
+      expect(arc.args[2]).toBeCloseTo(10.5, 1);
+    });
+
+    it('leaves an ordinary blip unringed', () => {
+      const h = setup();
+      h.el.state = {
+        ...BASE,
+        blips: [{ uuid: 'a', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'neutral' }],
+      };
+      h.tickRaf();
+      expect(findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820' && o.lineWidth === 2)).toBeUndefined();
+    });
+
   });
 
   describe('zoom and pan', () => {

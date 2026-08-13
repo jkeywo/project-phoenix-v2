@@ -19,6 +19,9 @@ pub enum EntityTag {
     AsteroidField,
     Star,
     Planet,
+    /// A natural satellite. Distinct from `Planet` so a chart can carry the
+    /// parent body without its moons, or the other way round.
+    Moon,
     Region,
     Station,
     /// The local player's ship. Distinct from `Ship` so radar filters can show
@@ -49,6 +52,7 @@ impl EntityTag {
             "asteroid_field" => Some(EntityTag::AsteroidField),
             "star" => Some(EntityTag::Star),
             "planet" => Some(EntityTag::Planet),
+            "moon" => Some(EntityTag::Moon),
             "region" => Some(EntityTag::Region),
             "station" => Some(EntityTag::Station),
             "player" => Some(EntityTag::Player),
@@ -67,6 +71,7 @@ impl EntityTag {
             EntityTag::AsteroidField => "asteroid_field",
             EntityTag::Star => "star",
             EntityTag::Planet => "planet",
+            EntityTag::Moon => "moon",
             EntityTag::Region => "region",
             EntityTag::Station => "station",
             EntityTag::Player => "player",
@@ -106,6 +111,7 @@ mod tests {
             ("asteroid_field", EntityTag::AsteroidField),
             ("star", EntityTag::Star),
             ("planet", EntityTag::Planet),
+            ("moon", EntityTag::Moon),
             ("region", EntityTag::Region),
             ("station", EntityTag::Station),
             ("player", EntityTag::Player),

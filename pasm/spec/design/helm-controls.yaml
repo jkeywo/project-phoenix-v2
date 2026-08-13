@@ -136,6 +136,8 @@ entities:
       confidence: confirmed
       title: Helm Status Information
       summary: Helm can inspect the available drive states and current movement telemetry for the ship.
+      rationale:
+        - "[ai] Issue #1006 halves the authored helm radar range from 187.5 to 93.75 on the three alliance hulls (`alliance_destroyer.toml`, `alliance_cruiser.toml`, `alliance_battleship.toml`) as a starting point for the shorter effective reach requested in issue #1006 (no playtest-claim entity backs the specific value yet). The value is authored once per hull under `[helm_console.radar] range` and read by exactly one path per tick (`publish_helm_blackboard`, helm-blackboard-publisher) into the live damage-scaled radar_range on helm-status-blackboard-state — the SAME number the client radar widget renders (`gui/console-state.js` `buildHelmConsoleState`, via `ShipClientConfigResource.helm_radar_range` for the LocalShip) and the NPC helm AI's sensing gate reads (`helm_ai_radar_range` -> `helm_ai_world_view`, `src/ship/helm_ai.rs`). Halving the authored value therefore halves what Helm can see for AI and human alike with no code change on either path. Tuning is AI-origin, recorded here pending designer ratification."
     game_design:
       enforcement_links:
         - helm-console-interface

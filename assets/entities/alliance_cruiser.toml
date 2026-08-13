@@ -578,7 +578,7 @@ active_duration = 3.0
 recharge_duration = 20.0
 
 [helm_console.radar]
-range = 187.5
+range = 93.75
 shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
 
 [navigation_console]

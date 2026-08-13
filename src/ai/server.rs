@@ -1453,10 +1453,26 @@ fn simulate_low_lod_ships(
         entity_uuid,
     ) in &mut ships
     {
-        let max_speed = helm_section
-            .map(|h| h.0.max_speed)
-            .filter(|&s| s > 0.0)
-            .unwrap_or(20.0);
+        // No Helm console means no engine: this hull cannot propel itself, so
+        // its top speed is 0, not a fabricated default. That is the difference
+        // between "a mover whose authored max_speed we couldn't read" and "a
+        // thing with no propulsion at all" — combat_test's Starbase Alpha (a
+        // `StaticPointDefence`) carries the full `Ship` substrate for its
+        // targeting and beams, so it rides this path once the player drifts far
+        // enough to demote it, but with max_speed 0 every speed ramp below
+        // multiplies to 0 and it stays put. It still gets every OTHER low-LOD
+        // update (yaw, hazard avoidance) — the platform is not special-cased out
+        // of the path, it simply has nothing to accelerate. Any future
+        // propulsion-less Ship entity (mine, comms buoy) inherits the same.
+        //
+        // A helm section that IS present but authors a non-positive max_speed is
+        // malformed authoring, not "no engine": keep the fixture fallback so the
+        // bare-`App` movers that rely on it still move.
+        let max_speed = match helm_section {
+            None => 0.0,
+            Some(h) if h.0.max_speed > 0.0 => h.0.max_speed,
+            Some(_) => 20.0,
+        };
         // The same facts the high-fidelity planner feeds `assess_hazards`, read
         // off this hull rather than defaulted (issue #968): its collider radius,
         // and the whole authored `[behaviour]` avoidance block (buffer,

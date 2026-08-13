@@ -6779,9 +6779,11 @@ fn combat_doctrine_drops_a_retained_factionless_assault_lock() {
 }
 
 /// Advisory from the #703 review: the tier-4 scan is an *auto-acquisition*
-/// surface, so it must be `With<Ship>` — the tactical radar `shows:
-/// [EntityTag::Ship]` and nothing else. No shipped non-ship template
-/// declares a `faction` today; this pins the filter before one does.
+/// surface, so it must be narrow — originally `With<Ship>`, widened by
+/// #1011 to `Or<(With<Ship>, With<StaticPointDefence>)>` for the first
+/// factioned station (see the tests below). This fixture carries NEITHER
+/// marker — the shape a factioned mine / probe / comms-buoy template would
+/// spawn — so it must stay outside both arms of that filter.
 #[test]
 fn tier_four_does_not_acquire_a_factioned_non_ship() {
     let mut app = test_app();
@@ -6791,10 +6793,9 @@ fn tier_four_does_not_acquire_a_factioned_non_ship() {
     setup_harrow_ship_hostile_to_federation(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    // A hostile-factioned entity that is *not* a ship — the shape a
-    // factioned station / mine / probe template would spawn. Everything
-    // else about it would qualify: in radar range, enemy faction, closer
-    // than anything else in the world.
+    // A hostile-factioned entity that is neither a ship nor a
+    // StaticPointDefence combatant. Everything else about it would qualify:
+    // in radar range, enemy faction, closer than anything else in the world.
     app.world_mut().spawn((
         crate::entity_spawner::EntityUuid(station_uuid),
         Transform::from_xyz(0.0, 0.0, -10.0),
@@ -6807,9 +6808,270 @@ fn tier_four_does_not_acquire_a_factioned_non_ship() {
 
     assert!(
         get_weapons_target(&mut app).is_none(),
-        "the nearest-hostile tier must only auto-acquire ships — a factioned non-ship is \
-         not what the tactical radar shows, and locking one would have the AI open fire on \
-         scenery it cannot even see"
+        "the nearest-hostile tier must only auto-acquire ships and StaticPointDefence \
+         combatants — a factioned entity that is neither is not what the tactical radar \
+         shows, and locking one would have the AI open fire on scenery it cannot even see"
+    );
+}
+
+// ── Factioned StaticPointDefence acquisition (issue #1011) ─────────────
+//
+// `assets/entities/station_axiom.toml` is the first shipped
+// `StaticPointDefence` combatant to author a `faction`. Before #1011 the
+// tier-4 scan surface was strictly `With<Ship>`, so a Harrow's untargeted
+// "destroy hostiles" doctrine could see every hostile SHIP in range but
+// never a hostile STATION standing right next to them — the raid could
+// close on the starbase and simply never fire on it. These pin the fix:
+// widening `hostile_scan_q` to `Or<(With<Ship>, With<StaticPointDefence>)>`
+// while the faction check (`is_hostile`, backed by `faction::is_enemy`)
+// stays exactly as strict as before.
+
+/// A hand-rolled reduction of the entity shape `station_axiom.toml` spawns.
+/// In production `spawn_entity` (`src/entities/spawner.rs`) gives that
+/// station BOTH the `StaticPointDefence` and `Ship` markers, but this
+/// fixture carries only `StaticPointDefence` so it pins the
+/// `With<StaticPointDefence>` arm of the `Or<>` filter in isolation from the
+/// `Ship` arm `spawn_factioned_target` already covers — that arm is a hedge
+/// for a future entity that is `StaticPointDefence` without also being a
+/// `Ship`, which is not what today's `station_axiom.toml` is. See
+/// `tier_four_does_not_acquire_a_factioned_non_ship` for the entity shape
+/// that must still stay invisible (neither marker), and
+/// `tactical_ai_acquires_station_axiom_spawned_via_spawn_entity` below for
+/// coverage built from the real production entity shape (both markers).
+fn spawn_factioned_static_point_defence_target(
+    app: &mut App,
+    uuid: &str,
+    x: f32,
+    z: f32,
+    faction: uuid::Uuid,
+) -> Entity {
+    app.world_mut()
+        .spawn((
+            crate::entity_spawner::StaticPointDefence,
+            crate::entity_spawner::EntityUuid(uuid.into()),
+            Transform::from_xyz(x, 0.0, z),
+            FactionComponent(faction),
+        ))
+        .id()
+}
+
+/// The headline #1011 fix: a factioned StaticPointDefence station is
+/// acquired by the nearest-hostile tier same as any hostile ship.
+#[test]
+fn tactical_ai_acquires_a_factioned_static_point_defence_station() {
+    let mut app = test_app();
+    let station_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 100.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // A factioned starbase-shaped station well inside the radar horizon —
+    // the hand-rolled `StaticPointDefence`-only reduction described on
+    // `spawn_factioned_static_point_defence_target` above. The production
+    // entity also carries `Ship`; that shape is exercised separately by
+    // `tactical_ai_acquires_station_axiom_spawned_via_spawn_entity` below.
+    spawn_factioned_static_point_defence_target(
+        &mut app,
+        &station_uuid,
+        0.0,
+        -50.0,
+        federation_faction(),
+    );
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(station_uuid.as_str()),
+        "issue #1011: the nearest-hostile tier must acquire a factioned StaticPointDefence \
+         station same as any hostile ship — a raider standing next to a hostile starbase \
+         must not treat it as invisible scenery"
+    );
+}
+
+/// The other side of the same fix: widening the scan to include
+/// `StaticPointDefence` must not make an UNFACTIONED point-defence turret
+/// acquirable. `is_hostile` / `find_nearest_hostile` both require a
+/// `FactionComponent` on both sides (`faction::is_enemy` returns `false`
+/// the moment either side is `None`), so this must hold with no additional
+/// query-level filtering.
+#[test]
+fn tactical_ai_does_not_acquire_an_unfactioned_static_point_defence_station() {
+    let mut app = test_app();
+    let station_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 100.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // Same shape as station_axiom.toml, but no faction — an ownerless
+    // point-defence turret.
+    app.world_mut().spawn((
+        crate::entity_spawner::StaticPointDefence,
+        crate::entity_spawner::EntityUuid(station_uuid),
+        Transform::from_xyz(0.0, 0.0, -50.0),
+    ));
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "widening the tier-4 scan to include StaticPointDefence must not make an \
+         UNFACTIONED point-defence turret acquirable — hostility always requires a faction \
+         on both sides"
+    );
+}
+
+/// The two tests above spawn a hand-rolled `(StaticPointDefence, EntityUuid,
+/// Transform, FactionComponent)` tuple, not the entity shape production ever
+/// actually produces. This test closes that gap: it parses
+/// `station_axiom.toml` with `EntityConfig::from_toml` and spawns it with the
+/// real `spawn_entity` (`src/entities/spawner.rs`), the same two calls
+/// `entity_without_audio_block_parses_to_none` /
+/// `station_axiom_template_parses_hull_integrity`
+/// (`src/entities/config.rs`) and `npc_ship_spawn_gives_all_ai_roster_and_no_ship_marker`
+/// (`src/entities/spawner.rs`) already use in lib tests — no
+/// `config_cache::insert_native_config` involved, since that helper belongs
+/// to the headless integration target, not this in-process `App`. Spawning
+/// this way gives the station BOTH the `StaticPointDefence` and `Ship`
+/// markers plus a live `FactionComponent` sourced from the TOML's own
+/// `faction` line, so the hostile scan and the faction check both run for
+/// real rather than being asserted piecemeal.
+#[test]
+fn tactical_ai_acquires_station_axiom_spawned_via_spawn_entity() {
+    let mut app = test_app();
+
+    set_tactical_radar_range(&mut app, 100.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    let config = crate::entity_config::EntityConfig::from_toml(include_str!(
+        "../../../assets/entities/station_axiom.toml"
+    ))
+    .expect("station_axiom.toml must parse");
+    let station_uuid = uuid::Uuid::new_v4().to_string();
+    let mut cmds = app.world_mut().commands();
+    // station_axiom.toml's own `faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"`
+    // is `federation_faction()`, the same faction
+    // `setup_harrow_ship_hostile_to_federation` makes the Harrow LocalShip
+    // hostile to — no per-test faction override needed.
+    crate::entity_spawner::spawn_entity(
+        &mut cmds,
+        &config,
+        bevy::math::Vec3::new(0.0, 0.0, -50.0),
+        station_uuid.clone(),
+        None,
+    );
+    app.world_mut().flush();
+
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(station_uuid.as_str()),
+        "issue #1011: a station built the production way — EntityConfig::from_toml + \
+         spawn_entity, not the hand-rolled component tuple the tests above use — must be \
+         acquired by the nearest-hostile tier with the faction check live"
+    );
+}
+
+/// Arm the LocalShip's named phaser banks for AI auto-fire. Distinct from
+/// `set_tactical_control_source`, which arms the tactical radar (the
+/// acquisition gate) plus a fixed "fore"/"aft"-shaped id set left over from
+/// other fixtures' bank names — not this app's own `test_ship_config`
+/// bank ids ("port"/"starboard"). Firing tests need both: the radar gate to
+/// acquire, and this to actually pull the trigger.
+fn set_phaser_bank_control_source(
+    app: &mut App,
+    bank_ids: &[&str],
+    source: crate::ship::control_source::ControlSource,
+) {
+    let world = app.world_mut();
+    let mut q =
+        world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    for mut cs in q.iter_mut(world) {
+        for bank_id in bank_ids {
+            cs.0.set(
+                crate::system_registry::phaser_bank_system_id(bank_id).unwrap(),
+                source,
+            );
+        }
+    }
+}
+
+/// The acceptance-criteria case: acquisition alone is not the fix, a Harrow
+/// with the factioned starbase in weapon range must actually FIRE on it and
+/// land damage. Exercises the real pipeline — `ai_target_selection` (locks
+/// the station) → the one-tick freeze into the viewscreen `combat_lock`
+/// (issue #829) → `ai_phaser_auto_fire` (fires) → `tick_beams_apply_damage`
+/// (hits) — rather than seeding `TacticalRadarSelection`/`ActiveBeam`
+/// directly the way the lower-level beam fixtures do.
+#[test]
+fn harrow_beam_fire_damages_a_factioned_static_point_defence_station() {
+    let mut app = test_app();
+    let station_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 100.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_phaser_bank_control_source(
+        &mut app,
+        &["port", "starboard"],
+        crate::ship::control_source::ControlSource::Ai,
+    );
+
+    // Within both the 100-unit radar horizon and the 40-unit default phaser
+    // range (test_app's banks author `beam_range = 0.0`, i.e. "use the
+    // default"), and dead ahead so both wide (270°) auto-fire arcs cover it.
+    let station = spawn_factioned_static_point_defence_target(
+        &mut app,
+        &station_uuid,
+        0.0,
+        -25.0,
+        federation_faction(),
+    );
+    app.world_mut()
+        .entity_mut(station)
+        .insert(EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            100.0,
+        )])));
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_local_last_attacker(&mut app, None);
+
+    // A few ticks: one to acquire the lock, one more for the one-tick
+    // combat_lock freeze `ai_phaser_auto_fire` reads, then however many it
+    // takes `tick_beams_apply_damage` (same `SimSet::Damage`, chained after
+    // the `SimSet::Physics` `handle_fire_phaser` that activates the beam)
+    // to land a hit. Generous margin over the minimum needed.
+    for _ in 0..8 {
+        tick(&mut app);
+    }
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(station_uuid.as_str()),
+        "precondition: the Harrow must have the station locked"
+    );
+
+    let hp = app
+        .world()
+        .get::<EntitySystemHull>(station)
+        .expect("station must carry a hull")
+        .0
+        .total_current();
+    assert!(
+        hp < 100.0,
+        "issue #1011: a Harrow with the factioned starbase in weapon range must actually \
+         fire on it and land damage, not just lock it (hp={hp})"
     );
 }
 

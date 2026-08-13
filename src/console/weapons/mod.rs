@@ -1169,21 +1169,34 @@ fn ai_target_selection(
     // That query is `Without<Asteroid>`, which is wide enough for resolving an
     // authored name (a mission may name anything, and a miss is harmless), but
     // as an *auto-acquisition* surface it would lock any factioned entity that
-    // happens to carry an `EntityUuid` + `Transform`. `With<Ship>` is the code
-    // spelling of the tactical radar's own `shows: [EntityTag::Ship]`: today
-    // every shipped asset declaring a `faction` is a ship, so the two agree by
-    // accident — the first factioned station, mine, or probe template is what
-    // this filter is here for.
+    // happens to carry an `EntityUuid` + `Transform`. The filter used to be
+    // `(With<Ship>, Without<StaticPointDefence>)` — until the first factioned
+    // station, `assets/entities/station_axiom.toml` (issue #1011): `spawn_entity`
+    // (`src/entities/spawner.rs`) inserts BOTH `StaticPointDefence` and `Ship`
+    // for a static-point-defence entity, so the station actually carries the
+    // `Ship` marker the old filter asked for — it was the `Without<StaticPointDefence>`
+    // half that excluded it. Dropping that `Without` is the load-bearing change;
+    // the `With<StaticPointDefence>` arm of the new `Or<>` is a deliberate hedge
+    // for a future entity that carries `StaticPointDefence` without `Ship` (a
+    // factioned mine, probe, or comms-buoy template), not something any shipped
+    // entity needs today.
+    //
+    // This does NOT make an unfactioned `StaticPointDefence` acquirable: the
+    // `is_hostile` / `find_nearest_hostile` verdicts below both require BOTH
+    // sides to carry a `FactionComponent` (`faction::is_enemy` returns `false`
+    // the moment either side is `None`), so a factionless point-defence turret
+    // stays invisible to auto-acquisition exactly as before — this filter only
+    // decides who is IN the scan, not who reads as hostile.
     hostile_scan_q: Query<
         (
             &crate::entity_spawner::EntityUuid,
             &Transform,
             Option<&FactionComponent>,
         ),
-        (
+        Or<(
             With<crate::server_app::Ship>,
-            Without<crate::entity_spawner::StaticPointDefence>,
-        ),
+            With<crate::entity_spawner::StaticPointDefence>,
+        )>,
     >,
 ) {
     let registry_default = crate::faction::FactionRegistry::default();

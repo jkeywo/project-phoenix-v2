@@ -67,8 +67,13 @@ pub struct RegionEffectsSection(pub Vec<RegionEffectKind>);
 pub struct BehaviourSection(pub crate::entity_config::BehaviourConfig);
 
 /// Marks an ownerless, stationary weapons platform. It uses the shared ship
-/// combat substrate for its own target selection and beams, but is excluded
-/// from ordinary ship-versus-ship hostile acquisition.
+/// combat substrate for its own target selection and beams. As of issue
+/// #1011, a factioned `StaticPointDefence` entity IS acquirable by the
+/// ordinary hostile scan (`ai_target_selection`'s `hostile_scan_q`, in
+/// `src/console/weapons/mod.rs`, matches `Or<(With<Ship>, With<StaticPointDefence>)>`) —
+/// an unfactioned one stays invisible only because the faction gate
+/// (`is_hostile` / `faction::is_enemy`) requires a `FactionComponent` on
+/// both sides.
 #[derive(Component, Clone, Debug)]
 pub struct StaticPointDefence;
 

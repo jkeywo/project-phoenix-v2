@@ -140,16 +140,20 @@ transform = { position = [2040.0, 0.0, 0.0] }
 # `base_priority = 80` outranks the destroyer template's own `destroy-hostiles`
 # (45) and `hold-station` (20), so the ship flies this and nothing else. Far
 # anchor first, so the very first leg is the one straight at the rock.
-[[trigger]]
-condition = "on_world_loaded"
+[script]
+setup = """
+on_world_loaded("on_load");
 
-  [[trigger.action]]
-  type              = "add_objective"
-  id                = "obj-cross-the-belt"
-  text              = "world.probe_huge_rock.trigger.action.obj_cross_the_belt.text"
-  mandatory         = true
-  source            = "mission"
-  base_priority     = 80.0
-  directive_kind    = "Patrol"
-  directive_anchors = ["lane_far", "lane_near"]
-  directive_loop    = true
+fn on_load(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-cross-the-belt",
+        text: "world.probe_huge_rock.trigger.action.obj_cross_the_belt.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 80,
+        directive_kind: "Patrol",
+        directive_anchors: ["lane_far", "lane_near"],
+        directive_loop: true,
+    });
+}
+"""

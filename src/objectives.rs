@@ -68,8 +68,87 @@ pub struct WorldConditions {
     pub red_alert: bool,
     /// Current hull integrity fraction [0.0, 1.0].
     pub hull_fraction: f32,
-    /// Whether the ship has an attacker in `LastShipAttacker`.
+    /// Whether something landed a hit on the ship — shields or hull — recently
+    /// enough that it still counts as under attack. See [`attacked_recently`]
+    /// over [`last_landed_hit_secs`], which both publish sites derive this from.
     pub attacked: bool,
+}
+
+/// When something last LANDED a hit on this ship: the more recent of hull
+/// damage taken and hostile fire an arc absorbed. The pure fold both `attacked`
+/// publish sites reduce a ship's combat activity through before calling
+/// [`attacked_recently`], so neither can pick a different set of readings.
+///
+/// Hull damage alone is not enough. `RecentCombatActivity::last_damage_taken`
+/// is written only when the hull TOTAL actually drops
+/// (`ship::combat_activity::update_combat_activity`), so fire a shield eats
+/// never reaches it — it lands in `last_hostile_fire_taken` instead.
+/// `assets/entities/station_axiom.toml` shoots 5 dps in 4 s bursts with no
+/// `shield_pierce` at a Harrow's single 90 hp arc regenerating 2/s: the burst
+/// (20 dmg) barely outpaces the regen over the same cycle (16 dmg over 8 s),
+/// netting only ~4 hp/cycle, so shield-absorbed fire dominates the opening of
+/// an engagement and hull damage does not register until sustained pressure
+/// collapses the arc (roughly three minutes of continuous fire). Reading
+/// damage alone would leave that Harrow flying its raid while the station
+/// shot at it for most of a short engagement, which is the behaviour the old
+/// per-beam `LastShipAttacker` signal did get right.
+///
+/// `last_weapon_fired` is deliberately NOT folded in: firing your own guns is
+/// not being attacked, and folding it would make a `not_attacked` gate veto
+/// itself the moment the hull opened fire and hold the veto for as long as it
+/// kept firing. (The captain's `secs_since_combat` red-alert fact DOES fold all
+/// three — it asks "is this ship in a fight", which is a different question.)
+pub fn last_landed_hit_secs(
+    last_damage_taken_secs: Option<f32>,
+    last_hostile_fire_taken_secs: Option<f32>,
+) -> Option<f32> {
+    match (last_damage_taken_secs, last_hostile_fire_taken_secs) {
+        (Some(damage), Some(fire)) => Some(damage.max(fire)),
+        (Some(damage), None) => Some(damage),
+        (None, fire) => fire,
+    }
+}
+
+/// Whether a hit landed recently enough that the ship still counts as under
+/// attack (issue #1010). Take `last_hit_secs` from [`last_landed_hit_secs`] —
+/// a hit that connected, shields or hull.
+///
+/// `attacked` used to read the `LastShipAttacker` latch, which is set on the
+/// first beam that connects and cleared only when the ship dies or when its red
+/// alert stands down (`server_app::clear_last_attacker_on_red_alert_off`).
+/// Every Harrow hull DOES author a captain stand-down —
+/// `combat_window_secs = 10.0` in `ship_harrow_cruiser.toml` — so the latch is
+/// releasable in principle. What it is not is releasable DURING a fight: the
+/// captain's `secs_since_combat` fact folds the hull's OWN weapon fire in
+/// alongside damage and hostile fire, so a Harrow returning fire keeps resetting
+/// its own stand-down clock, red alert never drops, and the latch never clears.
+/// (Hulls that author an alert-on-hostile rule hold the alert up on mere contact
+/// as well — `alliance_courier.toml`'s priority-5 rule; a Harrow authors none.)
+/// So with a player ship loitering nearby, `combat_test.toml`'s
+/// `not_attacked`-gated `assault-starbase` stayed retired for as long as the
+/// loitering lasted — the raid the scenario is named for never resumed, which
+/// is what the playtest saw.
+///
+/// Recency decays instead: the gate closes on the landed hit and reopens once
+/// `window_secs` of simulation time pass with no further one. Both times are
+/// `Time::elapsed_secs()` read inside `FixedUpdate` — SIM seconds off the fixed
+/// clock, never a wall clock (AGENTS.md #7) — and `window_secs` is authored as
+/// `[global] attacked_memory_secs`.
+///
+/// The two windows are separate on purpose. The per-hull captain
+/// `combat_window_secs` governs ALERT POSTURE; the global `attacked_memory_secs`
+/// governs this doctrine gate directly, which is what decouples resuming a raid
+/// from the red-alert/`LastShipAttacker` chain that could not release while the
+/// shooting continued.
+///
+/// A ship nothing has hit (`None`) is not under attack. A non-positive window
+/// degenerates to "never under attack", which is the honest reading of a
+/// designer authoring a zero-length memory.
+pub fn attacked_recently(last_hit_secs: Option<f32>, now_secs: f32, window_secs: f32) -> bool {
+    match last_hit_secs {
+        Some(last) => now_secs - last < window_secs,
+        None => false,
+    }
 }
 
 fn evaluate_condition(condition: &str, threshold: Option<f32>, cond: &WorldConditions) -> bool {
@@ -970,5 +1049,67 @@ mod tests {
         let pool = mgr.scored_pool(&WorldConditions::default());
         assert_eq!(pool[0].id, "first");
         assert_eq!(pool[1].id, "second");
+    }
+
+    // ── attacked_recently (issue #1010) ────────────────────────────────────
+
+    /// The boundary both publish sites share. It lives here, on the pure
+    /// function, so the NPC aggregator and the LocalShip publisher cannot
+    /// drift apart on where the window ends: they call this, and this is what
+    /// is pinned.
+    #[test]
+    fn attacked_recency_window_opens_and_closes_on_the_boundary() {
+        // Never damaged: nothing to decay from, so never under attack.
+        assert!(!attacked_recently(None, 100.0, 8.0));
+        // The hit itself, and everything strictly inside the window.
+        assert!(attacked_recently(Some(100.0), 100.0, 8.0));
+        assert!(attacked_recently(Some(100.0), 107.9, 8.0));
+        // The far edge: at exactly the window the memory has expired, so the
+        // raid resumes rather than hanging on for one more tick.
+        assert!(!attacked_recently(Some(100.0), 108.0, 8.0));
+        assert!(!attacked_recently(Some(100.0), 200.0, 8.0));
+    }
+
+    /// A designer authoring a zero (or negative) window means "no memory at
+    /// all" — a hit must not read as an attack even on the tick it lands.
+    #[test]
+    fn a_non_positive_attacked_window_never_reads_as_attacked() {
+        assert!(!attacked_recently(Some(100.0), 100.0, 0.0));
+        assert!(!attacked_recently(Some(100.0), 100.0, -1.0));
+    }
+
+    /// Shield-absorbed fire IS being attacked. `last_damage_taken` only moves
+    /// when the hull total drops, and shield-absorbed fire dominates early;
+    /// hull damage lands only after sustained pressure collapses an arc — so a
+    /// fold over hull damage alone would leave a Harrow under sustained
+    /// station fire reading "not attacked" for most of a short engagement and
+    /// flying its raid into the guns.
+    #[test]
+    fn shield_absorbed_hostile_fire_counts_as_a_landed_hit() {
+        assert_eq!(last_landed_hit_secs(None, Some(100.0)), Some(100.0));
+        assert!(attacked_recently(
+            last_landed_hit_secs(None, Some(100.0)),
+            103.0,
+            8.0
+        ));
+    }
+
+    /// The fold takes the MORE RECENT of the two readings either way round, so
+    /// a hull hit long ago and skimmed a moment ago still reads as under
+    /// attack (and not the other way about).
+    #[test]
+    fn the_landed_hit_fold_takes_the_more_recent_reading() {
+        assert_eq!(last_landed_hit_secs(None, None), None);
+        assert_eq!(last_landed_hit_secs(Some(100.0), None), Some(100.0));
+        assert_eq!(last_landed_hit_secs(Some(100.0), Some(140.0)), Some(140.0));
+        assert_eq!(last_landed_hit_secs(Some(140.0), Some(100.0)), Some(140.0));
+
+        // Hull damage at 100, shields skimmed at 140, now 145: the stale hull
+        // reading must not expire the window the fresh one keeps open.
+        assert!(attacked_recently(
+            last_landed_hit_secs(Some(100.0), Some(140.0)),
+            145.0,
+            8.0
+        ));
     }
 }

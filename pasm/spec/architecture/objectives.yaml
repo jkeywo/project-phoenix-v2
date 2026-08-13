@@ -37,6 +37,12 @@ entities:
       confidence: confirmed
       title: Objective Doctrine Score Policy
       summary: Scores active mission and doctrine objectives from mandatory priority, world conditions, zero gates, condition modifiers, and an optional Captain boost.
+      rationale:
+        - "Issue #1010. The `attacked` world condition is recency of the last LANDED HIT on the ship, not the `LastShipAttacker` record. That record is a latch: set on the first beam that connects and cleared only on death or on the red-alert on→off edge, which a ship still returning fire never reaches — a hull's captain stand-down folds its OWN weapon fire into `secs_since_combat`, so a Harrow shooting back holds its own alert up. With a player loitering nearby, `combat_test.toml`'s `not_attacked`-gated `assault-starbase` therefore stayed retired indefinitely: the raid the scenario is named for never resumed."
+        - "The signal folds hull damage taken together with hostile fire an arc absorbed, and deliberately excludes the ship's own weapon fire. Hull damage alone is not enough on its own: it is recorded only when the hull total drops, and shield-absorbed fire dominates the opening of an engagement — the shipped station's 5 dps, 4 s bursts (20 dmg/cycle, no shield_pierce) barely outpaces a Harrow's single 90 hp arc regenerating 2/s (16 dmg over the same 8 s cycle), a net of only ~4 hp/cycle. Hull damage does eventually land — sustained fire collapses a 90 hp arc in roughly three minutes — but a fold over hull damage alone would still leave a Harrow reading 'not attacked' for most of a short engagement. Own weapon fire is excluded because folding it would make a not_attacked gate veto itself for as long as the hull kept firing."
+        - "[ai] The memory window is authored as [global] attacked_memory_secs, default 8.0 simulation seconds; the serde default is the only hardcoded copy of it. Eight seconds is AI-origin tuning: long enough that a hull under sustained fire never flickers back to its raid between volleys, short enough that a single stray hit costs the raid seconds rather than the run. Pending designer ratification."
+        - "This window is separate from the per-hull captain combat_window_secs (10 s on every Harrow) on purpose. That one governs ALERT POSTURE; attacked_memory_secs governs the doctrine gate directly, which is what decouples resuming a raid from the red-alert/LastShipAttacker chain that could not release while the shooting continued."
+        - "Both publish sites — the NPC aggregator and the LocalShip viewscreen publisher — run the same fold into the same predicate, so a backfilled player and a world-spawned copy of the same hull evaluate identical doctrine identically (the #842 AC4 symmetry rule) by construction rather than by two copies of the rule staying in step."
     architecture:
       kind: scoring-policy
       authority: authoritative
@@ -45,8 +51,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/ship/viewscreen.rs]
-      symbols: [UtilityConfig, WorldConditions]
+      paths: [src/objectives.rs, src/ship/viewscreen.rs, src/ai/server.rs, src/server_app.rs]
+      symbols: [UtilityConfig, WorldConditions, attacked_recently, last_landed_hit_secs]
       tests: [cargo test]
 
   - component: objective-target-name-resolver

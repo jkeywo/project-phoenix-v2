@@ -679,6 +679,8 @@ fn entity_direct_fire_banks(
 /// catch). Pure NPCs (no `LocalShip`) are unaffected — only this writer touches
 /// their entry.
 pub(crate) fn aggregate_doctrine_blackboards(
+    time: Res<Time>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut query: Query<(
         &BehaviourSection,
         &crate::entity_spawner::EntitySystemHull,
@@ -688,6 +690,14 @@ pub(crate) fn aggregate_doctrine_blackboards(
         Option<&crate::weapons_plugin::LastShipAttacker>,
     )>,
 ) {
+    // Sim seconds off the fixed clock — Bevy context-switches `Res<Time>` to
+    // `Time<Fixed>` inside `FixedUpdate`, so this is the tick's own elapsed
+    // time and never a wall clock (AGENTS.md #7).
+    let now = time.elapsed_secs();
+    let attacked_memory_secs = world_config
+        .as_deref()
+        .map(|wc| wc.global.attacked_memory_secs)
+        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().attacked_memory_secs);
     for (behaviour, hull, mut blackboards, red_alert_opt, activity_opt, last_attacker_opt) in
         &mut query
     {
@@ -700,33 +710,67 @@ pub(crate) fn aggregate_doctrine_blackboards(
             }
         };
         let red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
-        // Whether this ship HAS an attacker, not whether it carries the
-        // component that would record one (issue #936). `entity_spawner`
-        // inserts `LastShipAttacker::default()` on every ship it spawns, so
-        // `last_attacker_opt.is_some()` was true from the first tick of every
-        // NPC's life and `WorldConditions.attacked` was a constant `true`.
+        // Whether something LANDED A HIT on this ship recently, on a decaying
+        // window (issue #1010) — not whether it carries the component that
+        // would record an attacker (issue #936), and not whether one was ever
+        // recorded at all.
         //
-        // Every `attacked` / `not_attacked` condition in shipped content was
-        // therefore decided before the fight started, always the same way:
-        // an `attacked` modifier always applied and a `not_attacked` zero-gate
-        // always vetoed. Two shipped consequences, both of them the reverse of
-        // what the content says:
+        // #936's fix read `LastShipAttacker`'s contents rather than the
+        // component's presence, which unpinned the constant `true` every ship
+        // was born with. But the contents are a LATCH: set on the first beam
+        // that connects, cleared only on death or on the red-alert on→off edge
+        // (`server_app::clear_last_attacker_on_red_alert_off`). Every Harrow
+        // DOES author a captain stand-down (`combat_window_secs = 10.0`), so
+        // the latch releases about ten seconds after a fight ends — but it
+        // cannot release DURING one, and "during" is broader than it looks:
+        // the captain's `secs_since_combat` fact folds the hull's OWN weapon
+        // fire in alongside damage taken, so a Harrow returning fire keeps
+        // resetting its own stand-down clock and red alert never drops. (Hulls
+        // authoring an alert-on-hostile rule — `alliance_courier.toml`'s
+        // priority-5 one; a Harrow authors none — hold the alert up on mere
+        // contact too.) With a player loitering in the raid's vicinity the
+        // latch therefore never released, which is what the playtest saw:
         //
         //   * `combat_test.toml`'s `assault-starbase` Destroy override is
-        //     zero-gated on `not_attacked`, so it scored 0 on every wave, on
-        //     every tier, for the whole run — no Harrow has ever flown the
-        //     assault this scenario is named for.
+        //     zero-gated on `not_attacked`. Under the latch the first shot any
+        //     Harrow took retired the raid this scenario is named for, and it
+        //     stayed retired for as long as anything hung around — the ship
+        //     kills what shot it and then has no assault to go back to.
         //   * `ship_harrow_patrol.toml` documents a picket that HOLDS station
         //     undisturbed (Patrol 30+15 vs Destroy 38) and commits when shot at
-        //     (Destroy 38+25). With `attacked` pinned true it scored 30 vs 63
-        //     from the first tick and never held anything.
+        //     (Destroy 38+25). It could commit, but it could not stand back
+        //     down and resume the picket while the intruder stayed put.
+        //
+        // Recency of the last landed hit decays instead, over the TOML-authored
+        // `[global] attacked_memory_secs`: a hit closes a `not_attacked` gate
+        // (self-defence outranks the raid via the base `destroy_hostiles` arm),
+        // and a window with none reopens it. That gives the doctrine gate its
+        // OWN window, decoupled from the red-alert/`LastShipAttacker` chain —
+        // the per-hull captain `combat_window_secs` still governs alert posture,
+        // this governs whether the raid resumes. `LastShipAttacker` still
+        // identifies WHO is shooting for the viewscreen below; it no longer
+        // decides WHETHER.
+        //
+        // `last_landed_hit_secs` folds hull damage together with
+        // shield-absorbed hostile fire, because `last_damage_taken` alone
+        // misses everything an arc eats — see that function for why the shipped
+        // station never gets past a Harrow's arc.
         //
         // The LocalShip half of the same publish (`publish_viewscreen_blackboard`,
-        // `src/server_app.rs`) already reads `last_attacker_uuid.is_some()` and
-        // says in a comment that it uses "the same `attacked` signal the NPC
-        // path uses" — which is the symmetry rule (AGENTS.md #6) and was simply
-        // untrue. This is the line that makes it true.
-        let attacked = last_attacker_opt.is_some_and(|la| la.0.is_some());
+        // `src/server_app.rs`) says in a comment that it uses "the same
+        // `attacked` signal the NPC path uses" — the symmetry rule (AGENTS.md
+        // #6). Both sites run the same fold into the same predicate so that
+        // stays true by construction rather than by two copies agreeing.
+        let attacked = crate::objectives::attacked_recently(
+            activity_opt.and_then(|a| {
+                crate::objectives::last_landed_hit_secs(
+                    a.last_damage_taken,
+                    a.last_hostile_fire_taken,
+                )
+            }),
+            now,
+            attacked_memory_secs,
+        );
         let conditions = crate::objectives::WorldConditions {
             red_alert,
             hull_fraction,
@@ -3159,22 +3203,33 @@ verb = "fire_blaster"
         }
     }
 
-    /// Issue #936: `WorldConditions.attacked` reports whether the ship HAS an
-    /// attacker, not whether it carries the component that would record one.
+    /// Issue #936, retained through #1010: `WorldConditions.attacked` never
+    /// reports whether the ship merely CARRIES the component that would record
+    /// an attacker.
     ///
     /// `entity_spawner` inserts `LastShipAttacker::default()` on every ship it
-    /// spawns, so the pre-fix `last_attacker_opt.is_some()` was a constant
+    /// spawns, so the pre-#936 `last_attacker_opt.is_some()` was a constant
     /// `true` from an NPC's first tick and every `attacked` / `not_attacked`
     /// condition in shipped content was decided before the fight began. That
     /// survived because nothing ever looked: the one test over
     /// `aggregate_doctrine_blackboards` spawned an entity with NO
     /// `LastShipAttacker` at all, which reads `false` on both sides of the fix.
     ///
-    /// So this spawns the component both ways and gates on it. The doctrine
-    /// shape is `combat_test.toml`'s: an assault entry zero-gated on
-    /// `not_attacked`, which is what "commit to the raid unless something is
+    /// #1010 then moved the signal off `LastShipAttacker` entirely. That field
+    /// is set on the first beam that connects and cleared only on death or on
+    /// the red-alert on→off edge, and while the shooting continues that edge
+    /// never comes: a Harrow's captain stand-down (`combat_window_secs = 10`)
+    /// folds the hull's OWN return fire into `secs_since_combat`, so a Harrow
+    /// fighting back keeps its own alert up and the latch stayed set for as
+    /// long as anything loitered nearby — the playtest's frozen raid. The
+    /// signal is now recency of the last LANDED HIT, which is why the middle
+    /// case below — a named attacker on a ship nothing has hit lately — leaves
+    /// the gate open where it used to veto.
+    ///
+    /// The doctrine shape is `combat_test.toml`'s: an assault entry zero-gated
+    /// on `not_attacked`, which is what "commit to the raid unless something is
     /// shooting at you" is authored as, and which scored 0 on every wave for
-    /// the whole life of the bug.
+    /// the whole life of the #936 bug.
     #[test]
     fn a_default_last_attacker_component_does_not_read_as_attacked() {
         let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
@@ -3184,7 +3239,7 @@ verb = "fire_blaster"
                 .score
         };
 
-        let untouched = scored_pool_for_attacker(assault_behaviour(), None);
+        let untouched = scored_pool_for_attacker(assault_behaviour(), None, Activity::default());
         assert!(
             score_of(&untouched, "assault-starbase") > 0.0,
             "a ship carrying `LastShipAttacker::default()` has NOT been \
@@ -3193,30 +3248,300 @@ verb = "fire_blaster"
              entry on every wave of every run: {untouched:?}"
         );
 
-        let shot_at = scored_pool_for_attacker(assault_behaviour(), Some("attacker-uuid"));
-        assert_eq!(
-            score_of(&shot_at, "assault-starbase"),
-            0.0,
-            "once something IS shooting, the `not_attacked` gate must veto the \
-             assault so the hull turns and fights: {shot_at:?}"
+        let stale_attacker = scored_pool_for_attacker(
+            assault_behaviour(),
+            Some("attacker-uuid"),
+            Activity::default(),
         );
         assert!(
-            score_of(&shot_at, "destroy-hostiles") > 0.0,
+            score_of(&stale_attacker, "assault-starbase") > 0.0,
+            "the attacker uuid is a LATCH — set on the first hit, cleared only \
+             on death or on the red-alert on→off edge, which a ship still \
+             returning fire never reaches. A ship carrying one but taking no \
+             hits is not under attack, so the raid must stay live: \
+             {stale_attacker:?}"
+        );
+
+        let under_fire = scored_pool_for_attacker(
+            assault_behaviour(),
+            Some("attacker-uuid"),
+            Activity {
+                last_damage_taken: Some(0.0),
+                ..Activity::default()
+            },
+        );
+        assert_eq!(
+            score_of(&under_fire, "assault-starbase"),
+            0.0,
+            "with a hit inside the memory window the `not_attacked` gate must \
+             veto the assault so the hull turns and fights: {under_fire:?}"
+        );
+        assert!(
+            score_of(&under_fire, "destroy-hostiles") > 0.0,
             "precondition: the rival entry the veto hands the fight to must be \
-             live: {shot_at:?}"
+             live: {under_fire:?}"
         );
     }
 
-    /// Publish a viewscreen pool for one entity that carries a
-    /// `LastShipAttacker`, and hand back its `scored_objectives`.
+    /// Fire an arc ABSORBS is still being attacked (issue #1010 review).
     ///
-    /// Deliberately separate from [`scored_pool_for`]: that helper spawns no
-    /// attacker component at all, which is a third state (`None` vs
-    /// `Some(default)` vs `Some(attacker)`) and the one the pre-#936 bug hid
-    /// behind.
+    /// `last_damage_taken` moves only when the hull total drops, so shield-eaten
+    /// fire lands in `last_hostile_fire_taken` instead. This is not a corner
+    /// case: `station_axiom.toml` shoots 5 dps in 4 s bursts with no
+    /// `shield_pierce` at a Harrow's single 90 hp arc regenerating 2/s — the
+    /// burst (20 dmg) barely outpaces the regen over the same cycle (16 dmg
+    /// over 8 s), netting only ~4 hp/cycle, so shield-absorbed fire dominates
+    /// the engagement and hull damage does not land until sustained pressure
+    /// collapses the arc (roughly three minutes of continuous fire). A gate
+    /// reading hull damage alone would leave a Harrow under sustained station
+    /// fire flying its raid into the guns for most of a short engagement —
+    /// exactly the AC ("a Harrow attacked by the station switches to
+    /// self-defence") the old per-beam `LastShipAttacker` signal did satisfy,
+    /// since `tick_beams` marks the target on every hit regardless of damage.
+    #[test]
+    fn shield_absorbed_hostile_fire_closes_the_assault_gate() {
+        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+            pool.iter()
+                .find(|o| o.id == id)
+                .unwrap_or_else(|| panic!("{id} must be in the pool"))
+                .score
+        };
+
+        let shields_holding = scored_pool_for_attacker(
+            assault_behaviour(),
+            Some("attacker-uuid"),
+            Activity {
+                last_hostile_fire_taken: Some(0.0),
+                ..Activity::default()
+            },
+        );
+        assert_eq!(
+            score_of(&shields_holding, "assault-starbase"),
+            0.0,
+            "a hit the shields ate is still a hit — the raid must break off \
+             even though the hull total never moved: {shields_holding:?}"
+        );
+    }
+
+    /// Firing your own guns is NOT being attacked (issue #1010 review).
+    ///
+    /// `last_weapon_fired` is the third reading on `RecentCombatActivity` and
+    /// the captain's `secs_since_combat` red-alert fact folds it in — which is
+    /// precisely why the alert never stood down mid-fight. Folding it here too
+    /// would make a `not_attacked` gate veto itself the instant the hull opened
+    /// fire and hold the veto for as long as it kept firing, reinstating the
+    /// permanent break-off #1010 exists to remove.
+    #[test]
+    fn a_ships_own_weapon_fire_does_not_read_as_being_attacked() {
+        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+            pool.iter()
+                .find(|o| o.id == id)
+                .unwrap_or_else(|| panic!("{id} must be in the pool"))
+                .score
+        };
+
+        let shooting = scored_pool_for_attacker(
+            assault_behaviour(),
+            Some("attacker-uuid"),
+            Activity {
+                last_weapon_fired: Some(0.0),
+                ..Activity::default()
+            },
+        );
+        assert!(
+            score_of(&shooting, "assault-starbase") > 0.0,
+            "a raider pressing its own attack has not been attacked — the \
+             `not_attacked` gate must stay open: {shooting:?}"
+        );
+    }
+
+    /// Issue #1010: the `attacked` window DECAYS, so the raid a hit interrupts
+    /// comes back once the shooting stops — and it decays over the window the
+    /// WORLD AUTHORS, not just over the serde default.
+    ///
+    /// This is the behaviour `combat_test.toml`'s `assault-starbase` is
+    /// authored for and never got: a hit closes the `not_attacked` gate (the
+    /// base `destroy_hostiles` arm takes the fight), and a reprieve of
+    /// `[global] attacked_memory_secs` with no further hits reopens it. Under
+    /// the old `LastShipAttacker` latch the reopen needed a red-alert
+    /// stand-down that a ship still returning fire never reached, so the raid
+    /// stayed retired for as long as anything loitered nearby.
+    ///
+    /// Driven over the real fixed clock rather than by poking a boolean, so the
+    /// decay is measured in the sim seconds the window is authored in
+    /// (AGENTS.md #7) — nothing here reads a wall clock.
+    ///
+    /// The world here AUTHORS a short window (#889's lesson: a fixture with no
+    /// `WorldConfig` exercises only the serde-default fallback arm, so a
+    /// typo'd field path in the resolution block would pass unnoticed). Two
+    /// seconds is well clear of the 8 s default, so the gate reopening on
+    /// schedule can only be the authored value being read.
+    #[test]
+    fn the_assault_resumes_once_the_authored_attacked_window_elapses() {
+        use crate::console::weapons::beam::LastShipAttacker;
+        use crate::damage::SystemHull;
+        use crate::entity_spawner::EntitySystemHull;
+        use crate::messages::SystemId;
+        use crate::server_app::ShipSystemBlackboards;
+
+        let window = 2.0_f32;
+        let default_window = crate::entity_config::GlobalConfig::default().attacked_memory_secs;
+        assert!(
+            window < default_window,
+            "the authored window must differ from the {default_window}s serde \
+             default, or this test cannot tell the two arms apart"
+        );
+
+        let mut app = build_test_app();
+        // The three clock keys are authored 1:1 so the AI cadence stays one
+        // snapshot per fixed step, which is what `build_test_app` is paced for
+        // — a `WorldConfig` arms `ai::cadence`'s latches from the authored
+        // ratios instead of every step, and the shipped 60/30/10 defaults would
+        // put the aggregator on a six-step cadence this fixture was not written
+        // against. `sim_tick_hz` sits on `MIN_SIM_TICK_HZ`, the floor
+        // `parse_world` enforces.
+        app.insert_resource(
+            crate::world::config::parse_world(&format!(
+                "[global]\n\
+                 sim_tick_hz = 30\n\
+                 ai_tick_hz = 30\n\
+                 ai_snapshot_hz = 30\n\
+                 attacked_memory_secs = {window}\n"
+            ))
+            .expect("world TOML should parse"),
+        );
+        let ship = app
+            .world_mut()
+            .spawn((
+                BehaviourSection(assault_behaviour()),
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    100.0,
+                )])),
+                ShipSystemBlackboards::default(),
+                LastShipAttacker(Some("attacker-uuid".into())),
+                Activity::default(),
+            ))
+            .id();
+
+        app.update();
+        assert!(
+            published_score(&app, ship, "assault-starbase") > 0.0,
+            "precondition: an undamaged raider flies the assault"
+        );
+
+        // A hit lands on this tick.
+        let hit_at = sim_secs(&app);
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<Activity>()
+            .expect("combat activity")
+            .last_damage_taken = Some(hit_at);
+        app.update();
+        assert_eq!(
+            published_score(&app, ship, "assault-starbase"),
+            0.0,
+            "a fresh hit must close the `not_attacked` gate"
+        );
+        assert!(
+            published_score(&app, ship, "destroy-hostiles") > 0.0,
+            "self-defence is what the veto hands the fight to"
+        );
+
+        // Halfway through the reprieve, with no further hits: still broken off.
+        // A window that expired early would let the raider turn its back on a
+        // ship that is still shooting it.
+        drive_to_sim_secs(&mut app, hit_at + window * 0.5);
+        assert_eq!(
+            published_score(&app, ship, "assault-starbase"),
+            0.0,
+            "the gate must stay shut for the whole authored {window}s window"
+        );
+
+        // Past the AUTHORED window — and still well inside the serde default,
+        // so a resolution block that silently fell back to the default would
+        // leave this at 0 and fail here.
+        drive_to_sim_secs(&mut app, hit_at + window + 0.5);
+        assert!(
+            sim_secs(&app) < hit_at + default_window,
+            "precondition: still inside the {default_window}s default, so \
+             reopening here can only be the authored {window}s being honoured"
+        );
+        assert!(
+            published_score(&app, ship, "assault-starbase") > 0.0,
+            "after the authored {window}s with no further hits the `attacked` \
+             memory must decay and the raid resume — under the old latch this \
+             stayed 0 for as long as anything loitered nearby"
+        );
+    }
+
+    /// Simulation seconds elapsed on the fixed clock — the same value
+    /// `aggregate_doctrine_blackboards` reads from `Res<Time>` inside
+    /// `FixedUpdate`.
+    fn sim_secs(app: &App) -> f32 {
+        app.world().resource::<Time<Fixed>>().elapsed_secs()
+    }
+
+    /// Drive whole fixed steps until the sim clock reaches `target` seconds.
+    fn drive_to_sim_secs(app: &mut App, target: f32) {
+        let mut guard = 0;
+        while sim_secs(app) < target {
+            app.update();
+            guard += 1;
+            assert!(
+                guard < 10_000,
+                "the fixed clock is not advancing — {} s after {guard} updates",
+                sim_secs(app)
+            );
+        }
+    }
+
+    /// The score `aggregate_doctrine_blackboards` last published for `id` in
+    /// this entity's viewscreen pool.
+    fn published_score(app: &App, ship: Entity, id: &str) -> f32 {
+        let bb = app
+            .world()
+            .get::<crate::server_app::ShipSystemBlackboards>(ship)
+            .expect("blackboards");
+        match bb
+            .0
+            .get(&crate::messages::SystemId(
+                crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID.to_string(),
+            ))
+            .expect("viewscreen entry")
+        {
+            crate::messages::SystemBlackboard::Viewscreen(v) => {
+                v.scored_objectives
+                    .iter()
+                    .find(|o| o.id == id)
+                    .unwrap_or_else(|| panic!("{id} must be in the pool: {v:?}"))
+                    .score
+            }
+            _ => panic!("expected Viewscreen blackboard"),
+        }
+    }
+
+    /// The combat-activity component the `attacked` gate reads, aliased so the
+    /// three-reading case tables above stay legible.
+    use crate::ship::combat_activity::RecentCombatActivity as Activity;
+
+    /// Publish a viewscreen pool for one entity that carries a
+    /// `LastShipAttacker` and a `RecentCombatActivity`, and hand back its
+    /// `scored_objectives`. The activity's timestamps are in sim seconds;
+    /// `Some(0.0)` is "at the start of the run", which the single tick this
+    /// drives leaves well inside the memory window.
+    ///
+    /// It takes the whole component rather than one timestamp because WHICH
+    /// readings feed the gate is the thing under test: hull damage and
+    /// shield-absorbed fire both close it, own weapon fire must not.
+    ///
+    /// Deliberately separate from [`scored_pool_for`]: that helper spawns
+    /// neither component, which is a further state (`None` vs `Some(default)`
+    /// vs `Some(attacker)`) and the one the pre-#936 bug hid behind.
     fn scored_pool_for_attacker(
         behaviour: crate::entity_config::BehaviourConfig,
         attacker: Option<&str>,
+        activity: Activity,
     ) -> Vec<crate::messages::ScoredObjective> {
         use crate::console::weapons::beam::LastShipAttacker;
         use crate::damage::SystemHull;
@@ -3235,6 +3560,7 @@ verb = "fire_blaster"
             )])),
             ShipSystemBlackboards::default(),
             LastShipAttacker(attacker.map(str::to_string)),
+            activity,
         ));
         app.update();
 

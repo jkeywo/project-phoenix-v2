@@ -1892,6 +1892,29 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         ));
     }
 
+    // The attacked-memory window (issue #1010) feeds straight into
+    // `now - last < attacked_memory_secs` in `objectives::attacked_recently`
+    // with no clamp. TOML floats admit `nan`, and IEEE 754 makes every
+    // comparison against a NaN false — so a NaN window would make
+    // `attacked_recently` silently and permanently read `false`, the
+    // doctrine `not_attacked` gate would never close, and a raid under
+    // active fire would never break off for self-defence. Rejecting a
+    // non-finite value at load turns that silent lock-up into a content
+    // error the author can see. A non-positive value is deliberately left
+    // alone: per `GlobalConfig::attacked_memory_secs`'s docs, zero or
+    // negative is the honest reading of a designer authoring "never counts
+    // as attacked", not a mistake to reject.
+    if !raw.global.attacked_memory_secs.is_finite() {
+        return Err(format!(
+            "[global] attacked_memory_secs = {} is not a finite number: \
+             `objectives::attacked_recently` compares `now - last_hit < \
+             attacked_memory_secs`, and every comparison against a non-finite value \
+             is false, so the doctrine `not_attacked` gate would never close and a \
+             raid under active fire would silently never break off",
+            raw.global.attacked_memory_secs,
+        ));
+    }
+
     let mut anchors: HashMap<String, [f32; 3]> = HashMap::with_capacity(raw.anchors.len());
     for (name, pos) in raw.anchors {
         let normalised = match pos.len() {
@@ -2502,6 +2525,77 @@ mod tests {
              retunes when the crew is told the ship is pulling out without \
              touching Rust"
         );
+    }
+
+    /// `[global] attacked_memory_secs` (issue #1010): how long a hit keeps a
+    /// hull's doctrine `attacked` condition true. Authored data, not a Rust
+    /// literal (AGENTS.md #11) — the serde default is the only sanctioned
+    /// hardcoded copy of it, and it IS the shipped tuning: no world TOML
+    /// authors the key, exactly as with `intent_break_off_hull_fraction`.
+    #[test]
+    fn parse_world_reads_the_attacked_memory_secs() {
+        let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
+        assert_eq!(
+            defaulted.global.attacked_memory_secs, 8.0,
+            "an omitted attacked_memory_secs falls back to an 8 s reprieve"
+        );
+
+        let authored =
+            parse_world("[global]\nattacked_memory_secs = 2.5\n").expect("TOML should parse");
+        assert_eq!(
+            authored.global.attacked_memory_secs, 2.5,
+            "an authored window must be read verbatim — a designer retunes how \
+             long a raid stays broken off after a hit without touching Rust"
+        );
+    }
+
+    /// `attacked_memory_secs` feeds straight into `now - last <
+    /// attacked_memory_secs` in `objectives::attacked_recently` with no
+    /// runtime clamp. TOML admits `nan`/`inf` as float literals, and IEEE 754
+    /// makes every comparison against a non-finite value false — so a NaN (or
+    /// infinite) window would make `attacked_recently` silently and
+    /// permanently read `false`, the doctrine `not_attacked` gate would never
+    /// close, and a raid under active fire would never break off for
+    /// self-defence. Non-finite is therefore a load-time rejection, the same
+    /// treatment `sim_tick_hz` gets above.
+    #[test]
+    fn parse_world_rejects_a_non_finite_attacked_memory_secs() {
+        let err = parse_world("[global]\nattacked_memory_secs = nan\n").expect_err(
+            "a NaN window must be rejected at load, not silently read as an \
+                          always-open `not_attacked` gate",
+        );
+        assert!(
+            err.contains("attacked_memory_secs") && err.contains("NaN"),
+            "the load error must name the field and the authored value so the author \
+             can fix it; got: {err}"
+        );
+
+        let err = parse_world("[global]\nattacked_memory_secs = inf\n")
+            .expect_err("an infinite window must be rejected too");
+        assert!(
+            err.contains("attacked_memory_secs"),
+            "the load error must name the field; got: {err}"
+        );
+    }
+
+    /// Non-positive is a deliberate, documented authored intent —
+    /// `GlobalConfig::attacked_memory_secs`'s docs and
+    /// `objectives::attacked_recently`'s own doc comment both read a
+    /// non-positive window as "never counts as attacked" — not a mistake, so
+    /// the finite check above must not sweep it up too.
+    #[test]
+    fn parse_world_still_accepts_a_non_positive_attacked_memory_secs() {
+        let zero = parse_world("[global]\nattacked_memory_secs = 0.0\n").expect(
+            "a zero window is the documented \"never attacked\" authoring, not \
+                     a load error",
+        );
+        assert_eq!(zero.global.attacked_memory_secs, 0.0);
+
+        let negative = parse_world("[global]\nattacked_memory_secs = -1.0\n").expect(
+            "a negative window is likewise the documented \"never attacked\" \
+                     authoring, not a load error",
+        );
+        assert_eq!(negative.global.attacked_memory_secs, -1.0);
     }
 
     /// Every shipped world TOML authors the pre-#889 key. Promoting the field

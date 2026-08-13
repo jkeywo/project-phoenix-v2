@@ -14502,6 +14502,22 @@ pub struct GlobalConfig {
     /// disengages; that lives in the movement fragments as a policy guard.
     #[serde(default = "default_intent_break_off_hull_fraction")]
     pub intent_break_off_hull_fraction: f32,
+    /// How long (simulation seconds) a landed hit — shields or hull — keeps a
+    /// ship's doctrine `attacked` condition true (issue #1010).
+    ///
+    /// `attacked` used to read the `LastShipAttacker` latch, which clears only
+    /// on death or when the ship's red alert stands down. A hull's captain
+    /// stand-down does release it (`combat_window_secs`, 10 s on every Harrow),
+    /// but not while the fight continues — the captain's `secs_since_combat`
+    /// fact counts the hull's own return fire, so a Harrow shooting back holds
+    /// its own alert up and a `not_attacked`-gated raid stayed retired for as
+    /// long as anything loitered nearby. This window governs the doctrine gate
+    /// DIRECTLY: a raid yields to self-defence while the ship is being hit and
+    /// resumes after a reprieve of this length, whatever the alert posture is
+    /// doing. Authored so a designer can say how long a hull holds a grudge
+    /// without a recompile — see `objectives::attacked_recently`.
+    #[serde(default = "default_attacked_memory_secs")]
+    pub attacked_memory_secs: f32,
 }
 
 /// Serde default for [`GlobalConfig::intent_break_off_hull_fraction`]: half
@@ -14509,6 +14525,21 @@ pub struct GlobalConfig {
 /// (AGENTS.md #11).
 fn default_intent_break_off_hull_fraction() -> f32 {
     0.5
+}
+
+/// Serde default for [`GlobalConfig::attacked_memory_secs`]: eight seconds.
+/// The only sanctioned hardcoded gameplay value is a TOML-parse fallback
+/// (AGENTS.md #11).
+///
+/// `[ai]` The eight-second figure is AI-origin tuning, chosen as long enough
+/// that a hull under sustained fire never flickers back to its raid between
+/// volleys and short enough that a single stray hit costs the raid seconds
+/// rather than the run. The marker that RATIFICATION reads is the `[ai] `
+/// rationale bullet on `objective-doctrine-score-policy` in
+/// `pasm/spec/architecture/objectives.yaml` (AGENTS.md "AI-origin decisions");
+/// this note is the pointer to it, not the record itself.
+fn default_attacked_memory_secs() -> f32 {
+    8.0
 }
 
 impl Default for GlobalConfig {
@@ -14521,6 +14552,7 @@ impl Default for GlobalConfig {
             ai_tick_hz: default_ai_tick_hz(),
             ai_snapshot_hz: default_ai_snapshot_hz(),
             intent_break_off_hull_fraction: default_intent_break_off_hull_fraction(),
+            attacked_memory_secs: default_attacked_memory_secs(),
         }
     }
 }

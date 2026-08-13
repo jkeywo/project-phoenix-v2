@@ -1500,6 +1500,8 @@ fn clear_last_attacker_on_red_alert_off(
 /// A `LocalShip` with no `BehaviourSection` (pre-#842 shape) merges an empty
 /// doctrine pool — i.e. behaves exactly as before.
 fn publish_viewscreen_blackboard(
+    time: Res<Time>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
     local_uuid_q: Query<&crate::entity_spawner::EntityUuid, With<LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
@@ -1547,6 +1549,9 @@ fn publish_viewscreen_blackboard(
     let last_damage_taken_secs = entity_state
         .as_ref()
         .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_damage_taken));
+    let last_hostile_fire_taken_secs = entity_state
+        .as_ref()
+        .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_hostile_fire_taken));
     let last_weapon_fired_secs = entity_state
         .as_ref()
         .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_weapon_fired));
@@ -1586,14 +1591,32 @@ fn publish_viewscreen_blackboard(
     // the "why this MERGES" note above). Score the doctrine with the same
     // `attacked` signal the NPC path (`aggregate_doctrine_blackboards`) uses, so
     // a backfilled player and a world-spawned copy of the same hull evaluate
-    // their identical doctrine identically (#842 AC4 symmetry). The scenario
-    // pool keeps its own conditions (unchanged), so existing player-objective
-    // scoring is untouched.
+    // their identical doctrine identically (#842 AC4 symmetry). Both sites run
+    // the one `objectives::last_landed_hit_secs` fold into the one
+    // `objectives::attacked_recently` predicate (issue #1010) — a decaying
+    // recency window over the last hit that CONNECTED, shields or hull, not the
+    // `LastShipAttacker` latch — so the symmetry holds by construction rather
+    // than by two copies of the rule staying in step. The scenario pool keeps
+    // its own conditions (unchanged), so existing player-objective scoring is
+    // untouched.
     if let Some((_, _, _, _, Some(behaviour))) = entity_state.as_ref() {
+        // Sim seconds off the fixed clock (`Res<Time>` is `Time<Fixed>` inside
+        // `FixedUpdate`), never a wall clock — AGENTS.md #7.
+        let attacked_memory_secs = world_config
+            .as_deref()
+            .map(|wc| wc.global.attacked_memory_secs)
+            .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().attacked_memory_secs);
         let doctrine_conditions = WorldConditions {
             red_alert,
             hull_fraction: hull_integrity_pct / 100.0,
-            attacked: last_attacker_uuid.is_some(),
+            attacked: crate::objectives::attacked_recently(
+                crate::objectives::last_landed_hit_secs(
+                    last_damage_taken_secs,
+                    last_hostile_fire_taken_secs,
+                ),
+                time.elapsed_secs(),
+                attacked_memory_secs,
+            ),
         };
         let doctrine_pool =
             crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &doctrine_conditions);
@@ -9818,6 +9841,216 @@ station = "pilot"
             app.world().get::<LastShipAttacker>(local).unwrap().0,
             Some("attacker-1".to_string()),
             "the player ship, still at red alert, must keep its attacker record"
+        );
+    }
+
+    // ── publish_viewscreen_blackboard: the `attacked` decay mirror (#1010) ──
+
+    /// The LocalShip half of the `attacked` signal must decay exactly like the
+    /// NPC half (`ai::server::aggregate_doctrine_blackboards`) — AGENTS.md #6
+    /// symmetry, and #842's AC4: a backfilled player and a world-spawned copy
+    /// of the same hull evaluate identical doctrine identically.
+    ///
+    /// Both sites fold with `objectives::last_landed_hit_secs` and test with
+    /// `objectives::attacked_recently`, whose boundary is pinned in
+    /// `objectives`' own tests; this pins that this site really does route
+    /// through them — off the fixed clock, over `[global] attacked_memory_secs`,
+    /// rather than off the `LastShipAttacker` latch it used to read. The tail of
+    /// the test covers the other half of the fold: fire an arc ABSORBS closes
+    /// the gate here too, which matters because the shipped station cannot get
+    /// through a Harrow's arc at all and would otherwise never register.
+    ///
+    /// The world here AUTHORS a short window, the same lesson #889 taught the
+    /// NPC-side sibling `the_assault_resumes_once_the_authored_attacked_window_elapses`
+    /// (`ai::server`): a fixture with no `WorldConfig` exercises only the
+    /// serde-default fallback arm of the LocalShip resolution block
+    /// (`publish_viewscreen_blackboard`'s `attacked_memory_secs` lookup), so a
+    /// typo'd field path there would pass unnoticed. Two seconds is well clear
+    /// of the 8 s default, so the gate reopening on schedule can only be the
+    /// authored value being read. `publish_viewscreen_blackboard` is not
+    /// cadence-gated — it is the only system this fixture registers in
+    /// `FixedUpdate` and `drive_one_fixed_step_per_update` paces the fixed
+    /// clock directly off `TEST_TICK`, independent of `[global] sim_tick_hz` —
+    /// so unlike the NPC sibling this fixture does not need the 1:1
+    /// `sim_tick_hz`/`ai_tick_hz`/`ai_snapshot_hz` authoring to keep an AI
+    /// cadence latch from swallowing steps.
+    #[test]
+    fn the_local_ship_doctrine_pool_reopens_its_raid_after_the_attacked_window() {
+        use crate::entities::spawner::BehaviourSection;
+        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+        use crate::ship::combat_activity::RecentCombatActivity;
+        use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
+
+        // `combat_test.toml`'s raid shape: an untargeted self-defence Destroy
+        // plus a `not_attacked`-gated assault that outranks it.
+        let behaviour = BehaviourConfig {
+            doctrine: vec![
+                DoctrineObjective {
+                    id: "destroy-hostiles".into(),
+                    text: "Engage whatever is in front of you".into(),
+                    directive_kind: Some("Destroy".into()),
+                    base_priority: 38.0,
+                    ..Default::default()
+                },
+                DoctrineObjective {
+                    id: "assault-starbase".into(),
+                    text: "Press the assault on the station".into(),
+                    directive_kind: Some("Destroy".into()),
+                    directive_target: Some("world.entity.starbase_alpha.name".into()),
+                    base_priority: 50.0,
+                    zero_gates: vec![crate::objectives::ZeroGateCondition {
+                        condition: "not_attacked".into(),
+                        threshold: None,
+                    }],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let window = 2.0_f32;
+        let default_window = crate::entity_config::GlobalConfig::default().attacked_memory_secs;
+        assert!(
+            window < default_window,
+            "the authored window must differ from the {default_window}s serde \
+             default, or this test cannot tell the two arms apart"
+        );
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_systems(FixedUpdate, publish_viewscreen_blackboard);
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            crate::ship::test_support::TEST_TICK,
+        );
+        // Author the short window through a real `WorldConfig` rather than
+        // leaving this bare `App` without one, so the LocalShip resolution
+        // block's authored-config arm (the `world_config.as_deref().map(...)`
+        // branch in `publish_viewscreen_blackboard`) is what this test
+        // exercises, not just its `unwrap_or_else` fallback (see #889).
+        app.insert_resource(
+            crate::world::config::parse_world(&format!(
+                "[global]\nattacked_memory_secs = {window}\n"
+            ))
+            .expect("world TOML should parse"),
+        );
+        let ship = app
+            .world_mut()
+            .spawn((
+                LocalShip,
+                BehaviourSection(behaviour),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
+                    (SystemId("captain".into()), 100.0),
+                ])),
+                ShipSystemBlackboards::default(),
+                // The latch that used to decide this on its own.
+                LastShipAttacker(Some("attacker-uuid".to_string())),
+                RecentCombatActivity::default(),
+            ))
+            .id();
+
+        let sim_secs = |app: &App| app.world().resource::<Time<Fixed>>().elapsed_secs();
+        let assault_score = |app: &App| {
+            let bbs = app
+                .world()
+                .get::<ShipSystemBlackboards>(ship)
+                .expect("blackboards");
+            match bbs
+                .0
+                .get(&SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+                .expect("viewscreen entry")
+            {
+                SystemBlackboard::Viewscreen(v) => {
+                    v.scored_objectives
+                        .iter()
+                        .find(|o| o.id == "assault-starbase")
+                        .unwrap_or_else(|| panic!("assault-starbase must be in the pool: {v:?}"))
+                        .score
+                }
+                _ => panic!("expected Viewscreen blackboard"),
+            }
+        };
+
+        app.update();
+        assert!(
+            assault_score(&app) > 0.0,
+            "a named attacker with no recent damage is a stale latch, not an \
+             attack — the raid must stay live"
+        );
+
+        // A hit lands.
+        let hit_at = sim_secs(&app);
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<RecentCombatActivity>()
+            .expect("combat activity")
+            .last_damage_taken = Some(hit_at);
+        app.update();
+        assert_eq!(
+            assault_score(&app),
+            0.0,
+            "a fresh hit must close the `not_attacked` gate on the player's \
+             doctrine pool too"
+        );
+
+        // The reprieve elapses with no further hits.
+        let mut guard = 0;
+        while sim_secs(&app) < hit_at + window + 0.5 {
+            app.update();
+            guard += 1;
+            assert!(guard < 10_000, "the fixed clock is not advancing");
+        }
+        assert!(
+            sim_secs(&app) < hit_at + default_window,
+            "precondition: still inside the {default_window}s default, so \
+             reopening here can only be the authored {window}s being honoured"
+        );
+        assert!(
+            assault_score(&app) > 0.0,
+            "after {window}s of quiet the LocalShip pool must reopen the raid, \
+             exactly as the NPC aggregator does"
+        );
+
+        // Now fire the shields ABSORB. `last_damage_taken` never moves for it —
+        // the hull total is untouched — so a gate reading damage alone would
+        // leave the raid live while something shot at the ship, which is what
+        // the shipped station does to a Harrow for the whole engagement.
+        let skimmed_at = sim_secs(&app);
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<RecentCombatActivity>()
+            .expect("combat activity")
+            .last_hostile_fire_taken = Some(skimmed_at);
+        app.update();
+        assert_eq!(
+            assault_score(&app),
+            0.0,
+            "a hit the shields ate must close the `not_attacked` gate too"
+        );
+
+        // Own weapon fire is not being attacked: let the shield-absorbed hit
+        // decay while the ship keeps shooting, and the raid must come back.
+        let mut guard = 0;
+        while sim_secs(&app) < skimmed_at + window + 0.5 {
+            app.world_mut()
+                .entity_mut(ship)
+                .get_mut::<RecentCombatActivity>()
+                .expect("combat activity")
+                .last_weapon_fired = Some(sim_secs(&app));
+            app.update();
+            guard += 1;
+            assert!(guard < 10_000, "the fixed clock is not advancing");
+        }
+        assert!(
+            sim_secs(&app) < skimmed_at + default_window,
+            "precondition: still inside the {default_window}s default, so \
+             reopening here can only be the authored {window}s being honoured"
+        );
+        assert!(
+            assault_score(&app) > 0.0,
+            "a raider pressing its own attack has not been attacked — folding \
+             `last_weapon_fired` in would make the gate veto itself for as long \
+             as the ship kept firing"
         );
     }
 

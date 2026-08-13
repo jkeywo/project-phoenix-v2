@@ -64,6 +64,15 @@
 //!   `wave_3_cleared` is authoritative even though nothing folds it yet. It is
 //!   named by this issue's own acceptance criteria, and `FlagStore` gained
 //!   serde for exactly this.
+//! * `scenario` ([`ScenarioState`], issue #864) is in for the same reason
+//!   widened one step: flags are what a scenario *remembers*, and this is what
+//!   it has already *done* and is still *owed* — every trigger's single-shot
+//!   latch, the mission clock those latches are timed against, and the queue of
+//!   deferred `after(n, |ctx| …)` script callbacks. Nothing folds any of it
+//!   either, and a resumed scenario without it replays its own opening: spent
+//!   triggers re-arm and fire a second time, pending callbacks are forgotten,
+//!   and `on_timer` thresholds are measured from the age of the fresh app
+//!   rather than of the run.
 //!
 //! **Excluded, and the exclusion is the design.** Browser UI state, PeerJS
 //! sessions, renderer caches, client projections, and raw ECS `Entity` handles
@@ -155,8 +164,10 @@ use crate::ship::state::{ShipPhysics, ShipRedAlert};
 use crate::sim_rng::{SimRng, SimRngState};
 use crate::sim_tick::SimTick;
 use crate::torpedo::{Torpedo, TubeBurstState, TubeLoadState};
+use crate::world::content::WorldEvent;
 use crate::world::flags::FlagStore;
-use crate::world::server::WorldContentRuntime;
+use crate::world::script::schedule::{PendingCallbacks, ScheduledCall, TickBudget};
+use crate::world::server::{WorldContentRuntime, WorldScriptRuntime};
 use crate::world_id::{WorldIdMint, WorldIdMintState};
 
 // ── The three version dimensions ─────────────────────────────────────────────
@@ -167,7 +178,17 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// This is a *phoenix* constant that `vellum_save::Versions` carries, not a
 /// phoenix version field: the comparison, the ordering of the three checks, and
 /// the refusal all belong to `Versions::check`.
-pub const SNAPSHOT_FORMAT: u32 = 1;
+///
+/// `2` — issue #864 added [`PhoenixSnapshot::scenario`]. Every new field
+/// carries `#[serde(default)]`, so a format-1 save still *parses*; the bump is
+/// here because parsing it is exactly the wrong outcome. A format-1 payload
+/// carries no trigger fired-state, no mission clock and no pending script
+/// callbacks, so restoring one would silently re-arm every scenario trigger the
+/// run had already spent and drop every deferred callback it was waiting on —
+/// the same class of silent gap [`RestoreGap`] exists to refuse out loud. A
+/// save this build cannot honour is refused by `Versions::check`, which names
+/// the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 2;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -863,6 +884,165 @@ pub struct LayerFlags {
     pub flags: FlagStore,
 }
 
+/// The **scenario-progression** state a scripted world resumes from (issue
+/// #864).
+///
+/// `flags` above is the half of a scenario's memory that already travelled: the
+/// counters a `when` predicate reads. This is the other half — *what has
+/// already happened*, and *what is still owed*. A resumed scenario without it
+/// stands at a matching digest and then replays its own opening: every
+/// single-shot trigger the run had spent is re-armed and fires a second time,
+/// every `after(n, |ctx| …)` callback the run was waiting on has been forgotten,
+/// and the mission clock those firings are measured against has been rewound to
+/// the age of whatever fresh app was booted to restore into.
+///
+/// That last one is the piece the rest hangs off, and it is stored **relative**
+/// rather than absolute for the reason [`AsteroidWindowState`] stores the
+/// streamer's anchor: `mission_clock_anchor_secs` is a reading of
+/// `Time<Fixed>::elapsed_secs()` taken in *this process*, and a fresh app's
+/// clock started at a different moment. What is authoritative is not the anchor
+/// but the distance from it — the mission-elapsed seconds every `on_timer`
+/// threshold and every `action_delays` fire time is authored against — so the
+/// capture stores the distance and the restore re-derives an anchor that
+/// reproduces it against the resumed app's own clock.
+///
+/// # Honestly not covered
+///
+/// `pending_delayed_actions` (the declarative `action_delays` queue, which a
+/// scripted `ctx.schedule.in_seconds(n).<verb>(…)` also feeds) is **not** here.
+/// Carrying it means giving [`crate::world::config::TriggerAction`] — 22
+/// variants over `AiDirective`, `UtilityConfig`, `ObjectiveSource`,
+/// `ModifierSlot`, `IntModifierSlot` and `crate::balance::Outcome` — a serde
+/// derive, which would pin six *authored-config* types' shape as save format.
+/// This module refuses that commitment everywhere else it comes up (see
+/// [`PhoenixSnapshot::game_over`], which stores `Outcome` as a label precisely
+/// so its variant order does not become stored surface), and no shipped world
+/// authors `action_delays` or `in_seconds` today — the deferral vocabulary the
+/// shipped scripted set actually uses is `after(..)`, which is
+/// [`Self::script_callbacks`]. Widening to the action queue is a separate
+/// issue's commitment, not a line to slip in here.
+///
+/// Per-layer trigger state (`WorldRuntime::trigger_states`) is not here either,
+/// for a narrower reason: a layer's states are *merged into* the base
+/// `trigger_states` vec at load and removed from it at unload, so
+/// [`Self::triggers`] already carries every trigger that can fire. The per-layer
+/// copy is the load-time snapshot `evaluate_layer_unload` matches against, and a
+/// resumed world rebuilds it by re-running the same layer loads.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioState {
+    /// Mission-elapsed seconds at the capture — see the type docs for why this
+    /// is a distance and not the anchor itself. `None` when the mission clock
+    /// was not yet anchored (no world, or a run that had not started).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mission_elapsed_secs: Option<f32>,
+    /// One row per live trigger state, in `WorldContentRuntime::trigger_states`
+    /// order — see [`TriggerRuntimeState`]. Every row is written, not just the
+    /// fired ones, so the count is itself the alignment check the restore makes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<TriggerRuntimeState>,
+    /// `(group, member names)` sorted by group, members sorted — the membership
+    /// an `on_all_destroyed group = "…"` condition is judged against. A
+    /// `HashMap` of `HashSet`s in the runtime; a payload may not inherit either
+    /// iteration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_groups: Vec<(String, Vec<String>)>,
+    /// `(uuid, aggregate hull fraction)` sorted by uuid: the last sample
+    /// `collect_world_events` compares against to decide whether a hull crossed
+    /// *downward*.
+    ///
+    /// Restored because leaving it out manufactures an event. A fresh app's
+    /// ships are whole, so its last sample is ~1.0; the restore then writes the
+    /// capture's mauled hull underneath it, and the very next tick reads that
+    /// as a fresh downward crossing and fires every `on_hull_below` template the
+    /// captured run had already spent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_hull_fractions: Vec<(String, f32)>,
+    /// `WorldContentRuntime::pending_world_events`, in queue order — see
+    /// [`WorldEventRecord`]. Usually empty at a tick boundary; non-empty exactly
+    /// when the previous tick's delayed actions or script callbacks queued a
+    /// chaining event for the next one, which is the tick a capture can land on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_events: Vec<WorldEventRecord>,
+    /// `WorldScriptRuntime::pending_callbacks`, **in queue order**.
+    ///
+    /// Not sorted, and that is the deliberate reading of this module's
+    /// stable-key rule rather than an exception to it. The rule exists because a
+    /// payload must not inherit a `HashMap`'s iteration order; this queue is a
+    /// `Vec` whose order is the order the scripts scheduled into it, which is
+    /// already a deterministic function of the run every peer reproduces — and
+    /// it is *load-bearing*, because `PendingCallbacks::drain_due` fires due
+    /// callbacks in exactly this order and their effects apply in that order.
+    /// Sorting the payload would hand the resumed world a different firing
+    /// order than the live one it is being compared against. Each entry is a
+    /// [`ScheduledCall`] — `(fire_tick, script_path, fn_name)` — which is
+    /// already the stable key the rule asks for: no AST, no closure, no handle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub script_callbacks: Vec<ScheduledCall>,
+}
+
+/// One scenario trigger's runtime state — the three fields a run *changes*.
+///
+/// The trigger itself (condition, actions, `when` predicate, `repeat`,
+/// `cooldown_secs`, authored id) is not here, for [`EntityState::hull`]'s rule:
+/// it is authored config the fresh world rebuilds from TOML — or, for a scripted
+/// trigger, from the `[script]` block the content digest is bound to.
+///
+/// # Scripted and declarative triggers are the same row
+///
+/// `merge_script_triggers` appends one `TriggerState` per compiled
+/// `ScriptTrigger` to the SAME `WorldContentRuntime::trigger_states` vec the
+/// declarative triggers live in — a scripted trigger's `.trigger` is
+/// byte-identical to its TOML equivalent, and only the parallel
+/// `WorldScriptRuntime::handlers` entry says where its effects come from. So
+/// there is one fired-state list to capture, not two, and this row covers both
+/// kinds.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerRuntimeState {
+    /// Position in `trigger_states`. See [`restore`]'s scenario walk for why an
+    /// index is a stable key *here* while it would not be for an ECS entity: the
+    /// table is rebuilt by a deterministic replay of the same load, and a table
+    /// of a different length is refused rather than written into.
+    pub index: u32,
+    /// The single-shot latch. The whole point of the row.
+    pub fired: bool,
+    /// The `OnAllDestroyed` accumulation, sorted — a `HashSet` in the runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seen_destroyed: Vec<String>,
+    /// Mission-elapsed seconds of the last fire, which is what a `repeat`
+    /// trigger's `cooldown_secs` is measured from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_fired_elapsed: Option<f32>,
+}
+
+/// One queued `WorldEvent`, written as a tag plus its fields.
+///
+/// Written out rather than by deriving serde on
+/// [`crate::world::content::WorldEvent`], for [`ControlState`]'s reason: a
+/// derive would make that enum's shape stored surface, and a tag written at the
+/// call site makes the commitment visible where it is made. An unrecognised
+/// `kind` is dropped on restore rather than panicking — the same rule
+/// [`ControlState::impulse_phase`] states.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WorldEventRecord {
+    /// `0` Destroyed, `1` Attacked, `2` HullDroppedBelow, `3` TimerElapsed,
+    /// `4` Hailed, `5` FlagSet, `6` FlagCleared, `7` WorldLoaded,
+    /// `8` EnteredRegion, `9` ExitedRegion, `10` WaypointReached.
+    pub kind: u8,
+    /// The event's primary name: an entity uuid, a region uuid, or a flag name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subject: String,
+    /// The event's secondary name: an attacker uuid or a waypoint anchor.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub other: String,
+    /// `FlagSet`/`FlagCleared`'s owning layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_layer: Option<String>,
+    /// `HullDroppedBelow`'s `(previous, current)` fractions, or
+    /// `TimerElapsed`'s elapsed seconds in `[0]`.
+    #[serde(default)]
+    pub numbers: [f32; 2],
+}
+
 /// Captured authoritative world state: everything issue #894's record says a
 /// divergence is defined over, at one tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -893,6 +1073,12 @@ pub struct PhoenixSnapshot {
     /// Per-layer flag stores, sorted by path so the payload is byte-stable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layer_flags: Vec<LayerFlags>,
+    /// The scenario's *progression*: what has already fired, what is still
+    /// scheduled, and the mission clock both are measured against — see
+    /// [`ScenarioState`]. `None` only for a world with no `WorldContentRuntime`
+    /// at all (a bare-`App` fixture).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario: Option<ScenarioState>,
     /// `AiPolicyTickClock` — the tick-derived clock every stateful AI policy
     /// measures `state_time` against (issue #882's AC4).
     ///
@@ -961,6 +1147,7 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .get_resource::<WorldContentRuntime>()
             .map(|rt| rt.flags.clone()),
         layer_flags: capture_layer_flags(world),
+        scenario: capture_scenario(world),
         ai_policy_clock: world
             .get_resource::<crate::ship::helm_ai::AiPolicyTickClock>()
             .map(|clock| clock.0),
@@ -985,6 +1172,191 @@ fn capture_layer_flags(world: &World) -> Vec<LayerFlags> {
         .collect();
     rows.sort_by(|a, b| a.path.cmp(&b.path));
     rows
+}
+
+/// The fixed-step clock the mission anchor is a reading of.
+///
+/// `Time<Fixed>` explicitly, not the context-sensitive `Time`: `anchor_mission_clock`
+/// runs inside `FixedUpdate`, where `Time` *is* `Time<Fixed>`, and a capture taken
+/// between `App::update()` calls would read `Time<Virtual>` instead — two clocks
+/// that disagree by up to a timestep, which is exactly the drift issue #960 spent
+/// a whole system removing from this anchor.
+fn fixed_elapsed_secs(world: &World) -> Option<f32> {
+    world
+        .get_resource::<Time<bevy::time::Fixed>>()
+        .map(|t| t.elapsed_secs())
+}
+
+/// Walk the scenario's progression state — see [`ScenarioState`].
+fn capture_scenario(world: &World) -> Option<ScenarioState> {
+    let runtime = world.get_resource::<WorldContentRuntime>()?;
+
+    // The anchor is a reading of THIS process's clock; the distance from it is
+    // what a resumed run needs. See `ScenarioState`.
+    let mission_elapsed_secs = match (runtime.mission_clock_anchor_secs, fixed_elapsed_secs(world))
+    {
+        (Some(anchor), Some(now)) => Some((now - anchor).max(0.0)),
+        _ => None,
+    };
+
+    let triggers = runtime
+        .trigger_states
+        .iter()
+        .enumerate()
+        .map(|(index, state)| {
+            let mut seen_destroyed: Vec<String> = state.seen_destroyed.iter().cloned().collect();
+            seen_destroyed.sort();
+            TriggerRuntimeState {
+                index: index as u32,
+                fired: state.fired,
+                seen_destroyed,
+                last_fired_elapsed: state.last_fired_elapsed,
+            }
+        })
+        .collect();
+
+    let mut entity_groups: Vec<(String, Vec<String>)> = runtime
+        .entity_groups
+        .iter()
+        .map(|(group, members)| {
+            let mut names: Vec<String> = members.iter().cloned().collect();
+            names.sort();
+            (group.clone(), names)
+        })
+        .collect();
+    entity_groups.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut observed_hull_fractions: Vec<(String, f32)> = runtime
+        .observed_hull_fractions
+        .iter()
+        .map(|(uuid, fraction)| (uuid.clone(), *fraction))
+        .collect();
+    observed_hull_fractions.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Some(ScenarioState {
+        mission_elapsed_secs,
+        triggers,
+        entity_groups,
+        observed_hull_fractions,
+        pending_events: runtime
+            .pending_world_events
+            .iter()
+            .map(world_event_record)
+            .collect(),
+        // The scripted half. Absent for every script-free world, which is what
+        // keeps their payloads shaped exactly as they were before this issue.
+        script_callbacks: world
+            .get_resource::<WorldScriptRuntime>()
+            .map(|script| script.pending_callbacks.0.clone())
+            .unwrap_or_default(),
+    })
+}
+
+/// Tag one queued `WorldEvent` — see [`WorldEventRecord`].
+fn world_event_record(event: &WorldEvent) -> WorldEventRecord {
+    let mut row = WorldEventRecord::default();
+    match event {
+        WorldEvent::Destroyed { uuid } => {
+            row.kind = 0;
+            row.subject = uuid.clone();
+        }
+        WorldEvent::Attacked {
+            uuid,
+            attacker_uuid,
+        } => {
+            row.kind = 1;
+            row.subject = uuid.clone();
+            row.other = attacker_uuid.clone();
+        }
+        WorldEvent::HullDroppedBelow {
+            uuid,
+            previous_fraction,
+            current_fraction,
+        } => {
+            row.kind = 2;
+            row.subject = uuid.clone();
+            row.numbers = [*previous_fraction, *current_fraction];
+        }
+        WorldEvent::TimerElapsed { elapsed_secs } => {
+            row.kind = 3;
+            row.numbers = [*elapsed_secs, 0.0];
+        }
+        WorldEvent::Hailed { target_uuid } => {
+            row.kind = 4;
+            row.subject = target_uuid.clone();
+        }
+        WorldEvent::FlagSet { name, origin_layer } => {
+            row.kind = 5;
+            row.subject = name.clone();
+            row.origin_layer = origin_layer.clone();
+        }
+        WorldEvent::FlagCleared { name, origin_layer } => {
+            row.kind = 6;
+            row.subject = name.clone();
+            row.origin_layer = origin_layer.clone();
+        }
+        WorldEvent::WorldLoaded => row.kind = 7,
+        WorldEvent::EnteredRegion { uuid } => {
+            row.kind = 8;
+            row.subject = uuid.clone();
+        }
+        WorldEvent::ExitedRegion { uuid } => {
+            row.kind = 9;
+            row.subject = uuid.clone();
+        }
+        WorldEvent::WaypointReached { uuid, waypoint } => {
+            row.kind = 10;
+            row.subject = uuid.clone();
+            row.other = waypoint.clone();
+        }
+    }
+    row
+}
+
+/// The inverse of [`world_event_record`]. An unrecognised tag is `None` — a save
+/// from a build with an event kind this one does not have, which the version
+/// gate is what refuses, not a `match` arm here.
+fn world_event_from_record(row: &WorldEventRecord) -> Option<WorldEvent> {
+    Some(match row.kind {
+        0 => WorldEvent::Destroyed {
+            uuid: row.subject.clone(),
+        },
+        1 => WorldEvent::Attacked {
+            uuid: row.subject.clone(),
+            attacker_uuid: row.other.clone(),
+        },
+        2 => WorldEvent::HullDroppedBelow {
+            uuid: row.subject.clone(),
+            previous_fraction: row.numbers[0],
+            current_fraction: row.numbers[1],
+        },
+        3 => WorldEvent::TimerElapsed {
+            elapsed_secs: row.numbers[0],
+        },
+        4 => WorldEvent::Hailed {
+            target_uuid: row.subject.clone(),
+        },
+        5 => WorldEvent::FlagSet {
+            name: row.subject.clone(),
+            origin_layer: row.origin_layer.clone(),
+        },
+        6 => WorldEvent::FlagCleared {
+            name: row.subject.clone(),
+            origin_layer: row.origin_layer.clone(),
+        },
+        7 => WorldEvent::WorldLoaded,
+        8 => WorldEvent::EnteredRegion {
+            uuid: row.subject.clone(),
+        },
+        9 => WorldEvent::ExitedRegion {
+            uuid: row.subject.clone(),
+        },
+        10 => WorldEvent::WaypointReached {
+            uuid: row.subject.clone(),
+            waypoint: row.other.clone(),
+        },
+        _ => return None,
+    })
 }
 
 fn hull_rows(hull: &crate::damage::SystemHull) -> Vec<(String, f32, f32)> {
@@ -1807,6 +2179,26 @@ pub enum RestoreGap {
     /// than mapped by position, which would hand one call site another's
     /// sequence.
     RngStreamsMoved,
+    /// The bootstrapped world's trigger table is a different length than the
+    /// capture's, so the capture's per-trigger rows cannot be trusted to name
+    /// the same triggers.
+    ///
+    /// Reported rather than written in by position, and the distinction is the
+    /// whole reason an index is usable as a key here at all: the table is
+    /// rebuilt by a deterministic replay of the same load — the declarative
+    /// states in `trigger_states_from_world` order, then the scripted ones
+    /// appended by `merge_script_triggers` in compile order — so two runs of the
+    /// same content produce the same table. A table of a *different* length is
+    /// therefore not a table whose rows shifted; it is a world that loaded a
+    /// different layer set, and writing fired-state into it by position would
+    /// arm and disarm triggers at random.
+    ScenarioTriggersMoved { saved: usize, found: usize },
+    /// The capture was waiting on scripted `after(n, |ctx| …)` callbacks and the
+    /// bootstrapped world has no `WorldScriptRuntime` to queue them on — a save
+    /// from a scripted world being restored into one whose scripts did not
+    /// compile. The content dimension is what should have refused this; the gap
+    /// is here so it is never silent if it does not.
+    ScriptRuntimeAbsent { pending_callbacks: usize },
 }
 
 impl std::fmt::Display for RestoreGap {
@@ -1821,6 +2213,17 @@ impl std::fmt::Display for RestoreGap {
             RestoreGap::RngStreamsMoved => f.write_str(
                 "this save's generator streams do not match this build's; \
                  mapping them by position would misroute a call site's sequence",
+            ),
+            RestoreGap::ScenarioTriggersMoved { saved, found } => write!(
+                f,
+                "this save records {saved} scenario trigger(s) and the world has \
+                 {found}; writing fired state in by position would arm and \
+                 disarm the wrong triggers"
+            ),
+            RestoreGap::ScriptRuntimeAbsent { pending_callbacks } => write!(
+                f,
+                "this save is waiting on {pending_callbacks} scripted callback(s) \
+                 and the world compiled no scripts to run them"
             ),
         }
     }
@@ -1995,12 +2398,118 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
         }
     }
 
+    restore_scenario(world, snapshot, report);
+
     restore_collisions(world, snapshot);
 
     // Last, now that every resource an entry effect might read (`GameOverReason`
     // above included) carries the restored value.
     if let Some(phase) = restored_phase_entry {
         run_restored_phase_entry_effects(world, phase);
+    }
+}
+
+/// Put the scenario's progression back — see [`ScenarioState`].
+///
+/// Every write here is a wholesale replacement, [`apply_weapons`]' rule and for
+/// its reason: the fresh app ran its *own* opening on the way to the restore
+/// point, so merging would leave the resumed scenario holding a firing the
+/// capture never made.
+///
+/// # The handlers realign, and nothing here realigns them
+///
+/// `WorldScriptRuntime::handlers` is the vec parallel to `trigger_states` that
+/// says which script fn supplies a scripted trigger's effects. It is **not** in
+/// the payload and must not be: it holds `(script_path, fn_name)` pairs that
+/// only mean anything against the retained ASTs, and ASTs are not serialisable
+/// at all. It does not need to be, either. `compile_world_scripts` runs at
+/// `Startup` on the bootstrapped world and `init_world_runtime` calls
+/// `merge_script_triggers` immediately after, which rebuilds `handlers` from
+/// scratch: `None` for each declarative index, then one `Some` per compiled
+/// `ScriptTrigger` appended in compile order — the same two deterministic walks
+/// (`trigger_states_from_world` over the parsed TOML, then the load's
+/// registration order) that produced the captured table. So the resumed world's
+/// index *i* names the same trigger and the same handler the capture's did,
+/// before this function writes a single byte, and the only thing left to check
+/// is that the two tables are the same length — which is
+/// [`RestoreGap::ScenarioTriggersMoved`].
+///
+/// # The per-tick budget is reset, not restored
+///
+/// `WorldScriptRuntime::budget` is a per-tick circuit breaker and a capture is
+/// taken at a tick boundary, with that tick's script work already complete — so
+/// there is no partially-spent budget to preserve, and the live world's next
+/// tick starts a fresh one. What IS written back is `budget_tick`, re-based to
+/// the captured tick, and that is not cosmetic. Both script systems reset the
+/// budget by comparing `budget_tick` against the *current* `SimTick`; the fresh
+/// app's `budget_tick` is whatever tick its own bootstrap reached, and if that
+/// number happened to equal the resumed world's next tick — a coincidence a
+/// world whose fresh app runs hundreds of ticks can absolutely produce — the
+/// resumed world would skip the reset and run its first continuation tick with
+/// the bootstrap's operations already charged against it while the live world
+/// ran with an empty budget. Re-basing makes the reset decision a function of
+/// the captured state rather than of how far the fresh app happened to get.
+fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut RestoreReport) {
+    let Some(stored) = snapshot.scenario.as_ref() else {
+        return;
+    };
+    let now = fixed_elapsed_secs(world);
+
+    if let Some(mut runtime) = world.get_resource_mut::<WorldContentRuntime>() {
+        // The anchor that reproduces the captured mission elapsed against THIS
+        // app's clock. Left alone when either side has no clock reading to work
+        // from, rather than guessed at.
+        runtime.mission_clock_anchor_secs = match (stored.mission_elapsed_secs, now) {
+            (Some(elapsed), Some(now)) => Some(now - elapsed),
+            (Some(_), None) => runtime.mission_clock_anchor_secs,
+            (None, _) => None,
+        };
+
+        if stored.triggers.len() == runtime.trigger_states.len() {
+            for row in &stored.triggers {
+                let Some(state) = runtime.trigger_states.get_mut(row.index as usize) else {
+                    continue;
+                };
+                state.fired = row.fired;
+                state.seen_destroyed = row.seen_destroyed.iter().cloned().collect();
+                state.last_fired_elapsed = row.last_fired_elapsed;
+            }
+        } else {
+            report.gaps.push(RestoreGap::ScenarioTriggersMoved {
+                saved: stored.triggers.len(),
+                found: runtime.trigger_states.len(),
+            });
+        }
+
+        runtime.entity_groups = stored
+            .entity_groups
+            .iter()
+            .map(|(group, members)| (group.clone(), members.iter().cloned().collect()))
+            .collect();
+        runtime.observed_hull_fractions = stored
+            .observed_hull_fractions
+            .iter()
+            .map(|(uuid, fraction)| (uuid.clone(), *fraction))
+            .collect();
+        runtime.pending_world_events = stored
+            .pending_events
+            .iter()
+            .filter_map(world_event_from_record)
+            .collect();
+    }
+
+    match world.get_resource_mut::<WorldScriptRuntime>() {
+        Some(mut script) => {
+            script.pending_callbacks = PendingCallbacks(stored.script_callbacks.clone());
+            script.budget = TickBudget::new();
+            script.budget_tick = snapshot.tick;
+        }
+        None if !stored.script_callbacks.is_empty() => {
+            report.gaps.push(RestoreGap::ScriptRuntimeAbsent {
+                pending_callbacks: stored.script_callbacks.len(),
+            });
+        }
+        None => {}
     }
 }
 

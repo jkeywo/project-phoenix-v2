@@ -1,13 +1,18 @@
 # Probe world for issue #843 — the victory classification path, end to end.
 #
 # A player Alliance cruiser (AI-backfilled in a headless run) sits alone; a
-# one-shot timer fires a `game_over` action carrying `outcome = "victory"`. No
-# combat is involved on purpose: this is a deterministic tripwire for the whole
-# outcome-declaration wiring — config parse (`outcome = "victory"`) → dispatch
+# one-shot timer fires a `game_over` carrying `outcome = "victory"`. No combat is
+# involved on purpose: this is a deterministic tripwire for the whole
+# outcome-declaration wiring — script parse → dispatch
 # (`SetGameOverReason { outcome }`) → the `GameOverReason` resource → the pure
 # classifier — proving a scenario-declared victory reaches the exit report as
-# `outcome: "victory"`. The `message` is deliberately omitted (it is optional),
-# so this world needs no strings.csv entry.
+# `outcome: "victory"`. The `message` is deliberately empty (it is optional), so
+# this world needs no strings.csv entry.
+#
+# Rhai M6: the timer + game_over are authored as a [script] block (`on_timer`
+# registration + a handler fn) rather than a declarative `[[trigger]]`; the
+# scripted path emits the identical `SetGameOverReason { outcome: Victory }` +
+# `SetNextState` at the same tick, so the authoritative digest is unchanged.
 
 [global]
 seed = 843
@@ -24,10 +29,11 @@ transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 
 # A scripted victory: end the run in a declared win after one second.
-[[trigger]]
-condition = "on_timer"
-after_secs = 1.0
+[script]
+setup = """
+on_timer(1, "declare_victory");
 
-  [[trigger.action]]
-  type    = "game_over"
-  outcome = "victory"
+fn declare_victory(ctx) {
+    ctx.effects.game_over("", "victory");
+}
+"""

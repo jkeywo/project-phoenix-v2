@@ -16,7 +16,7 @@
  *   window.ACTION_MAP  (for inspection / extension)
  */
 
-import { dispatchRepairTeam, setRepairPriority } from './repair-dispatch.js';
+import { dispatchRepairTeam, setRepairPriority, setRepairTargetPriority } from './repair-dispatch.js';
 import {
   sendHelmInput,
   startImpulseCharge,
@@ -236,12 +236,35 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /**
-   * Set on-site repair priority for a team (issue #739). Only takes effect
-   * when the team is in `Repairing` state. Requires a team_idx and priority.
+   * Set on-site repair priority for a team (issue #739) as an ORDINAL into its
+   * remaining work (issue #1013). Only takes effect when the team is in
+   * `Repairing` state. Requires a team_idx and priority.
+   *
+   * No console emits this since issue #1015 replaced the per-team 1/2/3 buttons
+   * with the damaged-systems list below; it stays wired because the payload is
+   * still live on the host and still the right shape for "the nth job". The
+   * ordinal it writes is a STANDING per-team order, untouched by the taps below
+   * — those set the host's one-shot pin instead.
    */
   set_repair_priority: (a, send) => {
     if (a.team_idx != null && a.priority != null) {
       setRepairPriority(a.team_idx, a.priority, send);
+    }
+  },
+
+  /**
+   * Prioritise one damaged system by name (issue #1015) — what the repair
+   * console's damaged-systems list sends when a row is tapped.
+   *
+   * Carries no ordinal on purpose: the host finds the on-site team whose sweep
+   * group holds this system and pins the system itself, so a re-rank between the
+   * tap and the hand-off cannot silently redirect it. See
+   * `setRepairTargetPriorityPayload` for why the console cannot do that sum, and
+   * for what host-side resolution does and does not buy.
+   */
+  set_repair_target_priority: (a, send) => {
+    if (a.system_id) {
+      setRepairTargetPriority(a.system_id, send);
     }
   },
 

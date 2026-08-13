@@ -181,10 +181,101 @@ capacity = 90
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 22
 
+# ── The AI's two-step SHED LADDER (issue #1003) ──────────────────────────────
+#
+# The four `min_*` numbers below are not four unrelated brownout guards; read
+# together with the six rules that follow they are ONE staircase, and the
+# staircase is what keeps a red-alert fight off the reactor's exhaustion lock.
+# Each channel authors three rules — HOLD (priority 15), ELEVATE (10) and the
+# BASELINE (0) — and when neither of the first two fires that channel falls to
+# its baseline at level 2. That fallback IS the shed: the policy authors no
+# demote rule and needs none.
+#
+# Each channel has TWO battery numbers, not one, and the gap between them is the
+# point:
+#
+#   min_reserve_*  the SHED floor. Below it the channel gives its point back.
+#   min_restore_*  the RESTORE floor, always the higher of the two. A channel
+#                  that has already shed may not rise again until the charge is
+#                  back up here.
+#
+# A single threshold per channel would be both the shed floor and the
+# re-elevate floor, and the AI would then flip that channel every tick the
+# charge sat on it: shed at the floor drops the total, the lower total recharges
+# the battery back over the floor within one tick (a destroyer moves ±0.095
+# battery-percent per 30 Hz tick), the channel re-elevates, the higher total
+# drains it back under. That is a `SetPowerGroupAllocation`, a Power log line
+# and a ×1.25/×1.0 modifier swing at TICK RATE. The gap makes the traversal ten
+# battery-percent wide instead — seconds, and visible as a decision rather than
+# as a strobe. `fact(power_<group>)` (the channel's CURRENT level, seeded by
+# `ship::power::seed_power_facts`) is what the HOLD rule reads to know which
+# side of the gap it is on, so the hysteresis needs no policy state.
+#
+# The HOLD rule also carries the SAME trigger clauses as the ELEVATE it sits
+# above — helm's red alert AND thrust, weapons' red alert — not only the shed
+# floor. That is deliberate, not an oversight: one tick with the trigger false
+# (thrust dipped under `thrust_threshold`, or the alert dropped) reads as false
+# on HOLD exactly as a battery breach does, and the channel sheds to baseline
+# immediately. It then cannot climb back on the trigger returning alone while
+# the charge is under the restore floor — the ELEVATE rule that would take it
+# up again is gated on the RESTORE floor, not the shed one — so the channel is
+# stuck at baseline until the battery has climbed there too. This is a one-way
+# ratchet on TRIGGER FLAP for as long as the reserve is in the band, and it is
+# intended: elevated posture belongs to combat stations, not to a red alert
+# that blinked or a throttle that stuttered for a single tick.
+#
+# There is likewise no ship-wide "total" rule anywhere in this file. The total
+# is EMERGENT from the per-channel bids (`shields` never bids at all, so
+# `plan_allocation` reserves it at its commanded 2). At combat stations under
+# thrust — BOTH elevate guards' non-battery halves true, which for helm means
+# red alert AND `thrust >= thrust_threshold` — a falling battery walks:
+#
+#   battery_pct        helm  weapons  shields  total   what the reactor does
+#   >= 50               3       3        2       8     steepest authored drain
+#   25 ..< 50           2       3        2       7     slow drain
+#   < 25                2       2        2       6     RECHARGES (positive rate)
+#
+# and a RISING battery walks the same steps at 35 (weapons) and 60 (helm).
+# Away from combat stations the ship simply rests at total 6.
+#
+# Below 25 the reserve refills, weapons re-elevates once it is back over 35, and
+# the charge oscillates across that 25–35 band — a long way above 0. 0 is the
+# number that matters: `PowerSystem::tick` slams every group to
+# `GROUP_LEVEL_MIN` and LOCKS the reactor the instant the charge reaches it, and
+# nothing unlocks it until the charge climbs back to `emergency_threshold`
+# above. A ship WITH A WORKING REACTOR must not be able to fight its way into
+# that on its own AI's decisions, and with this ladder it cannot: the
+# sustainable total is reached while a quarter of the reserve is still in hand.
+#
+# The floors are AI-SHED ONLY, and that is deliberate rather than an oversight
+# in the human/AI command symmetry (AGENTS.md rule #6). The symmetry lives at
+# the admitted-command seam — both sides emit the same
+# `SetPowerGroupAllocation` and both are applied by the same
+# `ship::power::handle_power_messages` — and these guards live upstream of it,
+# in the AI's bid stage. `handle_power_messages` never reads `battery_pct`, so a
+# human Power officer who wants weapons at 3 on a flat battery gets weapons at 3
+# and the consequences that follow.
+#
+# One case the ladder does NOT cover, deliberately: a Disabled or Destroyed
+# power reactor. `ControlSourceResolver::policy_for` rates an offline system
+# `operate_ai = false`, so `ai_power_allocation` skips the ship entirely while
+# the reactor's own integration carries on at whatever total was last
+# commanded. A hull knocked out at total 8 therefore flattens its battery and
+# locks, and no shed floor can prevent it — that is a damage outcome for the
+# repair seam to answer, not a tuning question for this staircase.
 [power.ai_policy.param]
 thrust_threshold = 0.7
+# Helm's pair. The shed at half a battery is the first point the ship gives
+# back; the restore ten points higher is what stops the two decisions chattering
+# into each other.
 min_reserve_helm = 50.0
-min_reserve_weapons = 10.0
+min_restore_helm = 60.0
+# Weapons' pair, and the lower step of the ladder. 25 sheds to the sustainable
+# total while a quarter of the reserve is still in hand — on the destroyer's
+# 70-point battery that is a comfortable margin, where the 10 this shipped with
+# before issue #1003 left barely three seconds of it.
+min_reserve_weapons = 25.0
+min_restore_weapons = 35.0
 min_reserve_baseline = 0.0
 
 # helm: elevate to 3 under sustained thrust with a healthy battery, AT RED
@@ -202,10 +293,30 @@ min_reserve_baseline = 0.0
 # involved at all. Gating on red alert confines the elevation to the "combat
 # stations" burst the budget note actually measured (`probe_duel` runs fight
 # with the alert up), leaving ordinary cruise at the sustainable resting total.
+#
+# Helm is the UPPER step of the shed ladder (see the param note): the first
+# point the ship gives back, at half a battery, because a combat manoeuvre is
+# the cheaper thing to lose and dropping to total 7 slows the drain enough to
+# make the second step's timing comfortable. It comes back at 60, not at 50.
+#
+# HOLD, at the higher priority: helm is ALREADY at 3 (`fact(power_helm)`, the
+# level seeded from the reactor's current allocation) and the charge is still
+# above the shed floor, so keep it. Same trigger clauses as the elevate below —
+# a hold is not a licence to ignore the alert or the throttle.
+[[power.ai_policy.rule]]
+priority = 15
+channel = "helm"
+when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
+verb = "set_power_group_allocation"
+level = 3
+
+# ELEVATE: the RISING edge, at the restore floor. Reached only from below (the
+# hold above wins whenever helm is already up), so this is the rule that decides
+# how much charge the ship insists on having before it spends again.
 [[power.ai_policy.rule]]
 priority = 10
 channel = "helm"
-when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_restore_helm)"
 verb = "set_power_group_allocation"
 level = 3
 
@@ -219,10 +330,30 @@ level = 2
 # weapons: elevate to 3 on red alert with a healthy battery, else hold 2. Level
 # 3 is ×1.25 on `ModifierSlot::PhaserDamage` — the beam hurts more, it does not
 # carry further (#955). This is the point #923 spent on `sensors`; it is back.
+#
+# Weapons is the LOWER step of the shed ladder (see the param note): the last
+# elevation the ship gives up, because giving it up drops the total to the
+# sustainable 6 and turns the battery around. Losing it costs damage output, not
+# the ability to shoot — the fire gate is red alert, which these rules read but
+# do not own.
+#
+# HOLD, at the higher priority: weapons is already at 3 and the charge is still
+# above the shed floor. This is the rung the battery actually oscillates on, so
+# it is the one the hysteresis earns its keep on.
+[[power.ai_policy.rule]]
+priority = 15
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(power_weapons) >= 3 and fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
+# ELEVATE: the RISING edge, at the restore floor — ten points of charge above
+# the shed, which at the total-6 recharge rate is seconds of recovery rather
+# than one tick's worth.
 [[power.ai_policy.rule]]
 priority = 10
 channel = "weapons"
-when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)"
+when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons)"
 verb = "set_power_group_allocation"
 level = 3
 
@@ -382,8 +513,12 @@ weight = 1.0
 # comparator. `assigned < 1` is what makes N free teams pick N DISTINCT
 # stations. `tier_ordinal` is the DamageTier discriminant (Operational 0,
 # Damaged 1, Disabled 2, Destroyed 3) — a structural enum ordinal, which is why
-# its bounds are literals rather than params; Destroyed is excluded because a
-# repair team alone cannot lift the latch.
+# its lower bound is a literal rather than a param. The Destroyed rung (3) is
+# REACHABLE: since issue #1013 an on-site team repairs a destroyed system like
+# any other — `SystemHull::restore` has no tier gate and the first restored HP
+# un-latches it — so a destroyed station is real repair work and the eligibility
+# must not refuse it. The only tier excluded is Operational (0), which has
+# nothing to repair.
 #
 # Authored on every hull whether or not it crews repair teams: the teams gate
 # dispatch, so a ship that gains them later already has its ranking.
@@ -392,7 +527,7 @@ weight = 1.0
 sources = ["damaged-stations", "core-bucket"]
 horizon = 1e9
 switch_margin = 0.0
-eligibility = "candidate_fact(source_repair_request) > 0 and candidate_fact(assigned) < 1 and candidate_fact(tier_ordinal) > 0 and candidate_fact(tier_ordinal) < 3"
+eligibility = "candidate_fact(source_repair_request) > 0 and candidate_fact(assigned) < 1 and candidate_fact(tier_ordinal) > 0"
 
 # The bands sit INSIDE the urgent range and deliberately NOT at the DamageTier
 # thresholds — because tier strictly dominates, the deficit ladder only ever

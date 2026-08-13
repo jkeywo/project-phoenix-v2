@@ -530,6 +530,13 @@ capacity = 100.0
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25.0
 
+# DELIBERATELY the pre-#1003 single-floor shape: no `min_restore_*` pair and
+# `min_reserve_weapons` still at 10. This fixture exists for RNG/decode coverage
+# in one test world, it is outside `assets/entities/*.toml` (and so outside the
+# fleet-baseline pins), and it never fights long enough for a shed ladder to
+# matter — so it carries the smallest policy that still decodes rather than a
+# copy of the fleet's hysteresis. See `fragments/ai/fleet_baseline.toml` for the
+# shape every hull the fleet actually flies authors.
 [power.ai_policy.param]
 thrust_threshold = 0.7
 min_reserve_helm = 50.0

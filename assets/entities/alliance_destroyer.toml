@@ -553,14 +553,14 @@ active_duration = 6.0
 recharge_duration = 18.0
 
 [helm_console.radar]
-range = 187.5
+range = 93.75
 shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
 
 [navigation_console]
 
 [navigation_console.system_chart]
 range = 800
-shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker" ]
+shows = [ "region", "asteroid_field", "star", "planet", "moon", "station", "player", "objective_marker" ]
 selects = [ "station", "planet", "star", "region" ]
 
 [comms]
@@ -620,30 +620,36 @@ icon = "ship"
 
 [power_groups.helm]
 label = "entity.alliance_destroyer.power_groups.helm.label"
-# `min_level = 2` is the allocation lower bound the console and AI budget clamp
-# to — 2 is NOMINAL, the rung whose multiplier is 1.0. It is not a brownout
-# floor: a drained battery locks the reactor and forces every group to 1
-# regardless. A human Power officer can still command down to 1 to free the two
-# spare points in the 8-point budget.
+# `min_level` is the DISPLAY floor: the lowest rung the Power console's pip row
+# draws, published to the client since issue #1004. It is NOT an allocation
+# clamp — `PowerSystem` floors every group at `GROUP_LEVEL_MIN` (= 1) whatever a
+# hull authors, and nothing else server-side reads this number. It reads 1
+# because a human Power officer can command this group down to 1 to free spare
+# points in the 8-point budget, and a row starting at 2 would hide the rung they
+# are allowed to reach. NOMINAL — the rung whose multiplier is 1.0 — is 2, and
+# that is `default_level`, where the group boots.
 default_level = 2
-min_level = 2
+min_level = 1
 max_level = 4
 
 [power_groups.weapons]
 label = "entity.alliance_destroyer.power_groups.weapons.label"
-# `min_level = 2`: the allocation lower bound (NOMINAL, ×1.0). Not a brownout
-# floor — a flat battery locks the reactor and forces every group to 1. A human
-# Power officer can command down to 1 to spend the freed points elsewhere.
+# `min_level = 1`: the DISPLAY floor, as on Helm above — the bottom pip of the
+# console's row, not a clamp on what can be ordered. NOMINAL (×1.0) is 2, which
+# is where this group boots; dropping it to 1 is a legal order that spends the
+# freed point elsewhere, so rung 1 has to be drawn.
 default_level = 2
-min_level = 2
+min_level = 1
 max_level = 4
 
 [power_groups.shields]
 label = "entity.alliance_destroyer.power_groups.shields.label"
 # Nominal at 2 alongside Helm and Weapons: those three groups make the
 # sustainable resting total of 6. Higher levels buy shield regeneration.
+# `min_level = 1` is the DISPLAY floor (see Helm above), the bottom of the pip
+# row rather than a clamp.
 default_level = 2
-min_level = 2
+min_level = 1
 max_level = 4
 
 [[station]]

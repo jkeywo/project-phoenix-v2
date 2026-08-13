@@ -11,11 +11,14 @@ tags = [ "station", "comms_contact", "allied" ]
 # the Federation in the other one, so nothing outside the combat scenario changes
 # hostility as a result.
 #
-# It does NOT, by itself, make the station auto-acquirable as an enemy target:
-# `ai_target_selection` reads faction off the `With<Ship>` scan surface, so a
-# station is never the "nearest hostile". A raider reaches it through a named
-# `Destroy` directive, which is what combat_test's `assault-starbase` override
-# authors.
+# Since issue #1011, this DOES make the station auto-acquirable as an enemy
+# target: `ai_target_selection`'s `hostile_scan_q` reads faction off
+# `Or<(With<Ship>, With<StaticPointDefence>)>`, and this station is a
+# `StaticPointDefence` combatant (see below), so a hostile raider's untargeted
+# "nearest hostile" doctrine can lock it same as any ship. A raider can also
+# still reach it through a named `Destroy` directive, which is what
+# combat_test's `assault-starbase` override authors — the two routes are
+# independent, not alternatives.
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 # Autonomous point defence. The station is an AI-operated static combatant: it

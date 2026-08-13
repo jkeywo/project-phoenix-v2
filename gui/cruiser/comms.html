@@ -124,7 +124,7 @@
         var msgs = comms.messages || [];
         var threadMsg = msgs.find(function(m) { return !m.is_read; }) || msgs[msgs.length - 1] || null;
         cm.state = { thread: threadMsg, rejection: comms.rejection };
-        var navState = { blips: nav.blips || [], range: nav.radar_range || 5000, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
+        var navState = { blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 5000, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
         nm.state = navState;
         if (nmOv) nmOv.state = navState;
         var wp = nav.waypoint;

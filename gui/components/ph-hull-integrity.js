@@ -80,6 +80,15 @@ export class PhHullIntegrity extends HTMLElement {
       barState.totalMax = s.totalMax;
     }
 
+    // Destroyed-capability share (issue #1014). Host-supplied and never derived
+    // from `systems` — those rows are this recipient's #737 projection, so a
+    // system destroyed where nobody can see it is missing from them entirely.
+    // Accepted in either input shape's spelling and passed straight through.
+    const destroyed = s.destroyed_pct != null ? s.destroyed_pct : s.destroyedPct;
+    if (destroyed != null && Object.keys(barState).length > 0) {
+      barState.destroyed = destroyed;
+    }
+
     this.#barEl.state = Object.keys(barState).length > 0 ? barState : null;
 
     const entries = Array.isArray(s.systems) ? s.systems

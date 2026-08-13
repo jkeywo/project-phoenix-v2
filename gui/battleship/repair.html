@@ -56,9 +56,9 @@
       // s is a RepairConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var oh = s.overall_hull || {};
-        document.getElementById('hull-integrity').state = { total_pct: oh.pct != null ? oh.pct : 1 };
+        document.getElementById('hull-integrity').state = { total_pct: oh.pct != null ? oh.pct : 1, destroyed_pct: oh.destroyed_pct };
         document.getElementById('core-damage').state = { entries: s.core_systems || [] };
-        document.getElementById('repair-teams').state = { teams: s.teams || [], auto: !!s.repair_auto, targets: s.dispatch_targets || [] };
+        document.getElementById('repair-teams').state = { teams: s.teams || [], auto: !!s.repair_auto, targets: s.dispatch_targets || [], damaged: s.damaged_systems || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
         var active = (s.teams || []).filter(function(t) { return t && t.status && t.status !== 'idle'; }).length;
         var total = (s.teams || []).length;

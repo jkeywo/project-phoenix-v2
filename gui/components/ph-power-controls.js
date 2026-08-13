@@ -6,6 +6,19 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 
+/**
+ * The lowest rung to draw for a group whose entry carries no `min_level`.
+ *
+ * Since issue #1004 the server publishes the authored floor on every
+ * `PowerGroupEntry`, so this only stands in for a pre-#1004 payload — and there
+ * the right answer is 1, not 0. The engine has always clamped every group to
+ * `GROUP_LEVEL_MIN` (= 1); a 0 here drew a bottom pip no order could ever light,
+ * which is what put nine lights on a three-group console instead of twelve. Same
+ * number as `ship::config::default_min_power_level`, which is also the Rust
+ * decoder's `#[serde(default)]` for the field.
+ */
+const DEFAULT_MIN_LEVEL = 1;
+
 export class PhPowerControls extends HTMLElement {
   #state = null;
   #pipCache = new Map();
@@ -24,7 +37,11 @@ export class PhPowerControls extends HTMLElement {
     .group { border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
     .group-top { display: flex; justify-content: space-between; align-items: center; }
     .group-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.2em; color: var(--ink); }
-    .pip-row { display: flex; align-items: center; gap: 0.4rem; justify-content: center; }
+    /* One visual unit per power group: [− button] [pips] [+ button], so the
+       controls a group's stepper operates on sit right beside its gems
+       instead of floating in a detached row underneath (issue #1005). */
+    .pip-cluster { display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+    .pip-row { display: flex; align-items: center; gap: 0.4rem; }
     .pip { width: 1.2rem; height: 1.2rem; border-radius: 50%; border: 2px solid var(--line-faint); background: var(--bg-deep); cursor: pointer; transition: all 0.15s ease; }
     .pip:hover:not(.disabled) { border-color: var(--ink-dim); }
     .pip.active { background: var(--loaded); border-color: var(--loaded); box-shadow: 0 0 6px rgba(78,200,112,0.5); }
@@ -35,7 +52,6 @@ export class PhPowerControls extends HTMLElement {
     .pip.held { background: transparent; border-color: var(--reloading); box-shadow: none; }
     .pip.disabled { cursor: default; opacity: 0.3; }
     .level-text.held { color: var(--reloading); }
-    .pip-btn-row { display: flex; align-items: center; gap: 0.5rem; justify-content: center; }
     .level-text { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
@@ -97,9 +113,9 @@ export class PhPowerControls extends HTMLElement {
             <span class="group-label"></span>
             <span class="level-text"></span>
           </div>
-          <div class="pip-row"></div>
-          <div class="pip-btn-row">
+          <div class="pip-cluster">
             <button type="button" class="mini-btn" data-action="decr"><span class="mini-bg"></span><span class="lbl">−</span></button>
+            <div class="pip-row"></div>
             <button type="button" class="mini-btn" data-action="incr"><span class="mini-bg"></span><span class="lbl">+</span></button>
           </div>
         `;
@@ -125,7 +141,7 @@ export class PhPowerControls extends HTMLElement {
         decrBtn.addEventListener('click', () => {
           if (auto) return;
           const cur = this.#currentLevel(gid);
-          const min = group.min_level != null ? group.min_level : 0;
+          const min = group.min_level != null ? group.min_level : DEFAULT_MIN_LEVEL;
           if (cur > min && this.sendAction) {
             this.sendAction('set_power', { target: gid, level: cur - 1 });
           }
@@ -146,7 +162,7 @@ export class PhPowerControls extends HTMLElement {
       const level = group.level != null ? group.level : 0;
       const commanded = commandedLevel(group);
       const held = commanded > level;
-      const minLevel = group.min_level != null ? group.min_level : 0;
+      const minLevel = group.min_level != null ? group.min_level : DEFAULT_MIN_LEVEL;
       const maxLevel = group.max_level != null ? group.max_level : 4;
 
       el.querySelector('.group-label').textContent = group.label || group.id;

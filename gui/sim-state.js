@@ -104,6 +104,14 @@ export class ClientSimState {
      * `SystemHullUpdate` arrives.
      */
     this.hullAggregate = null;
+    /**
+     * Share of the ship's total hull capacity (0.0–1.0) held by systems the
+     * host reports as destroyed (issue #1014). Like `hullAggregate` this spans
+     * every damageable system, including ones `consoleHull` never shows this
+     * client, so it can never be re-derived locally. `null` until the first
+     * `SystemHullUpdate` carrying it arrives.
+     */
+    this.hullDestroyed = null;
     /** Per-bank blaster state from the latest WeaponsUpdate or blackboard. */
     this.blasterBanks = [];
     /** Per-bank phaser state from the latest WeaponsUpdate. */
@@ -227,6 +235,13 @@ export class ClientSimState {
         this.consoleHull = d.entries || [];
         if (typeof d.aggregate_fraction === 'number') {
           this.hullAggregate = d.aggregate_fraction;
+        }
+        // `destroyed_fraction` is the companion ship-wide scalar (issue #1014):
+        // how much of the ship's capacity is gone rather than merely damaged.
+        // Same rule as the aggregate — keep the last known value when a payload
+        // omits it, so a legacy host never blanks the loss band.
+        if (typeof d.destroyed_fraction === 'number') {
+          this.hullDestroyed = d.destroyed_fraction;
         }
         break;
       case 'SimState': {

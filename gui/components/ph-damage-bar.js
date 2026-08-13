@@ -13,10 +13,17 @@ export class PhDamageBar extends HTMLElement {
     .bar-wrap .fill { position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.5s ease; }
     .bar-wrap .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
+    /* Destroyed capability (issue #1014): capacity that is gone, not merely
+       damaged. Anchored to the RIGHT — the segment lost off the top of the bar —
+       and hatched so it reads as a distinct band rather than as the crit fill
+       colour bleeding across the whole bar. */
+    /* Deliberately no transition here, unlike .fill above: capability loss is instantaneous, so .lost snaps to its new width; the 0.5s glide is only for ordinary HP movement. */
+    .bar-wrap .lost { position: absolute; top: 0; right: 0; height: 100%; border-left: 1px solid var(--fire); background: repeating-linear-gradient(135deg, var(--fire-dim) 0 3px, var(--fire) 3px 6px); }
     .bar-wrap .label { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; letter-spacing: 0.1em; color: var(--ink); text-shadow: 0 0 4px #000; pointer-events: none; }
   </style>
   <div class="bar-wrap">
     <div class="fill" id="bar-fill" style="width:100%"></div>
+    <div class="lost" id="bar-lost" style="display:none;width:0%"></div>
     <span class="label" id="bar-label">— / —</span>
   </div>
 `;
@@ -38,6 +45,7 @@ export class PhDamageBar extends HTMLElement {
 
     const root = this.shadowRoot;
     const fill = root.getElementById('bar-fill');
+    const lost = root.getElementById('bar-lost');
     const label = root.getElementById('bar-label');
 
     const widthPct = Math.max(0, Math.min(1, pct)) * 100;
@@ -47,6 +55,21 @@ export class PhDamageBar extends HTMLElement {
     if (pct < 0.4) cls += ' crit';
     else if (pct < 0.75) cls += ' warn';
     fill.className = cls;
+
+    // `destroyed` is a host-supplied ship-wide share (issue #1014), never
+    // derived here: it is the fraction of total capacity held by destroyed
+    // systems, painted as a band at the right end. It is independent of the
+    // fill/warn/crit state above, which still reads the remaining-hull `pct`.
+    const destroyed = typeof d.destroyed === 'number' && Number.isFinite(d.destroyed)
+      ? Math.max(0, Math.min(1, d.destroyed))
+      : 0;
+    if (destroyed > 0) {
+      lost.style.display = 'block';
+      lost.style.width = (destroyed * 100) + '%';
+    } else {
+      lost.style.display = 'none';
+      lost.style.width = '0%';
+    }
 
     if (totalCurrent != null && totalMax != null) {
       label.textContent = Math.round(totalCurrent) + ' / ' + Math.round(totalMax);

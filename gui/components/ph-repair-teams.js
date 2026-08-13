@@ -38,12 +38,37 @@ export class PhRepairTeams extends HTMLElement {
     .progress-fill.returning { background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); }
     .dispatch-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    /* Damaged-systems list (issue #1015). Rows are buttons: tapping one asks
+       the host to make that system the next job of whichever team is already
+       sweeping its station. */
+    .damaged { display: flex; flex-direction: column; gap: 0.3rem; }
+    .damaged[hidden] { display: none; }
+    .damaged-list { display: flex; flex-direction: column; gap: 0.15rem; }
+    .dmg-row {
+      display: flex; align-items: center; gap: 0.4rem; width: 100%;
+      background: var(--bg-card); border: 1px solid var(--line-faint);
+      color: inherit; font: inherit; text-align: left; cursor: pointer;
+      padding: 0.25rem 0.35rem;
+    }
+    .dmg-row:disabled { cursor: default; opacity: 0.5; }
+    .dmg-row.prioritised { border-color: var(--cyan); }
+    .dmg-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.65rem; }
+    .dmg-row .tier-chip { font-size: 0.5rem; letter-spacing: 0.15em; border: 1px solid; padding: 0.02rem 0.25rem; flex-shrink: 0; }
+    .dmg-row .tier-chip.damaged { color: var(--reloading); border-color: var(--reloading); }
+    .dmg-row .tier-chip.disabled { color: var(--fire); border-color: var(--fire); }
+    .dmg-row .tier-chip.destroyed { color: var(--fire); border-color: var(--fire); background: var(--fire-dim); }
+    .dmg-row .pct { font-size: 0.55rem; color: var(--ink-dim); min-width: 2.4rem; text-align: right; flex-shrink: 0; }
+    .dmg-row .flag { font-size: 0.5rem; letter-spacing: 0.15em; color: var(--cyan); flex-shrink: 0; }
   </style>
   <div class="header">
     <span>${t('component.repair_teams.title')}</span>
     <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div id="teams-container"></div>
+  <div class="damaged" id="damaged" hidden>
+    <div class="header"><span>${t('component.repair_teams.damaged_title')}</span></div>
+    <div class="damaged-list" id="damaged-list"></div>
+  </div>
 `;
     this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     phAdoptConsoleStyles(this.shadowRoot);
@@ -100,6 +125,86 @@ export class PhRepairTeams extends HTMLElement {
     this.#animFrame = requestAnimationFrame(step);
   }
 
+  /**
+   * Render the damaged-systems list (issue #1015).
+   *
+   * `state.damaged` is `RepairConsolePayload.damaged_systems` — the visible hull
+   * rows that are broken, already worst-first, each flagged with the host's own
+   * verdict (`prioritised`, `in_progress`). Nothing here re-derives any of that:
+   * a tap sends the row's `system_id` and the host decides which team, if any,
+   * can act on it, so a highlight always reflects a choice the server made.
+   *
+   * A row is only rendered as a CONTROL when tapping it could actually do
+   * something. Rows a team is already on site at are the exception the host's
+   * own candidate rule creates, and they are shown disabled — see the comment
+   * at the `noop` flag below.
+   *
+   * The whole section hides when nothing is damaged, so an intact ship's repair
+   * panel looks exactly as it did before this list existed.
+   */
+  #renderDamaged(s, auto) {
+    const rows = Array.isArray(s.damaged) ? s.damaged : [];
+    const section = this.shadowRoot.getElementById('damaged');
+    const list = this.shadowRoot.getElementById('damaged-list');
+    section.hidden = rows.length === 0;
+    if (rows.length === 0) { list.innerHTML = ''; return; }
+
+    const live = new Set(rows.map(r => r.system_id));
+    Array.from(list.children).forEach(child => {
+      if (!live.has(child.dataset.systemId)) child.remove();
+    });
+
+    rows.forEach((row, idx) => {
+      let el = list.querySelector(`[data-system-id="${row.system_id}"]`);
+      if (!el) {
+        el = document.createElement('button');
+        el.type = 'button';
+        el.className = 'dmg-row';
+        el.dataset.systemId = row.system_id;
+        el.innerHTML = '<span class="name"></span><span class="flag"></span><span class="tier-chip"></span><span class="pct"></span>';
+        el.addEventListener('click', () => {
+          if (el.disabled) return;
+          if (this.sendAction) {
+            // System-targeted on purpose: the ordinal the sweep consumes is
+            // resolved host-side, because #737 hides most of the candidates
+            // this console would have to rank. See repair-dispatch.js.
+            this.sendAction('set_repair_target_priority', { system_id: row.system_id });
+          }
+        });
+        list.appendChild(el);
+      }
+      // Keep DOM order in step with the host's worst-first ordering.
+      if (list.children[idx] !== el) list.insertBefore(el, list.children[idx] || null);
+
+      const tier = String(row.tier || '').toLowerCase();
+      const name = row.display_name || row.system_id;
+      // A row a team is already standing on is the one system the host's sweep
+      // never offers as a candidate — `sweep_candidates` excludes every on-site
+      // system — so a tap on it resolves to nothing at all. Render it (it is
+      // real damage, and the [ON IT] flag is the point of showing it) but do not
+      // dress it as a control: an enabled button promising "fix this next" that
+      // is structurally incapable of doing so is a lie the player pays for in
+      // taps. A prioritised row stays live regardless — that highlight IS a
+      // choice the host made.
+      const noop = !!row.in_progress && !row.prioritised;
+      el.className = 'dmg-row' + (row.prioritised ? ' prioritised' : '');
+      el.disabled = auto || noop;
+      el.querySelector('.name').textContent = name;
+      el.querySelector('.tier-chip').className = 'tier-chip ' + tier;
+      el.querySelector('.tier-chip').textContent = t('component.repair_teams.tier.' + tier);
+      el.querySelector('.pct').textContent = Math.round((row.damage_pct || 0) * 100) + '%';
+      const flag = el.querySelector('.flag');
+      flag.textContent = row.prioritised
+        ? t('component.repair_teams.next')
+        : row.in_progress ? t('component.repair_teams.working') : '';
+      el.title = row.prioritised
+        ? t('component.repair_teams.prioritised_title', { name })
+        : noop
+          ? t('component.repair_teams.working_title', { name })
+          : t('component.repair_teams.prioritise_title', { name });
+    });
+  }
+
   #render() {
     const s = this.#state || {};
     const teams = Array.isArray(s.teams) ? s.teams : [];
@@ -107,6 +212,10 @@ export class PhRepairTeams extends HTMLElement {
     const container = this.shadowRoot.getElementById('teams-container');
     const badge = this.shadowRoot.getElementById('auto-badge');
     badge.style.display = auto ? 'inline' : 'none';
+
+    // Before the empty-teams bail-out: the damage list is a readout in its own
+    // right, and a ship with no repair teams still has systems worth naming.
+    this.#renderDamaged(s, auto);
 
     if (teams.length === 0) {
       if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.repair_teams.empty'); container.appendChild(this.#emptyEl); }
@@ -187,41 +296,13 @@ export class PhRepairTeams extends HTMLElement {
         drow.querySelectorAll('.btn').forEach(b => { b.disabled = auto; });
       } else {
         // Busy team: show its current target; dispatch is not offered.
+        // Ordering the team's work is not offered HERE either since issue
+        // #1015 — the per-team 1/2/3 ordinal buttons are gone, replaced by the
+        // damaged-systems list below, which lets the player name the system
+        // instead of guessing its rank in a list the console cannot see.
         drow.style.display = 'none';
         label.style.display = 'block';
         label.textContent = t('component.repair_teams.target', { target: team.target || '—' });
-
-        // Priority controls only for on-site (repairing) teams (issue #739).
-        const isRepairing = status === 'repairing';
-        let priorityRow = card.querySelector('.priority-row');
-        if (isRepairing) {
-          if (!priorityRow) {
-            priorityRow = document.createElement('div');
-            priorityRow.className = 'priority-row';
-            priorityRow.style.cssText = 'display:flex;gap:0.3rem;align-items:center;margin-top:0.2rem;';
-            priorityRow.innerHTML = `
-              <span style="font-size:0.55rem;letter-spacing:0.15em;color:var(--ink-dim);">${t('component.repair_teams.priority')}</span>
-              <button type="button" class="btn priority-btn" data-priority="0" style="font-size:0.55rem;padding:0.1rem 0.3rem;">1</button>
-              <button type="button" class="btn priority-btn" data-priority="1" style="font-size:0.55rem;padding:0.1rem 0.3rem;">2</button>
-              <button type="button" class="btn priority-btn" data-priority="2" style="font-size:0.55rem;padding:0.1rem 0.3rem;">3</button>
-            `;
-            priorityRow.querySelectorAll('.priority-btn').forEach(btn => {
-              btn.addEventListener('click', () => {
-                if (btn.disabled || auto) return;
-                if (this.sendAction) {
-                  this.sendAction('set_repair_priority', { team_idx: team.id, priority: parseInt(btn.dataset.priority) + 1 });
-                }
-              });
-            });
-            card.appendChild(priorityRow);
-          }
-          priorityRow.style.display = auto ? 'none' : 'flex';
-          priorityRow.querySelectorAll('.priority-btn').forEach(btn => {
-            btn.disabled = auto;
-          });
-        } else if (priorityRow) {
-          priorityRow.style.display = 'none';
-        }
       }
 
       const fill = card.querySelector('.progress-fill');

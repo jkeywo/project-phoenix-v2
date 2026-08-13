@@ -217,6 +217,7 @@ export class PhNavigationMap extends HTMLElement {
     const R = Math.min(W, H) / 2;
     const state = this.#state || {};
     const blips = state.blips || [];
+    const regions = state.regions || [];
     const range = state.range || 50000;
     const rangeClamped = range > 0 ? range : 50000;
     const shipPos = state.ship_pos || { x: 0, z: 0 };
@@ -262,6 +263,11 @@ export class PhNavigationMap extends HTMLElement {
     // to the centre of the screen. Matches the legacy navigation console.
     this.#drawGrid(octx, cx, cy, scale, 0, 0, 0, W, H, rangeClamped);
 
+    // Areas sit under every point marker, matching the viewscreen radar's
+    // draw order (regions before blips) so a hull never hides inside its fill.
+    const showNames = this.#zoom >= 0.4;
+    this.#drawRegions(octx, regions, cx, cy, scale, namePx, showNames);
+
     if (waypoint && Number.isFinite(waypoint.x) && Number.isFinite(waypoint.z)) {
       this.#drawWaypoint(octx, waypoint, cx, cy, scale, wpPx);
     }
@@ -271,11 +277,13 @@ export class PhNavigationMap extends HTMLElement {
 
     this.#projectedBlips = [];
     const blipR = Math.max(3, R * 0.015);
-    const showNames = this.#zoom >= 0.4;
     for (const b of blips) {
       const [sx, sy] = this.#worldToScreen(b.world_x, b.world_z, 0, 0, 0, scale, cx, cy);
       if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) continue;
       const color = this.#blipColor(b.stance);
+      // Mission contacts wear a plain gold ring. The ticked ring is the
+      // target-lock decoration on the tactical radar — a different feature.
+      if (b.objective_target) this.#drawObjectiveRing(octx, sx, sy, blipR + 6);
       this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
       if (showNames && b.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
@@ -388,6 +396,111 @@ export class PhNavigationMap extends HTMLElement {
       octx.textAlign = 'left';
       octx.fillText('WP', px + d + 4, py + 3);
     }
+    octx.restore();
+  }
+
+  /**
+   * Region colour as `[r, g, b]` 0-255 ints. `region.color` arrives as the
+   * entity's authored `[radar_appearance].region_colour` — raw 0..1 floats,
+   * not a CSS string. The neutral fallback is the placeholder used until a
+   * colour is authored (same value as the viewscreen radar's).
+   */
+  #regionRgb(color) {
+    const c = (Array.isArray(color) && color.length >= 3) ? color : [0.66, 0.69, 0.75];
+    return [
+      Math.round((c[0] || 0) * 255),
+      Math.round((c[1] || 0) * 255),
+      Math.round((c[2] || 0) * 255),
+    ];
+  }
+
+  /**
+   * Draw region hulls and outlines under the blips.
+   *
+   * Shapes mirror the viewscreen radar's renderer: a sphere is a filled
+   * circle, a torus is one thick stroked ring (no fill), a box is an
+   * axis-aligned filled rect — box `yaw` is deliberately ignored, matching
+   * the Rust renderer. An `objective_target` region strokes in the waypoint
+   * gold instead of its own colour: for a sphere or box that gold outline
+   * sits around the region's own fill, but a torus never has a fill to
+   * begin with, so its single stroked ring renders entirely gold. That is
+   * exact parity with `gui/radar-widget.js`. The Rust viewscreen renderer
+   * differs: it keeps a region's own authored colour and adds a small gold
+   * ring only to icon-carrying objective entities, so gold-marking region
+   * shapes is a chart-side extension (known parity gap), not shared
+   * behaviour.
+   *
+   * Geometry is authored in world units: `#worldToScreen` offsets by
+   * `scale * zoom` buffer pixels per world unit, so sizes use the same
+   * factor. Every extent floors at 4px so a distant or zoomed-out region
+   * stays visible instead of collapsing to nothing.
+   */
+  #drawRegions(octx, regions, cx, cy, scale, namePx, showNames) {
+    if (!regions || regions.length === 0) return;
+    const pxPerWorld = scale * this.#zoom;
+    octx.save();
+    for (const region of regions) {
+      if (!region) continue;
+      const [sx, sy] = this.#worldToScreen(region.x || 0, region.z || 0, 0, 0, 0, scale, cx, cy);
+      const [r, g, b] = this.#regionRgb(region.color);
+      const fill = 'rgba(' + r + ',' + g + ',' + b + ',0.3)';
+      const stroke = region.objective_target ? '#d4a820' : 'rgb(' + r + ',' + g + ',' + b + ')';
+      let labelOffset;
+
+      if (region.shape === 'sphere') {
+        const rPx = Math.max(4, (region.radius || 0) * pxPerWorld);
+        octx.beginPath();
+        octx.arc(sx, sy, rPx, 0, Math.PI * 2);
+        octx.fillStyle = fill;
+        octx.fill();
+        octx.strokeStyle = stroke;
+        octx.lineWidth = 1.5;
+        octx.stroke();
+        labelOffset = rPx;
+      } else if (region.shape === 'torus') {
+        const outerR = region.outer_radius != null ? region.outer_radius : (region.radius || 0);
+        const outerPx = Math.max(4, outerR * pxPerWorld);
+        let innerPx = Math.max(0, (region.inner_radius || 0) * pxPerWorld);
+        if (innerPx >= outerPx) innerPx = Math.max(0, outerPx - 1);
+        octx.beginPath();
+        octx.arc(sx, sy, (outerPx + innerPx) / 2, 0, Math.PI * 2);
+        octx.lineWidth = Math.max(1, outerPx - innerPx);
+        octx.strokeStyle = stroke;
+        octx.stroke();
+        labelOffset = outerPx;
+      } else if (region.shape === 'box') {
+        const he = region.half_extents || [0, 0];
+        const halfW = Math.max(4, (he[0] || 0) * pxPerWorld);
+        const halfH = Math.max(4, (he[1] || 0) * pxPerWorld);
+        octx.fillStyle = fill;
+        octx.fillRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
+        octx.strokeStyle = stroke;
+        octx.lineWidth = 1.5;
+        octx.strokeRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
+        labelOffset = halfW;
+      } else {
+        // Unknown shape — skip, matching the viewscreen radar's own `_ => None`.
+        continue;
+      }
+
+      // Same label treatment as blip names, including the zoom-out floor.
+      if (showNames && region.name) {
+        octx.font = namePx + 'px "JetBrains Mono", monospace';
+        octx.fillStyle = stroke;
+        octx.fillText(region.name, sx + labelOffset + 4, sy + 4);
+      }
+    }
+    octx.restore();
+  }
+
+  /** Plain gold ring marking an objective contact (no target-lock ticks). */
+  #drawObjectiveRing(octx, sx, sy, ringR) {
+    octx.save();
+    octx.strokeStyle = '#d4a820';
+    octx.lineWidth = 2;
+    octx.beginPath();
+    octx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    octx.stroke();
     octx.restore();
   }
 

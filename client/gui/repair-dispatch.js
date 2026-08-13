@@ -75,7 +75,11 @@ export function dispatchRepairTeam(teamIdx, target, send) {
  * can assert on the exact wire shape.
  *
  * @param {number} teamIdx repair team slot index
- * @param {number} priority priority value (higher = more urgent)
+ * @param {number} priority 1-based ordinal into the station's remaining repair
+ *   work, ranked worst-first: 1 (and 0) means "take the worst job next", 2 the
+ *   second worst, clamped to however many jobs are left (issue #1013). NOT a
+ *   magnitude — a larger number is a job further down the list, not a more
+ *   urgent one.
  * @returns {{type: string, data: object}}
  */
 export function setRepairPriorityPayload(teamIdx, priority) {
@@ -102,4 +106,53 @@ export function setRepairPriorityPayload(teamIdx, priority) {
  */
 export function setRepairPriority(teamIdx, priority, send) {
   return sendControlSystem(REPAIR_SYSTEM_ID, setRepairPriorityPayload(teamIdx, priority), send);
+}
+
+/**
+ * Build the `SetRepairTargetPriority` payload without sending it (issue #1015).
+ *
+ * The damaged-systems list taps name a SYSTEM and carry no ordinal, because the
+ * console cannot compute one: post issue #737 it is shown core rows, its own
+ * station's rows, and the single row each team is on site at — and that last row
+ * is exactly the one the host's sweep excludes from its candidate list, so any
+ * rank derived here would be a rank over a list with holes in it.
+ *
+ * Sending the system id is not a way to steer sweeps the console cannot see. The
+ * same projection gates the LIST: a row the host did not send cannot be rendered
+ * and so cannot be tapped, which in practice means the core bucket and this
+ * station's own rows. What host-side resolution buys is that a tap on a row the
+ * console CAN show stays correct — under the projection (the host ranks the
+ * whole group, not the visible slice), under re-ranking (damage between the tap
+ * and the hand-off moves the ranking, not the pinned row), and as the visible
+ * set changes. See `SystemControlPayload::SetRepairTargetPriority` in
+ * `src/core/messages.rs`.
+ *
+ * `setRepairPriorityPayload` above is NOT deprecated by this — it stays the
+ * right payload for anything that genuinely means "the nth job", and the two do
+ * not overwrite each other: a tap sets the host's pin and leaves the team's
+ * standing ordinal alone.
+ *
+ * @param {string} systemId the tapped system's `system_id`
+ * @returns {{type: string, data: object}}
+ */
+export function setRepairTargetPriorityPayload(systemId) {
+  if (typeof systemId !== 'string' || systemId.length === 0) {
+    throw new TypeError('repair-dispatch: system_id must be a non-empty system id');
+  }
+  return {
+    type: 'SetRepairTargetPriority',
+    data: { system_id: systemId },
+  };
+}
+
+/**
+ * Prioritise one damaged system in whichever team's sweep already covers it,
+ * through the explicit command gateway.
+ *
+ * @param {string} systemId
+ * @param {((type: string, data?: object) => void)} [send]
+ * @returns {object|null} the envelope that was sent, or null when offline.
+ */
+export function setRepairTargetPriority(systemId, send) {
+  return sendControlSystem(REPAIR_SYSTEM_ID, setRepairTargetPriorityPayload(systemId), send);
 }

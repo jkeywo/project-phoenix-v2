@@ -114,29 +114,25 @@ spawn_on      = "game_start"
 # next to the player without ever acquiring it as a target, and three of the
 # five chokepoints never fire. Both directions, on world load, before the first
 # targeting tick — the same pattern `combat_test.toml` uses.
-[[trigger]]
-condition = "on_world_loaded"
+[script]
+setup = """
+on_world_loaded("on_load");
 
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Harrow"
-  enemy   = "Federation"
-
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Federation"
-  enemy   = "Harrow"
-
-  # The player's AI helm needs somewhere to be going. Without a directive the
-  # backfilled crew parks at the spawn point at zero speed, and collision
-  # damage — which scales with speed — rounds to nothing.
-  [[trigger.action]]
-  type              = "add_objective"
-  id                = "obj-rng-coverage-patrol"
-  text              = "world.rng_coverage.trigger.action.obj_patrol.text"
-  mandatory         = true
-  source            = "mission"
-  base_priority     = 40.0
-  directive_kind    = "Patrol"
-  directive_anchors = ["patrol_a", "patrol_b", "patrol_c"]
-  directive_loop    = true
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    // The player's AI helm needs somewhere to be going. Without a directive the
+    // backfilled crew parks at the spawn point at zero speed, and collision
+    // damage — which scales with speed — rounds to nothing.
+    ctx.effects.add_objective(#{
+        id: "obj-rng-coverage-patrol",
+        text: "world.rng_coverage.trigger.action.obj_patrol.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 40,
+        directive_kind: "Patrol",
+        directive_anchors: ["patrol_a", "patrol_b", "patrol_c"],
+        directive_loop: true
+    });
+}
+"""

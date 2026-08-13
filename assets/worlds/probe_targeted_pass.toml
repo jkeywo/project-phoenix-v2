@@ -58,42 +58,36 @@ spawn_on = "game_start"
 
 # Make Harrow and Federation mutually hostile before the target spawns, so the
 # Alliance captain doctrine's first-contact rule raises Red Alert on sight and the
-# movement `posture` fact presses the class doctrine.
-[[trigger]]
-condition = "on_world_loaded"
+# movement `posture` fact presses the class doctrine. Then spawn the named target
+# and author the mission `Destroy` objective that names it. `objectives.rs` gives
+# every Destroy objective `SystemAffinity::Helm`, which is what makes it the top
+# Helm-relevant objective both `helm_destroy_target` and `operate_navigation_ai`
+# read.
+[script]
+setup = """
+on_world_loaded("on_load");
+on_timer(0, "on_start");
 
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Harrow"
-  enemy   = "Federation"
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
 
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Federation"
-  enemy   = "Harrow"
-
-# The named target, and the mission objective that names it.
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/alliance_destroyer.toml"
-  name          = "probe_target"
-  position      = [0.0, 0.0, -70.0]
-  overrides     = { faction = "cccccccc-3333-4333-8333-cccccccccccc" }
-
-  # A mission `Destroy` carrying a target NAME. `objectives.rs` gives every
-  # Destroy objective `SystemAffinity::Helm`, which is what makes it the top
-  # Helm-relevant objective both `helm_destroy_target` and
-  # `operate_navigation_ai` read.
-  [[trigger.action]]
-  type           = "add_objective"
-  id             = "obj-destroy-target"
-  text           = "world.probe_targeted_pass.trigger.action.obj_destroy_target.text"
-  mandatory      = true
-  targets        = ["probe_target"]
-  target         = "probe_target"
-  directive_kind = "Destroy"
-  base_priority  = 80.0
+fn on_start(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_destroyer.toml",
+        name: "probe_target",
+        position: [0, 0, -70],
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc" }
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-destroy-target",
+        text: "world.probe_targeted_pass.trigger.action.obj_destroy_target.text",
+        mandatory: true,
+        targets: ["probe_target"],
+        target: "probe_target",
+        directive_kind: "Destroy",
+        base_priority: 80
+    });
+}
+"""

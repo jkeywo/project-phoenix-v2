@@ -1,0 +1,30 @@
+# Layer-fixture world for the `src/world/server.rs` layer tests.
+#
+# A deliberately DECLARATIVE `[[trigger]]` world, kept as a fixture because every
+# shipped world is migrating to `[script]` authoring (issue #984) and the
+# layer-load path (`evaluate_layer_load`) only merges declarative trigger states —
+# scripts compile on the standalone/base-world path only, until script-in-layers
+# lands (follow-up). These tests pin the CURRENT layer contract: a loaded layer's
+# declarative triggers merge into `WorldContentRuntime` and unload removes exactly
+# them. When M7 deletes the declarative front-end, re-author the fixture and the
+# tests against the script-in-layers capability.
+
+[global]
+seed = 7
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "layer-fixture-obj"
+  text = "test.layer_fixture.objective"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "test.layer_fixture.raider"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "layer-fixture-obj-2"
+  text = "test.layer_fixture.objective2"

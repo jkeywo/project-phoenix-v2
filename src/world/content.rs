@@ -1398,12 +1398,27 @@ mod tests {
         assert!(states.iter().all(|s| !s.fired));
     }
 
-    // ── Shipped-world integration ─────────────────────────────────────────
+    // ── Declarative world-TOML integration ────────────────────────────────
+    //
+    // Formerly pinned against the shipped patrol.toml, which is now
+    // [script]-authored (issue #984) and parses ZERO declarative triggers — its
+    // behaviour is pinned by the scripted-trigger tests + digest parity. This
+    // inline literal keeps the DECLARATIVE parse→evaluate→AddObjective path
+    // covered until M7 removes the declarative evaluator (this test goes with it).
 
     #[test]
     fn patrol_world_on_destroyed_trigger_fires_add_objective() {
-        let toml = include_str!("../../assets/worlds/patrol.toml");
-        let world = crate::world::config::parse_world(toml).expect("patrol.toml must parse");
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "world.entity.raider_alpha.name"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-raider-down"
+  text = "test.declarative.objective"
+"#;
+        let world = crate::world::config::parse_world(toml).expect("literal must parse");
         let mut states = trigger_states_from_world(&world);
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("world.entity.raider_alpha.name".into(), "uuid-r".into());

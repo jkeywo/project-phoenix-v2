@@ -75,31 +75,35 @@ overrides = { tags = ["ship", "npc", "enemy"], behaviour = { doctrine = [
     zero_gates = [{ condition = "hull_below", threshold = 0.3 }] },
 ] } }
 
-# ── Triggers ──────────────────────────────────────────────────────────────────
+# ── Script ────────────────────────────────────────────────────────────────────
 
 # Tracer objective (issue #571): a Patrol directive added on world load, scored
 # by the viewscreen aggregator and rendered as prose on the captain panel.
-[[trigger]]
-condition = "on_world_loaded"
+# Destroying the raider adds the completion objective.
+[script]
+setup = """
+on_world_loaded("on_load");
+on_destroyed("world.entity.raider_alpha.name", "on_raider_destroyed");
 
-  [[trigger.action]]
-  type              = "add_objective"
-  id                = "obj-patrol-sector"
-  text              = "world.patrol.trigger.action.obj_patrol_sector.text"
-  mandatory         = true
-  source            = "mission"
-  base_priority     = 40.0
-  directive_kind    = "Patrol"
-  directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
-  directive_loop    = true
-  zero_gates        = [{condition = "hull_below", threshold = 0.1}]
+fn on_load(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-patrol-sector",
+        text: "world.patrol.trigger.action.obj_patrol_sector.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 40,
+        directive_kind: "Patrol",
+        directive_anchors: ["patrol_alpha", "patrol_beta", "patrol_gamma"],
+        directive_loop: true,
+        zero_gates: [#{ condition: "hull_below", threshold: flt("0.1") }]
+    });
+}
 
-[[trigger]]
-condition = "on_destroyed"
-entity    = "world.entity.raider_alpha.name"
-
-  [[trigger.action]]
-  type      = "add_objective"
-  id        = "obj-raider-destroyed"
-  text      = "world.patrol.trigger.action.obj_raider_destroyed.text"
-  mandatory = false
+fn on_raider_destroyed(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-raider-destroyed",
+        text: "world.patrol.trigger.action.obj_raider_destroyed.text",
+        mandatory: false
+    });
+}
+"""

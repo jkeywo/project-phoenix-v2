@@ -27,44 +27,41 @@ id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 
-# Make Harrow and Federation mutually hostile before the hulls spawn.
-[[trigger]]
-condition = "on_world_loaded"
+[script]
+setup = """
+// Make Harrow and Federation mutually hostile before the hulls spawn.
+on_world_loaded("on_load");
+// Spawn the two duelling hulls at t=0.
+on_timer(0, "on_start");
 
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Harrow"
-  enemy   = "Federation"
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
 
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Federation"
-  enemy   = "Harrow"
+fn on_start(ctx) {
+    // The aggressor: a Harrow-flagged battleship with a standing Destroy doctrine.
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_battleship.toml",
+        name: "aggressor",
+        position: [500, 0, 0],
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc", behaviour: #{ doctrine: [
+            #{ id: "kill", directive_kind: "Destroy",
+               base_priority: 80, target_speed: flt("0.9"), maintain_range: 20 },
+        ] } }
+    });
 
-# The aggressor: a Harrow-flagged battleship with a standing Destroy doctrine.
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/alliance_battleship.toml"
-  name          = "aggressor"
-  position      = [500.0, 0.0, 0.0]
-  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
-    { id = "kill", directive_kind = "Destroy",
-      base_priority = 80.0, target_speed = 0.9, maintain_range = 20.0 },
-  ] } }
-
-  # The victim: a lightly-built Federation courier placed right next to the
-  # aggressor. It also has a Destroy doctrine so both sides trade fire, but it is
-  # heavily outgunned by the battleship and is the one that dies.
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/alliance_courier.toml"
-  name          = "victim"
-  position      = [514.0, 0.0, 0.0]
-  overrides = { behaviour = { doctrine = [
-    { id = "kill", directive_kind = "Destroy",
-      base_priority = 80.0, target_speed = 0.9, maintain_range = 12.0 },
-  ] } }
+    // The victim: a lightly-built Federation courier placed right next to the
+    // aggressor. It also has a Destroy doctrine so both sides trade fire, but it is
+    // heavily outgunned by the battleship and is the one that dies.
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_courier.toml",
+        name: "victim",
+        position: [514, 0, 0],
+        overrides: #{ behaviour: #{ doctrine: [
+            #{ id: "kill", directive_kind: "Destroy",
+               base_priority: 80, target_speed: flt("0.9"), maintain_range: 12 },
+        ] } }
+    });
+}
+"""

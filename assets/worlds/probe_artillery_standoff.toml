@@ -62,27 +62,31 @@ id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 
-# One direction only — see the header.
-[[trigger]]
-condition = "on_world_loaded"
+[script]
+setup = """
+// One direction only — see the header.
+on_world_loaded("on_load");
 
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Harrow"
-  enemy   = "Federation"
+// The battleship, 300 units out along +X.
+on_timer(0, "spawn_battleship");
 
-# The battleship, 300 units out along +X.
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+}
 
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_warhawk.toml"
-  name          = "artillery_platform"
-  position      = [300.0, 0.0, 0.0]
-  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
-    { id = "kill", directive_kind = "Destroy",
-      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
-    { id = "patrol-warhawk", directive_kind = "None", directive_anchors = [], directive_loop = false },
-  ] } }
+fn spawn_battleship(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_harrow_warhawk.toml",
+        name: "artillery_platform",
+        position: [300, 0, 0],
+        overrides: #{
+            faction: "cccccccc-3333-4333-8333-cccccccccccc",
+            behaviour: #{ doctrine: [
+                #{ id: "kill", directive_kind: "Destroy",
+                   base_priority: 80, target_speed: flt("0.9"), maintain_range: 25 },
+                #{ id: "patrol-warhawk", directive_kind: "None", directive_anchors: [], directive_loop: false },
+            ] },
+        },
+    });
+}
+"""

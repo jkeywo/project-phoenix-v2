@@ -7171,7 +7171,7 @@ base_priority = 35.0
         let mut world_cfg = crate::world::config::WorldConfig::default();
         world_cfg
             .extra_worlds
-            .push("assets/worlds/patrol.toml".into());
+            .push("tests/fixtures/layer_declarative_triggers.toml".into());
         world_cfg
             .extra_worlds
             .push("assets/worlds/side.toml".into());
@@ -7187,7 +7187,7 @@ base_priority = 35.0
             "one Load command per extra_worlds entry"
         );
         assert!(
-            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "assets/worlds/patrol.toml")
+            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "tests/fixtures/layer_declarative_triggers.toml")
         );
         assert!(
             matches!(&pending.0[1], WorldLayerChange::Load { path: p, .. } if p == "assets/worlds/side.toml")
@@ -7214,7 +7214,7 @@ base_priority = 35.0
                         entity_name: "raider".into(),
                     },
                     actions: vec![TriggerAction::LoadWorld {
-                        path: "assets/worlds/patrol.toml".into(),
+                        path: "tests/fixtures/layer_declarative_triggers.toml".into(),
                     }],
                     when: None,
                     action_predicates: vec![],
@@ -7241,7 +7241,7 @@ base_priority = 35.0
         let pending = app.world().resource::<PendingWorldLayerChanges>();
         assert_eq!(pending.0.len(), 1, "one Load must be queued");
         assert!(
-            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "assets/worlds/patrol.toml")
+            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "tests/fixtures/layer_declarative_triggers.toml")
         );
     }
 
@@ -7265,7 +7265,7 @@ base_priority = 35.0
                         entity_name: "raider".into(),
                     },
                     actions: vec![TriggerAction::UnloadWorld {
-                        path: "assets/worlds/patrol.toml".into(),
+                        path: "tests/fixtures/layer_declarative_triggers.toml".into(),
                     }],
                     when: None,
                     action_predicates: vec![],
@@ -7292,7 +7292,7 @@ base_priority = 35.0
         let pending = app.world().resource::<PendingWorldLayerChanges>();
         assert_eq!(pending.0.len(), 1, "one Unload must be queued");
         assert!(
-            matches!(&pending.0[0], WorldLayerChange::Unload(p) if p == "assets/worlds/patrol.toml")
+            matches!(&pending.0[0], WorldLayerChange::Unload(p) if p == "tests/fixtures/layer_declarative_triggers.toml")
         );
     }
 
@@ -7307,7 +7307,7 @@ base_priority = 35.0
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "assets/worlds/patrol.toml".into(),
+                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
                 loader_path: None,
             });
 
@@ -7315,7 +7315,9 @@ base_priority = 35.0
 
         let layer_map = app.world().resource::<WorldLayerMap>();
         assert!(
-            layer_map.0.contains_key("assets/worlds/patrol.toml"),
+            layer_map
+                .0
+                .contains_key("tests/fixtures/layer_declarative_triggers.toml"),
             "WorldLayerMap must contain the loaded path"
         );
 
@@ -7336,7 +7338,7 @@ base_priority = 35.0
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "assets/worlds/patrol.toml".into(),
+                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
                 loader_path: None,
             });
         app.update();
@@ -7352,7 +7354,7 @@ base_priority = 35.0
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "assets/worlds/patrol.toml".into(),
+                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
                 loader_path: None,
             });
         app.update();
@@ -7379,7 +7381,7 @@ base_priority = 35.0
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "assets/worlds/patrol.toml".into(),
+                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
                 loader_path: None,
             });
         app.update();
@@ -7398,7 +7400,9 @@ base_priority = 35.0
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Unload("assets/worlds/patrol.toml".into()));
+            .push(WorldLayerChange::Unload(
+                "tests/fixtures/layer_declarative_triggers.toml".into(),
+            ));
         app.update();
 
         let trigger_count_unloaded = app
@@ -7414,7 +7418,9 @@ base_priority = 35.0
 
         let layer_map = app.world().resource::<WorldLayerMap>();
         assert!(
-            !layer_map.0.contains_key("assets/worlds/patrol.toml"),
+            !layer_map
+                .0
+                .contains_key("tests/fixtures/layer_declarative_triggers.toml"),
             "WorldLayerMap must no longer contain the unloaded path"
         );
     }

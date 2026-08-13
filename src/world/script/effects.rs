@@ -352,7 +352,9 @@ fn map_string_array(spec: &Map, key: &str) -> Result<Option<Vec<String>>, String
 /// `[900, 0, -560]` becomes the identical `[f32; 3]` a declarative
 /// `[900.0, 0.0, -560.0]` parses to (pinned by the mint / structural parity
 /// tests). `Ok(None)` when absent; `Err` when present but not a 3-element integer
-/// array.
+/// array. [`RealLit`] support is deliberately omitted: no shipped world authors a
+/// fractional transform, and a stray `flt()` here raises loudly rather than
+/// silently diverging — add the branch only when a world actually needs it.
 fn map_f32_array3(spec: &Map, key: &str) -> Result<Option<[f32; 3]>, String> {
     let Some(d) = spec.get(key) else {
         return Ok(None);
@@ -911,6 +913,59 @@ mod tests {
             .and_then(|o| o.get("helm_console"))
             .and_then(|h| h.get("target_speed"))
             .expect("override target_speed present");
+        assert_eq!(speed, &toml::Value::Float(0.9));
+    }
+
+    /// The doctrine-ARRAY shape the converted worlds actually author (issue #984
+    /// review advisory): a `flt` leaf nested Array→Map deep —
+    /// `overrides.behaviour.doctrine = [ { … target_speed = 0.9 … } ]` — must
+    /// still equal the declarative twin. `flt_override_leaf_matches_declarative_float`
+    /// pins Map→Map recursion; this pins the Array→Map→RealLit path the probe/duel
+    /// spawn overrides (and combat_test's waves) ride through `dynamic_to_toml`.
+    #[test]
+    fn flt_inside_a_doctrine_array_override_matches_declarative() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.spawn_entity(#{
+                    template_path: "assets/entities/ship.toml",
+                    name: "x",
+                    position: [0, 0, 0],
+                    overrides: #{
+                        behaviour: #{
+                            doctrine: [
+                                #{
+                                    id: "kill",
+                                    base_priority: 80,
+                                    target_speed: flt("0.9"),
+                                    maintain_range: 25,
+                                },
+                            ],
+                        },
+                    },
+                });
+            }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"spawn_entity\"\n\
+             template_path = \"assets/entities/ship.toml\"\n\
+             name = \"x\"\n\
+             position = [0.0, 0.0, 0.0]\n\
+             overrides = { behaviour = { doctrine = [ { id = \"kill\", base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 } ] } }",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+
+        // Pin the nested leaf concretely, as the flat-leaf test does.
+        let BufferedEffect::Action(TriggerAction::SpawnEntity { overrides, .. }) = &effs[0] else {
+            panic!("expected a spawn action, got {:?}", effs[0]);
+        };
+        let speed = overrides
+            .as_ref()
+            .and_then(|o| o.get("behaviour"))
+            .and_then(|b| b.get("doctrine"))
+            .and_then(|d| d.get(0))
+            .and_then(|row| row.get("target_speed"))
+            .expect("doctrine[0].target_speed present");
         assert_eq!(speed, &toml::Value::Float(0.9));
     }
 

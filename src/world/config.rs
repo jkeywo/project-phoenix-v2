@@ -5064,9 +5064,17 @@ entity    = "raider"
     fn parse_world_patrol_toml_loads_triggers_with_no_comms() {
         let toml = include_str!("../../assets/worlds/patrol.toml");
         let cfg = parse_world(toml).expect("patrol.toml must parse");
-        // patrol.toml has 2 triggers: on_world_loaded (Patrol directive) + on_destroyed
-        assert_eq!(cfg.triggers.len(), 2);
+        // patrol.toml is [script]-authored (issue #984): its on_world_loaded +
+        // on_destroyed triggers live in the Rhai block, registered at activation
+        // by compile_world_scripts/merge_script_triggers — so the DECLARATIVE
+        // trigger list parses empty. The scripted behaviour is pinned by the
+        // world::server scripted-trigger tests and the conversion's digest parity.
+        assert!(cfg.triggers.is_empty());
         assert!(cfg.comms.is_empty());
+        assert!(
+            toml.contains("[script]"),
+            "patrol.toml must carry its [script] block"
+        );
     }
 
     #[test]

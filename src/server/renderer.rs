@@ -220,7 +220,11 @@ fn restore_authoritative_local_ship_transform(
 /// Draw the local hull one fixed interval behind the authoritative pose. This is
 /// active only in Cinematic mode; first-person and overlay modes keep their exact
 /// tick transform because the local hull is hidden there.
-fn apply_local_ship_render_interpolation(
+///
+/// `pub(crate)`: `PfxPlugin::build` (src/server/pfx.rs) orders
+/// `spawn_engine_trails` after this system so engine-trail PFX read the
+/// interpolated pose instead of the fixed-tick one (issue #1002).
+pub(crate) fn apply_local_ship_render_interpolation(
     fixed_time: Res<Time<Fixed>>,
     mut ship_q: Query<
         (&ShipViewMode, &RenderInterp, &mut Transform),

@@ -308,7 +308,9 @@ impl Plugin for PfxPlugin {
                     sync_torpedo_pfx.run_if(in_state(GamePhase::InProgress)),
                     sync_blaster_pfx.run_if(in_state(GamePhase::InProgress)),
                     spawn_ship_explosions.run_if(in_state(GamePhase::InProgress)),
-                    spawn_engine_trails.run_if(in_state(GamePhase::InProgress)),
+                    spawn_engine_trails
+                        .after(crate::server::renderer::apply_local_ship_render_interpolation)
+                        .run_if(in_state(GamePhase::InProgress)),
                     tick_engine_trail_materials,
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
                     tick_bursts.run_if(in_state(GamePhase::InProgress)),

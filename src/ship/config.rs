@@ -84,6 +84,17 @@ pub struct SystemInstanceConfig {
     pub station: Option<StationId>,
     #[serde(default)]
     pub ai_only: bool,
+    /// Marks a system as human-seeking (pasm decision
+    /// `console-complexity-human-seeking-systems`): comms and navigation
+    /// always try to be under human control, walking the ship's authored
+    /// station order — owner first — until they find a human-held station.
+    /// "The seek order only ever chooses among human-held stations: the
+    /// mechanism prefers any human over the AI, it never forces a human." With
+    /// no human anywhere in the order the system falls back to AI control
+    /// exactly as today. See [`crate::ship::coordination::seek_human_host`]
+    /// for the pure resolution this flag gates.
+    #[serde(default)]
+    pub human_seeking: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_group: Option<PowerGroupId>,
     /// Optional rig-marker name for this system instance.
@@ -714,6 +725,49 @@ station = "captain"
     #[test]
     fn station_config_tutorials_survive_round_trip() {
         let config = parse_ok(tutorial_toml());
+        let encoded = toml::to_string(&config).expect("ship config should serialize");
+        let decoded = parse_ok(&encoded);
+        assert_eq!(decoded, config);
+    }
+
+    // ── Human-seeking systems (issue #984) ────────────────────────────────
+
+    #[test]
+    fn system_config_parses_human_seeking_flag() {
+        let config = parse_ok(valid_toml());
+
+        // Absent on systems that authored none (serde default).
+        let red_alert = config.system(&SystemId("red-alert".into())).unwrap();
+        assert!(!red_alert.human_seeking);
+    }
+
+    #[test]
+    fn system_config_human_seeking_survives_round_trip() {
+        let toml = r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command the bridge."
+rank = "Cpt."
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "comms"
+kind = "sensors"
+station = "captain"
+human_seeking = true
+"#;
+        let config = parse_ok(toml);
+        assert!(
+            config
+                .system(&SystemId("comms".into()))
+                .unwrap()
+                .human_seeking
+        );
+
         let encoded = toml::to_string(&config).expect("ship config should serialize");
         let decoded = parse_ok(&encoded);
         assert_eq!(decoded, config);

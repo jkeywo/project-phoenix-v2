@@ -149,6 +149,53 @@ pub fn broadcast_to_ship(sender_origin: ControlSource, seats: &[ShipSeat]) -> Ve
         .collect()
 }
 
+// ── Human-seeking systems (issue #984) ────────────────────────────────────────
+
+/// Find the human-held seat that should host a human-seeking system (pasm
+/// decision `console-complexity-human-seeking-systems`).
+///
+/// Comms and navigation "always try to be under human control": the seek
+/// walks the ship's authored station order — the system's own authored
+/// `station` (`owner`) FIRST, then the remaining entries of `seats` in
+/// AUTHORED order (the same deterministic ordering [`broadcast_to_ship`]
+/// depends on, built by the adapter from `ShipConfig.stations`) — and returns
+/// the first seat that is both [`ControlSource::Human`] and has a connected
+/// holder. `None` means no human anywhere in the order; the caller falls back
+/// to AI control exactly as today: "the seek order only ever chooses among
+/// human-held stations: the mechanism prefers any human over the AI, it never
+/// forces a human."
+///
+/// OWNER-FIRST IS LOAD-BEARING: comms is the LAST authored station on the
+/// cruiser and battleship hulls. A naive first-human-in-authored-order scan
+/// would steal the Comms console away from the Comms officer the instant
+/// anyone else on the bridge is seated. Trying `owner` before the rest of
+/// `seats` keeps the hull's own officer at their own console.
+///
+/// `owner` is the seeking system's own authored station (`SystemInstanceConfig::station`,
+/// resolved before calling — this function does no lookup of its own).
+/// `seats` MUST be built with the seeking system's own fine-system policy
+/// EXCLUDED from every seat's [`seat_control_source`] reduction: folding the
+/// seek's own not-yet-decided control source back into its input is a
+/// fixpoint over this function's own output, not an independent seat.
+pub fn seek_human_host<'a>(owner: Option<&StationId>, seats: &'a [ShipSeat]) -> Option<&'a ShipSeat> {
+    fn is_human_and_connected(seat: &ShipSeat) -> bool {
+        seat.control == ControlSource::Human && seat.holder.is_some()
+    }
+
+    if let Some(owner_id) = owner {
+        if let Some(owner_seat) = seats.iter().find(|seat| &seat.station == owner_id) {
+            if is_human_and_connected(owner_seat) {
+                return Some(owner_seat);
+            }
+        }
+    }
+
+    seats
+        .iter()
+        .filter(|seat| owner != Some(&seat.station))
+        .find(|seat| is_human_and_connected(seat))
+}
+
 /// A coordination message queued for lagged delivery.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueuedCoordination {
@@ -400,6 +447,82 @@ mod tests {
             seat("helm", ControlSource::Ai, None),
         ];
         assert!(broadcast_to_ship(ControlSource::Ai, &seats).is_empty());
+    }
+
+    // ── Human-seeking systems (issue #984) ─────────────────────────────────
+
+    /// OWNER-FIRST IS LOAD-BEARING: an earlier-authored human seat must not
+    /// steal the console from the system's own (later-authored) human owner.
+    #[test]
+    fn owner_human_wins_over_earlier_authored_human() {
+        let seats = vec![
+            seat("captain", ControlSource::Human, Some("alice")),
+            seat("comms", ControlSource::Human, Some("bob")),
+        ];
+        let owner = StationId("comms".into());
+
+        let found = seek_human_host(Some(&owner), &seats).unwrap();
+
+        assert_eq!(found.station, StationId("comms".into()));
+        assert_eq!(found.holder.as_deref(), Some("bob"));
+    }
+
+    /// No owner (an ownerless/NPC-style seek, or a caller that has not
+    /// resolved one) falls back to the first human in authored order.
+    #[test]
+    fn no_owner_falls_back_to_first_authored_human() {
+        let seats = vec![
+            seat("captain", ControlSource::Ai, None),
+            seat("helm", ControlSource::Human, Some("hikaru")),
+            seat("comms", ControlSource::Human, Some("bob")),
+        ];
+
+        let found = seek_human_host(None, &seats).unwrap();
+
+        assert_eq!(found.station, StationId("helm".into()));
+    }
+
+    #[test]
+    fn no_humans_anywhere_yields_none() {
+        let seats = vec![
+            seat("captain", ControlSource::Ai, None),
+            seat("helm", ControlSource::Ai, None),
+        ];
+        let owner = StationId("comms".into());
+
+        assert!(seek_human_host(Some(&owner), &seats).is_none());
+        assert!(seek_human_host(None, &seats).is_none());
+    }
+
+    /// A human-held station with nobody browser-connected is not a seek
+    /// candidate — same "control source vs. connected holder" distinction
+    /// `broadcast_to_ship` already draws.
+    #[test]
+    fn disconnected_human_seat_is_skipped() {
+        let seats = vec![
+            seat("captain", ControlSource::Human, None),
+            seat("helm", ControlSource::Human, Some("hikaru")),
+        ];
+
+        let found = seek_human_host(None, &seats).unwrap();
+
+        assert_eq!(found.station, StationId("helm".into()));
+    }
+
+    /// The owner seat is backfilled (AI) — not human-and-connected — so the
+    /// seek continues past it to the next human in authored order.
+    #[test]
+    fn owner_is_ai_falls_through_to_later_human() {
+        let seats = vec![
+            seat("comms", ControlSource::Ai, Some("stale-token")),
+            seat("captain", ControlSource::Human, Some("alice")),
+        ];
+        let owner = StationId("comms".into());
+
+        let found = seek_human_host(Some(&owner), &seats).unwrap();
+
+        assert_eq!(found.station, StationId("captain".into()));
+        assert_eq!(found.holder.as_deref(), Some("alice"));
     }
 
     // ── Lag queue ─────────────────────────────────────────────────────────

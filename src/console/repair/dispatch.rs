@@ -264,6 +264,7 @@ mod tests {
             kind: "generic".into(),
             station: station.map(|s| StationId(s.into())),
             ai_only: false,
+            human_seeking: false,
             power_group: None,
             marker: None,
             config: None,

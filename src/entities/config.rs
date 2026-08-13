@@ -4594,6 +4594,7 @@ impl EntityConfig {
                             None
                         },
                         ai_only: !has_shields_station,
+                        human_seeking: false,
                         // Shield arcs are governed by the shields group as a
                         // whole through ShieldRegen; they are not an extra
                         // allocatable Operations channel.
@@ -4631,6 +4632,7 @@ impl EntityConfig {
                         kind: crate::system_registry::RED_ALERT_KIND.into(),
                         station: None,
                         ai_only: true,
+                        human_seeking: false,
                         power_group: None,
                         marker: None,
                         config: None,

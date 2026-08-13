@@ -346,6 +346,7 @@ mod tests {
                 kind: "dummy".into(),
                 station: None,
                 ai_only: true,
+                human_seeking: false,
                 power_group: None,
                 marker: None,
                 config: None,

@@ -235,6 +235,17 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
     }
 }
 
+/// The content-ledger key one world's compiled script set is recorded under
+/// (issue #864).
+///
+/// `<world path>#scripts`, in the same `path#part` shape the loader already uses
+/// for an inline block's virtual path (`world.toml#script.<key>`) — so a
+/// designer reading a refusal sees a key that names the world it belongs to, and
+/// two worlds' script sets can never collide on one entry.
+pub fn script_ledger_key(world_path: &str) -> String {
+    format!("{world_path}#scripts")
+}
+
 /// The full load path for one world: lift → compile → cross-reference validate,
 /// folding every finding into one [`CompiledScripts`]. No caller wires this into
 /// activation in M1 (no shipped world authors scripts yet); it exists so the
@@ -247,6 +258,28 @@ pub fn load_world_scripts(
     let (sources, lift_findings) = lift_world_scripts(world_path, world_toml, resolver);
     let mut compiled = compile_scripts(&sources);
     compiled.findings.extend(lift_findings);
+    // Bind a save to the exact script set it was recorded against (issue #864).
+    //
+    // The compiled set's own `content_hash` — the same u64 that becomes
+    // `WorldScriptRuntime::content_hash` — is recorded into the content ledger,
+    // so `snapshot::content_digest` folds it and `Versions::check` refuses a save
+    // whose scripts have since moved. Recorded HERE rather than at either call
+    // site so both of them (headless's fail-fast gate and `compile_world_scripts`)
+    // are covered by construction, and so it lands on the loading thread — the
+    // same thread `build_headless_app` records the world TOML and freezes on.
+    //
+    // Belt AND braces, deliberately: an inline `[script]` block already rides in
+    // the world TOML's own recorded text, so an edit to it moves the digest
+    // twice. What this closes is the sibling-`.rhai` case, where the *text* is
+    // recorded by `OverlayScriptResolver` but nothing recorded the compiled set,
+    // and the case where two different source sets compile to the same text
+    // shape. On wasm the ledger is frozen in `wasm_init` before `Startup` runs,
+    // so a browser save binds through the world TOML's inline blocks (the whole
+    // shipped set) rather than through this record — moving that freeze past
+    // `Startup` is `server/bridge.rs`'s call, not this loader's.
+    if !sources.is_empty() {
+        crate::content_ledger::record_digest(&script_ledger_key(world_path), compiled.content_hash);
+    }
     // Cross-reference every handler name against the defined-function set: the
     // generic `on(..)` registrations, the Rhai trigger front-end
     // (`on_destroyed`, …), and the TOML `[[trigger]] script = "fn"` front-end.

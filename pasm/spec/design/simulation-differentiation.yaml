@@ -1,0 +1,24 @@
+entities:
+  - decision: simulation-differentiation-principles
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Simulation Differentiation Principles
+      summary: "Six principles govern every physical-simulation addition (2026-08-13, Starship Simulator Genesis review): state has causes; different systems consume the same authoritative state; sensors reveal state rather than scenario text; objects continue behaving when players are not looking at them; physical properties occasionally create unexpected solutions; procedural generation creates internally coherent situations, not mere variety."
+      rationale:
+        - "Phoenix's differentiation is depth of a small operational situation across several coordinated human roles, not breadth of a simulated universe. Genesis-class work is adopted as principles, never as scope."
+        - "The B-D foundation PRDs (fields and epistemics, physical world and vessels, resource network) and the Patrol Mode PRD cite this entry as their scope guard."
+    game_design:
+      must_not_be: [used to justify simulating detail no bridge officer can act on within a mission, satisfied by scripted exposition dressed as sensor output]
+
+  - decision: simulation-differentiation-non-goals
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Simulation Non-Goals
+      summary: "Phoenix deliberately does not build: walkable ship interiors, bodily crew needs (food, sleep, oxygen as routine), a persistent large NPC crew, galaxy-scale traversal or billions of systems, valve-level physical hardware manipulation, explorable planetary surfaces, or fully simulated astronomical formation histories. Starship Simulator is spending its development effort exactly there; Phoenix does not need that competition."
+      rationale:
+        - "The consumable test is the boundary: a resource or detail is simulated only if another bridge officer can make a consequential decision about it within a 30-90 minute mission."
+        - "A non-goal may still appear as authored scenario content (e.g. oxygen as hazardous cargo) without becoming a simulated system."
+    game_design:
+      must_not_be: [eroded one plausible feature at a time, overridden by a scenario PRD without revisiting this entry]

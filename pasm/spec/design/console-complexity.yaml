@@ -1,0 +1,48 @@
+entities:
+  - decision: console-complexity-star-ladder
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Console Complexity Star Ladder
+      summary: "Every station runs at a star rating built from authored rungs: an ordered ladder of station ratings, each rung declaring per-system control depth (AI / simplified / detailed). Star 0 is Backfill; rung count varies per station (typically 3-5 stars at the top). A scenario may additionally force individual systems detailed, leaving a station legitimately between rungs — the effective per-system state is the maximum of the chosen rung and the scenario floor, and the overlay never snaps the rung."
+      rationale:
+        - "Rungs extend the existing StationRatingConfig (a detailed_systems list beside automated_systems), so star selection, live mid-round change, Backfill fallback, and the lobby's ratings-length signal all reuse the delivered rating machinery."
+        - "Authored bundles beat derived arithmetic: designers curate coherent depth combinations per station (the Thorium station-set lesson), while the scenario overlay covers the between-rung states without unauthored rung synthesis."
+        - "Simplified means a limited AI — the fine-system policy runtime with authority scoped to that system — drives the full model from summary-surface settings, preserving AI/human symmetry; detailed means direct control of the full model."
+    game_design:
+      must_not_be: [derived arithmetically from system counts instead of authored, changed by a player who does not hold the station]
+
+  - decision: console-complexity-scenario-floor
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Scenario Detail Floor
+      summary: "Scenarios declare required-detailed systems through first-class world-TOML vocabulary naming console families or system kinds, never per-hull system ids, so the requirement applies to whatever hull the crew selects in the lobby. The floor is applied inside the pure rating resolver. The same vocabulary can mark additional systems human-seeking."
+      rationale:
+        - "Hull-agnostic by construction: a scenario cannot know the lobby's hull choice, so requirements expressed as entity overrides would silently miss — and the player ship discards world overrides at spawn today. The entity-override merge policy is deliberately left untouched by this feature."
+    game_design:
+      must_not_be: [expressed as per-hull entity overrides, used to lower a station below its authored default]
+
+  - decision: console-complexity-detail-screens
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Per-System Detail Screens
+      summary: "Detailed systems surface through per-system detail screens rendered by a generalised overlay host that console-core mounts when a keyed payload carries detail state — full-frame on phones, zero per-console HTML edits, state carried by the per-system blackboard publication. Detail screens are always accessible, including in combat; the binding authoring rule is that any action needed under time pressure must also exist on the station's summary surface, so detail screens hold planning, diagnosis, and configuration."
+      rationale:
+        - "Phone-depth doctrine from the 2026-08-13 bridge-simulator survey: at most two coupled variables plus a trend and an automation toggle per real-time screen; presets applied in one tap; depth placed in the gaps between phones (number hand-offs, two-officer handshakes); degradation expressed as unreliability rather than smaller numbers; automation always available and always worse than a competent human."
+        - "The existing guardrail stands: a rating tunes what a console offers its own operator, never whether ship state reaches the rest of the bridge (#873), and no simulation path branches on human-versus-AI downstream of command admission."
+    game_design:
+      must_not_be: [the only home of a time-pressured action, locked out at red alert]
+
+  - decision: console-complexity-human-seeking-systems
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Human-Seeking Systems
+      summary: "Comms and navigation always try to be under human control: each walks an authored station order until it finds a human-held station, where it appears as extra buttons beside the hero bar (the destroyer-tactical precedent). With no human anywhere in the order, the system falls back to AI control exactly as today. A floating system carries its own control tier — default simplified — independent of the host station's rung, so hosting a visiting system never changes the host's star."
+      rationale:
+        - "The seek order only ever chooses among human-held stations: the mechanism prefers any human over the AI, it never forces a human."
+        - "Scenarios can mark additional systems human-seeking through the scenario-floor vocabulary."
+    game_design:
+      must_not_be: [allowed to inflate the host station's star rating, used to force a station onto an unwilling holder]

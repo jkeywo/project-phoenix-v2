@@ -4,7 +4,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Phoenix Demo and Post-Demo Delivery
-      summary: "The demo critical path front-loads deterministic simulation (#849), completed composable entity templates (#869), and Backfill combat symmetry (#870) before Combat Test doctrine closure (#774), measured readiness (#868 and #850), the snapshot tracer (#848/#862), and the deliberately narrow limited release (#853/#931): Combat Test only, Alliance Destroyer only. Everything else is post-demo and runs as the five release bands A-E — Falling Skyway with native/cloud delivery and mod packs (#851/#852/#855/#856), Borrowed Sun with P2P (#858/#854), Narrow Season with the GM console MVP (#859/#930), The Broken Tithe with GM facilitation (#860), and The Silent Corridor with the GM console complete (#861) — widening the catalogue by one playable hull per band (#922) and carrying a visual/UX polish pass each time."
+      summary: "The demo critical path front-loads deterministic simulation (#849), completed composable entity templates (#869), and Backfill combat symmetry (#870) before Combat Test doctrine closure (#774), measured readiness (#868 and #850), the snapshot tracer (#848/#862), and the deliberately narrow limited release (#853/#931): Combat Test only, Alliance Destroyer only. Everything else is post-demo and runs as the release bands A-E — Falling Skyway with native/cloud delivery and mod packs (#851/#852/#855/#856), Borrowed Sun with its fields-and-epistemics foundation and P2P (#858/#854), Narrow Season with its physical-world-and-vessels foundation and the GM console MVP (#859/#930), The Broken Tithe with its resource-network foundation and GM facilitation (#860), and The Silent Corridor with the GM console complete (#861) — widening the catalogue by one playable hull per band (#922) and carrying a visual/UX polish pass each time, with Patrol Mode marked as the band F flagship beyond the campaign."
       rationale:
         - Completed work already supplies the balance harness (#835), baseline player Backfill doctrine (#842), scenario catalogue and QR flow (#754-#756), legacy save/load tracer bullets (#431-#435), native scenario hosting (#420), and mod-pack export/overlay plumbing (#759-#760).
         - Determinism, authored composition, and player/NPC Backfill symmetry are foundational game contracts; settling them before Combat Test balance avoids tuning a model that will immediately change.
@@ -31,11 +31,15 @@ entities:
         - roadmap-authoritative-snapshots
         - roadmap-post-demo-readiness
         - roadmap-p2p-multiship-delivery
+        - roadmap-borrowed-sun-foundation
         - roadmap-borrowed-sun-content
         - roadmap-gm-console
+        - roadmap-narrow-season-foundation
         - roadmap-narrow-season-content
+        - roadmap-broken-tithe-foundation
         - roadmap-broken-tithe-content
         - roadmap-silent-corridor-content
+        - roadmap-patrol-mode
         - roadmap-release-polish
 
   - component: roadmap-completed-demo-baseline
@@ -104,12 +108,13 @@ entities:
       status: accepted
       confidence: confirmed
       title: Post-Demo Release Bands A-E
-      summary: "Post-demo work ships as five public builds. A: Rhai scenario scripting ahead of the mission content, Falling Skyway (#851/#852) with native and Cloudflare delivery (#855), the consequence and scripted-progression resume adapters (#863/#864), mod content packs (#856) with template-aware editing (#910), and the destroyer readiness slice. B: Borrowed Sun (#858) with P2P multi-ship (#854), slot UX and portable export (#865/#866), and the cruiser. C: Narrow Season (#859) with the GM console MVP (#930 M1-M3), campaign-continuity projection (#867), and the courier (#877). D: The Broken Tithe (#860) with GM facilitation and safety (M4-M5) and the battleship. E: The Silent Corridor (#861) with the GM console complete (M6-M8) and #922's full-matrix balance closure."
+      summary: "Post-demo work ships as five public builds. A: Rhai scenario scripting ahead of the mission content, Falling Skyway (#851/#852) with native and Cloudflare delivery (#855), the consequence and scripted-progression resume adapters (#863/#864), mod content packs (#856) with template-aware editing (#910), and the destroyer readiness slice. B: Borrowed Sun and its foundation (#858 plus environmental fields, sensor-derived observations, and the Falling Skyway radiation-storm field retrofit) with P2P multi-ship (#854), slot UX and portable export (#865/#866), and the cruiser. C: Narrow Season and its foundation (#859 plus star/body descriptors, on-rails orbits, vessel deltas, and relative-motion operations) with the GM console MVP (#930 M1-M3), campaign-continuity projection (#867), and the courier (#877). D: The Broken Tithe and its foundation (#860 plus the unified ship resource network, the control-tier ladder, and consumables) with GM facilitation and safety (M4-M5) and the battleship. E: The Silent Corridor (#861), composition only, with the GM console complete (M6-M8) and #922's full-matrix balance closure. F is marked, not banded: Patrol Mode with a hand-authored exploration first patrol as its tutorial."
       rationale:
         - Each band is a shippable public build, not a paper milestone, so every band pairs one campaign mission with one platform capability, one more playable hull, and one visual/UX polish pass.
         - "The hull rollout is deliberately one at a time — destroyer, cruiser, courier, battleship — so tutorials, doctrine, and balance evidence land together per hull instead of as a single catalogue-wide push."
         - "The #848 adapters split across A, B, and C by what needs them: Falling Skyway needs consequence and scripted-progression resume, P2P join and recovery ride on the portable record, and campaign continuity only becomes real once three missions exist."
         - Defects are fixed as they arise outside these bands and are deliberately not scheduled into them.
+        - "2026-08-13 decision (Starship Simulator Genesis review): missions 2-4 each gain a paired foundation PRD mirroring the #851/#852 pattern, threading a physical-world simulation layer through B-D rather than deferring it past the campaign. Platform capabilities stay in their bands; the bands get longer. Foundation PRDs are written just-in-time as each band starts. Scope guard: pasm/spec/design/simulation-differentiation.yaml."
     architecture:
       kind: roadmap-release-bands
       authority: non-authoritative
@@ -295,6 +300,24 @@ entities:
       reads: [entity-template-state, world-content-pack-state]
       runs_in: [host-browser-runtime, headless-runtime]
 
+  - component: roadmap-borrowed-sun-foundation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Borrowed Sun Foundation — Environmental Fields, Shared Epistemics, and the Complexity Ladder
+      summary: "Release B. Add generic environmental fields — scenario-authored moving volumes with shape, velocity, intensity, and falloff, covering debris density, radiation, and sensor/comms interference — and sensor-derived observations: pure evaluators over field state produce evidence entries (ETA ranges, densities) whose confidence narrows with repeat observation. Retrofit Falling Skyway's radiation storm onto the field system with identical observable behaviour. Also ship the console complexity-ladder framework (2026-08-13 decision, per pasm/spec/design/console-complexity.yaml): star-rung station ratings, the generalised per-system detail overlay host, the scenario detail-floor vocabulary, and human-seeking comms/nav systems — with sensors as the first detailed console (scan modes, observation history, confidence narrowing, field analysis) and the Comms evidence/dossier browser as its detail surface."
+      rationale:
+        - "Fields are authored volumes in this band; cause-derived emission from physical sources arrives with the Narrow Season foundation. Consumers (sensors, helm hazard checks, damage application) only ever read field state, so that upgrade is non-breaking."
+        - "There is ONE evidence contract: physical sensor readings, third-party data obtained via Comms, and derived estimates all carry confidence and provenance through the #858 dossier surface. No second epistemics system is built for physical measurement."
+        - "The Skyway retrofit lands here, before campaign-continuity projection (#867) freezes expectations against mission 1's state, so the toolkit never carries two hazard representations."
+        - "The complexity-ladder framework debuts here rather than with the band-D power network (superseding the earlier engineering-only timing) because its first real content is band B's sensor depth: the detail screen ships with genuine epistemics gameplay, not an empty frame, and D's power detail then lands as deeper rungs of an established ladder."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, spawned-entity-state, world-snapshot-artifact]
+      coordinates: [roadmap-falling-skyway-foundation]
+      runs_in: [host-browser-runtime, headless-runtime]
+
   - component: roadmap-borrowed-sun-content
     core:
       status: accepted
@@ -305,7 +328,25 @@ entities:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-content-pack-state]
+      coordinates: [roadmap-borrowed-sun-foundation]
       runs_in: [host-browser-runtime]
+
+  - component: roadmap-narrow-season-foundation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Narrow Season Foundation — Physical World and Vessel Deltas
+      summary: "Release C. Add compact star/body descriptors, on-rails parametric orbits where body position is a pure function of the logical tick, and a two-tier space: a system-map tier holding bodies, routes, fields, and occlusion/shielding/comms line-of-sight, with the existing local motion model anchored to a map location. Fields gain cause-derived emission from physical sources. Add derived relative-kinematic state and relative-motion operations (match velocity, hold station, intercept, interpose, escort position) as OperationEngine verbs through the existing directive path. Ladder content for this band: Helm detail (flight-assist configuration, relative-motion operations) and Navigation detail (system map, routes, occlusion/forecast windows), plus probes as a new system — launchable remote sensors that see through and into fields and link to the sensors console."
+      rationale:
+        - "No flight-model change: docking and tow envelopes are predicates over relative-kinematic state, verbs are AI/human symmetric via the directive path, and there is no thruster-level physics."
+        - "No new Vessel abstraction: this foundation audits the Genesis 'authoritative vessel object' proposal against the delivered unified ship model and adds only authored intent/compliance state for civilians, per-vessel knowledge isolation where missing, and LOD-tier profile parity so the full-AI tier and the low-LOD route follower read the same authored profile. NPC bridge crew for unmanned stations is already delivered as Backfill (#842/#870)."
+        - "On-rails orbits are deterministic, snapshot-free, and forecastable by pure evaluators, which is what gives Science occlusion-window and radiation-front prediction play."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, spawned-entity-state, world-snapshot-artifact]
+      coordinates: [roadmap-borrowed-sun-foundation]
+      runs_in: [host-browser-runtime, headless-runtime]
 
   - component: roadmap-narrow-season-content
     core:
@@ -317,7 +358,25 @@ entities:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-content-pack-state]
+      coordinates: [roadmap-narrow-season-foundation]
       runs_in: [host-browser-runtime]
+
+  - component: roadmap-broken-tithe-foundation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Broken Tithe Foundation — Unified Resource Network and Control Tiers
+      summary: "Release D. Generalise the #858 infrastructure-network model into one producer/conduit/buffer/consumer graph ruling power, coolant, and containment load, ship-side and external alike. Power migrates onto the network as a redesign, not a frozen re-expression. Ship the deepest rungs of the band-B complexity ladder for this band's consoles: Engineering/Power detail (network graph, load-shedding, one-tap presets — full-AI / group-level via limited AI / direct network control, live-switchable), Repair detail (diagnostics levels, triage queue, repair material), and Shields detail (frequency/modulation tuning, per-arc management). Add main-drive propellant and repair material as consumables."
+      rationale:
+        - "Binding invariants on the power redesign: no reactor-side floors (the 2026-08-10 revert's lesson stands), Backfill/NPC min_reserve guards kept and re-expressed over network state, and the three-group vocabulary [helm, weapons, shields] kept as the group-level control tier. The exhaustion-lock mechanism alone is open: it is the incumbent a network-native alternative must beat with playtest evidence, and it survives in network terms by default."
+        - "The group-level tier's limited AI is the fine-system policy runtime with authority scoped to power allocation — the same machinery as Backfill doctrine, so AI/human symmetry holds and no second control intelligence exists."
+        - "Consumables pass the test 'can another bridge officer make a consequential decision about this resource within a 30-90 minute mission': main-drive propellant is the currency of #860's long-duration operational budgets, repair material turns repair-team work into triage. RCS propellant is excluded (no thruster-level flight), reactor fuel stays scenario-infinite, and bodily needs stay out."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, spawned-entity-state, world-snapshot-artifact]
+      coordinates: [roadmap-borrowed-sun-foundation, fine-system-ai-policy-runtime]
+      runs_in: [host-browser-runtime, headless-runtime]
 
   - component: roadmap-broken-tithe-content
     core:
@@ -329,6 +388,7 @@ entities:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-content-pack-state]
+      coordinates: [roadmap-broken-tithe-foundation]
       runs_in: [host-browser-runtime]
 
   - component: roadmap-silent-corridor-content
@@ -336,11 +396,29 @@ entities:
       status: accepted
       confidence: confirmed
       title: The Silent Corridor — Thin Margin Mission 5
-      summary: "Release E. Combine schedules, traffic, evidence, infrastructure, cascades, commitments, and campaign consequences into the regional-crisis finale (#861)."
+      summary: "Release E. Combine schedules, traffic, evidence, infrastructure, cascades, commitments, and campaign consequences into the regional-crisis finale (#861). Composition only for scenario systems: the finale composes the B-D physical foundations (fields with derived emission, orbits, vessel actors, the resource network) under sustained multi-crisis load and introduces no new scenario systems. The band still carries ladder content — Tactical detail (calibration, ammo fabrication, arc-vs-range trade-offs), Captain detail (commitments/objectives board), and signature management as a new ship system (emissions profile affecting detectability, integrated with NPC sensor detection)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-content-pack-state]
+      coordinates: [roadmap-borrowed-sun-foundation, roadmap-narrow-season-foundation, roadmap-broken-tithe-foundation]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-patrol-mode
+    core:
+      status: proposed
+      confidence: provisional
+      title: Patrol Mode — Generated Assignments (Band F Marker)
+      summary: "Post-E marker, not a banded release. A patrol campaign is generated assignments: a seeded system generator produces the physical context (star, bodies, orbits, hazards, stations, traffic) and the Thin Margin machinery generates the situation (actors, needs, infrastructure, commitments, evidence, cascades) — coherent episodes, not planets for their own sake. A hand-authored exploration 'first patrol' ships as its tutorial, absorbing the standalone science-scenario concept. Ladder content: the database/ship's library — a read-only reference of known ships, systems, and hazards plus the mission log, serving as the patrol briefing surface."
+      rationale:
+        - "This is the stated long-term justification for the B-D physical foundations: they exist so that generated situations, not only authored missions, can use them."
+        - "Marker only by the 2026-08-13 decision: the PRD is written just-in-time when band E nears, per the per-band PRD workflow, so five bands of foundation lessons inform it."
+        - "Scope guard is pasm/spec/design/simulation-differentiation.yaml: Phoenix generates plausible episodes, not a galaxy."
+    architecture:
+      kind: roadmap-milestone
+      authority: non-authoritative
+      reads: [world-snapshot-artifact, world-content-pack-state]
+      coordinates: [roadmap-borrowed-sun-foundation, roadmap-narrow-season-foundation, roadmap-broken-tithe-foundation]
       runs_in: [host-browser-runtime]
 
   - component: roadmap-post-demo-readiness

@@ -25,6 +25,45 @@
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .ctrl-col { padding: 8px; } }
+    /* Landscape is height-starved, so the hero stops being an in-flow row and
+       becomes a bar floating over the top of the chart: `.console-body` then
+       gets the panel's whole content height and the radar grows into it. The
+       offsets mirror the landscape `body .panel-inner` padding console.css
+       forces (16px top / 20px right / 44px left) so the bar starts exactly at
+       the content box — the 44px is the settings cog's gutter, which the bar
+       must never cover. `pointer-events: none` keeps the radar draggable
+       underneath. Portrait keeps the hero in flow.
+
+       Only the chart runs under the bar; the control column is pushed clear of
+       it — and still ends up taller than it was with the hero in flow.
+
+       The radar takes its width from its (definite) height, so a bare `1fr`
+       track picks that width up as its automatic minimum and the grid overflows
+       — at 650x450 the tracks came out `310px 300px` in a 584px box and the
+       BOOST button was clipped off the frame. `minmax(0, 1fr)` is what lets the
+       track shrink below that; the max-width clamp then letterboxes the radar
+       rather than pushing the controls out. */
+    @media (orientation: landscape) {
+      /* The floating bar's height: its own floor, and what the control
+         columns clear so that only the chart runs underneath it. */
+      :root { --hero-bar: 34px; }
+      .hero {
+        position: absolute; z-index: 3; pointer-events: none;
+        top: 16px; left: 44px; right: 20px;
+        min-height: var(--hero-bar); align-items: center; padding: 2px 10px;
+        background: rgba(10, 16, 42, 0.92); border: 1px solid var(--line-faint);
+      }
+      .hero h1 { font-size: 19px; line-height: 26px; }
+      .hero h1 .sub { display: inline; margin-top: 0; margin-left: 14px; }
+      .console-body { grid-template-columns: minmax(0, 1fr) 300px; }
+      .console-body .ctrl-col { margin-top: calc(var(--hero-bar) + 6px); }
+      .console-body .radar-col { align-items: center; }
+      /* `isolation` matters: ph-helm-radar's readouts are `z-index: 10` inside
+         its shadow root, and the host is only `position: relative` — with no
+         stacking context of its own they escape into the root one and paint
+         straight through the bar that is supposed to be above them. */
+      ph-helm-radar { flex: none; width: auto; height: 100%; aspect-ratio: 1 / 1; max-width: 100%; max-height: 100%; isolation: isolate; }
+    }
   </style>
 </head>
 <body>

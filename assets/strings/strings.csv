@@ -401,10 +401,8 @@ console.common.no_active_hail,Console footer when no hail is open,[NO ACTIVE HAI
 console.comms.contacts,"comms console — ""Contacts"" panel heading",Contacts
 console.comms.available_hails,"comms console — ""Available Hails"" panel heading",Available Hails
 console.comms.current_thread,"comms console — ""Current Thread"" panel heading",Current Thread
-console.helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix - Helm Console]
 console.helm.screen_label,Phone-frame screen label of the helm console,Helm Console
 console.helm.title,helm console — main hero heading,HELM
-console.helm.subtitle,helm console — hero sub-heading under the title,[PROPULSION & COURSE]
 console.helm.station_footer,helm console — footer station name,HELM STATION
 console.navigation.doc_title,Browser-tab title of the navigation console page,[Project Phoenix - Navigation Console]
 console.navigation.screen_label,Phone-frame screen label of the navigation console,Navigation Console
@@ -462,6 +460,10 @@ console.engineering.power,"engineering console — ""Power"" panel heading",Powe
 console.engineering.repair,"engineering console — ""Repair"" panel heading",Repair
 console.cruiser_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
 console.cruiser_helm.subtitle,helm console — hero sub-heading under the title,PILOTING
+console.destroyer_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
+console.destroyer_helm.subtitle,helm console — hero sub-heading under the title,[PILOTING]
+console.battleship_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
+console.battleship_helm.subtitle,helm console — hero sub-heading under the title,[PROPULSION & COURSE]
 console.science.doc_title,Browser-tab title of the science console page,[Project Phoenix — Science Console]
 console.science.screen_label,Phone-frame screen label of the science console,Science Console
 console.science.title,science console — main hero heading,SCIENCE

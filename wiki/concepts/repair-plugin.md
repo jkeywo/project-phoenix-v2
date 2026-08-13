@@ -8,7 +8,9 @@ Server-side logic for the Repair console lives in `src/console/repair/server.rs`
 
 ## Overview
 
-The current repair model is **direct team dispatch**: the Repair console operator selects a team (0–N) and a `RepairTarget` (a station or Core), and the server dispatches that team to repair all damaged systems owned by the target station. There is no shape-matching minigame — that was removed in an earlier refactor (PRD #272-era). The human UX is `gui/repair-console.html` sending `dispatch_repair_team` actions via `gui/action-map.js`, which encodes them as `ControlSystem { target: SystemId("repair"), payload: DispatchRepairTeam { .. } }` after #619 deleted the legacy `ClientMessage::DispatchRepairTeam { console }` wire path.
+The current repair model is **direct team dispatch**: the Repair console operator selects an Idle team and a `RepairTarget` (a station or Core), and the server dispatches that team to the station. There is no shape-matching minigame — that was removed in an earlier refactor (PRD #272-era). The human UX is `gui/repair-console.html` (and the shared `ph-repair-teams` component) sending `dispatch_repair_team` actions via `gui/action-map.js`, which encodes them as `ControlSystem { target: SystemId("repair"), payload: DispatchRepairTeam { .. } }` after #619 deleted the legacy `ClientMessage::DispatchRepairTeam { console }` wire path.
+
+Since issue #1013, an on-site team no longer fixes one system and walks home: it **sweeps** every non-Operational system at its station (or the ownerless `core` group) worst-first — tier, then damage fraction, then id — rewriting its `Repairing` slot in place, and only goes `Returning` once nothing repairable remains. Destroyed (0 HP) systems are swept too, not skipped. Since issue #1015, the Repair console no longer offers the old per-team 1/2/3 ordinal buttons for a busy team; instead it shows a worst-first list of the ship's damaged/destroyed systems (`ph-repair-teams`'s `.damaged-list`), and tapping a row sends `SystemControlPayload::SetRepairTargetPriority { system_id }`. The host resolves which on-site team's sweep the named system belongs to and pins that SYSTEM (never a client-computed ordinal — see `handle_set_repair_target_priority` in `src/console/repair/dispatch.rs`) as its next job; the pin wins over the #1013 standing ordinal while it remains a candidate, and clears once the team moves off it. The old `SetRepairPriority { team_idx, priority }` ordinal payload stays on the wire and handled, but nothing in the UI sends it anymore.
 
 ## Key types
 
@@ -23,10 +25,10 @@ The current repair model is **direct team dispatch**: the Repair console operato
 
 | System | SimSet | Responsibility |
 |---|---|---|
-| `handle_dispatch_repair_team` | `SimSet::Input` | Processes `ControlSystem { target: repair, payload: DispatchRepairTeam { team_idx, target } }`; resolves `RepairTarget::Station(id)` to the matching `SystemId` on the ship's `EntitySystemHull` and `RepairTarget::Core` to `SystemId("core")`, then calls `teams.dispatch(team_idx, system_id, display_name)`. Post-#619 the legacy `ClientMessage::DispatchRepairTeam { console: Console }` wire path is gone — only the admission-gated `ControlSystem` envelope survives. |
-| `tick_repair_teams` | `SimSet::Modifiers` | Advances team progress each frame; restores hull HP for completed teams on the per-entity `EntitySystemHull` |
-| `operate_repair_ai` | `SimSet::Input` | Runs AI-controlled repair dispatch when the repair station is in `Backfill` or `Ai` mode; iterates all entities with `ShipSystemControlSources` gated on `policy.operate_ai`, picks the system with the largest HP deficit on that ship's hull |
-| `publish_repair_blackboard` | `SimSet::Broadcast` | Writes a `RepairBlackboard` into `ShipSystemBlackboards` for the repair system key |
+| `handle_dispatch_repair_team`, `handle_set_repair_priority`, `handle_set_repair_target_priority` | `SimSet::Physics`, `.after(operate_repair_ai)` | Apply admitted `DispatchRepairTeam` / `SetRepairPriority` / `SetRepairTargetPriority` (issue #1015) commands, in that fixed order relative to the AI decide/emit and the tick below (issue #785 AC4 determinism). `handle_dispatch_repair_team` resolves `RepairTarget::Station(id)` to the matching `SystemId` on the ship's `EntitySystemHull` (`RepairTarget::Core` to `SystemId("core")`) and calls `teams.dispatch(team_idx, system_id, display_name)`. Post-#619 the legacy `ClientMessage::DispatchRepairTeam { console: Console }` wire path is gone — only the admission-gated `ControlSystem` envelope survives. |
+| `tick_repair_teams` | `SimSet::Physics`, `.after(...)` the appliers above | Advances team progress each frame; sweeps the on-site station's remaining damaged systems worst-first (issue #1013) and restores hull HP on the per-entity `EntitySystemHull` |
+| `operate_repair_ai` | `SimSet::Physics`, gated on the shared AI cadence | Runs AI-controlled repair dispatch when the repair station is `Backfill` or `Ai`; ranks damaged stations with the authored `[repair.selector]` `TargetSelector` (issue #785) rather than a hardcoded largest-deficit comparator, then emits `DispatchRepairTeam` for each free team through the admission seam |
+| `publish_repair_blackboard` | `SimSet::Publish` | Writes a `RepairBlackboard` into `ShipSystemBlackboards` for the repair system key |
 | `repair_state_broadcaster` | `PostUpdate` | Reads the blackboard and broadcasts `SystemBlackboard::Repair` to the station holder at 10 Hz |
 
 ## RepairBlackboard
@@ -37,8 +39,13 @@ pub struct RepairBlackboard {
     pub system_hull: Vec<SystemHullStatus>,
     pub travel_duration_secs: f32,
     pub damageable_systems: Vec<SystemId>,
+    pub queue_depth: Vec<QueueEntryPreview>,
+    pub aggregate_hull_fraction: Option<f32>,
+    pub destroyed_hull_fraction: Option<f32>,
 }
 ```
+
+`queue_depth` (issue #682) is the pending-request severity preview; `aggregate_hull_fraction` and `destroyed_hull_fraction` (issue #1014) are ship-wide scalars everyone may have even where the per-system rows are withheld. Issue #737's `src/console/repair/visibility.rs` projects `system_hull` and `queue_depth` per-recipient before this struct reaches the wire — see [Damage And Repair Intent](./damage-and-repair-intent.md).
 
 - `damageable_systems` derives from `SystemHull.entries()` (`src/console/repair/server.rs`). Core appears in this list when `[[hull.system_hull]] system_id = "core"` is declared in `player_ship.toml`.
 - `system_hull` is the per-`SystemId` HP/tier snapshot (`SystemHullStatus { system_id, display_name, current, max, tier }`) sent to the client so the Repair screen can show live damage bars with human-readable labels.
@@ -71,9 +78,9 @@ debuff_magnitude = 0.10
 
 ## Per-entity migration (PRD #597 PR 6)
 
-`ShipRepairTeams` derives both `Resource` and `Component` (unlike `ShipImpulse`/`ShipBoost`/`ShipModifiers`, which lost their `Resource` derive in issue #606 — `ShipRepairTeams` was left untouched by that issue and still dual-derives). The player ship carries a per-entity `ShipRepairTeams` component seeded from its TOML `[repair]` block. NPC ships also get a `ShipRepairTeams` component when their entity TOML declares a `[repair]` block (skipped otherwise).
+Issue #830 dropped `ShipRepairTeams`'s legacy global `Resource` derive: it is now `#[derive(Component, Clone)]` only, and every ship — player and NPC alike — reads and writes its own component, with no ship-wide singleton to fall back to. The player ship carries a per-entity `ShipRepairTeams` component seeded from its TOML `[repair]` block. NPC ships also get one when their entity TOML declares a `[repair]` block (skipped otherwise).
 
-`tick_repair_teams` (`src/console/repair/server.rs:176`) iterates every ship (`With<Ship>`), reading each ship's own `ShipModifiers` component directly (`&ShipModifiers`, not `Option<&ShipModifiers>` — the #606 cleanup removed the `Option`/Resource-fallback branch here too) to scale `RepairRate`. `handle_dispatch_repair_team`, `publish_repair_blackboard`, and `repair_state_broadcaster` stay LocalShip-scoped (repair is a player mechanic today).
+`tick_repair_teams` (`src/console/repair/server.rs:219`) iterates every ship (`With<Ship>`), reading each ship's own `ShipModifiers` component directly (`&ShipModifiers`, not `Option<&ShipModifiers>` — the #606 cleanup removed the `Option`/Resource-fallback branch here too) to scale `RepairRate`. `handle_dispatch_repair_team` and `publish_repair_blackboard` are also per-entity and iterate every `Ship`, not just `LocalShip` — NPC teams tick and publish to their own `ShipSystemBlackboards` so their AI can read them. Only `repair_state_broadcaster` (the outbound wire) stays `LocalShip`-scoped, since NPC team state never reaches a client.
 
 ## Dispatch path
 
@@ -89,29 +96,33 @@ gui/repair-console.html
 
 ## Tests
 
-Tests live in `src/console/repair/server.rs` under `#[cfg(test)] mod tests`.
+Tests live in `src/console/repair/server.rs` and `src/console/repair/dispatch.rs` under `#[cfg(test)] mod tests`, plus the sweep/priority state machine in `src/modifiers/repair_teams.rs`.
 
 Notable tests:
 
 | Test | What it checks |
 |---|---|
-| `dispatch_repair_target_station_maps_helm` | `RepairTarget::Station("helm")` dispatches to `SystemId("helm")` |
-| `dispatch_repair_target_core_dispatches_to_core` | `RepairTarget::Core` dispatches team 0 to `SystemId("core")` |
-| `publish_repair_blackboard_contains_damageable_systems` | `damageable_systems` contains both `SystemId("helm")` and `SystemId("core")` |
-| `player_ship_toml_repair_block_matches_runtime_default_values` | Drift guard: TOML repair values match `RepairTimings::default()` |
-| `repair_teams_resource_reflects_player_ship_toml_repair_block` | Drift guard: TOML→runtime wiring for repair timings |
+| `dispatch_sends_team_to_travelling` (`server.rs`) | A dispatch to a station puts the team in `Travelling` |
+| `station_dispatch_repairs_damaged_owned_fine_system` (`server.rs`) | A completed dispatch resolves to and repairs the correct owned fine system |
+| `publish_repair_blackboard_contains_damageable_systems` (`server.rs`) | `damageable_systems` contains both `SystemId("helm")` and `SystemId("core")` |
+| `station_name_colliding_with_a_hull_row_resolves_to_no_dispatch` (`dispatch.rs`) | A station whose own name is also an ownerless hull row must not fall back to sweeping that row |
+| `a_damaged_owned_system_still_wins_over_the_fallback` (`dispatch.rs`) | The most-damaged owned system is picked over the station-name fallback |
 
-Five additional tests were added by issue #526. See the source file for the full list.
+See the source files for the full list, including the issue #1013 sweep-ordering and issue #1015 target-priority tests in `src/modifiers/repair_teams.rs`.
 
 ## Sources
 
 - `src/console/repair/server.rs`
+- `src/console/repair/dispatch.rs`
+- `src/console/repair/visibility.rs` (issue #737 per-recipient projection)
 - `src/modifiers/repair_teams.rs`
 - `src/core/messages.rs` (RepairBlackboard, RepairTarget, SystemHullStatus)
 - `assets/entities/player_ship.toml` ([repair] block, [[hull.system_hull]] entries)
-- `gui/repair-console.html`, `gui/action-map.js`
+- `gui/repair-console.html`, `gui/components/ph-repair-teams.js`, `gui/repair-dispatch.js`, `gui/action-map.js`
 - Issue [#508](https://github.com/jkeywo/project-phoenix-v2/issues/508)
 - Issue [#526](https://github.com/jkeywo/project-phoenix-v2/issues/526)
 - Issue [#619](https://github.com/jkeywo/project-phoenix-v2/issues/619) — Console enum + legacy `console_hull` / `damageable_consoles` fields deleted; `system_hull` / `damageable_systems` are the survivors
+- Issue [#1013](https://github.com/jkeywo/project-phoenix-v2/issues/1013) — on-site teams sweep every damaged system at a station worst-first
+- Issue [#1015](https://github.com/jkeywo/project-phoenix-v2/issues/1015) — repair console damaged-systems list, tap-to-prioritise `SetRepairTargetPriority`
 - [Console UI Authoring Library](./console-ui-library.md)
 - [Broadcaster Seam](./broadcaster-seam.md)

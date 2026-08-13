@@ -2,8 +2,8 @@
 title: Damage And Repair Intent
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [pasm/spec/architecture/engineering-damage.yaml, src/console/repair/server.rs, gui/console-state.js, gui/components/ph-repair-teams.js, gui/destroyer/engineering.html, gui/cruiser/engineering.html, gui/battleship/repair.html]
-updated: 2026-07-15
+sources: [pasm/spec/architecture/engineering-damage.yaml, src/console/repair/server.rs, src/console/repair/visibility.rs, gui/console-state.js, gui/components/ph-repair-teams.js, gui/destroyer/engineering.html, gui/cruiser/engineering.html, gui/battleship/repair.html]
+updated: 2026-08-13
 ---
 
 Summary
@@ -30,6 +30,6 @@ The intended damage-and-repair model separates information access by role and by
 - Once a team arrives, Engineering owns subsystem repair prioritization for that target station.
 - That prioritization is local to the on-site team, not global across the whole ship.
 
-## Current implementation tension
+## Implementation: the intended model is now enforced host-side
 
-The shipped repair UI currently derives a global `system_hull` list and `dispatch_targets` directly from the repair blackboard, which means Engineering has broader pre-arrival visibility than intended. The state is assembled in [gui/console-state.js](/C:/Coding/project-phoenix-v2/gui/console-state.js) and rendered through the shared repair-team component used by the Destroyer and Cruiser Engineering consoles and the Battleship Repair console.
+Issue #737 closed the gap this section used to describe: `src/console/repair/visibility.rs`'s `HullVisibility` now projects `RepairBlackboard.system_hull` and `queue_depth` per-recipient before either reaches the wire, rather than leaving role separation to client-side presentation. A station owner sees only its own systems; Engineering sees Core plus any non-Core system with a team physically on site (`Repairing`, not `Travelling`); everyone gets the two ship-wide scalars (`aggregate_hull_fraction`, and `destroyed_hull_fraction` since issue #1014) regardless of which rows they can see. `damageable_systems` (dispatch targets) and `teams` stay whole — Engineering must be able to dispatch to a system it cannot yet see exact detail for. The projection is shared by the live broadcast and the reconnect resync, so reconnecting cannot be used to obtain detail the live path withholds. The state is assembled in `gui/console-state.js` and rendered through the shared `ph-repair-teams` component used by the Destroyer and Cruiser Engineering consoles and the Battleship Repair console; since issue #1013 an on-site team sweeps every damaged system at its station rather than one, so "a team arrives" now reveals detail for however many of the station's systems it visits in turn, not just the one it was originally dispatched to.

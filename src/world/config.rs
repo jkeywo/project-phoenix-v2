@@ -375,25 +375,30 @@ struct RawTriggerEntry {
 
 /// A single condition-weighted modifier inside an `add_objective` TOML action.
 ///
-/// `pub(crate)` only so it may appear in [`RawActionEntry`]'s (also `pub(crate)`)
-/// `modifiers` field without tripping the private-in-public lint; its fields stay
-/// module-private (only [`parse_utility_config`] reads them, in this file).
+/// `pub(crate)` (with `pub(crate)` fields) so it may appear in [`RawActionEntry`]'s
+/// (also `pub(crate)`) `modifiers` field without tripping the private-in-public
+/// lint AND so the Rhai effect host (`world::script::effects`) can build one from a
+/// `#{ … }` script map — the scripted `add_objective` reads its `modifiers` array
+/// into these and runs the SHARED [`parse_utility_config`], rather than
+/// re-implementing utility parsing (issue #984, Rhai M6). `threshold` / `weight`
+/// are `no_float` `f32` leaves the script authors as `flt("…")` or an int.
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawModifier {
-    condition: String,
+    pub(crate) condition: String,
     #[serde(default)]
-    threshold: Option<f32>,
-    weight: f32,
+    pub(crate) threshold: Option<f32>,
+    pub(crate) weight: f32,
 }
 
 /// A zero-gate veto condition inside an `add_objective` TOML action.
 ///
-/// `pub(crate)` for the same reason as [`RawModifier`].
+/// `pub(crate)` (with `pub(crate)` fields) for the same reason as [`RawModifier`]:
+/// declarative deserialization AND scripted construction from a `#{ … }` map.
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawZeroGate {
-    condition: String,
+    pub(crate) condition: String,
     #[serde(default)]
-    threshold: Option<f32>,
+    pub(crate) threshold: Option<f32>,
 }
 
 /// One flat, all-optional `[[trigger.action]]` row as authored in TOML.

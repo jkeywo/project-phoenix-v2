@@ -863,10 +863,17 @@ fn a_save_whose_authored_data_changed_is_refused_on_content() {
 /// set, so re-recording one of those exact paths with different text is what a
 /// designer's edit would have produced, without mutating a shipped asset out
 /// from under the rest of the suite. The hull edited below is the PLAYER's own,
-/// which reaches the ledger through `FsTemplateLoader` resolving `--ship` —
-/// since `duel.toml`'s NPC slots became script (issue #984, M6) they are no
-/// longer in `world_config.entities`, so `content_ledger::
-/// eager_record_world_entities` does not see them (tracked as its own issue).
+/// which reaches the ledger through `FsTemplateLoader` resolving `--ship`.
+///
+/// The duel's NPC hulls are deliberately not the ones edited: they are not in
+/// the FROZEN ledger and never were. `content_ledger::
+/// eager_record_world_entities` walks `world_config.entities`, so a hull that
+/// arrives any other way — a `[[trigger]]` spawn action, as duel.toml's slots
+/// did before issue #984, or a script spawn, as they do after it — is recorded
+/// only when it actually spawns, which is after `freeze`. That is a #935-class
+/// gap about trigger/script-spawned templates generally, tracked as its own
+/// issue; the M6 conversion changed which side of it these slots sit on, not
+/// whether the gap exists.
 #[test]
 fn a_save_whose_entity_template_changed_is_refused_on_content() {
     let mut live = duel();

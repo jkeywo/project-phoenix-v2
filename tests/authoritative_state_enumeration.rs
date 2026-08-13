@@ -287,8 +287,9 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "WeaponsUpdateFirstTick", "WorldContentRuntime", "WorldSetupBroadcast",
     // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are
     // authoritative-but-deferred, exactly like `WorldContentRuntime` above:
-    // `RawWorldSource` is the untouched world TOML the script loader reads at
-    // `Startup`; `WorldScriptRuntime` holds the compiled handler ASTs, the
+    // `RawWorldSource` is the world TOML the script loader reads at `Startup`
+    // (as loaded, after any headless duel-side transform);
+    // `WorldScriptRuntime` holds the compiled handler ASTs, the
     // per-tick script budget, the content hash and — since phase 2b — the live
     // `PendingCallbacks` queue of deferred `after(n, |ctx| …)` callbacks that
     // `tick_script_callbacks` drains each tick. That `PendingCallbacks` is now

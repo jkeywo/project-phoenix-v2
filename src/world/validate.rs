@@ -652,6 +652,40 @@ fn doctrine_anchor_refs(
     out
 }
 
+/// The doctrine anchors ONE template references, for a host that fields a hull
+/// the config walkers above cannot see (issue #984 review).
+///
+/// [`collect_spawned_instances`] only knows the *declarative* spawn sites —
+/// `[[entity]]` blocks and `spawn_entity` trigger/comms actions. A hull spawned
+/// from script, or dropped into a script-authored slot by the headless duel
+/// harness (`--side-a`/`--side-b`), never appears there, so
+/// [`validate_doctrine_anchors_in`] cannot judge it. Rather than let those hulls
+/// escape the #888 guard entirely, the harness runs this against each hull it
+/// fields and rejects an undeclared anchor itself — through the same
+/// [`doctrine_anchor_refs`] table the load-time validator uses, so the two can
+/// never disagree about which fields are anchors.
+///
+/// The template's OWN doctrine is judged, with no overrides applied: a slot
+/// override adds entries (`merge_id_array` keeps every template entry the
+/// override does not name by id), so the route the template arrives carrying is
+/// present in the effective doctrine either way.
+///
+/// Returns `(anchor, directive-kind)` pairs, empty when the template cannot be
+/// loaded — the same silence, for the same reason, as [`doctrine_anchor_refs`].
+pub fn template_doctrine_anchors(
+    template_path: &str,
+    loader: &dyn TemplateLoader,
+) -> Vec<(String, &'static str)> {
+    doctrine_anchor_refs(
+        &SpawnedInstance {
+            label: String::new(),
+            template_path,
+            overrides: None,
+        },
+        loader,
+    )
+}
+
 /// Reject a doctrine anchor that no world in the composition declares
 /// (issue #888).
 ///

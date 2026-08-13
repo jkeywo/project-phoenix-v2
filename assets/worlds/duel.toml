@@ -89,10 +89,19 @@ side_b_5     = [ 80.0, 0.0, -30.0]
 # arena now states where the battleship would go instead of leaving it to a
 # lookup that misses.
 #
-# Fielding a hull whose route is not declared here fails the build and names the
-# anchor. That is the intended prompt: declare it on this line too, or stand the
-# hull's patrol entry down in the slot override
-# (`#{ id: "...", directive_kind: "None", directive_anchors: [] }`).
+# Fielding a hull through `--side-a`/`--side-b` whose route is not declared here
+# fails the run before it boots, naming the anchor: `headless::duel::
+# apply_duel_sides` re-runs #888's check over every hull it fields
+# (`DuelError::UndeclaredDoctrineAnchor`). That is the intended prompt — declare
+# the route on this line too, or stand the hull's patrol entry down in the slot
+# override (`#{ id: "...", directive_kind: "None", directive_anchors: [] }`).
+#
+# The check is the HARNESS's, not the world loader's. `world::validate::
+# validate_doctrine_anchors_in` walks the declarative config, and since the slots
+# below became script (issue #984, M6) they are spawns it never sees — so a hull
+# a script fields of its own accord, the authored default roster below included,
+# is not covered by either check. That is the general script-spawn validation
+# gap, open and tracked apart from this file.
 warhawk_patrol_a = [ 55.0, 0.0,  30.0]   # = side_b_2
 warhawk_patrol_b = [ 55.0, 0.0, -30.0]   # = side_b_3
 # `ship_harrow_patrol.toml`'s escort route (issue #915) — same treatment as the

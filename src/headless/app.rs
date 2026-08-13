@@ -453,6 +453,7 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
             &args.side_a,
             &args.side_b,
             &super::duel::resolve_template,
+            &super::duel::DuelTemplateLoader,
         )
         .map_err(|e| BuildError(format!("duel sides: {e}")))?;
     }

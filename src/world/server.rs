@@ -292,20 +292,28 @@ pub struct WorldEventBuffer(pub Vec<WorldEvent>);
 
 // ── Scripting seam (issue #984, Rhai M6 phase 2a) ───────────────────────────
 
-/// The raw world source a session loaded: its path plus the untouched TOML
+/// The raw world source a session loaded: its path plus the world TOML as a
 /// `Value`.
 ///
 /// `WorldConfig` drops the raw `[script]` / `script` keys the Rhai loader needs,
-/// so this carries the untouched TOML alongside its path. Populated on both
+/// so this carries the whole TOML alongside its path. Populated on both
 /// targets — headless inserts it directly in `build_headless_app`, the browser
 /// via `insert_raw_world_source_resource` reading `server::bridge::
 /// get_raw_world_source()` at `Startup` — and read once by
 /// `compile_world_scripts`.
+///
+/// "Raw" is about SHAPE, not provenance: unparsed TOML with nothing dropped,
+/// which is not the same as untouched. On a harnessed duel run
+/// (`--side-a`/`--side-b`) what lands here is the world TOML *after*
+/// `headless::duel::apply_duel_sides` has regenerated the slot roster inside its
+/// `[script]` source — deliberately, since this resource is what
+/// `compile_world_scripts` compiles.
 #[derive(Resource, Clone, Debug)]
 pub struct RawWorldSource {
     /// The world TOML's path (its content-ledger / snapshot-boundary key).
     pub path: String,
-    /// The untouched world TOML, still carrying any `[script]` / `script` key.
+    /// The world TOML as loaded — after any headless duel-side transform — still
+    /// carrying any `[script]` / `script` key.
     pub toml: toml::Value,
 }
 

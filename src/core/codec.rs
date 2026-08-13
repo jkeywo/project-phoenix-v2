@@ -724,6 +724,7 @@ mod tests {
                         debuff_magnitude: 0.0,
                     }],
                     aggregate_fraction: Some(0.75),
+                    destroyed_fraction: Some(0.25),
                 },
             ),
             (
@@ -2522,6 +2523,11 @@ mod tests {
     /// no longer be summed into one. Both are new on the wire; neither had any
     /// round-trip coverage. `queue_depth` and `system_hull` are populated here
     /// because the empty-vec case is what `#[serde(default)]` already covers.
+    ///
+    /// Issue #1014 added a third: `destroyed_hull_fraction`, the companion
+    /// whole-ship scalar for capability at the `Destroyed` tier. It is
+    /// `#[serde(default)]` like the other two, so a payload predating it decodes
+    /// to `None` rather than failing — pinned below.
     #[test]
     fn system_blackboard_repair_round_trips() {
         fn hull(id: &str, current: f32, tier: crate::damage::DamageTier) -> SystemHullStatus {
@@ -2558,6 +2564,7 @@ mod tests {
                 },
             ],
             aggregate_hull_fraction: Some(0.75),
+            destroyed_hull_fraction: Some(0.2),
         });
 
         let json = serde_json::to_string(&bb).unwrap();
@@ -2568,8 +2575,25 @@ mod tests {
             json.contains("\"aggregate_hull_fraction\":0.75"),
             "got: {json}"
         );
+        assert!(
+            json.contains("\"destroyed_hull_fraction\":0.2"),
+            "got: {json}"
+        );
         let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
         assert_eq!(bb, decoded);
+
+        // A payload written before #1014 carries no `destroyed_hull_fraction`;
+        // `#[serde(default)]` must decode it to `None` rather than reject the
+        // whole blackboard.
+        let legacy = r#"{"kind":"Repair","data":{"teams":[],"travel_duration_secs":5.0,
+            "system_hull":[],"damageable_systems":[],"queue_depth":[],
+            "aggregate_hull_fraction":0.75}}"#;
+        let decoded_legacy: SystemBlackboard = serde_json::from_str(legacy).unwrap();
+        let SystemBlackboard::Repair(legacy_bb) = decoded_legacy else {
+            panic!("expected a Repair blackboard");
+        };
+        assert_eq!(legacy_bb.destroyed_hull_fraction, None);
+        assert_eq!(legacy_bb.aggregate_hull_fraction, Some(0.75));
 
         // ...and through the envelope it actually ships in. Post-#737 this is
         // sent per token (`Target::Token`), not broadcast, but the encoding is
@@ -2834,6 +2858,44 @@ mod tests {
         let decoded: SystemHullStatus = serde_json::from_str(json).unwrap();
         assert_eq!(decoded.debuff_magnitude, 0.0);
         assert_eq!(decoded.system_id, SystemId("helm".into()));
+    }
+
+    #[test]
+    fn system_hull_update_legacy_wire_shape_defaults_destroyed_fraction() {
+        // A payload written before #1014 carries no `destroyed_fraction`;
+        // `#[serde(default)]` must decode it to `None` rather than reject the
+        // whole message.
+        let legacy =
+            r#"{"type":"SystemHullUpdate","data":{"entries":[],"aggregate_fraction":0.75}}"#;
+        let decoded = JsonCodec.decode_server(legacy).unwrap();
+        let ServerMessage::SystemHullUpdate {
+            aggregate_fraction,
+            destroyed_fraction,
+            ..
+        } = decoded
+        else {
+            panic!("expected SystemHullUpdate");
+        };
+        assert_eq!(aggregate_fraction, Some(0.75));
+        assert_eq!(destroyed_fraction, None);
+    }
+
+    #[test]
+    fn system_hull_update_legacy_wire_shape_defaults_aggregate_fraction() {
+        // Same pre-existing gap, one field further back: a payload that also
+        // predates `aggregate_fraction` must default it to `None` too.
+        let legacy = r#"{"type":"SystemHullUpdate","data":{"entries":[]}}"#;
+        let decoded = JsonCodec.decode_server(legacy).unwrap();
+        let ServerMessage::SystemHullUpdate {
+            aggregate_fraction,
+            destroyed_fraction,
+            ..
+        } = decoded
+        else {
+            panic!("expected SystemHullUpdate");
+        };
+        assert_eq!(aggregate_fraction, None);
+        assert_eq!(destroyed_fraction, None);
     }
 
     #[test]

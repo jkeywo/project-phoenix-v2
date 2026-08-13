@@ -98,4 +98,89 @@ describe('PhDamageBar', () => {
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill.className).toBe('fill warn');
   });
+
+  // ── Issue #1014: destroyed capability reads as a loss band ─────────────────
+  //
+  // `destroyed` is a host-supplied ship-wide share — the fraction of total hull
+  // capacity held by systems that are gone, not merely damaged. It is painted
+  // at the RIGHT end of the bar (the segment lost off the top) and is entirely
+  // independent of the fill/warn/crit state, which still tracks remaining hull.
+
+  it('renders no loss band when destroyed is 0', () => {
+    const { el } = setup();
+    el.state = { pct: 0.8, destroyed: 0, totalCurrent: 80, totalMax: 100 };
+    const lost = el.shadowRoot.getElementById('bar-lost');
+    expect(lost.style.display).toBe('none');
+    expect(lost.style.width).toBe('0%');
+  });
+
+  it('renders no loss band when destroyed is absent (legacy host)', () => {
+    const { el } = setup();
+    el.state = { pct: 0.8, totalCurrent: 80, totalMax: 100 };
+    expect(el.shadowRoot.getElementById('bar-lost').style.display).toBe('none');
+  });
+
+  it('renders the loss band at the destroyed width, anchored to the right end', () => {
+    const { el } = setup();
+    el.state = { pct: 0.7, destroyed: 0.25, totalCurrent: 70, totalMax: 100 };
+    const lost = el.shadowRoot.getElementById('bar-lost');
+    expect(lost.style.display).toBe('block');
+    expect(lost.style.width).toBe('25%');
+    // Anchored right, so it is the top of the bar that is shown as lost.
+    const css = el.shadowRoot.querySelector('style').textContent;
+    expect(css).toMatch(/\.lost\s*\{[^}]*right:\s*0/);
+  });
+
+  it('the loss band coexists with each fill class without changing it', () => {
+    const { el } = setup();
+    const fill = el.shadowRoot.getElementById('bar-fill');
+    const lost = el.shadowRoot.getElementById('bar-lost');
+
+    el.state = { pct: 0.9, destroyed: 0.1 };
+    expect(fill.className).toBe('fill');
+    expect(lost.style.width).toBe('10%');
+
+    el.state = { pct: 0.6, destroyed: 0.2 };
+    expect(fill.className).toBe('fill warn');
+    expect(lost.style.width).toBe('20%');
+
+    el.state = { pct: 0.3, destroyed: 0.5 };
+    expect(fill.className).toBe('fill crit');
+    expect(lost.style.width).toBe('50%');
+  });
+
+  it('exact fill thresholds are unaffected by a loss band', () => {
+    const { el } = setup();
+    const fill = el.shadowRoot.getElementById('bar-fill');
+    el.state = { pct: 0.75, destroyed: 0.25, totalCurrent: 75, totalMax: 100 };
+    expect(fill.className).toBe('fill');
+    el.state = { pct: 0.4, destroyed: 0.25, totalCurrent: 40, totalMax: 100 };
+    expect(fill.className).toBe('fill warn');
+  });
+
+  it('clears the loss band when destroyed drops back to 0', () => {
+    const { el } = setup();
+    const lost = el.shadowRoot.getElementById('bar-lost');
+    el.state = { pct: 0.5, destroyed: 0.3 };
+    expect(lost.style.display).toBe('block');
+    el.state = { pct: 0.5, destroyed: 0 };
+    expect(lost.style.display).toBe('none');
+    expect(lost.style.width).toBe('0%');
+  });
+
+  it('clamps an out-of-range destroyed share to the bar', () => {
+    const { el } = setup();
+    const lost = el.shadowRoot.getElementById('bar-lost');
+    el.state = { pct: 0, destroyed: 1.5 };
+    expect(lost.style.width).toBe('100%');
+    el.state = { pct: 1, destroyed: -0.5 };
+    expect(lost.style.display).toBe('none');
+  });
+
+  it('null state hides the loss band', () => {
+    const { el } = setup();
+    el.state = { pct: 0.5, destroyed: 0.3 };
+    el.state = null;
+    expect(el.shadowRoot.getElementById('bar-lost').style.display).toBe('none');
+  });
 });

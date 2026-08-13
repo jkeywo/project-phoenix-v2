@@ -2183,10 +2183,16 @@ pub enum ServerMessage {
     /// (0.0–1.0) across *every* damageable system — it is the only whole-ship
     /// figure a recipient may show, because `entries` can no longer be summed
     /// to derive one. `None` only on legacy/unprojected payloads.
+    /// `destroyed_fraction` is the companion scalar (issue #1014): the share of
+    /// the ship's total hull capacity held by systems at the `Destroyed` tier,
+    /// so the hull bar can paint permanently lost capability instead of letting
+    /// it read as ordinary damage.
     SystemHullUpdate {
         entries: Vec<SystemHullStatus>,
         #[serde(default)]
         aggregate_fraction: Option<f32>,
+        #[serde(default)]
+        destroyed_fraction: Option<f32>,
     },
     /// Broadcast when the ship takes damage (from collision or damage zone).
     /// `shield` = HP absorbed by shields, `hull` = HP that reached the hull.
@@ -3168,6 +3174,18 @@ pub struct RepairBlackboard {
     /// figure. `None` on the host-internal copy before projection.
     #[serde(default)]
     pub aggregate_hull_fraction: Option<f32>,
+    /// Share of the ship's total hull capacity (0.0–1.0) held by systems at the
+    /// `Destroyed` tier (issue #1014).
+    ///
+    /// A second whole-ship scalar computed over *every* damageable system, on
+    /// the same terms as `aggregate_hull_fraction`: a single reduction reveals
+    /// no per-system detail, so every recipient may have it. It exists because
+    /// `aggregate_hull_fraction` alone cannot distinguish "half the ship is
+    /// lightly scratched" from "a quarter of it is gone for good" — the client
+    /// paints this as a loss band on the hull bar. `None` on the host-internal
+    /// copy before projection.
+    #[serde(default)]
+    pub destroyed_hull_fraction: Option<f32>,
 }
 
 /// Raw sim truth for the Comms system, published each tick into the ship

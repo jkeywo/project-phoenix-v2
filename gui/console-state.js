@@ -980,20 +980,34 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
  * `system_hull`, not just one station's slice) — the "overall hull" figure
  * for the Repair console's hero bar.
  *
+ * `destroyedFraction` is the host's second whole-ship scalar (issue #1014):
+ * the share of total capacity held by destroyed systems. It has **no local
+ * fallback**, deliberately — the projected rows are a slice of the ship, so a
+ * system destroyed at a station this client cannot see is absent from them
+ * entirely, and any sum over them would report "nothing destroyed" precisely
+ * when something was. Absent host value ⇒ `destroyed_pct: 0` (legacy hosts, and
+ * the only honest default when the figure is genuinely unknown).
+ *
  * @param {Array<{current,max_hp}>} systemHull
+ * @param {number} [aggregateFraction] host ship-wide hull fraction
+ * @param {number} [destroyedFraction] host ship-wide destroyed-capacity share
  */
-export function overallHull(systemHull, aggregateFraction) {
+export function overallHull(systemHull, aggregateFraction, destroyedFraction) {
   const hull = Array.isArray(systemHull) ? systemHull : [];
   const current = hull.reduce((s, h) => s + (h.current || 0), 0);
   const max = hull.reduce((s, h) => s + (h.max_hp || 0), 0);
+  const destroyed_pct =
+    typeof destroyedFraction === 'number' && Number.isFinite(destroyedFraction)
+      ? Math.max(0, Math.min(1, destroyedFraction))
+      : 0;
   // Post issue #737 `system_hull` is a per-recipient projection, so summing it
   // yields the *visible* slice, not the ship. When the host supplies the
   // authoritative ship-wide fraction, that wins — always. The local sum is only
   // a fallback for payloads predating the aggregate field.
   if (typeof aggregateFraction === 'number' && Number.isFinite(aggregateFraction)) {
-    return { current, max, pct: aggregateFraction };
+    return { current, max, pct: aggregateFraction, destroyed_pct };
   }
-  return { current, max, pct: max > 0 ? current / max : 1 };
+  return { current, max, pct: max > 0 ? current / max : 1, destroyed_pct };
 }
 
 /**
@@ -1006,7 +1020,8 @@ export function overallHull(systemHull, aggregateFraction) {
  *                                 current: number, max_hp: number,
  *                                 tier?: number}>,
  *             damageable_systems: Array,
- *             overall_hull: {current: number, max: number, pct: number},
+ *             overall_hull: {current: number, max: number, pct: number,
+ *                            destroyed_pct: number},
  *             core_systems: Array, dispatch_targets: Array<{id: string,
  *               label: string, damage_pct: number|null}>,
  *             travel_duration_secs: number,
@@ -1030,6 +1045,7 @@ export function buildRepairConsoleState(state) {
     const systemHull = bb.system_hull ?? [];
     const damageableSystems = bb.damageable_systems ?? [];
     const aggregate = bb.aggregate_hull_fraction ?? state.hullAggregate;
+    const destroyed = bb.destroyed_hull_fraction ?? state.hullDestroyed;
     const { coreSystems, targets } =
       repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems);
     return JSON.stringify({
@@ -1038,8 +1054,9 @@ export function buildRepairConsoleState(state) {
       system_hull:          systemHull,
       damageable_systems:   damageableSystems,
       // Authoritative ship-wide hull aggregate from the host — the only
-      // whole-ship figure available now that `system_hull` is a projection.
-      overall_hull:         overallHull(systemHull, aggregate),
+      // whole-ship figures available now that `system_hull` is a projection,
+      // and `destroyed_pct` is the share of it that is gone for good (#1014).
+      overall_hull:         overallHull(systemHull, aggregate, destroyed),
       // Only ownerless "core" systems stay on the repair console; per-station
       // system status moved to each console's footer bar (issue #12).
       core_systems:         coreSystems,
@@ -1064,7 +1081,7 @@ export function buildRepairConsoleState(state) {
     teams:                state.repairTeams || [],
     system_hull:          legacyHull,
     damageable_systems:   legacyHull.map(h => h.system_id),
-    overall_hull:         overallHull(legacyHull, state.hullAggregate),
+    overall_hull:         overallHull(legacyHull, state.hullAggregate, state.hullDestroyed),
     core_systems:         legacy.coreSystems,
     dispatch_targets:     legacy.targets,
     travel_duration_secs: 5.0,

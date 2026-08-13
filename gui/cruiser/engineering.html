@@ -82,7 +82,7 @@
         // Overall ship-wide hull (every damageable system), not just this
         // station's own systems.
         var oh = r.overall_hull || {};
-        hul.state = { total_pct: oh.pct != null ? oh.pct : 1 };
+        hul.state = { total_pct: oh.pct != null ? oh.pct : 1, destroyed_pct: oh.destroyed_pct };
         // Ownerless "core" systems get their own click-to-expand bar that
         // hides itself entirely when there are none (issue #12).
         document.getElementById('core-damage').state = { entries: r.core_systems || [] };

@@ -8,6 +8,7 @@ import {
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
   aggregateStationHull,
+  overallHull,
   repairCoreAndTargets,
   torpSlotStates,
   foldTorpedoBadges,
@@ -1027,6 +1028,102 @@ describe('buildRepairConsoleState', () => {
       stationSystems: { engineering: ['repair'] },
     }));
     expect(s.overall_hull.pct).toBe(0.25);
+  });
+
+  // ── Issue #1014: destroyed capability threads through to overall_hull ───────
+
+  it('threads the host destroyed share into overall_hull', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ], { destroyed_hull_fraction: 0.25 })));
+    // The visible rows contain nothing destroyed — the lost system belongs to a
+    // station this recipient cannot see, which is exactly why the host sends it.
+    expect(s.system_hull.every(h => h.current > 0)).toBe(true);
+    expect(s.overall_hull.destroyed_pct).toBe(0.25);
+  });
+
+  it('falls back to the cached SystemHullUpdate destroyed share', () => {
+    const state = projectedState([
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ]);
+    state.hullDestroyed = 0.4;
+    const s = parse(buildRepairConsoleState(state));
+    expect(s.overall_hull.destroyed_pct).toBe(0.4);
+  });
+
+  it('reports a zero destroyed share on a legacy payload carrying neither', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ])));
+    expect(s.overall_hull.destroyed_pct).toBe(0);
+  });
+
+  it('the legacy consoleHull fallback also carries the destroyed share', () => {
+    const s = parse(buildRepairConsoleState({
+      consoleHull: [{ system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 }],
+      hullAggregate: 0.25,
+      hullDestroyed: 0.5,
+      stationSystems: { engineering: ['repair'] },
+    }));
+    expect(s.overall_hull.destroyed_pct).toBe(0.5);
+  });
+});
+
+describe('overallHull', () => {
+  const rows = [
+    { system_id: 'core',   current: 4,  max_hp: 10 },
+    { system_id: 'repair', current: 10, max_hp: 10 },
+  ];
+
+  it('the host aggregate wins over the local sum of the projected rows', () => {
+    // The rows sum to 14/20 = 0.7, but the ship as a whole is at 0.5.
+    expect(overallHull(rows, 0.5).pct).toBe(0.5);
+  });
+
+  it('falls back to the local sum only when the host sent no aggregate', () => {
+    expect(overallHull(rows).pct).toBe(0.7);
+    expect(overallHull(rows, null).pct).toBe(0.7);
+  });
+
+  it('still reports the summed current/max of the visible rows', () => {
+    const h = overallHull(rows, 0.5);
+    expect(h.current).toBe(14);
+    expect(h.max).toBe(20);
+  });
+
+  it('reads full on an empty hull rather than dividing by zero', () => {
+    expect(overallHull([]).pct).toBe(1);
+    expect(overallHull(undefined).pct).toBe(1);
+  });
+
+  // Issue #1014. There is deliberately NO local fallback for the destroyed
+  // share: the projected rows cannot compute it (a system destroyed where this
+  // recipient cannot see it is absent from them entirely), so an unknown share
+  // is 0 rather than a guess derived from a slice of the ship.
+  it('carries the host destroyed share through untouched', () => {
+    expect(overallHull(rows, 0.5, 0.25).destroyed_pct).toBe(0.25);
+  });
+
+  it('defaults the destroyed share to 0 when the host sent none', () => {
+    expect(overallHull(rows, 0.5).destroyed_pct).toBe(0);
+    expect(overallHull(rows, 0.5, null).destroyed_pct).toBe(0);
+    expect(overallHull(rows, 0.5, NaN).destroyed_pct).toBe(0);
+  });
+
+  it('never derives the destroyed share from the rows it was given', () => {
+    // A visibly destroyed row must not be summed into a whole-ship figure —
+    // it is one system out of a projection, not a share of the ship.
+    const withDestroyed = [
+      { system_id: 'core',   current: 0,  max_hp: 10 },
+      { system_id: 'repair', current: 10, max_hp: 10 },
+    ];
+    expect(overallHull(withDestroyed, 0.5).destroyed_pct).toBe(0);
+  });
+
+  it('clamps an out-of-range destroyed share', () => {
+    expect(overallHull(rows, 0.5, 1.4).destroyed_pct).toBe(1);
+    expect(overallHull(rows, 0.5, -0.2).destroyed_pct).toBe(0);
   });
 });
 

@@ -20,6 +20,7 @@
 //! | View state | Who sees it | Rule |
 //! |---|---|---|
 //! | aggregate hull | everyone | ship-wide fraction over *every* damageable system |
+//! | destroyed share | everyone | ship-wide fraction of capacity at the `Destroyed` tier (issue #1014) |
 //! | Core detail | the Engineering holder | hull entries no station owns |
 //! | station-owner detail | that station's holder | hull entries its station owns |
 //! | on-site detail | the Engineering holder | non-Core entries with a team *on site* |
@@ -60,6 +61,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use crate::damage::DamageTier;
 use crate::damage::SystemHull;
 use crate::lobby::handler::Target;
 use crate::lobby::Sessions;
@@ -90,6 +92,7 @@ pub const CORE_BUCKET_ID: &str = "core";
 pub struct HullProjection {
     pub entries: Vec<SystemHullStatus>,
     pub aggregate_fraction: Option<f32>,
+    pub destroyed_fraction: Option<f32>,
 }
 
 /// Last-sent repair blackboard projection per session token.
@@ -223,6 +226,38 @@ impl HullVisibility {
         Some((current / max).clamp(0.0, 1.0))
     }
 
+    /// Share of the ship's total hull capacity (0.0–1.0) held by systems at the
+    /// `Destroyed` tier — capability that is gone rather than merely damaged
+    /// (issue #1014).
+    ///
+    /// Computed over **every** damageable system, exactly like
+    /// [`Self::aggregate_fraction`] and for the same reason: the projected
+    /// `entries` a recipient receives are a slice of the ship, so a destroyed
+    /// system nobody may see would otherwise be invisible to every whole-ship
+    /// figure. It is a single scalar reduction over the full list, which names
+    /// no system and therefore leaks nothing #737 withholds — the same privacy
+    /// argument that lets every recipient have the aggregate.
+    ///
+    /// `Destroyed` latches at exactly 0 HP (`crate::damage::DamageTier`), so
+    /// this share is already inside `aggregate_fraction`'s *loss*; the two
+    /// scalars answer different questions — "how much hull is left" versus "how
+    /// much of it is unrecoverable" — and the client paints the second as a
+    /// distinct band. Returns `None` when the ship declares no damageable
+    /// systems, matching [`Self::aggregate_fraction`].
+    pub fn destroyed_fraction(&self) -> Option<f32> {
+        let max: f32 = self.entries.iter().map(|e| e.max_hp).sum();
+        if max <= 0.0 {
+            return None;
+        }
+        let destroyed: f32 = self
+            .entries
+            .iter()
+            .filter(|e| e.tier == DamageTier::Destroyed)
+            .map(|e| e.max_hp)
+            .sum();
+        Some((destroyed / max).clamp(0.0, 1.0))
+    }
+
     /// True when a hull entry has no owning station — the Core bucket.
     fn is_core(&self, system_id: &SystemId) -> bool {
         matches!(self.owner_of.get(system_id), Some(None) | None)
@@ -296,6 +331,7 @@ impl HullVisibility {
         HullProjection {
             entries: self.entries_for(viewer),
             aggregate_fraction: self.aggregate_fraction(),
+            destroyed_fraction: self.destroyed_fraction(),
         }
     }
 
@@ -317,6 +353,7 @@ impl HullVisibility {
     /// | `system_hull` | projected via [`Self::entries_for`] | exact per-system hull |
     /// | `queue_depth` | projected via [`Self::can_see_station`] | exact tier + HP deficit, scoped to damaged systems |
     /// | `aggregate_hull_fraction` | recomputed ship-wide | the one whole-ship figure everyone may have |
+    /// | `destroyed_hull_fraction` | recomputed ship-wide | a second whole-ship scalar; a reduction over every system names none of them |
     /// | `damageable_systems` | whole | system ids only, no hull detail; Engineering dispatches to systems it cannot see |
     /// | `teams` | whole | this viewer's *own* teams — where it already chose to send them, not a fact about the ship |
     /// | `travel_duration_secs` | whole | a ship constant from `[repair]` TOML |
@@ -333,6 +370,7 @@ impl HullVisibility {
             system_hull: self.entries_for(viewer),
             queue_depth: self.queue_entries_for(viewer, &bb.queue_depth),
             aggregate_hull_fraction: self.aggregate_fraction(),
+            destroyed_hull_fraction: self.destroyed_fraction(),
             damageable_systems: bb.damageable_systems.clone(),
             teams: bb.teams.clone(),
             travel_duration_secs: bb.travel_duration_secs,
@@ -368,6 +406,7 @@ fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
         damageable_systems: vec![],
         queue_depth: vec![],
         aggregate_hull_fraction: None,
+        destroyed_hull_fraction: None,
     }
 }
 
@@ -459,6 +498,7 @@ pub fn push_hull_updates(world: &mut World) {
                     ServerMessage::SystemHullUpdate {
                         entries: projection.entries.clone(),
                         aggregate_fraction: projection.aggregate_fraction,
+                        destroyed_fraction: projection.destroyed_fraction,
                     },
                 ));
             }
@@ -566,6 +606,7 @@ pub fn hull_update_for_token(world: &mut World, token: &str) -> Option<ServerMes
     Some(ServerMessage::SystemHullUpdate {
         entries: projection.entries,
         aggregate_fraction: projection.aggregate_fraction,
+        destroyed_fraction: projection.destroyed_fraction,
     })
 }
 
@@ -605,15 +646,31 @@ mod tests {
         }
     }
 
+    /// A system at the `Destroyed` tier — 0 HP, full capacity still declared.
+    fn destroyed(id: &str) -> SystemHullStatus {
+        SystemHullStatus {
+            tier: DamageTier::Destroyed,
+            ..status(id, 0.0)
+        }
+    }
+
     /// helm-radar -> helm, sensors -> science, repair -> engineering,
     /// "core" -> ownerless.
     fn vis(on_site: Vec<&str>) -> HullVisibility {
-        let entries = vec![
-            status("core", 40.0),
-            status("helm-radar", 60.0),
-            status("sensors", 100.0),
-            status("repair", 100.0),
-        ];
+        vis_with(
+            vec![
+                status("core", 40.0),
+                status("helm-radar", 60.0),
+                status("sensors", 100.0),
+                status("repair", 100.0),
+            ],
+            on_site,
+        )
+    }
+
+    /// Same ownership map as [`vis`], with the hull entries supplied — used to
+    /// author tiers (a `Destroyed` system) the plain fixture never produces.
+    fn vis_with(entries: Vec<SystemHullStatus>, on_site: Vec<&str>) -> HullVisibility {
         let owner_of = [
             (SystemId("core".into()), None),
             (
@@ -702,6 +759,95 @@ mod tests {
         }
     }
 
+    // ── Issue #1014: destroyed capability is a whole-ship scalar ──────────────
+    //
+    // The worst case is a system that is destroyed, owned by a station nobody is
+    // on, with no repair team on site — it appears in *no* recipient's projected
+    // rows, so both whole-ship scalars have to be computed from the full entry
+    // list or the loss is invisible to everyone.
+
+    /// `sensors` (science-owned, off-site) destroyed; nothing else damaged.
+    fn vis_with_destroyed_offsite() -> HullVisibility {
+        vis_with(
+            vec![
+                status("core", 100.0),
+                status("helm-radar", 100.0),
+                destroyed("sensors"),
+                status("repair", 100.0),
+            ],
+            vec![],
+        )
+    }
+
+    #[test]
+    fn a_destroyed_offsite_system_still_drags_the_aggregate_down_for_every_viewer() {
+        let v = vis_with_destroyed_offsite();
+        // 100 + 100 + 0 + 100 out of 400 — the destroyed system stays in the
+        // denominator, so the ship cannot read as fully healthy.
+        let expected = 300.0 / 400.0;
+        for viewer in [
+            None,
+            Some(StationId("helm".into())),
+            Some(StationId("science".into())),
+            Some(StationId("engineering".into())),
+        ] {
+            let p = v.projection_for(viewer.as_ref());
+            let got = p.aggregate_fraction.expect("aggregate");
+            assert!((got - expected).abs() < 1e-6, "{viewer:?} aggregate {got}");
+        }
+    }
+
+    #[test]
+    fn every_viewer_gets_the_same_destroyed_fraction_including_systems_it_cannot_see() {
+        let v = vis_with_destroyed_offsite();
+        // One 100-max system destroyed out of 400 total capacity.
+        let expected = 0.25;
+        for viewer in [
+            None,
+            Some(StationId("helm".into())),
+            Some(StationId("science".into())),
+            Some(StationId("engineering".into())),
+        ] {
+            let p = v.projection_for(viewer.as_ref());
+            let got = p.destroyed_fraction.expect("destroyed fraction");
+            assert!((got - expected).abs() < 1e-6, "{viewer:?} destroyed {got}");
+            // ...and it is genuinely unavailable from the rows they were sent:
+            // only science can see the destroyed row at all.
+            let visible_destroyed = p.entries.iter().any(|e| e.tier == DamageTier::Destroyed);
+            assert_eq!(
+                visible_destroyed,
+                viewer.as_ref() == Some(&StationId("science".into())),
+                "{viewer:?} row visibility must not change with the new scalar"
+            );
+        }
+    }
+
+    #[test]
+    fn destroyed_fraction_is_zero_when_nothing_is_destroyed() {
+        // Damaged is not destroyed: the fixture's core is at 40/100.
+        let v = vis(vec![]);
+        assert_eq!(v.destroyed_fraction(), Some(0.0));
+    }
+
+    #[test]
+    fn destroyed_fraction_is_none_when_the_ship_declares_no_damageable_systems() {
+        let v = vis_with(vec![], vec![]);
+        assert_eq!(v.destroyed_fraction(), None);
+        assert_eq!(v.aggregate_fraction(), None);
+    }
+
+    #[test]
+    fn the_repair_blackboard_carries_the_destroyed_scalar_to_engineering() {
+        let v = vis_with_destroyed_offsite();
+        let bb = bb_with_queue(vec![]);
+        let eng = StationId("engineering".into());
+        let p = v.project_repair_blackboard(Some(&eng), &bb);
+        // Engineering cannot see the sensors row, but is told a quarter of the
+        // ship's capacity is gone.
+        assert!(!ids(&p.system_hull).contains(&"sensors"));
+        assert_eq!(p.destroyed_hull_fraction, Some(0.25));
+    }
+
     #[test]
     fn blackboard_projection_filters_hull_but_keeps_dispatch_targets() {
         let v = vis(vec![]);
@@ -722,6 +868,7 @@ mod tests {
             ],
             queue_depth: vec![],
             aggregate_hull_fraction: None,
+            destroyed_hull_fraction: None,
         };
         let eng = StationId("engineering".into());
         let projected = v.project_repair_blackboard(Some(&eng), &bb);
@@ -757,7 +904,12 @@ mod tests {
             system_hull: vec![status("core", 40.0), status("helm-radar", 60.0)],
             damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
             queue_depth: queue,
-            aggregate_hull_fraction: None,
+            // Non-None on input so the withholding tests that use this fixture
+            // (see `a_non_engineering_viewer_is_sent_the_empty_blackboard_not_a_filtered_one`)
+            // genuinely exercise the overwrite-to-`None` behaviour instead of
+            // passing vacuously because the input was already `None`.
+            aggregate_hull_fraction: Some(0.25),
+            destroyed_hull_fraction: Some(0.25),
         }
     }
 
@@ -831,6 +983,7 @@ mod tests {
         assert_eq!(ids(&p.system_hull), vec!["core", "repair"]);
         assert!(p.queue_depth.is_empty());
         assert!(p.aggregate_hull_fraction.is_some());
+        assert!(p.destroyed_hull_fraction.is_some());
         // Deliberately whole:
         assert_eq!(p.damageable_systems, bb.damageable_systems);
         assert_eq!(p.teams, bb.teams);
@@ -867,6 +1020,7 @@ mod tests {
         assert!(out.damageable_systems.is_empty());
         assert!(out.teams.is_empty());
         assert!(out.aggregate_hull_fraction.is_none());
+        assert!(out.destroyed_hull_fraction.is_none());
     }
 
     #[test]
@@ -1036,6 +1190,12 @@ station = "engineering"
     /// Spawn a LocalShip carrying the config/hull/teams the projection reads,
     /// plus two connected sessions: `eng` at Engineering, `pilot` at Helm.
     fn world_app(teams: RepairTeams) -> App {
+        world_app_with_hp(teams, &[("helm-radar", 30.0), ("core", 60.0)])
+    }
+
+    /// [`world_app`] with the post-damage HP of each system spelled out, so a
+    /// test can author a *destroyed* system (0 HP) the default fixture lacks.
+    fn world_app_with_hp(teams: RepairTeams, hp: &[(&str, f32)]) -> App {
         use crate::entity_spawner::EntitySystemHull;
         use crate::server_app::LocalShip;
         use crate::ship_plugin::ShipConfigComponent;
@@ -1052,8 +1212,9 @@ station = "engineering"
         app.insert_resource(Sessions(sessions));
 
         let mut hull = hull_with(&[("core", 100.0), ("helm-radar", 100.0), ("repair", 100.0)]);
-        hull.set_hp(&SystemId("helm-radar".into()), 30.0);
-        hull.set_hp(&SystemId("core".into()), 60.0);
+        for (id, current) in hp {
+            hull.set_hp(&SystemId((*id).into()), *current);
+        }
 
         app.world_mut().spawn((
             crate::simulation::Ship,
@@ -1065,7 +1226,16 @@ station = "engineering"
         app
     }
 
-    fn sent_hull(app: &mut App) -> Vec<(String, Vec<String>, Option<f32>)> {
+    /// One recipient's `SystemHullUpdate`: the rows it may see, plus both
+    /// whole-ship scalars it is entitled to regardless of those rows.
+    struct SentHull {
+        token: String,
+        rows: Vec<String>,
+        aggregate: Option<f32>,
+        destroyed: Option<f32>,
+    }
+
+    fn sent_hull(app: &mut App) -> Vec<SentHull> {
         push_hull_updates(app.world_mut());
         app.world()
             .resource::<crate::simulation::SimOutbox>()
@@ -1077,26 +1247,27 @@ station = "engineering"
                     ServerMessage::SystemHullUpdate {
                         entries,
                         aggregate_fraction,
+                        destroyed_fraction,
                     },
-                ) => Some((
-                    token.clone(),
-                    entries.iter().map(|e| e.system_id.0.clone()).collect(),
-                    *aggregate_fraction,
-                )),
+                ) => Some(SentHull {
+                    token: token.clone(),
+                    rows: entries.iter().map(|e| e.system_id.0.clone()).collect(),
+                    aggregate: *aggregate_fraction,
+                    destroyed: *destroyed_fraction,
+                }),
                 _ => None,
             })
             .collect()
     }
 
-    fn rows_for<'a>(
-        sent: &'a [(String, Vec<String>, Option<f32>)],
-        token: &str,
-    ) -> &'a Vec<String> {
-        &sent
-            .iter()
-            .find(|(t, _, _)| t == token)
+    fn for_token<'a>(sent: &'a [SentHull], token: &str) -> &'a SentHull {
+        sent.iter()
+            .find(|s| s.token == token)
             .unwrap_or_else(|| panic!("expected a SystemHullUpdate for {token}"))
-            .1
+    }
+
+    fn rows_for<'a>(sent: &'a [SentHull], token: &str) -> &'a Vec<String> {
+        &for_token(sent, token).rows
     }
 
     #[test]
@@ -1126,9 +1297,47 @@ station = "engineering"
         let sent = sent_hull(&mut app);
         // 60 + 30 + 100 out of 300 — spans systems no single recipient sees.
         let expected = 190.0 / 300.0;
-        for (token, _, aggregate) in &sent {
-            let got = aggregate.unwrap_or_else(|| panic!("{token} got no aggregate"));
+        for s in &sent {
+            let token = &s.token;
+            let got = s
+                .aggregate
+                .unwrap_or_else(|| panic!("{token} got no aggregate"));
             assert!((got - expected).abs() < 1e-6, "{token} aggregate {got}");
+        }
+    }
+
+    #[test]
+    fn every_recipient_receives_the_same_destroyed_capability_share() {
+        // helm-radar destroyed: helm-owned, no team on site, so Engineering
+        // never receives its row — yet must still be told a third of the ship's
+        // capacity is gone (issue #1014).
+        let mut app = world_app_with_hp(RepairTeams::new(1), &[("helm-radar", 0.0)]);
+        let sent = sent_hull(&mut app);
+        assert!(
+            !rows_for(&sent, "eng").contains(&"helm-radar".to_string()),
+            "the destroyed system must stay hidden from Engineering"
+        );
+        let expected = 100.0 / 300.0;
+        for s in &sent {
+            let token = &s.token;
+            let got = s
+                .destroyed
+                .unwrap_or_else(|| panic!("{token} got no destroyed fraction"));
+            assert!((got - expected).abs() < 1e-6, "{token} destroyed {got}");
+            // The aggregate is denominator-complete over the same entries.
+            let agg = s.aggregate.expect("aggregate");
+            assert!(
+                (agg - 200.0 / 300.0).abs() < 1e-6,
+                "{token} aggregate {agg}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_undamaged_ship_reports_a_zero_destroyed_share_not_none() {
+        let mut app = world_app_with_hp(RepairTeams::new(1), &[]);
+        for s in &sent_hull(&mut app) {
+            assert_eq!(s.destroyed, Some(0.0), "{} destroyed share", s.token);
         }
     }
 
@@ -1156,6 +1365,7 @@ station = "engineering"
             let ServerMessage::SystemHullUpdate {
                 entries,
                 aggregate_fraction,
+                destroyed_fraction,
             } = hull_update_for_token(app.world_mut(), token).expect("resync payload")
             else {
                 unreachable!()
@@ -1167,6 +1377,7 @@ station = "engineering"
                 "reconnect must not hand {token} detail the live path withholds"
             );
             assert!(aggregate_fraction.is_some());
+            assert!(destroyed_fraction.is_some());
         }
     }
 
@@ -1187,7 +1398,11 @@ station = "engineering"
                 SystemId("repair".into()),
             ],
             queue_depth: vec![],
-            aggregate_hull_fraction: None,
+            // Non-None on input so the "pilot" assertions below genuinely
+            // exercise `withheld_repair_blackboard` overwriting to `None`
+            // rather than passing vacuously on an already-`None` input.
+            aggregate_hull_fraction: Some(0.25),
+            destroyed_hull_fraction: Some(0.25),
         });
         let viewers = vec![
             ("eng".to_string(), Some(StationId("engineering".into()))),
@@ -1218,6 +1433,7 @@ station = "engineering"
                 "eng" => {
                     assert_eq!(rows, vec!["core", "repair"]);
                     assert!(bb.aggregate_hull_fraction.is_some());
+                    assert!(bb.destroyed_hull_fraction.is_some());
                 }
                 // Helm is not Engineering: the repair blackboard is the
                 // Engineering console's payload and nothing else renders it,
@@ -1228,6 +1444,7 @@ station = "engineering"
                     assert!(bb.teams.is_empty());
                     assert!(bb.queue_depth.is_empty());
                     assert!(bb.aggregate_hull_fraction.is_none());
+                    assert!(bb.destroyed_hull_fraction.is_none());
                 }
                 other => panic!("unexpected recipient {other}"),
             }

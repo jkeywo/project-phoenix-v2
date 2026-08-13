@@ -94,6 +94,53 @@ describe('PhHullIntegrity', () => {
     expect(detail.shadowRoot.textContent).toContain(t('console.common.destroyed'));
   });
 
+  // ── Issue #1014: the destroyed-capability share is passed straight through ──
+  //
+  // The figure is ship-wide and host-supplied; `systems` is this recipient's
+  // #737 projection and cannot produce it, so this component only forwards it.
+
+  it('passes destroyed_pct through to the bar in the total_pct shape', () => {
+    const { el } = setup();
+    el.state = {
+      total_pct: 0.6,
+      destroyed_pct: 0.25,
+      systems: [{ system_id: 'helm', display_name: 'Helm', current: 25.0, max_hp: 25.0 }],
+    };
+    const bar = el.shadowRoot.querySelector('ph-damage-bar');
+    expect(bar.state.destroyed).toBe(0.25);
+    expect(bar.state.pct).toBe(0.6);
+  });
+
+  it('passes destroyed_pct through to the bar in the pct shape', () => {
+    const { el } = setup();
+    el.state = { pct: 0.85, totalCurrent: 850, totalMax: 1000, destroyed_pct: 0.1 };
+    const bar = el.shadowRoot.querySelector('ph-damage-bar');
+    expect(bar.state.destroyed).toBe(0.1);
+    expect(bar.state.totalMax).toBe(1000);
+  });
+
+  it('forwards a destroyed share even when no visible system is destroyed', () => {
+    // The whole point: the lost system belongs to a station this client cannot
+    // see, so the rows it was given look perfectly healthy.
+    const { el } = setup();
+    el.state = {
+      total_pct: 0.5,
+      destroyed_pct: 0.5,
+      systems: [{ system_id: 'repair', display_name: 'Repair', current: 25.0, max_hp: 25.0 }],
+    };
+    const bar = el.shadowRoot.querySelector('ph-damage-bar');
+    expect(bar.state.destroyed).toBe(0.5);
+    expect(bar.shadowRoot.getElementById('bar-lost').style.width).toBe('50%');
+  });
+
+  it('omits destroyed when the host sent none (legacy payload)', () => {
+    const { el } = setup();
+    el.state = { total_pct: 0.6 };
+    const bar = el.shadowRoot.querySelector('ph-damage-bar');
+    expect(bar.state.destroyed).toBeUndefined();
+    expect(bar.shadowRoot.getElementById('bar-lost').style.display).toBe('none');
+  });
+
   it('updates when state changes', () => {
     const { el } = setup();
     el.state = { total_pct: 0.9 };

@@ -92,6 +92,26 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.hullAggregate).toBe(0.6);
   });
 
+  it('SystemHullUpdate stores the ship-wide destroyed share (issue #1014)', () => {
+    const s = new ClientSimState();
+    expect(s.hullDestroyed).toBeNull();
+    // The destroyed system is not in `entries` — it belongs to a station this
+    // client cannot see — so the share can only come from the host.
+    s.apply({ type: 'SystemHullUpdate', data: {
+      entries: [{ system_id: 'helm', display_name: 'Helm', current: 100, max_hp: 100 }],
+      aggregate_fraction: 0.66,
+      destroyed_fraction: 0.33,
+    } });
+    expect(s.hullDestroyed).toBe(0.33);
+  });
+
+  it('SystemHullUpdate keeps the last known destroyed share when a payload omits it', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SystemHullUpdate', data: { entries: [], destroyed_fraction: 0.2 } });
+    s.apply({ type: 'SystemHullUpdate', data: { entries: [] } });
+    expect(s.hullDestroyed).toBe(0.2);
+  });
+
   it('SimState leaves position untouched when the snapshot omits it', () => {
     const s = new ClientSimState();
     s.world.entities = [asteroid('a', 7, 8)];

@@ -334,6 +334,7 @@ mod tests {
                     debuff_magnitude: 0.5,
                 }],
                 aggregate_fraction: Some(0.4),
+                destroyed_fraction: Some(0.0),
             },
         );
         let mut shields = LastBroadcastShields(vec![ShieldFacingStatus {

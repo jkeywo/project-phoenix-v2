@@ -429,6 +429,7 @@ entities:
         - repair-team-state
       produces:
         - engineering-aggregate-hull-state
+        - engineering-destroyed-capability-state
         - core-damage-detail-state
         - station-owner-local-damage-state
         - onsite-repair-detail-state
@@ -630,6 +631,57 @@ entities:
         summary: >-
           `overallHull` prefers the host figure over the local sum, so the hero
           bar shows ship hull rather than visible-slice hull.
+
+  - state: engineering-destroyed-capability-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Engineering Destroyed Capability State
+      summary: >-
+        Ship-wide share of total capacity held by systems destroyed outright,
+        visible to Engineering before any team arrives.
+      rationale:
+        - >-
+          Issue #1014 gave this state a host producer alongside the aggregate
+          hull fraction. It is carried on the wire as
+          `SystemHullUpdate.destroyed_fraction` and
+          `RepairBlackboard.destroyed_hull_fraction`, computed over *every*
+          damageable system. It is a second whole-ship scalar, not a
+          refinement of the aggregate: a reduction over every system's HP
+          fraction names none of the systems that are fully gone, so
+          "destroyed" needs its own published figure.
+        - >-
+          [ai] Like the aggregate, this has no honest client-side fallback: the
+          per-system rows a recipient receives are a projection (issue #737),
+          so a system destroyed at a station this client cannot see is absent
+          from them entirely, and any local derivation would report "nothing
+          destroyed" precisely when something was.
+    architecture:
+      classification: replicated
+      owner: repair-visibility-publisher
+      derived_from:
+        - authoritative-damage-state
+    implementation:
+      status: declared
+      paths:
+        - gui/console-state.js
+        - gui/components/ph-damage-bar.js
+      symbols:
+        - overallHull
+        - buildRepairConsoleState
+        - PhDamageBar
+    evidence:
+      - kind: test
+        reference: every_recipient_receives_the_same_destroyed_capability_share
+        summary: >-
+          The published destroyed-capacity share spans systems no single
+          recipient can see, and is identical for every recipient.
+      - kind: test
+        reference: never derives the destroyed share from the rows it was given
+        summary: >-
+          `overallHull` uses the host-supplied `destroyed_fraction` for
+          `destroyed_pct` and never sums it from the projected `system_hull`
+          rows.
 
   - state: core-damage-detail-state
     core:

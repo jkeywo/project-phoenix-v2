@@ -349,7 +349,10 @@ transform = { relative_to = "gas-giant", offset = [125.0, 0.0, 40.0] }
 template_path = "assets/entities/asteroid_field_main.toml"
 id = "inner-belt"
 transform = { position = [0.0, 0.0, 0.0] }
-overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0, weight = 1.0, shape = "torus" } }
+# `density` halves the template's 0.005 and `grid.jitter` triples its 20.0
+# (combat_test only): a thinner belt with the rocks scattered much further off
+# their grid cells, so the field reads as scattered debris rather than a lattice.
+overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0, weight = 1.0, shape = "torus", density = 0.0025, grid = { jitter = 60.0 } } }
 
 # Outer asteroid belt, r=800..1000. Sits between the starbase and the
 # enemy spawn anchors (all at r >= 1000), so attackers must fly through
@@ -358,7 +361,8 @@ overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0, wei
 template_path = "assets/entities/asteroid_field_main.toml"
 id = "outer-belt"
 transform = { position = [0.0, 0.0, 0.0] }
-overrides = { asteroid_field = { inner_radius = 800.0, outer_radius = 1000.0, weight = 1.0, shape = "torus" } }
+# Same halved density / tripled grid.jitter as the inner belt (see there).
+overrides = { asteroid_field = { inner_radius = 800.0, outer_radius = 1000.0, weight = 1.0, shape = "torus", density = 0.0025, grid = { jitter = 60.0 } } }
 
 # Player ship — selected from the lobby ship picker. The [[available_ships]]
 # entries drive the lobby UI; [player_spawn] sets the spawn position once

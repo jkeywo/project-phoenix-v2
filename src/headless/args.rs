@@ -20,12 +20,13 @@ pub const DEFAULT_HZ: f64 = 60.0;
 const DEFAULT_WORLD: &str = "assets/worlds/default.toml";
 /// World `--side-a`/`--side-b` imply when `--world` is absent.
 ///
-/// The duel slots those flags fill only exist in this world, so defaulting to
+/// The slot seam those flags drive only exists in this world, so defaulting to
 /// `default.toml` meant `--side-a cruiser --side-b destroyer` loaded a world
-/// with nothing to fill and ran a combat-free 300s draw that reads like a real
-/// balance result. An explicit `--world` still wins — a user may have authored
-/// their own duel-shaped world — and a world without slots is now rejected by
-/// `duel::apply_duel_sides` rather than silently ignored.
+/// with nothing to generate into and ran a combat-free 300s draw that reads like
+/// a real balance result. An explicit `--world` still wins — a user may have
+/// authored their own duel-shaped world — and a world carrying no
+/// `duel::SLOT_MARKER` is now rejected by `duel::apply_duel_sides` rather than
+/// silently ignored.
 const DUEL_WORLD: &str = "assets/worlds/duel.toml";
 const DEFAULT_SHIP: &str = "assets/entities/alliance_cruiser.toml";
 /// The scenario a capture is filed under when `--perf-scenario` is absent.
@@ -56,10 +57,12 @@ DUEL (assets/worlds/duel.toml)
                           <name>.toml (both under assets/entities/), then <name>
                           as a literal path. e.g. --side-a cruiser --side-b destroyer
                           Either flag defaults --world to the duel harness
-                          (assets/worlds/duel.toml) — the only world that authors
-                          the side_a_*/side_b_* slots they fill. An explicit
-                          --world still wins, but a world with no such slots is
-                          rejected rather than silently run as-is.
+                          (assets/worlds/duel.toml) — the only world carrying the
+                          `// duel:slots` marker, below which the side_a_*/
+                          side_b_* slot drivers are regenerated. An explicit
+                          --world still wins, but a world with no such marker is
+                          rejected rather than silently run as-is. Without either
+                          flag the world's own authored roster runs untouched.
 
 TIME
     --hz <N>              Frame rate the harness drives the app at, in frames

@@ -859,11 +859,14 @@ fn a_save_whose_authored_data_changed_is_refused_on_content() {
 /// the fresh world's authored maxima over the capture's.
 ///
 /// The edit is simulated through the ledger/loader seam rather than editing a
-/// real asset on disk: `duel()` already recorded the duel's real declared
-/// file set (every hull it spawns, via `content_ledger::
-/// eager_record_world_entities`), so re-recording one of those exact paths
-/// with different text is what a designer's edit would have produced, without
-/// mutating a shipped asset out from under the rest of the suite.
+/// real asset on disk: `duel()` already recorded the duel's real declared file
+/// set, so re-recording one of those exact paths with different text is what a
+/// designer's edit would have produced, without mutating a shipped asset out
+/// from under the rest of the suite. The hull edited below is the PLAYER's own,
+/// which reaches the ledger through `FsTemplateLoader` resolving `--ship` —
+/// since `duel.toml`'s NPC slots became script (issue #984, M6) they are no
+/// longer in `world_config.entities`, so `content_ledger::
+/// eager_record_world_entities` does not see them (tracked as its own issue).
 #[test]
 fn a_save_whose_entity_template_changed_is_refused_on_content() {
     let mut live = duel();

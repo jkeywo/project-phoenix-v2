@@ -1058,6 +1058,56 @@ mod tests {
         assert!(err.to_string().contains("anchor"), "{err}");
     }
 
+    /// A handler may DELEGATE to a helper fn in the same unit, and the helper's
+    /// effects land in the CALLER's buffer, in authored order (issue #984, M6
+    /// duel harness).
+    ///
+    /// This is what lets a world author one parameterised spawn body and call it
+    /// from N one-line handlers instead of repeating the body N times: `ctx` is
+    /// copied into the callee (Rhai passes maps by value), but the `effects`
+    /// handle inside it is an [`EffectSink`] — `Arc<Mutex<_>>` — so every copy
+    /// pushes onto the ONE buffer the host drains. `duel.toml`'s generated slot
+    /// drivers ride on this; nothing else shipped did, so it is pinned here.
+    #[test]
+    fn a_helper_fn_shares_the_callers_effect_buffer() {
+        let effs = run_buffered(
+            r#"
+            fn spawn_slot(ctx, name, template) {
+                ctx.effects.spawn_entity(#{
+                    template_path: template,
+                    name: name,
+                    position: [0, 0, 0],
+                });
+            }
+
+            fn f(ctx) {
+                ctx.effects.complete_objective("before");
+                spawn_slot(ctx, "side_b_1", "assets/entities/ship.toml");
+                ctx.effects.complete_objective("after");
+            }"#,
+            "f",
+        );
+        let spawned = toml_action(
+            "type = \"spawn_entity\"\n\
+             template_path = \"assets/entities/ship.toml\"\n\
+             name = \"side_b_1\"\n\
+             position = [0.0, 0.0, 0.0]",
+        );
+        assert_eq!(
+            effs,
+            vec![
+                BufferedEffect::Cmd(ActionCmd::CompleteObjective {
+                    id: "before".to_string()
+                }),
+                BufferedEffect::Action(spawned),
+                BufferedEffect::Cmd(ActionCmd::CompleteObjective {
+                    id: "after".to_string()
+                }),
+            ],
+            "a helper fn's effects must interleave in the caller's buffer"
+        );
+    }
+
     /// A `Cmd` effect and an `Action` effect keep their authored order in the one
     /// shared buffer — the interleaving guarantee flag writes also rely on.
     #[test]

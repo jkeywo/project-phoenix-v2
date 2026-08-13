@@ -395,8 +395,10 @@ fn duel_args() -> HeadlessArgs {
 /// (`apply_duel_sides`), which only runs at all when `HeadlessArgs::side_a`/
 /// `side_b` reach `build_headless_app`. A v1 artifact (before this review)
 /// had nowhere to carry these two fields, so replaying a duel recording
-/// silently ran the UNFILLED `duel.toml` — every NPC slot deleted, no
-/// escorts, no enemies — rather than the roster that was actually recorded.
+/// silently ran `duel.toml` UNTRANSFORMED — since issue #984 that means the
+/// world's own authored default roster (a 5v5 of couriers against destroyers),
+/// and before it an empty arena with every slot deleted. Either way it is not
+/// the roster that was actually recorded.
 #[test]
 fn a_duel_recording_replays_with_its_side_rosters_intact() {
     let args = duel_args();

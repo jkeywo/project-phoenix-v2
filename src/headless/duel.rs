@@ -1,17 +1,54 @@
-//! `--side-a` / `--side-b` class-matchup transform for `duel.toml` (issue #844).
+//! `--side-a` / `--side-b` class-matchup transform for `duel.toml` (issue #844;
+//! retyped onto the Rhai front-end by issue #984, M6).
 //!
-//! `duel.toml` pre-authors up to five NPC spawn slots per side (as
-//! `spawn_entity` triggers, so `on_all_destroyed` group membership registers
-//! through the normal `SpawnEntity` dispatch — a static `[[entity]]` never
-//! joins a group), plus one static `player-ship` entity for side-A slot 1.
-//! [`apply_duel_sides`] takes the parsed [`WorldConfig`] and the two CLI ship
-//! lists and, as a **pure** transform over the config, fills the slots the
-//! lists name and deletes the rest.
+//! `duel.toml` authors its NPC combatants in one inline `[script]` block: a
+//! parameterised spawn body (`spawn_slot`) written ONCE, plus a roster of
+//! one-line *drivers* that call it — one per filled slot — under a
+//! [`SLOT_MARKER`] line. [`apply_duel_sides`] takes the **raw world TOML** and
+//! the two CLI ship lists, truncates that script source at the marker, and
+//! regenerates the roster below it from the lists. It is still a pure transform,
+//! now over `toml::Value` rather than `WorldConfig`, and it still runs once
+//! before the world boots.
 //!
-//! The core (fill / delete / reject / empty-group guard) is filesystem-free:
-//! template-name resolution is injected as a closure so the transform is
-//! unit-testable with a fake resolver, and the production wiring passes
-//! [`resolve_template`] (which does touch the filesystem).
+//! ## Why the raw source and not the parsed config
+//!
+//! A converted world's spawn slots are no longer `[[trigger]]` blocks —
+//! `parse_world` never sees them, so `WorldConfig::triggers` is empty of slots
+//! and there is nothing there to fill or delete. Registration happens when the
+//! script loader runs the unit's TOP LEVEL (`compile_scripts`), which is also why
+//! the transform cannot be a runtime decision: a script cannot conditionally skip
+//! registering the side-B victory trigger from data that only exists at runtime.
+//! Editing the source string before the loader reads it is the one seam that
+//! keeps both properties.
+//!
+//! The whole mechanism lives inside ONE script unit because it has to: ASTs are
+//! keyed per source path and each unit's top level runs separately, so a second
+//! `[script.<key>]` block cannot call a helper defined in `[script.setup]`.
+//!
+//! ## The authored body and the generated drivers
+//!
+//! The transform generates only the drivers, never the spawn body:
+//!
+//! ```rhai
+//! on_timer(0, "spawn_side_b_1");
+//! on_all_destroyed("side_b", "on_side_b_destroyed");
+//!
+//! fn spawn_side_b_1(ctx) { spawn_slot(ctx, "side_b_1", "assets/entities/alliance_destroyer.toml", "<harrow-uuid>", "side_b"); }
+//! ```
+//!
+//! `spawn_slot` — the doctrine, the anchor convention, the override shape — is
+//! authored in `duel.toml` and is the same body the un-harnessed default roster
+//! calls. So `--side-a`/`--side-b` cannot drift from the arena's own doctrine the
+//! way a Rust-side generator of whole spawn bodies would. A helper fn's effects
+//! land in its CALLER's buffer (`EffectSink` is an `Arc<Mutex<_>>` shared through
+//! the copied `ctx`), which is what makes the delegation work at all; pinned by
+//! `world::script::effects`'s `a_helper_fn_shares_the_callers_effect_buffer`.
+//!
+//! Registration order below the marker mirrors the declarative file exactly —
+//! side-A escorts, then side-B, then the victory `on_all_destroyed` — so the
+//! trigger indices, and with them the spawn order the world digest folds, are
+//! unchanged by the conversion. Rhai function definitions are position
+//! independent, so the drivers may follow their own registrations.
 //!
 //! ## The player decides side A
 //!
@@ -27,11 +64,23 @@
 //! don't end the run, the player's death does.
 //!
 //! VICTORY is `on_all_destroyed group = "side_b"` → `game_over` victory. The
-//! transform DELETES that trigger when `side_b` ends up with zero filled slots,
-//! so a degenerate `--side-b` (empty) can't instant-fire a false victory off an
-//! empty group. The guard runs for both groups symmetrically.
+//! transform simply DOES NOT EMIT that registration when `side_b` is empty, so a
+//! degenerate `--side-b` can't instant-fire a false victory off an empty group.
+//! (Declaratively this was a deletion; generating the roster makes it an
+//! omission, which is the same guard stated the other way round.)
 
-use crate::world::config::{TriggerAction, TriggerCondition, WorldConfig};
+use crate::logging::LogCat;
+
+/// The marker the harness truncates `duel.toml`'s script source at.
+///
+/// Everything from the START of the line carrying this marker is kept; every
+/// byte after that line is discarded and regenerated from `--side-a`/`--side-b`.
+/// A world whose `[script]` blocks carry no such marker is REJECTED
+/// ([`DuelError::NoDuelSlots`]) rather than silently run with the ship lists
+/// ignored, so the mechanism can never fail quietly.
+///
+/// Keeping the marker line in the output makes the transform idempotent.
+pub const SLOT_MARKER: &str = "// duel:slots";
 
 /// Federation faction UUID — side A's own faction (the player's). Side-A NPC
 /// escorts are forced to it so they bucket as the player side in the report.
@@ -42,7 +91,8 @@ pub const FEDERATION_FACTION: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
 
 /// Harrow faction UUID — side B's faction. Matches
 /// `assets/factions/harrow.toml`. Federation<->Harrow mutual hostility is
-/// armed by the pre-authored `add_faction_enemy` actions in `duel.toml`.
+/// armed by the pre-authored `add_faction_enemy` calls in `duel.toml`'s
+/// `on_world_loaded` handler, above the marker and so never regenerated.
 pub const HARROW_FACTION: &str = "cccccccc-3333-4333-8333-cccccccccccc";
 
 /// Maximum ships per side. Side A is one player (slot 1) plus up to four NPC
@@ -57,14 +107,24 @@ pub enum DuelError {
     TooManyShips { side: &'static str, count: usize },
     /// A ship name resolved to none of the candidate paths.
     Unresolved { name: String, tried: Vec<String> },
-    /// The world carries no `side_a_*`/`side_b_*` spawn slots, so there is
-    /// nothing for the ship lists to fill.
+    /// No `[script]` block in the world carries the [`SLOT_MARKER`], so there is
+    /// nowhere to generate the slot drivers the ship lists ask for.
     ///
     /// Without this the transform was a silent no-op: `--side-a cruiser
     /// --side-b destroyer --world <some non-duel world>` loaded that world
     /// untouched and produced a combat-free draw that reads like a balance
-    /// finding. Naming the missing slots is the whole point of the error.
+    /// finding. Naming the missing marker is the whole point of the error.
     NoDuelSlots,
+    /// A generated slot names an anchor the world's `[anchors]` table never
+    /// declares.
+    ///
+    /// The declarative slots carried their own `anchor = "…"` and so could only
+    /// name what the arena had staged; a generated driver names the anchor
+    /// itself, and `dispatch_spawn_entity` answers an unresolvable one with a
+    /// warning and no spawn — the ship would simply not be there, and the run
+    /// would read as a lopsided balance result. Rejecting up front says which
+    /// staging coordinate is missing.
+    UndeclaredSlotAnchor { slot: String },
 }
 
 impl std::fmt::Display for DuelError {
@@ -85,9 +145,17 @@ impl std::fmt::Display for DuelError {
             ),
             DuelError::NoDuelSlots => write!(
                 f,
-                "--side-a/--side-b need a duel-shaped world: this one authors no \
-                 side_a_*/side_b_* spawn_entity slots to fill. Drop --world to use \
-                 the duel harness (assets/worlds/duel.toml), or author matching slots"
+                "--side-a/--side-b need a duel-shaped world: no [script] block in \
+                 this one carries the `{SLOT_MARKER}` marker the harness \
+                 regenerates the side_a_*/side_b_* slot drivers below. Drop \
+                 --world to use the duel harness (assets/worlds/duel.toml), or \
+                 author the marker in a [script] block of your own"
+            ),
+            DuelError::UndeclaredSlotAnchor { slot } => write!(
+                f,
+                "slot {slot:?} has no [anchors] entry in this world; a slot spawns \
+                 on the anchor of its own name, and an undeclared one would leave \
+                 that ship out of the fight. Declare {slot} = [x, y, z]"
             ),
         }
     }
@@ -95,90 +163,133 @@ impl std::fmt::Display for DuelError {
 
 impl std::error::Error for DuelError {}
 
-/// Which side a slot belongs to, for faction assignment and empty-group guards.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Side {
-    A,
-    B,
+/// One generated slot driver: which arena slot, which hull, whose side.
+struct Slot {
+    /// Slot name — also the `[anchors]` key it stages on and the driver fn's
+    /// suffix (`side_b_1` → `spawn_side_b_1`).
+    name: String,
+    /// Resolved template path for the hull filling it.
+    template: String,
+    /// Faction UUID forced onto the hull, so the report buckets it on the right
+    /// side regardless of the template's own faction.
+    faction: &'static str,
+    /// `on_all_destroyed` group the spawn joins.
+    group: &'static str,
 }
 
-impl Side {
-    fn faction(self) -> &'static str {
-        match self {
-            Side::A => FEDERATION_FACTION,
-            Side::B => HARROW_FACTION,
-        }
-    }
-}
-
-/// Map a slot spawn name to `(side, array index)`.
+/// Render `s` as the body of a Rhai string literal.
 ///
-/// `side_a_2`..`side_a_5` are the side-A *escort* slots: `side_a_1` is the
-/// player (a static entity, not a spawn slot), so `side_a_2` is `side_a[1]`.
-/// `side_b_1`..`side_b_5` are `side_b[0]`..`side_b[4]`.
-fn slot_of(name: &str) -> Option<(Side, usize)> {
-    if let Some(n) = name.strip_prefix("side_a_") {
-        let slot: usize = n.parse().ok()?;
-        // side_a_1 is the player; escort slots start at 2.
-        (slot >= 2).then(|| (Side::A, slot - 1))
-    } else if let Some(n) = name.strip_prefix("side_b_") {
-        let slot: usize = n.parse().ok()?;
-        (slot >= 1).then(|| (Side::B, slot - 1))
-    } else {
-        None
-    }
+/// The generated drivers embed resolved template paths, and `resolve_template`'s
+/// third candidate is the name *as given* — so a literal Windows path
+/// (`assets\entities\x.toml`) would otherwise emit `\e`, an invalid Rhai escape,
+/// and fail the build-time script gate with a parse error rather than running.
+fn rhai_str(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// The `SpawnEntity` name in a trigger's action list, if it has exactly one.
-fn spawn_name(actions: &[TriggerAction]) -> Option<&str> {
-    actions.iter().find_map(|a| match a {
-        TriggerAction::SpawnEntity { name, .. } => Some(name.as_str()),
-        _ => None,
-    })
-}
-
-/// How many escort slots a side ends up with filled, for the empty-group guard.
+/// The `[script]` table key whose source carries [`SLOT_MARKER`].
 ///
-/// Side A's fillable escort slots are `side_a[1..]` (slot 1 is the player), so
-/// at most [`MAX_SIDE`]-1. Side B fills `side_b[..]`, at most [`MAX_SIDE`].
-fn filled_slots(side_a: &[String], side_b: &[String], group: &str) -> Option<usize> {
-    match group {
-        "side_a" => Some(side_a.len().saturating_sub(1).min(MAX_SIDE - 1)),
-        "side_b" => Some(side_b.len().min(MAX_SIDE)),
-        _ => None,
-    }
+/// `None` for a world with no `script` key, a sibling `script = "file.rhai"`
+/// (the harness edits an inline block; a sibling file is not the world's to
+/// rewrite), or a `[script]` table in which no entry carries the marker. Table
+/// iteration is sorted (toml maps are `BTreeMap`s), so a world that marked two
+/// blocks resolves to the same one every run.
+fn marked_script_key(raw: &toml::Value) -> Option<String> {
+    raw.get("script")?
+        .as_table()?
+        .iter()
+        .find(|(_, v)| v.as_str().is_some_and(|s| s.contains(SLOT_MARKER)))
+        .map(|(k, _)| k.clone())
 }
 
-/// Force `faction` into a `spawn_entity` action's inline `overrides` table,
-/// creating the table if the slot authored none. Side-A escorts get the
-/// player's faction, side-B ships the enemy's, so the report buckets each ship
-/// on the correct side regardless of what the template's own faction was.
-fn set_override_faction(overrides: &mut Option<toml::Value>, faction: &str) {
-    let table = overrides.get_or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    if let toml::Value::Table(t) = table {
-        t.insert("faction".into(), toml::Value::String(faction.to_string()));
-    }
+/// Whether the world's `[anchors]` table declares `slot`.
+fn declares_anchor(raw: &toml::Value, slot: &str) -> bool {
+    raw.get("anchors")
+        .and_then(|a| a.as_table())
+        .is_some_and(|t| t.contains_key(slot))
 }
 
-/// Fill `duel.toml`'s NPC slots from the CLI ship lists and delete the rest —
-/// a pure transform over [`WorldConfig`].
+/// The slots the two ship lists fill, in the declarative file's authored order:
+/// side-A escorts (`side_a[1..]` → `side_a_2`..), then side B (`side_b[..]` →
+/// `side_b_1`..). `side_a[0]` is the player's own hull and fills no slot.
+fn slots_for(
+    side_a: &[String],
+    side_b: &[String],
+    resolve: &impl Fn(&str) -> Result<String, DuelError>,
+) -> Result<Vec<Slot>, DuelError> {
+    let mut slots = Vec::with_capacity(side_a.len().saturating_sub(1) + side_b.len());
+    for (i, ship) in side_a.iter().enumerate().skip(1) {
+        slots.push(Slot {
+            name: format!("side_a_{}", i + 1),
+            template: resolve(ship)?,
+            faction: FEDERATION_FACTION,
+            group: "side_a",
+        });
+    }
+    for (i, ship) in side_b.iter().enumerate() {
+        slots.push(Slot {
+            name: format!("side_b_{}", i + 1),
+            template: resolve(ship)?,
+            faction: HARROW_FACTION,
+            group: "side_b",
+        });
+    }
+    Ok(slots)
+}
+
+/// Render the Rhai the transform appends below the marker: one `on_timer(0, …)`
+/// registration per filled slot, the side-B victory registration when side B is
+/// non-empty, then the one-line drivers that delegate to the authored
+/// `spawn_slot`.
+///
+/// Registrations come first only for readability — Rhai resolves function
+/// definitions independently of position — but their ORDER is load-bearing: it
+/// is the trigger order the declarative file authored, and therefore the spawn
+/// order the world digest folds.
+fn render_drivers(slots: &[Slot], side_b_filled: bool) -> String {
+    let mut out = String::from("\n");
+    for slot in slots {
+        out.push_str(&format!("on_timer(0, \"spawn_{}\");\n", slot.name));
+    }
+    if side_b_filled {
+        out.push_str("on_all_destroyed(\"side_b\", \"on_side_b_destroyed\");\n");
+    }
+    if !slots.is_empty() {
+        out.push('\n');
+    }
+    for slot in slots {
+        out.push_str(&format!(
+            "fn spawn_{}(ctx) {{ spawn_slot(ctx, \"{}\", \"{}\", \"{}\", \"{}\"); }}\n",
+            slot.name,
+            rhai_str(&slot.name),
+            rhai_str(&slot.template),
+            slot.faction,
+            slot.group,
+        ));
+    }
+    out
+}
+
+/// Regenerate `duel.toml`'s slot drivers from the CLI ship lists — a pure
+/// transform over the raw world [`toml::Value`].
 ///
 /// - `side_a[0]` is the player ship (applied elsewhere via `--ship`); only
 ///   `side_a[1..]` fill escort slots.
 /// - `side_b[..]` fill side-B slots.
-/// - Unused slot triggers are removed.
-/// - An `on_all_destroyed` trigger (and its `game_over`) whose group ends up
-///   with zero filled slots is removed, so an empty side never instant-fires.
-/// - Rejects either side longer than [`MAX_SIDE`].
+/// - Slots the lists do not reach are simply not generated.
+/// - The side-B victory `on_all_destroyed` is emitted only when side B has at
+///   least one ship, so an empty side never instant-fires.
+/// - Rejects either side longer than [`MAX_SIDE`], a world with no
+///   [`SLOT_MARKER`], and a slot whose anchor the world does not declare.
 ///
 /// `resolve` turns a ship name into a template path; inject a fake in tests,
 /// [`resolve_template`] in production.
 pub fn apply_duel_sides(
-    mut world: WorldConfig,
+    mut raw: toml::Value,
     side_a: &[String],
     side_b: &[String],
     resolve: &impl Fn(&str) -> Result<String, DuelError>,
-) -> Result<WorldConfig, DuelError> {
+) -> Result<toml::Value, DuelError> {
     if side_a.len() > MAX_SIDE {
         return Err(DuelError::TooManyShips {
             side: "a",
@@ -192,54 +303,43 @@ pub fn apply_duel_sides(
         });
     }
 
-    // Reject a world with no slots at all before touching it. The fill loop
-    // below is a no-op on such a world, which used to mean the run proceeded
-    // with the CLI's ship lists silently ignored.
-    if !world
-        .triggers
-        .iter()
-        .any(|t| spawn_name(&t.actions).and_then(slot_of).is_some())
-    {
-        return Err(DuelError::NoDuelSlots);
-    }
+    // Reject a world the harness has no seam in before touching it, rather than
+    // running it untransformed with the ship lists silently ignored.
+    let key = marked_script_key(&raw).ok_or(DuelError::NoDuelSlots)?;
 
-    let mut kept = Vec::with_capacity(world.triggers.len());
-    for mut trigger in world.triggers.into_iter() {
-        // Empty-group guard: drop a side's victory `on_all_destroyed` when that
-        // side has no filled slots (an empty group would fire immediately).
-        if let TriggerCondition::OnAllDestroyed { group, .. } = &trigger.condition {
-            if filled_slots(side_a, side_b, group) == Some(0) {
-                continue;
-            }
+    let slots = slots_for(side_a, side_b, resolve)?;
+    // A generated slot names its own anchor, so the arena has to have staged it.
+    for slot in &slots {
+        if !declares_anchor(&raw, &slot.name) {
+            return Err(DuelError::UndeclaredSlotAnchor {
+                slot: slot.name.clone(),
+            });
         }
-
-        // Slot spawns: fill the ones the lists reach, delete the rest.
-        if let Some((side, idx)) = spawn_name(&trigger.actions).and_then(slot_of) {
-            let list = match side {
-                Side::A => side_a,
-                Side::B => side_b,
-            };
-            let Some(name) = list.get(idx) else {
-                continue; // slot beyond the list length → delete
-            };
-            let template = resolve(name)?;
-            for action in &mut trigger.actions {
-                if let TriggerAction::SpawnEntity {
-                    template_path,
-                    overrides,
-                    ..
-                } = action
-                {
-                    *template_path = template.clone();
-                    set_override_faction(overrides, side.faction());
-                }
-            }
-        }
-
-        kept.push(trigger);
     }
-    world.triggers = kept;
-    Ok(world)
+    let drivers = render_drivers(&slots, !side_b.is_empty());
+
+    let table = raw
+        .get_mut("script")
+        .and_then(|s| s.as_table_mut())
+        .expect("the marked key came from this table");
+    let source = table
+        .get(&key)
+        .and_then(|v| v.as_str())
+        .expect("the marked entry is a string");
+    // Keep the marker line itself, so the output is still marked and a second
+    // pass over it is a no-op.
+    let cut = source.find(SLOT_MARKER).expect("the marker was just found");
+    let prelude_end = source[cut..]
+        .find('\n')
+        .map_or(source.len(), |i| cut + i + 1);
+    let composed = format!("{}{drivers}", &source[..prelude_end]);
+
+    bevy::log::debug!(
+        target: LogCat::Config.target(),
+        "duel harness: regenerated [script.{key}] slot drivers:{drivers}"
+    );
+    table.insert(key, toml::Value::String(composed));
+    Ok(raw)
 }
 
 /// Resolve a ship name to a template path, filesystem-backed.
@@ -271,84 +371,66 @@ pub fn resolve_template(name: &str) -> Result<String, DuelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::config::parse_world;
 
-    /// A minimal `duel.toml`-shaped world: two side-A escort slots, two side-B
-    /// slots, and a side-B victory `on_all_destroyed`. Placeholder templates
-    /// are overwritten on fill and irrelevant on delete.
-    const DUEL_FIXTURE: &str = r#"
+    /// A `duel.toml`-shaped world in script form: the full `[anchors]` staging
+    /// block, the authored `spawn_slot` body and `on_world_loaded` prelude, the
+    /// marker, and a default roster below it. Everything below the marker is
+    /// what the transform replaces, so the one default driver here exists only
+    /// to prove it is discarded.
+    const DUEL_FIXTURE: &str = r##"
 [global]
 seed = 1
 
+[anchors]
+player_spawn = [0.0, 0.0, 0.0]
+side_a_2 = [-15.0, 0.0, 30.0]
+side_a_3 = [-15.0, 0.0, -30.0]
+side_a_4 = [-40.0, 0.0, 30.0]
+side_a_5 = [-40.0, 0.0, -30.0]
+side_b_1 = [55.0, 0.0, 0.0]
+side_b_2 = [55.0, 0.0, 30.0]
+side_b_3 = [55.0, 0.0, -30.0]
+side_b_4 = [80.0, 0.0, 30.0]
+side_b_5 = [80.0, 0.0, -30.0]
+
 [player_spawn]
-position = [0.0, 0.0, 0.0]
+anchor = "player_spawn"
 
 [[entity]]
 template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 spawn_on = "game_start"
 
-[[trigger]]
-condition = "on_world_loaded"
-  [[trigger.action]]
-  type = "add_faction_enemy"
-  faction = "Federation"
-  enemy = "Harrow"
+[script]
+setup = """
+on_world_loaded("on_load");
 
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-  [[trigger.action]]
-  type = "spawn_entity"
-  template_path = "assets/entities/placeholder.toml"
-  name = "side_a_2"
-  position = [0.0, 0.0, 40.0]
-  groups = ["side_a"]
-  overrides = { behaviour = { doctrine = [] } }
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
 
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-  [[trigger.action]]
-  type = "spawn_entity"
-  template_path = "assets/entities/placeholder.toml"
-  name = "side_a_3"
-  position = [0.0, 0.0, -40.0]
-  groups = ["side_a"]
-  overrides = { behaviour = { doctrine = [] } }
+fn spawn_slot(ctx, name, template, faction, group) {
+    ctx.effects.spawn_entity(#{
+        template_path: template,
+        name: name,
+        anchor: name,
+        groups: [group],
+        overrides: #{ faction: faction },
+    });
+}
 
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-  [[trigger.action]]
-  type = "spawn_entity"
-  template_path = "assets/entities/placeholder.toml"
-  name = "side_b_1"
-  position = [300.0, 0.0, 0.0]
-  groups = ["side_b"]
-  overrides = { behaviour = { doctrine = [] } }
+fn on_side_b_destroyed(ctx) { ctx.effects.game_over("", "victory"); }
 
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-  [[trigger.action]]
-  type = "spawn_entity"
-  template_path = "assets/entities/placeholder.toml"
-  name = "side_b_2"
-  position = [300.0, 0.0, 40.0]
-  groups = ["side_b"]
-  overrides = { behaviour = { doctrine = [] } }
+// duel:slots
+on_timer(0, "spawn_side_a_2");
+on_all_destroyed("side_b", "on_side_b_destroyed");
 
-[[trigger]]
-condition = "on_all_destroyed"
-group = "side_b"
-  [[trigger.action]]
-  type = "game_over"
-  outcome = "victory"
-"#;
+fn spawn_side_a_2(ctx) { spawn_slot(ctx, "side_a_2", "assets/entities/placeholder.toml", "aaaa", "side_a"); }
+"""
+"##;
 
-    fn fixture() -> WorldConfig {
-        parse_world(DUEL_FIXTURE).expect("fixture parses")
+    fn fixture() -> toml::Value {
+        toml::from_str(DUEL_FIXTURE).expect("fixture parses")
     }
 
     /// A fake resolver: `<name>` → `assets/entities/<name>.toml`, and a
@@ -364,70 +446,107 @@ group = "side_b"
         Ok(format!("assets/entities/{name}.toml"))
     }
 
-    /// Every `spawn_entity` action in the world, as `(name, template, faction)`.
-    fn spawns(world: &WorldConfig) -> Vec<(String, String, Option<String>)> {
-        world
-            .triggers
-            .iter()
-            .flat_map(|t| &t.actions)
-            .filter_map(|a| match a {
-                TriggerAction::SpawnEntity {
-                    name,
-                    template_path,
-                    overrides,
-                    ..
-                } => {
-                    let faction = overrides
-                        .as_ref()
-                        .and_then(|o| o.get("faction").and_then(|v| v.as_str()).map(String::from));
-                    Some((name.clone(), template_path.clone(), faction))
-                }
-                _ => None,
+    /// The transformed world's `[script.setup]` source.
+    fn source(world: &toml::Value) -> &str {
+        world["script"]["setup"]
+            .as_str()
+            .expect("the script block survives as a string")
+    }
+
+    /// The part of the source the transform generated — everything after the
+    /// marker line.
+    fn generated(world: &toml::Value) -> String {
+        let src = source(world);
+        let cut = src.find(SLOT_MARKER).expect("the marker survives");
+        let after = src[cut..].find('\n').map_or(src.len(), |i| cut + i + 1);
+        src[after..].to_string()
+    }
+
+    /// Every generated driver as `(slot, template, faction, group)`, in emission
+    /// order — read back out of the generated text, so these assertions read the
+    /// way the pre-script ones did over `spawn_entity` actions.
+    fn drivers(world: &toml::Value) -> Vec<(String, String, String, String)> {
+        generated(world)
+            .lines()
+            .filter(|l| l.starts_with("fn spawn_side_"))
+            .map(|l| {
+                let (_, args) = l.split_once("spawn_slot(ctx, ").expect("delegates");
+                let (args, _) = args.split_once(");").expect("call closes");
+                let mut it = args.split(", ").map(|a| a.trim_matches('"').to_string());
+                let mut next = || it.next().unwrap_or_default();
+                (next(), next(), next(), next())
             })
             .collect()
     }
 
-    fn has_victory(world: &WorldConfig) -> bool {
-        world.triggers.iter().any(|t| {
-            matches!(&t.condition, TriggerCondition::OnAllDestroyed { group, .. } if group == "side_b")
-        })
+    /// The registration calls the generated block makes, in order.
+    fn registrations(world: &toml::Value) -> Vec<String> {
+        generated(world)
+            .lines()
+            .filter(|l| l.starts_with("on_timer(") || l.starts_with("on_all_destroyed("))
+            .map(|l| l.to_string())
+            .collect()
     }
 
-    /// A world that authors no duel slots must be rejected, not silently run
-    /// with the ship lists ignored — that produced a combat-free draw that
-    /// looked like a balance result.
+    fn has_victory(world: &toml::Value) -> bool {
+        registrations(world)
+            .iter()
+            .any(|r| r.starts_with("on_all_destroyed(\"side_b\""))
+    }
+
+    /// A world with no marker must be rejected, not silently run with the ship
+    /// lists ignored — that produced a combat-free draw that looked like a
+    /// balance result.
     #[test]
     fn a_world_without_duel_slots_is_rejected() {
         const NO_SLOTS: &str = r#"
 [global]
 seed = 1
 
-[player_spawn]
-position = [0.0, 0.0, 0.0]
-
-[[trigger]]
-condition = "on_world_loaded"
-  [[trigger.action]]
-  type = "add_faction_enemy"
-  faction = "Federation"
-  enemy = "Harrow"
+[script]
+setup = """
+on_world_loaded("on_load");
+fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
+"""
 "#;
         let err = apply_duel_sides(
-            parse_world(NO_SLOTS).expect("fixture parses"),
+            toml::from_str(NO_SLOTS).expect("fixture parses"),
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
         )
-        .expect_err("a slot-free world must be rejected");
+        .expect_err("a marker-free world must be rejected");
         assert_eq!(err, DuelError::NoDuelSlots);
         // The message has to name what is missing, or the user cannot act on it.
         let msg = err.to_string();
-        assert!(msg.contains("side_a_*/side_b_*"), "got {msg:?}");
+        assert!(msg.contains(SLOT_MARKER), "got {msg:?}");
         assert!(msg.contains("assets/worlds/duel.toml"), "got {msg:?}");
     }
 
+    /// A world with no `[script]` at all — the pre-conversion shape, and any
+    /// ordinary declarative world — is rejected the same way.
     #[test]
-    fn fills_named_slots_with_resolved_template_and_side_faction() {
+    fn a_script_free_world_is_rejected() {
+        let world = toml::from_str("[global]\nseed = 1\n").expect("parses");
+        assert_eq!(
+            apply_duel_sides(world, &["cruiser".into()], &[], &fake_resolve).unwrap_err(),
+            DuelError::NoDuelSlots
+        );
+    }
+
+    /// A sibling `script = "file.rhai"` is not an inline block, so there is
+    /// nothing here to rewrite — reject rather than edit a file beside the world.
+    #[test]
+    fn a_sibling_script_file_is_rejected() {
+        let world = toml::from_str("script = \"duel.rhai\"\n").expect("parses");
+        assert_eq!(
+            apply_duel_sides(world, &["cruiser".into()], &[], &fake_resolve).unwrap_err(),
+            DuelError::NoDuelSlots
+        );
+    }
+
+    #[test]
+    fn generates_named_slots_with_resolved_template_and_side_faction() {
         let world = apply_duel_sides(
             fixture(),
             &["cruiser".into(), "courier".into()], // player + 1 escort
@@ -436,31 +555,37 @@ condition = "on_world_loaded"
         )
         .expect("applies");
 
-        let s = spawns(&world);
-        // side_a_2 filled from side_a[1] = courier, Federation faction.
-        let a2 = s
-            .iter()
-            .find(|(n, ..)| n == "side_a_2")
-            .expect("side_a_2 kept");
-        assert_eq!(a2.1, "assets/entities/courier.toml");
-        assert_eq!(a2.2.as_deref(), Some(FEDERATION_FACTION));
-        // side_b_1 / side_b_2 filled from side_b[0] / side_b[1], Harrow faction.
-        let b1 = s
-            .iter()
-            .find(|(n, ..)| n == "side_b_1")
-            .expect("side_b_1 kept");
-        assert_eq!(b1.1, "assets/entities/destroyer.toml");
-        assert_eq!(b1.2.as_deref(), Some(HARROW_FACTION));
-        let b2 = s
-            .iter()
-            .find(|(n, ..)| n == "side_b_2")
-            .expect("side_b_2 kept");
-        assert_eq!(b2.1, "assets/entities/battleship.toml");
+        assert_eq!(
+            drivers(&world),
+            vec![
+                // side_a_2 from side_a[1] = courier, Federation faction.
+                (
+                    "side_a_2".to_string(),
+                    "assets/entities/courier.toml".to_string(),
+                    FEDERATION_FACTION.to_string(),
+                    "side_a".to_string(),
+                ),
+                // side_b_1 / side_b_2 from side_b[0] / side_b[1], Harrow faction.
+                (
+                    "side_b_1".to_string(),
+                    "assets/entities/destroyer.toml".to_string(),
+                    HARROW_FACTION.to_string(),
+                    "side_b".to_string(),
+                ),
+                (
+                    "side_b_2".to_string(),
+                    "assets/entities/battleship.toml".to_string(),
+                    HARROW_FACTION.to_string(),
+                    "side_b".to_string(),
+                ),
+            ]
+        );
     }
 
+    /// The generated block is exactly this text — the golden that a reviewer can
+    /// read against `duel.toml`'s authored default roster.
     #[test]
-    fn deletes_unfilled_slots() {
-        // Player only on side A (no escorts), one ship on side B.
+    fn the_generated_block_is_the_expected_rhai() {
         let world = apply_duel_sides(
             fixture(),
             &["cruiser".into()],
@@ -468,32 +593,23 @@ condition = "on_world_loaded"
             &fake_resolve,
         )
         .expect("applies");
-        let names: Vec<String> = spawns(&world).into_iter().map(|(n, ..)| n).collect();
-        // side_a_2 / side_a_3 unfilled → gone; side_b_2 unfilled → gone.
-        assert_eq!(names, vec!["side_b_1".to_string()]);
-        // side_b still has a filled slot → victory trigger survives.
-        assert!(has_victory(&world));
-    }
-
-    #[test]
-    fn empty_side_b_deletes_the_victory_trigger() {
-        // Degenerate: nobody on side B. The victory `on_all_destroyed` group
-        // would be empty and fire immediately — the transform removes it.
-        let world =
-            apply_duel_sides(fixture(), &["cruiser".into()], &[], &fake_resolve).expect("applies");
-        assert!(
-            !has_victory(&world),
-            "empty side_b must drop the victory trigger"
+        assert_eq!(
+            generated(&world),
+            "\n\
+             on_timer(0, \"spawn_side_b_1\");\n\
+             on_all_destroyed(\"side_b\", \"on_side_b_destroyed\");\n\
+             \n\
+             fn spawn_side_b_1(ctx) { spawn_slot(ctx, \"side_b_1\", \
+             \"assets/entities/destroyer.toml\", \
+             \"cccccccc-3333-4333-8333-cccccccccccc\", \"side_b\"); }\n"
         );
-        // And no side-B slots remain.
-        let names: Vec<String> = spawns(&world).into_iter().map(|(n, ..)| n).collect();
-        assert!(names.is_empty(), "no slots should remain, got {names:?}");
     }
 
+    /// Registration order below the marker mirrors the declarative file: every
+    /// side-A escort, then every side-B ship, then the victory trigger. This is
+    /// the trigger order the world digest's spawn sequence rides on.
     #[test]
-    fn full_five_v_five_fills_every_slot() {
-        // The fixture only authors two slots per side, but the transform must
-        // accept a full roster without rejecting it.
+    fn registrations_keep_the_declarative_order() {
         let five = vec![
             "a".to_string(),
             "b".into(),
@@ -502,14 +618,127 @@ condition = "on_world_loaded"
             "e".into(),
         ];
         let world = apply_duel_sides(fixture(), &five, &five, &fake_resolve).expect("5v5 applies");
-        // Both authored side-B slots are filled (side_b[0], side_b[1]).
-        let s = spawns(&world);
-        assert!(s
-            .iter()
-            .any(|(n, t, _)| n == "side_b_1" && t == "assets/entities/a.toml"));
-        assert!(s
-            .iter()
-            .any(|(n, t, _)| n == "side_b_2" && t == "assets/entities/b.toml"));
+        assert_eq!(
+            registrations(&world),
+            vec![
+                "on_timer(0, \"spawn_side_a_2\");",
+                "on_timer(0, \"spawn_side_a_3\");",
+                "on_timer(0, \"spawn_side_a_4\");",
+                "on_timer(0, \"spawn_side_a_5\");",
+                "on_timer(0, \"spawn_side_b_1\");",
+                "on_timer(0, \"spawn_side_b_2\");",
+                "on_timer(0, \"spawn_side_b_3\");",
+                "on_timer(0, \"spawn_side_b_4\");",
+                "on_timer(0, \"spawn_side_b_5\");",
+                "on_all_destroyed(\"side_b\", \"on_side_b_destroyed\");",
+            ]
+        );
+    }
+
+    #[test]
+    fn generates_no_slot_the_lists_do_not_reach() {
+        // Player only on side A (no escorts), one ship on side B.
+        let world = apply_duel_sides(
+            fixture(),
+            &["cruiser".into()],
+            &["destroyer".into()],
+            &fake_resolve,
+        )
+        .expect("applies");
+        let names: Vec<String> = drivers(&world).into_iter().map(|(n, ..)| n).collect();
+        // No side-A escorts; side_b_2..5 beyond the list → never generated.
+        assert_eq!(names, vec!["side_b_1".to_string()]);
+        // side_b has a filled slot → the victory registration is emitted.
+        assert!(has_victory(&world));
+    }
+
+    #[test]
+    fn empty_side_b_omits_the_victory_trigger() {
+        // Degenerate: nobody on side B. The victory `on_all_destroyed` group
+        // would be empty and fire immediately — so it is not registered.
+        let world =
+            apply_duel_sides(fixture(), &["cruiser".into()], &[], &fake_resolve).expect("applies");
+        assert!(
+            !has_victory(&world),
+            "empty side_b must not register the victory trigger"
+        );
+        // And no slots are generated at all.
+        assert!(
+            drivers(&world).is_empty(),
+            "no slots should be generated, got {:?}",
+            drivers(&world)
+        );
+    }
+
+    #[test]
+    fn full_five_v_five_fills_every_slot() {
+        let five = vec![
+            "a".to_string(),
+            "b".into(),
+            "c".into(),
+            "d".into(),
+            "e".into(),
+        ];
+        let world = apply_duel_sides(fixture(), &five, &five, &fake_resolve).expect("5v5 applies");
+        let names: Vec<String> = drivers(&world).into_iter().map(|(n, ..)| n).collect();
+        assert_eq!(
+            names,
+            vec![
+                // side_a[0] is the player; escorts start at slot 2.
+                "side_a_2", "side_a_3", "side_a_4", "side_a_5", //
+                "side_b_1", "side_b_2", "side_b_3", "side_b_4", "side_b_5",
+            ]
+        );
+        // The hulls track the list positions: side_a[1] = b → side_a_2,
+        // side_b[0] = a → side_b_1.
+        let s = drivers(&world);
+        assert_eq!(s[0].1, "assets/entities/b.toml");
+        assert_eq!(s[4].1, "assets/entities/a.toml");
+    }
+
+    /// The prelude — the authored `spawn_slot` body, the faction handler, the
+    /// marker — survives verbatim, and the old roster below it does not.
+    #[test]
+    fn the_authored_prelude_survives_and_the_old_roster_does_not() {
+        let world = apply_duel_sides(
+            fixture(),
+            &["cruiser".into()],
+            &["destroyer".into()],
+            &fake_resolve,
+        )
+        .expect("applies");
+        let src = source(&world);
+        assert!(src.contains("fn spawn_slot(ctx, name, template, faction, group)"));
+        assert!(src.contains("on_world_loaded(\"on_load\");"));
+        assert!(
+            src.contains(SLOT_MARKER),
+            "the marker stays, so a re-run is a no-op"
+        );
+        assert!(
+            !src.contains("placeholder.toml"),
+            "the authored default roster must be replaced, got:\n{src}"
+        );
+    }
+
+    /// Re-running the transform over its own output produces the same thing —
+    /// the marker line is kept precisely so the seam survives a second pass.
+    #[test]
+    fn the_transform_is_idempotent() {
+        let once = apply_duel_sides(
+            fixture(),
+            &["cruiser".into()],
+            &["destroyer".into()],
+            &fake_resolve,
+        )
+        .expect("applies");
+        let twice = apply_duel_sides(
+            once.clone(),
+            &["cruiser".into()],
+            &["destroyer".into()],
+            &fake_resolve,
+        )
+        .expect("applies again");
+        assert_eq!(once, twice);
     }
 
     #[test]
@@ -541,6 +770,50 @@ condition = "on_world_loaded"
         )
         .unwrap_err();
         assert!(matches!(err, DuelError::Unresolved { name, .. } if name == "unknown"));
+    }
+
+    /// A slot whose staging anchor the arena never declared is rejected: the
+    /// spawn would warn and no-op, quietly leaving that ship out of the fight.
+    #[test]
+    fn a_slot_without_a_declared_anchor_is_rejected() {
+        // Same fixture, but the `[anchors]` table stops at side_b_1.
+        let trimmed = DUEL_FIXTURE.replace("side_b_2 = [55.0, 0.0, 30.0]\n", "");
+        let err = apply_duel_sides(
+            toml::from_str(&trimmed).expect("fixture parses"),
+            &["cruiser".into()],
+            &["destroyer".into(), "battleship".into()],
+            &fake_resolve,
+        )
+        .expect_err("an undeclared slot anchor must be rejected");
+        assert_eq!(
+            err,
+            DuelError::UndeclaredSlotAnchor {
+                slot: "side_b_2".to_string()
+            }
+        );
+        // The message names the slot and how to fix it.
+        let msg = err.to_string();
+        assert!(msg.contains("side_b_2"), "got {msg:?}");
+    }
+
+    /// A literal-path ship name carrying backslashes (a Windows path handed
+    /// straight to `--side-b`) must emit a valid Rhai string, not an invalid
+    /// escape that fails the build-time script gate.
+    #[test]
+    fn a_backslashed_template_path_is_escaped_in_the_generated_driver() {
+        let resolve = |name: &str| Ok(name.to_string());
+        let world = apply_duel_sides(
+            fixture(),
+            &["cruiser".into()],
+            &[r"assets\entities\x.toml".into()],
+            &resolve,
+        )
+        .expect("applies");
+        assert!(
+            generated(&world).contains(r"assets\\entities\\x.toml"),
+            "got:\n{}",
+            generated(&world)
+        );
     }
 
     // ── resolve_template: the documented order, filesystem-backed ────────────

@@ -190,9 +190,13 @@ entities:
       status: implemented
       confidence: confirmed
       title: Duel Composition Transform
-      summary: Pure transform over the parsed duel world config that fills up to five pre-authored spawn_entity slot triggers per side from CLI side lists (--side-a / --side-b), resolves each ship name (alliance-prefixed template, then bare template, then literal path) via an injected resolver, sets each side's faction, and deletes unused slots and any annihilation trigger whose group ends empty.
+      summary: Pure transform over the duel world's RAW TOML that regenerates the slot-driver roster inside its inline [script] block from the CLI side lists (--side-a / --side-b). It truncates the script source at the `// duel:slots` marker and emits, below it, one on_timer(0) registration per filled slot, the side-B annihilation registration when side B is non-empty, and a one-line driver per slot delegating to the world's own authored spawn_slot body. Each ship name resolves through an injected resolver (alliance-prefixed template, then bare template, then literal path); each side's faction is forced onto the spawn. Slots the lists do not reach are simply never generated.
       rationale:
-        - "Slots are spawn_entity triggers, not static entities, because on_all_destroyed group membership only registers through SpawnEntity dispatch. Side A slot 1 is the game-start player ship (set from --side-a[0] via --ship); victory is side B annihilation, defeat is the built-in player-death latch — no side_a annihilation trigger is authored, because an empty side_a group would instant-fire and LocalShip death is the real defeat condition."
+        - "Combatants are spawn_entity effects, not static entities, because on_all_destroyed group membership only registers through SpawnEntity dispatch. Side A slot 1 is the game-start player ship (set from --side-a[0] via --ship); victory is side B annihilation, defeat is the built-in player-death latch — no side_a annihilation trigger is authored, because an empty side_a group would instant-fire and LocalShip death is the real defeat condition."
+        - "It edits the raw source string rather than the parsed WorldConfig because a converted world's slots ARE script: trigger registration happens when the loader runs the unit's top level, so there is nothing in WorldConfig.triggers to fill or delete, and a script cannot conditionally skip registering the side-B victory trigger from runtime data. Editing the source before the loader reads it keeps the transform pre-boot and pure, and the build-time script gate then compiles the GENERATED source — so broken generation is a hard BuildError before App::new()."
+        - "It generates only the one-line drivers, never spawn bodies: the doctrine, anchor convention and override shape are authored ONCE in duel.toml's spawn_slot, so a CLI roster cannot drift from the arena's own doctrine. This rides on a helper fn's effects landing in its caller's buffer (EffectSink is an Arc<Mutex<_>> shared through the copied ctx)."
+        - "Determinism: the generated registration order mirrors the declarative file exactly (side-A escorts, side B, then victory), so trigger indices and spawn order are unchanged. Verified by digest A/B against the pre-conversion declarative world — sides-free and --side-a cruiser --side-b destroyer both reproduce their HEAD digests byte for byte."
+        - "Absence of the marker is a hard NoDuelSlots error, and a slot whose anchor the world's [anchors] table never declares is a hard UndeclaredSlotAnchor error — an unresolvable anchor otherwise warns and spawns nothing, leaving a ship silently out of a run that reads as a balance result."
     architecture:
       kind: pure-transform
       authority: authoritative
@@ -202,7 +206,7 @@ entities:
     implementation:
       status: declared
       paths: [src/headless/duel.rs, src/headless/app.rs, src/headless/args.rs, assets/worlds/duel.toml]
-      symbols: [apply_duel_sides, resolve_template]
+      symbols: [apply_duel_sides, resolve_template, SLOT_MARKER]
       tests: [cargo test, tests/headless_runner.rs]
 
   - component: balance-batch-runner

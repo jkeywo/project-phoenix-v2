@@ -425,7 +425,7 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // equivalent — it no-ops off-browser. Inserting it here pre-empts that.
     let world_toml = read_toml(&args.world_path, "world")?;
     crate::content_ledger::record(&args.world_path, &world_toml);
-    let mut world_config = crate::world::config::parse_world(&world_toml)
+    let world_config = crate::world::config::parse_world(&world_toml)
         .map_err(|e| BuildError(format!("world {:?} failed to parse: {e}", args.world_path)))?;
 
     // The raw world TOML for the Rhai loader (issue #984, Rhai M6 phase 2a):
@@ -433,29 +433,34 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // seam needs the untouched value. Native's answer to the browser's
     // `insert_raw_world_source_resource` (which reads `SNAPSHOT_WORLD`): inserted
     // directly here so `compile_world_scripts` at `Startup` finds it.
-    let raw_world_toml: toml::Value = toml::from_str(&world_toml).map_err(|e| {
+    let mut raw_world_toml: toml::Value = toml::from_str(&world_toml).map_err(|e| {
         BuildError(format!(
             "world {:?} failed to re-parse as a TOML value: {e}",
             args.world_path
         ))
     })?;
-    app.insert_resource(crate::world::server::RawWorldSource {
-        path: args.world_path.clone(),
-        toml: raw_world_toml.clone(),
-    });
 
     // Duel side transform (issue #844). Only when `--side-a`/`--side-b` is
-    // given, so a plain `--world` run is untouched. Pure over `WorldConfig`;
-    // the filesystem-backed resolver is injected here in production.
+    // given, so a plain `--world` run is untouched. Since the duel slots became
+    // script (issue #984, M6) the transform rewrites the RAW TOML — it
+    // regenerates the slot drivers inside `duel.toml`'s `[script]` source — so it
+    // has to run BEFORE `RawWorldSource` is inserted, because that resource is
+    // what the script loader reads. `world_config` is not touched by it at all.
+    // The filesystem-backed resolver is injected here in production.
     if !args.side_a.is_empty() || !args.side_b.is_empty() {
-        world_config = super::duel::apply_duel_sides(
-            world_config,
+        raw_world_toml = super::duel::apply_duel_sides(
+            raw_world_toml,
             &args.side_a,
             &args.side_b,
             &super::duel::resolve_template,
         )
         .map_err(|e| BuildError(format!("duel sides: {e}")))?;
     }
+
+    app.insert_resource(crate::world::server::RawWorldSource {
+        path: args.world_path.clone(),
+        toml: raw_world_toml.clone(),
+    });
 
     // Seed precedence: `--seed`, then the world TOML's `[global] seed`, then a
     // seed drawn from the OS. Resolved here because this is the first point at

@@ -4432,6 +4432,345 @@ setup = 'on_destroyed("raider", "spawn_wave"); fn spawn_wave(ctx) { ctx.effects.
         );
     }
 
+    // ── Scripted destruction (issue #1033) ───────────────────────────────────
+
+    /// Spawn `name` as a live ECS entity carrying `uuid`, registered in
+    /// `name_to_uuid` — the shape a world-spawned entity has by the time a script
+    /// can address it by name.
+    fn register_named_entity(app: &mut App, name: &str, uuid: &str) -> Entity {
+        use crate::entities::spawner::EntityUuid;
+        let entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(uuid.to_string()),
+                bevy::prelude::Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert(name.to_string(), uuid.to_string());
+        entity
+    }
+
+    /// Issue #1033, THE acceptance: a scripted `destroy_entity` chains its
+    /// `WorldEvent::Destroyed` into the SAME tick, so a downstream `on_destroyed`
+    /// trigger fires off a scripted removal exactly as it does off a combat kill.
+    ///
+    /// The chain is the whole point of buffering a `TriggerAction` instead of a
+    /// resolved command. `dispatch_destroy_entity` returns the event on
+    /// `DispatchResult::new_events` beside the despawn command;
+    /// `apply_script_commands` feeds the WHOLE result to `apply_dispatch_result`,
+    /// whose `events_out` is `tick_trigger_pipeline`'s `next_events` — the current
+    /// tick's next chaining pass. So the watcher below fires inside the single
+    /// `app.update()` that ran the handler, with no second tick to hide behind.
+    ///
+    /// Three things are asserted together because a partial implementation can
+    /// deliver any one of them alone: the entity is really gone, the chained
+    /// trigger really fired, and the `AiEntityDestroyed` message really reached
+    /// external consumers (telemetry, save/load) the way a combat kill's does.
+    #[test]
+    fn a_scripted_destroy_chains_on_destroyed_in_the_same_tick() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "collapse"); fn collapse(ctx) { ctx.effects.destroy_entity("skyhook"); }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        let raider_uuid = "raider-uuid-1033a";
+        let skyhook_uuid = "skyhook-uuid-1033a";
+        let skyhook = register_named_entity(&mut app, "skyhook", skyhook_uuid);
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            // The witness, at index 0: a declarative `on_destroyed` watching the
+            // SKYHOOK — an entity nothing shoots at. Only the scripted destruction
+            // can make this fire.
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnDestroyed {
+                        entity_name: "skyhook".into(),
+                    },
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        assert!(
+            app.world().get_entity(skyhook).is_err(),
+            "the scripted destroy must despawn the named entity"
+        );
+        assert!(
+            trigger_fired(&app, 0),
+            "the chained on_destroyed must fire in the SAME tick — the scripted \
+             destroy's Destroyed event rides `new_events` into this tick's next \
+             chaining pass, exactly as a combat kill's does"
+        );
+        let msgs = app
+            .world()
+            .resource::<Messages<crate::ai_plugin::AiEntityDestroyed>>();
+        let mut cursor = msgs.get_cursor();
+        let emitted: Vec<String> = cursor.read(msgs).map(|m| m.entity_uuid.clone()).collect();
+        assert!(
+            emitted.iter().any(|u| u == skyhook_uuid),
+            "external consumers must see a scripted kill as they see a combat one, \
+             got {emitted:?}"
+        );
+    }
+
+    /// Issue #1033, the group half of the acceptance: a script destroys group
+    /// members one at a time, and the group's `OnAllDestroyed` fires when — and
+    /// only when — the LAST one goes.
+    ///
+    /// This is the assertion that catches a cleanup that looks tidy and is not.
+    /// `OnAllDestroyed` resolves each `Destroyed` event back to a member NAME
+    /// through `name_to_uuid`, and reads the membership out of `entity_groups`;
+    /// removing the destroyed entity from either — the intuitive "clean up on
+    /// removal" — makes the last kill unresolvable and the group never fires. A
+    /// combat kill removes neither, so neither does a scripted one, and the two
+    /// paths stay identical by doing the same nothing.
+    ///
+    /// The negative half (one down, group silent) is what makes the positive half
+    /// mean anything: a trigger that fired on the FIRST kill would satisfy a
+    /// fires-at-the-end assertion just as well.
+    #[test]
+    fn a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = '''
+on_destroyed("cue_a", "kill_a");
+on_destroyed("cue_b", "kill_b");
+fn kill_a(ctx) { ctx.effects.destroy_entity("band_a"); }
+fn kill_b(ctx) { ctx.effects.destroy_entity("band_b"); }
+'''
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        let band_a = register_named_entity(&mut app, "band_a", "band-a-uuid-1033");
+        let band_b = register_named_entity(&mut app, "band_b", "band-b-uuid-1033");
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("cue_a".to_string(), "cue-a-uuid-1033".to_string());
+            runtime
+                .name_to_uuid
+                .insert("cue_b".to_string(), "cue-b-uuid-1033".to_string());
+            // The storm band, as a spawned group would register it.
+            runtime.entity_groups.insert(
+                "band".to_string(),
+                ["band_a".to_string(), "band_b".to_string()]
+                    .into_iter()
+                    .collect(),
+            );
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAllDestroyed {
+                        group: "band".into(),
+                        after_secs: 0.0,
+                    },
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+
+        // First member down.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: "cue-a-uuid-1033".into(),
+            });
+        app.update();
+        assert!(
+            app.world().get_entity(band_a).is_err(),
+            "the first scripted destroy must despawn its target"
+        );
+        assert!(
+            !trigger_fired(&app, 0),
+            "one of two members down is not the whole group — OnAllDestroyed must \
+             stay silent"
+        );
+
+        // Last member down.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: "cue-b-uuid-1033".into(),
+            });
+        app.update();
+        assert!(app.world().get_entity(band_b).is_err());
+        assert!(
+            trigger_fired(&app, 0),
+            "the LAST scripted destroy must fire the group's OnAllDestroyed — the \
+             storm-band teardown this effect exists for"
+        );
+    }
+
+    /// Issue #1033: destroying a name nothing registered is a warning-only no-op —
+    /// no panic, no despawn, and NO `Destroyed` event for a chained trigger to
+    /// react to. Matching `dispatch_spawn_entity`'s unresolvable-template
+    /// contingency, and for the same reason: a phantom event would fire
+    /// `on_destroyed` for something that never existed.
+    ///
+    /// Driven through the scripted path (not `dispatch_action` directly) so it also
+    /// covers the raise-vs-warn choice: an unknown name is a RUNTIME miss the
+    /// dispatcher warns about, not a malformed call the host fn rejects, so the
+    /// rest of the handler's effects still apply.
+    #[test]
+    fn a_scripted_destroy_of_an_unknown_name_warns_and_keeps_the_rest_of_the_call() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.destroy_entity("no_such_entity"); ctx.effects.complete_objective("obj"); }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        let raider_uuid = "raider-uuid-1033c";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnDestroyed {
+                        entity_name: "no_such_entity".into(),
+                    },
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+        app.world_mut()
+            .resource_mut::<ObjectiveManagerRes>()
+            .0
+            .add("obj", "hold the line", true, vec![]);
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        assert!(
+            !trigger_fired(&app, 0),
+            "an unresolvable destroy must emit no Destroyed event at all"
+        );
+        assert!(
+            objective_is_completed(&app, "obj"),
+            "the miss is a dispatch warning, not a raise: the effects authored \
+             after it still apply"
+        );
+    }
+
+    /// Issue #1033 AC4: a name freed by a destroy is reusable — a later
+    /// `spawn_entity` under the same name resolves to the NEW entity, with no
+    /// stale entry in the way.
+    ///
+    /// Both effects run in one handler, in authored order, which is the sharpest
+    /// version: the spawn's `name_to_uuid` insert lands after the destroy in the
+    /// same buffer drain. It works because the map is written by INSERT (an
+    /// overwrite), so the stale entry is replaced rather than needing removal —
+    /// which is what lets the destroy leave the entry alone for the chaining pass
+    /// above to resolve against.
+    #[test]
+    fn a_name_freed_by_a_scripted_destroy_is_reusable_by_a_later_spawn() {
+        use crate::entity_config::EntityConfig;
+        crate::config_cache::insert_native_config(
+            "fixture/reuse_1033.toml".to_string(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = '''
+on_destroyed("cue", "recycle");
+fn recycle(ctx) {
+    ctx.effects.destroy_entity("band");
+    ctx.effects.spawn_entity(#{ template_path: "fixture/reuse_1033.toml", name: "band", position: [10, 0, 0] });
+}
+'''
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        app.world_mut()
+            .insert_resource(crate::world_id::WorldIdMint::default());
+        let old_uuid = "band-old-uuid-1033";
+        let old = register_named_entity(&mut app, "band", old_uuid);
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("cue".to_string(), "cue-uuid-1033d".to_string());
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: "cue-uuid-1033d".into(),
+            });
+        app.update();
+
+        assert!(
+            app.world().get_entity(old).is_err(),
+            "the old entity is gone"
+        );
+        let now = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("band")
+            .cloned()
+            .expect("the name is still registered — to the NEW entity");
+        assert_ne!(
+            now, old_uuid,
+            "reusing a destroyed entity's name must resolve to the freshly minted \
+             uuid, not the stale one"
+        );
+    }
+
     /// Issue #984 (Rhai M6 phase 2a), Startup-wiring proof: `compile_world_scripts`
     /// inserts `WorldScriptRuntime`, and `init_world_runtime` merges the scripted
     /// trigger into `trigger_states` and builds `handlers` parallel to it — the

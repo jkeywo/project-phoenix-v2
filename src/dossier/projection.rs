@@ -14,11 +14,11 @@
 //!
 //! * [`DossierSubject`] is the *whole input port*. It has a field for the
 //!   subject's identity, its faction label, its comms standing, its **published**
-//!   condition and the promises made to it — and no field for anything else.
-//!   A withheld disposition, an unrevealed future spawn, an authored flag the
-//!   scenario has not mirrored anywhere the crew can see: none of them has
-//!   anywhere to go. Leaking one would take a new field on this struct, in a
-//!   diff, next to this paragraph.
+//!   condition, the promises made to it and the evidence the crew gathered on it
+//!   — and no field for anything else. A withheld disposition, an unrevealed
+//!   future spawn, an authored flag the scenario has not mirrored anywhere the
+//!   crew can see: none of them has anywhere to go. Leaking one would take a new
+//!   field on this struct, in a diff, next to this paragraph.
 //! * The condition input arrives as
 //!   [`InfrastructureSnapshot`](crate::messages::InfrastructureSnapshot) — the
 //!   type #1025 mints through `from_state`, which returns `None` for a structure
@@ -34,18 +34,42 @@
 //! [`Commitment`] can be handed over: a caller that can see a promise exists is a
 //! caller the crew already told.
 //!
-//! # Evidence is #1031's, and it appends
+//! # Evidence is GATHERED knowledge, and it does not weaken the rule (issue #1031)
 //!
-//! [`DossierSnapshot::evidence`](crate::messages::DossierSnapshot::evidence) is
-//! carried from this slice and left empty by it. #1031 appends entries with
-//! provenance; nothing about the fold, the payload, the console state or the
-//! panel changes shape when it does. That is the whole reason the list exists
-//! before anything writes to it.
+//! [`DossierSubject::evidence`] is the port's sixth and last field, and it is
+//! the only one that is not a re-statement of something folded from elsewhere:
+//! it is what the crew *found out*, carried out of
+//! [`crate::dossier::evidence`]'s append-only log.
+//!
+//! Adding it does not open a door the five above are closed to, and the reason
+//! is worth stating precisely rather than assuming. **An evidence entry exists
+//! only because a scenario said the crew did something.** Its one writer is
+//! `ctx.dossier.append(…)`, authored at the beat where a scan returns or a
+//! witness talks; nothing here or in [`super::server`] derives an entry from
+//! world state, reads one out of a withheld field, or synthesises one when a
+//! secret becomes true. So the invariant is unchanged in substance — everything
+//! on a sheet is something the crew already have access to — and merely widened
+//! in *how*: the first five fields are surfaces the crew can consult, and this
+//! one is the record of what they went and got.
+//!
+//! The two structural gates stand exactly as they did. A withheld condition
+//! track still reaches no field, because
+//! [`InfrastructureSnapshot::from_state`](crate::messages::InfrastructureSnapshot)
+//! still returns `None` for it and *nothing about evidence touches that path*;
+//! and the payload's whole key set is still pinned in `codec.rs`, which is where
+//! a field a secret could ride in would have to appear. What a scenario CAN now
+//! do is reveal its own secret — deliberately, in a beat, as an entry with a
+//! provenance saying how the crew got it. That is the mechanism the mission
+//! wanted, and issue #1030's rule always said appending was the only path to it.
 //!
 //! Pure and Bevy-free. The adapter that gathers the live inputs is
 //! [`super::server`].
 
-use crate::messages::{DossierFactSnapshot, DossierSnapshot, DossierValue, InfrastructureSnapshot};
+use crate::dossier::evidence::EvidenceEntry;
+use crate::messages::{
+    DossierEvidenceSnapshot, DossierFactSnapshot, DossierSnapshot, DossierValue,
+    InfrastructureSnapshot,
+};
 use crate::world::commitments::{Commitment, CommitmentState};
 
 /// `strings.csv` id: the subject's faction.
@@ -84,8 +108,9 @@ pub const SHARED_FACT_LABELS: [&str; 6] = [
 /// See the module docs. Every field here names a surface the crew has some other
 /// authoritative access to: the entity's own name and description already ride
 /// the entity snapshot, the faction label is authored display text, the comms
-/// standing is the roster's, the condition is what #1025 chose to publish, and a
-/// promise is one the captain made out loud.
+/// standing is the roster's, the condition is what #1025 chose to publish, a
+/// promise is one the captain made out loud — and the evidence is what the crew
+/// themselves went and found out.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DossierSubject {
     /// The subject entity's UUID.
@@ -107,6 +132,14 @@ pub struct DossierSubject {
     pub condition: Option<SubjectCondition>,
     /// Promises made to this subject, oldest first — the ledger's own order.
     pub commitments: Vec<Commitment>,
+    /// What the crew have found out about this subject, oldest first — the
+    /// log's own order, restricted to this subject (issue #1031).
+    ///
+    /// Whole [`EvidenceEntry`] records for the reason whole [`Commitment`]s are
+    /// handed over: there is nothing on one to withhold. Every field was
+    /// produced by the crew's own act of finding out, so a caller that can see
+    /// an entry is a caller who was there when it was gathered.
+    pub evidence: Vec<EvidenceEntry>,
 }
 
 /// A subject's published condition track plus the crew-facing labels for it
@@ -177,6 +210,12 @@ fn commitment_label(state: CommitmentState) -> &'static str {
 /// Fact order is fixed here rather than sorted, because it is an editorial
 /// order: who they are, whether you can talk to them, what state they are in,
 /// what you owe them.
+///
+/// Evidence is kept in its own list rather than folded into `facts` (issue
+/// #1031), and that separation is the whole readout: a crew looking at a sheet
+/// must be able to see which lines they were handed and which they earned. It
+/// stays in gather order — never re-sorted by provenance, never interleaved
+/// with the facts — so the sheet reads as the story of what the crew did.
 pub fn project(subject: &DossierSubject) -> DossierSnapshot {
     let mut facts = Vec::new();
 
@@ -225,15 +264,25 @@ pub fn project(subject: &DossierSubject) -> DossierSnapshot {
         name: subject.name.clone(),
         summary: subject.summary.clone(),
         facts,
-        // #1031's, and appended there. Empty is the whole contract this slice
-        // owes that one.
-        evidence: Vec::new(),
+        evidence: subject
+            .evidence
+            .iter()
+            .map(|entry| DossierEvidenceSnapshot {
+                text: entry.text.clone(),
+                // The typed provenance crosses the wire under its own script
+                // name, so the panel's PROVENANCE_LABELS table, a scenario's
+                // `provenance: "scan"`, and a save all spell it identically.
+                provenance: entry.provenance.as_str().to_string(),
+                gathered_at_tick: entry.gathered_at_tick,
+            })
+            .collect(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dossier::evidence::EvidenceProvenance;
 
     fn subject() -> DossierSubject {
         DossierSubject {
@@ -259,6 +308,15 @@ mod tests {
         facts.iter().map(|f| f.label.as_str()).collect()
     }
 
+    fn finding(text: &str, provenance: EvidenceProvenance, tick: u64) -> EvidenceEntry {
+        EvidenceEntry {
+            subject_uuid: "skyhook-1".into(),
+            text: text.into(),
+            provenance,
+            gathered_at_tick: tick,
+        }
+    }
+
     /// **AC2.** A subject nobody knows anything about still has a sheet. The
     /// list carries it, the name resolves, and the fact list is empty rather
     /// than the whole dossier being absent.
@@ -273,7 +331,7 @@ mod tests {
         );
         assert!(
             dossier.evidence.is_empty(),
-            "evidence is #1031's to append; this slice always leaves it empty"
+            "a crew who have found nothing out have an empty file, not a missing one"
         );
     }
 
@@ -442,5 +500,127 @@ mod tests {
         for label in SHARED_FACT_LABELS {
             assert!(label.starts_with("dossier.fact."));
         }
+    }
+
+    // ── Gathered evidence (issue #1031) ──────────────────────────────────────
+
+    /// **AC4's server half.** Evidence rides its own list, in gather order, with
+    /// the provenance beside each entry — never folded into `facts`, because the
+    /// separation between what the crew were handed and what they earned is the
+    /// readout.
+    #[test]
+    fn evidence_projects_into_its_own_list_in_gather_order_and_never_into_the_facts() {
+        let mut s = subject();
+        s.faction_label = Some("faction.federation.display_name".into());
+        s.evidence = vec![
+            finding(
+                "world.probe.evidence.brief",
+                EvidenceProvenance::Briefing,
+                1,
+            ),
+            finding("world.probe.evidence.scan", EvidenceProvenance::Scan, 400),
+            finding(
+                "world.probe.evidence.foreman",
+                EvidenceProvenance::Dialogue,
+                900,
+            ),
+        ];
+
+        let dossier = project(&s);
+        assert_eq!(
+            labels(&dossier.facts),
+            vec![FACT_FACTION],
+            "a finding is not a fact row — the two lists are separate all the way \
+             to the panel"
+        );
+        assert_eq!(
+            dossier
+                .evidence
+                .iter()
+                .map(|e| (e.text.as_str(), e.provenance.as_str(), e.gathered_at_tick))
+                .collect::<Vec<_>>(),
+            vec![
+                ("world.probe.evidence.brief", "briefing", 1),
+                ("world.probe.evidence.scan", "scan", 400),
+                ("world.probe.evidence.foreman", "dialogue", 900),
+            ],
+            "gather order, never re-sorted by provenance or by tick"
+        );
+    }
+
+    /// The provenance crosses the wire under its own script name, so a
+    /// scenario's `provenance: "scan"`, the client's `PROVENANCE_LABELS` key and
+    /// a save all spell it identically. Asserted over the whole vocabulary, so a
+    /// fifth kind cannot ship with a name the client has never heard of.
+    #[test]
+    fn every_provenance_reaches_the_wire_under_its_own_script_name() {
+        let mut s = subject();
+        s.evidence = EvidenceProvenance::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, p)| finding(&format!("world.probe.{i}"), *p, i as u64))
+            .collect();
+        assert_eq!(
+            project(&s)
+                .evidence
+                .iter()
+                .map(|e| e.provenance.clone())
+                .collect::<Vec<_>>(),
+            EvidenceProvenance::ALL
+                .iter()
+                .map(|p| p.as_str().to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// **AC5, the hidden-truth guarantee restated with evidence in the port.**
+    ///
+    /// The withheld condition is still structurally unreachable — the input is
+    /// still `InfrastructureSnapshot::from_state`'s `None` — and appending a
+    /// finding does not change that by one row. A crew who learned something
+    /// about this structure learned exactly what the scenario said they learned;
+    /// the number it is keeping back is still on nothing.
+    #[test]
+    fn appending_evidence_does_not_open_a_path_for_the_withheld_condition() {
+        use crate::infrastructure::{InfrastructureConfig, InfrastructureState};
+
+        let hidden = InfrastructureState::from_config(&InfrastructureConfig {
+            condition_max: 100.0,
+            condition: Some(31.0),
+            publish: false,
+            ..InfrastructureConfig::default()
+        });
+
+        let mut s = subject();
+        s.condition = InfrastructureSnapshot::from_state(&hidden)
+            .as_ref()
+            .map(|published| SubjectCondition::from_published(published, |_| None, |_| None));
+        s.evidence = vec![finding(
+            "world.probe.evidence.scan",
+            EvidenceProvenance::Scan,
+            400,
+        )];
+
+        let dossier = project(&s);
+        assert_eq!(dossier.evidence.len(), 1, "the crew did learn something");
+        assert!(
+            dossier.facts.is_empty(),
+            "and the sheet still carries no condition row"
+        );
+        assert!(
+            !dossier
+                .facts
+                .iter()
+                .any(|f| matches!(f.value, DossierValue::Fraction(_))),
+            "the withheld 0.31 rides on no fact"
+        );
+        assert!(
+            !dossier
+                .evidence
+                .iter()
+                .any(|e| e.text.contains("31") || e.provenance.contains("31")),
+            "and nothing about it leaked into the evidence list either — an entry \
+             carries what a SCENARIO said the crew found, and nothing this module read"
+        );
     }
 }

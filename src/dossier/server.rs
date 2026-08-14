@@ -19,8 +19,16 @@
 //! true` would be a way to declare that the crew hold a file on something they
 //! have no other means of observing, which is precisely the shape of leak this
 //! slice exists to make impossible. It also means the roster needs no new
-//! component, no save field and no census entry: a dossier is a *view*, and
-//! there is nothing here to persist.
+//! component and no save field: a dossier is a *view*.
+//!
+//! **Gathered evidence is not a third door either** (issue #1031). Appending a
+//! finding does not make something a subject: the entry lands in
+//! [`WorldContentRuntime::evidence`](crate::world::server::WorldContentRuntime)
+//! keyed by uuid whatever it was written about, and it reaches a fact sheet only
+//! where that uuid is already through one of the two doors above. A scenario
+//! that appends a finding to a rock has written it down honestly and has nowhere
+//! to show it — which is the same answer #1029 gives a promise made to a party
+//! that is not an entity in this world.
 //!
 //! Ships, stations and structures all reach it through those two doors — a
 //! hailable hull, a hailable starbase, a published skyhook — which is the
@@ -205,6 +213,15 @@ fn dossier_subjects(
                                 .cloned()
                                 .collect()
                         })
+                        .unwrap_or_default(),
+                    // What the crew found out about THIS hull (issue #1031),
+                    // matched by UUID where a promise is matched by name — a
+                    // finding is about the specific thing that was examined,
+                    // and the applier resolved the script's name to this uuid
+                    // when it was written. Gather order is the log's own; the
+                    // filter preserves it.
+                    evidence: world_runtime
+                        .map(|runtime| runtime.evidence.for_subject(&uuid.0).cloned().collect())
                         .unwrap_or_default(),
                     summary: target
                         .and_then(|t| t.0.description.clone())
@@ -492,5 +509,85 @@ mod tests {
         app.add_systems(Update, publish_dossier_blackboard);
         hailable(&mut app, "ship-1", "claimant");
         app.update();
+    }
+
+    // ── Gathered evidence (issue #1031) ──────────────────────────────────────
+
+    /// **AC4 at the adapter.** A finding reaches the subject it was gathered on,
+    /// matched by UUID, in gather order — and nobody else's file grew a finding
+    /// about somebody else.
+    #[test]
+    fn a_finding_lands_on_the_file_of_the_subject_it_was_gathered_on() {
+        use crate::dossier::evidence::EvidenceProvenance;
+
+        let mut app = app();
+        hailable(&mut app, "ship-1", "strike_committee");
+        hailable(&mut app, "ship-2", "corporate_security");
+
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.evidence.append(
+            "ship-1",
+            "world.probe.evidence.manifest",
+            EvidenceProvenance::Records,
+            120,
+        );
+        runtime.evidence.append(
+            "ship-1",
+            "world.probe.evidence.admission",
+            EvidenceProvenance::Dialogue,
+            300,
+        );
+        app.insert_resource(runtime);
+        app.update();
+
+        let subjects = published(&app).subjects;
+        assert_eq!(
+            subjects[0]
+                .evidence
+                .iter()
+                .map(|e| (e.text.as_str(), e.provenance.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("world.probe.evidence.manifest", "records"),
+                ("world.probe.evidence.admission", "dialogue"),
+            ],
+            "both findings, in the order the crew made them"
+        );
+        assert!(
+            subjects[1].evidence.is_empty(),
+            "and the other hull's file is untouched"
+        );
+    }
+
+    /// Evidence is not a third door onto the roster: a finding written about
+    /// something the crew have no other surface on has nowhere to be shown, and
+    /// the subject list is exactly what it was.
+    #[test]
+    fn a_finding_about_a_non_subject_does_not_make_it_one() {
+        use crate::dossier::evidence::EvidenceProvenance;
+
+        let mut app = app();
+        hailable(&mut app, "ship-1", "claimant");
+        app.world_mut().spawn(EntityUuid("rock-1".into()));
+
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.evidence.append(
+            "rock-1",
+            "world.probe.evidence.ore",
+            EvidenceProvenance::Scan,
+            60,
+        );
+        app.insert_resource(runtime);
+        app.update();
+
+        assert_eq!(
+            published(&app)
+                .subjects
+                .iter()
+                .map(|d| d.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ship-1"],
+            "the two doors are still the whole roster rule"
+        );
     }
 }

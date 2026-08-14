@@ -7,7 +7,7 @@
 //! // A scan handler. The crew pointed something at the skyhook and read it back.
 //! fn on_survey_complete(ctx) {
 //!     ctx.dossier.append(#{
-//!         subject:    "skyway_hook",
+//!         subject:    "world.thin_margin.entity.skyway_hook.name",
 //!         text:       "world.thin_margin.evidence.stress_fracture",
 //!         provenance: "scan",
 //!     });
@@ -16,7 +16,7 @@
 //! // A dialogue on_pick. Testimony: the foreman said it out loud.
 //! fn on_press_foreman(ctx) {
 //!     ctx.dossier.append(#{
-//!         subject:    "skyway_hook",
+//!         subject:    "world.thin_margin.entity.skyway_hook.name",
 //!         text:       "world.thin_margin.evidence.foreman_admission",
 //!         provenance: "dialogue",
 //!     });
@@ -48,8 +48,8 @@
 //! * The **subject name is resolved by the applier**, which is the one place
 //!   holding `WorldContentRuntime::name_to_uuid` — the same hop
 //!   `repair_infrastructure` and `order_hold` take. Script therefore names a
-//!   subject by its `[[entity]] id`, like every other verb, and never handles a
-//!   UUID.
+//!   subject by its `[[entity]] name`, like every other name-resolving verb,
+//!   and never handles a UUID.
 //!
 //! And on the failure path the whole buffer is dropped (settled decision 10), so
 //! a handler that raises after appending records nothing.
@@ -107,8 +107,8 @@ impl Dossier {
     fn append(&self, spec: &Map) -> Result<(), Box<EvalAltResult>> {
         let subject = map_str(spec, "subject").ok_or_else(|| {
             raise(
-                "dossier.append requires a string `subject` (the [[entity]] id of the \
-                 thing this was learned about)"
+                "dossier.append requires a string `subject` (the [[entity]] name of \
+                 the thing this was learned about)"
                     .to_string(),
             )
         })?;

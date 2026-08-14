@@ -1848,8 +1848,10 @@ mod tests {
         assert!(json.contains(r#""kind":"Dossiers""#), "got: {json}");
         assert_eq!(serde_json::from_str::<SystemBlackboard>(&json).unwrap(), bb);
 
-        // #1031's seam, pinned from this slice: an entry decodes into the list
-        // that ships empty here, so appending is additive rather than a reshape.
+        // The #1031 seam, pinned by #1030 before anything wrote to it and kept
+        // BYTE-FOR-BYTE here now that something does: appending entries was
+        // additive, and this literal is the proof — the slice that filled the
+        // list did not have to move a character of it.
         let with_evidence = r#"{"kind":"Dossiers","data":{"subjects":[{"uuid":"u","name":"n",
             "facts":[],"evidence":[{"text":"world.x.evidence","provenance":"scan",
             "gathered_at_tick":900}]}]}}"#;
@@ -1876,6 +1878,42 @@ mod tests {
             serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Dossiers","data":{}}"#).unwrap(),
             SystemBlackboard::Dossiers(DossierBlackboard::default())
         );
+
+        // An evidence ENTRY's whole key set, asserted the same way a fact's is
+        // (issue #1031). Three columns and no fourth: what was learned, how, and
+        // when. There is deliberately no "actual value" beside the reported one
+        // and no confidence score — a scenario that misleads the crew authors the
+        // misleading finding and the contradiction as two entries they can
+        // compare, which is why inspecting this payload cannot reveal anything
+        // they were not shown.
+        let entry: serde_json::Value = serde_json::from_str(
+            &serde_json::to_string(&DossierEvidenceSnapshot {
+                text: "world.x.evidence".into(),
+                provenance: "dialogue".into(),
+                gathered_at_tick: 900,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            entry
+                .as_object()
+                .expect("an entry is an object")
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<&str>>(),
+            BTreeSet::from(["text", "provenance", "gathered_at_tick"]),
+        );
+
+        // And the provenance crosses as the SCRIPT's own name, so the panel's
+        // PROVENANCE_LABELS keys, a scenario's `provenance: "scan"` and a save
+        // are one vocabulary rather than three.
+        for provenance in crate::dossier::EvidenceProvenance::ALL {
+            assert_eq!(
+                serde_json::to_string(&provenance).unwrap(),
+                format!("\"{}\"", provenance.as_str())
+            );
+        }
 
         let msg = ServerMessage::BlackboardUpdate {
             updates: vec![(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)],

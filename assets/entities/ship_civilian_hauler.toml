@@ -1,0 +1,143 @@
+# Civilian bulk hauler — the first hull to carry a `[civilian]` table
+# (issue #1028).
+#
+# Deliberately generic rather than Falling-Skyway-specific: a hauler is
+# something a scenario puts on a lane, talks to, and occasionally has to argue
+# with, and the whole point of putting the route assignment and the compliance
+# disposition on the ENTITY is that the next mission needing traffic does not
+# re-derive the bookkeeping.
+#
+# What makes it civilian is what it does NOT have: no weapons, no Destroy
+# doctrine, and a Captain policy that stands DOWN unconditionally rather than
+# going to red alert. Its faction is Requiem, which is neutral to everyone, so
+# it never becomes a target by accident.
+#
+# Its travel doctrine is not authored here at all. `[civilian] route` names a
+# world `[[route]]`, and `civilian::tick_civilian_traffic` keeps a single
+# `civilian-route` doctrine entry pointed at whatever the craft is currently
+# trying to do — its lane, an ordered anchor, an ordered berth, or nothing when
+# it has been told to hold. That entry is an ordinary authored directive and is
+# flown by the ordinary NPC helm.
+
+name = "entity.ship_civilian_hauler.name"
+tags = ["ship", "npc", "civilian"]
+faction = "dddddddd-4444-4444-8444-dddddddddddd"
+
+# The fifteen ship-level AI declarations every hull with a `[behaviour]` block
+# owes (PRD #774 US7). The Captain one is authored inline below instead, because
+# a hauler's is the opposite of the shared fragment's.
+includes = ["fragments/ai/fleet_baseline.toml"]
+
+[target]
+tags = ["ship"]
+threat_level = "none"
+description = "entity.ship_civilian_hauler.target.description"
+
+[hull]
+hull_integrity = 60.0
+
+[collider]
+shape = "Capsule"
+radius = 2.0
+length = 6.0
+# A ship is a MOBILE contact, so another hull's authored
+# `hazard_ignore_size_ratio` may size-ignore it (issue #958).
+movable = true
+
+[radar_appearance]
+colour = [0.55, 0.75, 0.45]
+size = 4.0
+icon = "ship"
+
+[mesh]
+# Shares the Dynasty courier hull with `ship_requiem_courier`: a civilian hauler
+# is the same silhouette at this scale, and a new .glb for it would buy nothing.
+model = "assets/models/dynasty_courier.glb"
+shape = "cuboid"
+size = [4.0, 1.5, 6.0]
+colour = [0.55, 0.75, 0.45]
+
+[comms]
+range = 900.0
+
+[helm_console]
+# Slow. A hauler under way should be something a crew can catch, hail and argue
+# with rather than something that outruns the conversation.
+max_speed = 12.0
+max_reverse_speed = 4.0
+acceleration = 5.0
+deceleration = 8.0
+max_yaw_rate = 0.35
+max_bank_deg = 5.0
+
+[ai_profile]
+aggression = 0.0
+sensor_range = 200.0
+
+# Civilian traffic (issue #1028). No `route` here on purpose: which lane a
+# hauler flies is a fact about the mission that placed it, so a world authors it
+# per instance with `overrides = { civilian = { route = "…" } }`. Everything
+# else is the hull's own temperament, and this one is cooperative — a scenario
+# that wants a difficult operator authors `[civilian.compliance]` on the
+# instance, or on the faction.
+[civilian]
+route_priority = 60.0
+
+[behaviour]
+# No doctrine entries. A civilian's travel objective is installed and maintained
+# by the traffic adapter; a standing `Reach` here would compete with it.
+waypoint_arrival_radius = 20.0
+nav_handoff_speed = 0.9
+
+# Captain — a hauler stands down, always. Authored inline rather than composed,
+# because every shared Captain fragment in the library raises alert on contact
+# and that is precisely what a civilian does not do. This is a DECLARATION, not
+# an omission: US7 asks that automation is never silently synthesised, and "this
+# ship deliberately never goes to red alert" is a policy like any other.
+[captain_console]
+
+[captain_console.ai]
+
+[[captain_console.ai.rule]]
+priority = 10
+channel = "red_alert"
+when = "true"
+verb = "set_red_alert"
+value = false
+
+# Every system is ownerless and `ai_only`, so the NPC spawn path puts each one
+# under `ControlSource::Ai`.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+# The navigation system is what makes a `dock` order flyable. A Dock directive
+# resolves to a destination through `operate_navigation_ai`, which emits this
+# hull's own anchored waypoint as an admitted command — so without a navigation
+# system to admit it, the berth would resolve and the hauler would never set
+# off. It is `ai_only` because nobody is ever seated here.
+[[system]]
+id = "navigation"
+kind = "navigation"
+ai_only = true
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true

@@ -913,3 +913,11 @@ civilian.compliance.reason.declined,"Reason a civilian gives for refusing an ord
 civilian.compliance.reason.unable,"Reason shown when a civilian accepted an order and the world then made it impossible — the dock is gone, the lane resolves nowhere (issue #1028)","[Unable to comply.]"
 civilian.order.rejected.unknown_target,"Navigation console feedback when an order names a craft this world does not have (issue #1028)","[No such craft.]"
 civilian.order.rejected.malformed,"Navigation console feedback when an order is malformed — a divert naming both a route and an anchor, or neither (issue #1028)","[Order not understood.]"
+entity.ship_civilian_hauler.name,assets/entities/ship_civilian_hauler.toml → name (top level),[Civilian Hauler]
+entity.ship_civilian_hauler.target.description,assets/entities/ship_civilian_hauler.toml → [target] description,[Bulk hauler. Unarmed. Running a contracted lane.]
+world.entity.probe_depot.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Probe Depot]
+world.entity.hauler_kestrel.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Kestrel]
+world.entity.hauler_wren.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Wren]
+world.entity.hauler_teal.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Teal]
+world.entity.hauler_gull.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Gull]
+world.probe_civilian_traffic.wren.refusal,"Reason the Wren gives for refusing a divert in the #1028 probe world","[Contracted lane. Not diverting.]"

@@ -1009,6 +1009,203 @@ fn an_infrastructure_threshold_flips_its_flag_in_both_directions_in_a_real_run()
     );
 }
 
+/// Issue #1028: four civilians on authored lanes, one order each, walked all
+/// the way through the compliance machine in a real run — and one of them left
+/// alone long enough to prove the lane itself is being flown.
+///
+/// `probe_civilian_traffic.toml` is a deliberate tripwire for the whole chain
+/// rather than a scenario that happens to contain traffic. Every outcome the
+/// machine can produce is on screen at once, and the two a console must be able
+/// to tell apart — `refused` (declined, carried on) and `non_compliant`
+/// (agreed, then stuck) — are produced by two different craft on the same tick,
+/// because a probe that produced only one of them would pass with the two
+/// folded together.
+#[test]
+fn civilian_orders_walk_the_compliance_machine_while_the_lane_keeps_being_flown() {
+    use project_phoenix::civilian::{CivilianTraffic, ComplianceState, REASON_UNABLE};
+    use project_phoenix::entity_spawner::{BehaviourSection, EntityName};
+
+    const KESTREL: &str = "world.entity.hauler_kestrel.name";
+    const WREN: &str = "world.entity.hauler_wren.name";
+    const TEAL: &str = "world.entity.hauler_teal.name";
+    const GULL: &str = "world.entity.hauler_gull.name";
+    const ROUTE_ID: &str = project_phoenix::civilian::CIVILIAN_ROUTE_OBJECTIVE_ID;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_civilian_traffic.toml".into(),
+        dt,
+        // Long enough for the Wren — the one craft nobody diverts — to fly a
+        // whole leg of its circuit, sit out the authored dwell at the northern
+        // anchor, and set off on the next leg.
+        max_ticks: ticks_for_sim_seconds(30.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // Every compliance state each craft passed through, in order and without
+    // repeats: the SEQUENCE is the assertion, not the endpoint.
+    let mut seen: std::collections::BTreeMap<String, Vec<ComplianceState>> = Default::default();
+    let mut legs: std::collections::BTreeMap<String, usize> = Default::default();
+    let mut dwelled = false;
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        let now = app
+            .world()
+            .resource::<project_phoenix::sim_tick::SimTick>()
+            .0;
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityName, &CivilianTraffic, &BehaviourSection)>();
+        for (name, traffic, behaviour) in q.iter(app.world()) {
+            let row = seen.entry(name.0.clone()).or_default();
+            if row.last() != Some(&traffic.0.compliance()) {
+                row.push(traffic.0.compliance());
+            }
+            let leg = legs.entry(name.0.clone()).or_insert(0);
+            *leg = (*leg).max(traffic.0.leg());
+            // The authored 3 s dwell at the northern anchor, observed as the one
+            // thing it is: a craft that KEEPS its lane directive, at zero
+            // throttle. Read inside the loop because by the end it is over.
+            if name.0 == WREN && traffic.0.is_dwelling(now) {
+                dwelled = behaviour.0.doctrine.iter().any(|d| {
+                    d.id == ROUTE_ID
+                        && d.directive_kind.as_deref() == Some("Patrol")
+                        && d.target_speed == 0.0
+                });
+            }
+        }
+    }
+
+    // ── AC7: route progress. The Wren refuses its only order and is otherwise
+    // left alone, so it is the craft that proves the lane is real.
+    assert_eq!(
+        legs.get(WREN).copied(),
+        Some(1),
+        "the Wren must have reached the northern anchor and moved on to the next \
+         leg — the PatrolCursor IS the leg pointer, so a leg that never advances \
+         is a lane nobody is flying. Legs seen: {legs:?}"
+    );
+    assert!(
+        dwelled,
+        "…and the authored 3 s dwell at that anchor must show up as the lane \
+         directive held at zero throttle, rather than as the craft being taken \
+         off its lane and put back on it"
+    );
+
+    // ── AC4/AC6: the four outcomes, each its own sequence.
+    assert_eq!(
+        seen.get(KESTREL).map(Vec::as_slice),
+        Some(
+            [
+                ComplianceState::Unordered,
+                ComplianceState::Received,
+                ComplianceState::Acknowledged,
+                ComplianceState::Complying,
+                // The hold at t = 12 s: a second order, on a craft already
+                // complying with the first.
+                ComplianceState::Received,
+                ComplianceState::Acknowledged,
+                ComplianceState::Complying,
+            ]
+            .as_slice()
+        ),
+        "the Kestrel takes its divert, then its hold, and every intermediate \
+         state is visible rather than skipped: {seen:?}"
+    );
+    assert_eq!(
+        seen.get(WREN).map(Vec::as_slice),
+        Some(
+            [
+                ComplianceState::Unordered,
+                ComplianceState::Received,
+                ComplianceState::Refused,
+            ]
+            .as_slice()
+        ),
+        "the Wren RECEIVES the order like everyone else — an uncooperative craft \
+         still hears you — and then refuses straight out of `received`, never \
+         acknowledging its way to complying: {seen:?}"
+    );
+    assert_eq!(
+        seen.get(TEAL).map(Vec::as_slice),
+        Some(
+            [
+                ComplianceState::Unordered,
+                ComplianceState::Received,
+                ComplianceState::Acknowledged,
+                ComplianceState::Complying,
+            ]
+            .as_slice()
+        ),
+        "the Teal takes its dock order: {seen:?}"
+    );
+    assert_eq!(
+        seen.get(GULL).map(Vec::as_slice),
+        Some(
+            [
+                ComplianceState::Unordered,
+                ComplianceState::Received,
+                ComplianceState::Acknowledged,
+                ComplianceState::NonCompliant,
+            ]
+            .as_slice()
+        ),
+        "the Gull agrees to dock at a berth this world does not have and lands in \
+         `non_compliant` — a DIFFERENT state from the Wren's refusal, which is \
+         the distinction the whole vocabulary exists for: {seen:?}"
+    );
+
+    // ── The state each craft is left in, and the directive behind it.
+    let mut q = app
+        .world_mut()
+        .query::<(&EntityName, &CivilianTraffic, &BehaviourSection)>();
+    let rows: std::collections::BTreeMap<String, (String, Option<String>, Option<String>)> = q
+        .iter(app.world())
+        .map(|(name, traffic, behaviour)| {
+            let entry = behaviour.0.doctrine.iter().find(|d| d.id == ROUTE_ID);
+            (
+                name.0.clone(),
+                (
+                    traffic.0.route().unwrap_or_default().to_string(),
+                    entry.and_then(|d| d.directive_kind.clone()),
+                    traffic.0.reason().map(str::to_string),
+                ),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        rows.get(KESTREL).map(|r| (r.0.as_str(), r.1.as_deref())),
+        Some(("storm_detour", None)),
+        "a complied divert BECOMES the craft's own lane, and the later hold then \
+         takes its directive away entirely — a held craft is flown by the \
+         existing no-objective arm, not by a stop command this slice invented: \
+         {rows:?}"
+    );
+    assert_eq!(
+        rows.get(WREN).map(|r| (r.0.as_str(), r.1.as_deref())),
+        Some(("depot_run", Some("Patrol"))),
+        "a refusal is a decision, so the Wren is still flying its own circuit: \
+         {rows:?}"
+    );
+    assert_eq!(
+        rows.get(TEAL).map(|r| (r.0.as_str(), r.1.as_deref())),
+        Some(("depot_run", Some("Dock"))),
+        "the Teal is under a Dock directive — the one addition to the shared \
+         directive vocabulary — while the lane it will return to is untouched \
+         underneath: {rows:?}"
+    );
+    assert_eq!(
+        rows.get(GULL).map(|r| (r.1.as_deref(), r.2.as_deref())),
+        Some((None, Some(REASON_UNABLE))),
+        "a stuck craft stops where it is and says why, rather than wandering back \
+         onto its lane as if nothing happened: {rows:?}"
+    );
+}
+
 /// Issue #843: a run whose tick budget expires while combat is still live
 /// classifies as a timeout, carrying the per-side margins.
 ///

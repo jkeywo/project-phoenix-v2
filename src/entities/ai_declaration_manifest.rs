@@ -1245,38 +1245,42 @@ base_priority = 40.0
             rollup.push((kind.key.as_str(), declared, slots));
         }
         assert_eq!(
-            total, 184,
-            "the shipped hulls carry 184 AI-capable fine-system slots in total"
+            total, 200,
+            "the shipped hulls carry 200 AI-capable fine-system slots in total"
         );
         assert_eq!(
             rollup,
             vec![
-                ("captain", 9, 9),
-                ("engines", 9, 9),
-                ("steering", 9, 9),
-                ("lateral", 9, 9),
-                ("vertical", 9, 9),
-                ("impulse", 9, 9),
-                ("boost", 9, 9),
+                ("captain", 10, 10),
+                ("engines", 10, 10),
+                ("steering", 10, 10),
+                ("lateral", 10, 10),
+                ("vertical", 10, 10),
+                ("impulse", 10, 10),
+                ("boost", 10, 10),
                 ("phaser_bank", 12, 12),
                 ("blaster_bank", 7, 7),
                 ("torpedo_tube", 14, 14),
-                ("weapons_doctrine", 10, 10),
+                ("weapons_doctrine", 11, 11),
                 ("torpedo_magazine", 5, 5),
-                ("shields_focus", 9, 9),
-                ("power", 9, 9),
-                ("comms_response", 9, 9),
-                ("sensors_selector", 9, 9),
-                ("tactical_selector", 10, 10),
-                ("navigation_selector", 9, 9),
-                ("repair_selector", 9, 9),
-                ("comms_selector", 9, 9),
+                ("shields_focus", 10, 10),
+                ("power", 10, 10),
+                ("comms_response", 10, 10),
+                ("sensors_selector", 10, 10),
+                ("tactical_selector", 11, 11),
+                ("navigation_selector", 10, 10),
+                ("repair_selector", 10, 10),
+                ("comms_selector", 10, 10),
             ],
             "the per-kind roll-up moved. Every one of the twenty kinds is now \
              DECLARED on every hull that has it — declared == slots on every row — \
              after #885b stage 5b authored the five selectors and stage 5c the \
              fourteen policies, and #956 added the fifteenth policy kind \
-             (`weapons_doctrine`) already authored on all nine. A row where the two \
+             (`weapons_doctrine`) already authored on all nine. The tenth hull is \
+             `ship_civilian_hauler` (issue #1028): it composes the fifteen \
+             ship-level declarations from `fragments/ai/fleet_baseline.toml` and \
+             authors its own stand-down Captain policy inline, so it arrives fully \
+             declared like the nine before it. A row where the two \
              numbers differ is a fine system being handed automation nobody wrote, \
              which is exactly what PRD #774 US7 forbids: author the block rather than \
              editing this expectation."

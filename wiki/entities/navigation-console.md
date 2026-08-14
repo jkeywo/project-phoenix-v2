@@ -2,8 +2,8 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/destroyer/tactical.html, gui/components/ph-navigation-map.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/core/messages.rs, src/entities/config.rs, assets/entities/alliance_battleship.toml]
-updated: 2026-08-12
+sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/destroyer/tactical.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/civilian/server.rs, src/core/messages.rs, src/entities/config.rs, assets/entities/alliance_battleship.toml]
+updated: 2026-08-14
 ---
 
 # Navigation Console
@@ -39,10 +39,21 @@ Navigation commands enter through the same `ControlSystem` command path as other
 
 `NavigateTo` is the level-3 clearance that releases the AI Helm to follow the waypoint: it carries the waypoint's `generation` (not a position), serves the ship's `coordination_lag_secs` in the coordination queue, and latches into `HelmWaypointClearance` on delivery. It is issued from one origin-agnostic place — `issue_navigate_to_clearance` in `src/console/navigation/mod.rs` — once per new waypoint generation, and re-issued when the helm axes flip Human→AI while the current generation is unlatched (so a waypoint set under a human helm is still flown after a disconnect/Backfill flip). Neither waypoint writer sends its own clearance.
 
+## Civilian traffic
+
+Since issue #1028 the console also carries a traffic picture: every civilian craft in the world, with the authored `[[route]]` it is flying, which leg of how many, its standing order, and whether it is doing as it was asked. `<ph-civilian-traffic>` renders it — beside the chart on the Battleship, under the map in the Destroyer's Nav overlay.
+
+Compliance is published, never inferred client-side, because "has not started turning yet" and "has decided not to" look identical on a chart. `refused` and `non_compliant` are different words and different row styles for the same reason: a refusal is a decision (the craft declined and carried on down its own lane), non-compliance is a failure (it agreed, set off, and the world moved). Only the second needs a crew.
+
+Orders are issued as `SystemControlPayload::OrderCivilian`, admitted for the same Navigation system the waypoint payloads are, and answered on the craft's own authored clock rather than immediately — an order is a negotiation with an actor, not a remote-control input. An order the host cannot deliver at all (unknown craft, malformed divert) bounces as `ServerMessage::CivilianOrderRejected`; a craft that simply says no does not bounce, it changes compliance state. The mechanism lives in `src/civilian/`.
+
 ## Wire surface
 
 - `SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }` sets a free or anchored waypoint.
 - `SystemControlPayload::ClearNavigationWaypoint` clears it.
+- `SystemControlPayload::OrderCivilian { target, order }` orders a civilian to hold, divert or dock (issue #1028).
+- `ServerMessage::CivilianOrderRejected { target, reason }` is the rejection-only reply for an order that could not be delivered.
 - `NavigationBlackboard.navigation_waypoint: Option<WaypointSnapshot>` publishes the current shared value.
+- `NavigationBlackboard.civilians: Vec<CivilianTrafficSnapshot>` publishes the traffic picture, on the local ship only.
 
 `gui/action-map.js` maps the browser actions onto these authoritative commands. `buildWaypointBlip` also projects the shared waypoint onto Helm and other radar views, edge-clamping it where the consuming view requests that behaviour.

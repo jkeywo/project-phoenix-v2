@@ -74,6 +74,18 @@ max_bank_deg = 5.0
 aggression = 0.0
 sensor_range = 200.0
 
+# Reactor + battery, at the fleet baseline's own numbers. Authored HERE rather
+# than taken from `fragments/ai/fleet_baseline.toml` even though the fragment
+# carries an identical block: `capacity` is an authoring surface the spawner
+# gates a capability on, and a shared AI-policy fragment must never be the thing
+# that supplies one (`every_shipped_template_resolves_to_its_own_bytes`). The
+# shed LADDER above it is still the fragment's, unchanged — a hauler manages a
+# reactor exactly the way the fleet does.
+[power]
+capacity = 90
+rates = [ 5, 4, 3, 2, -2, -5 ]
+emergency_threshold = 22
+
 # Civilian traffic (issue #1028). No `route` here on purpose: which lane a
 # hauler flies is a fact about the mission that placed it, so a world authors it
 # per instance with `overrides = { civilian = { route = "…" } }`. Everything

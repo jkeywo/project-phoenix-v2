@@ -144,6 +144,7 @@ impl Plugin for CivilianPlugin {
 /// the simulation's contract, and two civilians racing for the same order would
 /// otherwise resolve differently on two hosts. Same rule
 /// [`crate::sim_digest`] applies to its own walks.
+#[allow(clippy::too_many_arguments)]
 pub fn tick_civilian_traffic(
     runtime: Option<ResMut<WorldContentRuntime>>,
     world_config: Option<Res<WorldConfig>>,
@@ -174,9 +175,20 @@ pub fn tick_civilian_traffic(
         .map(|wc| wc.global.sim_tick_hz)
         .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().sim_tick_hz);
 
+    // Who is actually addressable. An order that resolves to a real entity
+    // which is not traffic — a rock, a starbase, the player's own hull — is
+    // rejected rather than queued, because a queue nobody drains is a silent
+    // drop and the operator would be left watching for an answer that cannot
+    // come.
+    let addressable: std::collections::HashSet<String> = civilians
+        .iter()
+        .map(|(_, uuid, ..)| uuid.0.clone())
+        .collect();
+
     // Every order addressed this tick, script and console alike, resolved to a
-    // target UUID. Console orders are read first so a scenario and a crew
-    // issuing on the same tick resolve in a fixed order.
+    // target UUID. Script orders are taken first so a scenario and a crew
+    // issuing on the same tick resolve in a fixed order — and the crew wins,
+    // because the later `receive_order` replaces the earlier.
     let mut queued: Vec<PendingCivilianOrder> =
         std::mem::take(&mut runtime.pending_civilian_orders);
     let mut rejections: Vec<(String, String, String)> = Vec::new();
@@ -190,7 +202,7 @@ pub fn tick_civilian_traffic(
                 rejections.push((token, target.clone(), REJECT_MALFORMED_ORDER.to_string()));
                 continue;
             }
-            match resolve_civilian(&runtime, target) {
+            match resolve_civilian(&runtime, target).filter(|uuid| addressable.contains(uuid)) {
                 Some(uuid) => queued.push(PendingCivilianOrder {
                     uuid,
                     order: order.clone(),
@@ -200,6 +212,16 @@ pub fn tick_civilian_traffic(
                 }
             }
         }
+    }
+    // A scripted order to something that is not traffic gets the same warning
+    // and the same drop, minus the bounce: a script has no console to flash.
+    for pending in queued.iter().filter(|p| !addressable.contains(&p.uuid)) {
+        crate::pwarn!(
+            log,
+            crate::logging::LogCat::Nav,
+            "civilian order for uuid '{}' names no craft carrying traffic state — ignoring",
+            pending.uuid
+        );
     }
     for (token, target, reason) in rejections {
         crate::pwarn!(
@@ -417,6 +439,13 @@ fn directive_for(
 /// Returns whether the entry's *destination* changed, which is the only thing
 /// that invalidates the route cursor — a leg's speed moving as the cursor
 /// advances must not reset the very cursor that moved it.
+///
+/// A hold counts as a change, so a craft released from one rejoins its lane at
+/// the first leg rather than where it stopped. That is the honest reading of
+/// "no directive at all": the cursor belongs to an objective, and while the
+/// craft has none there is nothing for it to be a pointer into. Preserving it
+/// would need the adapter to remember which lane the dropped cursor belonged
+/// to, which is a second copy of the thing the doctrine entry already says.
 fn install_directive(
     doctrine: &mut Vec<DoctrineObjective>,
     desired: Option<DoctrineObjective>,
@@ -818,6 +847,85 @@ mod tests {
                 .doctrine
                 .is_empty(),
             "…and a stuck civilian holds station, which is no directive at all"
+        );
+    }
+
+    /// **AC3.** An order the host cannot deliver bounces back to the console
+    /// that sent it, with a reason, rather than vanishing into a queue nobody
+    /// drains.
+    #[test]
+    fn an_undeliverable_order_is_refused_with_a_reason_on_the_senders_own_token() {
+        use crate::messages::{AdmittedCommand, SystemId};
+
+        let mut app = test_app();
+        spawn_civilian(&mut app, "civ-1", CivilianConfig::default());
+        // A named entity that is NOT traffic: resolving is not the same as
+        // being addressable, and an order to a rock must not queue.
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert("a_rock".into(), "rock-1".into());
+
+        let console = |target: &str, order: CivilianOrder| AdmittedCommand {
+            target: SystemId(crate::system_registry::NAVIGATION_SYSTEM_ID.to_string()),
+            payload: SystemControlPayload::OrderCivilian {
+                target: target.to_string(),
+                order,
+            },
+            response_token: Some("nav-holder".into()),
+        };
+        app.world_mut().spawn(AdmittedCommands(vec![
+            console("nobody", CivilianOrder::Hold),
+            console("a_rock", CivilianOrder::Hold),
+            console(
+                "civ-1",
+                CivilianOrder::Divert {
+                    route: Some("a".into()),
+                    anchor: Some("b".into()),
+                },
+            ),
+        ]));
+
+        app.world_mut().run_schedule(FixedUpdate);
+
+        let bounced: Vec<(String, String)> = app
+            .world()
+            .resource::<crate::simulation::SimOutbox>()
+            .0
+            .iter()
+            .filter_map(|(target, msg)| match (target, msg) {
+                (
+                    crate::lobby::Target::Token(token),
+                    crate::messages::ServerMessage::CivilianOrderRejected { target, reason },
+                ) => Some((token.clone(), format!("{target}:{reason}"))),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            bounced,
+            vec![
+                (
+                    "nav-holder".to_string(),
+                    format!("nobody:{REJECT_UNKNOWN_CIVILIAN}")
+                ),
+                (
+                    "nav-holder".to_string(),
+                    format!("a_rock:{REJECT_UNKNOWN_CIVILIAN}")
+                ),
+                (
+                    "nav-holder".to_string(),
+                    format!("civ-1:{REJECT_MALFORMED_ORDER}")
+                ),
+            ],
+            "an unknown craft, a craft that is not traffic, and a divert naming two \
+             destinations all bounce — on the token the command arrived with"
+        );
+        let mut q = app.world_mut().query::<&CivilianTraffic>();
+        let states: Vec<ComplianceState> = q.iter(app.world()).map(|t| t.0.compliance()).collect();
+        assert_eq!(
+            states,
+            vec![ComplianceState::Unordered],
+            "…and the malformed order never reaches the craft it named"
         );
     }
 

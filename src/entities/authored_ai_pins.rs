@@ -500,6 +500,18 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     ("ship_harrow_patrol", "captain"),
     ("ship_harrow_warhawk", "captain"),
     ("ship_requiem_courier", "captain"),
+    // The civilian hauler (issue #1028) departs further than any of the five
+    // above: its one captain rule is `when = "true"` → `set_red_alert(false)`,
+    // an UNCONDITIONAL stand-down. That is the doctrine, not a stub. A hauler
+    // has no guns for an alert to arm, and raising one would still change the
+    // posture every fact, comms and repair reading is keyed on — so the honest
+    // declaration is that it never raises one, said here rather than by quietly
+    // matching a baseline it does not mean.
+    //
+    // Listed in the direction that keeps the entry meaningful: a hauler that
+    // acquired the returning-fire rule would be a civilian craft that goes to
+    // battlestations, and only this list would notice.
+    ("ship_civilian_hauler", "captain"),
     // ── The reactors whose drive is not gated by the alert ───────────────────
     //
     // These five author `power` inline and their `helm` ELEVATE reads
@@ -3418,10 +3430,13 @@ fn an_unknown_channel_resolves_to_nothing_on_every_authored_policy() {
         }
     }
     assert_eq!(
-        checked, 136,
-        "the fifteen policy kinds account for 136 of the fleet's 181 AI-capable \
-         fine-system slots (the other 45 are the selectors). A change in this number \
-         means a hull, weapon or kind moved. 136-of-181 since #956, which added the \
+        checked, 147,
+        "the fifteen policy kinds account for 147 of the fleet's 197 AI-capable \
+         fine-system slots (the other 50 are the selectors). A change in this number \
+         means a hull, weapon or kind moved. 147-of-197 since #1028, which added the \
+         TENTH AI-bearing hull — `ship_civilian_hauler`, eleven policy slots and five \
+         selectors, every one of them composed from the fleet baseline except its \
+         stand-down captain; 136-of-181 since #956, which added the \
          ship-level `weapons_doctrine` kind — one slot on each of the nine AI-bearing \
          hulls; 127-of-172 after #954 moved the three-weapon RNG-coverage escort out \
          of `assets/entities/` to the test-fixture directory, and 141-of-191 before \

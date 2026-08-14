@@ -67,6 +67,7 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Single block type for all spawnables; named entries (with `name = "..."`) are the ones a script can reference. |
 | `[script]` | table | none | Scenario logic — event registrations, handler fns and comms dialogue nodes (see §1.5, §1.7). |
 | `[[deadline]]` | array of tables | `[]` | Named mission deadlines the crew can be shown and script can slip or cancel (see §1.6). |
+| `[[route]]` | array of tables | `[]` | Named civilian traffic lanes: anchor chains a `[civilian]` craft flies (see §1.8). |
 | `[ambient_light]` | table | none | World ambient light override; omitted sub-fields fall back to renderer constants. |
 | `[dust]` | table | none | Ambient dust / velocity-mote effect (see §1.3). |
 
@@ -325,6 +326,9 @@ A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedu
 | `ctx.schedule.after(n, \|ctx\| { … })` | Defers a whole closure. |
 | `ctx.deadlines.remaining(id)` / `state(id)` | Read a named mission deadline — see §1.6. |
 | `ctx.deadlines.slip(id, secs)` / `cancel(id)` | Move a deadline out (or in), or call it off. |
+| `ctx.effects.order_hold(entity)` | Order a civilian to stop where it is — see §1.8. Refusable. |
+| `ctx.effects.order_divert_route(entity, route)` / `order_divert_anchor(entity, anchor)` | Send it down another lane, or to a single anchor. Refusable. |
+| `ctx.effects.order_dock(entity, structure)` | Send it to berth at a named structure. Refusable. |
 
 Conditional effects are ordinary Rhai control flow — an `if` on a flag read —
 rather than a per-action `when` predicate. A trigger-level gate is still a
@@ -448,6 +452,63 @@ display_name = "Starbase Alpha"   # optional; falls back to the entity's name
 
 Per-world opt-in is an `overrides` on the `[[entity]]` block:
 `overrides = { comms = { hailable = true } }`.
+
+### 1.8 Civilian traffic: routes and orders
+
+A **route** is a named lane in the world — an anchor chain with per-leg
+behaviour and an authored ending. A **civilian** is a hull that flies one and
+can be told otherwise. Both halves are authored data; neither is a mover.
+
+```toml
+[[route]]
+id = "depot_run"                  # unique in the world; a craft or an order names it by this
+on_complete = "loop"              # "loop" (default) or "terminate"
+
+[[route.leg]]
+anchor = "depot_north"            # a name in this world's [anchors] table
+speed = 0.4                       # cruise fraction (0, 1] for THIS leg; default 0.5
+hold_secs = 20                    # dwell here before pressing on; default 0
+
+[[route.leg]]
+anchor = "depot_south"
+```
+
+```toml
+# On the entity template (or a world `[[entity]] overrides`):
+[civilian]
+route = "depot_run"               # omit for a craft with no standing lane
+route_priority = 60.0             # utility priority of its travel objective
+
+[civilian.compliance]             # optional; omit for a cooperative craft
+ack_secs = 2                      # whole seconds before it answers at all
+decide_secs = 3                   # …and before it acts on what it answered
+hold = "comply"                   # per verb: "comply" (default) or "refuse"
+divert = "refuse"
+dock = "comply"
+refusal_reason = "world.fs.hauler.refusal"   # a strings.csv id, never English
+```
+
+* An order is a **negotiation, not a remote control**. Every order — from a
+  console or from a script — walks `received → acknowledged → complying`, or
+  `received → refused`, on the craft's own authored clock. A craft that agrees
+  and then finds it cannot comply (the berth is gone, the lane resolves
+  nowhere) lands in `non_compliant`, which is a *different* state from
+  `refused`: one declined and carried on down its own lane, the other agreed
+  and got stuck.
+* Compliance resolves **entity → faction → cooperative default**, so a scenario
+  can make one hull difficult or a whole shipping line difficult. A faction
+  authors the same `[compliance]` table in `assets/factions/*.toml`.
+* A leg naming an anchor no world in the composition declares, and a `[civilian]
+  route` naming a lane nobody declares, are **load-time errors** that block the
+  world — neither table is ever written again, so a reference that misses at
+  load misses forever.
+* A duplicate route `id`, a lane with no legs, and a `speed` outside `(0, 1]`
+  are load-time errors naming the route.
+* Route following goes through the ordinary NPC helm: the craft is handed a
+  `Patrol` directive over the lane's anchors and the existing patrol cursor is
+  its leg pointer. A `hold` takes its directive away entirely, which is how any
+  objective-less NPC comes to a stop.
+* Navigation sees the whole picture — lane, leg and compliance — on its console.
 
 ### Example — a world, end to end
 
@@ -1302,6 +1363,7 @@ radius = 150.0
 | `uuid` | UUID string | **required** | Stable identity. Referenced from entity TOMLs (`faction = "..."`). |
 | `name` | string | **required** | Display name. |
 | `enemies` | array of UUID strings | `[]` | UUIDs this faction considers hostile. *Asymmetric* — listing B does not imply B is hostile to A. |
+| `[compliance]` | table | none | How this faction's civilian traffic answers crew orders — the same shape as an entity's `[civilian.compliance]` (see §1.8). The fallback when a hull authors none of its own. |
 
 Factionless entities (no `faction` field on the entity) are neither
 enemies nor targets.

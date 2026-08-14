@@ -407,6 +407,36 @@ pub struct EntityState {
     /// long before this field is read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operations: Option<crate::operations::OperationsSaveState>,
+    /// The entity's civilian traffic state (issue #1028), whole.
+    ///
+    /// Stored whole for the same reason the condition track is: the parts have
+    /// to come back together. A civilian's lane, its leg, its standing order,
+    /// where it stands with that order and the tick that stage is due on are one
+    /// fact about a negotiation in progress. Restore the order without the
+    /// compliance state and a craft that had already refused starts obeying;
+    /// restore the compliance state without the due tick and a craft frozen
+    /// mid-acknowledgement answers on the first tick after resume, or never.
+    ///
+    /// The variant-order hazard applies to exactly one field — `order` is an
+    /// enum — and it is handled the way `RON` handles every other: by name, not
+    /// by index. Adding a fourth order verb is additive; RENAMING one is not,
+    /// and would need the same format bump any other renamed variant does.
+    ///
+    /// The **route assignment** is not here twice. `CivilianSection` is authored
+    /// configuration, re-derived from the entity's TOML at spawn; what the state
+    /// carries is the lane it is *currently* on, which a complied divert may
+    /// have changed. That is why the section is not captured and this is.
+    ///
+    /// # Why this did not bump [`SNAPSHOT_FORMAT`]
+    ///
+    /// Exactly the [`EntityState::infrastructure`] argument, one feature later.
+    /// A save that lacks this field is a save of a world written before it
+    /// existed; a world gains civilian traffic by gaining a `[civilian]` table
+    /// in an entity TOML and `[[route]]` blocks in its world TOML, both of which
+    /// move `content_digest` and get the older save refused as content-moved
+    /// long before this field is read. The format stays at 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub civilian: Option<crate::civilian::CivilianState>,
     /// `ObjectiveCursors` as `(objective id, waypoint index, settled)`.
     ///
     /// Where a patrolling ship is *around its route*, which is not derivable
@@ -2220,6 +2250,20 @@ fn capture_operations(world: &World) -> Vec<(String, crate::operations::Operatio
         .collect()
 }
 
+/// The civilian traffic states, in a query of their own, joined by uuid — see
+/// [`EntityState::civilian`]. Only entities that authored `[civilian]` carry
+/// one, so most worlds capture an empty list.
+fn capture_civilians(world: &World) -> Vec<(String, crate::civilian::CivilianState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::civilian::CivilianTraffic)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, traffic)| (uuid.0.clone(), traffic.0.clone()))
+        .collect()
+}
+
 fn capture_entities(world: &World) -> Vec<EntityState> {
     let controls = capture_controls(world);
     let machines = capture_weapons_and_repair(world);
@@ -2229,6 +2273,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let pass_surfaces = capture_pass_surfaces(world);
     let infrastructure = capture_infrastructure(world);
     let operations = capture_operations(world);
+    let civilians = capture_civilians(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
         Option<&ShipPhysics>,
@@ -2276,6 +2321,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
             operations: operations
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            civilian: civilians
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
@@ -3267,6 +3316,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(operations) = &row.operations {
             if let Some(mut ops) = entity_mut.get_mut::<crate::operations::ShipOperations>() {
                 ops.restore(operations);
+            }
+        }
+        if let Some(civilian) = &row.civilian {
+            if let Some(mut traffic) = entity_mut.get_mut::<crate::civilian::CivilianTraffic>() {
+                traffic.0 = civilian.clone();
             }
         }
         if !row.patrol_cursors.is_empty() {

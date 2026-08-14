@@ -3267,6 +3267,7 @@ station = "sensors"
         "assets/entities/alliance_courier.toml",
         "assets/entities/alliance_cruiser.toml",
         "assets/entities/alliance_destroyer.toml",
+        "assets/entities/ship_civilian_hauler.toml",
         "assets/entities/ship_harrow_cruiser.toml",
         "assets/entities/ship_harrow_destroyer.toml",
         "assets/entities/ship_harrow_patrol.toml",

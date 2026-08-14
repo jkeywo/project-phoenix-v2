@@ -31,6 +31,13 @@
 #   t ~5-7   the three that acknowledged act on it (2 s ack + 3 s decide is the
 #            default disposition; `wren`'s refusal needs only the ack)
 #   t 12     kestrel is told to hold and comes off its lane entirely
+#
+# BASELINE (this world is new in #1028, so this is its first recorded digest):
+# `--seed 42 --ticks 900` gives final digest 0x6132ca281ad68690
+# (7003882644112311952). Measured on a clean tree at the commit that added this
+# line. It is a NEW number, not a preserved one — nothing to compare it against
+# yet — so it is written down here to be the thing a later change is A/B'd
+# against, the way probe_deadlines' already is.
 
 [global]
 seed = 1028

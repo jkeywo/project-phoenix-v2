@@ -2335,3 +2335,102 @@ fn a_world_with_no_operations_writes_no_operation_state() {
          a byte for a feature they do not use"
     );
 }
+
+// ── Issue #1028: civilian traffic survives a resume ─────────────────────────
+
+/// The civilian probe: four haulers on two authored lanes, ordered at t = 2 s.
+const CIVILIAN: &str = "assets/worlds/probe_civilian_traffic.toml";
+
+/// Frames to run before the civilian capture.
+///
+/// The probe issues its four orders at t = 2 s and the default disposition
+/// answers two seconds later, so this has to land while at least one craft is
+/// still MID-NEGOTIATION — received or acknowledged, with a due tick pending.
+/// A capture taken before the orders would round-trip four unordered craft,
+/// which is exactly the payload a restore that dropped the whole field would
+/// also produce. The assertions below make the precondition explicit rather
+/// than trusting the number.
+const CIVILIAN_CAPTURE_AT: u64 = 130;
+
+fn civilian_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: CIVILIAN.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+/// **Issue #1028.** A negotiation in progress comes back in progress: the
+/// order, where the craft stands with it, and the tick it is due to answer on.
+///
+/// The due tick is the half worth having a test for. Restore the compliance
+/// state without it and a craft frozen mid-acknowledgement either answers on
+/// the first tick after a resume or never answers at all — and both look
+/// exactly like a save that worked, right up until the crew notices the hauler
+/// never turned.
+#[test]
+fn the_resumed_world_keeps_a_civilians_lane_order_and_place_in_the_negotiation() {
+    use project_phoenix::civilian::{CivilianTraffic, ComplianceState};
+
+    let mut live = boot(&civilian_args());
+    step(&mut live, CIVILIAN_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.civilian.as_ref().map(|c| (&e.uuid, c)))
+        .collect();
+    assert_eq!(
+        captured.len(),
+        4,
+        "the probe world carries exactly four craft with traffic state"
+    );
+    assert!(
+        captured
+            .iter()
+            .any(|(_, state)| state.compliance().is_pending() && state.due_tick() > 0),
+        "precondition: the capture must be taken while at least one craft is still \
+         answering — a capture of four unordered craft would round-trip identically even \
+         if restore dropped the field entirely. Captured: {:?}",
+        captured
+            .iter()
+            .map(|(id, s)| (id, s.compliance(), s.due_tick()))
+            .collect::<Vec<_>>()
+    );
+
+    let mut resumed = boot_to_restore_point(&civilian_args(), &payload);
+    let before_restore: Vec<ComplianceState> = resumed
+        .world_mut()
+        .query::<&CivilianTraffic>()
+        .iter(resumed.world())
+        .map(|t| t.0.compliance())
+        .collect();
+    assert!(
+        before_restore
+            .iter()
+            .all(|c| *c == ComplianceState::Unordered),
+        "control: a freshly booted world's traffic is under no orders at all, so an inert \
+         restore would be visible here rather than hidden behind a value that happened to \
+         match: {before_restore:?}"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let after = capture(resumed.world());
+    for (uuid, state) in captured {
+        let restored = after
+            .entities
+            .iter()
+            .find(|e| &e.uuid == uuid)
+            .and_then(|e| e.civilian.as_ref())
+            .unwrap_or_else(|| panic!("craft {uuid} came back without its traffic state"));
+        assert_eq!(
+            restored, state,
+            "craft {uuid}: its lane, its leg, its standing order, where it stands with that \
+             order and the tick that stage is due on must all come back exactly as captured"
+        );
+    }
+}

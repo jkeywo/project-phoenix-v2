@@ -78,6 +78,15 @@
 //! has folds nothing, and the authored capability table is not folded at all:
 //! see [`fold_operations_namespace`].
 //!
+//! **Folded (civilian namespace, in `FoldKey` order — issue #1028):** every
+//! entity carrying a `CivilianTraffic` — its id, its lane, its leg, its
+//! compliance state, the tick its current compliance stage is due on, and its
+//! standing order as a verb plus a destination. A host that disagreed about
+//! whether a hauler is complying disagrees about whether traffic control is
+//! working, so this is authoritative and folded. The per-leg dwell tick is NOT
+//! folded: it is re-derived from the same authored `hold_secs` on both hosts the
+//! moment a leg is left. Empty-namespace rule as above.
+//!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
 //! id, its `Transform` translation as bit patterns (a rock's position is
 //! authoritative — it is what a collision resolves against), and its
@@ -156,6 +165,7 @@ use bevy::prelude::*;
 use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 
 use crate::balance::BalanceEvent;
+use crate::civilian::{CivilianState, CivilianTraffic};
 use crate::core::telemetry::RunTelemetry;
 use crate::damage::SystemHull;
 use crate::entity_spawner::{EntitySystemHull, EntityUuid};
@@ -301,6 +311,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_entity_namespace(world, acc);
     acc = fold_infrastructure_namespace(world, acc);
     acc = fold_operations_namespace(world, acc);
+    acc = fold_civilian_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -466,6 +477,80 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         };
     }
     acc
+}
+
+/// Every civilian craft's traffic state (issue #1028), in [`FoldKey`] order, in
+/// its own namespace.
+///
+/// Its lane, its leg, its standing order and where it stands with that order.
+/// Two hosts that disagreed about whether a hauler is complying would disagree
+/// about whether a mission's traffic control is working, so this is
+/// authoritative and folded.
+///
+/// The **due tick** is folded and the dwell tick is not, and that asymmetry is
+/// deliberate: the due tick is the thing the machine compares against every tick
+/// to decide when to answer, so two hosts holding different ones would answer on
+/// different ticks. The dwell is re-derived from the same authored `hold_secs`
+/// on both hosts the moment a leg is left; folding it would add a second copy of
+/// a number that is already implied by the leg and the lane.
+///
+/// Empty-namespace rule as [`fold_infrastructure_namespace`], for the same
+/// reason and with the same expiry: no shipped world authors `[civilian]`
+/// traffic, so folding a row count for all of them would move every committed
+/// world digest over state none of them carry.
+fn fold_civilian_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &CivilianTraffic)>() else {
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, CivilianState)> = query
+        .iter(world)
+        .map(|(entity, uuid, traffic)| {
+            (
+                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                entity.index(),
+                traffic.0.clone(),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "civilian-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, state) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_str(acc, state.route().unwrap_or_default());
+        acc = fold_u64(acc, state.leg() as u64);
+        acc = fold_str(acc, state.compliance().as_str());
+        acc = fold_u64(acc, state.due_tick());
+        // The order, as the two strings a console reads it by. Folding the
+        // typed enum would need a serialiser here; the verb and its destination
+        // are the whole of what distinguishes one order from another.
+        match state.order() {
+            None => acc = fold_u64(acc, 0),
+            Some(order) => {
+                acc = fold_u64(acc, 1);
+                acc = fold_str(acc, order.kind().as_str());
+                acc = fold_str(acc, &civilian_order_destination(order));
+            }
+        }
+    }
+    acc
+}
+
+/// Where an order sends a craft, as one string: a route id, an anchor name, a
+/// structure name, or nothing for a hold.
+fn civilian_order_destination(order: &crate::civilian::CivilianOrder) -> String {
+    use crate::civilian::CivilianOrder;
+    match order {
+        CivilianOrder::Hold => String::new(),
+        CivilianOrder::Divert { route, anchor } => {
+            route.clone().or_else(|| anchor.clone()).unwrap_or_default()
+        }
+        CivilianOrder::Dock { structure } => structure.clone(),
+    }
 }
 
 /// Every entity carrying an infrastructure condition track (issue #1025), in
@@ -979,6 +1064,7 @@ mod tests {
         world.register_component::<Transform>();
         world.register_component::<InfrastructureCondition>();
         world.register_component::<ShipOperations>();
+        world.register_component::<CivilianTraffic>();
         world
     }
 
@@ -1184,6 +1270,137 @@ mod tests {
         let mut reverse = fold_world();
         spawn_structure(&mut reverse, "00000000-0000-8000-8000-000000000002", 20.0);
         spawn_structure(&mut reverse, "00000000-0000-8000-8000-000000000001", 90.0);
+        assert_eq!(
+            world_digest(&forward),
+            world_digest(&reverse),
+            "the fold is keyed on the minted id, not on archetype order"
+        );
+    }
+
+    /// A civilian on `lane` at `leg`, optionally under an order.
+    fn spawn_civilian(
+        world: &mut World,
+        uuid: &str,
+        leg: usize,
+        order: Option<crate::civilian::CivilianOrder>,
+    ) {
+        let mut state = CivilianState::from_config(&crate::civilian::CivilianConfig {
+            route: Some("depot_run".into()),
+            ..Default::default()
+        });
+        state.observe_leg(leg, None, 0, 60.0);
+        if let Some(order) = order {
+            state.receive_order(
+                order,
+                &crate::civilian::ComplianceDisposition::default(),
+                0,
+                60.0,
+            );
+        }
+        world.spawn((EntityUuid(uuid.to_string()), CivilianTraffic(state)));
+    }
+
+    /// **Issue #1028.** A world with no civilian traffic must fold to exactly
+    /// the number it folded before the namespace existed.
+    ///
+    /// The same claim the infrastructure namespace makes, for the same reason:
+    /// an empty walk and an absent feature are the same world state, and a
+    /// folded row count here would have moved every committed world digest over
+    /// state none of those worlds carry.
+    #[test]
+    fn the_civilian_namespace_is_a_no_op_for_a_world_that_has_none() {
+        let mut world = fold_world();
+        spawn_ship(&mut world, "00000000-0000-8000-8000-000000000001", 1.0);
+        spawn_rock(&mut world, "a1b2c3d4-0000-4000-8000-000000000001", 2.0);
+        assert_eq!(
+            fold_civilian_namespace(&world, FOLD_SEED),
+            FOLD_SEED,
+            "an empty civilian walk must leave the accumulator untouched"
+        );
+    }
+
+    /// **Issue #1028.** A craft's lane position and its answer to an order both
+    /// move the digest; two hosts that agree about both must agree.
+    #[test]
+    fn a_civilians_leg_and_its_compliance_move_the_digest() {
+        const ID: &str = "00000000-0000-8000-8000-000000000001";
+        let mut on_leg_one = fold_world();
+        spawn_civilian(&mut on_leg_one, ID, 1, None);
+        let mut same = fold_world();
+        spawn_civilian(&mut same, ID, 1, None);
+        let mut on_leg_two = fold_world();
+        spawn_civilian(&mut on_leg_two, ID, 2, None);
+        let mut ordered = fold_world();
+        spawn_civilian(
+            &mut ordered,
+            ID,
+            1,
+            Some(crate::civilian::CivilianOrder::Hold),
+        );
+        let mut ordered_elsewhere = fold_world();
+        spawn_civilian(
+            &mut ordered_elsewhere,
+            ID,
+            1,
+            Some(crate::civilian::CivilianOrder::divert_to_anchor(
+                "holding_point",
+            )),
+        );
+
+        assert_eq!(
+            world_digest(&on_leg_one),
+            world_digest(&same),
+            "two hosts holding the same craft on the same leg must agree"
+        );
+        assert_ne!(
+            world_digest(&on_leg_one),
+            world_digest(&on_leg_two),
+            "…and a craft one leg further round its circuit must not fold to the number the \
+             one behind it does"
+        );
+        assert_ne!(
+            world_digest(&on_leg_one),
+            world_digest(&ordered),
+            "an order taken is authoritative state: a craft that has been told to hold is not \
+             the same craft as one that has not"
+        );
+        assert_ne!(
+            world_digest(&ordered),
+            world_digest(&ordered_elsewhere),
+            "…and neither is one sent somewhere else — the verb AND its destination are what \
+             distinguish two orders"
+        );
+    }
+
+    /// **Issue #1028.** Craft order must not reach the digest.
+    #[test]
+    fn civilians_fold_in_uuid_order_whatever_order_they_spawned_in() {
+        let mut forward = fold_world();
+        spawn_civilian(
+            &mut forward,
+            "00000000-0000-8000-8000-000000000001",
+            0,
+            None,
+        );
+        spawn_civilian(
+            &mut forward,
+            "00000000-0000-8000-8000-000000000002",
+            2,
+            None,
+        );
+        let mut reverse = fold_world();
+        spawn_civilian(
+            &mut reverse,
+            "00000000-0000-8000-8000-000000000002",
+            2,
+            None,
+        );
+        spawn_civilian(
+            &mut reverse,
+            "00000000-0000-8000-8000-000000000001",
+            0,
+            None,
+        );
         assert_eq!(
             world_digest(&forward),
             world_digest(&reverse),

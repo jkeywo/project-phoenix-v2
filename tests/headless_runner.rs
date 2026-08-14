@@ -6378,3 +6378,194 @@ fn the_operating_ship_publishes_its_hold_under_the_operations_blackboard_key() {
         "and the target is named by its own string id"
     );
 }
+
+// ── The commitments ledger with a live consumer (issue #1029, parent #851) ───
+
+/// `probe_commitments.toml`, driven for fifteen mission seconds: a promise is
+/// recorded, a **real dialogue node offers an option that exists only because
+/// of it**, keeping the promise writes a campaign flag that an `on_flag_set`
+/// trigger reacts to, and a deadline breaks the promise nobody kept.
+///
+/// The live-consumer assertion is the load-bearing one, and it is made against
+/// `CommsRuntime::active_dialogues` — the projected node the comms pipeline
+/// actually built and would have sent a console — rather than against anything
+/// the script says about itself. One authored node fn is opened twice: while
+/// `safe_passage` is owed it offers two responses, and after it has been kept it
+/// offers one. That is the gate opening AND closing, from the ledger.
+///
+/// The probe world's own header carries the authored timeline this is asserted
+/// against.
+#[test]
+fn a_promise_gates_a_dialogue_option_and_its_resolution_writes_a_campaign_flag() {
+    use project_phoenix::comms::server::CommsRuntime;
+    use project_phoenix::world::commitments::CommitmentState;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_commitments.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(15.0, dt),
+        seed: Some(1029),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // Every dialogue this run opened, in the order it opened, recorded as the
+    // response texts the node actually offered. Sampled every tick because a
+    // thread opened at t=4 is still open at t=12 — the pair is what the gate is
+    // read off, and it has to be collected as it happens rather than at the end.
+    let mut offered: Vec<Vec<String>> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        let comms = app.world().resource::<CommsRuntime>();
+        let mut fresh: Vec<(String, Vec<String>)> = comms
+            .active_dialogues
+            .iter()
+            .filter(|(id, _)| !seen.contains(*id))
+            .map(|(id, d)| {
+                (
+                    id.clone(),
+                    d.current_node
+                        .responses
+                        .iter()
+                        .map(|r| r.text.clone())
+                        .collect(),
+                )
+            })
+            .collect();
+        // `active_dialogues` is a `HashMap`, so a tick that opened two threads
+        // could hand them back in either order. Sorting by the minted message id
+        // makes the sample deterministic; in this world only one thread ever
+        // opens per tick, so this is belt to that brace.
+        fresh.sort_by(|a, b| a.0.cmp(&b.0));
+        for (id, texts) in fresh {
+            seen.insert(id);
+            offered.push(texts);
+        }
+    }
+
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    let flags = &runtime.flags;
+    let ledger = &runtime.commitments;
+
+    // AC1: both promises are on the books under their own ids, carrying the
+    // party, the terms and the stated resolution condition.
+    assert_eq!(ledger.records.len(), 2, "two promises were made");
+    let passage = ledger
+        .get("safe_passage")
+        .expect("the id is the lookup key");
+    assert_eq!(
+        passage.made_to, "skyway_strike_committee",
+        "the party is a committee, not a hull — and it is stored as the script \
+         wrote it rather than resolved to a UUID"
+    );
+    assert_eq!(
+        passage.terms, "world.probe_commitments.commitment.safe_passage.terms",
+        "the terms are a strings.csv id, never English"
+    );
+    assert_eq!(
+        passage.resolves_when, "world.probe_commitments.commitment.safe_passage.resolves",
+        "and what would count as keeping it is authored data, not an implication \
+         of whichever handler settles it"
+    );
+    assert_eq!(
+        flags.counter("unmade_reads_unknown"),
+        1,
+        "a promise that was never made reads as unknown — the guard against \
+         recording a duplicate, and the answer that is NOT 'broken'"
+    );
+    assert_eq!(flags.counter("passage_reads_open"), 1);
+
+    // AC5, THE LIVE CONSUMER: one authored node fn, opened twice, offering a
+    // different option list each time because the ledger moved between them.
+    assert_eq!(
+        offered.len(),
+        2,
+        "the probe opens the committee channel twice; got {offered:?}"
+    );
+    assert_eq!(
+        offered[0],
+        vec![
+            "world.probe_commitments.comms.stall".to_string(),
+            "world.probe_commitments.comms.honour_word".to_string(),
+        ],
+        "while the promise is OWED the node offers the option that exists only \
+         because the captain gave their word"
+    );
+    assert_eq!(
+        offered[1],
+        vec!["world.probe_commitments.comms.stall".to_string()],
+        "and once it is KEPT that option is gone — the gate closes as well as \
+         opens, from the same authored node"
+    );
+
+    // AC3: keeping writes a campaign flag, and an `on_flag_set` trigger that
+    // knows nothing about commitments reacts to it.
+    assert_eq!(
+        ledger.get("safe_passage").map(|c| c.state),
+        Some(CommitmentState::Kept)
+    );
+    assert_eq!(
+        flags.counter("commitment.safe_passage.kept"),
+        1,
+        "resolution writes the campaign flag through the ordinary flag path"
+    );
+    assert_eq!(
+        flags.counter("kept_flag_chained"),
+        1,
+        "and an on_flag_set trigger authored against it fired — the consequence \
+         reaching beyond the scene the promise was made in"
+    );
+    assert_eq!(
+        flags.counter("chain_reads_kept"),
+        1,
+        "by the time that trigger runs, the ledger it can read agrees"
+    );
+
+    // The deadline composition: the ledger carries no timer, so the promise
+    // nobody kept is broken by a `[[deadline]]` handler.
+    assert_eq!(
+        flags.counter("records_broken_by_deadline"),
+        1,
+        "the deadline's handler found the promise still open and settled it"
+    );
+    assert_eq!(
+        ledger.get("surface_records").map(|c| c.state),
+        Some(CommitmentState::Broken)
+    );
+    assert_eq!(flags.counter("commitment.surface_records.broken"), 1);
+    assert_eq!(flags.counter("broken_flag_chained"), 1);
+    assert_eq!(
+        flags.counter("chain_reads_broken"),
+        1,
+        "a broken promise is distinguishable from an unresolved one all the way \
+         out to the handler that reacts to it"
+    );
+
+    // The two outcomes never wrote each other's flag.
+    assert_eq!(flags.counter("commitment.safe_passage.broken"), 0);
+    assert_eq!(flags.counter("commitment.surface_records.kept"), 0);
+
+    // Both promises were settled on ticks, not on a wall clock, and both stamps
+    // are after the tick they were made on.
+    for record in &ledger.records {
+        let resolved = record
+            .resolved_at_tick
+            .expect("both promises were settled by the end of the run");
+        assert!(
+            resolved > record.made_at_tick,
+            "{} was settled on tick {resolved}, after the tick {} it was made on",
+            record.id,
+            record.made_at_tick
+        );
+    }
+    assert_eq!(
+        ledger.open().count(),
+        0,
+        "nothing is still owed at the end of this run"
+    );
+}

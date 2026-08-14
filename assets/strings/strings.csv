@@ -921,3 +921,11 @@ world.entity.hauler_wren.name,assets/worlds/probe_civilian_traffic.toml -> [[ent
 world.entity.hauler_teal.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Teal]
 world.entity.hauler_gull.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Gull]
 world.probe_civilian_traffic.wren.refusal,"Reason the Wren gives for refusing a divert in the #1028 probe world","[Contracted lane. Not diverting.]"
+world.probe_commitments.deadline.records_deadline.label,assets/worlds/probe_commitments.toml -> [[deadline]] label,[Records hearing convenes]
+world.probe_commitments.commitment.safe_passage.terms,"Terms of the safe-passage promise in the #1029 probe world","[Safe passage for the strike committee's people]"
+world.probe_commitments.commitment.safe_passage.resolves,"What counts as keeping the safe-passage promise in the #1029 probe world","[They are clear of the skyway]"
+world.probe_commitments.commitment.surface_records.terms,"Terms of the surface-the-records promise in the #1029 probe world","[The maintenance records go to the hearing]"
+world.probe_commitments.commitment.surface_records.resolves,"What counts as keeping the surface-the-records promise in the #1029 probe world","[The hearing has them before it convenes]"
+world.probe_commitments.comms.committee_calls,"Body of the committee's follow-up hail in the #1029 probe world","[Committee to Phoenix. Where do we stand?]"
+world.probe_commitments.comms.stall,"Response text — stalling the committee, always offered, in the #1029 probe world","[Nothing to report yet.]"
+world.probe_commitments.comms.honour_word,"Response text — offered ONLY while the safe-passage promise is still owed, in the #1029 probe world","[You have my word, and I mean to keep it.]"

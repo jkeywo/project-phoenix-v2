@@ -1116,6 +1116,159 @@ fn on_send(ctx) {
         );
     }
 
+    // ── A promise gates a dialogue option, player-driven (issue #1029) ────────
+
+    /// One thread, four player picks, and the option list changing under them
+    /// because of a promise the player made three ticks earlier.
+    ///
+    /// This is issue #1029's live consumer at full strength: the promise is
+    /// recorded by a real `RespondToMessage` travelling the real Input chain,
+    /// and the option it unlocks is offered by a node fn running in a **later
+    /// tick, against the live ledger** — not against the per-call snapshot the
+    /// recording handler mutated. Nothing here reads a script's own account of
+    /// what it did; every assertion is on what reached the inbox.
+    ///
+    /// The chain, and what each link proves:
+    ///
+    ///   1. `root` offers "give your word" because the ledger has never heard of
+    ///      `safe_passage` — the "unknown" state, doing real work.
+    ///   2. Picking it records the promise. The LIVE ledger moves.
+    ///   3. `status`, entered on a later tick, offers "your people are through"
+    ///      because the promise reads `open` — the gate, opened by state the
+    ///      previous call committed.
+    ///   4. Picking THAT keeps the promise: the campaign flag is written, and
+    ///      re-entering `root` no longer offers to give a word already given.
+    #[test]
+    fn a_player_pick_records_a_promise_that_unlocks_a_later_dialogue_option() {
+        let mut app = live_comms_app();
+        setup_game_with_comms(&mut app, STATION_UUID);
+        let mut sr = compile_fixture(
+            r#"
+on_hailed("starbase_alpha", "hail_handler");
+fn hail_handler(ctx) {
+    ctx.effects.open_comms(#{ from: "starbase_alpha", node_fn: "root" });
+}
+
+// The gate. Which options exist is ordinary control flow over the ledger —
+// there is no `when:` field on a response, and #1029 does not add one.
+fn root(ctx) {
+    let responses = [ #{ text: "Nothing to report.", on_pick: "on_stall" } ];
+    if ctx.commitments.state("safe_passage") == "unknown" {
+        responses.push(#{ text: "You have my word.", on_pick: "on_promise" });
+    }
+    #{ message: "Committee to Phoenix. Where do we stand?", responses: responses }
+}
+
+fn on_stall(ctx) { }
+
+// The beat that gives the word. Returns a follow-up whose own on_pick runs on a
+// LATER tick — which is what makes the next node's read a read of the live
+// ledger rather than of this call's snapshot.
+fn on_promise(ctx) {
+    ctx.commitments.record(#{
+        id: "safe_passage",
+        made_to: "skyway_strike_committee",
+        terms: "fixture.terms",
+        resolves_when: "fixture.resolves",
+    });
+    #{ message: "Understood, Phoenix.", responses: [
+        #{ text: "Stand by.", on_pick: "status" },
+    ] }
+}
+
+fn status(ctx) {
+    let responses = [ #{ text: "Still working.", on_pick: "on_stall" } ];
+    if ctx.commitments.state("safe_passage") == "open" {
+        responses.push(#{ text: "Your people are through.", on_pick: "on_honour" });
+    }
+    #{ message: "Committee standing by.", responses: responses }
+}
+
+fn on_honour(ctx) {
+    ctx.commitments.keep("safe_passage");
+    // Re-entering the FIRST node, now that the promise is spent: the offer to
+    // give a word already given must be gone.
+    root(ctx)
+}
+"#,
+        );
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+
+        /// The response texts on the most recently delivered message, plus its
+        /// id — everything a player can see and act on, read off the inbox.
+        fn latest(app: &App) -> (String, Vec<String>) {
+            let messages = app.world().resource::<CommsInboxRes>().0.messages();
+            let msg = messages.last().expect("a message was delivered").clone();
+            (
+                msg.id,
+                msg.responses.iter().map(|r| r.text.clone()).collect(),
+            )
+        }
+
+        // 1. The unknown state doing real work: the offer exists because no such
+        //    promise has ever been made.
+        hail(&mut app);
+        let (root_id, offered) = latest(&app);
+        assert_eq!(
+            offered,
+            vec![
+                "Nothing to report.".to_string(),
+                "You have my word.".to_string()
+            ],
+            "an unmade promise reads as unknown, and that is what offers the word"
+        );
+
+        // 2. The pick writes the LIVE ledger, through the real response path.
+        respond(&mut app, &root_id, 1);
+        assert_eq!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .commitments
+                .state_of("safe_passage"),
+            "open",
+            "a player's choice put the promise on the books"
+        );
+
+        // 3. THE GATE: `status` runs on a later tick, reads the live ledger, and
+        //    offers an option that did not exist before the promise was made.
+        let (ack_id, _) = latest(&app);
+        respond(&mut app, &ack_id, 0);
+        let (status_id, offered) = latest(&app);
+        assert_eq!(
+            offered,
+            vec![
+                "Still working.".to_string(),
+                "Your people are through.".to_string()
+            ],
+            "the option is offered because a promise made in an EARLIER call is \
+             open in the live ledger"
+        );
+
+        // 4. Picking it settles the promise and writes the campaign flag; the
+        //    first node no longer offers a word already given.
+        respond(&mut app, &status_id, 1);
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.commitments.state_of("safe_passage"), "kept");
+        assert_eq!(
+            runtime.flags.counter("commitment.safe_passage.kept"),
+            1,
+            "and keeping it wrote the campaign flag an on_flag_set trigger watches"
+        );
+        assert_eq!(runtime.flags.counter("commitment.safe_passage.broken"), 0);
+
+        let (_, offered) = latest(&app);
+        assert_eq!(
+            offered,
+            vec!["Nothing to report.".to_string()],
+            "the gate closes as well as it opens: the word has been given, so the \
+             option to give it is gone"
+        );
+    }
+
     // ── The shipped converted world (issue #984) ──────────────────────────────
     //
     // `default.toml` is the first world whose COMMS moved to `[script]`, and

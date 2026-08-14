@@ -1538,7 +1538,7 @@ export const NAVIGATION_RADAR_RANGE = 5000.0;
  *             own_hull: StationHullAggregate, ship_speed: number,
  *             impulse_charge_progress: number, cancel_visible: boolean,
  *             on_screen: boolean, radar_range: number,
- *             regions: RadarRegion[],
+ *             regions: RadarRegion[], civilians: Array,
  *             navigation_auto: boolean }} NavigationConsolePayload
  */
 
@@ -1622,6 +1622,11 @@ export function buildNavigationConsoleState(state) {
     on_screen:               onScreen,
     radar_range:             range,
     regions:                 state.regions || buildRadarRegions(navEntities, state.objectives),
+    // Civilian traffic (issue #1028): who is on which lane, and who is not
+    // doing as asked. Server-derived — the client never infers compliance from
+    // watching a contact move, because "it has not started turning yet" and
+    // "it has decided not to" look identical on a chart.
+    civilians:               (bb && bb.civilians) || [],
     navigation_auto:         state.stationRatings?.['navigation'] === 'Backfill',
   });
 }

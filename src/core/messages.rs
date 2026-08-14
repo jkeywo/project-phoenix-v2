@@ -3638,6 +3638,57 @@ pub struct NavigationBlackboard {
     /// Current shared navigation waypoint (supersedes SimSnapshot.navigation_waypoint).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub navigation_waypoint: Option<WaypointSnapshot>,
+    /// Every civilian craft in the world, with its lane, its leg and whether it
+    /// is doing as it was asked (issue #1028). In UUID order.
+    ///
+    /// Empty for every world that authors no `[civilian]` traffic, so a world
+    /// without any publishes exactly the payload it did before. Only the local
+    /// ship's blackboard carries it: this is the crew's traffic picture, and an
+    /// NPC's own Navigation blackboard has no console to render it on.
+    #[serde(default)]
+    pub civilians: Vec<CivilianTrafficSnapshot>,
+}
+
+/// One civilian craft as the Navigation console reads it (issue #1028).
+///
+/// Everything a traffic controller needs to answer "who is where, and who is
+/// not doing as they were asked" — and nothing else. There is deliberately no
+/// position here: a civilian is already a contact on the nav chart, and a second
+/// copy of its coordinates on a different cadence is how two readouts of the
+/// same ship end up disagreeing.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct CivilianTrafficSnapshot {
+    /// The craft's entity UUID — the panel's stable row key, and what an
+    /// `OrderCivilian` names it by.
+    pub uuid: String,
+    /// `strings.csv` id for the crew-facing name, or empty when the craft has
+    /// none. The client looks it up; no English crosses the wire.
+    #[serde(default)]
+    pub name: String,
+    /// The `[[route]]` id it is flying, or empty when it has no standing lane.
+    #[serde(default)]
+    pub route: String,
+    /// Which leg of that lane it is on, and how many the lane has. `0 / 0` for a
+    /// craft with no route.
+    #[serde(default)]
+    pub leg: u32,
+    /// Total legs on the current lane.
+    #[serde(default)]
+    pub legs: u32,
+    /// `"hold"` / `"divert"` / `"dock"`, or empty when it is under no order.
+    #[serde(default)]
+    pub order: String,
+    /// Where a `divert` or `dock` order sends it — a route id, an anchor name or
+    /// a structure name. Empty for `hold` and for no order.
+    #[serde(default)]
+    pub order_destination: String,
+    /// `"unordered"` / `"received"` / `"acknowledged"` / `"complying"` /
+    /// `"non_compliant"` / `"refused"`.
+    #[serde(default)]
+    pub compliance: String,
+    /// `strings.csv` id explaining a refusal or a failure; empty otherwise.
+    #[serde(default)]
+    pub reason: String,
 }
 
 impl Default for NavigationBlackboard {
@@ -3647,6 +3698,7 @@ impl Default for NavigationBlackboard {
             nav_chart_shows: Vec::new(),
             nav_chart_selects: Vec::new(),
             navigation_waypoint: None,
+            civilians: Vec::new(),
         }
     }
 }

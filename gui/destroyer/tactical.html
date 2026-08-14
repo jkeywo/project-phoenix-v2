@@ -72,6 +72,7 @@
       <button class="overlay-back" id="nav-back" data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.navigation">Navigation</h2>
       <ph-navigation-map id="navigation-map"></ph-navigation-map>
+      <ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>
     </div>
     <div class="overlay-panel" id="comms-overlay">
       <button class="overlay-back" id="comms-back" data-i18n="console.common.back">&#8592; Back</button>
@@ -88,6 +89,7 @@
     import '../components/ph-comms-contact-list.js';
     import '../components/ph-comms-current-message.js';
     import '../components/ph-navigation-map.js';
+    import '../components/ph-civilian-traffic.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
@@ -131,6 +133,7 @@
         var commsContactsEl = document.getElementById('comms-contact-list');
         var commsMsgEl = document.getElementById('comms-current-message');
         var navMapEl = document.getElementById('navigation-map');
+        var civilianEl = document.getElementById('civilian-traffic');
         var commsUnread = document.getElementById('comms-unread');
         var w = system(s, 'tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard');
         var n = system(s, 'navigation');
@@ -146,6 +149,9 @@
         var threadMsg = messages.find(function(m) { return !m.is_read; }) || messages[messages.length - 1] || null;
         commsMsgEl.state = { thread: threadMsg, rejection: c.rejection };
         navMapEl.state = { blips: n.blips || [], regions: n.regions || [], range: n.radar_range || 5000, ship_pos: { x: n.ship_x || 0, z: n.ship_z || 0 }, ship_heading: n.ship_heading || 0, waypoint: n.waypoint || null };
+        // Civilian traffic (issue #1028): who is on which lane, and who is
+        // not doing as asked. Server-derived; the panel never infers it.
+        civilianEl.state = { civilians: n.civilians || [] };
         var targetName = w.target_name || w.target_uuid || null;
         document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : t('console.common.no_target');
         document.getElementById('footer-target').style.color = targetName ? 'var(--fire-bright)' : 'var(--ink-faint)';

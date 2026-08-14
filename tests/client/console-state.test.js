@@ -1907,6 +1907,31 @@ describe('buildNavigationConsoleState', () => {
     expect(parse(buildNavigationConsoleState(EMPTY)).radar_range).toBe(NAVIGATION_RADAR_RANGE);
   });
 
+  // Issue #1028. The traffic picture is server-derived and passed straight
+  // through: compliance is a fact about a negotiation, not something a console
+  // could work out by watching a contact move.
+  it('forwards the civilian traffic picture from the navigation blackboard', () => {
+    const civilians = [{
+      uuid: 'civ-1',
+      name: 'world.entity.hauler_kestrel.name',
+      route: 'depot_run',
+      leg: 1,
+      legs: 3,
+      order: 'divert',
+      order_destination: 'holding_point',
+      compliance: 'refused',
+      reason: 'civilian.compliance.reason.declined',
+    }];
+    const state = { blackboards: { navigation: { civilians } } };
+    expect(parse(buildNavigationConsoleState(state)).civilians).toEqual(civilians);
+  });
+
+  it('reports no civilian traffic when the world carries none, or has no blackboard yet', () => {
+    expect(parse(buildNavigationConsoleState(EMPTY)).civilians).toEqual([]);
+    expect(parse(buildNavigationConsoleState({ blackboards: { navigation: {} } })).civilians)
+      .toEqual([]);
+  });
+
   it('blips is empty when no asteroids', () => {
     expect(parse(buildNavigationConsoleState(EMPTY)).blips).toEqual([]);
   });

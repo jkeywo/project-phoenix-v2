@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 41 expected action keys', () => {
+  it('contains exactly the 42 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'abort_operation',
       'cancel_impulse',
@@ -23,6 +23,7 @@ describe('ACTION_MAP', () => {
       'hail',
       'helm_input',
       'load_tube',
+      'order_civilian',
       'respond_to_message',
       'return_to_lobby',
       'select_comms_message',
@@ -721,6 +722,64 @@ describe('clear_navigation_waypoint', () => {
       target: 'navigation',
       payload: { type: 'ClearNavigationWaypoint' },
     });
+  });
+});
+
+// ── order_civilian (issue #1028) ─────────────────────────────────────────────
+
+describe('order_civilian', () => {
+  it('sends each verb targeting the navigation system', () => {
+    const send = mkSend();
+    ACTION_MAP.order_civilian({ target: 'civ-1', verb: 'hold' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: { type: 'OrderCivilian', data: { target: 'civ-1', order: { verb: 'hold' } } },
+    });
+
+    ACTION_MAP.order_civilian({ target: 'civ-1', verb: 'divert', route: 'depot_run' }, send);
+    expect(send).toHaveBeenLastCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: {
+        type: 'OrderCivilian',
+        data: { target: 'civ-1', order: { verb: 'divert', route: 'depot_run' } },
+      },
+    });
+
+    ACTION_MAP.order_civilian({ target: 'civ-1', verb: 'divert', anchor: 'holding_point' }, send);
+    expect(send).toHaveBeenLastCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: {
+        type: 'OrderCivilian',
+        data: { target: 'civ-1', order: { verb: 'divert', anchor: 'holding_point' } },
+      },
+    });
+
+    ACTION_MAP.order_civilian({ target: 'civ-1', verb: 'dock', structure: 'depot' }, send);
+    expect(send).toHaveBeenLastCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: {
+        type: 'OrderCivilian',
+        data: { target: 'civ-1', order: { verb: 'dock', structure: 'depot' } },
+      },
+    });
+  });
+
+  // The server refuses a divert naming both or neither, so sending one would be
+  // a guaranteed rejection bounce. A mistyped lane silently read as an anchor
+  // name is the exact failure the split destination exists to stop.
+  it('sends nothing for an order that cannot be carried out', () => {
+    const send = mkSend();
+    for (const a of [
+      { verb: 'hold' },
+      { target: '', verb: 'hold' },
+      { target: 'civ-1', verb: 'divert' },
+      { target: 'civ-1', verb: 'divert', route: 'depot_run', anchor: 'holding_point' },
+      { target: 'civ-1', verb: 'dock' },
+      { target: 'civ-1', verb: 'evacuate' },
+    ]) {
+      ACTION_MAP.order_civilian(a, send);
+    }
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

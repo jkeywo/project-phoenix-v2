@@ -428,6 +428,15 @@ fn refresh_anchored_waypoint(
 /// AI-bearing ship (those carrying `ShipSystemBlackboards`).
 fn publish_navigation_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    // The civilian traffic picture (issue #1028). Read-only, so this system
+    // stays a pure publisher; the state itself is advanced by
+    // `civilian::tick_civilian_traffic` in `SimSet::Input`.
+    civilians_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        Option<&crate::entity_spawner::EntityName>,
+        &crate::civilian::CivilianTraffic,
+    )>,
     mut ship_q: Query<
         (
             &NavigationWaypoint,
@@ -438,6 +447,10 @@ fn publish_navigation_blackboard(
     >,
 ) {
     let cfg = &ship_config.0;
+    // Built once for the whole publish rather than per ship: it is the same
+    // world picture for everyone, and UUID-sorted so archetype order never
+    // reaches the wire.
+    let civilians = civilian_traffic_rows(&civilians_q, world_config.as_deref());
     for (waypoint, is_local, mut bbs) in ship_q.iter_mut() {
         let navigation_waypoint = waypoint.snapshot();
         let bb = if is_local {
@@ -446,6 +459,7 @@ fn publish_navigation_blackboard(
                 nav_chart_shows: cfg.nav_chart_shows.clone(),
                 nav_chart_selects: cfg.nav_chart_selects.clone(),
                 navigation_waypoint,
+                civilians: civilians.clone(),
             }
         } else {
             NavigationBlackboard {
@@ -458,6 +472,60 @@ fn publish_navigation_blackboard(
             SystemBlackboard::Navigation(bb),
         );
     }
+}
+
+/// Project every civilian's live traffic state onto the wire (issue #1028).
+///
+/// UUID order, for the reason every other authoritative walk sorts: Bevy's
+/// archetype iteration order is not part of the simulation's contract, and a
+/// traffic list that re-ordered itself between ticks would make the console's
+/// rows jump under the operator's finger.
+fn civilian_traffic_rows(
+    civilians: &Query<(
+        &crate::entity_spawner::EntityUuid,
+        Option<&crate::entity_spawner::EntityName>,
+        &crate::civilian::CivilianTraffic,
+    )>,
+    world_config: Option<&crate::world::config::WorldConfig>,
+) -> Vec<crate::messages::CivilianTrafficSnapshot> {
+    use crate::civilian::CivilianOrder;
+    let mut rows: Vec<crate::messages::CivilianTrafficSnapshot> = civilians
+        .iter()
+        .map(|(uuid, name, traffic)| {
+            let state = &traffic.0;
+            let route = state.route().unwrap_or_default().to_string();
+            let legs = world_config
+                .and_then(|wc| wc.route(&route))
+                .map(|r| r.legs.len() as u32)
+                .unwrap_or(0);
+            let (order, destination) = match state.order() {
+                None => (String::new(), String::new()),
+                Some(order) => (
+                    order.kind().as_str().to_string(),
+                    match order {
+                        CivilianOrder::Hold => String::new(),
+                        CivilianOrder::Divert { route, anchor } => {
+                            route.clone().or_else(|| anchor.clone()).unwrap_or_default()
+                        }
+                        CivilianOrder::Dock { structure } => structure.clone(),
+                    },
+                ),
+            };
+            crate::messages::CivilianTrafficSnapshot {
+                uuid: uuid.0.clone(),
+                name: name.map(|n| n.0.clone()).unwrap_or_default(),
+                route,
+                leg: state.leg() as u32,
+                legs,
+                order,
+                order_destination: destination,
+                compliance: state.compliance().as_str().to_string(),
+                reason: state.reason().unwrap_or_default().to_string(),
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+    rows
 }
 
 // ── AI controller ──────────────────────────────────────────────────────────────
@@ -1092,6 +1160,90 @@ mod tests {
             }
             _ => None,
         })
+    }
+
+    /// **Issue #1028, AC4.** A civilian's lane, leg and compliance reach the
+    /// Navigation blackboard, so a console can show who is and is not doing as
+    /// asked — and a world with no traffic publishes exactly what it did before.
+    #[test]
+    fn the_navigation_blackboard_carries_the_civilian_traffic_picture() {
+        use crate::civilian::{
+            CivilianConfig, CivilianOrder, CivilianState, CivilianTraffic, ComplianceDisposition,
+        };
+
+        // Read off the local ship's own blackboard rather than off the wire:
+        // `broadcast_blackboard_updates` is diffed, so an unchanged picture is
+        // deliberately not re-sent and the control below would have nothing to
+        // look at.
+        fn local_blackboard(app: &mut App) -> crate::messages::NavigationBlackboard {
+            let mut q = app.world_mut().query_filtered::<
+                &crate::server_app::ShipSystemBlackboards,
+                With<crate::server_app::LocalShip>,
+            >();
+            let bbs = q
+                .iter(app.world())
+                .next()
+                .expect("the local ship publishes");
+            match bbs.0.get(&SystemId(NAVIGATION_SYSTEM_ID.to_string())) {
+                Some(crate::messages::SystemBlackboard::Navigation(nav)) => nav.clone(),
+                other => panic!("expected a navigation blackboard, got {other:?}"),
+            }
+        }
+
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        tick(&mut app);
+        assert!(
+            local_blackboard(&mut app).civilians.is_empty(),
+            "a world with no civilian traffic publishes the payload it always did"
+        );
+
+        // One hauler, ordered to dock and already complying.
+        let config = CivilianConfig {
+            route: Some("depot_run".into()),
+            ..CivilianConfig::default()
+        };
+        let mut state = CivilianState::from_config(&config);
+        let disposition = ComplianceDisposition {
+            ack_secs: 0,
+            decide_secs: 0,
+            ..ComplianceDisposition::default()
+        };
+        state.receive_order(
+            CivilianOrder::dock_at("world.entity.skyhook_depot.name"),
+            &disposition,
+            0,
+            60.0,
+        );
+        state.advance(0, true, &disposition, 60.0);
+        state.advance(0, true, &disposition, 60.0);
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("civ-1".into()),
+            crate::entity_spawner::EntityName("world.entity.hauler_kestrel.name".into()),
+            CivilianTraffic(state),
+        ));
+
+        let out = tick(&mut app);
+        let bb = latest_navigation_blackboard(&out)
+            .expect("the changed traffic picture reaches the wire");
+        assert_eq!(
+            bb.civilians.len(),
+            1,
+            "the hauler is on the traffic picture"
+        );
+        let row = &bb.civilians[0];
+        assert_eq!(
+            row.uuid, "civ-1",
+            "the row key is what an order names it by"
+        );
+        assert_eq!(row.name, "world.entity.hauler_kestrel.name");
+        assert_eq!(row.route, "depot_run");
+        assert_eq!(row.order, "dock");
+        assert_eq!(row.order_destination, "world.entity.skyhook_depot.name");
+        assert_eq!(
+            row.compliance, "complying",
+            "the whole point of the row: whether it is doing as it was asked"
+        );
     }
 
     #[test]

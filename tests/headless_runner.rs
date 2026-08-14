@@ -7538,7 +7538,8 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
 
         for (name, position) in ship_positions(&mut app) {
             let start = *opening.entry(name.clone()).or_insert(position);
-            let travelled = (position.0 - start.0).hypot(position.1 - start.1);
+            let travelled =
+                ((position.0 - start.0).powi(2) + (position.1 - start.1).powi(2)).sqrt();
             if travelled > 40.0 {
                 moved_by.entry(name).or_insert(sim_t);
             }
@@ -7614,7 +7615,9 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
              later is traffic the crew watched arrive"
         );
         let under_way = *moved_by.get(name).unwrap_or_else(|| {
-            panic!("{name} never left its spawn point; the lane is authored but nobody is flying it")
+            panic!(
+                "{name} never left its spawn point; the lane is authored but nobody is flying it"
+            )
         });
         assert!(
             under_way < at("lane_open"),

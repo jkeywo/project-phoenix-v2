@@ -546,32 +546,38 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
         ship_path: "assets/entities/alliance_battleship.toml".into(),
         dt,
         max_ticks: 0, // driven by hand below
-        // Re-blessed for issue #907's review (was seed 12, empirically swept
-        // over 1..15 on a 60 s window). Moving the game-start
-        // `NextState<GamePhase>` writers into `FixedUpdate` so the player-ship
-        // mint lands on a deterministic tick shifts this combat-chaotic
-        // duel's RNG draws by one tick (see the two `probe_duel.toml` re-bless
-        // notes above for the same mechanism); on the new timing, seed 12's
-        // fight now resolves into a full kill BEFORE the radar specifically
-        // reaches Destroyed — exactly the "different bug" this test's own
-        // doc comment says it deliberately does not chase, just for a
-        // different seed than before. Re-swept over seeds 1..30 on a 90 s
-        // window (recorded below); seed 1 destroys the hostile's tactical
-        // radar at tick <=868 (~29 s) with BOTH ships still alive — the same
-        // shape the original seed 12 gave, just re-timed.
+        // Re-blessed twice. First for issue #907's review (was seed 12,
+        // swept 1..15 on a 60 s window): moving the game-start
+        // `NextState<GamePhase>` writers into `FixedUpdate` shifted this
+        // combat-chaotic duel's RNG draws by one tick and seed 12's fight
+        // resolved into a full kill before the radar specifically died; seed
+        // 1 replaced it. Then again when the power fixes (5672b09a seeding
+        // the AI power decider's thrust fact from the real throttle, and
+        // c8a13b9a's brownout-advisory timing) re-timed the duel once more:
+        // on THAT timing seed 1's hostile dies whole at tick 961 — radar
+        // never reaching Destroyed on its own — which is again the
+        // "different bug" this test deliberately does not chase. Re-swept
+        // over seeds 1..40 on the same 90 s window (recorded below); seed 2
+        // destroys the hostile's tactical radar at tick 868 (~29 s) with
+        // both ships alive, the same shape both previous picks gave.
         //
-        // Sweep table (seed: destroyed_tick, resolved-before-radar-died):
-        //   1:868,no  2:none,yes(GameOver)  3:961,no  4:1023,no  5:none,no
-        //   6:1209,no  7:868,no  8:992,no  9:868,no  10:none,yes  11:961,no
-        //   12:none,yes  13:none,yes  14:868,no  15:none,yes  16:868,no
-        //   17:none,no  18:none,no  19:868,no  20:868,no  21:none,yes
-        //   22:868,no  23:961,no  24:868,no  25:none,no  26:none,no  27:868,no
-        //   28:none,yes  29:868,no
-        // ("none" = radar never reached Destroyed inside 90s; "yes" = the
-        // fight ended in GameOver before or at the tick the radar died —
-        // both disqualify a seed for this test). Seed 1 chosen as the
-        // simplest surviving candidate, not because it is otherwise special.
-        seed: Some(1),
+        // Sweep table (seed: outcome@tick; "hostile-gone" = the whole ship
+        // died before its radar specifically reached Destroyed, which
+        // disqualifies the seed):
+        //   1:hostile-gone@961   2:destroyed@868   3:destroyed@868
+        //   4:destroyed@868      5:hostile-gone@930 6:destroyed@868
+        //   7:destroyed@868      8:destroyed@837   9:hostile-gone@930
+        //   10:destroyed@868    11:destroyed@930  12:destroyed@868
+        //   13:destroyed@868    14:destroyed@868  15:hostile-gone@930
+        //   16:destroyed@868    17:hostile-gone@961 18:hostile-gone@930
+        //   19..24:destroyed@868 25:hostile-gone@930 26:destroyed@868
+        //   27..29:hostile-gone@930 30..32:destroyed@868 33/34:hostile-gone@930
+        //   35:destroyed@930    36:destroyed@868  37:destroyed@930
+        //   38:hostile-gone@930 39:destroyed@930  40:destroyed@868
+        // Seed 2 chosen as the simplest surviving candidate, not because it
+        // is otherwise special. The sweep harness is
+        // `scratch_seed_sweep_probe_radar_kill` below.
+        seed: Some(2),
         deterministic: true,
         ..test_args()
     };

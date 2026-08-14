@@ -48,8 +48,14 @@
 # `strings.csv` label for it. `depot_transfer_throughput` is left unlabelled on
 # purpose — published data a script can read, and prose the console never shows.
 #
-# BASELINE (release headless, `--seed 42 --ticks 900`, no --ship, clean tree):
-# final digest 0x6f00c8d6ee2fb3ef (8000226176452170735).
+# BASELINE (headless, `--seed 42 --ticks 900`, no --ship, clean tree):
+# final digest 0x6cf7680c58c8e132 (7851858877582205234).
+#
+# The three shipped anchors are UNMOVED by this slice, measured rather than
+# assumed: combat_test 14942520827746055774, patrol 11531679067393217131,
+# falling_skyway 1501629821237961665. All three fly the destroyer, which now
+# authors a `[scan]` table and therefore carries a scan record and publishes a
+# scan channel — and neither is folded, which is exactly the claim.
 #
 # Nothing this world exists to exercise is IN that digest. A scan reading is
 # authoritative but unfolded, in the same bucket as the deadline table, the

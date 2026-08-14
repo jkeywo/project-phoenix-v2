@@ -8452,7 +8452,10 @@ fn published_scan(app: &mut App) -> project_phoenix::messages::ScanBlackboard {
         .iter(app.world())
         .next()
         .expect("the local ship publishes");
-    match boards.0.get(&project_phoenix::science::scan_blackboard_key()) {
+    match boards
+        .0
+        .get(&project_phoenix::science::scan_blackboard_key())
+    {
         Some(SystemBlackboard::Scan(bb)) => bb.clone(),
         other => panic!("expected a scan blackboard, got {other:?}"),
     }
@@ -8567,7 +8570,9 @@ fn the_same_structure_reads_coarser_from_further_out() {
     // …and straight back in to 80, on the very next scan.
     place_scanner_at(&mut app, 520.0);
     ask_for_scan(&mut app, &depot);
-    let close = published_scan(&mut app).reading.expect("a detailed reading");
+    let close = published_scan(&mut app)
+        .reading
+        .expect("a detailed reading");
 
     assert_eq!(far.band, "coarse");
     assert_eq!(close.band, "detailed");

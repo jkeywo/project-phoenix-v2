@@ -2436,7 +2436,8 @@ fn capture_operations(world: &World) -> Vec<(String, crate::operations::Operatio
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
 fn capture_scans(world: &World) -> Vec<(String, crate::science::ScanSaveState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::science::ShipScanRecord)>() else {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::science::ShipScanRecord)>()
+    else {
         return Vec::new();
     };
     query

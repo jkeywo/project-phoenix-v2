@@ -57,7 +57,9 @@ use crate::messages::{
     SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::operations::RegionEffectName;
-use crate::science::scan::{derive, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject};
+use crate::science::scan::{
+    derive, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject,
+};
 use crate::ship::power::ShipPowerSystem;
 
 /// The blackboard channel key a ship's last scan is published under.
@@ -581,7 +583,10 @@ mod tests {
 
         let reading = record(&app, ship).last.expect("a reading");
         assert_eq!(reading.band, "coarse");
-        assert_eq!(reading.condition_fraction, 0.5, "0.62 to the nearest quarter");
+        assert_eq!(
+            reading.condition_fraction, 0.5,
+            "0.62 to the nearest quarter"
+        );
         assert!(
             reading.capacities.is_empty(),
             "the coarse band does not claim to count berths"
@@ -625,10 +630,7 @@ mod tests {
         let (mut app, ship) = app_with(suite(), 62.0, 200.0);
         ask_for_scan(&mut app, ship, "not-in-this-world");
         app.update();
-        assert_eq!(
-            record(&app, ship).refusal,
-            Some(ScanRefusal::NoSuchTarget)
-        );
+        assert_eq!(record(&app, ship).refusal, Some(ScanRefusal::NoSuchTarget));
     }
 
     /// **The leak rule through the ECS.** A `publish = false` structure is

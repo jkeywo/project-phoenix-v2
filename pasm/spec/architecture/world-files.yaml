@@ -472,6 +472,7 @@ entities:
     implementation:
       status: declared
       paths:
+        - src/science/scan.rs
         - src/science/server.rs
         - src/snapshot.rs
       symbols:

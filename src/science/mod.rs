@@ -28,6 +28,6 @@ pub use scan::{
     ScanSubject,
 };
 pub use server::{
-    publish_scan_blackboard, scan_blackboard_key, tick_scans, SciencePlugin, ScanSaveState,
+    publish_scan_blackboard, scan_blackboard_key, tick_scans, ScanSaveState, SciencePlugin,
     ShipScanRecord, SCAN_BLACKBOARD_KEY,
 };

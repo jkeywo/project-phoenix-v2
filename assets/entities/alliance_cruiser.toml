@@ -933,6 +933,7 @@ power_group = "shields"
 id = "navigation"
 kind = "navigation"
 station = "comms"
+human_seeking = true
 
 [[system]]
 id = "power-reactor"
@@ -953,6 +954,7 @@ station = "engineering"
 id = "comms"
 kind = "comms"
 station = "comms"
+human_seeking = true
 
 [[system]]
 id = "viewscreen"

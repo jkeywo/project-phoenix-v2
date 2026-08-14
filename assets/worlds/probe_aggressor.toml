@@ -38,31 +38,30 @@ id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 
-# Make Harrow and Federation mutually hostile before the destroyer spawns.
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Harrow"
-  enemy   = "Federation"
-
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Federation"
-  enemy   = "Harrow"
-
-# Spawn the passive hostile destroyer inside the player's phaser range (40u) at
+# Make Harrow and Federation mutually hostile before the destroyer spawns, then
+# spawn the passive hostile destroyer inside the player's phaser range (40u) at
 # t=0. The empty doctrine override strips the template's default combat doctrine,
 # leaving a hull with nothing standing that licenses it to engage — never an
 # initiator.
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
+[script]
+setup = """
+on_world_loaded("on_load");
+on_timer(0, "on_start");
 
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/alliance_destroyer.toml"
-  name          = "probe_target"
-  position      = [35.0, 0.0, 0.0]
-  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [] } }
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
+
+fn on_start(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_destroyer.toml",
+        name: "probe_target",
+        position: [35, 0, 0],
+        overrides: #{
+            faction: "cccccccc-3333-4333-8333-cccccccccccc",
+            behaviour: #{ doctrine: [] }
+        }
+    });
+}
+"""

@@ -1145,6 +1145,7 @@ power_group = "shields"
 id = "navigation"
 kind = "navigation"
 station = "navigation"
+human_seeking = true
 
 [[system]]
 id = "power-reactor"
@@ -1160,6 +1161,7 @@ station = "power"
 id = "comms"
 kind = "comms"
 station = "comms"
+human_seeking = true
 
 [cinematic_camera]
 position = [0, 12, 22]

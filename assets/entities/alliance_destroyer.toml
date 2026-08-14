@@ -1069,11 +1069,13 @@ power_group = "weapons"
 id = "navigation"
 kind = "navigation"
 station = "tactical"
+human_seeking = true
 
 [[system]]
 id = "comms"
 kind = "comms"
 station = "tactical"
+human_seeking = true
 
 [[system]]
 id = "shields-system"

@@ -850,6 +850,165 @@ fn scenario_declared_victory_classifies_as_victory() {
     assert!(parsed["sides"]["player"].is_object());
 }
 
+/// Issue #1025: a structure's condition degrades through an authored threshold,
+/// flips its operational flag, a script hook reacts, a repair puts the condition
+/// back, and the flag flips the other way — all in one real run.
+///
+/// `probe_infrastructure.toml` is a deliberate tripwire for the whole chain
+/// rather than a fight that happens to damage something: one transfer depot,
+/// spawned at an overridden 80/100, damaged 50 points at t=1 s and repaired 25
+/// at t=3 s. Every link is asserted separately, because "the end state is right"
+/// would pass with the flag never having moved at all.
+#[test]
+fn an_infrastructure_threshold_flips_its_flag_in_both_directions_in_a_real_run() {
+    use project_phoenix::entity_spawner::EntityName;
+    use project_phoenix::infrastructure::InfrastructureCondition;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_infrastructure.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(5.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // `first_seen[name]` is the sim-second at which each reading first went true.
+    let mut first_seen: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
+    let mut capable_after_offline: Option<f64> = None;
+    // An unset flag reads false, so "not published yet" and "cleared" are the
+    // same reading until the depot's first tick. The fall is only counted once
+    // the flag has genuinely been up.
+    let mut has_been_capable = false;
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        let capable = flags.flag("depot_transfer_capable");
+        let offline_hook = flags.flag("depot_offline");
+        let restored_hook = flags.flag("depot_restored");
+        if capable {
+            has_been_capable = true;
+            first_seen.entry("capable").or_insert(sim_t);
+        } else if has_been_capable {
+            first_seen.entry("incapable").or_insert(sim_t);
+        }
+        if offline_hook {
+            first_seen.entry("offline_hook").or_insert(sim_t);
+            if capable && capable_after_offline.is_none() {
+                capable_after_offline = Some(sim_t);
+            }
+        }
+        if restored_hook {
+            first_seen.entry("restored_hook").or_insert(sim_t);
+        }
+    }
+
+    // ── The flag published UP before anything degraded it ──
+    let capable_at = *first_seen.get("capable").unwrap_or_else(|| {
+        panic!("the depot never published `depot_transfer_capable` at all: {first_seen:?}")
+    });
+    assert!(
+        capable_at < 1.0,
+        "an 80/100 depot is above its 40 % threshold, so the flag must be up from the depot's \
+         first tick — first seen at {capable_at:.2} s"
+    );
+
+    // ── Degradation crossed the threshold and cleared the flag ──
+    let incapable_at = *first_seen.get("incapable").unwrap_or_else(|| {
+        panic!(
+            "`depot_transfer_capable` never fell: 50 points of scripted damage should take an \
+             80/100 depot to 30 %, below the authored 40 %. Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        (1.0..2.0).contains(&incapable_at),
+        "the flag must fall just after the t=1 s damage, not before it and not much after — \
+         fell at {incapable_at:.2} s"
+    );
+
+    // ── A script hook reacted to the crossing ──
+    let offline_at = *first_seen.get("offline_hook").unwrap_or_else(|| {
+        panic!(
+            "the world's `on_flag_cleared` handler never ran — the crossing wrote the flag \
+             store but never reached the trigger pipeline. Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        offline_at >= incapable_at,
+        "the hook cannot fire before the crossing it reacts to ({offline_at:.2} s vs \
+         {incapable_at:.2} s)"
+    );
+    assert!(
+        offline_at - incapable_at < 0.5,
+        "…and it must fire promptly after it: the crossing rides the same one-tick \
+         pending_world_events bridge WaypointReached does, not an open-ended delay \
+         ({offline_at:.2} s vs {incapable_at:.2} s)"
+    );
+
+    // ── The repair put the flag back, and a second hook reacted ──
+    let back_up_at = capable_after_offline.unwrap_or_else(|| {
+        panic!(
+            "`depot_transfer_capable` never came back: repairing 25 points takes the depot to \
+             55 %, above the 45 % restore point. Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        (3.0..4.0).contains(&back_up_at),
+        "the flag must return just after the t=3 s repair — returned at {back_up_at:.2} s"
+    );
+    let restored_at = *first_seen.get("restored_hook").unwrap_or_else(|| {
+        panic!(
+            "the guarded `on_flag_set` handler never ran. It carries a trigger-level `when` so \
+             the depot's opening publication leaves it armed; if this is missing, either the \
+             restore never reached the pipeline or the guard spent the trigger early. \
+             Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        restored_at >= back_up_at,
+        "the restore hook cannot fire before the restore ({restored_at:.2} s vs \
+         {back_up_at:.2} s)"
+    );
+
+    // ── The authored capacity is readable as a counter, unmoved by any of it ──
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("depot_transfer_throughput"),
+        40,
+        "the depot's authored capacity is a world counter a script predicate can read, and it \
+         is a property of the structure rather than of its condition — it must read the same \
+         after the depot has been wrecked and patched as it did on arrival"
+    );
+
+    // ── And the live component agrees with the arithmetic ──
+    let mut q = app
+        .world_mut()
+        .query::<(&EntityName, &InfrastructureCondition)>();
+    let depot = q
+        .iter(app.world())
+        .find(|(name, _)| name.0 == "world.entity.skyhook_depot.name")
+        .map(|(_, condition)| condition.0.clone())
+        .expect("the depot is still in the world, carrying its condition track");
+    assert_eq!(
+        depot.condition(),
+        55.0,
+        "80 - 50 + 25 = 55, in condition points: the scripted verbs move the authored track \
+         and nothing else has touched it"
+    );
+    assert_eq!(
+        depot.capacity("depot_transfer_throughput"),
+        Some(40),
+        "and a consumer asking the structure directly gets the same authored answer the \
+         counter carries"
+    );
+}
+
 /// Issue #843: a run whose tick budget expires while combat is still live
 /// classifies as a timeout, carrying the per-side margins.
 ///

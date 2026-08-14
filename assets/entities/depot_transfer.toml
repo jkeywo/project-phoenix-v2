@@ -1,0 +1,70 @@
+# Orbital transfer depot — the first piece of authored world furniture to carry
+# an [infrastructure] condition track (issue #1025).
+#
+# It is deliberately generic rather than Falling-Skyway-specific: a depot is
+# something a scenario places, degrades, repairs and asks capacity questions of,
+# and the whole point of putting condition and capacity on the ENTITY is that
+# the next mission that needs one does not re-derive the bookkeeping.
+#
+# Two health tracks, and they are not the same thing:
+#
+#   [hull]           what weapons destroy. At zero the depot is despawned.
+#   [infrastructure] what a storm, a decade of deferred maintenance and a repair
+#                    team move. At zero the depot is still there — it just
+#                    cannot do anything.
+#
+# `hull_damage_share = 0.5` is the coupling between them: a depot that takes a
+# torpedo is structurally worse off, at half a condition point per hull point,
+# without hull damage BEING condition damage.
+
+name = "entity.depot_transfer.name"
+tags = ["station", "infrastructure"]
+
+[target]
+tags = ["station"]
+threat_level = "none"
+description = "entity.depot_transfer.target.description"
+
+[hull]
+hull_integrity = 400.0
+
+[collider]
+shape = "Ball"
+radius = 10.0
+length = 0.0
+
+[radar_appearance]
+colour = [0.72, 0.62, 0.32]
+size = 10.0
+icon = "station"
+
+[mesh]
+# Shares the Alliance research-outpost hull with the other stations; the torus
+# is the streaming/flat-render fallback, as on station_outpost.
+model = "assets/models/alliance_research_outpost.glb"
+shape = "torus"
+radius = 10.0
+minor_radius = 2.5
+colour = [0.72, 0.62, 0.32]
+
+[comms]
+range = 900.0
+
+[infrastructure]
+# 100 condition points, intact on arrival unless a world overrides it.
+condition_max = 100.0
+# Half a condition point per hull point taken.
+hull_damage_share = 0.5
+
+# What a consumer asks instead of restating the number: how much this depot
+# moves in one transfer window.
+[[infrastructure.capacity]]
+id = "depot_transfer_throughput"
+amount = 40
+
+# Below 40 % condition the transfer arm is out of tolerance and the depot stops
+# being able to move anything. It comes back at 45 % — `fails_below` plus the
+# default hysteresis band — so a depot hovering on the line does not flap.
+[[infrastructure.threshold]]
+flag = "depot_transfer_capable"
+fails_below = 0.4

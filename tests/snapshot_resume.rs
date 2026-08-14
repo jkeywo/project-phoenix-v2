@@ -1890,6 +1890,33 @@ fn deadline_args() -> HeadlessArgs {
     }
 }
 
+// ── Issue #1025: infrastructure condition survives a resume ─────────────────
+
+/// The infrastructure probe: one transfer depot walked down through its
+/// operational threshold and back up again on a script clock.
+const INFRASTRUCTURE: &str = "assets/worlds/probe_infrastructure.toml";
+
+/// Frames to run before the infrastructure capture.
+///
+/// The probe damages the depot at t=1 s and repairs it at t=3 s, so this has to
+/// land between the two: a capture taken before the damage would round-trip an
+/// intact structure with every flag up, which is exactly the payload a restore
+/// that dropped the whole field would also produce. The assertions below make
+/// the precondition explicit rather than trusting the number.
+const INFRASTRUCTURE_CAPTURE_AT: u64 = 150;
+
+fn infrastructure_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: INFRASTRUCTURE.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+<<<<<<< HEAD
 fn live_deadlines(app: &bevy::prelude::App) -> &project_phoenix::world::deadlines::DeadlineTable {
     &app.world()
         .resource::<project_phoenix::world::server::WorldContentRuntime>()
@@ -2102,5 +2129,72 @@ fn a_save_written_before_deadline_state_is_refused_on_format() {
     assert!(
         matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
         "the refusal names the dimension that moved: {refusal}"
+=======
+/// **Issue #1025.** A degraded structure comes back degraded — its condition
+/// *and* which of its operational flags are currently down.
+///
+/// The flag half is the one worth having a test for. Restore the number alone
+/// and the first tick after a resume re-detects every crossing the mission
+/// already spent, re-firing `on_flag_cleared` on a skyhook that failed twenty
+/// minutes ago; the flags travel with the condition precisely so it cannot.
+#[test]
+fn the_resumed_world_keeps_a_structures_condition_and_its_operational_flags() {
+    let mut live = boot(&infrastructure_args());
+    step(&mut live, INFRASTRUCTURE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.infrastructure.as_ref().map(|i| (&e.uuid, i)))
+        .collect();
+    assert_eq!(
+        captured.len(),
+        1,
+        "the probe world carries exactly one structure with a condition track"
+    );
+    let (uuid, track) = captured[0];
+    assert!(
+        track.condition() < track.condition_max(),
+        "precondition: the capture must be taken after the scripted damage — a capture of an \
+         intact depot would round-trip identically even if restore dropped the field entirely \
+         (condition {} of {})",
+        track.condition(),
+        track.condition_max()
+    );
+    assert_eq!(
+        track.flag("depot_transfer_capable"),
+        Some(false),
+        "precondition: and after the crossing, so the flag under test is DOWN at capture time"
+    );
+
+    let mut resumed = boot_to_restore_point(&infrastructure_args(), &payload);
+    let before_restore = resumed
+        .world_mut()
+        .query::<&project_phoenix::infrastructure::InfrastructureCondition>()
+        .iter(resumed.world())
+        .next()
+        .map(|c| c.0.clone())
+        .expect("the fresh world spawned the depot from its template");
+    assert_eq!(
+        before_restore.flag("depot_transfer_capable"),
+        Some(true),
+        "control: a freshly booted depot is intact and capable, so an inert restore would be \
+         visible here rather than hidden behind a value that happened to match"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let after = capture(resumed.world());
+    let restored = after
+        .entities
+        .iter()
+        .find(|e| &e.uuid == uuid)
+        .and_then(|e| e.infrastructure.as_ref())
+        .unwrap_or_else(|| panic!("structure {uuid} came back without its condition track"));
+    assert_eq!(
+        restored, track,
+        "structure {uuid}: condition, ceiling, every operational flag and the hull reading the \
+         track was last damaged against must all come back exactly as captured"
+>>>>>>> a4f58614 (feat(#1025): a probe world walks a depot through a threshold and back)
     );
 }

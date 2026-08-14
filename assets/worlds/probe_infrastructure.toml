@@ -1,0 +1,86 @@
+# Probe world for issue #1025 — the infrastructure condition track, end to end.
+#
+# One transfer depot, far from the player, walked all the way round the loop the
+# issue asks for: degrade → threshold crossed → operational flag flipped → a
+# script hook reacts → repair → the flag flips BACK and a second hook reacts.
+# No combat is involved on purpose; every condition move here is authored, so
+# the run is a deterministic tripwire for the whole chain rather than a duel
+# that happens to damage something.
+#
+# The depot spawns with its condition overridden DOWN to 80 points via the
+# `[[entity]].overrides` path, which is the other half of the "both authoring
+# paths accept it" claim — the template supplies the ceiling, the capacity and
+# the threshold; the world supplies this instance's starting condition.
+#
+# Timeline (60 Hz):
+#
+#   tick   0   depot spawns at 80/100 → `depot_transfer_capable` publishes UP,
+#              and the armed `on_flag_set` watcher does NOT fire, because its
+#              `when` guard reads `counter(depot_offline) == 0`
+#   tick  60   `on_storm_damage` takes 50 points → 30/100 = 30 %, below the
+#              authored 40 % → the flag CLEARS
+#   tick ~61   `on_depot_offline` fires, setting `depot_offline`
+#   tick 180   `on_field_repair` puts 25 points back → 55/100 = 55 %, above the
+#              45 % restore point → the flag SETS
+#   tick ~181  `on_depot_restored` fires — its guard now reads true
+#
+# The intermediate value matters: 30 → 55 crosses 40 % on the way up but the
+# flag only returns at 45 %, so the run also proves the restore point is the one
+# being honoured rather than the failure point read backwards.
+
+[global]
+seed = 1025
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The structure under test. `name` is both the display String Id and the
+# reference id the scripted effects address it by — the convention every named
+# world entity follows (see patrol.toml / combat_test.toml).
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.entity.skyhook_depot.name"
+transform = { position = [600.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 80.0 } }
+
+[script]
+setup = """
+on_timer(1, "on_storm_damage");
+on_timer(3, "on_field_repair");
+
+// The failure direction. Single-shot, and it only ever has one crossing to see.
+on_flag_cleared("depot_transfer_capable", "on_depot_offline");
+
+// The restore direction. The same flag publishes UP on the depot's first tick,
+// which would spend a bare single-shot watcher before the mission had started —
+// so the registration carries a trigger-level `when` that leaves it ARMED until
+// the depot has actually been offline. A test inside the handler would not do:
+// `evaluate_triggers_with_flags` skips a false `when` BEFORE setting `fired`,
+// while an in-handler `if` would have burned the trigger on the publication.
+on_flag_set("depot_transfer_capable", "on_depot_restored").when("counter(depot_offline) > 0");
+
+fn on_storm_damage(ctx) {
+    ctx.effects.damage_infrastructure("world.entity.skyhook_depot.name", 50);
+}
+
+fn on_field_repair(ctx) {
+    // Whole points, applied in one go. A timed field-repair operation calls the
+    // same verb with a fractional flt() slice once a tick instead.
+    ctx.effects.repair_infrastructure("world.entity.skyhook_depot.name", 25);
+}
+
+fn on_depot_offline(ctx) {
+    ctx.flags.depot_offline = 1;
+}
+
+fn on_depot_restored(ctx) {
+    ctx.flags.depot_restored = 1;
+}
+"""

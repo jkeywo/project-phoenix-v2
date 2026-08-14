@@ -102,6 +102,79 @@ entities:
       symbols: [FlagStore]
       tests: [cargo test]
 
+  - component: infrastructure-condition-tracker
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Infrastructure Condition Tracker
+      summary: Advances the condition track on every entity that authored `[infrastructure]`, folding in authored decay, the hull the entity lost since the previous tick, and any condition adjustment a script queued this tick; mirrors each resulting operational-flag crossing into the world flag store and queues the matching FlagSet/FlagCleared world event.
+      rationale:
+        - "[ai] ONE write site. Condition moves for three reasons - authored decay, damage, and a scripted repair or hit - and a threshold crossing is only observable if the code that crosses it is also the code that mirrors the resulting flag. Scripted adjustments are therefore QUEUED on the world runtime and drained here rather than applied where they are authored; an effect writing the component directly would cross a threshold with nobody listening."
+        - "[ai] Damage arrives as a LEVEL observation of the entity's aggregate hull, not as a hook on each damage site. Beam, torpedo and blaster already damage non-ship entities, region zones and collisions are ship-gated today, and further hazards are still to come; watching the level catches all of them without editing any damage site, present or future. It is the same shape collect_world_events already uses to derive HullDroppedBelow."
+        - "[ai] Hysteresis is structural, not advisory: a threshold is edge-triggered against the STORED flag, and its restore point defaults to fails_below plus the authored hysteresis band, so a condition parked on the boundary sits in a dead band and reports no transition. Authoring an equal restore point opts out; a restore point BELOW the failure point is refused at load."
+        - "[ai] The crossing reaches a script hook one tick later, via the same pending_world_events queue WaypointReached rides: this runs in SimSet::Modifiers, after collect_world_events has already run for the tick."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [infrastructure-condition-state]
+      reads: [world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/infrastructure/condition.rs
+        - src/infrastructure/server.rs
+      symbols:
+        - InfrastructureConfig
+        - InfrastructureState
+        - InfrastructureCondition
+        - InfrastructurePlugin
+        - tick_infrastructure_condition
+      tests: [cargo test]
+
+  - state: infrastructure-condition-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Infrastructure Condition And Capacity State
+      summary: "Per-entity structural condition, the authored degradation thresholds over it and the named operational flags they hold (transfer_capable, docking_capable, whatever a scenario declares), plus the entity's named authored capacities. Authoritative: it decides whether a structure can still transfer, dock or hold, so two hosts that disagreed about it would disagree about whether a mission is winnable."
+      rationale:
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own, keyed on the minted entity id. Condition, ceiling and every operational flag are in; the authored capacities are not, because they never move and a divergence in them is a content divergence that content_digest is the thing to catch."
+        - "[ai] That namespace folds NOTHING when it is empty, unlike every other walk in the fold, which folds its row count first. No world authors an infrastructure table today, and folding a zero for all of them would have moved every committed world digest over state none of them carry. A world with no structures and a world built before the feature existed are the same authoritative state, so they fold to the same number; as soon as one structure exists the count is in the accumulator like everyone else's."
+        - "[ai] Snapshotted WHOLE rather than as a scalar projection, because the track carries which flags are currently down alongside the number and the two have to come back together - restoring the condition alone would re-detect, and re-fire, every crossing the mission already spent."
+        - "[ai] Nothing here is a hidden-truth field. The published condition IS the truth; a maintenance dossier that contradicts it is authored as its own content. The only authored control is publish, which keeps a structure off the wire entirely."
+    architecture:
+      classification: authoritative
+      owner: infrastructure-condition-tracker
+      writers: [infrastructure-condition-tracker]
+      replicas: [infrastructure-published-state]
+    implementation:
+      status: declared
+      paths: [src/infrastructure/condition.rs]
+      symbols:
+        - InfrastructureState
+        - ConditionAdjustment
+        - ResolvedThreshold
+        - CapacityConfig
+        - ThresholdConfig
+      tests: [cargo test]
+
+  - state: infrastructure-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Published Infrastructure State
+      summary: The client-visible projection of a structure's condition fraction, operational flags and capacities, carried on the entity wire snapshot wherever one is minted and only when the scenario authored publish = true.
+    architecture:
+      classification: client-projection
+      owner: infrastructure-condition-tracker
+      writers: [infrastructure-condition-tracker]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs]
+      symbols: [InfrastructureSnapshot]
+      tests: [cargo test]
+
   - component: world-trigger-evaluator
     core:
       status: implemented

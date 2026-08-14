@@ -138,6 +138,8 @@ entity.asteroid_uncommon_3_large.name,assets/entities/asteroid_uncommon_3_large.
 entity.asteroid_uncommon_3_small.name,assets/entities/asteroid_uncommon_3_small.toml → name (top level),[Small Uncommon Asteroid 3]
 entity.asteroid_uncommon_4_large.name,assets/entities/asteroid_uncommon_4_large.toml → name (top level),[Large Uncommon Asteroid 4]
 entity.asteroid_uncommon_4_small.name,assets/entities/asteroid_uncommon_4_small.toml → name (top level),[Small Uncommon Asteroid 4]
+entity.depot_transfer.name,assets/entities/depot_transfer.toml -> name (top level),[Transfer Depot]
+entity.depot_transfer.target.description,assets/entities/depot_transfer.toml -> [target] description,[Orbital transfer depot]
 entity.moon_ice.name,assets/entities/moon_ice.toml → name (top level),Ice Moon
 entity.moon_ice.target.description,assets/entities/moon_ice.toml → [target] description,[A frozen cryovolcanic moon]
 entity.moon_luna.name,assets/entities/moon_luna.toml → name (top level),Luna
@@ -211,6 +213,7 @@ world.combat_test.available_ships.0.label,assets/worlds/combat_test.toml → [av
 world.combat_test.available_ships.1.label,assets/worlds/combat_test.toml → [available_ships] label,Alliance Cruiser
 world.combat_test.available_ships.2.label,assets/worlds/combat_test.toml → [available_ships] label,Alliance Battleship
 world.combat_test.available_ships.3.label,assets/worlds/combat_test.toml → [available_ships] label,Alliance Courier
+world.entity.skyhook_depot.name,assets/worlds/probe_infrastructure.toml -> [[entity]] name,[Skyhook Depot]
 world.entity.starbase_alpha.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),Starbase Alpha
 world.combat_test.trigger.action.obj_destroy_wave_1.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 1: Harrow cruiser.]
 world.combat_test.trigger.action.obj_destroy_wave_2.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 2: Harrow destroyer.]

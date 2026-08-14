@@ -465,6 +465,29 @@ pub fn register_scheduling(engine: &mut Engine) {
     engine.register_fn("reset_trigger", |b: &mut Schedule, id: ImmutableString| {
         b.defer(TriggerAction::ResetTrigger { id: id.to_string() });
     });
+    // The deferred twin of `ctx.effects.destroy_entity` (issue #1033). It needed
+    // no new machinery, which is the claim worth pinning: a `TriggerAction` is
+    // already what this builder buffers, `tick_delayed_actions` already resolves
+    // one through `dispatch_action` and applies the whole `DispatchResult`, so a
+    // delayed destruction chains its `WorldEvent::Destroyed` by the same route an
+    // immediate one does — one tick later, through `pending_world_events`, which is
+    // where every delayed action's chaining events already go.
+    //
+    // Built by the SAME `destroy_entity_action` the immediate verb uses, so the two
+    // cannot come apart.
+    engine.register_fn(
+        "destroy_entity",
+        |b: &mut Schedule, entity: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+            let action = super::effects::destroy_entity_action(&entity).map_err(|e| {
+                Box::new(EvalAltResult::ErrorRuntime(
+                    e.into(),
+                    rhai::Position::NONE,
+                ))
+            })?;
+            b.defer(action);
+            Ok(())
+        },
+    );
     engine.register_fn("load_world", |b: &mut Schedule, path: ImmutableString| {
         b.defer(TriggerAction::LoadWorld {
             path: path.to_string(),
@@ -586,6 +609,46 @@ mod tests {
                 script_path: "combat.rhai".to_string(),
                 fn_name: "anon$abc".to_string(),
             }]
+        );
+    }
+
+    /// A DELAYED destroy buffers the identical `TriggerAction` the immediate verb
+    /// does, stamped with its fire time (issue #1033, AC6).
+    ///
+    /// The AC is "with no new machinery", and this is what that cashes out to: the
+    /// action reaches `pending_delayed_actions` as an ordinary `DelayedAction`, so
+    /// `tick_delayed_actions` resolves it through the same `dispatch_action` and
+    /// applies the same whole `DispatchResult` — chaining included. Nothing in the
+    /// deferred path knows a destroy is different from a spawn.
+    #[test]
+    fn a_delayed_destroy_entity_defers_the_same_action() {
+        use crate::world::script::engine::runtime_engine;
+        use rhai::{Dynamic, Map};
+
+        let engine = runtime_engine();
+        let ast = engine
+            .compile(r#"fn on_x(ctx) { ctx.schedule.in_seconds(8).destroy_entity("skyhook"); }"#)
+            .expect("compiles");
+        let sink = ScheduleSink::new();
+        let mut ctx = Map::new();
+        ctx.insert("schedule".into(), Dynamic::from(sink.clone()));
+        vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx).expect("the call runs");
+
+        let (delayed, callbacks) = sink.drain(&clock(0, 2.0, 60.0), "t.rhai");
+        assert!(callbacks.is_empty(), "a delayed effect is not a callback");
+        assert_eq!(delayed.len(), 1);
+        assert_eq!(
+            delayed[0].fire_at_elapsed, 10.0,
+            "elapsed 2 + delay 8, the seconds→elapsed conversion every delayed \
+             effect shares"
+        );
+        assert_eq!(
+            delayed[0].action,
+            TriggerAction::DestroyEntity {
+                entity: "skyhook".to_string(),
+            },
+            "byte-identical to what `ctx.effects.destroy_entity` buffers — both \
+             build it through `destroy_entity_action`"
         );
     }
 

@@ -452,6 +452,30 @@ pub fn register_effects(engine: &mut Engine) {
         },
     );
     engine.register_fn(
+        "destroy_entity",
+        |sink: &mut EffectSink, entity: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+            // The counterpart to `spawn_entity` (issue #1033), and buffered for the
+            // SAME reason `add_faction_enemy` is: the name→uuid map lives on
+            // `WorldContentRuntime`, not at this host-fn boundary, so resolution is
+            // deferred to the applier's `dispatch_action` → `dispatch_destroy_entity`.
+            //
+            // That deferral is what makes a scripted destruction chain. The pure
+            // dispatcher pushes `WorldEvent::Destroyed` onto `DispatchResult::new_events`
+            // beside the `ActionCmd::DestroyEntity`, and `apply_script_commands` feeds
+            // the WHOLE result to `apply_dispatch_result` — whose `events_out` is
+            // `tick_trigger_pipeline`'s `next_events`. So an `on_destroyed` handler and
+            // an `on_all_destroyed` group both fire on the next chaining pass of the
+            // SAME tick, exactly as they do for a combat kill. Emitting the despawn
+            // from here instead would kill the entity and chain nothing.
+            //
+            // `parse_action_entry`, not a hand-built variant: the required-`entity`
+            // check is then the declarative one rather than a second copy of it.
+            let action = destroy_entity_action(&entity).map_err(raise)?;
+            sink.push_action(action);
+            Ok(())
+        },
+    );
+    engine.register_fn(
         "add_objective",
         |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
             // Read the script map into a `RawActionEntry` and run the SHARED
@@ -759,6 +783,28 @@ fn spawn_entity_action(spec: &Map) -> Result<TriggerAction, String> {
     parse_action_entry(&raw)
 }
 
+/// Build a `TriggerAction::DestroyEntity` from a script entity name, reusing the
+/// declarative `parse_action_entry` for the required-field check (issue #1033).
+///
+/// A bare string rather than a `#{ … }` map, matching `add_faction_enemy`: the
+/// action carries exactly one field, and a map would invent an authoring shape the
+/// declarative twin does not have. It still routes through `parse_action_entry`,
+/// so "which field is required, and what does its absence say" has one owner —
+/// unreachable from Rhai (the arity is the check) but true by construction rather
+/// than by a comment claiming so.
+///
+/// `pub(super)` because the deferred twin — `ctx.schedule.in_seconds(n)
+/// .destroy_entity(…)` — must buffer the byte-identical `TriggerAction`, and two
+/// spellings of "build the destroy action" would be two chances to diverge.
+pub(super) fn destroy_entity_action(entity: &str) -> Result<TriggerAction, String> {
+    let raw = RawActionEntry {
+        kind: "destroy_entity".to_string(),
+        entity: Some(entity.to_string()),
+        ..Default::default()
+    };
+    parse_action_entry(&raw)
+}
+
 /// Build an [`OpenCommsRequest`] from an `open_comms` script map.
 ///
 /// ```rhai
@@ -1037,6 +1083,79 @@ mod tests {
                 faction: "Harrow".to_string(),
                 enemy: "Federation".to_string(),
             })]
+        );
+    }
+
+    // ── destroy_entity (issue #1033) ─────────────────────────────────────────
+
+    /// `destroy_entity(name)` buffers the DECLARATIVE `DestroyEntity` — the entity
+    /// NAME, unresolved — identical to the TOML action before UUID resolution, the
+    /// same assertion `add_faction_enemy_matches_toml` makes about its twin.
+    #[test]
+    fn destroy_entity_matches_toml() {
+        let effs = run_buffered(
+            r#"fn f(ctx) { ctx.effects.destroy_entity("skyhook"); }"#,
+            "f",
+        );
+        let toml = toml_action("type = \"destroy_entity\"\nentity = \"skyhook\"");
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+        assert_eq!(
+            effs,
+            vec![BufferedEffect::Action(TriggerAction::DestroyEntity {
+                entity: "skyhook".to_string(),
+            })]
+        );
+    }
+
+    /// The load-bearing shape claim, stated where it can fail: a destroy buffers as
+    /// an `Action`, NOT a `Cmd`.
+    ///
+    /// This is the whole architecture in one assertion. A `Cmd` is applied
+    /// directly and would despawn the entity while chaining nothing; an `Action` is
+    /// resolved through `dispatch_destroy_entity`, which pushes
+    /// `WorldEvent::Destroyed` onto `new_events` beside the command — and that
+    /// event is what makes `on_destroyed` / `on_all_destroyed` fire off a scripted
+    /// removal. A refactor that "simplified" this into a resolved command would
+    /// pass every other test in this module and silently break chaining.
+    #[test]
+    fn destroy_entity_buffers_an_action_not_a_resolved_command() {
+        let effs = run_buffered(
+            r#"fn f(ctx) { ctx.effects.destroy_entity("skyhook"); }"#,
+            "f",
+        );
+        assert!(
+            matches!(effs.as_slice(), [BufferedEffect::Action(_)]),
+            "a destroy must defer name resolution to dispatch — a resolved Cmd \
+             would despawn without chaining a Destroyed event, got {effs:?}"
+        );
+    }
+
+    /// A destroy keeps its authored position among the other effects, so a handler
+    /// that raises a flag, destroys a structure and completes an objective applies
+    /// them in that order.
+    #[test]
+    fn destroy_entity_interleaves_in_authored_order() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.complete_objective("first");
+                ctx.effects.destroy_entity("skyhook");
+                ctx.effects.fail_objective("last");
+            }"#,
+            "f",
+        );
+        assert_eq!(
+            effs,
+            vec![
+                BufferedEffect::Cmd(ActionCmd::CompleteObjective {
+                    id: "first".to_string()
+                }),
+                BufferedEffect::Action(TriggerAction::DestroyEntity {
+                    entity: "skyhook".to_string(),
+                }),
+                BufferedEffect::Cmd(ActionCmd::FailObjective {
+                    id: "last".to_string()
+                }),
+            ]
         );
     }
 

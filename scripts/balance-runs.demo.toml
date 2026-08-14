@@ -101,4 +101,10 @@ side_a = ["destroyer"]
 side_b = ["ship_harrow_warhawk"]
   [matchup.thresholds]
   max_win_rate      = 0.0
-  min_damage_margin = -300.0
+  # Re-blessed -300 -> -400 (project owner, 2026-08-14, #992): the destroyer's
+  # measured margin against the warhawk is a stable, reproducible -355.9 across
+  # seeds and builds — the warhawk is SUPPOSED to win this matchup decisively
+  # (max_win_rate 0 above), and the owner ruled the observed brutality is the
+  # intended shape rather than a defect to tune away. The floor still exists to
+  # catch a REGRESSION toward obliteration (anything past -400).
+  min_damage_margin = -400.0

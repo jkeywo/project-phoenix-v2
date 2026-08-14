@@ -56,13 +56,13 @@
 
 use rhai::{Dynamic, Map};
 
-use crate::world::config::{CommsDialogueNode, CommsResponse};
+use crate::comms::content::{CommsDialogueNode, CommsResponse};
 use crate::world::flags::FlagStore;
 use crate::world::script::engine::RuntimeHost;
 use crate::world::script::schedule::{CallEffects, SchedClock, TickBudget};
 
 /// One response option in a scripted dialogue node — the script analogue of a
-/// [`CommsResponse`](crate::world::config::CommsResponse).
+/// [`CommsResponse`](crate::comms::content::CommsResponse).
 ///
 /// `on_pick` names the fn to run when the player picks this response; that fn
 /// supplies the response's effects and returns the follow-up node (or `()`), so
@@ -70,18 +70,18 @@ use crate::world::script::schedule::{CallEffects, SchedClock, TickBudget};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScriptDialogueResponse {
     /// Player-facing button text (authored inline, exactly like
-    /// [`CommsResponse::text`](crate::world::config::CommsResponse)).
+    /// [`CommsResponse::text`](crate::comms::content::CommsResponse)).
     pub text: String,
     /// Name of the fn to call when this response is picked.
     pub on_pick: String,
     /// Whether the client confirms before submitting this response (the script
-    /// analogue of [`CommsResponse::important`](crate::world::config::CommsResponse)).
+    /// analogue of [`CommsResponse::important`](crate::comms::content::CommsResponse)).
     /// Defaults to `false` when the response map omits it.
     pub important: bool,
 }
 
 /// A scripted dialogue node materialized from a node fn's return map — the
-/// script analogue of a [`CommsDialogueNode`](crate::world::config::CommsDialogueNode).
+/// script analogue of a [`CommsDialogueNode`](crate::comms::content::CommsDialogueNode).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScriptDialogueNode {
     /// The message body to inject into the inbox.
@@ -179,8 +179,6 @@ pub fn project_node(node: &ScriptDialogueNode) -> (CommsDialogueNode, Vec<String
         responses.push(CommsResponse {
             text: r.text.clone(),
             important: r.important,
-            actions: Vec::new(),
-            follow_up: None,
         });
         on_pick.push(r.on_pick.clone());
     }
@@ -188,8 +186,6 @@ pub fn project_node(node: &ScriptDialogueNode) -> (CommsDialogueNode, Vec<String
         CommsDialogueNode {
             body: node.message.clone(),
             responses,
-            speaker: None,
-            trigger: None,
         },
         on_pick,
     )
@@ -304,12 +300,10 @@ pub fn enter_node(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::config::parse_world;
-    use crate::world::dispatch::{dispatch_action, ActionCmd, DispatchContext};
+    use crate::world::dispatch::ActionCmd;
     use crate::world::script::effects::BufferedEffect;
     use crate::world::script::engine::RuntimeHost;
     use crate::world::script::load::compile_scripts;
-    use std::collections::HashMap;
     use vellum_script::ScriptSource;
 
     const PATH: &str = "w.toml#script.axiom";
@@ -364,32 +358,6 @@ mod tests {
             compiled.findings
         );
         compiled.asts.get(PATH).expect("compiled ast").clone()
-    }
-
-    /// A minimal context-free dispatch context — the objective actions the parity
-    /// tests use resolve nothing, so only the required borrows are populated.
-    /// Mirrors the M2 trigger parity test's context.
-    fn dispatch_toml(actions: &[crate::world::config::TriggerAction]) -> Vec<ActionCmd> {
-        let empty_names: HashMap<String, String> = HashMap::new();
-        let base_flags = FlagStore::new();
-        let layers = HashMap::new();
-        let anchors = HashMap::new();
-        let uuid = || "uuid".to_string();
-        let ctx = DispatchContext {
-            origin_layer: None,
-            entity_name: None,
-            name_to_uuid: &empty_names,
-            base_flags: &base_flags,
-            layers: &layers,
-            base_anchors: &anchors,
-            factions: None,
-            uuid_source: &uuid,
-            template_loader: &crate::entity_loader::WasmTemplateLoader,
-        };
-        actions
-            .iter()
-            .flat_map(|a| dispatch_action(a, &ctx).commands)
-            .collect()
     }
 
     // ── read_dialogue_node materialization ────────────────────────────────────
@@ -527,18 +495,19 @@ mod tests {
         assert!(matches!(err, EnterError::Refused), "{err:?}");
     }
 
-    // ── parity: scripted thread == TOML thread, same ActionCmds (issue #982) ──
+    // ── the ActionCmd boundary a dialogue's effects reach (issue #982) ────────
+    //
+    // These three tests were PARITY tests: each ran a scripted thread and its
+    // declarative `[[comms]]` twin and asserted the two emitted an identical
+    // `ActionCmd` sequence for the same player choices — the migration guard for
+    // "one evaluator, two front-ends". Issue #985 deleted the second front-end,
+    // so what survives is the half that pinned behaviour rather than
+    // equality-to-itself: the concrete `ActionCmd` sequence each `on_pick`
+    // produces, on the same boundary `dispatch_action` writes to.
 
-    /// The strongest migration guard (acceptance criterion): a scripted dialogue
-    /// thread and its declarative TOML equivalent produce the identical
-    /// `ActionCmd` sequence for the same player choices. The scripted path runs
-    /// the picked response's `on_pick` fn on the runtime host and collects its
-    /// buffered effects; the TOML path dispatches the same response's
-    /// `[[response.action]]` list through `dispatch_action`. Both land on the one
-    /// `ActionCmd` boundary.
+    /// One node, two terminal responses, one `ActionCmd` each.
     #[test]
-    fn scripted_and_toml_comms_emit_identical_action_cmds_per_choice() {
-        // ---- Scripted front-end: the whole dialogue tree in Rhai. ----
+    fn each_response_fn_emits_its_own_action_cmds() {
         let ast = compile(
             r#"
             fn hail_axiom(ctx) {
@@ -555,63 +524,24 @@ mod tests {
         let flags = FlagStore::new();
 
         let (root_effects, root) = enter(&host, &ast, "hail_axiom", &flags).unwrap();
-        assert!(root_effects.commands.is_empty());
+        assert!(
+            root_effects.commands.is_empty(),
+            "entering a root node buffers nothing; only a pick does"
+        );
         let root = root.expect("root returns a node");
         assert_eq!(root.responses.len(), 2);
 
-        // ---- Declarative TOML front-end: the same thread, tables inline. ----
-        let cfg = parse_world(
-            r#"
-            [[comms]]
-            from = "axiom"
-            trigger = "on_hailed"
-            entity = "axiom"
-            message = "Axiom Station, go ahead."
-
-            [[comms.response]]
-            text = "Acknowledge"
-            [[comms.response.action]]
-            type = "complete_objective"
-            id = "reach_axiom"
-
-            [[comms.response]]
-            text = "Decline"
-            [[comms.response.action]]
-            type = "fail_objective"
-            id = "reach_axiom"
-            "#,
-        )
-        .expect("world parses");
-        // A TOML comms block (not scripted) still lands in `comms`.
-        assert_eq!(cfg.comms.len(), 1);
-        assert!(cfg.scripted_comms.is_empty());
-        let toml_node = &cfg.comms[0].node;
-        assert_eq!(toml_node.responses.len(), 2);
-
-        // For EACH choice, the scripted `on_pick` effects == the TOML response
-        // actions dispatched.
-        for i in 0..2 {
-            let (scripted, follow) =
-                enter(&host, &ast, &root.responses[i].on_pick, &flags).unwrap();
-            assert!(follow.is_none(), "response {i} is terminal");
-            let toml_cmds = dispatch_toml(&toml_node.responses[i].actions);
-            assert_eq!(
-                cmds(&scripted),
-                toml_cmds,
-                "choice {i}: scripted and TOML must emit identical ActionCmds"
-            );
-        }
-
-        // And the concrete expected sequences, so this pins behaviour not just
-        // equality-to-itself.
-        let (ack, _) = enter(&host, &ast, "on_ack", &flags).unwrap();
+        let (ack, follow) = enter(&host, &ast, &root.responses[0].on_pick, &flags).unwrap();
+        assert!(follow.is_none(), "response 0 is terminal");
         assert_eq!(
             cmds(&ack),
             vec![ActionCmd::CompleteObjective {
                 id: "reach_axiom".into()
             }]
         );
-        let (decline, _) = enter(&host, &ast, "on_decline", &flags).unwrap();
+
+        let (decline, follow) = enter(&host, &ast, &root.responses[1].on_pick, &flags).unwrap();
+        assert!(follow.is_none(), "response 1 is terminal");
         assert_eq!(
             cmds(&decline),
             vec![ActionCmd::FailObjective {
@@ -620,11 +550,10 @@ mod tests {
         );
     }
 
-    /// Parity across a FOLLOW-UP hop: picking a response advances to the next
-    /// node (script: the `on_pick` fn returns it; TOML: `response.follow_up`),
-    /// and a choice on that follow-up node again emits identical `ActionCmd`s.
+    /// A FOLLOW-UP hop: picking a response buffers that response's effects AND
+    /// returns the next node, whose own response buffers its own.
     #[test]
-    fn scripted_and_toml_follow_up_hop_emit_identical_action_cmds() {
+    fn a_follow_up_hop_carries_its_own_action_cmds() {
         let ast = compile(
             r#"
             fn root(ctx) {
@@ -646,60 +575,22 @@ mod tests {
 
         // Pick the root's only response → effects + a follow-up node.
         let (wait_effects, follow) = enter(&host, &ast, "on_wait", &flags).unwrap();
-        let wait_cmds = cmds(&wait_effects);
         let follow = follow.expect("on_wait returns a follow-up node");
         assert_eq!(follow.message, "Patched through.");
         assert_eq!(follow.responses.len(), 1);
-
-        // Pick the follow-up's response → its effects.
-        let (confirm_effects, tail) =
-            enter(&host, &ast, &follow.responses[0].on_pick, &flags).unwrap();
-        let confirm_cmds = cmds(&confirm_effects);
-        assert!(tail.is_none());
-
-        // ---- TOML equivalent: nested response.follow_up. ----
-        let cfg = parse_world(
-            r#"
-            [[comms]]
-            from = "axiom"
-            trigger = "on_hailed"
-            entity = "axiom"
-            message = "Stand by."
-
-            [[comms.response]]
-            text = "Wait"
-            [[comms.response.action]]
-            type = "complete_objective"
-            id = "waited"
-
-            [comms.response.follow_up]
-            message = "Patched through."
-            [[comms.response.follow_up.response]]
-            text = "Confirm"
-            [[comms.response.follow_up.response.action]]
-            type = "fail_objective"
-            id = "aborted"
-            "#,
-        )
-        .expect("world parses");
-        let root_resp = &cfg.comms[0].node.responses[0];
-        assert_eq!(wait_cmds, dispatch_toml(&root_resp.actions));
-        let follow_resp = &root_resp
-            .follow_up
-            .as_ref()
-            .expect("toml follow-up")
-            .responses[0];
-        assert_eq!(confirm_cmds, dispatch_toml(&follow_resp.actions));
-
-        // Concrete sequences.
         assert_eq!(
-            wait_cmds,
+            cmds(&wait_effects),
             vec![ActionCmd::CompleteObjective {
                 id: "waited".into()
             }]
         );
+
+        // Pick the follow-up's response → its effects, and the thread ends.
+        let (confirm_effects, tail) =
+            enter(&host, &ast, &follow.responses[0].on_pick, &flags).unwrap();
+        assert!(tail.is_none());
         assert_eq!(
-            confirm_cmds,
+            cmds(&confirm_effects),
             vec![ActionCmd::FailObjective {
                 id: "aborted".into()
             }]
@@ -707,10 +598,10 @@ mod tests {
     }
 
     /// A response `on_pick` fn can also compose world flags, and those route
-    /// through the same `ActionCmd::MutateFlag` boundary a TOML
-    /// `set_flag_value` / `increment_flag` action produces.
+    /// through the same `ActionCmd::MutateFlag` boundary every other flag write
+    /// reaches (base layer, no `parent:` walk).
     #[test]
-    fn scripted_response_flag_writes_match_toml_flag_actions() {
+    fn a_response_fns_flag_writes_reach_the_mutate_flag_boundary() {
         use crate::world::dispatch::FlagMutation;
         let ast = compile(
             r#"
@@ -722,9 +613,8 @@ mod tests {
         );
         let host = RuntimeHost::new();
         let (effects, _) = enter(&host, &ast, "on_pick", &FlagStore::new()).unwrap();
-        let scripted = cmds(&effects);
         assert_eq!(
-            scripted,
+            cmds(&effects),
             vec![
                 ActionCmd::MutateFlag {
                     target_layer: None,
@@ -738,30 +628,5 @@ mod tests {
                 },
             ]
         );
-
-        // The TOML equivalent (`set_flag_value` + `increment_flag`) dispatches the
-        // same two MutateFlag commands (base layer, no `parent:` walk).
-        let cfg = parse_world(
-            r#"
-            [[comms]]
-            from = "axiom"
-            trigger = "on_hailed"
-            entity = "axiom"
-            message = "x"
-            [[comms.response]]
-            text = "Arm"
-            [[comms.response.action]]
-            type = "set_flag_value"
-            name = "armed"
-            value = 1
-            [[comms.response.action]]
-            type = "increment_flag"
-            name = "score"
-            by = 50
-            "#,
-        )
-        .expect("world parses");
-        let toml_cmds = dispatch_toml(&cfg.comms[0].node.responses[0].actions);
-        assert_eq!(scripted, toml_cmds);
     }
 }

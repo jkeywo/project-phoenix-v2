@@ -4,8 +4,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rhai::{Map, AST};
 
-use crate::comms::content::CommsTemplateState;
-use crate::comms::server::CommsRuntime;
 use crate::lobby::{Target, WorldResource};
 use crate::messages::{GamePhase, ServerMessage};
 use crate::objectives::ObjectiveManager;
@@ -99,15 +97,14 @@ pub struct PendingScenarioLoad(pub Vec<String>);
 
 /// Serialisable runtime snapshot for one additively-loaded sub-world.
 ///
-/// Keyed by world TOML path in `WorldLayerMap`. Holds the trigger and comms
-/// states that were derived from the sub-world's `WorldConfig` at load time,
-/// enabling them to be cleanly removed when `UnloadWorld` fires.
+/// Keyed by world TOML path in `WorldLayerMap`. Holds the trigger states that
+/// were derived from the sub-world's `WorldConfig` at load time, enabling them
+/// to be cleanly removed when `UnloadWorld` fires.
 /// Also tracks ECS entity handles spawned from the sub-world's `[[entity]]`
 /// blocks so they can be despawned when `UnloadWorld` fires.
 #[derive(Clone, Debug, Default)]
 pub struct WorldRuntime {
     pub trigger_states: Vec<TriggerState>,
-    pub comms_template_states: Vec<CommsTemplateState>,
     /// ECS entity handles spawned when this layer was loaded.
     pub spawned_entities: Vec<Entity>,
     /// Anchor table from the layer's `WorldConfig`. Used by `spawn_entity`
@@ -2966,7 +2963,7 @@ use crate::entity_spawner::EntityUuid;
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Pending scenario load system ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 /// Bevy system: drain `PendingScenarioLoad` and merge each world TOML into the
-/// live `WorldContentRuntime` (trigger states + comms templates + contacts).
+/// live `WorldContentRuntime` (trigger states).
 ///
 /// On WASM the TOML string is not available at runtime (JS pre-fetches only the
 /// initial world), so we push paths into the WASM-side pending-world queue and
@@ -2983,7 +2980,6 @@ use crate::entity_spawner::EntityUuid;
 fn apply_pending_scenario_loads(
     mut pending: ResMut<PendingScenarioLoad>,
     mut runtime: ResMut<WorldContentRuntime>,
-    mut comms: ResMut<CommsRuntime>,
 ) {
     if pending.0.is_empty() {
         return;
@@ -3013,15 +3009,6 @@ fn apply_pending_scenario_loads(
         }
         // Merge trigger states (don't overwrite existing ones).
         runtime.trigger_states.extend(result.new_trigger_states);
-        if let Some(scenario_config) = result.scenario_config {
-            // Merge comms template states + contacts into the live comms
-            // runtime (skips duplicate contacts by uuid).
-            let _ = crate::comms::server::merge_world_comms(
-                &mut comms,
-                &scenario_config,
-                &runtime.name_to_uuid,
-            );
-        }
         if result.mark_loaded {
             runtime.loaded_scenario_paths.insert(path);
         }
@@ -3117,7 +3104,6 @@ fn apply_world_layer_changes(
     mut pending: ResMut<PendingWorldLayerChanges>,
     mut layer_map: ResMut<WorldLayerMap>,
     mut runtime: ResMut<WorldContentRuntime>,
-    mut comms: ResMut<CommsRuntime>,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     // Layer-owned objective cleanup on unload (issue #751). `Option` so bare
     // `App` fixtures without an `ObjectiveManagerRes` still run the loader.
@@ -3209,16 +3195,6 @@ fn apply_world_layer_changes(
                                 .insert(EntityOriginLayer(path.clone()));
                         }
 
-                        // Merge comms template states + contacts
-                        // into the live comms runtime (skips
-                        // duplicate contacts by uuid); snapshot
-                        // the layer's states for UnloadWorld.
-                        let comms_template_states = crate::comms::server::merge_world_comms(
-                            &mut comms,
-                            &scenario_config,
-                            &runtime.name_to_uuid,
-                        );
-
                         // Issue #415: emit a WorldLoaded event so
                         // `on_world_loaded` triggers declared inside
                         // this sub-world (and merged into the live
@@ -3236,7 +3212,6 @@ fn apply_world_layer_changes(
                             path,
                             WorldRuntime {
                                 trigger_states,
-                                comms_template_states,
                                 spawned_entities,
                                 anchors: scenario_config.anchors.clone(),
                                 flags: crate::world::flags::FlagStore::new(),
@@ -3269,9 +3244,6 @@ fn apply_world_layer_changes(
                     ti += 1;
                     keep
                 });
-
-                // Remove comms template states belonging to this layer.
-                crate::comms::server::remove_layer_comms(&mut comms, &layer.comms_template_states);
 
                 // Remove objectives this layer's triggers added (issue #751)
                 // and prune the runtime state that referenced them (issue #752):
@@ -3344,9 +3316,7 @@ fn load_scenario_toml_text(path: &str) -> Option<String> {
 pub(crate) mod tests {
     use super::*;
     use crate::ai_plugin::{AiEntityAttacked, AiEntityDestroyed};
-    use crate::comms::server::{
-        inject_comms_templates, tick_pending_follow_ups, CommsChannel2Event, CommsInboxRes,
-    };
+    use crate::comms::server::{CommsChannel2Event, CommsInboxRes, CommsRuntime};
     use crate::console::comms::server::handle_comms_channel2;
     use crate::lobby::LobbyPlugin;
     use crate::messages::*;
@@ -3489,9 +3459,7 @@ pub(crate) mod tests {
             .add_systems(
                 Update,
                 (
-                    tick_pending_follow_ups,
                     collect_world_events,
-                    inject_comms_templates,
                     tick_trigger_pipeline,
                     handle_comms_channel2,
                 )
@@ -8055,13 +8023,7 @@ entity = "layer_npc"
             .add_message::<crate::ai_plugin::AiWaypointReached>()
             .add_systems(
                 Update,
-                (
-                    collect_world_events,
-                    inject_comms_templates,
-                    tick_trigger_pipeline,
-                    probe,
-                )
-                    .chain(),
+                (collect_world_events, tick_trigger_pipeline, probe).chain(),
             );
 
         // First tick: the probe sees everything "changed" because the
@@ -8911,7 +8873,6 @@ condition = "on_world_loaded"
                 Update,
                 (
                     collect_world_events,
-                    inject_comms_templates,
                     tick_trigger_pipeline,
                     handle_comms_channel2,
                     crate::regions::server::update_region_membership,

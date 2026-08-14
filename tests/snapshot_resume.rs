@@ -1618,10 +1618,7 @@ fn a_scripted_dialogue_open_at_the_save_is_answerable_after_a_resume() {
         "the capture should hold exactly one open scripted dialogue \
          (caught on frame {opened_at})"
     );
-    let script = comms.dialogues[0]
-        .script
-        .as_ref()
-        .expect("the open dialogue is a scripted one");
+    let script = &comms.dialogues[0].script;
     assert_eq!(
         script.node_fn, "axiom_root",
         "the open dialogue should be sitting on the thread's root node"
@@ -1792,8 +1789,7 @@ fn a_queued_open_comms_request_survives_a_resume_and_fires() {
 /// A **comms-quiet** world's payload carries the comms state that exists and
 /// nothing conversation-shaped — the compatibility half of this slice.
 ///
-/// The duel authors no `[[comms]]` and no `[script]`, so it has no templates, no
-/// threads and no script runtime. Its capture must still produce a `CommsState`
+/// The duel authors no `[script]`, so it has no threads and no script runtime. Its capture must still produce a `CommsState`
 /// (the runtime exists on every world), leave every conversation field empty,
 /// and round-trip through RON.
 #[test]
@@ -1806,8 +1802,6 @@ fn a_comms_quiet_world_captures_an_empty_comms_state() {
     assert!(comms.inbox.is_empty(), "the duel seats no messages");
     assert!(comms.dialogues.is_empty(), "and opens no threads");
     assert!(comms.pending_opens.is_empty(), "and queues no opens");
-    assert_eq!(comms.uncarried_dialogues, 0);
-    assert!(comms.uncarried_follow_ups.is_empty());
 
     let run = run_for(
         payload.clone(),
@@ -1859,80 +1853,16 @@ fn a_save_written_before_comms_state_is_refused_on_format() {
     );
 }
 
-/// What this slice does NOT carry, it reports — it does not drop it quietly.
-///
-/// A declarative dialogue's node holds `TriggerAction`s and a nested follow-up
-/// tree, and a queued follow-up holds a whole node; carrying either means a
-/// serde derive on the authored-config vocabulary, the commitment
-/// `ScenarioState` already refuses for `pending_delayed_actions`. So they stay
-/// out — and the restore says so on the report rather than leaving the caller to
-/// notice.
-///
-/// Driven from a hand-built payload rather than from a world, because what is
-/// being asserted is the restore's handling of counts the capture records when
-/// it has to leave something behind — and a fixture that produced them would be
-/// asserting the declarative comms front-end's behaviour, not this slice's.
-#[test]
-fn uncarried_comms_state_is_reported_as_a_gap_not_dropped_quietly() {
-    use project_phoenix::snapshot::RestoreGap;
-
-    let mut live = duel();
-    step(&mut live, 60);
-
-    let mut payload = capture(live.world());
-    let mut comms = payload
-        .comms
-        .clone()
-        .expect("the duel captures comms state");
-    comms.uncarried_dialogues = 2;
-    // One response follow-up (its `…` placeholder is seated in the inbox) and
-    // one chained root, which shows nothing until it fires.
-    comms.uncarried_follow_ups = vec!["placeholder-1".to_string(), String::new()];
-    comms.inbox = vec![project_phoenix::messages::CommsMessage::injected(
-        "placeholder-1".to_string(),
-        "sender-uuid".to_string(),
-        "Sender".to_string(),
-        "...".to_string(),
-        Vec::new(),
-        "thread-1".to_string(),
-        true,
-        false,
-    )];
-    payload.comms = Some(comms);
-
-    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
-    let report = restore(resumed.world_mut(), &payload);
-
-    assert!(
-        report
-            .gaps
-            .contains(&RestoreGap::CommsDialoguesUncarried { declarative: 2 }),
-        "the declarative dialogues left behind should be reported: {:?}",
-        report.gaps
-    );
-    assert!(
-        report.gaps.contains(&RestoreGap::CommsFollowUpsUncarried {
-            queued: 2,
-            removed_placeholders: 1,
-        }),
-        "so should the follow-ups, and how many placeholder rows went with \
-         them: {:?}",
-        report.gaps
-    );
-    assert!(
-        live_inbox(&resumed).is_empty(),
-        "the orphaned placeholder is removed rather than left in the restored \
-         inbox waiting on a follow-up that is not coming back"
-    );
-
-    // And the gap type says all of that in words, for a host that only logs it.
-    let rendered = RestoreGap::CommsFollowUpsUncarried {
-        queued: 2,
-        removed_placeholders: 1,
-    }
-    .to_string();
-    assert!(
-        rendered.contains('2') && rendered.contains('1'),
-        "{rendered}"
-    );
-}
+// `uncarried_comms_state_is_reported_as_a_gap_not_dropped_quietly` lived here.
+// It drove a hand-built payload carrying `uncarried_dialogues` /
+// `uncarried_follow_ups` and asserted the restore REPORTED what it could not
+// carry: a declarative node's responses held `TriggerAction`s and a nested
+// follow-up tree, and a queued `PendingFollowUp` held a whole node, so neither
+// could travel without a serde derive on the authored-config vocabulary.
+//
+// Issue #985 deleted the front-end that could author either. Every node is now
+// built by `project_node` and reduces losslessly by construction, and the
+// follow-up queue is gone, so both fields — and the two `RestoreGap` variants
+// that reported them — went with it. `SNAPSHOT_FORMAT` moved to 4 for exactly
+// that reason: a format-3 payload could still contain them, and reading one
+// here would silently drop state this build has nowhere to put.

@@ -391,11 +391,11 @@ pub(crate) fn open_scripted_comms_threads(
             ActiveDialogue {
                 current_node: wire_node,
                 thread_id,
-                script: Some(ScriptedDialogue {
+                script: ScriptedDialogue {
                     script_path: req.script_path.clone(),
                     node_fn: req.root_fn.clone(),
                     on_pick,
-                }),
+                },
             },
         );
     }
@@ -545,21 +545,13 @@ pub(crate) mod tests {
             .get(&msg.id)
             .expect("the injected message has an active dialogue");
         assert_eq!(dialogue.thread_id, msg.thread_id);
-        let script = dialogue.script.as_ref().expect("a scripted dialogue");
+        let script = &dialogue.script;
         assert_eq!(script.script_path, PATH);
         assert_eq!(script.node_fn, "hail_axiom");
         assert_eq!(
             script.on_pick,
             vec!["on_ack".to_string(), "on_decline".to_string()],
             "the on_pick names are parallel to the shown responses"
-        );
-        assert!(
-            dialogue
-                .current_node
-                .responses
-                .iter()
-                .all(|r| r.actions.is_empty() && r.follow_up.is_none()),
-            "a projected node carries no declarative actions or follow-up"
         );
         assert!(
             app.world()
@@ -850,12 +842,8 @@ pub(crate) mod tests {
     // Input → Physics → Broadcast chain, compared on what actually reaches the
     // wire and what their picks actually do to the world.
 
-    use crate::comms::content::{
-        CommsDialogueNode, CommsResponse, CommsTemplate, CommsTemplateState,
-    };
     use crate::comms::server::tests::{comms_test_app, push_msg, setup_game_with_comms, tick};
-    use crate::messages::{ClientMessage, CommsMessage, ObjectiveStatus};
-    use crate::world::content::{TriggerAction, TriggerCondition};
+    use crate::messages::{ClientMessage, ObjectiveStatus};
 
     const STATION_UUID: &str = "a1b2c3d4-e5f6-4789-abcd-ef0123456990";
 
@@ -879,48 +867,6 @@ fn root(ctx) {
 fn on_ack(ctx)     { ctx.effects.complete_objective("script_obj"); }
 fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
 "#;
-
-    /// The declarative twin of [`SCRIPTED_THREAD`]: the same body, the same two
-    /// responses, the same two objective actions — authored as TOML tables.
-    fn declarative_twin() -> CommsTemplateState {
-        let action = |a: TriggerAction| vec![a];
-        CommsTemplateState {
-            template: CommsTemplate {
-                from: "starbase_alpha".into(),
-                trigger: TriggerCondition::OnHailed {
-                    entity_name: "starbase_alpha".into(),
-                },
-                node: CommsDialogueNode {
-                    body: "USS Phoenix, please identify yourself.".into(),
-                    responses: vec![
-                        CommsResponse {
-                            text: "We are on a survey mission.".into(),
-                            important: false,
-                            actions: action(TriggerAction::CompleteObjective {
-                                id: "decl_obj".into(),
-                            }),
-                            follow_up: None,
-                        },
-                        CommsResponse {
-                            text: "No comment.".into(),
-                            important: true,
-                            actions: action(TriggerAction::FailObjective {
-                                id: "decl_obj".into(),
-                            }),
-                            follow_up: None,
-                        },
-                    ],
-                    speaker: None,
-                    trigger: None,
-                },
-                thread_id: None,
-                urgent: false,
-                root_follow_up: None,
-                display_name: None,
-            },
-            fired: false,
-        }
-    }
 
     /// The full live path: `comms_test_app`'s Input → Broadcast chain with the
     /// world-script Physics systems spliced in exactly where `CommsWorldPlugin`
@@ -950,37 +896,36 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
                     open_scripted_comms_threads,
                 )
                     .chain()
-                    .after(crate::comms::server::tick_pending_follow_ups)
+                    .after(crate::console::comms::server::handle_clear_comms)
                     .before(crate::console::comms::server::handle_comms_channel2),
             );
         app
     }
 
-    /// Seat the twins: the declarative template, the scripted trigger + its
-    /// handler table, and the two objectives their picks resolve.
-    fn seat_twin_threads(app: &mut App, scripted: bool) {
+    /// Seat the scripted thread: its trigger + handler table, and the objective
+    /// its picks resolve.
+    ///
+    /// It used to seat a DECLARATIVE twin beside it — the same body, the same
+    /// two responses, the same two objective actions authored as `[[comms]]`
+    /// tables — and the tests below compared the two wire-for-wire and
+    /// effect-for-effect. Issue #985 deleted the front-end that authored the
+    /// twin, so what those tests can still pin is the concrete shape they always
+    /// asserted alongside the comparison, which is the half that pinned
+    /// behaviour rather than equality-to-itself.
+    fn seat_scripted_thread(app: &mut App) {
         setup_game_with_comms(app, STATION_UUID);
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "script_obj",
+            "identify the ship",
+            true,
+            vec![],
+        );
+        let mut sr = compile_fixture(SCRIPTED_THREAD);
         {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            // Replace the harness's own template with the declarative twin.
-            comms.comms_template_states = vec![declarative_twin()];
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr);
         }
-        for id in ["decl_obj", "script_obj"] {
-            app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
-                id,
-                "identify the ship",
-                true,
-                vec![],
-            );
-        }
-        if scripted {
-            let mut sr = compile_fixture(SCRIPTED_THREAD);
-            {
-                let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-                crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr);
-            }
-            app.world_mut().insert_resource(sr);
-        }
+        app.world_mut().insert_resource(sr);
     }
 
     fn hail(app: &mut App) {
@@ -997,28 +942,11 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
         let _ = tick(app);
     }
 
-    /// Split the inbox into `(declarative, scripted)` by which dialogue carries a
-    /// `ScriptedDialogue` — the only thing that distinguishes the twins.
-    fn split_twins(app: &App) -> (CommsMessage, CommsMessage) {
-        let comms = app.world().resource::<CommsRuntime>();
+    /// The one message the hail delivered.
+    fn only_message(app: &App) -> crate::messages::CommsMessage {
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        let scripted = |m: &CommsMessage| {
-            comms
-                .active_dialogues
-                .get(&m.id)
-                .is_some_and(|d| d.script.is_some())
-        };
-        let decl = messages
-            .iter()
-            .find(|m| !scripted(m))
-            .expect("the declarative twin is delivered")
-            .clone();
-        let script = messages
-            .iter()
-            .find(|m| scripted(m))
-            .expect("the scripted twin is delivered")
-            .clone();
-        (decl, script)
+        assert_eq!(messages.len(), 1, "the hail opens exactly one thread");
+        messages[0].clone()
     }
 
     fn respond(app: &mut App, message_id: &str, response_index: usize) {
@@ -1047,30 +975,19 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
             .status
     }
 
-    /// The wire half of the parity claim: one hail delivers both threads, and
-    /// what the Comms officer sees is indistinguishable between them.
+    /// What the Comms officer sees when a scripted thread opens: the authored
+    /// body and the authored response texts and `important` flags, in order.
     #[test]
-    fn scripted_and_declarative_threads_deliver_identical_messages_on_the_wire() {
+    fn a_scripted_thread_delivers_its_authored_body_and_responses() {
         let mut app = live_comms_app();
-        seat_twin_threads(&mut app, true);
+        seat_scripted_thread(&mut app);
         hail(&mut app);
 
-        let (decl, script) = split_twins(&app);
-        assert_eq!(decl.body, script.body);
-        assert_eq!(decl.subject, script.subject);
-        assert_eq!(decl.sender_uuid, script.sender_uuid);
-        assert_eq!(
-            decl.sender_name, script.sender_name,
-            "the open's display_name is the scripted analogue of the contact label"
-        );
-        assert_eq!(decl.is_urgent, script.is_urgent);
-        assert_eq!(decl.sender_in_range, script.sender_in_range);
-        assert_eq!(
-            decl.responses, script.responses,
-            "text, `important` and availability must match response for response"
-        );
-        // And the concrete shape, so this pins behaviour rather than
-        // equality-to-itself.
+        let script = only_message(&app);
+        assert_eq!(script.sender_uuid, STATION_UUID);
+        assert_eq!(script.sender_name, "Starbase Alpha");
+        assert!(!script.is_urgent);
+        assert!(script.sender_in_range);
         assert_eq!(script.body, "USS Phoenix, please identify yourself.");
         assert_eq!(
             script
@@ -1085,29 +1002,22 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
         );
     }
 
-    /// The effect half: for the SAME pick, both threads resolve their objective
-    /// the same way — the live-app form of "identical `ActionCmd`s per choice".
+    /// Each pick runs its own `on_pick` fn, and the objective moves the way that
+    /// fn says: response 0 completes it, response 1 fails it.
     #[test]
-    fn scripted_and_declarative_responses_have_identical_effects_per_choice() {
+    fn each_scripted_response_applies_its_own_on_picks_effects() {
         for (index, expected) in [
             (0usize, ObjectiveStatus::Completed),
             (1usize, ObjectiveStatus::Failed),
         ] {
             let mut app = live_comms_app();
-            seat_twin_threads(&mut app, true);
+            seat_scripted_thread(&mut app);
             hail(&mut app);
-            let (decl, script) = split_twins(&app);
+            let script = only_message(&app);
 
-            respond(&mut app, &decl.id, index);
             respond(&mut app, &script.id, index);
 
-            assert_eq!(
-                status(&app, "decl_obj"),
-                status(&app, "script_obj"),
-                "choice {index}: the scripted thread and its TOML twin must have \
-                 identical effects"
-            );
-            assert_eq!(status(&app, "script_obj"), expected);
+            assert_eq!(status(&app, "script_obj"), expected, "choice {index}");
         }
     }
 
@@ -1123,7 +1033,7 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
             crate::entity_config::EntityConfig::from_toml("").unwrap(),
         );
         let mut app = live_comms_app();
-        seat_twin_threads(&mut app, false);
+        setup_game_with_comms(&mut app, STATION_UUID);
         let mut sr = compile_fixture(
             r#"
 on_hailed("starbase_alpha", "hail_handler");
@@ -1153,7 +1063,7 @@ fn on_send(ctx) {
             .insert_resource(crate::world_id::WorldIdMint::default());
 
         hail(&mut app);
-        let (_decl, script) = split_twins(&app);
+        let script = only_message(&app);
         respond(&mut app, &script.id, 0);
 
         let escort_uuid = app
@@ -1332,12 +1242,6 @@ fn on_send(ctx) {
     fn seat_default_world(app: &mut App) {
         setup_game_with_comms(app, STATION_UUID);
         {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            // The converted world authors NO declarative templates; drop the
-            // harness's own so the inbox holds only what the script delivers.
-            comms.comms_template_states.clear();
-        }
-        {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime
                 .name_to_uuid
@@ -1441,28 +1345,31 @@ fn on_send(ctx) {
     }
 
     /// The no-op guard at full scale: the SAME hail on a world with no scripts
-    /// delivers the declarative twin and nothing else, and the new system leaves
-    /// no trace — every shipped world takes this path.
+    /// delivers nothing at all, and the new system leaves no trace.
+    ///
+    /// It used to assert the DECLARATIVE twin still arrived; issue #985 deleted
+    /// that front-end, so a hail into a script-free world is now exactly a
+    /// recorded hail and a `WorldEvent::Hailed` nobody is listening for.
     #[test]
-    fn a_hail_on_a_script_free_world_delivers_only_the_declarative_thread() {
+    fn a_hail_on_a_script_free_world_delivers_nothing() {
         let mut app = live_comms_app();
-        seat_twin_threads(&mut app, false);
+        setup_game_with_comms(&mut app, STATION_UUID);
         hail(&mut app);
 
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(messages.len(), 1, "only the declarative twin arrives");
-        let comms = app.world().resource::<CommsRuntime>();
-        assert_eq!(comms.active_dialogues.len(), 1);
         assert!(
-            comms.active_dialogues.values().all(|d| d.script.is_none()),
-            "a declarative dialogue never carries scripted state"
+            app.world()
+                .resource::<CommsInboxRes>()
+                .0
+                .messages()
+                .is_empty(),
+            "no front-end answered the hail, so no message is delivered"
         );
-
-        // And the declarative pick still behaves exactly as it always did.
-        let id = messages[0].id.clone();
-        respond(&mut app, &id, 0);
-        assert_eq!(status(&app, "decl_obj"), ObjectiveStatus::Completed);
-        assert_eq!(status(&app, "script_obj"), ObjectiveStatus::Active);
+        let comms = app.world().resource::<CommsRuntime>();
+        assert!(comms.active_dialogues.is_empty());
+        assert!(
+            comms.open_hails.contains(STATION_UUID),
+            "the hail itself is still recorded — that is what re-arms the AI gate"
+        );
     }
 
     // ── The shipped demo scenario (issue #984) ────────────────────────────────

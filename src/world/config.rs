@@ -526,126 +526,6 @@ pub(crate) struct RawActionEntry {
     pub(crate) delay_secs: Option<f32>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawCommsFollowUp {
-    message: String,
-    #[serde(default, rename = "response")]
-    responses: Vec<RawCommsResponse>,
-    /// Preferred display-speaker override for this follow-up node.
-    #[serde(default)]
-    speaker: Option<String>,
-    /// Legacy display-speaker override for this follow-up node. Prefer
-    /// `speaker`; kept so existing authored worlds continue to parse.
-    #[serde(default)]
-    from: Option<String>,
-    /// Optional trigger condition that gates this follow-up. When absent,
-    /// the follow-up fires immediately. When present, the follow-up sits in
-    /// the pending queue with a `...` placeholder until the trigger
-    /// condition is met (or fires immediately on the next tick if the
-    /// condition is already true — e.g. `on_entered_region` when the ship
-    /// is already inside, `on_flag_set` when the flag is already set,
-    /// `on_world_loaded` always).
-    #[serde(default)]
-    trigger: Option<String>,
-    /// Entity reference for triggers that require one
-    /// (`on_destroyed`, `on_attacked`, `on_hailed`, `on_entered_region`,
-    /// `on_exited_region`).
-    #[serde(default)]
-    entity: Option<String>,
-    /// Entity list for `on_all_destroyed`.
-    #[serde(default)]
-    group: Option<String>,
-    /// Elapsed-seconds threshold for `on_timer`. For follow-ups the timer
-    /// is measured from the moment the follow-up is queued (i.e. the
-    /// response is picked or the parent message is injected), not from
-    /// world load.
-    #[serde(default)]
-    after_secs: Option<f32>,
-    #[serde(default)]
-    threshold: Option<f32>,
-    /// Flag name for `on_flag_set` / `on_flag_cleared`.
-    #[serde(default)]
-    name: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawCommsResponse {
-    text: String,
-    /// When true, the client requires an explicit confirmation before
-    /// submitting this response (issue #761). Authored TOML flag; defaults
-    /// to false so existing responses submit immediately as before.
-    #[serde(default)]
-    important: bool,
-    #[serde(default, rename = "action")]
-    actions: Vec<RawActionEntry>,
-    #[serde(default)]
-    follow_up: Option<RawCommsFollowUp>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawCommsEntry {
-    from: String,
-    /// Root message body. Required for a declarative comms thread; OMITTED for a
-    /// scripted thread (issue #982, `script = "fn"`), whose root message lives in
-    /// the script node the root fn returns. The parser enforces presence on the
-    /// declarative path.
-    #[serde(default)]
-    message: Option<String>,
-    trigger: String,
-    /// Optional display-speaker override for this root message. `from`
-    /// remains the physical/synthetic comms endpoint used for hailing,
-    /// range, and contact lookup.
-    #[serde(default)]
-    speaker: Option<String>,
-    /// Optional player-facing sender display text (issue #751), separate from
-    /// the `from` reference id. `from` stays the physical/synthetic comms
-    /// endpoint used for hailing, range, and contact lookup; `display_name`
-    /// is what the crew sees as the sender label.
-    #[serde(default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    entity: Option<String>,
-    /// Entity list for `on_all_destroyed` root triggers.
-    #[serde(default)]
-    group: Option<String>,
-    /// Elapsed-seconds threshold for `on_timer` root triggers.
-    #[serde(default)]
-    after_secs: Option<f32>,
-    #[serde(default)]
-    threshold: Option<f32>,
-    /// Flag name for `on_flag_set` / `on_flag_cleared` root triggers.
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default, rename = "response")]
-    responses: Vec<RawCommsResponse>,
-    /// When set, all messages from this template (and their follow-ups) share
-    /// this thread_id. When absent, a unique UUID is generated per fire.
-    #[serde(default)]
-    thread_id: Option<String>,
-    #[serde(default)]
-    urgent: bool,
-    /// Optional chained follow-up message that fires automatically after the
-    /// root node is injected. Authoring shape for one-way broadcasts that
-    /// promise more dialogue ("Stand by — patching you through...") without
-    /// any player response click. Mutually exclusive with `[[response]]`:
-    /// when both are present, the parser drops `follow_up` and emits a
-    /// warning so the responses path keeps working.
-    #[serde(default)]
-    follow_up: Option<RawCommsFollowUp>,
-    /// Rhai front-end (issue #982, milestone M4): the name of a script fn that
-    /// returns this thread's ROOT dialogue node (`#{message, responses}`), as an
-    /// ALTERNATIVE to the inline `message` + `[[response]]` tree. When present the
-    /// dialogue tree moves to script and this `[[comms]]` block carries only
-    /// metadata (`from` / `trigger` (+ its `entity` / `group` / `after_secs` /
-    /// `name`) / `thread_id` / `urgent` / `display_name` / `speaker`); the block
-    /// is parsed into a [`ScriptedCommsTemplate`] held apart from
-    /// [`WorldConfig::comms`], so the live TOML comms path never injects it. A
-    /// block that specifies both `script` and a `[[response]]` tree is rejected by
-    /// the script cross-reference pass (`crate::world::script::validate`).
-    #[serde(default)]
-    script: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AvailableShipEntry {
     pub template_path: String,
@@ -674,8 +554,6 @@ pub struct RawWorld {
     pub entities: Vec<WorldEntity>,
     #[serde(default, rename = "trigger")]
     triggers: Vec<RawTriggerEntry>,
-    #[serde(default, rename = "comms")]
-    comms: Vec<RawCommsEntry>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -968,119 +846,6 @@ pub struct Trigger {
     /// (may re-fire every tick its condition holds). Ignored for once-only
     /// triggers.
     pub cooldown_secs: Option<f32>,
-}
-
-/// A single response option within a comms dialogue node.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CommsResponse {
-    pub text: String,
-    /// True when the author marked this response important, so the client
-    /// confirms before submitting it (issue #761). Not a strings.csv id — the
-    /// authored `text` stays authored TOML, and this flag rides the wire in
-    /// `CommsResponseView`.
-    pub important: bool,
-    pub actions: Vec<TriggerAction>,
-    pub follow_up: Option<CommsDialogueNode>,
-}
-
-/// A single node in an inline dialogue tree.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CommsDialogueNode {
-    pub body: String,
-    pub responses: Vec<CommsResponse>,
-    /// Display-speaker override for this node. When `Some`, it overrides the
-    /// channel/contact name used for the delivered `CommsMessage`.
-    pub speaker: Option<String>,
-    /// Optional trigger condition that gates injection of this node into
-    /// the inbox.
-    ///
-    /// `None` — fire immediately on the next tick after being queued
-    /// (the default; mirrors a "no delay, no condition" follow-up).
-    ///
-    /// `Some(condition)` — sit in the pending queue with a `...`
-    /// placeholder until the condition is met. The condition is evaluated
-    /// against world events observed after the follow-up is queued, plus
-    /// "already-true" state-based shortcuts (e.g. ship currently inside a
-    /// region for `OnEnteredRegion`, flag already set for `OnFlagSet`).
-    /// For `OnTimer` the elapsed-seconds clock is queue-relative, not
-    /// world-relative — so a follow-up with `after_secs = 3.0` fires
-    /// three seconds after the player picks the response (or the parent
-    /// message is injected, for chained roots).
-    pub trigger: Option<TriggerCondition>,
-}
-
-/// A comms template: a root dialogue node associated with a trigger condition.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CommsTemplate {
-    /// Entity name whose UUID is the sender of the comms message. This is the
-    /// authored **reference id** — resolved to the sender UUID via
-    /// `name_to_uuid`, and used for hailing, range, and contact lookup. It is
-    /// NOT the player-facing sender label; use [`CommsTemplate::display_name`]
-    /// / per-node `speaker` for that (issue #751).
-    pub from: String,
-    /// Optional player-facing sender display text, independent of the `from`
-    /// reference id (issue #751, mirrors [`WorldEntity::display_name`]). When
-    /// absent the delivered sender name falls back to `from`. Authored data,
-    /// not a code string — no `strings.csv` entry required.
-    pub display_name: Option<String>,
-    /// The trigger condition that fires this template.
-    pub trigger: TriggerCondition,
-    /// The root dialogue node.
-    pub node: CommsDialogueNode,
-    /// Optional thread_id override. When present, the server uses this
-    /// instead of generating a UUID, allowing multiple templates from the
-    /// same plot line to share a conversation thread.
-    pub thread_id: Option<String>,
-    /// When true, the resulting `CommsMessage` is flagged as urgent.
-    /// Inbox rows and the sender's Hail button will display a `!` marker
-    /// and an amber tint while any unread urgent message from this sender
-    /// remains. Defaults to false.
-    pub urgent: bool,
-    /// Optional chained follow-up node that auto-fires after the root
-    /// message is injected. Used for one-way broadcasts that promise
-    /// further dialogue ("Stand by...") — the chained message arrives
-    /// either on the next tick or when its own `trigger` fires (with
-    /// "fire immediately if already true" semantics), with no response
-    /// click required.
-    /// Mutually exclusive with `node.responses`: when the author supplies
-    /// both, the parser drops this field and warns.
-    pub root_follow_up: Option<CommsDialogueNode>,
-}
-
-/// A comms thread whose dialogue tree is authored in Rhai (issue #982, M4).
-///
-/// The scripted analogue of [`CommsTemplate`]: the `[[comms]]` block keeps only
-/// its metadata, and `root_fn` names the script fn that returns the thread's
-/// root dialogue node (`#{message, responses}`). Follow-ups are fn-to-fn
-/// references — a response's `on_pick` names the next node fn — so the nested
-/// `[[comms.response.follow_up…]]` tables (and their eight-segment localization
-/// keys) are gone for a scripted thread.
-///
-/// Held in [`WorldConfig::scripted_comms`], SEPARATE from
-/// [`WorldConfig::comms`], so the live TOML comms path
-/// ([`crate::comms::content::comms_template_states_from_world`], `handle_hail`,
-/// `handle_respond_to_message`) never sees a scripted thread. The seam stays
-/// dormant until the M7 collapse routes both front-ends through one shared
-/// response-dispatch path — mirroring how M2's TOML `[[trigger]] script` front-
-/// end builds an inert empty-action [`Trigger`] the evaluator ignores at runtime.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ScriptedCommsTemplate {
-    /// Sender reference id (the same authoring role as [`CommsTemplate::from`]).
-    pub from: String,
-    /// Optional player-facing sender display text ([`CommsTemplate::display_name`]).
-    pub display_name: Option<String>,
-    /// The trigger condition that fires this thread.
-    pub trigger: TriggerCondition,
-    /// Optional root-message speaker override ([`CommsDialogueNode::speaker`]).
-    pub speaker: Option<String>,
-    /// Optional shared thread id ([`CommsTemplate::thread_id`]).
-    pub thread_id: Option<String>,
-    /// Urgency flag ([`CommsTemplate::urgent`]).
-    pub urgent: bool,
-    /// Name of the Rhai fn returning this thread's root dialogue node. Resolved
-    /// against the compiled script's defined-function set by
-    /// [`crate::world::script::validate::validate_toml_script_comms`].
-    pub root_fn: String,
 }
 
 // -- Parser helpers -----------------------------------------------------------
@@ -1580,50 +1345,6 @@ fn parse_raw_actions(
     Ok((actions, raw_predicates, delay_secs))
 }
 
-fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode, String> {
-    let fu_responses = parse_comms_responses(&raw_fu.responses)?;
-    let trigger = match &raw_fu.trigger {
-        Some(name) => Some(parse_trigger_condition_from_string(
-            name,
-            raw_fu.entity.clone(),
-            raw_fu.group.clone(),
-            raw_fu.after_secs,
-            raw_fu.threshold,
-            raw_fu.name.clone(),
-            // Comms follow-ups have no `waypoint` field; an
-            // `on_waypoint_reached` follow-up fires on any waypoint.
-            None,
-            "Comms follow-up",
-        )?),
-        None => None,
-    };
-    Ok(CommsDialogueNode {
-        body: raw_fu.message.clone(),
-        responses: fu_responses,
-        speaker: raw_fu.speaker.clone().or_else(|| raw_fu.from.clone()),
-        trigger,
-    })
-}
-
-fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<CommsResponse>, String> {
-    let mut responses = Vec::new();
-    for raw_resp in raw_responses {
-        let (actions, _, _) = parse_raw_actions(&raw_resp.actions)?;
-        let follow_up = if let Some(ref raw_fu) = raw_resp.follow_up {
-            Some(parse_comms_follow_up(raw_fu)?)
-        } else {
-            None
-        };
-        responses.push(CommsResponse {
-            text: raw_resp.text.clone(),
-            important: raw_resp.important,
-            actions,
-            follow_up,
-        });
-    }
-    Ok(responses)
-}
-
 fn parse_trigger_condition_from_string(
     name: &str,
     entity: Option<String>,
@@ -1728,10 +1449,10 @@ pub(crate) fn scripted_trigger(condition: TriggerCondition) -> Trigger {
 
 /// Parsed unified world configuration.
 ///
-/// Carries the anchor table, `[[entity]]` instances, `[[trigger]]` blocks,
-/// and `[[comms]]` templates. Anchors are normalised to fixed-size `[f32; 3]`
-/// arrays at parse time so downstream consumers (e.g. AI patrol path lookups,
-/// region positioning) don't have to re-validate length on every read.
+/// Carries the anchor table and the `[[entity]]` instances. Anchors are
+/// normalised to fixed-size `[f32; 3]` arrays at parse time so downstream
+/// consumers (e.g. AI patrol path lookups, region positioning) don't have to
+/// re-validate length on every read.
 #[derive(Clone, Debug, Default, bevy::prelude::Resource)]
 pub struct WorldConfig {
     pub global: GlobalConfig,
@@ -1739,14 +1460,6 @@ pub struct WorldConfig {
     pub entities: Vec<WorldEntity>,
     /// Ordered list of triggers declared in the world.
     pub triggers: Vec<Trigger>,
-    /// Ordered list of comms dialogue templates declared in the world.
-    pub comms: Vec<CommsTemplate>,
-    /// Ordered list of SCRIPTED comms threads (issue #982, M4): `[[comms]]`
-    /// blocks that moved their dialogue tree to a Rhai root-node fn (`script =
-    /// "fn"`), reduced here to metadata. Held apart from [`Self::comms`] so the
-    /// live TOML comms path never injects one — dormant until the M7 collapse
-    /// wires the scripted response dispatch.
-    pub scripted_comms: Vec<ScriptedCommsTemplate>,
     /// Map of `name ? uuid` for entities spawned via `[[entity]] name = "..."`.
     /// Populated by `spawn_world_entities` (PRD #337/#339 slice 2); read by
     /// trigger and comms lookup paths that resolve a name to a live UUID.
@@ -2020,82 +1733,6 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         });
     }
 
-    // Comms templates.
-    let mut comms = Vec::with_capacity(raw.comms.len());
-    let mut scripted_comms = Vec::new();
-    for raw_comms in raw.comms {
-        let trigger = parse_trigger_condition_from_string(
-            &raw_comms.trigger,
-            raw_comms.entity,
-            raw_comms.group,
-            raw_comms.after_secs,
-            raw_comms.threshold,
-            raw_comms.name,
-            // Comms blocks have no `waypoint` field; an
-            // `on_waypoint_reached` template fires on any waypoint.
-            None,
-            "Comms block",
-        )?;
-        // Scripted thread (issue #982, M4): the dialogue tree lives in the named
-        // root-node fn, so this block reduces to metadata. Its `[[response]]` /
-        // `follow_up` tables (if any) are ignored here — a block carrying both a
-        // `script` and a response tree is rejected by the script cross-reference
-        // pass (`validate_toml_script_comms`), mirroring how M2 handles a
-        // `[[trigger]]` that carries both front-ends. Pushed to `scripted_comms`,
-        // NOT `comms`, so the live TOML path never injects a scripted thread.
-        if let Some(root_fn) = raw_comms.script {
-            scripted_comms.push(ScriptedCommsTemplate {
-                from: raw_comms.from,
-                display_name: raw_comms.display_name,
-                trigger,
-                speaker: raw_comms.speaker,
-                thread_id: raw_comms.thread_id,
-                urgent: raw_comms.urgent,
-                root_fn,
-            });
-            continue;
-        }
-        // Declarative thread: a root `message` is required (a scripted thread
-        // omits it and returned above).
-        let message = raw_comms.message.ok_or_else(|| {
-            format!(
-                "Comms block from '{}' requires a 'message' field \
-                 (or a 'script' root-node fn for a scripted thread)",
-                raw_comms.from
-            )
-        })?;
-        let responses = parse_comms_responses(&raw_comms.responses)?;
-        let root_follow_up = if let Some(ref raw_fu) = raw_comms.follow_up {
-            if !responses.is_empty() {
-                return Err(format!(
-                    "Comms template from '{}' has both [[response]] and \
-                     a top-level [comms.follow_up]; these are mutually \
-                     exclusive — use response.follow_up for branching dialogue \
-                     or remove the responses to chain a monologue",
-                    raw_comms.from
-                ));
-            }
-            Some(parse_comms_follow_up(raw_fu)?)
-        } else {
-            None
-        };
-        let node = CommsDialogueNode {
-            body: message,
-            responses,
-            speaker: raw_comms.speaker,
-            trigger: None,
-        };
-        comms.push(CommsTemplate {
-            from: raw_comms.from,
-            display_name: raw_comms.display_name,
-            trigger,
-            node,
-            thread_id: raw_comms.thread_id,
-            urgent: raw_comms.urgent,
-            root_follow_up,
-        });
-    }
-
     // Validate extra_worlds: every entry must be a non-empty string.
     for (i, path) in raw.extra_worlds.iter().enumerate() {
         if path.trim().is_empty() {
@@ -2141,8 +1778,6 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         anchors,
         entities,
         triggers,
-        comms,
-        scripted_comms,
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
         delayed_unload_policy,
@@ -2277,34 +1912,10 @@ pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> V
         }
     }
 
-    // 4. Comms dialogue spawn_entity references (root + arbitrarily-nested
-    //    response follow-ups + the optional `root_follow_up` chained node).
-    fn walk_node(
-        node: &CommsDialogueNode,
-        seen: &mut std::collections::HashSet<String>,
-        out: &mut Vec<String>,
-    ) {
-        for resp in &node.responses {
-            for action in &resp.actions {
-                if let TriggerAction::SpawnEntity { template_path, .. } = action {
-                    if seen.insert(template_path.clone()) {
-                        out.push(template_path.clone());
-                    }
-                }
-            }
-            if let Some(fu) = &resp.follow_up {
-                walk_node(fu, seen, out);
-            }
-        }
-    }
-    for tmpl in &world.comms {
-        walk_node(&tmpl.node, &mut seen, &mut out);
-        if let Some(rfu) = &tmpl.root_follow_up {
-            walk_node(rfu, &mut seen, &mut out);
-        }
-    }
-
-    // 5. Scripted `spawn_entity` references (issue #984).
+    // 4. Scripted `spawn_entity` references (issue #984). Since issue #985 this
+    //    is the only source of a *dynamic* spawn's template path: the
+    //    `[[comms.response.action]]` tree that step 4 used to walk no longer
+    //    parses.
     for source in &world.script_sources {
         for path in script_spawn_template_paths(source) {
             if seen.insert(path.clone()) {
@@ -4120,564 +3731,6 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_reads_on_attacked_comms_template() {
-        let toml = r#"
-[[comms]]
-from    = "raider_alpha"
-trigger = "on_attacked"
-entity  = "raider_alpha"
-message = "MAYDAY!"
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.comms.len(), 1);
-        assert_eq!(cfg.comms[0].from, "raider_alpha");
-        assert_eq!(
-            cfg.comms[0].trigger,
-            TriggerCondition::OnAttacked {
-                entity_name: "raider_alpha".to_string()
-            }
-        );
-        assert_eq!(cfg.comms[0].node.body, "MAYDAY!");
-        assert!(cfg.comms[0].node.responses.is_empty());
-    }
-
-    #[test]
-    fn parse_world_reads_on_hull_below_comms_template_and_rejects_missing_fields() {
-        let cfg = parse_world(
-            r#"
-[[comms]]
-from = "station"
-trigger = "on_hull_below"
-entity = "station"
-threshold = 0.75
-message = "Hull warning"
-"#,
-        )
-        .expect("valid hull threshold comms must parse");
-        assert_eq!(
-            cfg.comms[0].trigger,
-            TriggerCondition::OnHullBelow {
-                entity_name: "station".into(),
-                threshold: 0.75,
-            }
-        );
-
-        for (label, toml) in [
-            (
-                "missing entity",
-                r#"[[comms]]
-from = "station"
-trigger = "on_hull_below"
-threshold = 0.75
-message = "Hull warning"
-"#,
-            ),
-            (
-                "missing threshold",
-                r#"[[comms]]
-from = "station"
-trigger = "on_hull_below"
-entity = "station"
-message = "Hull warning"
-"#,
-            ),
-        ] {
-            assert!(parse_world(toml).is_err(), "{label} must be rejected");
-        }
-    }
-
-    #[test]
-    fn scripted_comms_block_parses_to_metadata_only() {
-        // Issue #982 (M4): a `[[comms]] script = "fn"` block moves its dialogue
-        // tree to script and reduces to metadata. It lands in `scripted_comms`,
-        // NOT `comms`, so the live TOML comms path never injects it (dormant).
-        let toml = r#"
-[[comms]]
-from         = "axiom"
-trigger      = "on_hailed"
-entity       = "axiom"
-thread_id    = "axiom_thread"
-urgent       = true
-display_name = "Axiom Station"
-speaker      = "Dockmaster"
-script       = "hail_axiom"
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert!(
-            cfg.comms.is_empty(),
-            "a scripted thread must NOT land in the live `comms` list"
-        );
-        assert_eq!(cfg.scripted_comms.len(), 1);
-        let t = &cfg.scripted_comms[0];
-        assert_eq!(t.from, "axiom");
-        assert_eq!(t.root_fn, "hail_axiom");
-        assert_eq!(t.thread_id.as_deref(), Some("axiom_thread"));
-        assert!(t.urgent);
-        assert_eq!(t.display_name.as_deref(), Some("Axiom Station"));
-        assert_eq!(t.speaker.as_deref(), Some("Dockmaster"));
-        assert_eq!(
-            t.trigger,
-            TriggerCondition::OnHailed {
-                entity_name: "axiom".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn scripted_comms_ignores_any_inline_response_tree() {
-        // A block carrying BOTH `script` and a `[[response]]` tree parses (the
-        // parser prefers `script` and drops the tree); the script cross-reference
-        // pass (`validate_toml_script_comms`) is what rejects the ambiguity. The
-        // parsed result is metadata-only, with nothing in `comms`.
-        let toml = r#"
-[[comms]]
-from    = "axiom"
-trigger = "on_hailed"
-entity  = "axiom"
-script  = "hail_axiom"
-
-  [[comms.response]]
-  text = "Acknowledge"
-  [[comms.response.action]]
-  type = "complete_objective"
-  id   = "obj-x"
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert!(cfg.comms.is_empty());
-        assert_eq!(cfg.scripted_comms.len(), 1);
-        assert_eq!(cfg.scripted_comms[0].root_fn, "hail_axiom");
-    }
-
-    #[test]
-    fn parse_world_reads_comms_response_tree_with_actions() {
-        let toml = r#"
-[[comms]]
-from    = "Starbase Alpha"
-trigger = "on_hailed"
-entity  = "Starbase Alpha"
-message = "Please state your business."
-
-  [[comms.response]]
-  text = "We are on a survey mission."
-    [[comms.response.action]]
-    type = "add_objective"
-    id   = "obj-survey"
-    text = "Complete the survey."
-
-  [[comms.response]]
-  text = "We require docking clearance."
-    [[comms.response.action]]
-    type      = "add_objective"
-    id        = "obj-dock"
-    text      = "Dock at Starbase Alpha."
-    mandatory = true
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.comms.len(), 1);
-        let tmpl = &cfg.comms[0];
-        assert_eq!(tmpl.node.responses.len(), 2);
-        assert_eq!(tmpl.node.responses[0].text, "We are on a survey mission.");
-        assert_eq!(tmpl.node.responses[0].actions.len(), 1);
-        assert_eq!(tmpl.node.responses[1].text, "We require docking clearance.");
-        match &tmpl.node.responses[1].actions[0] {
-            TriggerAction::AddObjective { mandatory, .. } => assert!(*mandatory),
-            _ => panic!("expected mandatory AddObjective"),
-        }
-        // `important` defaults to false when the authored response omits it.
-        assert!(!tmpl.node.responses[0].important);
-        assert!(!tmpl.node.responses[1].important);
-    }
-
-    #[test]
-    fn parse_world_reads_important_response_flag() {
-        // Issue #761: an authored `important = true` on a `[[comms.response]]`
-        // parses through to `CommsResponse::important`. It defaults to false
-        // when omitted, mirroring the `display_name` authored-TOML precedent.
-        let toml = r#"
-[[comms]]
-from    = "Starbase Alpha"
-trigger = "on_hailed"
-entity  = "Starbase Alpha"
-message = "Arm the warhead?"
-
-  [[comms.response]]
-  text      = "Arm it."
-  important = true
-
-  [[comms.response]]
-  text = "Stand down."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let tmpl = &cfg.comms[0];
-        assert_eq!(tmpl.node.responses.len(), 2);
-        assert!(
-            tmpl.node.responses[0].important,
-            "authored important = true must parse through"
-        );
-        assert!(
-            !tmpl.node.responses[1].important,
-            "omitted important must default to false"
-        );
-    }
-
-    #[test]
-    fn parse_world_reads_root_comms_speaker_override() {
-        let toml = r#"
-[[comms]]
-from    = "Research Outpost"
-speaker = "Dr. Myst"
-trigger = "on_hailed"
-entity  = "Research Outpost"
-message = "The signal is getting stronger."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let tmpl = &cfg.comms[0];
-        assert_eq!(tmpl.from, "Research Outpost");
-        assert_eq!(tmpl.node.speaker.as_deref(), Some("Dr. Myst"));
-    }
-
-    #[test]
-    fn parse_world_reads_follow_up_speaker_override() {
-        let toml = r#"
-[[comms]]
-from    = "Research Outpost"
-trigger = "on_hailed"
-entity  = "Research Outpost"
-message = "Stand by."
-
-  [[comms.response]]
-  text = "Patch them through."
-    [comms.response.follow_up]
-    speaker = "Dr. Myst"
-    message = "This is Dr. Myst."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let follow_up = cfg.comms[0].node.responses[0]
-            .follow_up
-            .as_ref()
-            .expect("follow-up should parse");
-        assert_eq!(follow_up.speaker.as_deref(), Some("Dr. Myst"));
-    }
-
-    #[test]
-    fn parse_world_keeps_legacy_follow_up_from_as_speaker_alias() {
-        let toml = r#"
-[[comms]]
-from    = "Research Outpost"
-trigger = "on_hailed"
-entity  = "Research Outpost"
-message = "Stand by."
-
-  [[comms.response]]
-  text = "Patch them through."
-    [comms.response.follow_up]
-    from    = "Dr. Myst"
-    message = "This is Dr. Myst."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let follow_up = cfg.comms[0].node.responses[0]
-            .follow_up
-            .as_ref()
-            .expect("follow-up should parse");
-        assert_eq!(follow_up.speaker.as_deref(), Some("Dr. Myst"));
-    }
-
-    #[test]
-    fn parse_world_follow_up_speaker_wins_over_legacy_from_alias() {
-        let toml = r#"
-[[comms]]
-from    = "Research Outpost"
-trigger = "on_hailed"
-entity  = "Research Outpost"
-message = "Stand by."
-
-  [[comms.response]]
-  text = "Patch them through."
-    [comms.response.follow_up]
-    speaker = "Dr. Myst"
-    from    = "Outpost Operator"
-    message = "This is Dr. Myst."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let follow_up = cfg.comms[0].node.responses[0]
-            .follow_up
-            .as_ref()
-            .expect("follow-up should parse");
-        assert_eq!(follow_up.speaker.as_deref(), Some("Dr. Myst"));
-    }
-
-    // -- Root-level [comms.follow_up] (auto-chained monologues) ─────────────
-
-    #[test]
-    fn parse_world_reads_root_follow_up_with_speaker_and_timer_trigger() {
-        let toml = r#"
-[[comms]]
-from    = "Research Outpost"
-trigger = "on_hailed"
-entity  = "Research Outpost"
-message = "Stand by — patching you through to Dr. Myst now."
-
-  [comms.follow_up]
-  speaker    = "Dr. Myst"
-  trigger    = "on_timer"
-  after_secs = 2.0
-  message    = "Captain. Dr. Myst speaking."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let tmpl = &cfg.comms[0];
-        assert!(
-            tmpl.node.responses.is_empty(),
-            "root has no responses when chained"
-        );
-        let fu = tmpl
-            .root_follow_up
-            .as_ref()
-            .expect("root_follow_up must parse");
-        assert_eq!(fu.speaker.as_deref(), Some("Dr. Myst"));
-        assert_eq!(
-            fu.trigger,
-            Some(TriggerCondition::OnTimer { after_secs: 2.0 })
-        );
-        assert_eq!(fu.body, "Captain. Dr. Myst speaking.");
-        assert!(
-            fu.responses.is_empty(),
-            "no nested responses configured here"
-        );
-    }
-
-    #[test]
-    fn parse_world_root_follow_up_supports_nested_responses() {
-        let toml = r#"
-[[comms]]
-from    = "Research Outpost"
-trigger = "on_hailed"
-entity  = "Research Outpost"
-message = "Stand by."
-
-  [comms.follow_up]
-  message = "Captain. Dr. Myst speaking."
-
-    [[comms.follow_up.response]]
-    text = "What did you find?"
-
-    [[comms.follow_up.response]]
-    text = "Stand by, doctor."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let fu = cfg.comms[0]
-            .root_follow_up
-            .as_ref()
-            .expect("root_follow_up must parse");
-        assert_eq!(fu.responses.len(), 2);
-        assert_eq!(fu.responses[0].text, "What did you find?");
-        assert_eq!(fu.responses[1].text, "Stand by, doctor.");
-    }
-
-    #[test]
-    fn parse_world_root_follow_up_with_responses_is_rejected() {
-        // Mutual exclusion: a root node with both [[response]] and a
-        // top-level [comms.follow_up] is a hard parse error.
-        let toml = r#"
-[[comms]]
-from    = "Research Outpost"
-trigger = "on_hailed"
-entity  = "Research Outpost"
-message = "Stand by."
-
-  [[comms.response]]
-  text = "Acknowledge."
-
-  [comms.follow_up]
-  message = "Captain. Dr. Myst speaking."
-"#;
-        let err = parse_world(toml).expect_err("must reject mixed responses + root follow_up");
-        assert!(
-            err.contains("Research Outpost"),
-            "error must name the offending sender: {err}"
-        );
-        assert!(
-            err.contains("mutually exclusive") || err.contains("[comms.follow_up]"),
-            "error must explain the conflict: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_world_root_follow_up_absent_keeps_root_follow_up_none() {
-        // Existing world files (no [comms.follow_up]) still produce
-        // root_follow_up = None — back-compat smoke test.
-        let toml = r#"
-[[comms]]
-from    = "Starcorp Command"
-trigger = "on_world_loaded"
-message = "Investigate the situation."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert!(cfg.comms[0].root_follow_up.is_none());
-    }
-
-    // -- Follow-up triggers (response.follow_up.trigger) -------------------
-
-    #[test]
-    fn parse_world_reads_response_follow_up_with_on_entered_region_trigger() {
-        // The motivating use case: a response that promises the player will
-        // hear more on arrival. The follow-up's `trigger` field gates the
-        // injection until the named region is entered (or fires immediately
-        // if the ship is already inside).
-        let toml = r#"
-[[comms]]
-from    = "Axiom Station"
-trigger = "on_hailed"
-entity  = "Axiom Station"
-message = "Identify yourself."
-
-  [[comms.response]]
-  text = "We are proceeding to your location."
-
-    [comms.response.follow_up]
-    trigger = "on_entered_region"
-    entity  = "Axiom Station Dock"
-    message = "Welcome aboard, Ardent."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let fu = cfg.comms[0].node.responses[0]
-            .follow_up
-            .as_ref()
-            .expect("follow-up must parse");
-        assert_eq!(
-            fu.trigger,
-            Some(TriggerCondition::OnEnteredRegion {
-                entity_name: "Axiom Station Dock".into()
-            }),
-        );
-        assert_eq!(fu.body, "Welcome aboard, Ardent.");
-    }
-
-    #[test]
-    fn parse_world_reads_response_follow_up_with_on_flag_set_trigger() {
-        let toml = r#"
-[[comms]]
-from    = "Command"
-trigger = "on_hailed"
-entity  = "Command"
-message = "Stand by."
-
-  [[comms.response]]
-  text = "Standing by."
-
-    [comms.response.follow_up]
-    trigger = "on_flag_set"
-    name    = "alert_phase_two"
-    message = "Phase two engaged."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let fu = cfg.comms[0].node.responses[0]
-            .follow_up
-            .as_ref()
-            .expect("follow-up must parse");
-        assert_eq!(
-            fu.trigger,
-            Some(TriggerCondition::OnFlagSet {
-                name: "alert_phase_two".into()
-            }),
-        );
-    }
-
-    #[test]
-    fn parse_world_reads_response_follow_up_with_on_timer_trigger() {
-        // Replaces the legacy `delay_secs = N` shape.
-        let toml = r#"
-[[comms]]
-from    = "Command"
-trigger = "on_hailed"
-entity  = "Command"
-message = "Stand by."
-
-  [[comms.response]]
-  text = "Standing by."
-
-    [comms.response.follow_up]
-    trigger    = "on_timer"
-    after_secs = 5.0
-    message    = "Five seconds later..."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let fu = cfg.comms[0].node.responses[0]
-            .follow_up
-            .as_ref()
-            .expect("follow-up must parse");
-        assert_eq!(
-            fu.trigger,
-            Some(TriggerCondition::OnTimer { after_secs: 5.0 }),
-        );
-    }
-
-    #[test]
-    fn parse_world_follow_up_without_trigger_keeps_trigger_none() {
-        // A follow-up with no `trigger` field still parses; the resulting
-        // node has `trigger = None` (fires immediately on the next tick).
-        let toml = r#"
-[[comms]]
-from    = "Command"
-trigger = "on_hailed"
-entity  = "Command"
-message = "Identify yourself."
-
-  [[comms.response]]
-  text = "Phoenix here."
-
-    [comms.response.follow_up]
-    message = "Acknowledged."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let fu = cfg.comms[0].node.responses[0]
-            .follow_up
-            .as_ref()
-            .expect("follow-up must parse");
-        assert_eq!(fu.trigger, None);
-    }
-
-    #[test]
-    fn parse_world_follow_up_with_on_entered_region_missing_entity_errors() {
-        let toml = r#"
-[[comms]]
-from    = "Command"
-trigger = "on_hailed"
-entity  = "Command"
-message = "Identify yourself."
-
-  [[comms.response]]
-  text = "Phoenix here."
-
-    [comms.response.follow_up]
-    trigger = "on_entered_region"
-    message = "Welcome."
-"#;
-        let err = parse_world(toml).expect_err("missing entity must error");
-        assert!(
-            err.contains("on_entered_region") && err.contains("entity"),
-            "error must mention the missing entity field: {err}",
-        );
-    }
-
-    #[test]
-    fn parse_world_root_comms_with_on_timer_trigger() {
-        // [[comms]] blocks support `on_timer` as the template-level trigger
-        // (the migration target for the legacy root-level `delay_secs`).
-        let toml = r#"
-[[comms]]
-from    = "Command"
-trigger    = "on_timer"
-after_secs = 45.0
-message    = "Second wave inbound."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(
-            cfg.comms[0].trigger,
-            TriggerCondition::OnTimer { after_secs: 45.0 },
-        );
-    }
-
-    #[test]
     fn parse_world_unknown_trigger_condition_errors() {
         let toml = r#"
 [[trigger]]
@@ -5176,17 +4229,15 @@ entity    = "raider"
         let cfg = parse_world(toml).expect("default.toml must parse");
         // (#984) default.toml is the first world whose COMMS converted to
         // `[script]`, not just its triggers: its two `[[trigger]]` blocks and
-        // its three `[[comms]]` templates are all Rhai now, so both declarative
-        // lists parse empty. `scripted_comms` stays empty too — the M4
-        // `[[comms]] script = "fn"` metadata form is a different (dormant)
-        // front-end, and this conversion opens its threads from trigger
-        // handlers via `ctx.effects.open_comms` instead.
+        // its three `[[comms]]` templates are all Rhai now. Since issue #985
+        // deleted both declarative front-ends there is no other shape a world
+        // could be in, but the assertion still earns its place: it is the check
+        // that this world's scenario logic is REACHABLE, i.e. that it did not
+        // lose its `[script]` block in an edit.
         //
         // The scripted behaviour is pinned by the dialogue-tree parity test in
         // `comms::scripted` and by the conversion's digest parity.
         assert!(cfg.triggers.is_empty());
-        assert!(cfg.comms.is_empty());
-        assert!(cfg.scripted_comms.is_empty());
         assert!(
             toml.contains("[script]"),
             "default.toml must carry its [script] block"
@@ -5203,7 +4254,6 @@ entity    = "raider"
         // trigger list parses empty. The scripted behaviour is pinned by the
         // world::server scripted-trigger tests and the conversion's digest parity.
         assert!(cfg.triggers.is_empty());
-        assert!(cfg.comms.is_empty());
         assert!(
             toml.contains("[script]"),
             "patrol.toml must carry its [script] block"
@@ -5264,8 +4314,8 @@ entity    = "raider"
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
         assert!(
-            cfg.triggers.is_empty() && cfg.comms.is_empty() && cfg.scripted_comms.is_empty(),
-            "combat_test is [script]-authored (#984): every declarative list parses empty"
+            cfg.triggers.is_empty(),
+            "combat_test is [script]-authored (#984): its declarative trigger list is empty"
         );
         let world = ScriptedWorld::compile(WORLD, toml);
 
@@ -6035,32 +5085,6 @@ after_secs = 0.0
         assert!(
             paths.contains(&"assets/entities/wave_destroyer.toml".to_string()),
             "trigger spawn_entity template must be discovered for preload, got {paths:?}"
-        );
-    }
-
-    #[test]
-    fn entity_template_paths_includes_comms_response_spawn_entity_templates() {
-        // (#475) Comms response actions can also spawn entities (used by
-        // the Before-the-Fire scenario for "Varen Escape Pod" etc).
-        let toml = r#"
-[[comms]]
-from    = "Axiom Station"
-trigger = "on_world_loaded"
-message = "Greetings."
-
-  [[comms.response]]
-  text = "Hi."
-    [[comms.response.action]]
-    type          = "spawn_entity"
-    template_path = "assets/entities/escape_pod.toml"
-    name          = "pod_1"
-    position      = [0.0, 0.0, 0.0]
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg, &[]);
-        assert!(
-            paths.contains(&"assets/entities/escape_pod.toml".to_string()),
-            "comms response spawn_entity template must be discovered for preload, got {paths:?}"
         );
     }
 

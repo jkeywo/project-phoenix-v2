@@ -4,8 +4,7 @@
 //! Owns the comms runtime state (`CommsRuntime`), the shared inbox resource
 //! (`CommsInboxRes`), the viewscreen message (`OnScreenMessage`), the
 //! channel-2 delivery message (`CommsChannel2Event`), and the Bevy systems
-//! that drive template injection, follow-up delivery, range gating, and the
-//! `CommsState` broadcast. `CommsWorldPlugin` registers everything in the
+//! that drive range gating, the hail roster and the `CommsState` broadcast. `CommsWorldPlugin` registers everything in the
 //! same sets and relative order the `WorldPlugin` used before the
 //! consolidation.
 //!
@@ -18,21 +17,16 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::comms::content::{
-    comms_template_states_from_world, evaluate_comms_templates, follow_up_trigger_holds,
-    ActiveDialogue, CommsTemplateState, PendingFollowUp,
-};
+use crate::comms::content::ActiveDialogue;
 use crate::comms_inbox::CommsInbox;
 use crate::console::comms::server::{
     handle_clear_comms, handle_comms_channel2, handle_hail, handle_respond_to_message,
     handle_show_on_screen,
 };
-use crate::entity_spawner::EntityUuid;
 use crate::lobby::{Sessions, Target};
 use crate::messages::{CommsContact, CommsMessage, ServerMessage, StationId, ViewMode};
 use crate::simulation::SimOutbox;
-use crate::world::content::WorldEvent;
-use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime, WorldEventBuffer};
+use crate::world::server::ObjectiveManagerRes;
 
 // -- Resources ---------------------------------------------------------------
 
@@ -46,11 +40,11 @@ use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime, WorldEventB
 /// no-ops.
 #[derive(Resource, Default)]
 pub struct CommsRuntime {
-    /// Mutable per-template runtime state (fired flag).
-    pub comms_template_states: Vec<CommsTemplateState>,
     /// Active in-flight dialogues keyed by CommsMessage id.
     pub active_dialogues: HashMap<String, ActiveDialogue>,
-    /// Hailable contacts derived from world comms templates.
+    /// Hailable contacts, derived from the live entities that opted in with
+    /// `[comms] hailable = true` (issue #985's roster slice, `comms::roster`).
+    /// Rebuilt every tick by [`update_comms_range_flags`].
     pub contacts: Vec<CommsContact>,
     /// Set to `true` whenever contacts or other world-level data changes so
     /// `broadcast_comms_state` knows to push a fresh snapshot even if the
@@ -67,10 +61,6 @@ pub struct CommsRuntime {
     /// and is maintaining `range_flags`. While `false`, range gating is
     /// fully bypassed (preserves lobby + pure-handler tests).
     pub range_active: bool,
-    /// Comms follow-ups awaiting their trigger condition before injection.
-    /// Response follow-ups carry a `placeholder_id` so the inbox shows a
-    /// `...` row while the trigger is pending; chained roots stay silent.
-    pub pending_follow_ups: Vec<PendingFollowUp>,
     /// Entity UUIDs this ship has HAILED and not yet cleared (issue #786).
     ///
     /// Authoritative comms state, not AI memory: `handle_hail` records EVERY
@@ -128,11 +118,8 @@ pub struct CommsChannel2Event {
 /// * Broadcast chain: `handle_comms_channel2` → `auto_clear_on_screen_message`
 ///   → `update_comms_range_flags` → `broadcast_comms_state` (the world's
 ///   `broadcast_objective_summary` orders itself `.after(broadcast_comms_state)`).
-/// * Physics chain: `tick_pending_follow_ups` before the world's
-///   `collect_world_events`; `inject_comms_templates` between
-///   `collect_world_events` and `tick_trigger_pipeline` — preserving the
-///   documented `tick_pending_follow_ups → collect_world_events →
-///   inject_comms_templates → tick_trigger_pipeline` pipeline (#718/#719).
+/// * Physics: `open_scripted_comms_threads`, between the script callback drain
+///   and the delayed-action queue.
 /// * Startup: `init_comms_runtime` after the world's `init_world_runtime`
 ///   (it reads the merged `name_to_uuid`).
 /// * OnEnter(InProgress): `mark_comms_dirty_on_game_start`.
@@ -193,28 +180,24 @@ impl Plugin for CommsWorldPlugin {
                 )
                     .chain(),
             )
-            // Explicit trigger-pipeline ordering (#718/#719):
-            // `tick_pending_follow_ups` must observe `pending_world_events`
-            // BEFORE `collect_world_events` drains them into
-            // `WorldEventBuffer` (same-tick follow-up reaction);
-            // `inject_comms_templates` reads the buffer and must run before
-            // `tick_trigger_pipeline`'s dispatch can mutate
-            // `runtime.name_to_uuid` (`SpawnEntity`); the pipeline consumes
-            // the buffer last.
+            // The scripted-thread drain (issue #984): after BOTH script call
+            // sites have queued their opens, before the delayed queue a dialogue
+            // fn's own `in_seconds` effect joins.
+            //
+            // It is the only comms system left in `Physics`. `tick_pending_follow_ups`
+            // and `inject_comms_templates` sat here with it, ordered around
+            // `collect_world_events` / `tick_trigger_pipeline` (#718/#719) because
+            // they read world EVENTS to decide when a declarative template fired
+            // and when a queued follow-up was due. Issue #985 deleted both with the
+            // `[[comms]]` front-end: a scripted thread opens from a script handler
+            // (an `on_hailed` trigger fn calling `open_comms`), so the event->comms
+            // edge those orderings protected now runs through the trigger pipeline
+            // itself and needs no comms-side ordering of its own.
             .add_systems(
                 FixedUpdate,
-                (
-                    tick_pending_follow_ups.before(crate::world::server::collect_world_events),
-                    inject_comms_templates
-                        .after(crate::world::server::collect_world_events)
-                        .before(crate::world::server::tick_trigger_pipeline),
-                    // The scripted-thread drain (issue #984): after BOTH script
-                    // call sites have queued their opens, before the delayed
-                    // queue a dialogue fn's own `in_seconds` effect joins.
-                    crate::comms::scripted::open_scripted_comms_threads
-                        .after(crate::world::server::tick_script_callbacks)
-                        .before(crate::world::server::tick_delayed_actions),
-                )
+                crate::comms::scripted::open_scripted_comms_threads
+                    .after(crate::world::server::tick_script_callbacks)
+                    .before(crate::world::server::tick_delayed_actions)
                     .in_set(crate::sim_sets::SimSet::Physics),
             );
     }
@@ -222,123 +205,29 @@ impl Plugin for CommsWorldPlugin {
 
 // -- Startup -----------------------------------------------------------------
 
-/// Startup system: initialise `CommsRuntime` and `CommsInboxRes` from the
-/// loaded `WorldConfig` (if any).
+/// Startup system: mark the comms runtime dirty when a world is loaded, so the
+/// first `broadcast_comms_state` fires.
 ///
-/// Runs after `init_world_runtime` in the Startup schedule so the merged
-/// `WorldContentRuntime.name_to_uuid` (spawn pass + config names) is
-/// available for contact resolution. When no `WorldConfig` resource is
-/// present (native unit tests) this is a no-op and comms systems remain
-/// quiet.
+/// When no `WorldConfig` resource is present (native unit tests) this is a
+/// no-op and comms systems remain quiet.
 pub(crate) fn init_comms_runtime(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    world: Res<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
-    let Some(world_config) = world_config else {
+    if world_config.is_none() {
         return;
-    };
-
-    // Derive comms runtime states straight from the parsed world.
-    comms.comms_template_states = comms_template_states_from_world(&world_config);
-
-    // Build the contact list from comms templates using the merged
-    // `world.name_to_uuid` so unified-pipeline UUIDs are picked up.
-    let mut contacts: Vec<CommsContact> = Vec::new();
-    for tmpl in &world_config.comms {
-        let uuid = match world.name_to_uuid.get(&tmpl.from) {
-            Some(u) => u.clone(),
-            None => continue,
-        };
-        if !contacts.iter().any(|c: &CommsContact| c.uuid == uuid) {
-            contacts.push(CommsContact {
-                uuid,
-                // Player-facing contact label uses the sender display text
-                // when authored, falling back to the `from` reference id
-                // (issue #751).
-                name: tmpl
-                    .display_name
-                    .clone()
-                    .unwrap_or_else(|| tmpl.from.clone()),
-                in_range: true,
-                is_urgent: false,
-            });
-        }
     }
-    comms.contacts = contacts;
+    // Nothing is derived from the world any more: issue #985 deleted the
+    // `[[comms]]` front-end, and with it the template table this used to build
+    // and the contact roster it used to seed from each template's `from`. The
+    // roster's one source is now the live ECS — every entity carrying
+    // `[comms] hailable = true` — which `update_comms_range_flags` unions in
+    // every tick (`crate::comms::roster`). What survives here is the reason the
+    // system existed at Startup at all: telling the first broadcast there is
+    // something to send.
     comms.needs_broadcast = true;
-
-    // Mark inbox dirty so the first InProgress broadcast fires even though
-    // no messages have arrived yet.
     inbox.0.mark_dirty();
-}
-
-/// Merge a parsed world's comms templates and contacts into the live
-/// `CommsRuntime` and mark it for re-broadcast.
-///
-/// Shared by the world-layer lifecycle systems (`apply_pending_scenario_loads`
-/// and `apply_world_layer_changes`' Load branch) so world/server.rs no longer
-/// defines any comms merge behaviour. Contacts are de-duplicated by UUID;
-/// names that don't resolve through `name_to_uuid` are skipped. Returns the
-/// freshly derived template states so layer loads can snapshot them for
-/// `UnloadWorld` reversal.
-pub(crate) fn merge_world_comms(
-    comms: &mut CommsRuntime,
-    world_config: &crate::world::config::WorldConfig,
-    name_to_uuid: &HashMap<String, String>,
-) -> Vec<CommsTemplateState> {
-    let states = comms_template_states_from_world(world_config);
-    comms.comms_template_states.extend(states.iter().cloned());
-
-    // Merge contacts (skip duplicates by uuid).
-    for tmpl in &world_config.comms {
-        let uuid = match name_to_uuid.get(&tmpl.from) {
-            Some(u) => u.clone(),
-            None => continue,
-        };
-        if !comms.contacts.iter().any(|c: &CommsContact| c.uuid == uuid) {
-            comms.contacts.push(CommsContact {
-                uuid,
-                // Display text over reference id (issue #751), matching
-                // `init_comms_runtime`.
-                name: tmpl
-                    .display_name
-                    .clone()
-                    .unwrap_or_else(|| tmpl.from.clone()),
-                in_range: true,
-                is_urgent: false,
-            });
-        }
-    }
-
-    comms.needs_broadcast = true;
-    states
-}
-
-/// Remove the comms template states belonging to an unloaded world layer.
-///
-/// Counterpart to `merge_world_comms`, called by `apply_world_layer_changes`'
-/// Unload branch: each template in the layer snapshot removes at most one
-/// matching live state (matched by template equality).
-pub(crate) fn remove_layer_comms(comms: &mut CommsRuntime, layer_states: &[CommsTemplateState]) {
-    let removed_comms: HashSet<usize> = layer_states
-        .iter()
-        .filter_map(|ls| {
-            comms
-                .comms_template_states
-                .iter()
-                .position(|rs| rs.template == ls.template)
-        })
-        .collect();
-    let mut ci = 0usize;
-    comms.comms_template_states.retain(|_| {
-        let keep = !removed_comms.contains(&ci);
-        ci += 1;
-        keep
-    });
-
-    comms.needs_broadcast = true;
 }
 
 /// Re-mark the comms runtime dirty when the game enters InProgress.
@@ -352,7 +241,7 @@ fn mark_comms_dirty_on_game_start(
     mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
-    if comms.contacts.is_empty() && comms.comms_template_states.is_empty() {
+    if comms.contacts.is_empty() {
         return;
     }
     comms.needs_broadcast = true;
@@ -379,124 +268,6 @@ pub(crate) fn current_sender_in_range(comms: &CommsRuntime, sender_uuid: &str) -
 }
 
 // -- Update systems ----------------------------------------------------------
-
-/// Tick pending comms follow-ups: advance queue-relative timers, evaluate
-/// trigger conditions against current world state plus this tick's pending
-/// events, and inject any follow-ups whose conditions are now met.
-///
-/// Ordering: registered BEFORE `collect_world_events` (see
-/// `CommsWorldPlugin::build`) so this system observes `pending_world_events`
-/// BEFORE they are drained into `WorldEventBuffer`. This lets follow-ups
-/// react to events on the same tick they fire.
-///
-/// "Fire immediately if already true" semantics applies to state-based
-/// triggers: `OnEnteredRegion` fires if the ship is currently inside the
-/// region; `OnFlagSet` fires if the flag is currently set; `OnDestroyed`
-/// fires if the named entity is no longer in the ECS; `OnWorldLoaded`
-/// always fires. Event-only triggers (`OnAttacked`, `OnHailed`) require
-/// the matching event to be observed in `pending_world_events`.
-pub(crate) fn tick_pending_follow_ups(
-    time: Res<bevy::time::Time>,
-    world: Res<WorldContentRuntime>,
-    mut comms: ResMut<CommsRuntime>,
-    mut inbox: ResMut<CommsInboxRes>,
-    mut channel2_writer: MessageWriter<CommsChannel2Event>,
-    region_membership: Option<Res<crate::regions::server::RegionMembership>>,
-    ship_query: Query<Entity, With<crate::simulation::LocalShip>>,
-    entity_uuid_q: Query<&EntityUuid>,
-    // Message ids are command-addressing surface (issue #907 AC2).
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
-) {
-    if comms.pending_follow_ups.is_empty() {
-        return;
-    }
-
-    let dt = time.delta_secs();
-
-    // Snapshot of the events + flags + name lookup every pending follow-up
-    // evaluated this tick sees. The world runtime is read-only here, so the
-    // borrows stay stable for the whole pass.
-    let events_snapshot: &[WorldEvent] = &world.pending_world_events;
-    let name_to_uuid_snapshot = &world.name_to_uuid;
-    let flags_snapshot = &world.flags;
-    let entity_groups = &world.entity_groups;
-
-    // Build the set of region UUIDs the player ship is currently inside.
-    let inside_region_uuids: HashSet<String> = if let (Some(membership), Some(ship_entity)) =
-        (region_membership.as_ref(), ship_query.iter().next())
-    {
-        membership
-            .inside
-            .get(&ship_entity)
-            .map(|set| {
-                set.iter()
-                    .filter_map(|e| membership.region_uuids.get(e).cloned())
-                    .collect()
-            })
-            .unwrap_or_default()
-    } else {
-        HashSet::new()
-    };
-
-    // Build the set of all live entity UUIDs (for OnDestroyed checks).
-    let live_uuids: HashSet<String> = entity_uuid_q.iter().map(|u| u.0.clone()).collect();
-
-    let mut ready: Vec<PendingFollowUp> = Vec::new();
-    let mut keep: Vec<PendingFollowUp> = Vec::with_capacity(comms.pending_follow_ups.len());
-
-    for mut pfu in comms.pending_follow_ups.drain(..) {
-        pfu.elapsed_secs += dt;
-        let fires = follow_up_trigger_holds(
-            pfu.node.trigger.as_ref(),
-            pfu.elapsed_secs,
-            events_snapshot,
-            name_to_uuid_snapshot,
-            flags_snapshot,
-            &inside_region_uuids,
-            &live_uuids,
-            entity_groups,
-        );
-        if fires {
-            ready.push(pfu);
-        } else {
-            keep.push(pfu);
-        }
-    }
-    comms.pending_follow_ups = keep;
-
-    for pfu in ready {
-        if let Some(placeholder_id) = &pfu.placeholder_id {
-            inbox.0.remove(placeholder_id);
-        }
-
-        // Inject the real message.
-        let new_msg_id = crate::world_id::mint_id_with(
-            id_mint.as_deref(),
-            crate::world_id::IdNamespace::Message,
-        );
-        let available = current_sender_in_range(&comms, &pfu.sender_uuid);
-        let responses = crate::comms::content::response_views(&pfu.node.responses, available);
-        let new_msg = CommsMessage::injected(
-            new_msg_id.clone(),
-            pfu.sender_uuid.clone(),
-            pfu.sender_name.clone(),
-            pfu.node.body.clone(),
-            responses,
-            pfu.thread_id.clone(),
-            available,
-            pfu.urgent,
-        );
-        channel2_writer.write(CommsChannel2Event { message: new_msg });
-        comms.active_dialogues.insert(
-            new_msg_id,
-            ActiveDialogue {
-                current_node: pfu.node.clone(),
-                thread_id: pfu.thread_id.clone(),
-                script: None,
-            },
-        );
-    }
-}
 
 /// Auto-clear `OnScreenMessage` when the displayed message is no longer valid.
 ///
@@ -562,9 +333,10 @@ fn auto_clear_on_screen_message(
 /// live entity that opted in with `[comms] hailable = true`
 /// (`crate::comms::CommsHailable`). The same live query drives both halves, so a
 /// hailable entity appears on the roster the tick after it spawns and drops off
-/// the tick after it is destroyed. The declarative `[[comms]]` roster built by
-/// `init_comms_runtime` / `merge_world_comms` is untouched — the union rule and
-/// the deterministic append order live in `crate::comms::roster`.
+/// the tick after it is destroyed. Since issue #985 deleted the `[[comms]]`
+/// front-end this is the roster's ONLY source; the union rule and the
+/// deterministic append order still live in `crate::comms::roster`, where they
+/// now keep the per-tick re-derivation idempotent.
 pub(crate) fn update_comms_range_flags(
     mut comms: ResMut<CommsRuntime>,
     ship_q: Query<
@@ -798,138 +570,13 @@ pub(crate) fn broadcast_comms_state(
     comms.needs_broadcast = false;
 }
 
-/// Auto-fire comms templates that match this tick's external `WorldEvent`s
-/// (e.g. `on_attacked` distress calls) and inject the resulting messages onto
-/// channel-2. These are broadcast messages — no player hailing involved.
-///
-/// Reads `WorldEventBuffer` directly: only EXTERNAL events reach comms
-/// templates — `tick_trigger_pipeline`'s internally-produced chaining events
-/// (`FlagSet`, `FlagCleared`, `Destroyed` from a `DestroyEntity` action)
-/// never do.
-///
-/// Ordering (#719): registered after `collect_world_events` (which fills the
-/// buffer) and before `tick_trigger_pipeline`. Running before the pipeline
-/// means `world.name_to_uuid` read here is identical to the tick-level
-/// clone the pipeline takes — no `SpawnEntity` dispatch has mutated the map
-/// yet this tick.
-///
-/// Change detection (#716/#718 discipline): early-out on an empty buffer
-/// WITHOUT mutably dereferencing `comms`. This is behaviour-preserving
-/// even on the tick where the buffer is empty but the pipeline still runs
-/// for pending delayed actions: `evaluate_comms_templates` over an empty
-/// events slice is a guaranteed no-op (`events.iter().any(..)` is `false`
-/// for every template, so no `fired` flag flips and nothing is returned).
-pub(crate) fn inject_comms_templates(
-    world: Res<WorldContentRuntime>,
-    mut comms: ResMut<CommsRuntime>,
-    buffer: Res<WorldEventBuffer>,
-    mut channel2_writer: MessageWriter<CommsChannel2Event>,
-    // Message ids are command-addressing surface (issue #907 AC2).
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
-) {
-    if buffer.0.is_empty() {
-        return;
-    }
-
-    // Reborrow the `ResMut` as a plain `&mut` so disjoint field borrows can
-    // be split (`&mut comms.comms_template_states` while other comms fields
-    // are read). Placed after the early return so an event-free tick never
-    // marks the resource changed; a tick with events marks it exactly as the
-    // pre-split system did.
-    let comms = &mut *comms;
-
-    let fired_comms = evaluate_comms_templates(
-        &mut comms.comms_template_states,
-        &buffer.0,
-        &world.name_to_uuid,
-    );
-    for fc in fired_comms {
-        let thread_id = fc.thread_id.clone().unwrap_or_else(|| {
-            crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Message)
-        });
-        // `_self` is the reserved synthetic internal-sender name; render it as
-        // "Internal Report" in the comms UI so the crew sees a ship-generated
-        // intelligence summary rather than a literal "_self" sender label.
-        let channel_name = if fc.from == "_self" {
-            "Internal Report".to_string()
-        } else {
-            fc.from.clone()
-        };
-        // Sender identity (issue #751): the UUID resolves from the `from`
-        // reference id (below), while the player-facing display name resolves
-        // independently. Precedence: per-node `speaker` override (most
-        // specific) → template `display_name` → the `from`-derived channel
-        // name. Backward compatible: a template with neither renders `from`
-        // exactly as before.
-        let base_sender_name = fc.display_name.clone().unwrap_or(channel_name);
-        let sender_name = fc.node.speaker.clone().unwrap_or(base_sender_name);
-        // Keyed on the RAW `fc.from` (not the mapped display name): a
-        // synthetic sender like `_self` deliberately falls through to the
-        // name itself, which `current_sender_in_range` treats as
-        // always-in-range via its non-UUID escape hatch.
-        let sender_uuid = world
-            .name_to_uuid
-            .get(&fc.from)
-            .cloned()
-            .unwrap_or_else(|| fc.from.clone());
-
-        // Root templates inject immediately when their template-level
-        // `trigger` fires. Per-node triggers are reserved for follow-ups.
-        let msg_id = crate::world_id::mint_id_with(
-            id_mint.as_deref(),
-            crate::world_id::IdNamespace::Message,
-        );
-        let available = current_sender_in_range(comms, &sender_uuid);
-        let responses = crate::comms::content::response_views(&fc.node.responses, available);
-        let msg = crate::messages::CommsMessage::injected(
-            msg_id.clone(),
-            sender_uuid.clone(),
-            sender_name.clone(),
-            fc.node.body.clone(),
-            responses,
-            thread_id.clone(),
-            available,
-            fc.urgent,
-        );
-        channel2_writer.write(CommsChannel2Event { message: msg });
-        comms.active_dialogues.insert(
-            msg_id,
-            ActiveDialogue {
-                current_node: fc.node.clone(),
-                thread_id: thread_id.clone(),
-                script: None,
-            },
-        );
-
-        // Schedule the chained root follow_up, if any. See the
-        // matching block in `handle_hail` for the rationale.
-        if let Some(ref fu) = fc.root_follow_up {
-            let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
-            comms.pending_follow_ups.push(PendingFollowUp {
-                node: fu.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name: fu_sender_name,
-                thread_id: thread_id.clone(),
-                elapsed_secs: 0.0,
-                placeholder_id: None,
-                urgent: fc.urgent,
-            });
-        }
-    }
-}
-
-// -- Tests -------------------------------------------------------------------
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::ai_plugin::AiEntityAttacked;
-    use crate::comms::content::{CommsDialogueNode, CommsResponse, CommsTemplate};
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::*;
-    use crate::world::content::{TriggerAction, TriggerCondition};
-    use crate::world::server::broadcast_objective_summary;
     use crate::world::server::tests::ai_trigger_test_app;
+    use crate::world::server::{broadcast_objective_summary, WorldContentRuntime};
 
     // -- Test app -------------------------------------------------------------
 
@@ -960,7 +607,6 @@ pub(crate) mod tests {
                     handle_hail,
                     handle_respond_to_message,
                     handle_clear_comms,
-                    tick_pending_follow_ups,
                     handle_comms_channel2,
                     update_comms_range_flags,
                     broadcast_comms_state,
@@ -1132,8 +778,8 @@ pub(crate) mod tests {
         push_msg(app, "comms", ClientMessage::SetReady { ready: true });
         tick(app);
 
-        // Manually install a comms template into the runtime so tests are
-        // independent of TOML loading.
+        // Seat the station as a hail contact directly, so these tests are
+        // independent of both TOML loading and the entity-derived roster pass.
         app.world_mut()
             .resource_mut::<WorldContentRuntime>()
             .name_to_uuid
@@ -1145,361 +791,7 @@ pub(crate) mod tests {
             in_range: true,
             is_urgent: false,
         });
-        comms.comms_template_states.push(CommsTemplateState {
-            template: CommsTemplate {
-                from: "starbase_alpha".into(),
-                trigger: TriggerCondition::OnHailed {
-                    entity_name: "starbase_alpha".into(),
-                },
-                node: CommsDialogueNode {
-                    body: "USS Phoenix, please identify yourself.".into(),
-                    responses: vec![CommsResponse {
-                        text: "We are on a survey mission.".into(),
-                        important: false,
-                        actions: vec![TriggerAction::AddObjective {
-                            id: "obj-survey".into(),
-                            text: "Complete the survey".into(),
-                            mandatory: true,
-                            targets: vec![],
-                            directive: crate::messages::AiDirective::None,
-                            utility: crate::objectives::UtilityConfig::default(),
-                            source: crate::messages::ObjectiveSource::default(),
-                        }],
-                        follow_up: None,
-                    }],
-                    speaker: None,
-                    trigger: None,
-                },
-                thread_id: None,
-                urgent: false,
-                root_follow_up: None,
-                display_name: None,
-            },
-            fired: false,
-        });
         comms.needs_broadcast = true;
-    }
-
-    // -- Root comms templates (moved from world::server::tests, #816) ---------
-
-    #[test]
-    fn root_comms_template_with_on_timer_trigger_waits_silently() {
-        let mut app = ai_trigger_test_app();
-
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert(
-                "Research Outpost".to_string(),
-                "research-outpost-uuid".to_string(),
-            );
-            // Simulate that the world has been alive for less than the
-            // template's `after_secs` — no TimerElapsed event yet.
-            runtime
-                .pending_world_events
-                .push(WorldEvent::TimerElapsed { elapsed_secs: 1.0 });
-        }
-        {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            comms.comms_template_states = vec![CommsTemplateState {
-                template: CommsTemplate {
-                    from: "Research Outpost".to_string(),
-                    trigger: TriggerCondition::OnTimer { after_secs: 3.0 },
-                    node: CommsDialogueNode {
-                        body: "Ardent, this is Dr. Myst.".to_string(),
-                        responses: vec![],
-                        speaker: Some("Dr. Myst".to_string()),
-                        trigger: None,
-                    },
-                    thread_id: Some("research-scholar".to_string()),
-                    urgent: true,
-                    root_follow_up: None,
-                    display_name: None,
-                },
-                fired: false,
-            }];
-        }
-
-        app.update();
-
-        {
-            let messages = app.world().resource::<CommsInboxRes>().0.messages();
-            assert!(
-                messages.is_empty(),
-                "on_timer root comms must stay silent until the timer fires"
-            );
-            let comms = app.world().resource::<CommsRuntime>();
-            assert!(
-                comms.pending_follow_ups.is_empty(),
-                "root templates do not queue onto pending_follow_ups"
-            );
-        }
-
-        // Push a TimerElapsed event past the threshold; template fires now.
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .pending_world_events
-                .push(WorldEvent::TimerElapsed { elapsed_secs: 3.5 });
-        }
-        app.update();
-
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].sender_name, "Dr. Myst");
-        assert_eq!(messages[0].body, "Ardent, this is Dr. Myst.");
-        assert_eq!(messages[0].thread_id, "research-scholar");
-        assert!(messages[0].is_urgent);
-    }
-
-    /// `inject_comms_templates` (auto-fire path: `on_world_loaded`,
-    /// `on_attacked`, `on_destroyed`, `on_flag_set`) also schedules the
-    /// chained `root_follow_up`. Verified by emitting `WorldLoaded` on a
-    /// template with a chained node.
-    #[test]
-    fn root_follow_up_fires_for_auto_triggered_template() {
-        let mut app = ai_trigger_test_app();
-
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert(
-                "Research Outpost".to_string(),
-                "research-outpost-uuid".to_string(),
-            );
-            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-        }
-        {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            comms.comms_template_states = vec![CommsTemplateState {
-                template: CommsTemplate {
-                    from: "Research Outpost".to_string(),
-                    trigger: TriggerCondition::OnWorldLoaded,
-                    node: CommsDialogueNode {
-                        body: "Stand by.".to_string(),
-                        responses: vec![],
-                        speaker: None,
-                        trigger: None,
-                    },
-                    thread_id: Some("research-scholar".to_string()),
-                    urgent: false,
-                    root_follow_up: Some(CommsDialogueNode {
-                        body: "Captain. Dr. Myst speaking.".to_string(),
-                        responses: vec![],
-                        speaker: Some("Dr. Myst".to_string()),
-                        trigger: Some(TriggerCondition::OnTimer { after_secs: 2.0 }),
-                    }),
-                    display_name: None,
-                },
-                fired: false,
-            }];
-        }
-
-        app.update();
-
-        // Root injected; chained follow-up queued.
-        {
-            let messages = app.world().resource::<CommsInboxRes>().0.messages();
-            assert_eq!(messages.len(), 1);
-            assert_eq!(messages[0].body, "Stand by.");
-            let comms = app.world().resource::<CommsRuntime>();
-            assert_eq!(comms.pending_follow_ups.len(), 1);
-        }
-
-        // Trip the queue-relative timer and tick.
-        app.world_mut()
-            .resource_mut::<CommsRuntime>()
-            .pending_follow_ups[0]
-            .elapsed_secs = 5.0;
-        app.update();
-
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(messages.len(), 2);
-        let chained = &messages[1];
-        assert_eq!(chained.sender_name, "Dr. Myst");
-        assert_eq!(chained.body, "Captain. Dr. Myst speaking.");
-        assert_eq!(chained.thread_id, "research-scholar");
-    }
-
-    // -- on_attacked comms template auto-injection tests ----------------------
-
-    /// When an entity is attacked, comms templates with `on_attacked` condition
-    /// must fire automatically (no player hailing required) and inject a message
-    /// into the CommsInbox.
-    #[test]
-    fn on_attacked_comms_template_auto_injects_into_inbox() {
-        let mut app = ai_trigger_test_app();
-
-        let raider_uuid = "raider-uuid-auto-001";
-        let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000001").unwrap();
-        app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .name_to_uuid
-            .insert("raider".to_string(), raider_uuid.to_string());
-        {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            comms.comms_template_states = vec![CommsTemplateState {
-                template: CommsTemplate {
-                    from: "raider".to_string(),
-                    trigger: TriggerCondition::OnAttacked {
-                        entity_name: "raider".to_string(),
-                    },
-                    node: CommsDialogueNode {
-                        body: "Mayday! We are under attack!".to_string(),
-                        responses: vec![],
-                        speaker: None,
-                        trigger: None,
-                    },
-                    thread_id: None,
-                    urgent: false,
-                    root_follow_up: None,
-                    display_name: None,
-                },
-                fired: false,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityAttacked>>()
-            .write(AiEntityAttacked {
-                entity_uuid: raider_uuid.to_string(),
-                attacker_uuid,
-            });
-
-        app.update();
-
-        let inbox = &app.world().resource::<CommsInboxRes>().0;
-        let messages = inbox.messages();
-        assert_eq!(
-            messages.len(),
-            1,
-            "on_attacked comms template must auto-inject one message"
-        );
-        assert_eq!(messages[0].body, "Mayday! We are under attack!");
-        assert_eq!(
-            messages[0].responses.len(),
-            0,
-            "broadcast message should have no responses"
-        );
-    }
-
-    /// Sender identity (issue #751): the `from` reference id resolves the
-    /// message's `sender_uuid` (used for range/contact lookup), while the
-    /// authored `display_name` resolves the player-facing `sender_name`
-    /// independently. Delivery still targets the ship Comms system
-    /// (`CommsInboxRes` via `CommsChannel2Event`).
-    #[test]
-    fn sender_identity_resolves_from_reference_while_display_is_independent() {
-        let mut app = ai_trigger_test_app();
-
-        let raider_uuid = "raider-uuid-identity-751";
-        let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000751").unwrap();
-        app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .name_to_uuid
-            .insert("raider".to_string(), raider_uuid.to_string());
-        {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            comms.comms_template_states = vec![CommsTemplateState {
-                template: CommsTemplate {
-                    // Reference id used to resolve the sender UUID …
-                    from: "raider".to_string(),
-                    // … but the crew sees this label instead.
-                    display_name: Some("Unknown Contact".to_string()),
-                    trigger: TriggerCondition::OnAttacked {
-                        entity_name: "raider".to_string(),
-                    },
-                    node: CommsDialogueNode {
-                        body: "Back off!".to_string(),
-                        responses: vec![],
-                        speaker: None,
-                        trigger: None,
-                    },
-                    thread_id: None,
-                    urgent: false,
-                    root_follow_up: None,
-                },
-                fired: false,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityAttacked>>()
-            .write(AiEntityAttacked {
-                entity_uuid: raider_uuid.to_string(),
-                attacker_uuid,
-            });
-
-        app.update();
-
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(messages.len(), 1, "delivery must still reach ship Comms");
-        assert_eq!(
-            messages[0].sender_uuid, raider_uuid,
-            "sender_uuid resolves from the `from` reference id"
-        );
-        assert_eq!(
-            messages[0].sender_name, "Unknown Contact",
-            "sender_name resolves from display_name, independent of `from`"
-        );
-    }
-
-    /// A comms template with `on_attacked` must fire only once (single-shot).
-    #[test]
-    fn on_attacked_comms_template_fires_only_once() {
-        let mut app = ai_trigger_test_app();
-
-        let raider_uuid = "raider-uuid-once-002";
-        let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000002").unwrap();
-        app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .name_to_uuid
-            .insert("raider".to_string(), raider_uuid.to_string());
-        {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            comms.comms_template_states = vec![CommsTemplateState {
-                template: CommsTemplate {
-                    from: "raider".to_string(),
-                    trigger: TriggerCondition::OnAttacked {
-                        entity_name: "raider".to_string(),
-                    },
-                    node: CommsDialogueNode {
-                        body: "Distress signal transmitted.".to_string(),
-                        responses: vec![],
-                        speaker: None,
-                        trigger: None,
-                    },
-                    thread_id: None,
-                    urgent: false,
-                    root_follow_up: None,
-                    display_name: None,
-                },
-                fired: false,
-            }];
-        }
-
-        // First attack
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityAttacked>>()
-            .write(AiEntityAttacked {
-                entity_uuid: raider_uuid.to_string(),
-                attacker_uuid,
-            });
-        app.update();
-
-        // Second attack
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityAttacked>>()
-            .write(AiEntityAttacked {
-                entity_uuid: raider_uuid.to_string(),
-                attacker_uuid,
-            });
-        app.update();
-
-        let inbox = &app.world().resource::<CommsInboxRes>().0;
-        assert_eq!(
-            inbox.messages().len(),
-            1,
-            "on_attacked comms template must fire only once"
-        );
     }
 
     // -- Slice 7: range-aware comms broadcast ---------------------------------
@@ -1537,17 +829,22 @@ pub(crate) mod tests {
         // Flush initial broadcast.
         let _ = tick(&mut app);
 
-        // Hail in range so a message is injected.
-        push_msg(
-            &mut app,
-            "comms",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
-                    target_uuid: station_uuid.into(),
-                },
-            },
-        );
+        // Seat a message from the station while it is in range. (It used to
+        // arrive from a `[[comms]] on_hailed` template; issue #985 deleted that
+        // front-end, and the stamp under test reads the inbox, not the source.)
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(CommsMessage::injected(
+                "msg-range-far".into(),
+                station_uuid.into(),
+                "Starbase Alpha".into(),
+                "Go ahead, Phoenix.".into(),
+                vec![],
+                "thread-range-far".into(),
+                true,
+                false,
+            ));
         let _ = tick(&mut app);
 
         // Now move the station far away (combined range 200, distance 1000).
@@ -1723,16 +1020,19 @@ pub(crate) mod tests {
         ));
 
         let _ = tick(&mut app);
-        push_msg(
-            &mut app,
-            "comms",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
-                    target_uuid: station_uuid.into(),
-                },
-            },
-        );
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(CommsMessage::injected(
+                "msg-range-near".into(),
+                station_uuid.into(),
+                "Starbase Alpha".into(),
+                "Go ahead, Phoenix.".into(),
+                vec![],
+                "thread-range-near".into(),
+                true,
+                false,
+            ));
         let out = tick(&mut app);
 
         let (messages, contacts) = out
@@ -1764,6 +1064,12 @@ pub(crate) mod tests {
     /// authoritative `available` (in-range) flag ride onto each wire response.
     /// `important` is preserved regardless of range; `available` tracks the
     /// sender's reachability and flips false once the station leaves range.
+    ///
+    /// The message is injected straight into the inbox rather than produced by a
+    /// hail. It used to come from a `[[comms]] on_hailed` template, and issue
+    /// #985 deleted that front-end; what is under test here is the BROADCAST
+    /// stamp, which reads the inbox and the range map and does not care which
+    /// front-end seated the row.
     #[test]
     fn comms_state_projects_important_and_available_onto_responses() {
         use crate::comms::CommsRange;
@@ -1773,12 +1079,6 @@ pub(crate) mod tests {
         let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456761";
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
-        // Mark the sole authored response important so we can assert it rides
-        // the wire independent of range.
-        {
-            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
-            comms.comms_template_states[0].template.node.responses[0].important = true;
-        }
 
         app.world_mut().spawn((
             Ship,
@@ -1796,16 +1096,23 @@ pub(crate) mod tests {
             .id();
 
         let _ = tick(&mut app);
-        push_msg(
-            &mut app,
-            "comms",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
-                    target_uuid: station_uuid.into(),
-                },
-            },
-        );
+        {
+            let mut inbox = app.world_mut().resource_mut::<CommsInboxRes>();
+            inbox.0.inject(CommsMessage::injected(
+                "msg-important".into(),
+                station_uuid.into(),
+                "Starbase Alpha".into(),
+                "USS Phoenix, please identify yourself.".into(),
+                vec![CommsResponseView {
+                    text: "We are on a survey mission.".into(),
+                    important: true,
+                    available: true,
+                }],
+                "thread-important".into(),
+                true,
+                false,
+            ));
+        }
         let out = tick(&mut app);
         let messages = out
             .iter()
@@ -1880,7 +1187,7 @@ pub(crate) mod tests {
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
-        // The declarative contact's own entity, so it survives the prune.
+        // The seated contact's own entity, so it survives the prune.
         app.world_mut().spawn((
             EntityUuid("declared-station".into()),
             Transform::from_xyz(10.0, 0.0, 0.0),
@@ -1898,7 +1205,7 @@ pub(crate) mod tests {
         assert_eq!(
             contacts.iter().map(|c| c.uuid.as_str()).collect::<Vec<_>>(),
             vec!["declared-station"],
-            "only the declarative contact belongs on the roster, got {contacts:?}"
+            "only the seated contact belongs on the roster, got {contacts:?}"
         );
     }
 
@@ -1942,14 +1249,13 @@ pub(crate) mod tests {
             derived.in_range,
             "the new contact must carry its real range stamp on the tick it appears"
         );
-        // The declarative entry is still first — entity-derived contacts are
+        // The seated entry is still first — entity-derived contacts are
         // APPENDED, never interleaved.
         assert_eq!(contacts[0].uuid, "declared-station");
     }
 
     /// An authored `[comms] display_name` beats the reference id, and the
-    /// out-of-range stamp reaches an entity-derived contact just like a
-    /// declarative one.
+    /// out-of-range stamp reaches an entity-derived contact.
     #[test]
     fn an_entity_derived_contact_uses_its_authored_display_name_and_range_stamp() {
         use crate::comms::{CommsHailable, CommsRange};
@@ -2037,22 +1343,28 @@ pub(crate) mod tests {
         );
         assert!(
             after_despawn.iter().any(|c| c.uuid == "declared-station"),
-            "the declarative contact must survive the despawn of an unrelated entity"
+            "the seated contact must survive the despawn of an unrelated entity"
         );
     }
 
-    /// A declarative `[[comms]]` contact and an entity-derived one that name
-    /// the SAME entity collapse to a single roster row, and the declarative
+    /// A roster row already seated for a UUID and an entity-derived candidate
+    /// naming the SAME entity collapse to a single row, and the seated row's
     /// display metadata is the one that survives.
+    ///
+    /// The seated row used to be a declarative `[[comms]]` contact, which is
+    /// what made the rule "declarative wins"; issue #985 deleted that source, so
+    /// what the rule now protects is idempotency across ticks — the roster is
+    /// re-merged every tick, and a contact must not lose its label (or its
+    /// `in_range` / `is_urgent` stamps) to its own re-derivation.
     #[test]
-    fn a_declarative_contact_wins_the_uuid_collision_with_its_entity() {
+    fn a_seated_contact_wins_the_uuid_collision_with_its_entity() {
         use crate::comms::{CommsHailable, CommsRange};
         use crate::entities::spawner::{EntityName, EntityUuid};
         use crate::simulation::Ship;
 
         let mut app = comms_test_app();
-        // `setup_game_with_comms` seats the declarative contact named
-        // "Starbase Alpha" for this UUID.
+        // `setup_game_with_comms` seats the contact named "Starbase Alpha" for
+        // this UUID.
         setup_game_with_comms(&mut app, "starbase-uuid");
         app.world_mut().spawn((
             Ship,
@@ -2120,7 +1432,7 @@ pub(crate) mod tests {
         assert_eq!(
             contacts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
             vec!["Starbase Alpha", "Alpha", "Bravo", "Charlie", "Delta"],
-            "declarative first, then entity-derived in (name, uuid) order"
+            "seated first, then entity-derived in (name, uuid) order"
         );
     }
 
@@ -2399,263 +1711,31 @@ pub(crate) mod tests {
         );
     }
 
-    // -- Same-tick follow-up ordering (#718) ----------------------------------
-
-    /// `tick_pending_follow_ups` must snapshot `pending_world_events` BEFORE
-    /// `collect_world_events` drains them into `WorldEventBuffer`. A
-    /// registration that ran collection first would leave the snapshot empty
-    /// and the event-only `OnAttacked` follow-up trigger used here would
-    /// never observe its event (it is consumed this tick, not requeued).
-    #[test]
-    fn pending_follow_up_reacts_to_event_queued_same_tick() {
-        let mut app = ai_trigger_test_app();
-
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("freighter".to_string(), "freighter-uuid".to_string());
-            // Queued before this tick's update, e.g. by `tick_delayed_actions`
-            // on the previous tick or by a region observer.
-            runtime.pending_world_events.push(WorldEvent::Attacked {
-                uuid: "freighter-uuid".to_string(),
-                attacker_uuid: "raider-uuid".to_string(),
-            });
-        }
-        app.world_mut()
-            .resource_mut::<CommsRuntime>()
-            .pending_follow_ups
-            .push(PendingFollowUp {
-                node: CommsDialogueNode {
-                    body: "Mayday! We are under attack!".to_string(),
-                    responses: vec![],
-                    speaker: Some("Freighter".to_string()),
-                    trigger: Some(TriggerCondition::OnAttacked {
-                        entity_name: "freighter".to_string(),
-                    }),
-                },
-                sender_uuid: "freighter-uuid".to_string(),
-                sender_name: "Freighter".to_string(),
-                thread_id: "convoy-thread".to_string(),
-                elapsed_secs: 0.0,
-                placeholder_id: None,
-                urgent: true,
-            });
-
-        app.update();
-
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(
-            messages.len(),
-            1,
-            "an OnAttacked follow-up must fire on the SAME tick its event sits \
-             in pending_world_events — tick_pending_follow_ups must run before \
-             collect_world_events drains the queue"
-        );
-        assert_eq!(messages[0].body, "Mayday! We are under attack!");
-    }
-
-    // -- tick_pending_follow_ups: integration of triggered follow-ups ---------
-
-    /// Build a minimal app for testing `tick_pending_follow_ups` directly.
-    /// Mirrors the existing `delayed_follow_up_replacement_preserves_display_speaker`
-    /// shape but exercises the new trigger evaluator.
-    fn pending_follow_up_test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(bevy::time::TimePlugin)
-            .init_resource::<WorldContentRuntime>()
-            .init_resource::<CommsRuntime>()
-            .init_resource::<CommsInboxRes>()
-            .add_message::<CommsChannel2Event>()
-            .add_systems(
-                Update,
-                (tick_pending_follow_ups, handle_comms_channel2).chain(),
-            );
-        app
-    }
-
-    /// Queue a triggered follow-up with a `...` placeholder onto the runtime.
-    fn queue_triggered_follow_up(
-        app: &mut App,
-        body: &str,
-        sender_uuid: &str,
-        thread_id: &str,
-        placeholder_id: &str,
-        trigger: TriggerCondition,
-    ) {
-        let placeholder = CommsMessage {
-            id: placeholder_id.into(),
-            sender_uuid: sender_uuid.into(),
-            sender_name: "Axiom Station".into(),
-            subject: "...".into(),
-            body: "...".into(),
-            responses: vec![],
-            selected_response: None,
-            is_read: false,
-            is_orphaned: false,
-            sender_in_range: true,
-            thread_id: thread_id.into(),
-            is_urgent: false,
-        };
-        app.world_mut()
-            .resource_mut::<CommsInboxRes>()
-            .0
-            .inject(placeholder);
-        app.world_mut()
-            .resource_mut::<CommsRuntime>()
-            .pending_follow_ups
-            .push(PendingFollowUp {
-                node: CommsDialogueNode {
-                    body: body.into(),
-                    responses: vec![],
-                    speaker: None,
-                    trigger: Some(trigger),
-                },
-                sender_uuid: sender_uuid.into(),
-                sender_name: "Axiom Station".into(),
-                thread_id: thread_id.into(),
-                elapsed_secs: 0.0,
-                placeholder_id: Some(placeholder_id.into()),
-                urgent: false,
-            });
-    }
-
-    #[test]
-    fn pending_follow_up_with_on_flag_set_trigger_stays_queued_until_flag_is_set() {
-        let mut app = pending_follow_up_test_app();
-        queue_triggered_follow_up(
-            &mut app,
-            "Aphelion armed — we're committed now.",
-            "axiom-uuid",
-            "thread-aphelion",
-            "placeholder-aphelion",
-            TriggerCondition::OnFlagSet {
-                name: "aphelion_armed".into(),
-            },
-        );
-
-        // Tick once with flag unset — placeholder stays, follow-up still queued.
-        app.update();
-        {
-            let messages = app.world().resource::<CommsInboxRes>().0.messages();
-            assert_eq!(messages.len(), 1);
-            assert_eq!(
-                messages[0].body, "...",
-                "placeholder must remain while the trigger is unsatisfied"
-            );
-            let comms = app.world().resource::<CommsRuntime>();
-            assert_eq!(comms.pending_follow_ups.len(), 1);
-        }
-
-        // Set the flag; next tick must inject the real message.
-        app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .flags
-            .set_flag("aphelion_armed");
-        app.update();
-
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(
-            messages.len(),
-            1,
-            "placeholder must be replaced by the real message"
-        );
-        assert_eq!(messages[0].body, "Aphelion armed — we're committed now.");
-        assert_eq!(messages[0].thread_id, "thread-aphelion");
-        let comms = app.world().resource::<CommsRuntime>();
-        assert!(comms.pending_follow_ups.is_empty());
-    }
-
-    #[test]
-    fn pending_follow_up_with_on_flag_set_fires_immediately_if_flag_already_set() {
-        // Critical case for the user request: "or immediately if it's
-        // already in range". Set the flag BEFORE queueing the follow-up;
-        // the very first tick must inject the real message.
-        let mut app = pending_follow_up_test_app();
-        app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .flags
-            .set_flag("aphelion_armed");
-
-        queue_triggered_follow_up(
-            &mut app,
-            "Already-armed acknowledgement.",
-            "axiom-uuid",
-            "thread-aphelion",
-            "placeholder-aphelion",
-            TriggerCondition::OnFlagSet {
-                name: "aphelion_armed".into(),
-            },
-        );
-
-        app.update();
-
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].body, "Already-armed acknowledgement.");
-    }
-
-    #[test]
-    fn pending_follow_up_with_on_timer_uses_queue_relative_elapsed_secs() {
-        let mut app = pending_follow_up_test_app();
-        queue_triggered_follow_up(
-            &mut app,
-            "Three seconds elapsed.",
-            "axiom-uuid",
-            "thread-timer",
-            "placeholder-timer",
-            TriggerCondition::OnTimer { after_secs: 3.0 },
-        );
-
-        // Force the queue-relative elapsed_secs past the threshold.
-        app.world_mut()
-            .resource_mut::<CommsRuntime>()
-            .pending_follow_ups[0]
-            .elapsed_secs = 4.0;
-        app.update();
-
-        let messages = app.world().resource::<CommsInboxRes>().0.messages();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].body, "Three seconds elapsed.");
-    }
-
     // -- Issue #506: channel-2 routing tests ----------------------------------
 
-    /// Scenario hail arrives in CommsInboxRes via channel-2 (inject_comms_templates
-    /// writes to CommsChannel2Event; handle_comms_channel2 injects into inbox).
+    /// Scenario content arrives in `CommsInboxRes` via channel-2: a producer
+    /// writes `CommsChannel2Event`, `handle_comms_channel2` injects it.
+    ///
+    /// The producer used to be `inject_comms_templates` firing a `[[comms]]`
+    /// template on `WorldLoaded`; issue #985 deleted it, and the producer is now
+    /// `open_scripted_comms_threads` (covered in `comms::scripted`). The event is
+    /// written directly here because the DELIVERY leg is what this test is for.
     #[test]
     fn scenario_hail_arrives_in_inbox_via_channel2() {
         let mut app = ai_trigger_test_app();
 
-        // Install a comms template that fires on WorldLoaded.
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("outpost_alpha".to_string(), "outpost-uuid-ch2".to_string());
-            // Queue a WorldLoaded event so inject_comms_templates fires the template.
-            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-        }
-        app.world_mut()
-            .resource_mut::<CommsRuntime>()
-            .comms_template_states
-            .push(CommsTemplateState {
-                template: CommsTemplate {
-                    from: "outpost_alpha".to_string(),
-                    trigger: TriggerCondition::OnWorldLoaded,
-                    node: CommsDialogueNode {
-                        body: "Channel-2 test message.".to_string(),
-                        responses: vec![],
-                        speaker: Some("Outpost Alpha".to_string()),
-                        trigger: None,
-                    },
-                    thread_id: None,
-                    urgent: false,
-                    root_follow_up: None,
-                    display_name: None,
-                },
-                fired: false,
-            });
+        app.world_mut().write_message(CommsChannel2Event {
+            message: CommsMessage::injected(
+                "msg-ch2".into(),
+                "outpost-uuid-ch2".into(),
+                "Outpost Alpha".into(),
+                "Channel-2 test message.".into(),
+                vec![],
+                "thread-ch2".into(),
+                true,
+                false,
+            ),
+        });
 
         app.update();
 
@@ -2699,39 +1779,22 @@ pub(crate) mod tests {
             ));
         }
 
-        // Install a template with a response, fired on WorldLoaded.
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("sector_hq".to_string(), "sector-hq-uuid".to_string());
-            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-        }
-        app.world_mut()
-            .resource_mut::<CommsRuntime>()
-            .comms_template_states
-            .push(CommsTemplateState {
-                template: CommsTemplate {
-                    from: "sector_hq".to_string(),
-                    trigger: TriggerCondition::OnWorldLoaded,
-                    node: CommsDialogueNode {
-                        body: "AI auto-respond test.".to_string(),
-                        responses: vec![CommsResponse {
-                            text: "Acknowledged.".to_string(),
-                            important: false,
-                            actions: vec![],
-                            follow_up: None,
-                        }],
-                        speaker: None,
-                        trigger: None,
-                    },
-                    thread_id: None,
-                    urgent: false,
-                    root_follow_up: None,
-                    display_name: None,
-                },
-                fired: false,
-            });
+        app.world_mut().write_message(CommsChannel2Event {
+            message: CommsMessage::injected(
+                "msg-ai-ch2".into(),
+                "sector-hq-uuid".into(),
+                "sector_hq".into(),
+                "AI auto-respond test.".into(),
+                vec![CommsResponseView {
+                    text: "Acknowledged.".into(),
+                    important: false,
+                    available: true,
+                }],
+                "thread-ai-ch2".into(),
+                true,
+                false,
+            ),
+        });
 
         app.update();
 

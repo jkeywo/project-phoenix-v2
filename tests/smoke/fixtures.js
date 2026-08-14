@@ -91,9 +91,13 @@ window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
 //
   //   - the player ship (no GLB — the ship TOML is icon-only);
 //   - "Starbase Alpha" (one ~16 MB station GLB) — `comms.spec.js` hails it
-//     and `world-bootstrap.spec.js` asserts on its tag;
-//   - an `[[comms]] on_hailed` block with a response carrying an
-//     `add_objective` action — required by `comms.spec.js`.
+//     and `world-bootstrap.spec.js` asserts on its tag. It reaches the hail
+//     ROSTER through `station_axiom.toml`'s template-level `[comms] hailable
+//     = true` (issue #985), not through this world;
+//   - a `[script]` block whose `on_hailed` handler opens a thread with one
+//     response, whose `on_pick` adds an objective — required by
+//     `comms.spec.js`. It was an `[[comms]]` block with a
+//     `[[comms.response.action]]` until issue #985 deleted that front-end.
 //
 // Position constraint: the player ship's `[comms] range = 1200` and the
 // station's `[comms] range = 800` (assets/entities/station_axiom.toml)
@@ -133,18 +137,26 @@ template_path = "assets/entities/station_axiom.toml"
 name          = "Starbase Alpha"
 transform     = { anchor = "starbase_alpha" }
 
-[[comms]]
-from    = "Starbase Alpha"
-trigger = "on_hailed"
-entity  = "Starbase Alpha"
-message = "USS Phoenix, this is Starbase Alpha. Please state your business."
+[script]
+setup = """
+on_hailed("Starbase Alpha", "on_starbase_hailed");
 
-  [[comms.response]]
-  text = "We are on a survey mission."
-    [[comms.response.action]]
-    type = "add_objective"
-    id   = "obj-survey"
-    text = "Complete the survey in this sector."
+fn on_starbase_hailed(ctx) {
+    ctx.effects.open_comms(#{ from: "Starbase Alpha", node_fn: "starbase_hail" });
+}
+
+fn starbase_hail(ctx) {
+    #{ message: "USS Phoenix, this is Starbase Alpha. Please state your business.",
+       responses: [ #{ text: "We are on a survey mission.", on_pick: "on_survey" } ] }
+}
+
+fn on_survey(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-survey",
+        text: "Complete the survey in this sector."
+    });
+}
+"""
 `;
 
 // Override the default context fixture to inject the PeerJS shim into every

@@ -35,9 +35,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::entity_includes::FragmentSource;
 use crate::entity_loader::TemplateLoader;
-use crate::world::config::{
-    CommsDialogueNode, TriggerAction, TriggerCondition, WorldConfig, WorldEntity,
-};
+use crate::world::config::{TriggerAction, TriggerCondition, WorldConfig, WorldEntity};
 
 /// Severity of a [`WorldFinding`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -401,36 +399,16 @@ pub fn validate_entity_identity(
 }
 
 /// Every action list authored in a world config, in a stable order: each
-/// trigger's action list, then every comms dialogue node's response action
-/// lists (recursing through follow-ups and the template root follow-up).
+/// trigger's action list.
 ///
-/// Objective declarations and references live in these lists whether they were
-/// authored on a world trigger or a comms response, so the objective validator
-/// walks all of them in one place.
+/// It also walked every comms dialogue node's response action lists until issue
+/// #985 deleted the `[[comms]]` front-end that authored them.
 fn collect_action_lists(config: &WorldConfig) -> Vec<&[TriggerAction]> {
     let mut lists: Vec<&[TriggerAction]> = Vec::new();
     for trigger in &config.triggers {
         lists.push(&trigger.actions);
     }
-    for template in &config.comms {
-        collect_comms_node_action_lists(&template.node, &mut lists);
-        if let Some(root_fu) = &template.root_follow_up {
-            collect_comms_node_action_lists(root_fu, &mut lists);
-        }
-    }
     lists
-}
-
-fn collect_comms_node_action_lists<'a>(
-    node: &'a CommsDialogueNode,
-    lists: &mut Vec<&'a [TriggerAction]>,
-) {
-    for response in &node.responses {
-        lists.push(&response.actions);
-        if let Some(follow_up) = &response.follow_up {
-            collect_comms_node_action_lists(follow_up, lists);
-        }
-    }
 }
 
 /// Collect every objective id declared via `add_objective` across all of a

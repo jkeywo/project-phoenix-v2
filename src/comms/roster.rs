@@ -1,36 +1,39 @@
 //! Pure hail-roster derivation (issue #985).
 //!
 //! The Comms roster — `CommsRuntime::contacts`, the list of endpoints a Comms
-//! officer (human or Backfill AI) may hail — has historically had exactly ONE
-//! source: the declarative `[[comms]]` templates in the world TOML. Every
-//! contact was a template's `from` reference id resolved through
-//! `name_to_uuid`. The Rhai conversion (issue #982, milestone M7) deletes
-//! `[[comms]]` parsing outright, which would empty the roster and take
-//! `resolve_hail_target`, `candidate_fact(source_comms_contact)` and every hail
-//! candidate with it.
+//! officer (human or Backfill AI) may hail — had exactly ONE source until this
+//! issue: the declarative `[[comms]]` templates in the world TOML. Every contact
+//! was a template's `from` reference id resolved through `name_to_uuid`. The
+//! Rhai conversion (issue #982, milestone M7) deleted `[[comms]]` parsing
+//! outright, which would have emptied the roster and taken `resolve_hail_target`,
+//! `candidate_fact(source_comms_contact)` and every hail candidate with it.
 //!
-//! This module is the replacement source: contacts derived from the ENTITIES
-//! themselves. An entity opts in with `[comms] hailable = true` in its template
-//! (the same block that already declares `range`), and the live ECS set of such
-//! entities is unioned into the roster every tick.
+//! This module is the replacement, and now the only source: contacts derived
+//! from the ENTITIES themselves. An entity opts in with `[comms] hailable = true`
+//! in its template (the same block that already declares `range`), and the live
+//! ECS set of such entities is unioned into the roster every tick.
 //!
-//! ## Dual-source rule (coexistence)
+//! ## Merge rule
 //!
-//! While `[[comms]]` still exists, the roster is
-//! `declarative ∪ entity-derived`, de-duplicated on the entity UUID:
+//! The roster is `already-seated ∪ entity-derived`, de-duplicated on the entity
+//! UUID:
 //!
-//! * The **declarative** entry WINS on a UUID collision — it keeps its authored
-//!   display metadata (`display_name`, and the runtime `in_range`/`is_urgent`
-//!   stamps), so shipped behaviour is unchanged for every world that authors
-//!   `[[comms]]`.
-//! * Entity-derived entries for UUIDs the declarative pass did not produce are
+//! * The **seated** entry WINS on a UUID collision — it keeps its display
+//!   metadata and the runtime `in_range`/`is_urgent` stamps.
+//! * Entity-derived entries for UUIDs the seated list did not already hold are
 //!   APPENDED, sorted by `(name, uuid)`, so the roster order never depends on
 //!   Bevy archetype iteration order.
 //!
-//! At M7 the declarative half is gone and the entity-derived half is the only
-//! source; a world converting to scripted comms moves the `[[comms]]`
-//! `display_name` onto the entity (`[comms] display_name = "…"`) or relies on
-//! the entity's `name` reference id, exactly as the fallback below does.
+//! The rule was written for coexistence with the declarative `[[comms]]` roster,
+//! where "seated" meant "authored as a template" and the collision rule was
+//! "declarative wins". Issue #985 deleted that source; what the same rule now
+//! buys is idempotency, because `update_comms_range_flags` re-merges the roster
+//! every tick and a contact must not lose its label or its stamps to its own
+//! re-derivation.
+//!
+//! A world's sender label therefore lives on the entity: `[comms] display_name
+//! = "…"`, or the entity's `name` reference id, exactly as the fallback below
+//! does.
 //!
 //! Bevy-free so it can be unit-tested directly; the applier lives in
 //! `comms::server::update_comms_range_flags`.
@@ -52,8 +55,8 @@ pub struct EntityContact {
 
 /// Resolve the player-facing label for an entity-derived contact.
 ///
-/// Precedence mirrors the declarative rule (`display_name` over the `from`
-/// reference id, issue #751):
+/// Precedence mirrors the rule the deleted declarative front-end used
+/// (`display_name` over the `from` reference id, issue #751):
 ///
 /// 1. `[comms] display_name` on the entity template — authored player-facing text.
 /// 2. The entity's `EntityName`, which for a world-declared `[[entity]]` is its
@@ -69,13 +72,12 @@ pub fn entity_contact_label(
     display_name.or(entity_name).unwrap_or(uuid).to_string()
 }
 
-/// Union entity-derived contacts into a roster that already holds the
-/// declarative (`[[comms]]`-derived) entries.
+/// Union entity-derived contacts into the roster.
 ///
-/// De-duplication is keyed on `uuid`, and the entry ALREADY IN `roster` wins:
-/// a declarative contact keeps its authored name and its live
-/// `in_range`/`is_urgent` stamps untouched. Only UUIDs absent from the roster
-/// are appended.
+/// De-duplication is keyed on `uuid`, and the entry ALREADY IN `roster` wins: a
+/// seated contact keeps its name and its live `in_range`/`is_urgent` stamps
+/// untouched. Only UUIDs absent from the roster are appended. The caller merges
+/// every tick, so that rule is what makes the pass idempotent.
 ///
 /// New entries are appended in `(name, uuid)` order. The caller hands over an
 /// unsorted `derived` (ECS query order is archetype order, which is not a
@@ -84,7 +86,7 @@ pub fn entity_contact_label(
 ///
 /// New contacts are pushed with `in_range: true` / `is_urgent: false`; both are
 /// re-stamped downstream from the authoritative `range_flags` map and the
-/// inbox, exactly as they are for a declarative contact.
+/// inbox.
 ///
 /// Returns `true` when at least one contact was appended (the caller's cue to
 /// set `needs_broadcast`).
@@ -117,7 +119,7 @@ pub fn merge_entity_contacts(
 mod tests {
     use super::*;
 
-    fn declarative(uuid: &str, name: &str) -> CommsContact {
+    fn seated(uuid: &str, name: &str) -> CommsContact {
         CommsContact {
             uuid: uuid.into(),
             name: name.into(),
@@ -175,8 +177,8 @@ mod tests {
     }
 
     #[test]
-    fn a_declarative_entry_wins_the_uuid_collision() {
-        let mut roster = vec![declarative("u1", "Starbase Alpha")];
+    fn a_seated_entry_wins_the_uuid_collision() {
+        let mut roster = vec![seated("u1", "Starbase Alpha")];
         let mut derived_in = vec![derived("world.entity.starbase_alpha.name", "u1")];
         assert!(
             !merge_entity_contacts(&mut roster, &mut derived_in),
@@ -191,7 +193,7 @@ mod tests {
 
     #[test]
     fn only_the_uncollided_entity_contacts_are_appended() {
-        let mut roster = vec![declarative("u1", "Starbase Alpha")];
+        let mut roster = vec![seated("u1", "Starbase Alpha")];
         let mut derived_in = vec![derived("Alpha", "u1"), derived("Courier", "u2")];
         assert!(merge_entity_contacts(&mut roster, &mut derived_in));
         assert_eq!(
@@ -262,11 +264,8 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_derivation_leaves_the_declarative_roster_alone() {
-        let mut roster = vec![
-            declarative("u1", "Starbase Alpha"),
-            declarative("u2", "Raider"),
-        ];
+    fn an_empty_derivation_leaves_the_seated_roster_alone() {
+        let mut roster = vec![seated("u1", "Starbase Alpha"), seated("u2", "Raider")];
         let before = roster.clone();
         let mut derived_in = Vec::new();
         assert!(!merge_entity_contacts(&mut roster, &mut derived_in));
@@ -303,21 +302,6 @@ mod shipped_world_rosters {
             }
         }
         out.sort();
-        out
-    }
-
-    /// The declarative roster a world produces today: the `[[comms]]` `from`
-    /// reference ids in authored order, de-duplicated the way
-    /// `init_comms_runtime` de-duplicates them (first entry per sender wins;
-    /// resolution is `from` → UUID, and distinct names resolve to distinct
-    /// UUIDs, so ordered-unique `from` IS the roster identity).
-    fn declarative_roster(world: &crate::world::config::WorldConfig) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for tmpl in &world.comms {
-            if !out.iter().any(|f| f == &tmpl.from) {
-                out.push(tmpl.from.clone());
-            }
-        }
         out
     }
 
@@ -384,62 +368,6 @@ mod shipped_world_rosters {
             .and_then(|c| c.get("hailable"))
             .and_then(|h| h.as_bool())
             .unwrap_or(false)
-    }
-
-    /// INVARIANT 2 — the declarative rosters themselves, snapshotted.
-    ///
-    /// One entry per shipped world; the value is the ordered-unique `[[comms]]`
-    /// `from` list. A world absent from this table must have an EMPTY roster.
-    ///
-    /// The table is now EMPTY, and that is the finished state rather than a
-    /// gap: issue #984 converted `default.toml` and then `combat_test.toml` —
-    /// the last shipped world authoring `[[comms]]` — so no shipped world
-    /// produces a declarative contact any more and every roster is entirely
-    /// entity-derived. INVARIANT 3 is what holds the converted rosters to the
-    /// senders this table used to carry. The assertion stays because the
-    /// declarative source is still LIVE (a mod pack or hand-authored world may
-    /// use it): a shipped world that starts authoring `[[comms]]` again is a
-    /// roster change and has to be seen.
-    #[test]
-    fn shipped_world_declarative_rosters_are_unchanged() {
-        const EXPECTED: &[(&str, &[&str])] = &[];
-
-        let dir = manifest("assets/worlds");
-        let mut worlds: Vec<PathBuf> = std::fs::read_dir(&dir)
-            .expect("assets/worlds must be readable")
-            .map(|e| e.expect("readable dir entry").path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
-            .collect();
-        worlds.sort();
-        assert!(!worlds.is_empty(), "assets/worlds must ship worlds");
-
-        for path in worlds {
-            let file = path
-                .file_name()
-                .and_then(|f| f.to_str())
-                .expect("world file name")
-                .to_string();
-            let text = std::fs::read_to_string(&path).expect("world must be readable");
-            let world = crate::world::config::parse_world(&text)
-                .unwrap_or_else(|e| panic!("{file} must parse: {e}"));
-            let expected: Vec<String> = EXPECTED
-                .iter()
-                .find(|(name, _)| *name == file)
-                .map(|(_, senders)| senders.iter().map(|s| s.to_string()).collect())
-                .unwrap_or_default();
-            assert_eq!(
-                declarative_roster(&world),
-                expected,
-                "{file}: hail roster changed. Entity-derived contacts (#985) are a UNION on top \
-                 of this list, so any diff here is a behaviour change"
-            );
-            assert!(
-                world.scripted_comms.is_empty(),
-                "{file}: a scripted `[[comms]]` thread contributes NO contact today — the \
-                 entity-derived source is what will carry it at M7. Converting this world \
-                 needs `[comms] hailable = true` on its sender in the same commit"
-            );
-        }
     }
 
     /// The entity-derived roster a world produces: the label of every NAMED
@@ -512,11 +440,6 @@ mod shipped_world_rosters {
     #[test]
     fn the_converted_worlds_rosters_match_the_declarative_ones_they_replaced() {
         let default_text = include_str!("../../assets/worlds/default.toml");
-        let world = crate::world::config::parse_world(default_text).expect("default.toml parses");
-        assert!(
-            world.comms.is_empty(),
-            "default.toml's comms are [script]-authored (#984)"
-        );
         assert_eq!(
             entity_derived_roster(default_text),
             vec![
@@ -537,12 +460,6 @@ mod shipped_world_rosters {
         // The demo scenario: twelve templates onto one contact, and after the
         // conversion that one contact has to come from the entity instead.
         let combat_test = include_str!("../../assets/worlds/combat_test.toml");
-        let world =
-            crate::world::config::parse_world(combat_test).expect("combat_test.toml must parse");
-        assert!(
-            world.comms.is_empty(),
-            "combat_test's twelve comms templates are [script]-authored (#984)"
-        );
         assert_eq!(
             entity_derived_roster(combat_test),
             vec!["world.entity.starbase_alpha.name".to_string()],

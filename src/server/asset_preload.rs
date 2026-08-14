@@ -28,7 +28,7 @@ use crate::entity_config::EntityConfig;
 use crate::lobby::server::LobbyOutbox;
 use crate::lobby::Target;
 use crate::model_rig::sidecar_path;
-use crate::world::config::{parse_world, CommsTemplate, TriggerAction, WorldConfig};
+use crate::world::config::{parse_world, TriggerAction, WorldConfig};
 
 // ── AssetManifest ──────────────────────────────────────────────────────────
 
@@ -87,29 +87,6 @@ fn collect_action_paths(
             }
             _ => {}
         }
-    }
-}
-
-/// Walk comms dialogue tree for `SpawnEntity` / `LoadWorld` actions.
-fn collect_comms_action_paths(
-    templates: &[CommsTemplate],
-    out_entities: &mut Vec<String>,
-    out_worlds: &mut Vec<String>,
-) {
-    fn walk_node(
-        node: &crate::world::config::CommsDialogueNode,
-        out_entities: &mut Vec<String>,
-        out_worlds: &mut Vec<String>,
-    ) {
-        for response in &node.responses {
-            collect_action_paths(&response.actions, out_entities, out_worlds);
-            if let Some(ref follow_up) = response.follow_up {
-                walk_node(follow_up, out_entities, out_worlds);
-            }
-        }
-    }
-    for tmpl in templates {
-        walk_node(&tmpl.node, out_entities, out_worlds);
     }
 }
 
@@ -363,13 +340,6 @@ fn discover_world_assets(
             &mut world_paths_from_triggers,
         );
     }
-
-    // Walk comms responses for the same
-    collect_comms_action_paths(
-        &world.comms,
-        &mut entity_paths_from_triggers,
-        &mut world_paths_from_triggers,
-    );
 
     // Process discovered entity paths
     for path in entity_paths_from_triggers {

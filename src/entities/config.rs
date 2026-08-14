@@ -6815,10 +6815,11 @@ surfase_colour = [1.0, 0.7, 0.1]
             let cfg = crate::entity_includes::load_entity_config(&path)
                 .unwrap_or_else(|e| panic!("{path} must parse: {e}"));
 
-            assert_eq!(
-                cfg.name.as_deref(),
-                Some(&*format!("entity.asteroid_common_{n}_huge.name"))
-            );
+            // Every common-asteroid variant (small/large/huge, all four
+            // models) shares the one `entity.asteroid.name` id rather than a
+            // per-variant string (strings consolidation) — there is nothing
+            // about a rock's display name that depends on its size class.
+            assert_eq!(cfg.name.as_deref(), Some("entity.asteroid.name"));
             let collider = cfg
                 .collider
                 .as_ref()

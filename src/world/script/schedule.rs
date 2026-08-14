@@ -479,10 +479,7 @@ pub fn register_scheduling(engine: &mut Engine) {
         "destroy_entity",
         |b: &mut Schedule, entity: ImmutableString| -> Result<(), Box<EvalAltResult>> {
             let action = super::effects::destroy_entity_action(&entity).map_err(|e| {
-                Box::new(EvalAltResult::ErrorRuntime(
-                    e.into(),
-                    rhai::Position::NONE,
-                ))
+                Box::new(EvalAltResult::ErrorRuntime(e.into(), rhai::Position::NONE))
             })?;
             b.defer(action);
             Ok(())
@@ -632,7 +629,8 @@ mod tests {
         let sink = ScheduleSink::new();
         let mut ctx = Map::new();
         ctx.insert("schedule".into(), Dynamic::from(sink.clone()));
-        vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx).expect("the call runs");
+        let _ =
+            vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx).expect("the call runs");
 
         let (delayed, callbacks) = sink.drain(&clock(0, 2.0, 60.0), "t.rhai");
         assert!(callbacks.is_empty(), "a delayed effect is not a callback");

@@ -314,7 +314,7 @@ A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedu
 | `ctx.effects.add_objective(#{ id, text, mandatory?, targets?, source?, base_priority?, directive_kind?, … })` | Add to the objectives list, with its AI directive and utility scoring. |
 | `ctx.effects.complete_objective(id)` / `fail_objective(id)` | |
 | `ctx.effects.spawn_entity(#{ template_path, name, position?/anchor?, rotation?, scale?, overrides? })` | `template_path` string literals are scanned statically for asset preload. |
-| `ctx.effects.destroy_entity(name)` | |
+| `ctx.effects.destroy_entity(name)` | The counterpart to `spawn_entity`: removes the named entity. It CHAINS — `on_destroyed` and `on_all_destroyed` fire off it in the same tick, exactly as they do off a combat kill, which is what lets a scripted collapse drive mission state. An unknown name warns and does nothing. Reusing a destroyed entity's name in a later `spawn_entity` is fine. Also available deferred: `ctx.schedule.in_seconds(n).destroy_entity(name)`. |
 | `ctx.effects.load_world(path)` / `unload_world(path)` | Runtime composition of sub-world layers. |
 | `ctx.effects.apply_modifier(…)` / `remove_modifier(…)` | `slot` ∈ {`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`}. |
 | `ctx.effects.apply_int_modifier(…)` / `remove_int_modifier(…)` | `slot` ∈ {`RepairTeams`}. |

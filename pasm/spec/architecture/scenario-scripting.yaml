@@ -197,6 +197,51 @@ entities:
         reference: "world::server tests::scripted_in_seconds_effect_routes_through_tick_delayed_actions (src/world/server.rs)"
         summary: "A scripted `in_seconds` effect routes through the existing tick `DelayedAction` queue rather than a parallel timer — proving the schedule seam reuses the declarative delay path."
 
+  - component: scripted-entity-removal
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Scripted Entity Removal — `destroy_entity`
+      summary: "Issue #1033 (parent #851, Falling Skyway). The counterpart `spawn_entity` never had: `ctx.effects.destroy_entity(name)` and its deferred twin `ctx.schedule.in_seconds(n).destroy_entity(name)`, both buffering the declarative `TriggerAction::DestroyEntity` for the applier to resolve through the SAME `dispatch_action` the rest of the effects vocabulary goes through. Falling Skyway needs it twice over — the skyhook's mid-mission collapse, and retiring a radiation-storm region band once its sweep is done. NO ENGINE WORK: `TriggerAction::DestroyEntity`, the `dispatch_action` routing arm, `dispatch_destroy_entity` and the `ActionCmd::DestroyEntity` applier arm all pre-date this slice and survived the M7 teardown intact; what was missing was only the host fn and the authoring surface over them. Both verbs build the action through one shared `destroy_entity_action`, which routes through `parse_action_entry` so the required-`entity` rule has a single owner."
+      rationale:
+        - "BUFFERING THE ACTION, NOT A RESOLVED COMMAND, IS WHAT MAKES A REMOVAL CHAIN. `dispatch_destroy_entity` pushes `WorldEvent::Destroyed` onto `DispatchResult::new_events` beside the despawn command, and `apply_script_commands` feeds the WHOLE result to `apply_dispatch_result`, whose `events_out` is `tick_trigger_pipeline`'s `next_events` — the current tick's next chaining pass. So `on_destroyed` and `on_all_destroyed` fire off a scripted removal in the SAME tick, identically to a combat kill. A host fn pushing a resolved `ActionCmd` from the effects boundary would despawn the entity and chain nothing, which is why one unit test asserts the buffered SHAPE directly: that regression passes every behavioural test in the module."
+        - "[ai] THE MAPS ARE DELIBERATELY NOT CLEANED UP, against the literal reading of the issue's AC4. `OnAllDestroyed` resolves each `Destroyed` event back to a member NAME through `name_to_uuid` and reads membership out of `entity_groups`; removing the destroyed entity from either makes the LAST kill unresolvable and the group never fires — breaking the same issue's AC3. A combat kill removes neither, so a scripted destroy removes neither, and the two paths stay identical by doing the same nothing. AC4's PURPOSE (no collision when a name is reused) holds regardless, because the map is written by INSERT: a later `spawn_entity` under a destroyed entity's name overwrites the stale entry. Both halves are pinned by tests, so the decision is falsifiable rather than asserted."
+        - "A REMOVAL'S DETERMINISM IS A DIFFERENT CLAIM FROM A SPAWN'S. A spawn is deterministic when the MINT agrees; a removal mints nothing — the Entity namespace counter does not advance — and is deterministic when the TICK it lands on agrees. The digest makes that observable, since a despawned entity simply stops being folded. The mint counter is asserted separately because the digest cannot speak for it on its own: a removal that consumed a sequence number would hand two peers different ids for everything spawned afterwards, long after the removal itself looked fine."
+        - "The downstream consequences needed no new code, which is the affordance the #1026/#1027 operations spine and #985's roster lifecycle each wrote down, doing its job on the first change that tested it. An operation whose target is destroyed mid-flight settles `Failed(Ineligibility::TargetGone)` through ordinary eligibility, with nothing in the destroy path knowing an operation was running; a hailable subject that vanishes leaves the contact list through the same live-entity retain a combat kill goes through."
+        - "A destroyed-before-save entity does not resurrect on resume, and that is NOT free: a resumed app boots the same world file first, which SPAWNS the structure again, and `restore_entities`' surplus sweep is what takes it away. Asserted with the freshly booted world read BEFORE the restore, so an inert restore would be visible rather than hidden behind a world that happened to look right."
+    architecture:
+      kind: authoring-front-end
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/script/effects.rs
+        - src/world/script/schedule.rs
+        - src/world/dispatch.rs
+        - src/world/server.rs
+        - assets/worlds/probe_destroy.toml
+        - docs/toml-authoring-guide.md
+      symbols:
+        - destroy_entity_action
+        - dispatch_destroy_entity
+        - DestroyEntity
+      tests:
+        - cargo test
+        - "cargo test --features headless --test headless_runner a_scripted_destroy"
+        - "cargo test --features headless --test entity_id_minting two_instances_destroy"
+        - "cargo test --features headless --test snapshot_resume an_entity_destroyed_before_the_save"
+    evidence:
+      - kind: test
+        reference: "world::server tests::a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed (src/world/server.rs)"
+        summary: "A script destroys group members one at a time through the LIVE trigger pipeline: the group's `OnAllDestroyed` stays silent with one of two down and fires when the LAST one goes. The negative half is what makes the positive half mean anything — a trigger that fired on the first kill would satisfy a fires-at-the-end assertion just as well."
+      - kind: test
+        reference: "tests/headless_runner.rs::a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target"
+        summary: "`probe_destroy.toml` run whole: a t=5 s deadline collapses the skyhook, its chained `on_destroyed` fails an objective within a tick, the tender's in-flight stabilise settles `Failed(TargetGone)`, the DEFERRED `in_seconds(2).destroy_entity` retires the first storm band, and the group fires only on the second. Asserted on causal ORDER rather than frame arithmetic, because the mission clock anchors on the first InProgress tick."
+      - kind: test
+        reference: "tests/entity_id_minting.rs::two_instances_destroy_on_the_same_tick_and_agree_throughout"
+        summary: "Two instances remove on the same tick and fold to the same digest on EVERY tick of the run, and the Entity mint counter is unmoved by the removal."
+
   - component: scenario-script-comms-frontend
     core:
       status: implemented

@@ -4678,10 +4678,12 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.destroy_entity("no
             merge_script_triggers(&mut runtime.trigger_states, &mut sr);
         }
         app.world_mut().insert_resource(sr);
-        app.world_mut()
-            .resource_mut::<ObjectiveManagerRes>()
-            .0
-            .add("obj", "hold the line", true, vec![]);
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "obj",
+            "hold the line",
+            true,
+            vec![],
+        );
 
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()

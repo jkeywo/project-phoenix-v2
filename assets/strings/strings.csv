@@ -1,15 +1,12 @@
 id,context,en
 entity.alliance_battleship.name,assets/entities/alliance_battleship.toml → name (top level),Alliance Battleship
-entity.alliance_battleship.hull.system_hull.power_reactor.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Power Reactor
-entity.alliance_battleship.hull.system_hull.power_battery.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Power Battery
-entity.alliance_battleship.hull.system_hull.core.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Core
 entity.alliance_battleship.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_battleship.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Starboard)
 entity.alliance_battleship.power_groups.helm.label,assets/entities/alliance_battleship.toml → [power_groups.helm] label,Propulsion
 entity.alliance_battleship.power_groups.weapons.label,assets/entities/alliance_battleship.toml → [power_groups.weapons] label,Weapons
 entity.alliance_battleship.power_groups.shields.label,assets/entities/alliance_battleship.toml → [power_groups.shields] label,Shields
-entity.alliance_battleship.station.captain.description,assets/entities/alliance_battleship.toml → [station] description,[Command the bridge.]
-entity.alliance_battleship.station.helm.description,assets/entities/alliance_battleship.toml → [station] description,[Pilot the ship.]
+entity.alliance_battleship.station.captain.description,assets/entities/alliance_battleship.toml → [station] description,Command the ship.
+entity.alliance_battleship.station.helm.description,assets/entities/alliance_battleship.toml → [station] description,Pilot the ship.
 entity.alliance_battleship.station.tactical.description,assets/entities/alliance_battleship.toml → [station] description,[Manage weapons systems.]
 entity.alliance_battleship.station.repair.description,assets/entities/alliance_battleship.toml → [station] description,[Maintain and repair ship systems.]
 entity.alliance_battleship.station.sensors.description,assets/entities/alliance_battleship.toml → [station] description,[Monitor long-range sensors.]
@@ -18,12 +15,9 @@ entity.alliance_battleship.station.navigation.description,assets/entities/allian
 entity.alliance_battleship.station.power.description,assets/entities/alliance_battleship.toml → [station] description,[Manage ship power systems.]
 entity.alliance_battleship.station.comms.description,assets/entities/alliance_battleship.toml → [station] description,[Hail stations and relay intelligence.]
 entity.alliance_courier.name,assets/entities/alliance_courier.toml → name (top level),Alliance Courier
-entity.alliance_courier.hull.system_hull.core.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Core
-entity.alliance_courier.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Port Engine
-entity.alliance_courier.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Starboard Engine
+entity.alliance_courier.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Engine (Port)
+entity.alliance_courier.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Engine (Starboard)
 entity.alliance_courier.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Lateral Thrusters
-entity.alliance_courier.hull.system_hull.power_reactor.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Reactor
-entity.alliance_courier.hull.system_hull.power_battery.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,Battery
 entity.alliance_courier.power_groups.helm.label,assets/entities/alliance_courier.toml → [power_groups.helm] label,Propulsion
 entity.alliance_courier.power_groups.weapons.label,assets/entities/alliance_courier.toml → [power_groups.weapons] label,Weapons
 entity.alliance_courier.power_groups.shields.label,assets/entities/alliance_courier.toml → [power_groups.shields] label,Shields
@@ -31,37 +25,31 @@ entity.alliance_courier.station.captain.description,assets/entities/alliance_cou
 entity.alliance_courier.station.tactical.description,assets/entities/alliance_courier.toml → [station] description,"[Fly the Courier, track contacts and operate its blaster.]"
 entity.alliance_cruiser.name,assets/entities/alliance_cruiser.toml → name (top level),Alliance Cruiser
 entity.alliance_cruiser.hull.system_hull.science.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Science
-entity.alliance_cruiser.hull.system_hull.power_reactor.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Power Reactor
-entity.alliance_cruiser.hull.system_hull.power_battery.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Power Battery
-entity.alliance_cruiser.hull.system_hull.core.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Core
 entity.alliance_cruiser.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_cruiser.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Starboard)
 entity.alliance_cruiser.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Lateral Thrusters
 entity.alliance_cruiser.power_groups.helm.label,assets/entities/alliance_cruiser.toml → [power_groups.helm] label,Propulsion
 entity.alliance_cruiser.power_groups.weapons.label,assets/entities/alliance_cruiser.toml → [power_groups.weapons] label,Weapons
 entity.alliance_cruiser.power_groups.shields.label,assets/entities/alliance_cruiser.toml → [power_groups.shields] label,Shields
-entity.alliance_cruiser.station.captain.description,assets/entities/alliance_cruiser.toml → [station] description,[Command the bridge.]
-entity.alliance_cruiser.station.helm.description,assets/entities/alliance_cruiser.toml → [station] description,[Pilot the ship.]
+entity.alliance_cruiser.station.captain.description,assets/entities/alliance_cruiser.toml → [station] description,Command the ship.
+entity.alliance_cruiser.station.helm.description,assets/entities/alliance_cruiser.toml → [station] description,Pilot the ship.
 entity.alliance_cruiser.station.tactical.description,assets/entities/alliance_cruiser.toml → [station] description,[Manage weapons systems.]
 entity.alliance_cruiser.station.science.description,assets/entities/alliance_cruiser.toml → [station] description,[Monitor sensors and manage shields.]
 entity.alliance_cruiser.station.engineering.description,assets/entities/alliance_cruiser.toml → [station] description,[Manage power and repairs.]
 entity.alliance_cruiser.station.comms.description,assets/entities/alliance_cruiser.toml → [station] description,"[Hail stations, plot course and navigate.]"
 entity.alliance_destroyer.name,assets/entities/alliance_destroyer.toml → name (top level),Alliance Destroyer
-entity.alliance_destroyer.hull.system_hull.power_reactor.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Power Reactor
-entity.alliance_destroyer.hull.system_hull.power_battery.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Power Battery
-entity.alliance_destroyer.hull.system_hull.core.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Core
 entity.alliance_destroyer.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_destroyer.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Engine (Starboard)
 entity.alliance_destroyer.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,Lateral Thrusters
 entity.alliance_destroyer.power_groups.helm.label,assets/entities/alliance_destroyer.toml → [power_groups.helm] label,Propulsion
 entity.alliance_destroyer.power_groups.weapons.label,assets/entities/alliance_destroyer.toml → [power_groups.weapons] label,Weapons
 entity.alliance_destroyer.power_groups.shields.label,assets/entities/alliance_destroyer.toml → [power_groups.shields] label,Shields
-entity.alliance_destroyer.station.captain.description,assets/entities/alliance_destroyer.toml → [station] description,[Command the bridge and monitor sensors.]
-entity.alliance_destroyer.station.helm.description,assets/entities/alliance_destroyer.toml → [station] description,[Pilot the ship.]
+entity.alliance_destroyer.station.captain.description,assets/entities/alliance_destroyer.toml → [station] description,Command the ship and monitor sensors.
+entity.alliance_destroyer.station.helm.description,assets/entities/alliance_destroyer.toml → [station] description,Pilot the ship.
 entity.alliance_destroyer.station.tactical.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage weapons, navigation and comms.]"
 entity.alliance_destroyer.station.engineering.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage shields, power and repairs.]"
-entity.alliance_destroyer.station.helm.tutorial.welcome.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — first-visit helm tip heading,[WELCOME TO HELM]
-entity.alliance_destroyer.station.helm.tutorial.welcome.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — first-visit helm tip body,"[You fly the destroyer. The radar shows space around you — up is always your heading. Your flight controls are on the right.]"
+entity.alliance_destroyer.station.helm.tutorial.welcome.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — first-visit helm tip heading,WELCOME TO HELM
+entity.alliance_destroyer.station.helm.tutorial.welcome.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — first-visit helm tip body,[You fly the destroyer. The radar shows space around you — up is always your heading. Your flight controls are on the right.]
 entity.alliance_destroyer.station.helm.tutorial.joystick.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — flight-stick tip heading,FLIGHT STICK
 entity.alliance_destroyer.station.helm.tutorial.joystick.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — flight-stick tip body,"[Drag the flight stick: push up to thrust, pull sideways to steer. The ship holds your last input until you move it again.]"
 entity.alliance_destroyer.station.helm.tutorial.lateral.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — lateral-thrust tip heading,LATERAL THRUST
@@ -106,38 +94,6 @@ entity.alliance_destroyer.station.engineering.tutorial.repair.title,assets/entit
 entity.alliance_destroyer.station.engineering.tutorial.repair.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — repair-teams tip body,[Dispatch a team to a damaged system to start repairs. A team already on a job can be given priority over the others.]
 entity.alliance_destroyer.station.engineering.tutorial.damage.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — hull-damage contextual tip heading,HULL DAMAGE
 entity.alliance_destroyer.station.engineering.tutorial.damage.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — hull-damage contextual tip body,[Something on the ship just took a hit. Check which system is hurting and get a repair team moving before it fails outright.]
-entity.asteroid_common_1_cosmetic.name,assets/entities/asteroid_common_1_cosmetic.toml → name (top level),[Cosmetic Asteroid 1]
-entity.asteroid_common_1_huge.name,assets/entities/asteroid_common_1_huge.toml → name (top level),[Huge Asteroid 1]
-entity.asteroid_common_1_large.name,assets/entities/asteroid_common_1_large.toml → name (top level),[Large Asteroid 1]
-entity.asteroid_common_1_small.name,assets/entities/asteroid_common_1_small.toml → name (top level),[Small Asteroid 1]
-entity.asteroid_common_2_cosmetic.name,assets/entities/asteroid_common_2_cosmetic.toml → name (top level),[Cosmetic Asteroid 2]
-entity.asteroid_common_2_huge.name,assets/entities/asteroid_common_2_huge.toml → name (top level),[Huge Asteroid 2]
-entity.asteroid_common_2_large.name,assets/entities/asteroid_common_2_large.toml → name (top level),[Large Asteroid 2]
-entity.asteroid_common_2_small.name,assets/entities/asteroid_common_2_small.toml → name (top level),[Small Asteroid 2]
-entity.asteroid_common_3_cosmetic.name,assets/entities/asteroid_common_3_cosmetic.toml → name (top level),[Cosmetic Asteroid 3]
-entity.asteroid_common_3_huge.name,assets/entities/asteroid_common_3_huge.toml → name (top level),[Huge Asteroid 3]
-entity.asteroid_common_3_large.name,assets/entities/asteroid_common_3_large.toml → name (top level),[Large Asteroid 3]
-entity.asteroid_common_3_small.name,assets/entities/asteroid_common_3_small.toml → name (top level),[Small Asteroid 3]
-entity.asteroid_common_4_cosmetic.name,assets/entities/asteroid_common_4_cosmetic.toml → name (top level),[Cosmetic Asteroid 4]
-entity.asteroid_common_4_huge.name,assets/entities/asteroid_common_4_huge.toml → name (top level),[Huge Asteroid 4]
-entity.asteroid_common_4_large.name,assets/entities/asteroid_common_4_large.toml → name (top level),[Large Asteroid 4]
-entity.asteroid_common_4_small.name,assets/entities/asteroid_common_4_small.toml → name (top level),[Small Asteroid 4]
-entity.asteroid_rare_1_large.name,assets/entities/asteroid_rare_1_large.toml → name (top level),[Large Rare Asteroid 1]
-entity.asteroid_rare_1_small.name,assets/entities/asteroid_rare_1_small.toml → name (top level),[Small Rare Asteroid 1]
-entity.asteroid_rare_2_large.name,assets/entities/asteroid_rare_2_large.toml → name (top level),[Large Rare Asteroid 2]
-entity.asteroid_rare_2_small.name,assets/entities/asteroid_rare_2_small.toml → name (top level),[Small Rare Asteroid 2]
-entity.asteroid_rare_3_large.name,assets/entities/asteroid_rare_3_large.toml → name (top level),[Large Rare Asteroid 3]
-entity.asteroid_rare_3_small.name,assets/entities/asteroid_rare_3_small.toml → name (top level),[Small Rare Asteroid 3]
-entity.asteroid_rare_4_large.name,assets/entities/asteroid_rare_4_large.toml → name (top level),[Large Rare Asteroid 4]
-entity.asteroid_rare_4_small.name,assets/entities/asteroid_rare_4_small.toml → name (top level),[Small Rare Asteroid 4]
-entity.asteroid_uncommon_1_large.name,assets/entities/asteroid_uncommon_1_large.toml → name (top level),[Large Uncommon Asteroid 1]
-entity.asteroid_uncommon_1_small.name,assets/entities/asteroid_uncommon_1_small.toml → name (top level),[Small Uncommon Asteroid 1]
-entity.asteroid_uncommon_2_large.name,assets/entities/asteroid_uncommon_2_large.toml → name (top level),[Large Uncommon Asteroid 2]
-entity.asteroid_uncommon_2_small.name,assets/entities/asteroid_uncommon_2_small.toml → name (top level),[Small Uncommon Asteroid 2]
-entity.asteroid_uncommon_3_large.name,assets/entities/asteroid_uncommon_3_large.toml → name (top level),[Large Uncommon Asteroid 3]
-entity.asteroid_uncommon_3_small.name,assets/entities/asteroid_uncommon_3_small.toml → name (top level),[Small Uncommon Asteroid 3]
-entity.asteroid_uncommon_4_large.name,assets/entities/asteroid_uncommon_4_large.toml → name (top level),[Large Uncommon Asteroid 4]
-entity.asteroid_uncommon_4_small.name,assets/entities/asteroid_uncommon_4_small.toml → name (top level),[Small Uncommon Asteroid 4]
 entity.depot_transfer.name,assets/entities/depot_transfer.toml -> name (top level),[Transfer Depot]
 entity.depot_transfer.target.description,assets/entities/depot_transfer.toml -> [target] description,[Orbital transfer depot]
 entity.moon_ice.name,assets/entities/moon_ice.toml → name (top level),Ice Moon
@@ -227,16 +183,16 @@ world.combat_test.trigger.action.18.message,assets/worlds/combat_test.toml → [
 world.combat_test.trigger.action.21.message,assets/worlds/combat_test.toml → [trigger.action] message,[DEFEAT: Starbase Alpha lost. The Harrow strike fleet has secured the system.]
 world.combat_test.trigger.action.obj_defend.text,assets/worlds/combat_test.toml → [trigger.action] text,[Defend Starbase Alpha against the incoming Harrow fleet.]
 world.combat_test.comms.0.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha to USS Phoenix: a Harrow strike fleet is inbound. Eight waves, mixed class, all running on this station. Hold the line.]"
-world.combat_test.comms.1.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave one has launched north-northwest. Harrow cruiser inbound.]"
-world.combat_test.comms.2.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave two has launched southeast. Harrow destroyer inbound.]"
-world.combat_test.comms.3.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave three has launched due east. Harrow cruiser inbound.]"
-world.combat_test.comms.4.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave four has launched northeast. Harrow destroyer inbound.]"
-world.combat_test.comms.5.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave five has launched. Two Harrow cruisers inbound from east and east-northeast.]"
-world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave six has launched. Two Harrow destroyers inbound from north and south.]"
-world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: wave seven has launched east. Harrow cruiser and destroyer inbound.]"
-world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: final wave has launched due east. Ironveil-class patrol cruiser inbound.]"
-world.combat_test.comms.9.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: hull integrity below 75 percent. Defensive support requested.]"
-world.combat_test.comms.10.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: hull integrity below 50 percent. We need immediate support.]"
+world.combat_test.comms.1.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: wave one has launched north-northwest. Harrow cruiser inbound.]
+world.combat_test.comms.2.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: wave two has launched southeast. Harrow destroyer inbound.]
+world.combat_test.comms.3.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: wave three has launched due east. Harrow cruiser inbound.]
+world.combat_test.comms.4.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: wave four has launched northeast. Harrow destroyer inbound.]
+world.combat_test.comms.5.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: wave five has launched. Two Harrow cruisers inbound from east and east-northeast.]
+world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: wave six has launched. Two Harrow destroyers inbound from north and south.]
+world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: wave seven has launched east. Harrow cruiser and destroyer inbound.]
+world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: final wave has launched due east. Ironveil-class patrol cruiser inbound.]
+world.combat_test.comms.9.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: hull integrity below 75 percent. Defensive support requested.]
+world.combat_test.comms.10.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: hull integrity below 50 percent. We need immediate support.]
 world.combat_test.comms.11.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: critical hull integrity below 10 percent. Phoenix, defend the station.]"
 world.default.global.title,assets/worlds/default.toml → [global] title,Starbase Alpha
 world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
@@ -266,133 +222,133 @@ world.patrol.trigger.action.obj_raider_destroyed.text,assets/worlds/patrol.toml 
 world.reinforcements.global.title,assets/worlds/reinforcements.toml → [global] title,Reinforcements
 world.reinforcements.global.description,assets/worlds/reinforcements.toml → [global] description,[A second pirate raider drops out of warp to assist its wing-mate.]
 world.entity.raider_beta.name,assets/worlds/reinforcements.toml → [entity] name (entity display name; also the cross-reference key),raider_beta
-console.common.auto,"Badge shown on any console control when that system is AI-operated","AUTO"
-console.common.fire,"Weapon fire button label (phasers and torpedoes)","FIRE"
-console.common.cooldown,"Weapon/drive button label while the system is on cooldown","COOLDOWN"
-console.common.no_target,"Shown wherever a target readout has no locked target","NO TARGET"
-console.common.out_of_range,"Weapon readiness: a target is locked but beyond the weapon's range","[OUT OF RANGE]"
-console.common.out_of_arc,"Weapon readiness: a target is locked and in range but outside the weapon's fire arc","[OUT OF ARC]"
-console.common.loading,"Weapon readiness: the weapon is loading or charging and cannot fire yet","LOADING"
-console.common.no_ammo,"Weapon readiness: the weapon has no ammunition (empty magazine)","NO AMMO"
-console.common.offline,"Weapon readiness: the weapon is offline (disabled or destroyed)","OFFLINE"
-console.common.no_contact,"Target-kind readout when nothing is targeted","NO CONTACT"
-console.common.no_shield_data,"Shield readout when no shield telemetry is available","[NO SHIELD DATA]"
-console.common.on_screen,"Button that pushes this console's radar to the shared viewscreen","ON SCREEN"
-console.common.radar_pos,"Radar position readout. {x} and {z} are world coordinates","[X: {x}  Z: {z}]"
-console.common.destroyed,"Label on a ship system that has been destroyed","DESTROYED"
-console.common.unknown,"Fallback label for an unidentified contact or stance","UNKNOWN"
-console.common.port,"Port (left) direction label","PORT"
-console.common.stbd,"Starboard (right) direction label","STBD"
-console.common.omni,"Shield focus readout when no single facing is focused","OMNI"
-console.common.back,"Button that closes a full-screen overlay panel and returns to the console",← Back
-console.stance.hostile,"Contact stance label on sensor readouts","HOSTILE"
-console.stance.allied,"Contact stance label on sensor readouts","ALLIED"
-console.stance.neutral,"Contact stance label on sensor readouts","NEUTRAL"
-console.kind.ship,"Contact kind label on sensor readouts","WARSHIP"
-console.kind.asteroid,"Contact kind label on sensor readouts","ASTEROID"
-console.kind.station,"Contact kind label on sensor readouts","STARBASE"
-console.kind.planet,"Contact kind label on sensor readouts","PLANET"
-console.kind.star,"Contact kind label on sensor readouts","STAR"
-component.battery_bar.charging,"Battery bar indicator while the battery is recharging","CHARGING"
-component.blasters.title,"Blaster controls panel heading","BLASTERS"
-component.blasters.empty,"Blaster controls when the ship has no blaster banks","[NO BLASTER BANKS]"
-component.blasters.charge,"Blaster button: begin charging","CHARGE"
-component.blasters.firing,"Blaster button while the bank is discharging","FIRING..."
-component.blasters.bank_fallback,"Blaster bank row label when the bank has no name","BLASTER"
-component.blasters.pattern_step,"Blaster patterned-attack step indicator (step number of total)","STEP {step}/{total}"
-component.blasters.barrels,"Blaster patterned-attack active-barrel indicator listing firing barrel indices","BARRELS {barrels}"
-component.boost.title,"Boost control panel heading","BOOST"
-component.boost.ready,"Boost button in its ready state","BOOST"
-component.boost.boosting,"Boost button while boosting. {pct} is remaining battery percent","BOOSTING {pct}%"
-component.boost.boosting_full,"Boost button while boosting with a full battery","BOOSTING"
-component.boost.recharging,"Boost button while the battery refills. {pct} is charge percent","RECHARGING {pct}%"
-component.camera_select.title,"Viewscreen camera selector heading (Captain console)","CAMERA"
-component.camera_select.empty,"Camera selector when no cameras are available","NO CAMERA"
-component.comms_contacts.empty,"Comms contact list when nothing is in hailing range","NO CONTACTS"
-component.comms_contacts.hail,"Button that hails a comms contact","HAIL"
-component.comms_hails.empty,"Comms message list when no transmissions have arrived","NO MESSAGES"
-component.comms_message.no_active_hail,"Comms message panel when no hail is open","[NO ACTIVE HAIL]"
-component.comms_message.confirm_important,"Comms response button prompt asking the operator to confirm an important, irreversible response before it is sent","CONFIRM?"
-component.comms_message.unavailable,"Comms response button tooltip shown when the sender is out of comms range and the response cannot be sent","[OUT OF RANGE]"
-component.comms_message.rejected,"Comms response button tooltip shown when the host rejected the attempted submission","REJECTED"
-component.helm_joystick.title,"Helm joystick panel heading","HELM"
-component.helm_joystick.fwd,"Joystick axis label: forward","FWD"
-component.helm_joystick.rev,"Joystick axis label: reverse","REV"
-component.hull_integrity.title,"Hull integrity panel heading","HULL INTEGRITY"
-component.hull_integrity.no_data,"Hull integrity panel when no hull telemetry is available","[NO HULL DATA]"
-component.hull_integrity.systems,"Hull integrity panel: per-system breakdown heading","SYSTEMS"
-component.impulse.title,"Impulse drive control panel heading","IMPULSE DRIVE"
-component.impulse.ready,"Impulse button in its ready state","IMPULSE"
-component.impulse.cancel,"Impulse button while charging. {pct} is charge percent; pressing cancels","CANCEL {pct}%"
-component.lateral.title,"Lateral thruster joystick heading","LATERAL"
-component.objectives.empty,"Objective list when the mission has no objectives yet","NO OBJECTIVES"
-component.tutorial.heading,"Contextual tutorial overlay card (issue #916): eyebrow label above the tip title","TUTORIAL"
-component.tutorial.dismiss,"Contextual tutorial overlay card: dismiss button — marks the tip as read forever","GOT IT"
-component.tutorial.more,"Contextual tutorial overlay card: count of further tips queued behind the current one. {n} is that count","+{n} MORE"
-component.phasers.title,"Phaser controls panel heading","PHASERS"
-component.phasers.manual,"Phaser mode toggle: manual fire mode","MANUAL"
-component.phasers.empty,"Phaser controls when the ship has no phaser banks","[NO PHASER BANKS]"
-component.phasers.bank_fallback,"Phaser bank row label when the bank has no name","BANK"
-component.power.title,"Power allocation panel heading","POWER ALLOCATION"
-component.power.empty,"Power panel when the ship defines no power groups","[NO POWER GROUPS]"
-component.power.level,"Power group level readout. {n} is the allocated level","LVL {n}"
-component.power.held,"Power group level readout while the reactor's battery floor is holding the group below its standing order. {n} is the level it is running at, {c} the level it was commanded to","[LVL {n}/{c} HELD]"
-component.red_alert.title,"Red alert control heading (Captain console)","RED ALERT"
-component.red_alert.active,"Red alert button while the alert is raised","RED ALERT"
-component.red_alert.standby,"Red alert button while the ship is stood down","STAND DOWN"
-component.repair_teams.title,"Repair teams panel heading","REPAIR TEAMS"
-component.repair_teams.empty,"Repair panel when the ship has no repair teams","[NO REPAIR TEAMS]"
-component.repair_teams.no_targets,"Repair team row when nothing needs repair","[No repair targets]"
-component.repair_teams.target,"Repair team row: current assignment. {target} is the system name","Target: {target}"
-component.sensor_panel.no_target,"Sensor detail panel when no target is locked","NO TARGET"
-component.sensor_panel.brg,"Sensor readout key: bearing to target","BRG"
-component.sensor_panel.rng,"Sensor readout key: range to target","RNG"
-component.sensor_panel.class,"Sensor readout key: target ship class","CLASS"
-component.sensor_panel.hull,"Sensor readout key: target hull percentage","HULL"
-component.sensor_panel.heading,"Sensor readout key: target heading","HEADING"
+console.common.auto,Badge shown on any console control when that system is AI-operated,AUTO
+console.common.fire,Weapon fire button label (phasers and torpedoes),FIRE
+console.common.cooldown,Weapon/drive button label while the system is on cooldown,COOLDOWN
+console.common.no_target,Shown wherever a target readout has no locked target,NO TARGET
+console.common.out_of_range,Weapon readiness: a target is locked but beyond the weapon's range,[OUT OF RANGE]
+console.common.out_of_arc,Weapon readiness: a target is locked and in range but outside the weapon's fire arc,[OUT OF ARC]
+console.common.loading,Weapon readiness: the weapon is loading or charging and cannot fire yet,LOADING
+console.common.no_ammo,Weapon readiness: the weapon has no ammunition (empty magazine),NO AMMO
+console.common.offline,Weapon readiness: the weapon is offline (disabled or destroyed),OFFLINE
+console.common.no_contact,Target-kind readout when nothing is targeted,NO CONTACT
+console.common.no_shield_data,Shield readout when no shield telemetry is available,[NO SHIELD DATA]
+console.common.on_screen,Button that pushes this console's radar to the shared viewscreen,ON SCREEN
+console.common.radar_pos,Radar position readout. {x} and {z} are world coordinates,[X: {x}  Z: {z}]
+console.common.destroyed,Label on a ship system that has been destroyed,DESTROYED
+console.common.unknown,Fallback label for an unidentified contact or stance,UNKNOWN
+console.common.port,Port (left) direction label,PORT
+console.common.stbd,Starboard (right) direction label,STBD
+console.common.omni,Shield focus readout when no single facing is focused,OMNI
+console.common.back,Button that closes a full-screen overlay panel and returns to the console,← Back
+console.stance.hostile,Contact stance label on sensor readouts,HOSTILE
+console.stance.allied,Contact stance label on sensor readouts,ALLIED
+console.stance.neutral,Contact stance label on sensor readouts,NEUTRAL
+console.kind.ship,Contact kind label on sensor readouts,WARSHIP
+console.kind.asteroid,Contact kind label on sensor readouts,ASTEROID
+console.kind.station,Contact kind label on sensor readouts,STARBASE
+console.kind.planet,Contact kind label on sensor readouts,PLANET
+console.kind.star,Contact kind label on sensor readouts,STAR
+component.battery_bar.charging,Battery bar indicator while the battery is recharging,CHARGING
+component.blasters.title,Blaster controls panel heading,BLASTERS
+component.blasters.empty,Blaster controls when the ship has no blaster banks,[NO BLASTER BANKS]
+component.blasters.charge,Blaster button: begin charging,CHARGE
+component.blasters.firing,Blaster button while the bank is discharging,FIRING...
+component.blasters.bank_fallback,Blaster bank row label when the bank has no name,BLASTER
+component.blasters.pattern_step,Blaster patterned-attack step indicator (step number of total),STEP {step}/{total}
+component.blasters.barrels,Blaster patterned-attack active-barrel indicator listing firing barrel indices,BARRELS {barrels}
+component.boost.title,Boost control panel heading,BOOST
+component.boost.ready,Boost button in its ready state,BOOST
+component.boost.boosting,Boost button while boosting. {pct} is remaining battery percent,BOOSTING {pct}%
+component.boost.boosting_full,Boost button while boosting with a full battery,BOOSTING
+component.boost.recharging,Boost button while the battery refills. {pct} is charge percent,RECHARGING {pct}%
+component.camera_select.title,Viewscreen camera selector heading (Captain console),CAMERA
+component.camera_select.empty,Camera selector when no cameras are available,NO CAMERA
+component.comms_contacts.empty,Comms contact list when nothing is in hailing range,NO CONTACTS
+component.comms_contacts.hail,Button that hails a comms contact,HAIL
+component.comms_hails.empty,Comms message list when no transmissions have arrived,NO MESSAGES
+component.comms_message.no_active_hail,Comms message panel when no hail is open,[NO ACTIVE HAIL]
+component.comms_message.confirm_important,"Comms response button prompt asking the operator to confirm an important, irreversible response before it is sent",CONFIRM?
+component.comms_message.unavailable,Comms response button tooltip shown when the sender is out of comms range and the response cannot be sent,[OUT OF RANGE]
+component.comms_message.rejected,Comms response button tooltip shown when the host rejected the attempted submission,REJECTED
+component.helm_joystick.title,Helm joystick panel heading,HELM
+component.helm_joystick.fwd,Joystick axis label: forward,FWD
+component.helm_joystick.rev,Joystick axis label: reverse,REV
+component.hull_integrity.title,Hull integrity panel heading,HULL INTEGRITY
+component.hull_integrity.no_data,Hull integrity panel when no hull telemetry is available,[NO HULL DATA]
+component.hull_integrity.systems,Hull integrity panel: per-system breakdown heading,SYSTEMS
+component.impulse.title,Impulse drive control panel heading,IMPULSE DRIVE
+component.impulse.ready,Impulse button in its ready state,IMPULSE
+component.impulse.cancel,Impulse button while charging. {pct} is charge percent; pressing cancels,CANCEL {pct}%
+component.lateral.title,Lateral thruster joystick heading,LATERAL
+component.objectives.empty,Objective list when the mission has no objectives yet,NO OBJECTIVES
+component.tutorial.heading,Contextual tutorial overlay card (issue #916): eyebrow label above the tip title,TUTORIAL
+component.tutorial.dismiss,Contextual tutorial overlay card: dismiss button — marks the tip as read forever,GOT IT
+component.tutorial.more,Contextual tutorial overlay card: count of further tips queued behind the current one. {n} is that count,+{n} MORE
+component.phasers.title,Phaser controls panel heading,PHASERS
+component.phasers.manual,Phaser mode toggle: manual fire mode,MANUAL
+component.phasers.empty,Phaser controls when the ship has no phaser banks,[NO PHASER BANKS]
+component.phasers.bank_fallback,Phaser bank row label when the bank has no name,BANK
+component.power.title,Power allocation panel heading,POWER ALLOCATION
+component.power.empty,Power panel when the ship defines no power groups,[NO POWER GROUPS]
+component.power.level,Power group level readout. {n} is the allocated level,LVL {n}
+component.power.held,"Power group level readout while the reactor's battery floor is holding the group below its standing order. {n} is the level it is running at, {c} the level it was commanded to",[LVL {n}/{c} HELD]
+component.red_alert.title,Red alert control heading (Captain console),RED ALERT
+component.red_alert.active,Red alert button while the alert is raised,RED ALERT
+component.red_alert.standby,Red alert button while the ship is stood down,STAND DOWN
+component.repair_teams.title,Repair teams panel heading,REPAIR TEAMS
+component.repair_teams.empty,Repair panel when the ship has no repair teams,[NO REPAIR TEAMS]
+component.repair_teams.no_targets,Repair team row when nothing needs repair,[No repair targets]
+component.repair_teams.target,Repair team row: current assignment. {target} is the system name,Target: {target}
+component.sensor_panel.no_target,Sensor detail panel when no target is locked,NO TARGET
+component.sensor_panel.brg,Sensor readout key: bearing to target,BRG
+component.sensor_panel.rng,Sensor readout key: range to target,RNG
+component.sensor_panel.class,Sensor readout key: target ship class,CLASS
+component.sensor_panel.hull,Sensor readout key: target hull percentage,HULL
+component.sensor_panel.heading,Sensor readout key: target heading,HEADING
 component.sensor_panel.au,"Sensor readout unit: astronomical units, shown after the range value",AU
-component.shield_facings.title,"Shield facings panel heading","SHIELD FACINGS"
-component.shield_facings.empty,"Shield facings panel when no facing telemetry is available","[NO FACING DATA]"
-component.shield_facings.off,"Shield facing readout when that facing is offline","OFF"
-component.shield_facings.auto_hint,"Shield facings panel — hint toast shown when an arc is pressed while facing selection is unstaffed (Backfill auto rating) and the press cannot be sent","[AUTO — STAFF SHIELDS TO SET FACING]"
-component.shield_panel.title,"Shield status panel heading","SHIELDS"
-component.shield_panel.grid_nominal,"Shield grid status: operating normally","GRID NOMINAL"
-component.shield_panel.grid_offline,"Shield grid status: grid down","GRID OFFLINE"
-component.shield_panel.integrity,"Shield panel label for overall integrity bar","INTEGRITY"
-component.shield_panel.focus,"Shield focus readout. {name} is the focused facing","FOCUS: {name}"
-component.torpedoes.title,"Torpedo controls panel heading","TORPEDOES"
-component.torpedoes.empty,"Torpedo controls when the ship has no torpedo tubes","[NO TORPEDO TUBES]"
-component.torpedoes.pattern_step,"Torpedo patterned-attack step indicator (step number of total)","STEP {step}/{total}"
-component.torpedoes.barrels,"Torpedo patterned-attack active-barrel indicator listing firing barrel indices","BARRELS {barrels}"
-component.boost.binding,"Boost control key-binding hint (Shift key or gamepad A)","[HOLD SHIFT · A]"
-component.impulse.binding,"Impulse control key-binding hint (Ctrl key or gamepad B)","[CTRL · B]"
-console.stance.friendly,"Contact stance badge on the comms contact list","FRIENDLY"
-console.common.contacts.one,"Contact count, exactly one. {n} is the count","{n} CONTACT"
-console.common.contacts.other,"Contact count, zero or several. {n} is the count","{n} CONTACTS"
-component.sensor_panel.scan_range,"Sensor panel header: current scan range","SCAN RANGE"
-component.sensor_panel.speed,"Sensor readout key: target speed","SPEED"
-component.sensor_panel.threat,"Sensor readout key: target threat rating","THREAT"
-component.sensor_panel.alert,"Sensor readout key: selected target's red alert state","ALERT"
-component.sensor_panel.alert_active,"Sensor readout value: selected target is at red alert","RED ALERT"
-component.sensor_panel.alert_standby,"Sensor readout value: selected target is not at red alert","STANDBY"
-component.sensor_panel.status,"Sensor panel status row key while scanning","STATUS"
-component.sensor_panel.scanning,"Sensor panel status while no scan data has arrived","SCANNING..."
-component.sensor_panel.shield,"Sensor readout key: target shield state, per-facing or single-fraction (issue #927)","SHIELD"
-component.sensor_panel.shield_freq,"Sensor readout key: target shield frequency — the FrequencyHint sender-side origin (issue #927)","SHIELD FREQ"
-component.repair_teams.team,"Repair team fallback name. {n} is the team number","Team {n}"
-component.repair_teams.status.idle,"Repair team status badge: waiting for dispatch","IDLE"
-component.repair_teams.status.travelling,"Repair team status badge: moving to its target","TRAVELLING"
-component.repair_teams.status.repairing,"Repair team status badge: actively repairing","REPAIRING"
-component.repair_teams.status.returning,"Repair team status badge: returning to standby","RETURNING"
-component.repair_teams.damaged_title,"Repair console heading over the list of damaged systems a player can tap to prioritise","[DAMAGED SYSTEMS]"
-component.repair_teams.tier.damaged,"Damage tier chip on a damaged-systems row: lightly damaged","[DMG]"
-component.repair_teams.tier.disabled,"Damage tier chip on a damaged-systems row: badly damaged and offline","[DISABLED]"
-component.repair_teams.tier.destroyed,"Damage tier chip on a damaged-systems row: destroyed","[DESTROYED]"
-component.repair_teams.next,"Flag on the damaged-systems row a repair team has been told to fix next","[NEXT]"
-component.repair_teams.working,"Flag on the damaged-systems row a repair team is currently repairing","[ON IT]"
-component.repair_teams.prioritise_title,"Tooltip on a tappable damaged-systems row. {name} is the system name","[Fix {name} next]"
-component.repair_teams.prioritised_title,"Tooltip on the damaged-systems row already queued to be fixed next. {name} is the system name","[{name} is queued next]"
-component.repair_teams.working_title,"Tooltip on the damaged-systems row a repair team is already on site at. That row is not tappable — it is nobody's NEXT job. {name} is the system name","[A team is already on {name}]"
+component.shield_facings.title,Shield facings panel heading,SHIELD FACINGS
+component.shield_facings.empty,Shield facings panel when no facing telemetry is available,[NO FACING DATA]
+component.shield_facings.off,Shield facing readout when that facing is offline,OFF
+component.shield_facings.auto_hint,Shield facings panel — hint toast shown when an arc is pressed while facing selection is unstaffed (Backfill auto rating) and the press cannot be sent,[AUTO — STAFF SHIELDS TO SET FACING]
+component.shield_panel.title,Shield status panel heading,SHIELDS
+component.shield_panel.grid_nominal,Shield grid status: operating normally,GRID NOMINAL
+component.shield_panel.grid_offline,Shield grid status: grid down,GRID OFFLINE
+component.shield_panel.integrity,Shield panel label for overall integrity bar,INTEGRITY
+component.shield_panel.focus,Shield focus readout. {name} is the focused facing,FOCUS: {name}
+component.torpedoes.title,Torpedo controls panel heading,TORPEDOES
+component.torpedoes.empty,Torpedo controls when the ship has no torpedo tubes,[NO TORPEDO TUBES]
+component.torpedoes.pattern_step,Torpedo patterned-attack step indicator (step number of total),STEP {step}/{total}
+component.torpedoes.barrels,Torpedo patterned-attack active-barrel indicator listing firing barrel indices,BARRELS {barrels}
+component.boost.binding,Boost control key-binding hint (Shift key or gamepad A),[HOLD SHIFT · A]
+component.impulse.binding,Impulse control key-binding hint (Ctrl key or gamepad B),[CTRL · B]
+console.stance.friendly,Contact stance badge on the comms contact list,FRIENDLY
+console.common.contacts.one,"Contact count, exactly one. {n} is the count",{n} CONTACT
+console.common.contacts.other,"Contact count, zero or several. {n} is the count",{n} CONTACTS
+component.sensor_panel.scan_range,Sensor panel header: current scan range,SCAN RANGE
+component.sensor_panel.speed,Sensor readout key: target speed,SPEED
+component.sensor_panel.threat,Sensor readout key: target threat rating,THREAT
+component.sensor_panel.alert,Sensor readout key: selected target's red alert state,ALERT
+component.sensor_panel.alert_active,Sensor readout value: selected target is at red alert,RED ALERT
+component.sensor_panel.alert_standby,Sensor readout value: selected target is not at red alert,STANDBY
+component.sensor_panel.status,Sensor panel status row key while scanning,STATUS
+component.sensor_panel.scanning,Sensor panel status while no scan data has arrived,SCANNING...
+component.sensor_panel.shield,"Sensor readout key: target shield state, per-facing or single-fraction (issue #927)",SHIELD
+component.sensor_panel.shield_freq,Sensor readout key: target shield frequency — the FrequencyHint sender-side origin (issue #927),SHIELD FREQ
+component.repair_teams.team,Repair team fallback name. {n} is the team number,Team {n}
+component.repair_teams.status.idle,Repair team status badge: waiting for dispatch,IDLE
+component.repair_teams.status.travelling,Repair team status badge: moving to its target,TRAVELLING
+component.repair_teams.status.repairing,Repair team status badge: actively repairing,REPAIRING
+component.repair_teams.status.returning,Repair team status badge: returning to standby,RETURNING
+component.repair_teams.damaged_title,Repair console heading over the list of damaged systems a player can tap to prioritise,[DAMAGED SYSTEMS]
+component.repair_teams.tier.damaged,Damage tier chip on a damaged-systems row: lightly damaged,[DMG]
+component.repair_teams.tier.disabled,Damage tier chip on a damaged-systems row: badly damaged and offline,[DISABLED]
+component.repair_teams.tier.destroyed,Damage tier chip on a damaged-systems row: destroyed,[DESTROYED]
+component.repair_teams.next,Flag on the damaged-systems row a repair team has been told to fix next,[NEXT]
+component.repair_teams.working,Flag on the damaged-systems row a repair team is currently repairing,[ON IT]
+component.repair_teams.prioritise_title,Tooltip on a tappable damaged-systems row. {name} is the system name,[Fix {name} next]
+component.repair_teams.prioritised_title,Tooltip on the damaged-systems row already queued to be fixed next. {name} is the system name,[{name} is queued next]
+component.repair_teams.working_title,Tooltip on the damaged-systems row a repair team is already on site at. That row is not tappable — it is nobody's NEXT job. {name} is the system name,[A team is already on {name}]
 component.ship_picker.class.battleship,Lobby ship picker — hull class badge on a battleship card,[BATTLESHIP]
 component.ship_picker.class.courier,Lobby ship picker — hull class badge on a courier card,[COURIER]
 component.ship_picker.class.cruiser,Lobby ship picker — hull class badge on a cruiser card,[CRUISER]
@@ -401,9 +357,9 @@ component.ship_picker.class.unknown,Lobby ship picker — hull class badge when 
 component.ship_picker.empty,Lobby ship picker when the locked scenario offers no playable hull,[No ships available]
 component.ship_picker.power,Lobby ship picker — stat label above a hull's power rating,[Power]
 component.ship_picker.stations,Lobby ship picker — stat label above a hull's station count,[Stations]
-component.station_damage.popup_title,"Station-damage popup heading. {name} is the owning station (or the ship core)","[{name} Systems]"
-component.station_damage.bar_title,"Station-damage bar tooltip. {name} is the owning station (or the ship core)","[{name} systems]"
-component.station_damage.default_label,"Station-damage bar label before the console names the station it belongs to",Station
+component.station_damage.popup_title,Station-damage popup heading. {name} is the owning station (or the ship core),[{name} Systems]
+component.station_damage.bar_title,Station-damage bar tooltip. {name} is the owning station (or the ship core),[{name} systems]
+component.station_damage.default_label,Station-damage bar label before the console names the station it belongs to,Station
 console.comms.doc_title,Browser-tab title of the comms console page,[Project Phoenix - Comms Console]
 console.comms.screen_label,Phone-frame screen label of the comms console,Comms Console
 console.comms.title,comms console — main hero heading,COMMS
@@ -428,8 +384,8 @@ console.navigation.on_screen,"navigation console — ""On Screen"" button",On Sc
 console.navigation.clear_waypoint,"navigation console — ""Clear Waypoint"" button",Clear Waypoint
 console.navigation.set_waypoint,"navigation console — ""Set Waypoint"" button that starts tap-to-place mode (free waypoint)",Set Waypoint
 console.navigation.set_as_waypoint,"navigation console — ""Set as Waypoint"" button that anchors the waypoint to the selected chart contact",Set as Waypoint
-console.navigation.tap_to_place,"navigation console — toast prompt shown while tap-to-place waypoint mode is armed","TAP MAP TO PLACE WAYPOINT"
-console.navigation.waypoint_set,"navigation console — toast confirming a waypoint was set",WAYPOINT SET
+console.navigation.tap_to_place,navigation console — toast prompt shown while tap-to-place waypoint mode is armed,TAP MAP TO PLACE WAYPOINT
+console.navigation.waypoint_set,navigation console — toast confirming a waypoint was set,WAYPOINT SET
 console.power.doc_title,Browser-tab title of the power console page,[Project Phoenix - Power Console]
 console.power.screen_label,Phone-frame screen label of the power console,Power Console
 console.power.title,power console — main hero heading,POWER
@@ -462,8 +418,8 @@ console.cruiser_comms.doc_title,Browser-tab title of the comms console page,[Pro
 console.cruiser_comms.subtitle,comms console — hero sub-heading under the title,[COMMUNICATIONS & NAV]
 console.comms.navigation,"comms console — ""Navigation"" panel heading",Navigation
 console.comms.comms,"comms console — ""Comms"" panel heading",Comms
-console.comms.messages.one,"comms console footer — message count, exactly one. {n} is the count","[{n} MESSAGE]"
-console.comms.messages.other,"comms console footer — message count, zero or several. {n} is the count","[{n} MESSAGES]"
+console.comms.messages.one,"comms console footer — message count, exactly one. {n} is the count",[{n} MESSAGE]
+console.comms.messages.other,"comms console footer — message count, zero or several. {n} is the count",[{n} MESSAGES]
 console.engineering.doc_title,Browser-tab title of the engineering console page,[Project Phoenix — Engineering Console]
 console.engineering.screen_label,Phone-frame screen label of the engineering console,Engineering Console
 console.engineering.title,engineering console — main hero heading,ENGINEERING
@@ -514,56 +470,56 @@ console.common.no_waypoint,Console footer when no waypoint is set,NO WAYPOINT
 console.engineering.station_footer,engineering console — footer station name,ENGINEERING STATION
 console.science.station_footer,science console — footer station name,SCIENCE STATION
 console.pilot.station_footer,pilot console — footer station name,PILOT STATION
-console.common.active_hail,"Comms footer while a hail with an unnamed sender is open","ACTIVE HAIL"
-console.common.waypoint,"Fallback name for an unnamed waypoint","WAYPOINT"
-console.common.locked,"Tactical footer when a target is locked but unnamed","LOCKED"
-console.navigation.not_set,"Navigation console — waypoint readout when none is set","NOT SET"
-console.navigation.custom,"Navigation console — selected-entity readout for a custom point","CUSTOM"
-console.navigation.none,"Navigation console — selected-entity readout when nothing is selected","NONE"
-console.common.nav_toggle,"Button that toggles the navigation chart overlay","Nav"
-console.common.comms_toggle,"Button that toggles the comms overlay","Comms"
-console.common.objectives_toggle,"Button that toggles the objectives overlay","Objectives"
-console.common.red_alert_badge,"Badge shown while the ship is at red alert","Red Alert"
-console.pilot.cam_cinematic,"Courier pilot — cinematic camera button","Cinematic"
-console.pilot.cam_fore,"Courier pilot — fore camera button","Fore"
-console.shields.threat_bearing,"Shields console — standing bearing of the nearest hostile in sensor range, the same fact the backfilled Shields focus AI reads","Threat Bearing"
-console.common.no_data,"Generic readout placeholder when no telemetry is available","NO DATA"
-console.shield.shld,"Abbreviated shield label on a single-fraction shield readout","SHLD"
-console.shield.down,"Shield facing readout when that facing is down","DOWN"
-console.shield.online,"Shield status summary: shields operating","ONLINE"
-console.shield.shield_down,"Shield status summary: shields collapsed","SHIELD DOWN"
-console.shield.degraded,"Shield status summary: one or more facings down","DEGRADED"
-console.sensors.doc_title,"Browser-tab title of the sensors console page","[Project Phoenix - Sensors Console]"
-console.sensors.screen_label,"Phone-frame screen label of the sensors console","Sensors Console"
-console.sensors.title,"sensors console — main hero heading","SENSORS"
-console.sensors.subtitle,"sensors console — hero sub-heading under the title","LONG-RANGE SCAN"
-console.sensors.scan_summary,"sensors console — ""Scan Summary"" panel heading","Scan Summary"
-console.sensors.scan_range,"sensors console — ""Scan Range"" metric label","Scan Range"
-console.sensors.contacts,"sensors console — ""Contacts"" metric label","Contacts"
-console.sensors.target_analysis,"sensors console — ""Target Analysis"" panel heading","Target Analysis"
-console.sensors.name,"sensors console — target name metric label","Name"
-console.sensors.kind,"sensors console — target kind metric label","Kind"
-console.sensors.shield_status,"sensors console — target shield status metric label","Shield Status"
-console.sensors.station_footer,"sensors console — footer station name","SENSORS STATION"
-console.common.cancel_impulse,"Button that aborts an active impulse-drive charge","Cancel Impulse"
-console.common.target,"Fallback name for an unnamed locked target","TARGET"
-console.repair.core,"The ship's core — the systems owned by no station. Names both the repair-target row and the core damage bar beside the station bars, on repair and engineering","Core"
-console.repair.footer_status,"repair console footer — hull percent and repair-team activity. {pct} is hull percent; {active} of {total} teams are working","[{pct}% HULL · {active}/{total} ACTIVE]"
-console.radar.science_target,"Radar blip label for the science-locked target","SCIENCE TARGET"
-console.radar.tactical_target,"Radar blip label for the tactical-locked target","TACTICAL TARGET"
-console.radar.torpedo_armed,"Tactical radar badge drawn beside a hostile contact whose hull carries torpedo tubes. A capability warning shown before that contact fires, not a launch warning. Sits next to a blip, so keep it very short","[TORP]"
-station.captain.name,"Captain station display name (station ids stay English in TOML)","Captain"
-station.helm.name,"Helm station display name","Helm"
-station.tactical.name,"Tactical station display name","Tactical"
-station.repair.name,"Repair station display name","Repair"
-station.sensors.name,"Sensors station display name","Sensors"
-station.shields.name,"Shields station display name","Shields"
-station.navigation.name,"Navigation station display name","Navigation"
-station.power.name,"Power station display name","Power"
-station.comms.name,"Comms station display name","Comms"
-station.engineering.name,"Engineering station display name","Engineering"
-station.pilot.name,"Pilot station display name (courier)","Pilot"
-station.science.name,"Science station display name (cruiser)","Science"
+console.common.active_hail,Comms footer while a hail with an unnamed sender is open,ACTIVE HAIL
+console.common.waypoint,Fallback name for an unnamed waypoint,WAYPOINT
+console.common.locked,Tactical footer when a target is locked but unnamed,LOCKED
+console.navigation.not_set,Navigation console — waypoint readout when none is set,NOT SET
+console.navigation.custom,Navigation console — selected-entity readout for a custom point,CUSTOM
+console.navigation.none,Navigation console — selected-entity readout when nothing is selected,NONE
+console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
+console.common.comms_toggle,Button that toggles the comms overlay,Comms
+console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
+console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
+console.pilot.cam_cinematic,Courier pilot — cinematic camera button,Cinematic
+console.pilot.cam_fore,Courier pilot — fore camera button,Fore
+console.shields.threat_bearing,"Shields console — standing bearing of the nearest hostile in sensor range, the same fact the backfilled Shields focus AI reads",Threat Bearing
+console.common.no_data,Generic readout placeholder when no telemetry is available,NO DATA
+console.shield.shld,Abbreviated shield label on a single-fraction shield readout,SHLD
+console.shield.down,Shield facing readout when that facing is down,DOWN
+console.shield.online,Shield status summary: shields operating,ONLINE
+console.shield.shield_down,Shield status summary: shields collapsed,SHIELD DOWN
+console.shield.degraded,Shield status summary: one or more facings down,DEGRADED
+console.sensors.doc_title,Browser-tab title of the sensors console page,[Project Phoenix - Sensors Console]
+console.sensors.screen_label,Phone-frame screen label of the sensors console,Sensors Console
+console.sensors.title,sensors console — main hero heading,SENSORS
+console.sensors.subtitle,sensors console — hero sub-heading under the title,LONG-RANGE SCAN
+console.sensors.scan_summary,"sensors console — ""Scan Summary"" panel heading",Scan Summary
+console.sensors.scan_range,"sensors console — ""Scan Range"" metric label",Scan Range
+console.sensors.contacts,"sensors console — ""Contacts"" metric label",Contacts
+console.sensors.target_analysis,"sensors console — ""Target Analysis"" panel heading",Target Analysis
+console.sensors.name,sensors console — target name metric label,Name
+console.sensors.kind,sensors console — target kind metric label,Kind
+console.sensors.shield_status,sensors console — target shield status metric label,Shield Status
+console.sensors.station_footer,sensors console — footer station name,SENSORS STATION
+console.common.cancel_impulse,Button that aborts an active impulse-drive charge,Cancel Impulse
+console.common.target,Fallback name for an unnamed locked target,TARGET
+console.repair.core,"The ship's core — the systems owned by no station. Names both the repair-target row and the core damage bar beside the station bars, on repair and engineering",Core
+console.repair.footer_status,repair console footer — hull percent and repair-team activity. {pct} is hull percent; {active} of {total} teams are working,[{pct}% HULL · {active}/{total} ACTIVE]
+console.radar.science_target,Radar blip label for the science-locked target,SCIENCE TARGET
+console.radar.tactical_target,Radar blip label for the tactical-locked target,TACTICAL TARGET
+console.radar.torpedo_armed,"Tactical radar badge drawn beside a hostile contact whose hull carries torpedo tubes. A capability warning shown before that contact fires, not a launch warning. Sits next to a blip, so keep it very short",[TORP]
+station.captain.name,Captain station display name (station ids stay English in TOML),Captain
+station.helm.name,Helm station display name,Helm
+station.tactical.name,Tactical station display name,Tactical
+station.repair.name,Repair station display name,Repair
+station.sensors.name,Sensors station display name,Sensors
+station.shields.name,Shields station display name,Shields
+station.navigation.name,Navigation station display name,Navigation
+station.power.name,Power station display name,Power
+station.comms.name,Comms station display name,Comms
+station.engineering.name,Engineering station display name,Engineering
+station.pilot.name,Pilot station display name (courier),Pilot
+station.science.name,Science station display name (cruiser),Science
 shield_arc.fore.label,Shield arc label — the forward facing. Shared by every hull's [[shield_arc]] block,Fore
 shield_arc.aft.label,Shield arc label — the rear facing. Shared by every hull's [[shield_arc]] block,Aft
 shield_arc.port.label,Shield arc label — the left-hand facing. Shared by every hull's [[shield_arc]] block,Port
@@ -584,7 +540,6 @@ weapon.torpedo_tube_fore_starboard.display_name,Weapon mount display name — th
 weapon.torpedo_tube_fore_centre.display_name,Weapon mount display name — the centre tube of a forward torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Fore Centre)]
 weapon.torpedo_tube_aft_port.display_name,Weapon mount display name — the port tube of an aft torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Aft Port)]
 weapon.torpedo_tube_aft_starboard.display_name,Weapon mount display name — the starboard tube of an aft torpedo battery. Shared by every hull carrying that mount,[Torpedo Tube (Aft Starboard)]
-
 help.captain.0.heading,"Help modal — captain station, section 1 heading",Command
 help.captain.0.body,"Help modal — captain station, section 1 body text",[You set the ship's posture. Coordinate the crew and call the shots — no one else has the full picture.]
 help.captain.1.heading,"Help modal — captain station, section 2 heading",Red Alert
@@ -661,193 +616,193 @@ help.science.1.heading,"Help modal — science station, section 2 heading",Long-
 help.science.1.body,"Help modal — science station, section 2 body text",[Detect contacts before they enter combat range and provide extra information on their status.]
 help.science.2.heading,"Help modal — science station, section 3 heading",Shield Facings
 help.science.2.body,"Help modal — science station, section 3 body text","[Four quadrants: Fore, Aft, Port, Starboard. Focus capacity on one facing to tank heavy fire.]"
-help.modal_heading,"Help modal heading; the modal dismisses on any tap","[HELP — tap to dismiss]"
-settings.title,"Settings gear button tooltip and dialog name","Settings"
-settings.rating,"Settings — station rating (difficulty) section heading","Rating"
-settings.volume,"Settings — audio volume section heading","Volume"
-settings.qr_code,"Settings — QR code section heading","QR Code"
-settings.toggle_qr,"Settings — button that shows/hides the join QR code on the viewscreen","[Toggle QR on Screen]"
-settings.station,"Settings — station section heading","Station"
-settings.leave_station,"Settings — button that releases the player's claimed station","Leave Station"
-settings.tab.debug,"Server settings menu — name of the Debug/Cheat tab (hidden in a release build)","[Debug / Cheat]"
-settings.tab.audio,"Server settings menu — name of the Audio tab","Audio"
-settings.tab.gameplay,"Server settings menu — name of the Gameplay tab","Gameplay"
-settings.tab.station_help,"Phone client settings menu — name of the current station help tab","Station Help"
-settings.tab.ship_manual,"Phone client settings menu — name of the ship manual tab","Ship Manual"
-settings.station_help.unavailable,"Phone client Settings Station Help tab — shown when the player has no station or it has no authored help","[Station help is unavailable until you take a station.]"
-settings.master_volume,"Server settings menu — Audio tab, master volume section heading","Master Volume"
-settings.master_volume_value,"Server settings menu — master volume readout as a percentage. {value} is the whole-number percentage.","{value}%"
-settings.master_volume_hint,"Server settings menu — explains that master volume scales the per-sound volumes authored in the ship and world TOML rather than replacing them","[Scales every authored sound volume.]"
-settings.debug.output,"Server settings menu — Debug tab, heading over the debug output selectors","Debug Output"
-settings.debug.output_hint,"Server settings menu — explains that picking a debug output opens the output panel beside the viewscreen","[Pick one to open the output panel.]"
-settings.debug.client_hint,"Client settings menu — explains that a phone's debug toggles draw on the shared host viewscreen, not on the phone itself","[These draw on the host viewscreen.]"
-settings.debug.modifiers,"Server settings menu — debug output showing the ship modifier state","Modifiers"
-settings.debug.damage,"Server settings menu — debug output showing the recent damage log","Damage Log"
-settings.debug.entities,"Server settings menu — debug output showing per-entity behaviour","Entity Behaviour"
-settings.debug.inspector,"Server settings menu — debug output showing the entity inspector","Entity Inspector"
-settings.debug.cheats,"Server settings menu — Debug tab, heading over the cheat toggles","Cheats"
-settings.debug.wireframes,"Server settings menu — toggle drawing region wireframes in the world","Region Wireframes"
-settings.debug.godmode,"Server settings menu — toggle that makes the player ship take no damage","God Mode"
-settings.debug.instagib,"Server settings menu — toggle that multiplies weapon damage so hits kill outright","Instagib"
-settings.debug.session,"Server settings menu — Debug tab, heading over the session/save actions","Session"
-settings.debug.teleport,"Server settings menu — jump the ship to the shared Navigation waypoint; disabled when there is no waypoint","[Teleport to Waypoint]"
-settings.debug.save_snapshot,"Server settings menu — save the running session to the browser","Save Session"
-settings.debug.resume_snapshot,"Server settings menu — reload the page and resume the saved session","[Resume Saved Session]"
-settings.gameplay.simulation,"Server settings menu — Gameplay tab, heading over the pause control","Simulation"
-settings.gameplay.pause,"Server settings menu — button that pauses the simulation clock","Pause"
-settings.gameplay.resume,"Server settings menu — button that resumes a paused simulation clock","Resume"
-settings.gameplay.session,"Server settings menu — Gameplay tab, heading over the exit control","Session"
-settings.gameplay.exit_to_lobby,"Server settings menu — ends the current mission and returns everyone to the lobby","[Exit to Lobby]"
-station.rating.std.name,"Display name of the Std station rating (identifier in TOML)","STANDARD"
-station.rating.simplified.name,"Display name of the Simplified station rating","SIMPLIFIED"
-station.rating.backfill.name,"Display name of the implicit Backfill rating (station unmanned, AI operates all its systems)","BACKFILL (AI)"
-manual.title,"Ship manual button tooltip and dialog name","Ship Manual"
-manual.heading,"Ship manual overlay heading; the overlay dismisses on a backdrop tap","[SHIP MANUAL — tap outside to dismiss]"
-manual.empty,"Ship manual — shown when no manual has been received yet","[Ship manual unavailable]"
-manual.automated_systems,"Ship manual — heading above the per-rating list of AI-operated systems","[AI automation by rating]"
-manual.rating.none,"Ship manual — shown for a rating that automates no systems","[none — fully hands-on]"
-manual.section.shields,"Ship manual — heading of the generated Shields system section","Shields"
-manual.shields.max_hp,"Ship manual — Shields section, base HP per arc. {value} is the number.","[Base strength: {value} HP per arc]"
-manual.shields.regen,"Ship manual — Shields section, regen per second. {value} is the number.","[Regeneration: {value} HP/s per arc]"
-manual.shields.arcs,"Ship manual — Shields section, number of shield arcs. {value} is the count.","[Shield arcs: {value}]"
-manual.section.phaser_bank,"Ship manual — heading of a generated Phaser Bank section","Phaser Bank"
-manual.phaser_bank.beam_range,"Ship manual — Phaser Bank section, beam range in world units. {value} is the number.","[Beam range: {value}]"
-manual.phaser_bank.beam_damage,"Ship manual — Phaser Bank section, beam damage per second. {value} is the number.","[Beam damage: {value} HP/s]"
-manual.phaser_bank.cooldown,"Ship manual — Phaser Bank section, cooldown in seconds. {value} is the number.","[Cooldown: {value} s]"
-manual.phaser_bank.fire_arc,"Ship manual — Phaser Bank section, fire arc in degrees. {value} is the number.","[Fire arc: {value}°]"
-manual.section.blaster_bank,"Ship manual — heading of a generated Blaster Bank section","Blaster Bank"
-manual.blaster_bank.range,"Ship manual — Blaster Bank section, range in world units. {value} is the number.","Range: {value}"
-manual.blaster_bank.volley,"Ship manual — Blaster Bank section, projectiles per volley. {value} is the count.","[Volley: {value} shots]"
-manual.blaster_bank.cooldown,"Ship manual — Blaster Bank section, cooldown in seconds. {value} is the number.","[Cooldown: {value} s]"
-manual.blaster_bank.fire_arc,"Ship manual — Blaster Bank section, fire arc in degrees. {value} is the number.","[Fire arc: {value}°]"
-manual.blaster_bank.barrels,"Ship manual — Blaster Bank section, number of barrels. {value} is the count.","Barrels: {value}"
-manual.section.torpedo_tube,"Ship manual — heading of a generated Torpedo Tube section","Torpedo Tube"
-manual.torpedo_tube.fire_arc,"Ship manual — Torpedo Tube section, launch arc in degrees. {value} is the number.","[Launch arc: {value}°]"
-manual.torpedo_tube.load_time,"Ship manual — Torpedo Tube section, load time in seconds. {value} is the number.","[Load time: {value} s]"
-manual.torpedo_tube.volley_max,"Ship manual — Torpedo Tube section, volley capacity. {value} is the count.","[Volley capacity: {value}]"
-manual.section.torpedo_magazine,"Ship manual — heading of the generated Torpedo Magazine section","Torpedo Magazine"
-manual.torpedo_magazine.capacity,"Ship manual — Torpedo Magazine section, stored torpedoes. {value} is the count.","[Torpedo stores: {value}]"
-manual.torpedo_magazine.damage_hull,"Ship manual — Torpedo Magazine section, warhead hull damage. {value} is the number.","[Warhead hull damage: {value}]"
-manual.torpedo_magazine.damage_shields,"Ship manual — Torpedo Magazine section, warhead shield damage. {value} is the number.","[Warhead shield damage: {value}]"
-manual.torpedo_magazine.tubes,"Ship manual — Torpedo Magazine section, number of launch tubes. {value} is the count.","[Launch tubes: {value}]"
-manual.section.tactical_radar,"Ship manual — heading of the generated Tactical Radar section","Tactical Radar"
-manual.tactical_radar.range,"Ship manual — Tactical Radar section, range in world units. {value} is the number.","Range: {value}"
-manual.section.sensors,"Ship manual — heading of the generated Sensors section","Sensors"
-manual.sensors.range,"Ship manual — Sensors section, long-range radar range. {value} is the number.","[Long-range radar: {value}]"
-manual.section.sensor_radar,"Ship manual — heading of the generated Sensor Radar section","Sensor Radar"
-manual.sensor_radar.range,"Ship manual — Sensor Radar section, radar range in world units. {value} is the number.","Range: {value}"
-manual.section.power_reactor,"Ship manual — heading of the generated Power Reactor section","Power Reactor"
-manual.power_reactor.capacity,"Ship manual — Power Reactor section, reactor capacity. {value} is the number.","[Reactor capacity: {value}]"
-manual.power_reactor.power_groups,"Ship manual — Power Reactor section, number of power groups. {value} is the count.","[Power groups: {value}]"
-manual.section.power_battery,"Ship manual — heading of the generated Power Battery section","Power Battery"
-manual.power_battery.emergency_threshold,"Ship manual — Power Battery section, emergency reserve threshold. {value} is the percentage.","[Emergency reserve: {value}%]"
-manual.section.repair,"Ship manual — heading of the generated Repair section","Repair"
-manual.repair.teams,"Ship manual — Repair section, number of repair teams. {value} is the count.","[Repair teams: {value}]"
-manual.repair.rate,"Ship manual — Repair section, repair rate in HP per second. {value} is the number.","[Repair rate: {value} HP/s]"
-manual.repair.travel,"Ship manual — Repair section, team travel time in seconds. {value} is the number.","[Team travel: {value} s]"
-manual.section.comms,"Ship manual — heading of the generated Comms section","Comms"
-manual.comms.range,"Ship manual — Comms section, comms range in world units. {value} is the number.","Range: {value}"
-manual.section.helm_thrust,"Ship manual — heading of the generated Helm section","Helm"
-manual.helm_thrust.max_speed,"Ship manual — Helm section, maximum forward speed. {value} is the number.","[Max speed: {value}]"
-manual.helm_thrust.max_reverse_speed,"Ship manual — Helm section, maximum reverse speed. {value} is the number.","[Max reverse: {value}]"
-manual.helm_thrust.max_yaw_rate,"Ship manual — Helm section, maximum turn rate in radians per second. {value} is the number.","[Max turn rate: {value} rad/s]"
-manual.helm_thrust.impulse_steering,"Ship manual — Helm section, steering multiplier while impulse is engaged. {value} is the number.","[Impulse steering: {value}×]"
-manual.helm_thrust.movement_mode,"Ship manual — Helm section, vertical movement mode. {value} is the resolved mode name.","[Movement mode: {value}]"
-manual.helm_thrust.movement_mode.planar,"Ship manual — Helm movement mode value: planar (surface-plane only)","Planar"
-manual.helm_thrust.movement_mode.bounded,"Ship manual — Helm movement mode value: bounded vertical motion","Bounded vertical"
-manual.helm_thrust.movement_mode.full_3d,"Ship manual — Helm movement mode value: full six-degree-of-freedom 3D","Full 3D"
-client.default_ship_name,"Lobby header — placeholder ship name before the scenario loads","Phoenix"
-client.standing_by,"Lobby header — ship mission line before a scenario is chosen","Standing by"
-client.pill_connecting,"Lobby ready-pill while the WebRTC connection is being established","CONNECTING"
-client.no_station,"Lobby — station detail panel when the player holds no station","[No station assigned]"
-client.connecting_host,"Lobby status line while connecting to the host","[Connecting to host…]"
-client.ready,"Lobby READY button (also cancels a launch countdown)","READY"
-client.ready_confirmed,"Lobby READY button after the player has readied up","✓ READY"
-client.connecting,"Connection status overlay while connecting","Connecting…"
-client.retry_now,"Connection overlay — button that retries immediately","Retry now"
-client.retry_now_tip,"Tooltip on the retry button","[Retry connection now]"
+help.modal_heading,Help modal heading; the modal dismisses on any tap,[HELP — tap to dismiss]
+settings.title,Settings gear button tooltip and dialog name,Settings
+settings.rating,Settings — station rating (difficulty) section heading,Rating
+settings.volume,Settings — audio volume section heading,Volume
+settings.qr_code,Settings — QR code section heading,QR Code
+settings.toggle_qr,Settings — button that shows/hides the join QR code on the viewscreen,[Toggle QR on Screen]
+settings.station,Settings — station section heading,Station
+settings.leave_station,Settings — button that releases the player's claimed station,Leave Station
+settings.tab.debug,Server settings menu — name of the Debug/Cheat tab (hidden in a release build),[Debug / Cheat]
+settings.tab.audio,Server settings menu — name of the Audio tab,Audio
+settings.tab.gameplay,Server settings menu — name of the Gameplay tab,Gameplay
+settings.tab.station_help,Phone client settings menu — name of the current station help tab,Station Help
+settings.tab.ship_manual,Phone client settings menu — name of the ship manual tab,Ship Manual
+settings.station_help.unavailable,Phone client Settings Station Help tab — shown when the player has no station or it has no authored help,[Station help is unavailable until you take a station.]
+settings.master_volume,"Server settings menu — Audio tab, master volume section heading",Master Volume
+settings.master_volume_value,Server settings menu — master volume readout as a percentage. {value} is the whole-number percentage.,{value}%
+settings.master_volume_hint,Server settings menu — explains that master volume scales the per-sound volumes authored in the ship and world TOML rather than replacing them,[Scales every authored sound volume.]
+settings.debug.output,"Server settings menu — Debug tab, heading over the debug output selectors",Debug Output
+settings.debug.output_hint,Server settings menu — explains that picking a debug output opens the output panel beside the viewscreen,[Pick one to open the output panel.]
+settings.debug.client_hint,"Client settings menu — explains that a phone's debug toggles draw on the shared host viewscreen, not on the phone itself",[These draw on the host viewscreen.]
+settings.debug.modifiers,Server settings menu — debug output showing the ship modifier state,Modifiers
+settings.debug.damage,Server settings menu — debug output showing the recent damage log,Damage Log
+settings.debug.entities,Server settings menu — debug output showing per-entity behaviour,Entity Behaviour
+settings.debug.inspector,Server settings menu — debug output showing the entity inspector,Entity Inspector
+settings.debug.cheats,"Server settings menu — Debug tab, heading over the cheat toggles",Cheats
+settings.debug.wireframes,Server settings menu — toggle drawing region wireframes in the world,Region Wireframes
+settings.debug.godmode,Server settings menu — toggle that makes the player ship take no damage,God Mode
+settings.debug.instagib,Server settings menu — toggle that multiplies weapon damage so hits kill outright,Instagib
+settings.debug.session,"Server settings menu — Debug tab, heading over the session/save actions",Session
+settings.debug.teleport,Server settings menu — jump the ship to the shared Navigation waypoint; disabled when there is no waypoint,[Teleport to Waypoint]
+settings.debug.save_snapshot,Server settings menu — save the running session to the browser,Save Session
+settings.debug.resume_snapshot,Server settings menu — reload the page and resume the saved session,[Resume Saved Session]
+settings.gameplay.simulation,"Server settings menu — Gameplay tab, heading over the pause control",Simulation
+settings.gameplay.pause,Server settings menu — button that pauses the simulation clock,Pause
+settings.gameplay.resume,Server settings menu — button that resumes a paused simulation clock,Resume
+settings.gameplay.session,"Server settings menu — Gameplay tab, heading over the exit control",Session
+settings.gameplay.exit_to_lobby,Server settings menu — ends the current mission and returns everyone to the lobby,[Exit to Lobby]
+station.rating.std.name,Display name of the Std station rating (identifier in TOML),STANDARD
+station.rating.simplified.name,Display name of the Simplified station rating,SIMPLIFIED
+station.rating.backfill.name,"Display name of the implicit Backfill rating (station unmanned, AI operates all its systems)",BACKFILL (AI)
+manual.title,Ship manual button tooltip and dialog name,Ship Manual
+manual.heading,Ship manual overlay heading; the overlay dismisses on a backdrop tap,[SHIP MANUAL — tap outside to dismiss]
+manual.empty,Ship manual — shown when no manual has been received yet,[Ship manual unavailable]
+manual.automated_systems,Ship manual — heading above the per-rating list of AI-operated systems,[AI automation by rating]
+manual.rating.none,Ship manual — shown for a rating that automates no systems,[none — fully hands-on]
+manual.section.shields,Ship manual — heading of the generated Shields system section,Shields
+manual.shields.max_hp,"Ship manual — Shields section, base HP per arc. {value} is the number.",[Base strength: {value} HP per arc]
+manual.shields.regen,"Ship manual — Shields section, regen per second. {value} is the number.",[Regeneration: {value} HP/s per arc]
+manual.shields.arcs,"Ship manual — Shields section, number of shield arcs. {value} is the count.",[Shield arcs: {value}]
+manual.section.phaser_bank,Ship manual — heading of a generated Phaser Bank section,Phaser Bank
+manual.phaser_bank.beam_range,"Ship manual — Phaser Bank section, beam range in world units. {value} is the number.",[Beam range: {value}]
+manual.phaser_bank.beam_damage,"Ship manual — Phaser Bank section, beam damage per second. {value} is the number.",[Beam damage: {value} HP/s]
+manual.phaser_bank.cooldown,"Ship manual — Phaser Bank section, cooldown in seconds. {value} is the number.",[Cooldown: {value} s]
+manual.phaser_bank.fire_arc,"Ship manual — Phaser Bank section, fire arc in degrees. {value} is the number.",[Fire arc: {value}°]
+manual.section.blaster_bank,Ship manual — heading of a generated Blaster Bank section,Blaster Bank
+manual.blaster_bank.range,"Ship manual — Blaster Bank section, range in world units. {value} is the number.",Range: {value}
+manual.blaster_bank.volley,"Ship manual — Blaster Bank section, projectiles per volley. {value} is the count.",[Volley: {value} shots]
+manual.blaster_bank.cooldown,"Ship manual — Blaster Bank section, cooldown in seconds. {value} is the number.",[Cooldown: {value} s]
+manual.blaster_bank.fire_arc,"Ship manual — Blaster Bank section, fire arc in degrees. {value} is the number.",[Fire arc: {value}°]
+manual.blaster_bank.barrels,"Ship manual — Blaster Bank section, number of barrels. {value} is the count.",Barrels: {value}
+manual.section.torpedo_tube,Ship manual — heading of a generated Torpedo Tube section,Torpedo Tube
+manual.torpedo_tube.fire_arc,"Ship manual — Torpedo Tube section, launch arc in degrees. {value} is the number.",[Launch arc: {value}°]
+manual.torpedo_tube.load_time,"Ship manual — Torpedo Tube section, load time in seconds. {value} is the number.",[Load time: {value} s]
+manual.torpedo_tube.volley_max,"Ship manual — Torpedo Tube section, volley capacity. {value} is the count.",[Volley capacity: {value}]
+manual.section.torpedo_magazine,Ship manual — heading of the generated Torpedo Magazine section,Torpedo Magazine
+manual.torpedo_magazine.capacity,"Ship manual — Torpedo Magazine section, stored torpedoes. {value} is the count.",[Torpedo stores: {value}]
+manual.torpedo_magazine.damage_hull,"Ship manual — Torpedo Magazine section, warhead hull damage. {value} is the number.",[Warhead hull damage: {value}]
+manual.torpedo_magazine.damage_shields,"Ship manual — Torpedo Magazine section, warhead shield damage. {value} is the number.",[Warhead shield damage: {value}]
+manual.torpedo_magazine.tubes,"Ship manual — Torpedo Magazine section, number of launch tubes. {value} is the count.",[Launch tubes: {value}]
+manual.section.tactical_radar,Ship manual — heading of the generated Tactical Radar section,Tactical Radar
+manual.tactical_radar.range,"Ship manual — Tactical Radar section, range in world units. {value} is the number.",Range: {value}
+manual.section.sensors,Ship manual — heading of the generated Sensors section,Sensors
+manual.sensors.range,"Ship manual — Sensors section, long-range radar range. {value} is the number.",[Long-range radar: {value}]
+manual.section.sensor_radar,Ship manual — heading of the generated Sensor Radar section,Sensor Radar
+manual.sensor_radar.range,"Ship manual — Sensor Radar section, radar range in world units. {value} is the number.",Range: {value}
+manual.section.power_reactor,Ship manual — heading of the generated Power Reactor section,Power Reactor
+manual.power_reactor.capacity,"Ship manual — Power Reactor section, reactor capacity. {value} is the number.",[Reactor capacity: {value}]
+manual.power_reactor.power_groups,"Ship manual — Power Reactor section, number of power groups. {value} is the count.",[Power groups: {value}]
+manual.section.power_battery,Ship manual — heading of the generated Power Battery section,Power Battery
+manual.power_battery.emergency_threshold,"Ship manual — Power Battery section, emergency reserve threshold. {value} is the percentage.",[Emergency reserve: {value}%]
+manual.section.repair,Ship manual — heading of the generated Repair section,Repair
+manual.repair.teams,"Ship manual — Repair section, number of repair teams. {value} is the count.",[Repair teams: {value}]
+manual.repair.rate,"Ship manual — Repair section, repair rate in HP per second. {value} is the number.",[Repair rate: {value} HP/s]
+manual.repair.travel,"Ship manual — Repair section, team travel time in seconds. {value} is the number.",[Team travel: {value} s]
+manual.section.comms,Ship manual — heading of the generated Comms section,Comms
+manual.comms.range,"Ship manual — Comms section, comms range in world units. {value} is the number.",Range: {value}
+manual.section.helm_thrust,Ship manual — heading of the generated Helm section,Helm
+manual.helm_thrust.max_speed,"Ship manual — Helm section, maximum forward speed. {value} is the number.",[Max speed: {value}]
+manual.helm_thrust.max_reverse_speed,"Ship manual — Helm section, maximum reverse speed. {value} is the number.",[Max reverse: {value}]
+manual.helm_thrust.max_yaw_rate,"Ship manual — Helm section, maximum turn rate in radians per second. {value} is the number.",[Max turn rate: {value} rad/s]
+manual.helm_thrust.impulse_steering,"Ship manual — Helm section, steering multiplier while impulse is engaged. {value} is the number.",[Impulse steering: {value}×]
+manual.helm_thrust.movement_mode,"Ship manual — Helm section, vertical movement mode. {value} is the resolved mode name.",[Movement mode: {value}]
+manual.helm_thrust.movement_mode.planar,Ship manual — Helm movement mode value: planar (surface-plane only),Planar
+manual.helm_thrust.movement_mode.bounded,Ship manual — Helm movement mode value: bounded vertical motion,Bounded vertical
+manual.helm_thrust.movement_mode.full_3d,Ship manual — Helm movement mode value: full six-degree-of-freedom 3D,Full 3D
+client.default_ship_name,Lobby header — placeholder ship name before the scenario loads,Phoenix
+client.standing_by,Lobby header — ship mission line before a scenario is chosen,Standing by
+client.pill_connecting,Lobby ready-pill while the WebRTC connection is being established,CONNECTING
+client.no_station,Lobby — station detail panel when the player holds no station,[No station assigned]
+client.connecting_host,Lobby status line while connecting to the host,[Connecting to host…]
+client.ready,Lobby READY button (also cancels a launch countdown),READY
+client.ready_confirmed,Lobby READY button after the player has readied up,✓ READY
+client.connecting,Connection status overlay while connecting,Connecting…
+client.retry_now,Connection overlay — button that retries immediately,Retry now
+client.retry_now_tip,Tooltip on the retry button,[Retry connection now]
 client.fullscreen_tip,"Tooltip on the fullscreen toggle, on both the phone client and the host viewscreen",Toggle fullscreen
-client.name_label,"Lobby name field — the label beside the text input",Name
-client.name_placeholder,"Lobby name field — greyed-out hint inside the empty text input",Your name
-client.preparing_scenario,"Asset-loading overlay while models and icons pre-cache. Shown on the phone client and on both host viewscreen overlays","Preparing scenario…"
-client.return_to_lobby,"Game-over overlay — button back to the lobby","[Return to Lobby]"
-client.waiting_scenario,"Overlay shown while the host picks the next scenario","[Waiting for host to select a scenario…]"
-client.select_scenario,"Phone scenario picker — heading over the scenario list","[Select a scenario]"
-client.select_ship,"Phone scenario picker — heading over the ship list","[Select a ship]"
-client.scenario_locked,"Phone scenario picker — status once the selection is locked and the world is loading","Loading scenario…"
-client.scenario_mod_origin,"Phone scenario picker — badge on a scenario button showing it came from an applied mod pack. {name} is the pack display name","[Mod: {name}]"
-client.mods_active,"Phone lobby — heading above the list of mod packs the host applied to this session","[Mods active]"
-client.mods_active_version,"Phone lobby — the version suffix on one active-mod row. {version} is the pack version string","[v{version}]"
-client.reconnecting,"Connection banner after a disconnect while auto-reconnecting","[Disconnected — reconnecting…]"
-client.conn_error,"Connection banner after a connection error while auto-reconnecting","[Connection error — reconnecting…]"
-client.bridge_title,"Console title when no specific console is active","Bridge"
-client.ship_destroyed,"Game-over overlay headline when the hull reaches zero","Ship Destroyed"
-client.release,"Station card button — release your own claimed station","RELEASE"
-client.taken,"Station card button — station is held by another player","TAKEN"
-client.claim,"Station card button — claim a free station","CLAIM"
-client.leave,"Station detail button — leave the current station","LEAVE"
-client.take_station,"Lobby readiness button relabelled during an active round — takes the claimed station from Backfill AI","TAKE STATION"
-client.release_confirm,"Station release button after arming — asks the player to confirm returning the station to Backfill AI mid-round","CONFIRM RELEASE?"
-client.all_crew_ready,"Lobby ready-pill when every station is readied","[ALL CREW READY]"
-client.awaiting_crew,"Lobby ready-pill while stations are still unready","AWAITING CREW"
-client.status_select_station,"Lobby status line before the player claims a station","[Select a station to join the crew]"
-client.status_select_console,"Lobby status line after claiming. {station} is the station name","[Select a console at {station} to continue]"
-client.status_launching,"Lobby status line during countdown. {secs} is seconds remaining","[Launching in {secs}s  (click READY to cancel)]"
-client.status_all_ready,"Lobby status line when the launch fires","[All crew ready — launching!]"
-client.status_waiting_crew,"Lobby status line while others ready up","[Waiting for the rest of the crew…]"
-client.status_standing_by,"Lobby status line while unready. {station} is the station name","[Standing by at {station} — press READY when ready]"
-server.doc_title,"Browser-tab title of the host viewscreen page","[Project Phoenix — View Screen]"
-server.select_world,"Host lobby — heading over the scenario picker","[Select a world]"
-server.select_ship,"Host lobby — picker heading after a world with multiple ships is chosen","[Select a ship]"
-server.no_scenarios,"Host scenario picker — shown when the pre-load catalog is empty","[No scenarios available]"
-server.loading,"Host page — generic loading label","Loading…"
-server.crew,"Host lobby — crew count label","Crew"
-server.spectator,"Host lobby — tag on spectating players","Spectator"
-server.awaiting_selection,"Host lobby badge before a scenario is selected","AWAITING SELECTION"
-server.connected,"Host lobby — connected-players rail heading","Connected"
-server.waiting_players,"Host lobby hint while no players have joined","[Waiting for players to connect…]"
-server.waiting_ready,"Host lobby hint while players ready up","[Waiting for crew to ready up…]"
-server.no_players,"Host lobby player list when empty","[No players connected yet]"
-server.reserved,"Host lobby — station reserved by a disconnected player","RESERVED"
-server.launching_in,"Host lobby badge during countdown. {secs} is seconds remaining","[LAUNCHING IN {secs}s]"
-server.hint_launching,"Host lobby hint during countdown. {secs} is seconds remaining","[Launching in {secs}s — anyone can unready to cancel]"
-server.conn_error_refresh,"Host connection banner on unrecoverable error","[Error — refresh to retry]"
-server.upload_mod_pack,"Host scenario picker — button that opens the mod-pack ZIP file chooser","[Upload mod pack]"
-server.launch_ai_ship,"Host lobby button that starts the scenario with no human crew. The glyph is part of the label",⬡ Launch AI Ship
-server.launch_ai_ship_tip,"Tooltip on the host lobby AI-only launch button",Launch with fully AI-controlled crew
-server.mod_pack_reading,"Host scenario picker — status while an uploaded mod pack is being read and validated","[Validating mod pack…]"
-server.mod_pack_applied,"Host scenario picker — status when an uploaded mod pack passed validation and its scenarios were added","[Mod pack applied]"
-server.mod_pack_rejected,"Host scenario picker — status heading when an uploaded mod pack failed validation and nothing was applied","[Mod pack rejected — nothing applied]"
-server.mod_pack_read_error,"Host scenario picker — status when the uploaded file could not be read at all","[Could not read the uploaded file]"
-server.hud_nominal,"Viewscreen HUD — ship condition when undamaged","NOMINAL"
-server.hud_alert,"Viewscreen HUD — ship condition while the ship is at red alert","ALERT"
-server.hud_designation,"Viewscreen HUD — default ship designation","PHOENIX"
-server.hud_nav,"Viewscreen HUD status slot: navigation","Nav"
-server.hud_tac,"Viewscreen HUD status slot: tactical","Tac"
-server.hud_eng,"Viewscreen HUD status slot: engineering","Eng"
-server.hud_sys,"Viewscreen HUD status slot: systems","Sys"
-server.hud_heading,"Viewscreen HUD nav readout. {deg} is the 3-digit heading","HEADING {deg}"
-server.hud_hull,"Viewscreen HUD hull readout. {pct} is hull percent","HULL {pct}"
-server.hud_weapons_hot,"Viewscreen HUD tactical slot while the ship is at red alert","[WEAPONS HOT]"
-server.hud_clear,"Viewscreen HUD tactical slot while the ship is not at red alert","[CLEAR]"
-server.unknown_scenario,"Host lobby title when the selected scenario carries no title of its own","[Unknown Scenario]"
-server.complexity_low,"Host lobby station card — complexity pill for a Low-complexity console preset","[LOW]"
-server.complexity_normal,"Host lobby station card — complexity pill for any other console preset","[NORMAL]"
-server.slots_reserved.one,"Host lobby compact chip, exactly one reserved station slot. {n} is the count, {max} the total slots","[↻ {n} station slot reserved (max {max})]"
-server.slots_reserved.other,"Host lobby compact chip, zero or several reserved station slots. {n} is the count, {max} the total slots","[↻ {n} station slots reserved (max {max})]"
-server.spectator_waiting,"Host lobby pill for a connected player holding no station yet. {name} is the player name","[{name} (waiting)]"
-client.status_connected,"Connection status once the WebRTC link is up","Connected"
-client.status_no_host_id,"Connection status when the URL carries no host id","[No host ID in URL. Scan the QR code on the view screen.]"
-client.status_waiting_server,"Connection status while waiting for the signalling server","[Waiting for server]"
-client.status_connecting_host,"Connection status while dialling the host","[Connecting to host]"
-client.status_disconnected,"Connection status after losing the link","Disconnected"
-client.status_unreachable,"Connection status when WebRTC relay traffic appears blocked","[Cannot reach host - the network may be blocking WebRTC relay traffic. Try a different network.]"
-client.status_host_not_found,"Connection status when the host peer id is unknown","[Host not found — rescan the QR code on the view screen.]"
-client.status_peer_error,"Connection status on an unexpected peer error. {type} is the error kind","[Peer error: {type}]"
-client.doc_title,"Browser-tab title of the client console page","[Project Phoenix — Console]"
-console.battleship_captain.subtitle,"battleship captain console — hero sub-heading under the title","[COMMAND & BATTLESPACE]"
-console.courier_captain.subtitle,"courier captain console — hero sub-heading under the title","COURIER COMMAND"
-console.courier_tactical.subtitle,"courier tactical console — hero sub-heading under the title","[HELM · WEAPONS · SENSORS]"
+client.name_label,Lobby name field — the label beside the text input,Name
+client.name_placeholder,Lobby name field — greyed-out hint inside the empty text input,Your name
+client.preparing_scenario,Asset-loading overlay while models and icons pre-cache. Shown on the phone client and on both host viewscreen overlays,Preparing scenario…
+client.return_to_lobby,Game-over overlay — button back to the lobby,[Return to Lobby]
+client.waiting_scenario,Overlay shown while the host picks the next scenario,[Waiting for host to select a scenario…]
+client.select_scenario,Phone scenario picker — heading over the scenario list,[Select a scenario]
+client.select_ship,Phone scenario picker — heading over the ship list,[Select a ship]
+client.scenario_locked,Phone scenario picker — status once the selection is locked and the world is loading,Loading scenario…
+client.scenario_mod_origin,Phone scenario picker — badge on a scenario button showing it came from an applied mod pack. {name} is the pack display name,[Mod: {name}]
+client.mods_active,Phone lobby — heading above the list of mod packs the host applied to this session,[Mods active]
+client.mods_active_version,Phone lobby — the version suffix on one active-mod row. {version} is the pack version string,[v{version}]
+client.reconnecting,Connection banner after a disconnect while auto-reconnecting,[Disconnected — reconnecting…]
+client.conn_error,Connection banner after a connection error while auto-reconnecting,[Connection error — reconnecting…]
+client.bridge_title,Console title when no specific console is active,Bridge
+client.ship_destroyed,Game-over overlay headline when the hull reaches zero,Ship Destroyed
+client.release,Station card button — release your own claimed station,RELEASE
+client.taken,Station card button — station is held by another player,TAKEN
+client.claim,Station card button — claim a free station,CLAIM
+client.leave,Station detail button — leave the current station,LEAVE
+client.take_station,Lobby readiness button relabelled during an active round — takes the claimed station from Backfill AI,TAKE STATION
+client.release_confirm,Station release button after arming — asks the player to confirm returning the station to Backfill AI mid-round,CONFIRM RELEASE?
+client.all_crew_ready,Lobby ready-pill when every station is readied,[ALL CREW READY]
+client.awaiting_crew,Lobby ready-pill while stations are still unready,AWAITING CREW
+client.status_select_station,Lobby status line before the player claims a station,[Select a station to join the crew]
+client.status_select_console,Lobby status line after claiming. {station} is the station name,[Select a console at {station} to continue]
+client.status_launching,Lobby status line during countdown. {secs} is seconds remaining,[Launching in {secs}s  (click READY to cancel)]
+client.status_all_ready,Lobby status line when the launch fires,[All crew ready — launching!]
+client.status_waiting_crew,Lobby status line while others ready up,[Waiting for the rest of the crew…]
+client.status_standing_by,Lobby status line while unready. {station} is the station name,[Standing by at {station} — press READY when ready]
+server.doc_title,Browser-tab title of the host viewscreen page,[Project Phoenix — View Screen]
+server.select_world,Host lobby — heading over the scenario picker,[Select a world]
+server.select_ship,Host lobby — picker heading after a world with multiple ships is chosen,[Select a ship]
+server.no_scenarios,Host scenario picker — shown when the pre-load catalog is empty,[No scenarios available]
+server.loading,Host page — generic loading label,Loading…
+server.crew,Host lobby — crew count label,Crew
+server.spectator,Host lobby — tag on spectating players,Spectator
+server.awaiting_selection,Host lobby badge before a scenario is selected,AWAITING SELECTION
+server.connected,Host lobby — connected-players rail heading,Connected
+server.waiting_players,Host lobby hint while no players have joined,[Waiting for players to connect…]
+server.waiting_ready,Host lobby hint while players ready up,[Waiting for crew to ready up…]
+server.no_players,Host lobby player list when empty,[No players connected yet]
+server.reserved,Host lobby — station reserved by a disconnected player,RESERVED
+server.launching_in,Host lobby badge during countdown. {secs} is seconds remaining,[LAUNCHING IN {secs}s]
+server.hint_launching,Host lobby hint during countdown. {secs} is seconds remaining,[Launching in {secs}s — anyone can unready to cancel]
+server.conn_error_refresh,Host connection banner on unrecoverable error,[Error — refresh to retry]
+server.upload_mod_pack,Host scenario picker — button that opens the mod-pack ZIP file chooser,[Upload mod pack]
+server.launch_ai_ship,Host lobby button that starts the scenario with no human crew. The glyph is part of the label,⬡ Launch AI Ship
+server.launch_ai_ship_tip,Tooltip on the host lobby AI-only launch button,Launch with fully AI-controlled crew
+server.mod_pack_reading,Host scenario picker — status while an uploaded mod pack is being read and validated,[Validating mod pack…]
+server.mod_pack_applied,Host scenario picker — status when an uploaded mod pack passed validation and its scenarios were added,[Mod pack applied]
+server.mod_pack_rejected,Host scenario picker — status heading when an uploaded mod pack failed validation and nothing was applied,[Mod pack rejected — nothing applied]
+server.mod_pack_read_error,Host scenario picker — status when the uploaded file could not be read at all,[Could not read the uploaded file]
+server.hud_nominal,Viewscreen HUD — ship condition when undamaged,NOMINAL
+server.hud_alert,Viewscreen HUD — ship condition while the ship is at red alert,ALERT
+server.hud_designation,Viewscreen HUD — default ship designation,PHOENIX
+server.hud_nav,Viewscreen HUD status slot: navigation,Nav
+server.hud_tac,Viewscreen HUD status slot: tactical,Tac
+server.hud_eng,Viewscreen HUD status slot: engineering,Eng
+server.hud_sys,Viewscreen HUD status slot: systems,Sys
+server.hud_heading,Viewscreen HUD nav readout. {deg} is the 3-digit heading,HEADING {deg}
+server.hud_hull,Viewscreen HUD hull readout. {pct} is hull percent,HULL {pct}
+server.hud_weapons_hot,Viewscreen HUD tactical slot while the ship is at red alert,[WEAPONS HOT]
+server.hud_clear,Viewscreen HUD tactical slot while the ship is not at red alert,[CLEAR]
+server.unknown_scenario,Host lobby title when the selected scenario carries no title of its own,[Unknown Scenario]
+server.complexity_low,Host lobby station card — complexity pill for a Low-complexity console preset,[LOW]
+server.complexity_normal,Host lobby station card — complexity pill for any other console preset,[NORMAL]
+server.slots_reserved.one,"Host lobby compact chip, exactly one reserved station slot. {n} is the count, {max} the total slots",[↻ {n} station slot reserved (max {max})]
+server.slots_reserved.other,"Host lobby compact chip, zero or several reserved station slots. {n} is the count, {max} the total slots",[↻ {n} station slots reserved (max {max})]
+server.spectator_waiting,Host lobby pill for a connected player holding no station yet. {name} is the player name,[{name} (waiting)]
+client.status_connected,Connection status once the WebRTC link is up,Connected
+client.status_no_host_id,Connection status when the URL carries no host id,[No host ID in URL. Scan the QR code on the view screen.]
+client.status_waiting_server,Connection status while waiting for the signalling server,[Waiting for server]
+client.status_connecting_host,Connection status while dialling the host,[Connecting to host]
+client.status_disconnected,Connection status after losing the link,Disconnected
+client.status_unreachable,Connection status when WebRTC relay traffic appears blocked,[Cannot reach host - the network may be blocking WebRTC relay traffic. Try a different network.]
+client.status_host_not_found,Connection status when the host peer id is unknown,[Host not found — rescan the QR code on the view screen.]
+client.status_peer_error,Connection status on an unexpected peer error. {type} is the error kind,[Peer error: {type}]
+client.doc_title,Browser-tab title of the client console page,[Project Phoenix — Console]
+console.battleship_captain.subtitle,battleship captain console — hero sub-heading under the title,[COMMAND & BATTLESPACE]
+console.courier_captain.subtitle,courier captain console — hero sub-heading under the title,COURIER COMMAND
+console.courier_tactical.subtitle,courier tactical console — hero sub-heading under the title,[HELM · WEAPONS · SENSORS]
 entity.alliance_courier.behaviour.doctrine.destroy_hostiles.text,assets/entities/alliance_courier.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
 entity.alliance_courier.behaviour.doctrine.hold_station.text,assets/entities/alliance_courier.toml → [behaviour.doctrine] text,Hold station
 entity.alliance_destroyer.behaviour.doctrine.destroy_hostiles.text,assets/entities/alliance_destroyer.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
@@ -858,69 +813,73 @@ entity.alliance_battleship.behaviour.doctrine.destroy_hostiles.text,assets/entit
 entity.alliance_battleship.behaviour.doctrine.hold_station.text,assets/entities/alliance_battleship.toml → [behaviour.doctrine] text,Hold station
 world.probe_targeted_pass.trigger.action.obj_destroy_target.text,assets/worlds/probe_targeted_pass.toml → [trigger.action] text,[Destroy the Harrow warship.]
 world.probe_huge_rock.trigger.action.obj_cross_the_belt.text,assets/worlds/probe_huge_rock.toml → [trigger.action] text,[Cross the belt and return.]
-chatter.sender.sensors,"Coordination chatter/popup — sender label for the Sensors system","Sensors"
-chatter.sender.weapons,"Coordination chatter/popup — sender label for the Weapons/Tactical system","Weapons"
-chatter.sender.navigation,"Coordination chatter/popup — sender label for the Navigation system","Navigation"
-chatter.sender.power,"Coordination chatter/popup — sender label for the Power system","Power"
-chatter.sender.shields,"Coordination chatter/popup — sender label for the Shields system","Shields"
-chatter.sender.ai,"Coordination chatter/popup — generic sender label when the origin system is unnamed","AI"
-coordination.advisory.fallback_title,"Coordination popup — title for a bare advisory that carries no sender label","Advisory"
-coordination.alert.fallback_title,"Coordination popup — title for an alert that carries no title of its own","Alert"
-coordination.frequency_hint.title,"Coordination popup/chatter — Sensors-to-Tactical shield-frequency hint, title","Frequency Hint"
-coordination.frequency_hint.body,"Coordination popup/chatter — frequency-hint body. {frequency} is the target's shield frequency","Tune to: {frequency}"
-coordination.shield.fallback_label,"Coordination popup/chatter — placeholder shield-facing name when none is supplied","Shield"
-coordination.system.fallback_label,"Coordination popup/chatter — placeholder system name when none is supplied","System"
-coordination.shield_offline.title,"Coordination popup/chatter — a shield facing has gone offline. {label} is the facing name","{label} Offline"
-coordination.shield_restored.title,"Coordination popup/chatter — a shield facing has recovered. {label} is the facing name","{label} Restored"
-coordination.target_designation.title,"Coordination popup/chatter — Sensors designates a target for Tactical. {label} is the target name","Sensors designates: {label}"
-coordination.arc_bearing.title,"Coordination popup/chatter — Weapons asks Helm to bring a weapon family to bear. {weapon} is the family name","Tactical: come about, bring {weapon} to bear"
-coordination.arc_withdraw.title,"Coordination popup/chatter — Weapons withdraws a standing arc-bearing request. {weapon} is the family name","Belay that — {weapon} no longer able to bear"
-coordination.weapon_family.phasers,"Coordination popup/chatter — weapon family name, phasers","phasers"
-coordination.weapon_family.blasters,"Coordination popup/chatter — weapon family name, blasters","blasters"
-coordination.weapon_family.torpedoes,"Coordination popup/chatter — weapon family name, torpedoes","torpedoes"
-coordination.power_brownout.title,"Coordination popup/chatter — a power group is browning out. {label} is the affected system","{label} Power Brownout"
-coordination.power_brownout.body,"Coordination popup/chatter — power-brownout body. {level} is the allocated power level","Allocation: {level}"
-coordination.navigate.title,"Coordination popup/chatter — Navigation clears Helm toward a waypoint. {x} and {z} are the waypoint coordinates","Navigation: steer toward waypoint ({x}, {z})"
-coordination.repair.title,"Coordination popup/chatter — a system needs repair. {label} is the station or system name","Repair requested: {label}"
-coordination.threat_bearing.title,"Coordination popup/chatter — Sensors warns Shields of a threat. {deg} is the bearing in degrees, {label} the threat name","Sensors: threat bearing {deg}° — {label}"
-coordination.intent.target_acquired,"Coordination popup — an AI seat took a target. Intent-advisory title","Target acquired"
-coordination.intent.target_switched,"Coordination popup — an AI seat switched targets. Intent-advisory title","Switching target"
-coordination.intent.combat_posture_entered,"Coordination popup — an AI seat entered combat posture. Intent-advisory title","Combat posture"
-coordination.intent.combat_posture_left,"Coordination popup — an AI seat left combat posture. Intent-advisory title","Standing down"
-coordination.intent.breaking_off,"Coordination popup — an AI seat is breaking off. Intent-advisory title","Breaking off"
-coordination.intent.shield_arc_focused,"Coordination popup — an AI seat concentrated the shields on one facing. Intent-advisory title","Focusing shields"
-coordination.intent.power_brownout,"Coordination popup — an AI seat reports a power brownout. Intent-advisory title","Power brownout"
-coordination.intent.manoeuvre_begun,"Coordination popup — an AI seat began a manoeuvre. Intent-advisory title","Manoeuvring"
-server.mod_pack_applied_packs,"Host scenario picker — heading above the list of currently-applied mod packs","[Applied packs]"
-server.mod_pack_row,"Host scenario picker — one applied mod pack row. {name} is the pack display name, {version} its version, {count} the number of files it carries","[{name} {version} — {count} files]"
-server.mod_pack_move_up,"Host scenario picker — button that moves an applied mod pack earlier in load order (lower precedence)","[Up]"
-server.mod_pack_move_down,"Host scenario picker — button that moves an applied mod pack later in load order (higher precedence, wins conflicts)","[Down]"
-server.mod_pack_remove,"Host scenario picker — button that removes an applied mod pack from the stack","[Remove]"
-server.mod_pack_conflicts,"Host scenario picker — heading above the list of authored paths carried by more than one applied mod pack","[Path conflicts]"
+chatter.sender.sensors,Coordination chatter/popup — sender label for the Sensors system,Sensors
+chatter.sender.weapons,Coordination chatter/popup — sender label for the Weapons/Tactical system,Weapons
+chatter.sender.navigation,Coordination chatter/popup — sender label for the Navigation system,Navigation
+chatter.sender.power,Coordination chatter/popup — sender label for the Power system,Power
+chatter.sender.shields,Coordination chatter/popup — sender label for the Shields system,Shields
+chatter.sender.ai,Coordination chatter/popup — generic sender label when the origin system is unnamed,AI
+coordination.advisory.fallback_title,Coordination popup — title for a bare advisory that carries no sender label,Advisory
+coordination.alert.fallback_title,Coordination popup — title for an alert that carries no title of its own,Alert
+coordination.frequency_hint.title,"Coordination popup/chatter — Sensors-to-Tactical shield-frequency hint, title",Frequency Hint
+coordination.frequency_hint.body,Coordination popup/chatter — frequency-hint body. {frequency} is the target's shield frequency,Tune to: {frequency}
+coordination.shield.fallback_label,Coordination popup/chatter — placeholder shield-facing name when none is supplied,Shield
+coordination.system.fallback_label,Coordination popup/chatter — placeholder system name when none is supplied,System
+coordination.shield_offline.title,Coordination popup/chatter — a shield facing has gone offline. {label} is the facing name,{label} Offline
+coordination.shield_restored.title,Coordination popup/chatter — a shield facing has recovered. {label} is the facing name,{label} Restored
+coordination.target_designation.title,Coordination popup/chatter — Sensors designates a target for Tactical. {label} is the target name,Sensors designates: {label}
+coordination.arc_bearing.title,Coordination popup/chatter — Weapons asks Helm to bring a weapon family to bear. {weapon} is the family name,"Tactical: come about, bring {weapon} to bear"
+coordination.arc_withdraw.title,Coordination popup/chatter — Weapons withdraws a standing arc-bearing request. {weapon} is the family name,Belay that — {weapon} no longer able to bear
+coordination.weapon_family.phasers,"Coordination popup/chatter — weapon family name, phasers",phasers
+coordination.weapon_family.blasters,"Coordination popup/chatter — weapon family name, blasters",blasters
+coordination.weapon_family.torpedoes,"Coordination popup/chatter — weapon family name, torpedoes",torpedoes
+coordination.power_brownout.title,Coordination popup/chatter — a power group is browning out. {label} is the affected system,{label} Power Brownout
+coordination.power_brownout.body,Coordination popup/chatter — power-brownout body. {level} is the allocated power level,Allocation: {level}
+coordination.navigate.title,Coordination popup/chatter — Navigation clears Helm toward a waypoint. {x} and {z} are the waypoint coordinates,"Navigation: steer toward waypoint ({x}, {z})"
+coordination.repair.title,Coordination popup/chatter — a system needs repair. {label} is the station or system name,Repair requested: {label}
+coordination.threat_bearing.title,"Coordination popup/chatter — Sensors warns Shields of a threat. {deg} is the bearing in degrees, {label} the threat name",Sensors: threat bearing {deg}° — {label}
+coordination.intent.target_acquired,Coordination popup — an AI seat took a target. Intent-advisory title,Target acquired
+coordination.intent.target_switched,Coordination popup — an AI seat switched targets. Intent-advisory title,Switching target
+coordination.intent.combat_posture_entered,Coordination popup — an AI seat entered combat posture. Intent-advisory title,Combat posture
+coordination.intent.combat_posture_left,Coordination popup — an AI seat left combat posture. Intent-advisory title,Standing down
+coordination.intent.breaking_off,Coordination popup — an AI seat is breaking off. Intent-advisory title,Breaking off
+coordination.intent.shield_arc_focused,Coordination popup — an AI seat concentrated the shields on one facing. Intent-advisory title,Focusing shields
+coordination.intent.power_brownout,Coordination popup — an AI seat reports a power brownout. Intent-advisory title,Power brownout
+coordination.intent.manoeuvre_begun,Coordination popup — an AI seat began a manoeuvre. Intent-advisory title,Manoeuvring
+server.mod_pack_applied_packs,Host scenario picker — heading above the list of currently-applied mod packs,[Applied packs]
+server.mod_pack_row,"Host scenario picker — one applied mod pack row. {name} is the pack display name, {version} its version, {count} the number of files it carries",[{name} {version} — {count} files]
+server.mod_pack_move_up,Host scenario picker — button that moves an applied mod pack earlier in load order (lower precedence),[Up]
+server.mod_pack_move_down,"Host scenario picker — button that moves an applied mod pack later in load order (higher precedence, wins conflicts)",[Down]
+server.mod_pack_remove,Host scenario picker — button that removes an applied mod pack from the stack,[Remove]
+server.mod_pack_conflicts,Host scenario picker — heading above the list of authored paths carried by more than one applied mod pack,[Path conflicts]
 server.mod_pack_conflict_entry,"Host scenario picker — one path conflict line. {path} is the authored path, {winner} the pack id that wins it, {losers} the shadowed pack ids","[{path}: {winner} wins, shadows {losers}]"
-server.mod_pack_findings,"Host scenario picker — heading above the validation findings from the last mod-pack upload","[Findings]"
-server.game_over.ship_destroyed,"Game-over overlay / viewscreen HUD — the player's ship was destroyed. Emitted as an id by the built-in death sites (issue #977)","Ship Destroyed"
-power.group.helm,"Power console / chatter — display label for the helm power group (issue #977). Emitted by power_group_label, resolved via localiseTree","HELM"
-power.group.weapons,"Power console / chatter — display label for the weapons power group (issue #977)","WEAPONS"
-power.group.shields,"Power console / chatter — display label for the shields power group (issue #977)","SHIELDS"
-power.group.unknown,"Power console / chatter — fallback label for an unrecognised power group id (issue #977)","UNKNOWN"
-shield.facing.all,"Shield console / chatter — default facing label for a single-arc grid (issue #977)","All"
-shield.facing.fore,"Shield console / chatter — default facing label, forward arc (issue #977)","Fore"
-shield.facing.aft,"Shield console / chatter — default facing label, aft arc (issue #977)","Aft"
-shield.facing.port,"Shield console / chatter — default facing label, port arc (issue #977)","Port"
-shield.facing.starboard,"Shield console / chatter — default facing label, starboard arc (issue #977)","Starboard"
-shield.facing.arc_0,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 0 (issue #977)","Arc 0"
-shield.facing.arc_1,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 1 (issue #977)","Arc 1"
-shield.facing.arc_2,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 2 (issue #977)","Arc 2"
-shield.facing.arc_3,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 3 (issue #977)","Arc 3"
-shield.facing.arc_4,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 4 (issue #977)","Arc 4"
-shield.facing.arc_5,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 5 (issue #977)","Arc 5"
-shield.facing.arc_6,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 6 (issue #977)","Arc 6"
-shield.facing.arc_7,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 7 (issue #977)","Arc 7"
-component.deadlines.empty,"Deadline countdown panel when the mission has authored no visible deadlines (issue #1024)","[NO MISSION DEADLINES]"
-component.deadlines.heading,"Deadline countdown panel — heading above the list of visible mission deadlines (issue #1024)","[MISSION CLOCK]"
-component.deadlines.fired,"Deadline countdown panel — shown in place of the countdown once a deadline's time has run out (issue #1024)","[TIME UP]"
-component.deadlines.cancelled,"Deadline countdown panel — shown in place of the countdown once the mission has called a deadline off (issue #1024)","[STOOD DOWN]"
+server.mod_pack_findings,Host scenario picker — heading above the validation findings from the last mod-pack upload,[Findings]
+server.game_over.ship_destroyed,Game-over overlay / viewscreen HUD — the player's ship was destroyed. Emitted as an id by the built-in death sites (issue #977),Ship Destroyed
+power.group.helm,"Power console / chatter — display label for the helm power group (issue #977). Emitted by power_group_label, resolved via localiseTree",HELM
+power.group.weapons,Power console / chatter — display label for the weapons power group (issue #977),WEAPONS
+power.group.shields,Power console / chatter — display label for the shields power group (issue #977),SHIELDS
+power.group.unknown,Power console / chatter — fallback label for an unrecognised power group id (issue #977),UNKNOWN
+shield.facing.all,Shield console / chatter — default facing label for a single-arc grid (issue #977),All
+shield.facing.fore,"Shield console / chatter — default facing label, forward arc (issue #977)",Fore
+shield.facing.aft,"Shield console / chatter — default facing label, aft arc (issue #977)",Aft
+shield.facing.port,"Shield console / chatter — default facing label, port arc (issue #977)",Port
+shield.facing.starboard,"Shield console / chatter — default facing label, starboard arc (issue #977)",Starboard
+shield.facing.arc_0,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 0 (issue #977)",Arc 0
+shield.facing.arc_1,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 1 (issue #977)",Arc 1
+shield.facing.arc_2,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 2 (issue #977)",Arc 2
+shield.facing.arc_3,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 3 (issue #977)",Arc 3
+shield.facing.arc_4,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 4 (issue #977)",Arc 4
+shield.facing.arc_5,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 5 (issue #977)",Arc 5
+shield.facing.arc_6,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 6 (issue #977)",Arc 6
+shield.facing.arc_7,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 7 (issue #977)",Arc 7
+component.deadlines.empty,Deadline countdown panel when the mission has authored no visible deadlines (issue #1024),[NO MISSION DEADLINES]
+component.deadlines.heading,Deadline countdown panel — heading above the list of visible mission deadlines (issue #1024),[MISSION CLOCK]
+component.deadlines.fired,Deadline countdown panel — shown in place of the countdown once a deadline's time has run out (issue #1024),[TIME UP]
+component.deadlines.cancelled,Deadline countdown panel — shown in place of the countdown once the mission has called a deadline off (issue #1024),[STOOD DOWN]
 world.probe_deadlines.deadline.window_opens.label,assets/worlds/probe_deadlines.toml → [deadline] label,[Transfer window opens]
 world.probe_deadlines.deadline.stabiliser_failure.label,assets/worlds/probe_deadlines.toml → [deadline] label,[Stabiliser failure]
 world.probe_deadlines.deadline.first_warning.label,assets/worlds/probe_deadlines.toml → [deadline] label,[First warning]
+system_hull.power_reactor.display_name,Shared hull component display name — the ship's reactor. Shared by every hull carrying that component,Power Reactor
+system_hull.power_battery.display_name,Shared hull component display name — the ship's battery. Shared by every hull carrying that component,Power Battery
+system_hull.core.display_name,Shared hull component display name — the ship's core. Shared by every hull carrying that component,Core
+entity.asteroid.name,Shared entity name for every asteroid variant (assets/entities/asteroid_*.toml),Asteroid

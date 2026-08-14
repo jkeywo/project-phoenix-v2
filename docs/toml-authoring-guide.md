@@ -772,6 +772,56 @@ a settlement.
 See `assets/worlds/probe_strike.toml` for both bites, both controls, and the
 settlement, in one world.
 
+### 1.13 Knowing whether the crew went and looked
+
+A science scan (the hull's `[scan]` ladder, issue #1032) hands the *console* a
+reading derived from a structure's live condition track. A scenario usually
+wants a different fact: **did this crew ever survey that structure?** Neither of
+the two things a script could already reach answers it — a timer says how long
+the mission has run, and the structure's own threshold flags say what is true
+whether or not anybody looked.
+
+So every reading that comes back raises one ordinary world flag on the subject:
+
+```
+scan.<[[entity]] id>.taken        # e.g. scan.depot_ladder_b.taken
+```
+
+Keyed on the world's own `id`, because that is the handle you can type — the
+UUID a reading joins on is minted at spawn. A structure with no `id` mirrors
+nothing. Read it like any other flag, or chain a beat off it:
+
+```rhai
+on_flag_set("scan.depot_ladder_b.taken", "on_rung_surveyed");
+
+fn on_rung_surveyed(ctx) {
+    if ctx.flags.depot_b_meets_certified_load > 0 { return; }  // the file holds up
+    ctx.dossier.append(#{ /* … */ });                          // it does not
+}
+```
+
+Three properties to author against:
+
+* **It latches.** The console shows the *last* reading and the next scan
+  replaces it; this flag says the crew *have read* that structure, which
+  scanning something else does not unlearn. It is never cleared.
+* **A refusal raises nothing.** Out of range, underpowered, blinded, withheld
+  (`publish = false`), nothing there to read — none of them is an act of
+  reading, so a beat gated on this cannot fire off "the player pressed the
+  button".
+* **The hook is one tick late**, on the same bridge an `[infrastructure]`
+  threshold crossing rides.
+
+**The pattern this exists for** is a reading measured against something the
+world *claims*. Author the claim twice — once as an
+`[[infrastructure.threshold]]` the simulation can check against the live
+condition, once as a `briefing` evidence entry the crew can read (§1.11) — and
+let the beat compare the two. Re-tune the structure's `condition` and what the
+crew find changes, with no copy edited.
+
+See `assets/worlds/probe_scandiff.toml`, which runs all four combinations of
+"is the record true" and "did anybody look" in one run.
+
 ### Example — a world, end to end
 
 ```toml

@@ -60,8 +60,14 @@
 #
 # BASELINE (release headless, `--seed 42 --ticks 900 --digest-every 0`, no
 # `--ship` override — the invocation probe_scan.toml and probe_evidence.toml
-# record): final digest recorded in the commit that added this world. A NEW
-# number — nothing to compare it against yet.
+# record): final digest 0x2287d33988fc6bbe (2488189563210329022). A NEW number —
+# nothing to compare it against yet — so it is written down to be the thing a
+# later change is A/B'd against, the way the shipped worlds' digests already are.
+#
+# The five anchors were measured on the same clean tree and are UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, and probe_strike
+# (--ticks 1800) 535291289754814419.
 #
 # What is IN that digest is the four condition tracks and the entity population,
 # both of which #1025 folds, and `ladder_slipping`'s decay walks one of them

@@ -114,16 +114,19 @@
 # Act 3 is still a structural stub, and the slices that fill it author their own
 # `[[deadline]]` blocks (the transfer window) against the same counter.
 #
-# BASELINE (this world is new in #1034, so this is its first recorded digest).
+# BASELINE. CURRENT VALUE: 0x6d259525700a2aa4 (7864856312298482340), re-blessed
+# by #1038 — the paragraphs below are the history of how it got there, oldest
+# first, and the first number in them is NOT the one to A/B against.
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
 #     --seed 42 --ticks 900 --record target/t1_falling_skyway.ron --digest-every 0
 #
-# gives final digest 0x14d6dc5dcf05a3c1 (1501629821237961665), and
-# 8541878955160725293 at tick 0. Measured on a clean tree at the commit that
-# added this line. It is a NEW number, not a preserved one — nothing to compare
-# it against yet — so it is written down here to be the thing a later change is
-# A/B'd against, the way the shipped worlds' digests already are.
+# #1034 recorded the first value: final digest 0x14d6dc5dcf05a3c1
+# (1501629821237961665), and 8541878955160725293 at tick 0. Measured on a clean
+# tree at the commit that added this line. It was a NEW number, not a preserved
+# one — nothing to compare it against yet — so it was written down here to be the
+# thing a later change is A/B'd against, the way the shipped worlds' digests
+# already are.
 #
 # STILL 0x14d6dc5dcf05a3c1 AFTER #1035, and that is a claim rather than an
 # oversight. The strike slice adds a `[[workforce]]` table, a `workforce` line
@@ -170,6 +173,34 @@
 # 11531679067393217131 — as are probe_operations, probe_destroy, probe_strike,
 # probe_scan and probe_evidence. The destroyer template gained a capability and
 # a hull that can do a thing it never does folds nothing.
+#
+# RE-BLESSED BY #1038, from 0x14d6dc5dcf05a3c1 (1501629821237961665) to
+# 0x6d259525700a2aa4 (7864856312298482340), and 8112352794633606888 at tick 0
+# (from 8541878955160725293). The mechanism is one line of authored data and it
+# was measured rather than argued: Ladder Depot B gained a second
+# `[[infrastructure.threshold]]`, `depot_b_meets_certified_load`, and
+# `fold_infrastructure_namespace` folds "each authored operational flag with its
+# current state" — so the depot's fold row is one `(flag, state)` pair longer
+# from its first tick. That is exactly the class of edit the paragraph below
+# names as a legitimate mover.
+#
+# Both halves of the A/B are recorded because the attribution is the point:
+# delete that threshold block alone and the digest returns to
+# 1501629821237961665 exactly; delete the whole #1038 script block instead and
+# it stays at 7864856312298482340. So the two BRIEFING entries the slice files
+# at world load, the finding it appends, and its campaign flag fold nothing at
+# all — the evidence log and the flag store are authoritative-but-unfolded, in
+# the deadline table's bucket, and #1038's own `scan.<id>.taken` mirror is a
+# flag-store counter for that same reason.
+#
+# The five anchors were re-measured on the same clean tree and are UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, and probe_strike
+# (--ticks 1800) 535291289754814419.
+#
+# When a later slice lengthens the baseline run past 90 s, this number WILL move,
+# and the mechanism will be the two comms threads and their objectives rather
+# than anything mysterious.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls

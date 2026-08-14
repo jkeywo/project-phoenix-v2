@@ -25,6 +25,12 @@
 //!   is STRUCTURAL, not a re-implementation kept in sync (this is what a converted
 //!   world's authoritative digest, #894, rides on).
 //!
+//! One verb does NOT go through that buffer: `open_comms` (issue #984), which
+//! asks the comms module to open a scripted dialogue thread. Its
+//! [`OpenCommsRequest`] is comms vocabulary, not the world/entity vocabulary the
+//! applier dispatches, so it buffers separately and is materialised by a later
+//! comms system — see [`EffectSink`].
+//!
 //! The sink is an `Arc<Mutex<Vec<BufferedEffect>>>` so it can be registered on the
 //! shared runtime engine once and still be a fresh, per-call buffer: the host
 //! builds one sink per call, hands a clone into the context map, and — because
@@ -53,6 +59,7 @@ use std::sync::{Arc, Mutex};
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position};
 
+use crate::comms::content::OpenCommsRequest;
 use crate::world::config::{
     parse_action_entry, RawActionEntry, RawModifier, RawZeroGate, TriggerAction,
 };
@@ -92,8 +99,22 @@ pub enum BufferedEffect {
 /// Cloneable and interior-mutable: every clone shares one underlying `Vec`, so
 /// the runtime host can register the effect host-fns on the engine once and
 /// still collect exactly one call's effects.
+///
+/// A SECOND buffer holds the call's [`OpenCommsRequest`]s (issue #984). They are
+/// deliberately not `BufferedEffect`s: an open is comms vocabulary, materialised
+/// by a later comms system, while the ordered buffer is the world/entity
+/// `ActionCmd`/`TriggerAction` vocabulary the applier dispatches (the #816
+/// split). The cost is that an open is not interleaved with flag writes in
+/// authored order — unobservable, since nothing reads the thread within the
+/// call, and the same trade `delayed`/`callbacks` already make. Both buffers are
+/// drained together on the success path and dropped whole on the failure path,
+/// so a raising call discards its opens exactly as it discards its effects
+/// (settled decision 10).
 #[derive(Clone, Default)]
-pub struct EffectSink(Arc<Mutex<Vec<BufferedEffect>>>);
+pub struct EffectSink {
+    effects: Arc<Mutex<Vec<BufferedEffect>>>,
+    opens: Arc<Mutex<Vec<OpenCommsRequest>>>,
+}
 
 impl EffectSink {
     /// A fresh, empty buffer for one call.
@@ -108,7 +129,7 @@ impl EffectSink {
     /// authored it*, interleaved with effects, rather than being appended after
     /// them (issue #981 flag-ordering hazard). The M1 command effects push here too.
     pub(crate) fn push(&self, cmd: ActionCmd) {
-        self.0
+        self.effects
             .lock()
             .expect("effect sink lock")
             .push(BufferedEffect::Cmd(cmd));
@@ -119,22 +140,44 @@ impl EffectSink {
     /// effect keeps its authored position relative to flag writes and command
     /// effects. The applier resolves it through `dispatch_action` (issue #984, M6).
     pub(crate) fn push_action(&self, action: TriggerAction) {
-        self.0
+        self.effects
             .lock()
             .expect("effect sink lock")
             .push(BufferedEffect::Action(action));
+    }
+
+    /// Push one comms-thread open onto the SECOND buffer (issue #984). The
+    /// request arrives without its `script_path` — the sink cannot know which
+    /// unit is running — and [`take_opens`](Self::take_opens) stamps it.
+    pub(crate) fn push_open(&self, open: OpenCommsRequest) {
+        self.opens.lock().expect("effect sink lock").push(open);
     }
 
     /// Drain the buffer, leaving it empty. Called by the host on the success
     /// path only — on the failure path the buffer is dropped whole, which is
     /// how "discard the call's effects" (settled decision 10) is enforced.
     pub fn take(&self) -> Vec<BufferedEffect> {
-        std::mem::take(&mut self.0.lock().expect("effect sink lock"))
+        std::mem::take(&mut self.effects.lock().expect("effect sink lock"))
+    }
+
+    /// Drain the comms-open buffer, stamping every request with the running
+    /// unit's `script_path` — the same host-boundary stamping
+    /// [`ScheduleSink::drain`](super::schedule::ScheduleSink::drain) applies to a
+    /// callback's path, and for the same reason (a short or anonymous fn name is
+    /// not unique across units). Success path only, like [`take`](Self::take).
+    pub fn take_opens(&self, script_path: &str) -> Vec<OpenCommsRequest> {
+        std::mem::take(&mut *self.opens.lock().expect("effect sink lock"))
+            .into_iter()
+            .map(|open| OpenCommsRequest {
+                script_path: script_path.to_string(),
+                ..open
+            })
+            .collect()
     }
 
     /// Number of buffered effects (test/introspection helper).
     pub fn len(&self) -> usize {
-        self.0.lock().expect("effect sink lock").len()
+        self.effects.lock().expect("effect sink lock").len()
     }
 
     /// Whether the buffer is empty.
@@ -272,6 +315,18 @@ pub fn register_effects(engine: &mut Engine) {
             // to resolve `targets` through the same dispatch (#984 M6).
             let action = add_objective_action(&spec).map_err(raise)?;
             sink.push_action(action);
+            Ok(())
+        },
+    );
+    engine.register_fn(
+        "open_comms",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            // Comms vocabulary, so it buffers onto the sink's SECOND buffer
+            // rather than the ordered `ActionCmd`/`TriggerAction` one (see
+            // `EffectSink`). Read with the same map idiom as `add_objective` /
+            // `spawn_entity`: a missing required key raises, discarding the call.
+            let open = open_comms_request(&spec).map_err(raise)?;
+            sink.push_open(open);
             Ok(())
         },
     );
@@ -553,6 +608,44 @@ fn spawn_entity_action(spec: &Map) -> Result<TriggerAction, String> {
     parse_action_entry(&raw)
 }
 
+/// Build an [`OpenCommsRequest`] from an `open_comms` script map.
+///
+/// ```rhai
+/// ctx.effects.open_comms(#{
+///     from: "axiom",                 // required: sender ref id -> name_to_uuid
+///     node_fn: "hail_axiom",         // required: the root dialogue node fn
+///     display_name: "Axiom Control", // optional
+///     thread_id: "aphelion",         // optional: joins an existing thread
+///     urgent: true,                  // optional, default false
+/// });
+/// ```
+///
+/// `node_fn`, not `fn`: `fn` is a Rhai KEYWORD, and the map-literal parser
+/// accepts only an identifier or a string as a property name — so `#{ fn: … }`
+/// is a parse error rather than a key this could read (pinned by
+/// `fn_is_not_usable_as_a_map_key`). One spelling, so there is nothing to keep in
+/// step.
+///
+/// A missing required key raises, discarding the whole call (settled decision
+/// 10), exactly as a malformed `add_objective` / `spawn_entity` map does. Unknown
+/// keys are ignored, matching those two.
+fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
+    let from = map_str(spec, "from")
+        .ok_or_else(|| "open_comms requires a string `from` (the sender ref id)".to_string())?;
+    let root_fn = map_str(spec, "node_fn").ok_or_else(|| {
+        "open_comms requires a string `node_fn` (the root dialogue node fn)".to_string()
+    })?;
+    Ok(OpenCommsRequest {
+        from,
+        root_fn,
+        display_name: map_str(spec, "display_name"),
+        thread_id: map_str(spec, "thread_id"),
+        urgent: map_bool(spec, "urgent").unwrap_or(false),
+        // Stamped by `EffectSink::take_opens` at the host boundary.
+        script_path: String::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,6 +708,20 @@ mod tests {
         let sink = EffectSink::new();
         let ctx = make_ctx(&sink);
         vellum_script::call_fn(&engine, &ast, "t.rhai", fn_name, ctx).map(|_| sink.take())
+    }
+
+    /// Compile and call, returning BOTH drained buffers: the ordered effects and
+    /// the comms opens (stamped with the unit path, as the host does).
+    fn run_with_opens(
+        source: &str,
+        fn_name: &str,
+    ) -> (Vec<BufferedEffect>, Vec<OpenCommsRequest>) {
+        let engine = runtime_engine();
+        let ast = engine.compile(source).expect("compiles");
+        let sink = EffectSink::new();
+        let ctx = make_ctx(&sink);
+        let _ = vellum_script::call_fn(&engine, &ast, "t.rhai", fn_name, ctx).expect("calls");
+        (sink.take(), sink.take_opens("t.rhai"))
     }
 
     /// The single `TriggerAction` the declarative front-end parses for one
@@ -1135,6 +1242,129 @@ mod tests {
                 }),
             ]
         );
+    }
+
+    // ── open_comms (issue #984) ──────────────────────────────────────────────
+
+    /// The full authored form buffers one request with every optional carried,
+    /// and the drain stamps the running unit's path (the script never names it).
+    #[test]
+    fn open_comms_buffers_the_request_with_its_metadata() {
+        let (effs, opens) = run_with_opens(
+            r#"fn f(ctx) {
+                ctx.effects.open_comms(#{
+                    from: "axiom",
+                    node_fn: "hail_axiom",
+                    display_name: "Axiom Control",
+                    thread_id: "aphelion",
+                    urgent: true,
+                });
+            }"#,
+            "f",
+        );
+        assert!(
+            effs.is_empty(),
+            "an open is not an ActionCmd/TriggerAction effect"
+        );
+        assert_eq!(
+            opens,
+            vec![OpenCommsRequest {
+                from: "axiom".to_string(),
+                root_fn: "hail_axiom".to_string(),
+                display_name: Some("Axiom Control".to_string()),
+                thread_id: Some("aphelion".to_string()),
+                urgent: true,
+                script_path: "t.rhai".to_string(),
+            }]
+        );
+    }
+
+    /// Only `from` and `node_fn` are required; the rest default the way the
+    /// declarative `[[comms]]` template's optional fields do.
+    #[test]
+    fn open_comms_defaults_every_optional_key() {
+        let (_e, opens) = run_with_opens(
+            r#"fn f(ctx) { ctx.effects.open_comms(#{ from: "axiom", node_fn: "hail" }); }"#,
+            "f",
+        );
+        assert_eq!(
+            opens,
+            vec![OpenCommsRequest {
+                from: "axiom".to_string(),
+                root_fn: "hail".to_string(),
+                display_name: None,
+                thread_id: None,
+                urgent: false,
+                script_path: "t.rhai".to_string(),
+            }]
+        );
+    }
+
+    /// A missing required key raises, discarding the whole call (settled decision
+    /// 10) — including the effects authored before it.
+    #[test]
+    fn open_comms_raises_on_a_missing_required_key() {
+        for (spec, wanted) in [
+            (r#"#{ node_fn: "hail" }"#, "from"),
+            (r#"#{ from: "axiom" }"#, "node_fn"),
+        ] {
+            let src = format!(
+                "fn f(ctx) {{ ctx.effects.complete_objective(\"before\"); \
+                 ctx.effects.open_comms({spec}); }}"
+            );
+            let err = run_result(&src, "f").expect_err("a missing required key must raise");
+            assert!(
+                err.to_string().contains(wanted),
+                "the error should name `{wanted}`: {err}"
+            );
+        }
+    }
+
+    /// `node_fn`, not `fn`: `fn` is a Rhai keyword and the map-literal parser
+    /// takes only an identifier or a string as a property name, so `#{ fn: … }`
+    /// never even compiles. Pinned so the naming choice is evidence, not taste.
+    #[test]
+    fn fn_is_not_usable_as_a_map_key() {
+        let engine = runtime_engine();
+        assert!(
+            engine
+                .compile(r#"fn f(ctx) { ctx.effects.open_comms(#{ from: "a", fn: "b" }); }"#)
+                .is_err(),
+            "`fn` as a bare map key must be a parse error (hence `node_fn`)"
+        );
+    }
+
+    /// Opens ride a SECOND buffer, so they cannot perturb the authored order of
+    /// the `Cmd`/`Action` sequence the applier dispatches — the one ordering
+    /// guarantee flag writes and name-resolving effects depend on.
+    #[test]
+    fn open_comms_does_not_disturb_authored_effect_order() {
+        let (effs, opens) = run_with_opens(
+            r#"fn f(ctx) {
+                ctx.effects.complete_objective("first");
+                ctx.effects.open_comms(#{ from: "axiom", node_fn: "hail" });
+                ctx.effects.add_faction_enemy("Harrow", "Federation");
+                ctx.effects.fail_objective("last");
+            }"#,
+            "f",
+        );
+        assert_eq!(
+            effs,
+            vec![
+                BufferedEffect::Cmd(ActionCmd::CompleteObjective {
+                    id: "first".to_string()
+                }),
+                BufferedEffect::Action(TriggerAction::AddFactionEnemy {
+                    faction: "Harrow".to_string(),
+                    enemy: "Federation".to_string(),
+                }),
+                BufferedEffect::Cmd(ActionCmd::FailObjective {
+                    id: "last".to_string()
+                }),
+            ],
+            "the ordered buffer must read exactly as it does without the open"
+        );
+        assert_eq!(opens.len(), 1);
     }
 
     /// A minimal context-free dispatch of one action to its `ActionCmd`s, for the

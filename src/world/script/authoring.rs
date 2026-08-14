@@ -210,6 +210,15 @@ pub const HOST_FNS: &[HostFn] = &[
         category: "effect",
         summary: "End the game with a reason string.",
     },
+    HostFn {
+        name: "open_comms",
+        receiver: "effects",
+        params: &["spec"],
+        category: "effect",
+        summary: "Open a scripted comms thread: `#{from, node_fn, display_name?, \
+                  thread_id?, urgent?}`. No delayed form — defer it with \
+                  `schedule.after`.",
+    },
     // ── ctx.flags.* (runtime engine) ─────────────────────────────────────────
     HostFn {
         name: "increment",
@@ -404,8 +413,14 @@ mod tests {
     /// a different shape must extend this probe rather than silently mis-call.
     fn receiver_expr(hf: &HostFn) -> String {
         match hf.receiver {
-            // Every effect / delay verb takes a single string (id / path / reason).
-            "effects" => format!("ctx.effects.{}(\"x\")", hf.name),
+            // A map verb takes its spec map; every other effect verb takes a
+            // single string (id / path / reason).
+            "effects" => match hf.name {
+                "open_comms" => {
+                    "ctx.effects.open_comms(#{ from: \"a\", node_fn: \"f\" })".to_string()
+                }
+                _ => format!("ctx.effects.{}(\"x\")", hf.name),
+            },
             "delay" => format!("ctx.schedule.in_seconds(0).{}(\"x\")", hf.name),
             "flags" => match hf.name {
                 "increment" => "ctx.flags.increment(\"n\", 0)".to_string(),
@@ -513,6 +528,10 @@ mod tests {
             assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
             assert!(names.contains(&("delay", verb)), "missing delay.{verb}");
         }
+        // `open_comms` is immediate-only: there is no delay-builder twin (a
+        // deferred open is authored as `schedule.after(n, |ctx| …open_comms…)`).
+        assert!(names.contains(&("effects", "open_comms")));
+        assert!(!names.contains(&("delay", "open_comms")));
         // ctx.flags.* (flags.rs) and ctx.schedule.* (schedule.rs).
         assert!(names.contains(&("flags", "increment")));
         assert!(names.contains(&("schedule", "in_seconds")));

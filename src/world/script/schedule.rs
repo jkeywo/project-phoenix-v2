@@ -55,7 +55,8 @@ use crate::world::script::{MAX_CALLS_PER_TICK, MAX_OPS_PER_TICK};
 ///
 /// `commands` are applied this tick (effects and flag writes, in the order the
 /// script authored them); `delayed` extend the existing `pending_delayed_actions`
-/// queue; `callbacks` extend the serialisable [`PendingCallbacks`] queue. Not
+/// queue; `callbacks` extend the serialisable [`PendingCallbacks`] queue;
+/// `comms_opens` extend `WorldScriptRuntime::pending_comms_opens`. Not
 /// `PartialEq` because [`DelayedAction`] is not — tests compare the fields they
 /// care about.
 #[derive(Debug, Default, Clone)]
@@ -68,6 +69,12 @@ pub struct CallEffects {
     pub delayed: Vec<DelayedAction>,
     /// Deferred callbacks from `after(n, |ctx| …)`, absolute fire tick stamped.
     pub callbacks: Vec<ScheduledCall>,
+    /// Comms threads the call asked to open with `ctx.effects.open_comms(#{…})`,
+    /// each stamped with the running unit's script path (issue #984). A fourth
+    /// FIELD rather than a `BufferedEffect` variant because an open is comms
+    /// vocabulary the applier has no resources for — see
+    /// [`EffectSink`](super::effects::EffectSink).
+    pub comms_opens: Vec<crate::comms::content::OpenCommsRequest>,
 }
 
 /// The clock a deferred-work drain stamps absolute fire times against.

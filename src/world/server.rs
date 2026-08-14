@@ -375,6 +375,19 @@ pub struct WorldScriptRuntime {
     /// authoritative future work — it belongs in the same digest fold as
     /// [`WorldContentRuntime`]'s own deferred state.
     pub pending_callbacks: PendingCallbacks,
+    /// Queue of scripted `ctx.effects.open_comms(#{…})` requests awaiting a comms
+    /// system to materialise them into threads (issue #984). Sibling of
+    /// [`pending_callbacks`](Self::pending_callbacks) and populated the same way:
+    /// every script call site extends it with its [`CallEffects`] `comms_opens`.
+    ///
+    /// It lives here, not on a comms resource, for the same reason the callback
+    /// queue does — this is the resource the script systems already borrow, so
+    /// routing costs one line per call site and a script-free world (every shipped
+    /// one) has no `WorldScriptRuntime` at all, hence no queue and no behaviour.
+    /// The request itself is comms vocabulary from `comms::content`, keeping the
+    /// #816 split intact: world runtime holds the strings, the comms module owns
+    /// what they mean.
+    pub pending_comms_opens: Vec<crate::comms::content::OpenCommsRequest>,
 }
 
 /// The two script-related reads [`tick_trigger_pipeline`] needs, bundled into a
@@ -711,6 +724,7 @@ pub(crate) fn compile_world_scripts(mut commands: Commands, raw: Option<Res<RawW
         budget_tick: 0,
         content_hash: compiled.content_hash,
         pending_callbacks: PendingCallbacks::new(),
+        pending_comms_opens: Vec::new(),
     });
 }
 
@@ -1810,6 +1824,9 @@ pub(crate) fn tick_trigger_pipeline(
                         // `tick_script_callbacks` drains the due ones each tick.
                         // 2a dropped these — now they are retained.
                         sr.pending_callbacks.extend(effects.callbacks);
+                        // A scripted `open_comms` queues for the comms module to
+                        // materialise; empty for every world that authors none.
+                        sr.pending_comms_opens.extend(effects.comms_opens);
                     }
                 }
             }
@@ -2596,8 +2613,8 @@ fn tick_delayed_actions(
 /// on [`WorldScriptRuntime::pending_callbacks`]; this system drains the entries
 /// whose `fire_tick` has arrived, resolves each against its unit's retained AST,
 /// and feeds the call's effects through the SAME apply path the trigger handlers
-/// use ([`apply_script_commands`]). Its three effect kinds route identically to
-/// the trigger-handler branch:
+/// use ([`apply_script_commands`]). Its effect kinds route identically to the
+/// trigger-handler branch:
 /// * `commands` — applied this tick; their chaining `new_events` queue onto
 ///   `pending_world_events` for the NEXT tick, exactly as `tick_delayed_actions`
 ///   routes its own (there is no within-tick chaining loop here).
@@ -2605,6 +2622,8 @@ fn tick_delayed_actions(
 ///   when the mission clock is unanchored (same rule as the trigger path).
 /// * `callbacks` — a callback that scheduled another callback re-queues it on
 ///   `pending_callbacks` for a future tick.
+/// * `comms_opens` — an `open_comms` request queues on `pending_comms_opens` for
+///   the comms module to materialise (issue #984).
 ///
 /// # Shared per-tick budget
 /// The [`TickBudget`] on `WorldScriptRuntime` is reset once per tick, keyed on
@@ -2792,6 +2811,8 @@ fn tick_script_callbacks(
         // A callback that scheduled another callback re-queues it for a future
         // tick (drained the next time this system observes it due).
         sr.pending_callbacks.extend(effects.callbacks);
+        // A callback that opened a comms thread queues it for the comms module.
+        sr.pending_comms_opens.extend(effects.comms_opens);
     }
 }
 
@@ -3726,6 +3747,7 @@ pub(crate) mod tests {
             budget_tick: 0,
             content_hash: compiled.content_hash,
             pending_callbacks: PendingCallbacks::new(),
+            pending_comms_opens: Vec::new(),
         }
     }
 
@@ -3791,6 +3813,62 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.complete_objective
             snap.status,
             ObjectiveStatus::Completed,
             "a scripted on_destroyed handler must complete the objective through the LIVE pipeline"
+        );
+    }
+
+    /// Issue #984: a scripted handler's `ctx.effects.open_comms(#{…})` queues on
+    /// `WorldScriptRuntime::pending_comms_opens` through the LIVE
+    /// `tick_trigger_pipeline` — the routing line beside `pending_callbacks`,
+    /// proven end-to-end rather than by calling the host directly. The comms
+    /// module has nothing draining that queue yet (the scripted-thread system is
+    /// the next slice), so this pins the wiring, not the thread.
+    #[test]
+    fn scripted_open_comms_queues_on_the_runtime_through_the_live_pipeline() {
+        let mut sr = compile_fixture_scripts(
+            r#"[script]
+setup = 'on_destroyed("raider", "hail"); fn hail(ctx) { ctx.effects.open_comms(#{ from: "axiom", node_fn: "hail_axiom", display_name: "Axiom Control", urgent: true }); } fn hail_axiom(ctx) { #{ message: "Axiom Station, go ahead.", responses: [] } }'
+"#,
+        );
+
+        let mut app = ai_trigger_test_app();
+        let raider_uuid = "raider-uuid-984c";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        assert!(
+            sr.pending_comms_opens.is_empty(),
+            "nothing queued before the trigger fires"
+        );
+        app.world_mut().insert_resource(sr);
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: raider_uuid.into(),
+            });
+        app.update();
+
+        let sr = app.world().resource::<WorldScriptRuntime>();
+        assert_eq!(
+            sr.pending_comms_opens.len(),
+            1,
+            "the fired handler's open must reach the runtime queue"
+        );
+        let open = &sr.pending_comms_opens[0];
+        assert_eq!(open.from, "axiom");
+        assert_eq!(open.root_fn, "hail_axiom");
+        assert_eq!(open.display_name.as_deref(), Some("Axiom Control"));
+        assert_eq!(open.thread_id, None);
+        assert!(open.urgent);
+        assert_eq!(
+            open.script_path, "fixture/scripted.toml#script.setup",
+            "the host stamps the running unit's path, so the node fn resolves \
+             against the right AST"
         );
     }
 

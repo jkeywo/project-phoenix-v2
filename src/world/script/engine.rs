@@ -390,14 +390,18 @@ impl RuntimeHost {
         let value = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
         let ops = self.ops_counter.load(Ordering::Relaxed);
 
-        // `sink` already carries effects and flag writes in authored order.
+        // `sink` already carries effects and flag writes in authored order; its
+        // second buffer carries the call's comms opens, stamped with `path` here
+        // at the host boundary just as the schedule drain stamps a callback's.
         let commands = sink.take();
+        let comms_opens = sink.take_opens(path);
         let (delayed, callbacks) = schedule.drain(clock, path);
         Ok((
             CallEffects {
                 commands,
                 delayed,
                 callbacks,
+                comms_opens,
             },
             value,
             ops,

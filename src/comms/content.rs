@@ -14,11 +14,14 @@
 //   * `FiredCommsTemplate` — evaluation result for one fired template.
 //   * `ActiveDialogue` — dialogue state machine entry.
 //   * `PendingFollowUp` — a queued follow-up message awaiting its trigger.
+//   * `OpenCommsRequest` — a scripted request to open a thread.
 //   * `evaluate_comms_templates` — single-shot template evaluator.
 //   * `follow_up_trigger_holds` — pure follow-up trigger evaluator.
 //   * `comms_template_states_from_world` — factory from a parsed `WorldConfig`.
 
 use std::collections::{HashMap, HashSet};
+
+use serde::{Deserialize, Serialize};
 
 // Re-export the comms TOML vocabulary so comms consumers import template
 // types alongside the runtime state types defined here.
@@ -87,6 +90,42 @@ pub struct ActiveDialogue {
     /// Thread identifier shared by all messages in this dialogue tree.
     /// Set when the first message is injected; follow-ups inherit the same id.
     pub thread_id: String,
+}
+
+/// A script's request to open a comms thread — what
+/// `ctx.effects.open_comms(#{…})` buffers (issue #984).
+///
+/// The metadata lives on the OPEN, not on the node, mirroring the declarative
+/// split between [`CommsTemplate`] (`from` / `display_name` / `thread_id` /
+/// `urgent`) and [`CommsDialogueNode`] (`message` / `responses`): follow-up
+/// nodes inherit the thread rather than restating who is calling.
+///
+/// Strings and one bool, no `Entity` and no closures — so the queue this lands
+/// on round-trips through a save (issue #864) as plainly as
+/// [`ScheduledCall`](crate::world::script::schedule::ScheduledCall) does. `from`
+/// is the sender's authored reference id, resolved through `name_to_uuid` when
+/// the request is materialised; `root_fn` is the dialogue node fn to enter, and
+/// `script_path` the unit that defines it — the pair is exactly the
+/// `(script_path, fn_name)` key a scheduled callback carries, and for the same
+/// reason (anonymous and short fn names are not unique across units).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenCommsRequest {
+    /// Sender entity **reference id** (resolved to the sender UUID at open).
+    pub from: String,
+    /// The dialogue node fn to enter — the thread's root node.
+    pub root_fn: String,
+    /// Optional player-facing sender display text, independent of `from`.
+    /// `None` falls back to `from`, as a template's `display_name` does.
+    pub display_name: Option<String>,
+    /// Joins an existing thread when set; a fresh id is minted when absent.
+    pub thread_id: Option<String>,
+    /// Whether the injected message is flagged urgent.
+    pub urgent: bool,
+    /// Content-relative path of the unit defining `root_fn`. Stamped at the
+    /// host's drain boundary, not by the script — the effect sink cannot know
+    /// which unit is running, exactly as `ScheduleSink::drain` stamps a
+    /// callback's path there.
+    pub script_path: String,
 }
 
 /// A comms message that has been queued and is waiting to be injected into

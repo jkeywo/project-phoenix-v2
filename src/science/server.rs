@@ -224,6 +224,10 @@ pub fn tick_scans(
         &Transform,
         Option<&EntityName>,
         Option<&InfrastructureCondition>,
+        // The world's own `[[entity]] id` — the handle #1038's mirror flag is
+        // keyed on, because a scenario can type it and a minted UUID is not
+        // something any author has ever seen. See `scanned_flag`.
+        Option<&crate::entities::spawner::EntityId>,
     )>,
     region_effects: Query<&crate::entities::spawner::RegionEffectsSection>,
     mut commands: Commands,
@@ -269,7 +273,7 @@ pub fn tick_scans(
 
         for target_uuid in requested {
             let found = subjects.iter().find(|(uuid, ..)| uuid.0 == target_uuid);
-            let Some((_, subject_transform, name, condition)) = found else {
+            let Some((_, subject_transform, name, condition, authored_id)) = found else {
                 record.last = None;
                 record.refusal = Some(ScanRefusal::NoSuchTarget);
                 crate::pwarn!(
@@ -313,7 +317,9 @@ pub fn tick_scans(
                     );
                     record.last = Some(reading);
                     record.refusal = None;
-                    mirror_scanned(runtime.as_deref_mut(), &target_uuid, &log);
+                    if let Some(authored_id) = authored_id {
+                        mirror_scanned(runtime.as_deref_mut(), &authored_id.0, &log);
+                    }
                 }
                 Err(refusal) => {
                     crate::pdebug!(
@@ -345,13 +351,13 @@ pub fn tick_scans(
 /// `None` arm and scans exactly as it did before this existed.
 fn mirror_scanned(
     runtime: Option<&mut WorldContentRuntime>,
-    subject_uuid: &str,
+    subject_id: &str,
     log: &Option<Res<LogFilterConfig>>,
 ) {
     let Some(runtime) = runtime else {
         return;
     };
-    let flag = scanned_flag(subject_uuid);
+    let flag = scanned_flag(subject_id);
     let (before, after) = runtime.flags.set_flag(&flag);
     if (before != 0) == (after != 0) {
         return;
@@ -359,7 +365,7 @@ fn mirror_scanned(
     crate::pdebug!(
         log,
         crate::logging::LogCat::Sensors,
-        "scan mirror: {flag} raised — this crew have now read {subject_uuid}"
+        "scan mirror: {flag} raised — this crew have now read {subject_id}"
     );
     runtime.pending_world_events.push(WorldEvent::FlagSet {
         name: flag,
@@ -468,7 +474,12 @@ mod tests {
     use crate::science::scan::ScanBandConfig;
 
     const SHIP: &str = "ship-1";
+    /// The depot's minted UUID — what a command and a reading join on.
     const DEPOT: &str = "depot-1";
+    /// The depot's authored `[[entity]] id` — deliberately NOT its UUID, so the
+    /// mirror-flag tests below fail if the key ever slips back onto the UUID no
+    /// scenario author can type.
+    const DEPOT_ID: &str = "skyway_depot";
 
     fn suite() -> ScanConfig {
         ScanConfig {
@@ -546,6 +557,7 @@ mod tests {
             .id();
         app.world_mut().spawn((
             EntityUuid(DEPOT.to_string()),
+            crate::entities::spawner::EntityId(DEPOT_ID.to_string()),
             Transform::from_xyz(depot_x, 0.0, 0.0),
             EntityName("world.probe.entity.depot.name".to_string()),
             depot_condition(condition),
@@ -816,22 +828,51 @@ mod tests {
     }
 
     /// **Issue #1038's engine seam.** A reading that comes back raises the
-    /// subject's own `scan.<uuid>.taken` in the world flag store and queues the
-    /// `FlagSet` a scenario's `on_flag_set` hook fires from.
+    /// subject's own `scan.<id>.taken` in the world flag store and queues the
+    /// `FlagSet` a scenario's `on_flag_set` hook fires from — keyed on the
+    /// world's authored id, which is the only spelling an author can write.
     #[test]
     fn a_reading_that_comes_back_raises_the_subjects_scanned_flag() {
         let (mut app, ship) = app_with(suite(), 62.0, 200.0);
-        assert_eq!(runtime(&app).flags.counter(&scanned_flag(DEPOT)), 0);
+        assert_eq!(runtime(&app).flags.counter(&scanned_flag(DEPOT_ID)), 0);
 
         ask_for_scan(&mut app, ship, DEPOT);
         app.update();
 
         assert_eq!(
-            runtime(&app).flags.counter(&scanned_flag(DEPOT)),
+            runtime(&app).flags.counter(&scanned_flag(DEPOT_ID)),
             1,
             "the crew have now read this structure, and a script can ask so"
         );
-        assert_eq!(queued_flag_sets(&app), vec![scanned_flag(DEPOT)]);
+        assert_eq!(queued_flag_sets(&app), vec![scanned_flag(DEPOT_ID)]);
+        assert_eq!(
+            runtime(&app).flags.counter(&scanned_flag(DEPOT)),
+            0,
+            "and nothing is keyed on the minted UUID, which no scenario can type"
+        );
+    }
+
+    /// A structure the world authored no `id` for is one no scenario can name,
+    /// so it is read and nothing is mirrored. Never a `scan..taken`.
+    #[test]
+    fn a_structure_with_no_authored_id_is_scannable_and_mirrors_nothing() {
+        let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+        app.world_mut().spawn((
+            EntityUuid("anonymous-1".to_string()),
+            Transform::from_xyz(150.0, 0.0, 0.0),
+            EntityName("world.probe.entity.anonymous.name".to_string()),
+            depot_condition(44.0),
+        ));
+
+        ask_for_scan(&mut app, ship, "anonymous-1");
+        app.update();
+
+        assert!(
+            record(&app, ship).last.is_some(),
+            "the reading still comes back — the console is owed an answer"
+        );
+        assert!(queued_flag_sets(&app).is_empty());
+        assert_eq!(runtime(&app).flags.counter("scan..taken"), 0);
     }
 
     /// It LATCHES. A second reading of the same structure does not queue a
@@ -842,6 +883,7 @@ mod tests {
         let (mut app, ship) = app_with(suite(), 62.0, 200.0);
         app.world_mut().spawn((
             EntityUuid("depot-2".to_string()),
+            crate::entities::spawner::EntityId("ladder_depot".to_string()),
             Transform::from_xyz(120.0, 0.0, 0.0),
             EntityName("world.probe.entity.other.name".to_string()),
             depot_condition(55.0),
@@ -856,11 +898,11 @@ mod tests {
 
         assert_eq!(
             queued_flag_sets(&app),
-            vec![scanned_flag(DEPOT), scanned_flag("depot-2")],
+            vec![scanned_flag(DEPOT_ID), scanned_flag("ladder_depot")],
             "one event per structure the crew have read, however often they read it"
         );
         assert_eq!(
-            runtime(&app).flags.counter(&scanned_flag(DEPOT)),
+            runtime(&app).flags.counter(&scanned_flag(DEPOT_ID)),
             1,
             "the console's `last` reading has moved on to the other depot; what \
              the crew KNOW they have looked at has not"
@@ -877,6 +919,7 @@ mod tests {
         let (mut app, ship) = app_with(suite(), 62.0, 200.0);
         app.world_mut().spawn((
             EntityUuid("sealed-1".to_string()),
+            crate::entities::spawner::EntityId("sealed_depot".to_string()),
             Transform::from_xyz(100.0, 0.0, 0.0),
             EntityName("world.probe.entity.sealed.name".to_string()),
             InfrastructureCondition(InfrastructureState::from_config(&InfrastructureConfig {
@@ -892,7 +935,10 @@ mod tests {
         ask_for_scan(&mut app, ship, "not-in-this-world");
         app.update();
 
-        assert_eq!(runtime(&app).flags.counter(&scanned_flag("sealed-1")), 0);
+        assert_eq!(
+            runtime(&app).flags.counter(&scanned_flag("sealed_depot")),
+            0
+        );
         assert!(
             queued_flag_sets(&app).is_empty(),
             "neither refusal is an act of reading"

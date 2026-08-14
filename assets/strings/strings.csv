@@ -1115,3 +1115,13 @@ world.falling_skyway.objective.rescue.text,Objective text — the Act 2 tow resc
 world.falling_skyway.objective.storm.text,Objective text — the Act 2 storm watch in Falling Skyway,[See the sweep through. The corridor is yours again when the last band passes.]
 world.falling_skyway.objective.lee.text,Objective text — the Act 2 withdrawal to the storm lee in Falling Skyway,[Take the ship west into the lee and ride the rest of it out.]
 world.falling_skyway.objective.loss_report.text,Objective text — the Act 2 rescue-failure consequence in Falling Skyway,[Report the loss of Lyra Ascending to Skyway Control.]
+world.probe_scandiff.entity.ladder_frayed.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Frayed Rung]
+world.probe_scandiff.entity.ladder_sound.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Sound Rung]
+world.probe_scandiff.entity.ladder_unread.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Unread Rung]
+world.probe_scandiff.entity.ladder_slipping.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Slipping Rung]
+world.probe_scandiff.threshold.certified_load.label,assets/worlds/probe_scandiff.toml -> [[infrastructure.threshold]] label,[Certified load standard]
+world.probe_scandiff.evidence.record_certified,"Evidence text — the operator's recorded claim about a rung, probe_scandiff",[Operator's file: this rung was inspected and re-rated at the certified load standard.]
+world.probe_scandiff.evidence.record_contradicted,"Evidence text — the reading and the record put side by side, probe_scandiff",[The rung cannot carry what its own file says it was signed off to carry.]
+world.falling_skyway.threshold.certified_load.label,assets/worlds/falling_skyway.toml -> [[infrastructure.threshold]] label,[Certified load standard]
+world.falling_skyway.evidence.ladder_b_record_inspection,"Evidence text — the operator's recorded inspection of Ladder B, Falling Skyway",[Operator's file on Ladder B: inspected eleven weeks ago and signed off at the certified load standard.]
+world.falling_skyway.evidence.ladder_b_record_reinforced,"Evidence text — the operator's recorded reinforcement of Ladder B, Falling Skyway","[Operator's file on Ladder B: transfer arm reinforced last spring, re-rated for full load, no follow-up required.]"

@@ -449,6 +449,31 @@ flag = "depot_b_pumping"
 fails_below = 0.4
 label = "world.falling_skyway.threshold.pumping.label"
 
+# ── THE RECORDED STANDARD (issue #1038) ──────────────────────────────────────
+# The operator's maintenance file on Ladder B — filed onto the crew's dossier at
+# world load, two rows down in the script — says the rung was inspected and
+# re-rated at the certified load standard. THIS IS THAT CLAIM AS A NUMBER, and
+# it is the only place it exists in a form the simulation can check.
+#
+# 0.6 against an authored 34 points, so the flag is DOWN from the depot's first
+# tick and the file cannot be true. Nobody has to be told: #1025 mirrors the
+# answer into `depot_b_meets_certified_load` off the live track every tick, the
+# label puts it on the dossier panel beside the recorded claim, and a science
+# scan reads it back off the same published snapshot.
+#
+# It is a second threshold rather than a re-use of `depot_b_pumping` because the
+# two say different things and a repair can move them apart: "can this rung pump
+# today" is a 40 % operational line, and "could this rung be what its paperwork
+# says it is" is the 60 % it was signed off to. Tune this number up past the
+# condition and the discrepancy exists; tune the condition up past this number
+# and it does not — with no line of copy edited either way.
+#
+# [ai] 0.6 is unratified. It is the whole tuning surface of the diff.
+[[entity.overrides.infrastructure.threshold]]
+flag = "depot_b_meets_certified_load"
+fails_below = 0.6
+label = "world.falling_skyway.threshold.certified_load.label"
+
 # Skyway Control. Federation, hailable at the template level, and the party the
 # survey report goes to. It is a `station_axiom.toml` because that is the
 # shipped authority station; its point defence is beside the point in a world
@@ -1526,5 +1551,103 @@ fn on_storm_passed(ctx) {
     ctx.flags.skyway_storm_passed = 1;
     ctx.flags.act2_complete = 1;
     ctx.flags.act = 3;
+}
+
+// ═══ THE SCAN-VERSUS-DOSSIER DIFF (issue #1038) ══════════════════════════════
+//
+// The Thin Margin arc opens here, and it opens on a contradiction the crew have
+// to go and find. It runs alongside Act 1 rather than after it: the rung's file
+// is in the crew's hands from the moment they arrive, the rung is scannable from
+// the moment they are in range, and nothing in this block waits for an act.
+//
+// ── The two documents ───────────────────────────────────────────────────────
+//
+// WHAT THE PAPERWORK SAYS is filed below as two BRIEFING entries on Ladder B's
+// own dossier — inspected and signed off at the certified load standard,
+// transfer arm reinforced and re-rated. They read on the tactical dossier panel
+// beside everything else the crew know about the rung, under the provenance that
+// says where they came from: somebody handed these to us.
+//
+// WHAT THE RUNG IS is `depot_b_meets_certified_load`, the threshold authored on
+// the depot itself against 0.6 of its ceiling. #1025 mirrors it off the live
+// condition track every tick; at an authored 34 points it is down, and a science
+// scan (#1032) reads the same published snapshot back at whatever fidelity the
+// crew's range and power bought them.
+//
+// The crew are therefore holding two documents that disagree, and the panel
+// shows both. All this block does is notice.
+//
+// ── Why this is not a scripted reveal ───────────────────────────────────────
+//
+// `read_the_file_against_the_rung` asks two questions and holds neither answer
+// itself. It does not know what the scan SAID; it does not know what the record
+// CLAIMS beyond the flag's name. Three consequences, and each one is a thing a
+// scripted reveal could not do:
+//
+//   * Re-author the depot's `condition` above the recorded standard and the
+//     flag comes up, the second guard returns, and there is nothing to find —
+//     with no line of copy edited, and no handler touched.
+//   * A crew who never scan Ladder B never file anything, whatever else they do
+//     and however long the mission runs. `probe_scandiff.toml` runs that case as
+//     its own rung.
+//   * The beat is reachable from EITHER side. `on_flag_set` on the scan is the
+//     ordinary route — the crew look at a rung that is already wrong. The
+//     `on_flag_cleared` registration is the other one: a crew who read the rung
+//     while it still held up, and watched it stop holding up afterwards. Same
+//     function, same two questions, no ordering baked in.
+//
+// ── What it is worth ────────────────────────────────────────────────────────
+//
+// The finding is `…evidence.ladder_b_maintenance_file` under RECORDS provenance
+// — deliberately the SAME entry the operator hands over on Havelock's channel in
+// Act 2, because it is the same fact learned two ways, and #1031's store makes
+// the second one a silent no-op. So this route feeds the negotiation's evidence
+// branch (#1036 reads the log itself rather than a flag, precisely so that any
+// route reaching the finding opens the line), and a crew who did the survey work
+// settle the strike on one promise instead of two.
+//
+// Not finding it never blocks anything: both endings stay reachable empty-handed
+// and the act boundary does not wait on this. It costs the captain a promise.
+//
+// `skyway_records_diff_found` is the campaign flag, beside
+// `skyway_worker_corroboration_closed` and for its reason: a later mission wants
+// to know whether THIS crew were the ones who read the file, and the evidence log
+// is scenario state a debrief cannot re-derive.
+
+on_world_loaded("file_the_ladder_b_record");
+on_flag_set("scan.depot_ladder_b.taken", "on_ladder_b_read");
+on_flag_cleared("depot_b_meets_certified_load", "on_ladder_b_record_fails");
+
+// The operator's file, handed over with the mission. BRIEFING provenance: being
+// told is itself a source, and a crew who cannot tell a briefing from a reading
+// cannot argue with the briefing.
+fn file_the_ladder_b_record(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.depot_ladder_b.name",
+        text:       "world.falling_skyway.evidence.ladder_b_record_inspection",
+        provenance: "briefing",
+    });
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.depot_ladder_b.name",
+        text:       "world.falling_skyway.evidence.ladder_b_record_reinforced",
+        provenance: "briefing",
+    });
+}
+
+fn on_ladder_b_read(ctx)         { read_the_file_against_the_rung(ctx) }
+fn on_ladder_b_record_fails(ctx) { read_the_file_against_the_rung(ctx) }
+
+// The comparison. Two reads of the world, in either order, and no memory of its
+// own — see the block comment above for why that is the whole slice.
+fn read_the_file_against_the_rung(ctx) {
+    if ctx.flags["scan.depot_ladder_b.taken"] == 0 { return; }
+    if ctx.flags.depot_b_meets_certified_load > 0 { return; }
+
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.depot_ladder_b.name",
+        text:       "world.falling_skyway.evidence.ladder_b_maintenance_file",
+        provenance: "records",
+    });
+    ctx.flags.skyway_records_diff_found = 1;
 }
 """

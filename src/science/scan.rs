@@ -413,14 +413,24 @@ pub struct ScanReading {
 
 // ── The mirror flag: that the crew went and looked ───────────────────────────
 
-/// The world flag mirroring that a reading of `uuid` has come back at least
-/// once: `scan.<uuid>.taken`.
+/// The world flag mirroring that a reading of the structure authored as
+/// `[[entity]] id = "<id>"` has come back at least once: `scan.<id>.taken`.
 ///
 /// A free function rather than an inlined `format!` at the one write site, for
 /// [`strike_flag`](crate::world::workforce::strike_flag)'s reason: the name is a
 /// contract with scenario authors — an `on_flag_set("scan.depot_ladder_b.taken",
 /// …)` trigger is written against this exact string — and a contract stated in
 /// two places can be changed in one of them.
+///
+/// # Keyed on the world's own `id`, not on the minted UUID
+///
+/// A [`ScanReading`] joins on `subject_uuid`, which is the UUID
+/// `spawn_world_entities` mints — a value no author has ever seen and none can
+/// type. A flag is read from a scenario, so it is keyed on the handle a scenario
+/// *wrote*: the `[[entity]] id`, carried at runtime as
+/// [`EntityId`](crate::entities::spawner::EntityId), and already the way #1029
+/// matches a promise's party onto its dossier. A structure that authors no `id`
+/// is one no scenario can name at all, so nothing is mirrored for it.
 ///
 /// # Why a flag exists at all, when the reading is already stored
 ///
@@ -452,8 +462,8 @@ pub struct ScanReading {
 /// it, exactly as [`EvidenceLog`](crate::dossier::EvidenceLog) never forgets a
 /// finding, so the flag is raised once and never cleared. A refusal raises
 /// nothing: being told there is nothing to read is not having read it.
-pub fn scanned_flag(uuid: &str) -> String {
-    format!("scan.{uuid}.taken")
+pub fn scanned_flag(entity_id: &str) -> String {
+    format!("scan.{entity_id}.taken")
 }
 
 /// Round a fraction to a band's reporting step.

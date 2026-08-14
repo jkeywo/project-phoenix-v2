@@ -10231,3 +10231,552 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
          time"
     );
 }
+// ── The scan-versus-dossier diff (issue #1038, parent #852) ──────────────────
+
+/// `probe_scandiff.toml` — four rungs authored identically except for the one
+/// number under test. The world's own header carries what each is for.
+const SCANDIFF_WORLD: &str = "assets/worlds/probe_scandiff.toml";
+/// Under its recorded standard, and read. The diff.
+const DIFF_FRAYED: &str = "world.probe_scandiff.entity.ladder_frayed.name";
+/// Over its recorded standard, and read. The derivation proof.
+const DIFF_SOUND: &str = "world.probe_scandiff.entity.ladder_sound.name";
+/// Under its recorded standard, and never read. The control.
+const DIFF_UNREAD: &str = "world.probe_scandiff.entity.ladder_unread.name";
+/// Read while its record still held up, and slipping under it afterwards.
+const DIFF_SLIPPING: &str = "world.probe_scandiff.entity.ladder_slipping.name";
+/// What the operator's file claims, on every rung, as a BRIEFING entry.
+const DIFF_CLAIM: &str = "world.probe_scandiff.evidence.record_certified";
+/// What a crew who put the two documents side by side write down.
+const DIFF_FINDING: &str = "world.probe_scandiff.evidence.record_contradicted";
+
+/// Every finding on `subject_uuid`'s file, oldest first, as `(text, provenance)`.
+fn diff_file(app: &App, subject_uuid: &str) -> Vec<(String, String)> {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .evidence
+        .for_subject(subject_uuid)
+        .map(|e| (e.text.clone(), e.provenance.as_str().to_string()))
+        .collect()
+}
+
+fn diff_flag(app: &App, name: &str) -> i64 {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .counter(name)
+}
+
+/// The tick a finding about `subject_uuid` was gathered on.
+fn diff_gathered_at(app: &App, subject_uuid: &str, text: &str) -> u64 {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .evidence
+        .for_subject(subject_uuid)
+        .find(|e| e.text == text)
+        .unwrap_or_else(|| panic!("{subject_uuid} has no finding {text}"))
+        .gathered_at_tick
+}
+
+fn diff_now_tick(app: &App) -> u64 {
+    app.world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0
+}
+
+/// Move the scanner alongside the structure at `x` and take a reading through
+/// the ordinary admitted path, then give the mirrored flag its one-tick bridge
+/// into the trigger pipeline: `collect_world_events` drains at the top of the
+/// NEXT tick's `SimSet::Physics`, exactly as an infrastructure crossing does.
+fn scan_from_alongside(app: &mut App, x: f32, uuid: &str) {
+    place_scanner_at(app, x - 80.0);
+    ask_for_scan(app, uuid);
+    run(app, 4);
+}
+
+/// **Issue #1038, AC2/AC3/AC7 — the whole truth table in one run.**
+///
+/// Four rungs, one authored record, one comparison function. Which of them the
+/// crew end up with a finding about is decided by exactly two things, and the
+/// world holds all four combinations of them at once:
+///
+/// * FRAYED against SOUND is the DERIVATION. Identical authoring, identical
+///   record, scanned by the same test from the same distance — and only the one
+///   whose `condition` sits under the standard its file claims produces a
+///   finding. No copy is edited between them; the difference is a number.
+/// * FRAYED against UNREAD is the ACT. Identical in every authored respect.
+///   Only the one the crew pointed something at produces a finding, so a run
+///   that never scans and a run that does are different runs.
+/// * SLIPPING is the two facts arriving in the OTHER order, which is what a
+///   scripted reveal could not do. The scan comes back while the record is
+///   still defensible and files nothing; the finding lands later, with nobody
+///   scanning anything, because the condition crossed the claim.
+#[test]
+fn the_diff_falls_out_of_the_condition_and_the_crews_own_reading_and_nothing_else() {
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: SCANDIFF_WORLD.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(30.0, dt),
+        deterministic: true,
+        seed: Some(1038),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    // Far enough in that the game is InProgress and the hull is backfilled.
+    run(&mut app, 60);
+
+    let frayed = scan_uuid_named(&mut app, DIFF_FRAYED);
+    let sound = scan_uuid_named(&mut app, DIFF_SOUND);
+    let unread = scan_uuid_named(&mut app, DIFF_UNREAD);
+    let slipping = scan_uuid_named(&mut app, DIFF_SLIPPING);
+
+    // The paperwork is in the crew's hands before anybody looks at anything, on
+    // every rung, and it is the same claim on each.
+    assert_eq!(diff_flag(&app, "record_filed"), 1);
+    for subject in [&frayed, &sound, &unread, &slipping] {
+        assert_eq!(
+            diff_file(&app, subject),
+            vec![(DIFF_CLAIM.to_string(), "briefing".to_string())],
+            "every rung starts with the operator's claim and nothing else"
+        );
+    }
+    assert_eq!(diff_flag(&app, "records_diff_found"), 0);
+
+    // ── The rung that cannot be what its file says ───────────────────────────
+    scan_from_alongside(&mut app, 600.0, &frayed);
+    assert_eq!(
+        diff_flag(&app, "records_diff_found"),
+        1,
+        "the crew looked, and the two documents disagree"
+    );
+    assert_eq!(
+        diff_file(&app, &frayed),
+        vec![
+            (DIFF_CLAIM.to_string(), "briefing".to_string()),
+            (DIFF_FINDING.to_string(), "records".to_string()),
+        ],
+        "the finding is filed under RECORDS — two documents side by side, not a \
+         sensor return and not somebody's word"
+    );
+
+    // ── THE DERIVATION. The same act, on a rung whose file is true ───────────
+    scan_from_alongside(&mut app, 1200.0, &sound);
+    assert_eq!(
+        diff_flag(
+            &app,
+            &project_phoenix::science::scanned_flag("ladder_sound")
+        ),
+        1,
+        "precondition: the crew DID read this one — the act happened"
+    );
+    assert_eq!(
+        diff_flag(&app, "records_diff_found"),
+        1,
+        "…and found nothing, because 78 points can carry what the file claims. \
+         The only difference from the frayed rung is the authored condition."
+    );
+    assert_eq!(
+        diff_file(&app, &sound),
+        vec![(DIFF_CLAIM.to_string(), "briefing".to_string())],
+    );
+
+    // ── The other ordering: read first, wrong afterwards ─────────────────────
+    scan_from_alongside(&mut app, 1800.0, &slipping);
+    let slipping_read_tick = diff_now_tick(&app);
+    assert_eq!(
+        diff_flag(
+            &app,
+            &project_phoenix::science::scanned_flag("ladder_slipping")
+        ),
+        1,
+        "precondition: the reading came back"
+    );
+    assert_eq!(
+        diff_flag(&app, "records_diff_found"),
+        1,
+        "…while the rung still met its recorded standard, so there was nothing \
+         to write down at the time"
+    );
+
+    // Nobody scans anything from here on. The rung simply keeps failing under
+    // its own authored decay until it crosses the claim.
+    run(&mut app, ticks_for_sim_seconds(8.0, dt));
+    assert_eq!(
+        diff_flag(&app, "records_diff_found"),
+        2,
+        "the comparison completed itself when the OTHER half moved — which a \
+         flag flip hung off the player pressing scan could not do"
+    );
+    assert_eq!(
+        diff_file(&app, &slipping),
+        vec![
+            (DIFF_CLAIM.to_string(), "briefing".to_string()),
+            (DIFF_FINDING.to_string(), "records".to_string()),
+        ],
+    );
+    assert!(
+        diff_gathered_at(&app, &slipping, DIFF_FINDING) > slipping_read_tick,
+        "and it is stamped after the crew read it, not at the moment they did"
+    );
+
+    // ── THE CONTROL. Same condition as the frayed rung, never looked at ──────
+    assert_eq!(
+        diff_flag(
+            &app,
+            &project_phoenix::science::scanned_flag("ladder_unread")
+        ),
+        0,
+        "precondition: nobody ever pointed anything at this one"
+    );
+    assert_eq!(
+        diff_flag(&app, "ladder_unread_meets_record"),
+        0,
+        "precondition: its record does not hold up either — #1025 says so off \
+         the live track, whether or not anybody asks"
+    );
+    assert_eq!(
+        diff_file(&app, &unread),
+        vec![(DIFF_CLAIM.to_string(), "briefing".to_string())],
+        "…and its file is as clean as the sound rung's. The discrepancy is \
+         DISCOVERABLE, not automatic."
+    );
+    assert_eq!(
+        diff_flag(&app, "records_diff_found"),
+        2,
+        "two findings for the whole run: one rung read while wrong, one read \
+         before it went wrong, and two rungs that produced nothing"
+    );
+}
+
+/// The published fact sheet — the payload a tactical console renders — carries
+/// both halves of the contradiction, apart, and each says where it came from.
+///
+/// AC1 and AC4 are the same panel: the recorded facts a competent crew can read,
+/// and the finding that they do not survive a look. The condition rows beside
+/// them are the projection's, off the same published snapshot the scan read.
+#[test]
+fn the_recorded_claim_and_the_finding_that_breaks_it_are_both_on_the_fact_sheet() {
+    use project_phoenix::dossier::{dossier_blackboard_key, FACT_CONDITION};
+    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
+    use project_phoenix::server_app::ShipSystemBlackboards;
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: SCANDIFF_WORLD.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(30.0, dt),
+        deterministic: true,
+        seed: Some(1038),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, 60);
+    let frayed = scan_uuid_named(&mut app, DIFF_FRAYED);
+    scan_from_alongside(&mut app, 600.0, &frayed);
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let blackboards = q
+        .iter(app.world())
+        .next()
+        .expect("the local ship publishes");
+    let bb: DossierBlackboard = match blackboards.0.get(&dossier_blackboard_key()) {
+        Some(SystemBlackboard::Dossiers(bb)) => bb.clone(),
+        other => panic!("expected a dossier blackboard, got {other:?}"),
+    };
+    let rung = bb
+        .subjects
+        .iter()
+        .find(|d| d.name == DIFF_FRAYED)
+        .expect("the rung is a subject through the infrastructure door");
+
+    // What the crew were HANDED, then what they FOUND, in the order they got
+    // them, each under its own provenance.
+    assert_eq!(
+        rung.evidence
+            .iter()
+            .map(|e| (e.text.as_str(), e.provenance.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(DIFF_CLAIM, "briefing"), (DIFF_FINDING, "records")],
+        "the crew can say which of these two they were told and which they worked out"
+    );
+
+    // And the machine-readable half of the same claim, as a fact row off the
+    // live track: the standard the file says this rung meets, saying it does not.
+    assert_eq!(
+        rung.facts
+            .iter()
+            .map(|f| f.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            FACT_CONDITION,
+            "world.probe_scandiff.threshold.certified_load.label"
+        ],
+        "the panel shows the condition and the recorded standard beside it"
+    );
+    assert!(
+        matches!(rung.facts[1].value, DossierValue::Flag(false)),
+        "the standard the record claims is NOT met: {:?}",
+        rung.facts[1].value
+    );
+}
+
+/// The two rows the operator's own file puts on Ladder B's dossier at world
+/// load — what the crew are HANDED, before anybody looks at anything.
+const SKYWAY_RECORD: [&str; 2] = [
+    "world.falling_skyway.evidence.ladder_b_record_inspection",
+    "world.falling_skyway.evidence.ladder_b_record_reinforced",
+];
+
+/// Where `name` is standing right now.
+fn skyway_position(app: &mut bevy::prelude::App, name: &str) -> bevy::prelude::Vec3 {
+    use project_phoenix::entities::spawner::EntityName;
+    let mut q = app.world_mut().query::<(&EntityName, &Transform)>();
+    q.iter(app.world())
+        .find(|(n, _)| n.0 == name)
+        .map(|(_, t)| t.translation)
+        .unwrap_or_else(|| panic!("{name} is not in this world"))
+}
+
+/// Fly to Ladder Depot B, take a science scan of it, and come back.
+///
+/// The whole beat, through the two real doors: helm closes the range (moved by
+/// hand here for `skyway_at_act_two`'s stated reason — flying is not this test's
+/// subject), and the reading is asked for through the ordinary admitted
+/// `ScanTarget` path on the `sensors` system. Nothing in this helper touches an
+/// evidence log, a flag or a dossier; everything that follows is the scenario's.
+fn skyway_scan_ladder_b(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity) {
+    let station = {
+        let physics = app.world().get::<ShipPhysics>(ship).expect("a ship");
+        bevy::prelude::Vec3::new(physics.x, physics.y, physics.z)
+    };
+    let rung = skyway_position(app, SKYWAY_DEPOT_B);
+    skyway_move(app, ship, rung + bevy::prelude::Vec3::new(60.0, 0.0, 0.0));
+    run(app, 2);
+
+    let uuid = scan_uuid_named(app, SKYWAY_DEPOT_B);
+    ask_for_scan(app, &uuid);
+    // The mirrored flag's one-tick bridge into the trigger pipeline, then the
+    // handler's own effects.
+    run(app, 4);
+
+    skyway_move(app, ship, station);
+    run(app, 2);
+}
+
+/// **Issue #1038 in the scenario, AC1/AC4/AC5 — and the arc it opens.**
+///
+/// The crew are handed the operator's file on Ladder B with the mission and go
+/// and look at the rung. What comes back cannot carry what the file says it was
+/// signed off to carry, and the crew write that down: an entry under RECORDS
+/// provenance on the rung's own sheet, and a campaign flag a later mission can
+/// read.
+///
+/// The last assertion is what the evidence is FOR. #1036's committee settle for
+/// two pieces of ground out of three, and one of the three is the crew having
+/// already read the file — so a survey saves the captain a promise. The
+/// negotiation reads the evidence log itself rather than a flag beside it, which
+/// is why this route lights that line without #1036 knowing it exists.
+#[test]
+fn scanning_ladder_b_against_its_own_maintenance_record_opens_the_evidence_route() {
+    let (mut app, ship) = skyway_at_act_two();
+    let rung = scan_uuid_named(&mut app, SKYWAY_DEPOT_B);
+
+    // Before: the paperwork is on the sheet, and nothing else is.
+    assert_eq!(
+        diff_file(&app, &rung)
+            .iter()
+            .map(|(text, provenance)| (text.as_str(), provenance.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (SKYWAY_RECORD[0], "briefing"),
+            (SKYWAY_RECORD[1], "briefing"),
+        ],
+        "a competent crew can read the operator's claim before they act on it"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 0);
+
+    skyway_scan_ladder_b(&mut app, ship);
+
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_diff_found"),
+        1,
+        "the campaign flag a later mission reads: THIS crew found it"
+    );
+    assert_eq!(
+        diff_file(&app, &rung)
+            .iter()
+            .map(|(text, provenance)| (text.as_str(), provenance.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (SKYWAY_RECORD[0], "briefing"),
+            (SKYWAY_RECORD[1], "briefing"),
+            (SKYWAY_FILE, "records"),
+        ],
+        "…and the finding sits under the claim it contradicts, filed as the \
+         records comparison it is"
+    );
+
+    // The arc. #1036's committee offer a line that only exists for a crew who
+    // have read the file, and it is the evidence log they ask — so this route
+    // opens it without the negotiation knowing this slice exists.
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.listen",
+    );
+    assert!(
+        skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE))
+            .contains(&"world.falling_skyway.comms.show_file".to_string()),
+        "the committee's terms offer the line the survey earned: {:?}",
+        skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE))
+    );
+}
+
+/// **AC6/AC7's control run.** The same mission, played by a crew who never
+/// pointed anything at the rung.
+///
+/// Nothing is written — no finding, no flag — and the difference is not that the
+/// mission stalls. The act still opened, the committee are still talking, and
+/// the settlement is still there to be reached: it costs BOTH promises instead
+/// of one, which is what "changes the available endings rather than blocking
+/// progress" means in this scenario.
+#[test]
+fn a_crew_who_never_scan_the_rung_find_nothing_and_are_blocked_by_nothing() {
+    let (mut app, _ship) = skyway_at_act_two();
+    let rung = scan_uuid_named(&mut app, SKYWAY_DEPOT_B);
+
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_diff_found"),
+        0,
+        "no campaign state is written by a crew who did not do the work"
+    );
+    assert_eq!(
+        skyway_flag(
+            &app,
+            &project_phoenix::science::scanned_flag("depot_ladder_b")
+        ),
+        0,
+        "precondition: nobody read the rung"
+    );
+    assert_eq!(
+        diff_file(&app, &rung)
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<Vec<_>>(),
+        vec![SKYWAY_RECORD[0], SKYWAY_RECORD[1]],
+        "the operator's claim is still on the sheet — it is the FINDING that is \
+         absent, and the crew are looking at an unchallenged document"
+    );
+
+    // The mission runs on. The evidence line is gone, and the two promises that
+    // reach the same settlement are not.
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.listen",
+    );
+    let options = skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE));
+    assert!(
+        !options.contains(&"world.falling_skyway.comms.show_file".to_string()),
+        "nothing to show them: {options:?}"
+    );
+    assert!(
+        options.contains(&"world.falling_skyway.comms.promise_passage".to_string())
+            && options.contains(&"world.falling_skyway.comms.promise_records".to_string()),
+        "…and the road to the settlement is open, at a price: {options:?}"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_passage",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_records",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.call_the_vote",
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_settled_by_negotiation"),
+        1,
+        "the offer is on the floor"
+    );
+
+    // The floor votes on #1036's own clock. What matters here is only that it
+    // votes at all for a crew who found nothing.
+    run(&mut app, ticks_for_sim_seconds(27.0, SKYWAY_DT));
+    assert_eq!(
+        skyway_flag(&app, "strike_resolved"),
+        1,
+        "the strike ends for a crew who never found the diff — it cost them the \
+         promise the evidence would have saved, and nothing else"
+    );
+}
+
+/// The contradiction is visible on the panel a crew actually read, in both
+/// halves: the recorded claim as a gathered BRIEFING row, and the standard it
+/// claims as a live condition fact off #1025's own published snapshot.
+#[test]
+fn the_ladder_b_panel_shows_the_recorded_standard_failing_beside_the_claim() {
+    use project_phoenix::dossier::{dossier_blackboard_key, FACT_CONDITION};
+    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
+    use project_phoenix::server_app::ShipSystemBlackboards;
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_scan_ladder_b(&mut app, ship);
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let blackboards = q
+        .iter(app.world())
+        .next()
+        .expect("the local ship publishes");
+    let bb: DossierBlackboard = match blackboards.0.get(&dossier_blackboard_key()) {
+        Some(SystemBlackboard::Dossiers(bb)) => bb.clone(),
+        other => panic!("expected a dossier blackboard, got {other:?}"),
+    };
+    let rung = bb
+        .subjects
+        .iter()
+        .find(|d| d.name == SKYWAY_DEPOT_B)
+        .expect("Ladder Depot B is a subject through the infrastructure door");
+
+    let labels: Vec<&str> = rung.facts.iter().map(|f| f.label.as_str()).collect();
+    assert!(
+        labels.contains(&FACT_CONDITION)
+            && labels.contains(&"world.falling_skyway.threshold.certified_load.label"),
+        "the panel carries the condition and the standard the record claims: {labels:?}"
+    );
+    let standard = rung
+        .facts
+        .iter()
+        .find(|f| f.label == "world.falling_skyway.threshold.certified_load.label")
+        .expect("the recorded standard is a row");
+    assert!(
+        matches!(standard.value, DossierValue::Flag(false)),
+        "34 of 100 cannot be a rung signed off at the certified load standard: {:?}",
+        standard.value
+    );
+    assert_eq!(
+        rung.evidence
+            .iter()
+            .map(|e| (e.text.as_str(), e.provenance.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (SKYWAY_RECORD[0], "briefing"),
+            (SKYWAY_RECORD[1], "briefing"),
+            (SKYWAY_FILE, "records"),
+        ],
+        "what they were told, then what they worked out, in that order"
+    );
+}

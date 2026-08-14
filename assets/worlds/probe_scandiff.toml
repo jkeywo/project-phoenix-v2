@@ -1,0 +1,265 @@
+# Probe world for issue #1038 — the scan-versus-dossier diff, with the two
+# facts it is made of pulled apart so neither can be mistaken for the other.
+#
+# The slice's claim is that the mismatch is a GENUINE COMPARISON: it falls out of
+# the structure's authored condition measured against the standard its own
+# paperwork claims, and it is only ever reached by a crew who went and took a
+# reading. A world that fired the beat off "the player pressed scan" would look
+# identical from the outside on a single run — so this world runs the whole
+# truth table at once, on four rungs authored IDENTICALLY except for the one
+# number under test.
+#
+#   ladder_frayed     31/100, static, under the recorded standard
+#                     SCANNED     -> the diff is filed
+#   ladder_sound      78/100, static, over the recorded standard
+#                     SCANNED     -> nothing is filed, ever. The derivation.
+#   ladder_unread     31/100, static, under the recorded standard — the same
+#                     structure as `ladder_frayed` in every authored respect
+#                     NEVER SCANNED -> nothing is filed. The control.
+#   ladder_slipping   78/100, losing four points a second under its own authored
+#                     `decay_per_sec`
+#                     SCANNED EARLY, while the paperwork still holds up ->
+#                     nothing at the time, and the diff files itself later, on
+#                     the tick the condition crosses the claim.
+#
+# Read the first three together and the two dimensions separate cleanly. Frayed
+# against Sound is the DERIVATION: the only difference between them is
+# `condition`, and it decides whether the crew find anything — nobody edits a
+# line of copy to make that happen. Frayed against Unread is the ACT: the only
+# difference is whether the crew took a reading, and it decides the same thing.
+# Neither structure knows which run it is in.
+#
+# `ladder_slipping` is the fourth corner, and it is what proves the beat is a
+# comparison rather than a scan handler wearing one's clothes. The scan comes
+# back at a moment the record is still defensible and files nothing. The finding
+# arrives afterwards, with nobody scanning anything, because the OTHER half of
+# the comparison moved. A flag flip triggered by the scan could not do that.
+#
+# ── How the two halves are authored ─────────────────────────────────────────
+#
+# WHAT THE PAPERWORK SAYS is one authored number and one authored string, and
+# they are the same claim written for two different readers:
+#
+#   `<id>_meets_record` / `fails_below = 0.6`   for the simulation
+#   `…evidence.record_certified` (BRIEFING)     for the crew, on the fact sheet
+#
+# WHAT THE STRUCTURE IS is `condition`, and #1025 mirrors the threshold into the
+# world flag store every tick. So "does this rung still support what its file
+# says about it" is a question the flag store answers, live, and the script that
+# asks it holds no copy of either number.
+#
+# WHETHER THE CREW LOOKED is `scan.<id>.taken` (issue #1038), latched by
+# `tick_scans` the first time a reading of that structure comes back. The scans
+# are taken by the TEST through the ordinary admitted `ScanTarget` path — there
+# is no scripted scan in this file — which is the only way to prove the gate is
+# the crew's own act.
+#
+# There is no scan text anywhere here, in the template, or in `strings.csv`. The
+# two prose ids are the record's CLAIM and the finding that it does not hold,
+# and neither describes a reading.
+#
+# BASELINE (release headless, `--seed 42 --ticks 900 --digest-every 0`, no
+# `--ship` override — the invocation probe_scan.toml and probe_evidence.toml
+# record): final digest recorded in the commit that added this world. A NEW
+# number — nothing to compare it against yet.
+#
+# What is IN that digest is the four condition tracks and the entity population,
+# both of which #1025 folds, and `ladder_slipping`'s decay walks one of them
+# every tick. What is NOT in it is everything this world exists to exercise: an
+# evidence entry, a flag-store counter and a scan reading are all authoritative
+# but unfolded, in the same bucket as the deadline table and the commitments
+# ledger. If a later change moves this number without moving a condition track,
+# something started folding scenario state, and that is the question to ask
+# before re-blessing this line.
+
+[global]
+seed = 1038
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The scanning ship. The destroyer's shipped `[scan]` ladder is used unmodified,
+# so the run tests the hull the demo actually flies rather than a fixture.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The rung whose file does not survive a look ──────────────────────────────
+# 31 of 100 against a record that claims 60. Every other line below is repeated
+# verbatim on the three rungs that follow; this is the one that is different.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "ladder_frayed"
+name = "world.probe_scandiff.entity.ladder_frayed.name"
+transform = { position = [600.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition = 31.0
+# The template's shared `depot_transfer_throughput` is dropped rather than
+# inherited four times: a capacity id is the SCENARIO's namespace, and four
+# rungs publishing one counter would be declaring one number between them.
+capacity = []
+
+# THE RECORDED STANDARD, in the form the simulation can check. The operator's
+# file says this rung was inspected and re-rated at the certified load standard;
+# `fails_below` is that claim as a number, and #1025 mirrors the answer into
+# `ladder_frayed_meets_record` every tick off the LIVE condition. Move the
+# condition above 60 and the flag comes up and the diff goes away, which is
+# exactly what `ladder_sound` is.
+[[entity.overrides.infrastructure.threshold]]
+flag = "ladder_frayed_meets_record"
+fails_below = 0.6
+label = "world.probe_scandiff.threshold.certified_load.label"
+
+# ── The rung whose file is true ──────────────────────────────────────────────
+# 78 of 100. Identical authoring, identical record, identical handler, scanned
+# by the same test from the same distance — and nothing is ever filed about it.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "ladder_sound"
+name = "world.probe_scandiff.entity.ladder_sound.name"
+transform = { position = [1200.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition = 78.0
+capacity = []
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "ladder_sound_meets_record"
+fails_below = 0.6
+label = "world.probe_scandiff.threshold.certified_load.label"
+
+# ── The rung the crew never looked at ────────────────────────────────────────
+# The same 31 points as `ladder_frayed`, sitting there being wrong for the whole
+# run with nobody pointing anything at it. Its file stays as clean as the sound
+# rung's, which is the point: the discrepancy is discoverABLE, not automatic.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "ladder_unread"
+name = "world.probe_scandiff.entity.ladder_unread.name"
+transform = { position = [2400.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition = 31.0
+capacity = []
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "ladder_unread_meets_record"
+fails_below = 0.6
+label = "world.probe_scandiff.threshold.certified_load.label"
+
+# ── The rung that goes wrong after the crew have read it ─────────────────────
+# Starts at 78 — over the standard, so a scan taken now agrees with the file —
+# and sheds four points a second, driven by nobody. Somewhere past the fourth
+# second it crosses 60, the flag falls, and the comparison that already had half
+# its answer completes itself. Nothing scans anything in between.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "ladder_slipping"
+name = "world.probe_scandiff.entity.ladder_slipping.name"
+transform = { position = [1800.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition = 78.0
+decay_per_sec = 4.0
+capacity = []
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "ladder_slipping_meets_record"
+fails_below = 0.6
+label = "world.probe_scandiff.threshold.certified_load.label"
+
+[script]
+setup = """
+// The record is handed over at world load, before anybody has looked at
+// anything — a crew are given the operator's paperwork with the mission.
+on_world_loaded("file_the_official_record");
+
+// THE TWO HALVES OF THE COMPARISON, each arriving on its own event. Neither is
+// a scan handler: both call the same `compare`, which asks its two questions in
+// the same order whichever side woke it.
+on_flag_set("scan.ladder_frayed.taken",   "on_frayed_read");
+on_flag_set("scan.ladder_sound.taken",    "on_sound_read");
+on_flag_set("scan.ladder_unread.taken",   "on_unread_read");
+on_flag_set("scan.ladder_slipping.taken", "on_slipping_read");
+on_flag_cleared("ladder_slipping_meets_record", "on_slipping_slipped");
+
+// ── What the paperwork says ─────────────────────────────────────────────────
+// A BRIEFING entry, because being handed a document is itself a provenance: the
+// crew can tell the operator's claim from their own reading, and a crew who
+// cannot do that cannot argue with the claim. Every rung gets the same file.
+fn file_the_official_record(ctx) {
+    record_claim(ctx, "world.probe_scandiff.entity.ladder_frayed.name");
+    record_claim(ctx, "world.probe_scandiff.entity.ladder_sound.name");
+    record_claim(ctx, "world.probe_scandiff.entity.ladder_unread.name");
+    record_claim(ctx, "world.probe_scandiff.entity.ladder_slipping.name");
+    ctx.flags.increment("record_filed", 1);
+}
+
+fn record_claim(ctx, subject) {
+    ctx.dossier.append(#{
+        subject:    subject,
+        text:       "world.probe_scandiff.evidence.record_certified",
+        provenance: "briefing",
+    });
+}
+
+// ── The comparison ──────────────────────────────────────────────────────────
+// TWO READS OF THE WORLD AND NO MEMORY OF ITS OWN. `scanned` is the crew's act
+// (#1038's mirror, latched by the tick that took the reading); `meets_record` is
+// #1025's live answer to the standard the rung's own file claims. Nothing here
+// knows what the reading SAID, which is what keeps this a comparison rather than
+// a reveal: re-author the condition over the standard and the second guard
+// returns, with no line of copy touched.
+fn compare(ctx, subject, scanned, meets_record) {
+    if ctx.flags[scanned] == 0 { return; }
+    if ctx.flags[meets_record] > 0 { return; }
+    ctx.dossier.append(#{
+        subject:    subject,
+        text:       "world.probe_scandiff.evidence.record_contradicted",
+        provenance: "records",
+    });
+    ctx.flags.increment("records_diff_found", 1);
+}
+
+fn on_frayed_read(ctx) {
+    compare(ctx,
+        "world.probe_scandiff.entity.ladder_frayed.name",
+        "scan.ladder_frayed.taken",
+        "ladder_frayed_meets_record");
+}
+
+fn on_sound_read(ctx) {
+    compare(ctx,
+        "world.probe_scandiff.entity.ladder_sound.name",
+        "scan.ladder_sound.taken",
+        "ladder_sound_meets_record");
+}
+
+fn on_unread_read(ctx) {
+    compare(ctx,
+        "world.probe_scandiff.entity.ladder_unread.name",
+        "scan.ladder_unread.taken",
+        "ladder_unread_meets_record");
+}
+
+fn on_slipping_read(ctx) {
+    compare(ctx,
+        "world.probe_scandiff.entity.ladder_slipping.name",
+        "scan.ladder_slipping.taken",
+        "ladder_slipping_meets_record");
+}
+
+// The other side of the same comparison, and the same function. The crew read
+// this rung while its file was still defensible; the file stopped being
+// defensible afterwards.
+fn on_slipping_slipped(ctx) {
+    compare(ctx,
+        "world.probe_scandiff.entity.ladder_slipping.name",
+        "scan.ladder_slipping.taken",
+        "ladder_slipping_meets_record");
+}
+"""

@@ -1627,6 +1627,116 @@ mod tests {
         );
     }
 
+    /// The operation start/abort commands (issue #1026).
+    ///
+    /// Both target the real, station-owned `captain` system rather than an
+    /// operations system id of their own — an operation is something a ship
+    /// does, not a thing aboard it — so the wire shape pinned here is what gives
+    /// them the ordinary station-tenure admission check.
+    #[test]
+    fn operation_start_and_abort_control_systems_round_trip() {
+        let start = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::CAPTAIN_SYSTEM_ID.into()),
+            payload: SystemControlPayload::StartOperation {
+                verb: crate::operations::OperationVerb::Stabilise,
+                target_uuid: "00000000-0000-8000-8000-000000000042".into(),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, start.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, start.clone());
+        let encoded = JsonCodec.encode_client(&start).unwrap();
+        assert!(
+            encoded.contains(r#""verb":"stabilise""#),
+            "the verb crosses in its authored snake_case spelling — the same one the TOML \
+             `verb` field and the script effect use: {encoded}"
+        );
+
+        let abort = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::CAPTAIN_SYSTEM_ID.into()),
+            payload: SystemControlPayload::AbortOperation,
+        };
+        assert_client_roundtrip(&JsonCodec, abort.clone());
+        let encoded = JsonCodec.encode_client(&abort).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"captain","payload":{"type":"AbortOperation"}}}"#,
+            "AbortOperation wire shape must stay pinned"
+        );
+    }
+
+    /// The operations blackboard (issue #1026), and the claim that adding it
+    /// broke nobody.
+    #[test]
+    fn system_blackboard_operations_round_trips_and_is_additive() {
+        let bb = SystemBlackboard::Operations(crate::messages::OperationsBlackboard {
+            capabilities: vec![crate::messages::CapabilityOffer {
+                verb: "stabilise".into(),
+                label: "operation.verb.stabilise".into(),
+            }],
+            active: Some(crate::messages::ActiveOperationSnapshot {
+                id: 3,
+                verb: "stabilise".into(),
+                verb_label: "operation.verb.stabilise".into(),
+                target_uuid: "00000000-0000-8000-8000-000000000042".into(),
+                target_name: Some("world.entity.skyhook_depot.name".into()),
+                progress: 0.25,
+                state: "stalled".into(),
+                reason: Some("operation.refused.out_of_range".into()),
+            }),
+            refusal: None,
+        });
+
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains(r#""kind":"Operations""#), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+
+        // A ship that authored `[operations]` and is running nothing pays for
+        // neither the hold nor the refusal.
+        let idle = SystemBlackboard::Operations(crate::messages::OperationsBlackboard::default());
+        let json = serde_json::to_string(&idle).unwrap();
+        assert!(
+            !json.contains("active") && !json.contains("reason") && !json.contains("refusal"),
+            "an idle operations blackboard must carry no absent-field noise: {json}"
+        );
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+            idle
+        );
+
+        // ADDITIVE ON THE WIRE. A blackboard payload minted before this variant
+        // existed still decodes, because the enum's other variants are
+        // untouched and every field this one adds is its own.
+        let legacy = r#"{"kind":"Captain","data":{"red_alert":false,"view_direction":"fore",
+            "hull_integrity_pct":100.0}}"#;
+        assert!(
+            matches!(
+                serde_json::from_str::<SystemBlackboard>(legacy).unwrap(),
+                SystemBlackboard::Captain(_)
+            ),
+            "adding a variant must not move any other variant's decoding"
+        );
+        // …and the operations blackboard itself decodes from a payload carrying
+        // only the fields the first shipped version had, so a later field is
+        // additive on the same terms.
+        let minimal = r#"{"kind":"Operations","data":{}}"#;
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(minimal).unwrap(),
+            SystemBlackboard::Operations(crate::messages::OperationsBlackboard::default()),
+            "every field on the blackboard is `#[serde(default)]`, so a payload that predates \
+             any one of them decodes rather than being refused whole"
+        );
+
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(
+                SystemId(crate::operations::OPERATIONS_BLACKBOARD_KEY.into()),
+                bb,
+            )],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     /// The phone settings menu's wire shapes (issue #940), pinned because
     /// `gui/settings-panel.js` hand-builds them: the two messages it sends and
     /// the `DebugState` read-back it folds.

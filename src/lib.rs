@@ -103,6 +103,10 @@ pub mod cross_target_probe;
 /// Infrastructure condition + capacity on authored world furniture (issue
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;
+/// External operations (issue #1026): the verbs a crewed ship performs on
+/// something outside its own hull — the pure eligibility/timed-hold module and
+/// its Bevy adapter.
+pub mod operations;
 pub mod radar;
 pub mod radar_config;
 pub mod ship_plugin;

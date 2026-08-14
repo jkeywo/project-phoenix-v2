@@ -350,6 +350,26 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
+    // External operations (issue #1026). One host fn per VERB rather than one
+    // taking a verb string, on the same reasoning the two infrastructure hooks
+    // share: the verb lives in the name, so a misspelling is a load-time
+    // "unknown function" instead of a runtime shrug, and the buffered command
+    // carries a typed `OperationVerb` no applier has to re-parse. Adding `tow`
+    // is one more `register_fn` and no new plumbing.
+    //
+    // Both names are the world's authored entity names; the applier resolves
+    // them and queues the start for `tick_operations`, which is the only thing
+    // that can see whether the ship is capable, powered and in position.
+    engine.register_fn(
+        "stabilise",
+        |sink: &mut EffectSink, ship: ImmutableString, target: ImmutableString| {
+            sink.push(ActionCmd::StartOperation {
+                ship: ship.to_string(),
+                verb: crate::operations::OperationVerb::Stabilise,
+                target: target.to_string(),
+            });
+        },
+    );
     engine.register_fn(
         "add_faction_enemy",
         |sink: &mut EffectSink, faction: ImmutableString, enemy: ImmutableString| {

@@ -1126,6 +1126,17 @@ pub fn spawn_entity(
         ));
     }
 
+    // External operations (issue #1026) — attach the record when `[operations]`
+    // is present, placed here for the same reason. The record carries the
+    // authored capability table AND the live hold: a hull that can stabilise
+    // starts able to and running nothing.
+    if let Some(operations) = &config.operations {
+        entity_commands.insert(crate::operations::ShipOperations {
+            capabilities: operations.clone(),
+            ..Default::default()
+        });
+    }
+
     // Hull -- attach an EntitySystemHull component if the config has hull data.
     // Per-system entries take precedence; if absent we fall back to the
     // legacy scalar `hull_integrity` value mapped to a single `SystemId("captain")`
@@ -1472,6 +1483,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1553,6 +1565,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1604,6 +1617,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1660,6 +1674,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1720,6 +1735,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1786,6 +1802,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1863,6 +1880,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1923,6 +1941,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2027,6 +2046,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             ai_profile: None,
             lod_bubble: None,
             infrastructure: None,
+            operations: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -2086,6 +2106,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             comms: None,
             asteroid_field: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2127,6 +2148,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shield_arcs: Vec::new(),
             tags: vec![],
             infrastructure: None,
+            operations: None,
             faction: Some(faction_id),
             hull: None,
             collider: None,
@@ -2235,6 +2257,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2449,6 +2472,7 @@ regen_per_sec = 0.0
             shape: None,
             effects: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,

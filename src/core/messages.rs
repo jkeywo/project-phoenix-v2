@@ -1719,6 +1719,31 @@ pub enum SystemControlPayload {
     /// explicit `active` flag: the host page has exactly one button and no
     /// retry path, so there is no idempotency hazard to design against.
     ToggleGodMode,
+    /// Begin an external operation against a named target (issue #1026).
+    ///
+    /// Targets `captain` (`system_registry::CAPTAIN_SYSTEM_ID`), a real
+    /// station-owned system, so ordering an operation takes the same admission
+    /// path and the same station-tenure check as red alert. Operations
+    /// themselves are not ship systems and have no system id of their own —
+    /// they publish under a reserved *blackboard channel* key instead
+    /// (`operations::OPERATIONS_BLACKBOARD_KEY`).
+    ///
+    /// A start is refused only for a capability the hull does not have; range
+    /// and power are re-tested every tick, so a start from out of position
+    /// simply opens stalled and the crew fly to it.
+    StartOperation {
+        /// Which verb to perform.
+        verb: crate::operations::OperationVerb,
+        /// The target entity's UUID — the same identifier `SetTarget` carries,
+        /// and the one the client already holds from its radar blips.
+        target_uuid: String,
+    },
+    /// Stand the running external operation down (issue #1026).
+    ///
+    /// No payload: a ship runs at most one operation, so there is nothing to
+    /// disambiguate, and an abort naming an id the console read a tick ago
+    /// could only ever be stale.
+    AbortOperation,
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -3119,6 +3144,79 @@ pub enum SystemBlackboard {
     /// Sensor radar blackboard (issue #829). Carries the Science Target,
     /// keyed by `sensor_radar_system_id`.
     SensorRadar(SensorRadarBlackboard),
+    /// External-operation blackboard (issue #1026). One per ship whose hull
+    /// authored an `[operations]` table, keyed by
+    /// `operations::OPERATIONS_BLACKBOARD_KEY`.
+    ///
+    /// A variant of its own rather than a field on an existing blackboard
+    /// because an operation is not a ship system: nothing owns it, nothing
+    /// repairs it, and it outlives the console that ordered it. The key it is
+    /// carried under is a reserved *channel*, in the same not-a-system-id
+    /// bucket as `"helm"` and `"tactical"`.
+    Operations(OperationsBlackboard),
+}
+
+/// One verb a hull can perform, as the console offers it (issue #1026).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct CapabilityOffer {
+    /// The verb's machine code — what a `StartOperation` command carries back.
+    pub verb: String,
+    /// `strings.csv` id for the crew-facing name. The client looks it up; no
+    /// English crosses the wire (AGENTS.md rule 11).
+    pub label: String,
+}
+
+/// The operation a ship is running, as its console reads it (issue #1026).
+///
+/// `progress` is computed **server-side** off eligible ticks and re-published
+/// every tick, for `DeadlineSnapshot`'s reason: a client that interpolated its
+/// own bar would drift away from the tick the operation actually completes on
+/// and would show two players different numbers off the same hold. A *stalled*
+/// operation's bar is meant to sit visibly still, which an interpolating client
+/// could not render at all.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ActiveOperationSnapshot {
+    /// The operation's id, unique within this ship's run — the panel's stable
+    /// row key across a start, a settle and the next start.
+    pub id: u64,
+    /// The verb's machine code (`"stabilise"`).
+    pub verb: String,
+    /// `strings.csv` id for the verb's crew-facing name.
+    pub verb_label: String,
+    /// The target entity's UUID.
+    pub target_uuid: String,
+    /// `strings.csv` id for the target's display name, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
+    /// Progress through the hold, `0.0..=1.0`, off eligible ticks only.
+    pub progress: f32,
+    /// `"holding"` / `"stalled"` / `"completed"` / `"aborted"` / `"failed"`.
+    pub state: String,
+    /// `strings.csv` id for why the operation is stalled or how it failed.
+    /// `None` while it is holding, and once it has completed or been stood down
+    /// — those states are their own explanation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Raw sim truth for a ship's external operations, published each tick
+/// (issue #1026).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct OperationsBlackboard {
+    /// The verbs this hull authored, in authored order. Empty is possible and
+    /// meaningful: a hull that declared an `[operations]` table and then no
+    /// capability in it can be asked and refused.
+    #[serde(default)]
+    pub capabilities: Vec<CapabilityOffer>,
+    /// The live operation, or the last one to settle. Retained past settlement
+    /// so the console reports how it ended instead of the panel emptying.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<ActiveOperationSnapshot>,
+    /// `strings.csv` id for why the most recent *start* was refused. Distinct
+    /// from `active.reason`: a refusal means no operation was opened at all,
+    /// which the crew act on differently from one that opened and stalled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship

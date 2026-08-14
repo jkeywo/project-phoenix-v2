@@ -111,6 +111,17 @@ pub struct WorldContentRuntime {
     /// an effect writing the component directly would cross a threshold with
     /// nobody listening, and the world flag store would never hear about it.
     pub pending_condition_adjustments: Vec<crate::infrastructure::ConditionAdjustment>,
+    /// External operations a scripted effect asked to start this tick (issue
+    /// #1026), already resolved to the performing ship's and the target's UUIDs.
+    ///
+    /// Drained every tick by [`crate::operations::tick_operations`] in
+    /// `SimSet::Modifiers`, so it is empty at every tick boundary — including
+    /// the one a snapshot is taken at. Queued rather than applied where it is
+    /// authored for `pending_condition_adjustments`' reason turned around:
+    /// the applier holds `name_to_uuid` and nothing else, while opening a hold
+    /// needs the ship's capability table, its power grid and the target's
+    /// position.
+    pub pending_operation_starts: Vec<crate::operations::PendingOperationStart>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -493,8 +504,14 @@ impl Plugin for WorldPlugin {
         // Infrastructure condition (issue #1025) is added here for the same
         // reason comms is: it writes `WorldContentRuntime`'s flag store and
         // world-event queue, so it has no meaning in an app that has no world.
+        // External operations (issue #1026) join for the same reason again: a
+        // script start arrives on `WorldContentRuntime`'s queue and a completion
+        // pays into the infrastructure queue beside it, so the plugin is
+        // meaningless in an app with no world — and its tick is explicitly
+        // ordered before `InfrastructurePlugin`'s, which needs both registered.
         app.add_plugins(crate::comms::CommsWorldPlugin)
             .add_plugins(crate::infrastructure::InfrastructurePlugin)
+            .add_plugins(crate::operations::OperationsPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
@@ -2401,6 +2418,34 @@ pub(crate) fn apply_dispatch_result(
                 runtime
                     .pending_condition_adjustments
                     .push(crate::infrastructure::ConditionAdjustment { uuid, delta });
+            }
+
+            // Issue #1026, on exactly the same terms: the applier resolves the
+            // two names, and `tick_operations` — which can see the capability
+            // table, the power grid and the target's position — decides whether
+            // the hold opens.
+            ActionCmd::StartOperation { ship, verb, target } => {
+                let Some(ship_uuid) = runtime.name_to_uuid.get(&ship).cloned() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: StartOperation: no entity named '{ship}' in this world — \
+                         ignoring"
+                    );
+                    continue;
+                };
+                let Some(target_uuid) = runtime.name_to_uuid.get(&target).cloned() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: StartOperation: no target named '{target}' in this world — \
+                         ignoring"
+                    );
+                    continue;
+                };
+                runtime
+                    .pending_operation_starts
+                    .push(crate::operations::PendingOperationStart {
+                        ship_uuid,
+                        verb,
+                        target_uuid,
+                    });
             }
 
             ActionCmd::LoadWorld { path, loader_path } => {
@@ -8513,6 +8558,7 @@ seed = 1
             comms: None,
             asteroid_field: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -8805,6 +8851,7 @@ seed = 1
             comms: None,
             asteroid_field: None,
             infrastructure: None,
+            operations: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,

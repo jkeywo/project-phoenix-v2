@@ -3154,6 +3154,7 @@ verb = "fire_blaster"
             ship_config: None,
             shield_arcs: Vec::new(),
             infrastructure: None,
+            operations: None,
             faction: None,
             hull: None,
             weapons_console: Some(make_weapons_console_config(80.0)),

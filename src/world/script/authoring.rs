@@ -255,6 +255,17 @@ pub const HOST_FNS: &[HostFn] = &[
         summary: "Lower the named structure's infrastructure condition by whole \
                   points, or by a `flt(\"…\")` slice.",
     },
+    HostFn {
+        name: "stabilise",
+        receiver: "effects",
+        params: &["ship", "target"],
+        category: "effect",
+        summary: "Order the named ship to begin a stabilise operation on the \
+                  named target. The hold opens whatever the ship's position — \
+                  range and power are re-tested every tick — so a start from \
+                  out of position simply opens stalled. No delayed form: defer \
+                  it with `schedule.after`.",
+    },
     // ── ctx.flags.* (runtime engine) ─────────────────────────────────────────
     HostFn {
         name: "increment",
@@ -474,6 +485,8 @@ mod tests {
                 "repair_infrastructure" | "damage_infrastructure" => {
                     format!("ctx.effects.{}(\"x\", 1)", hf.name)
                 }
+                // The operation verbs take (ship, target).
+                "stabilise" => format!("ctx.effects.{}(\"x\", \"y\")", hf.name),
                 _ => format!("ctx.effects.{}(\"x\")", hf.name),
             },
             "delay" => format!("ctx.schedule.in_seconds(0).{}(\"x\")", hf.name),
@@ -597,6 +610,23 @@ mod tests {
         for verb in ["repair_infrastructure", "damage_infrastructure"] {
             assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
             assert!(!names.contains(&("delay", verb)), "unexpected delay.{verb}");
+        }
+        // And the #1026 operation verbs, for a third variation on the same
+        // reason: an operation IS the timed thing, so "fire it late" is
+        // `schedule.after`, not a delay-builder twin. Every verb in the pure
+        // module's own list has to be registered, so a new one cannot ship with
+        // no script surface.
+        for verb in crate::operations::OperationVerb::ALL {
+            assert!(
+                names.contains(&("effects", verb.as_str())),
+                "missing effects.{} — every operation verb needs a script surface",
+                verb.as_str()
+            );
+            assert!(
+                !names.contains(&("delay", verb.as_str())),
+                "unexpected delay.{}",
+                verb.as_str()
+            );
         }
         // ctx.flags.* (flags.rs) and ctx.schedule.* (schedule.rs).
         assert!(names.contains(&("flags", "increment")));

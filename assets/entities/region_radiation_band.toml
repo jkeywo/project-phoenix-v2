@@ -1,0 +1,112 @@
+# Radiation band — one band of a sweeping storm (issue #1037).
+#
+# The Falling Skyway storm is authored as REGION TEMPLATES spawned and retired on
+# a schedule, not as new hazard code. This is the whole band: everything a
+# radiation front does to a crew, composed out of effects that already existed,
+# in the shape `region_kaleth_nebula.toml` set. Nothing in Rust knows this file
+# is a storm.
+#
+# WHY IT IS NOT `region_storm_band.toml`. That template is #1027's, and its own
+# header makes a point of carrying NO `damage_zone`: it is the slow-only band the
+# operations probe measures a rate against, and putting damage on it would make
+# every test of the slow rule also a test of the damage rule. This is the other
+# band — the one a scenario places when it wants the storm to cost hull as well
+# as time — and the two are separate templates so each stays the single thing it
+# claims to be.
+#
+# ── The five effects, and what each one is for ───────────────────────────────
+#
+#   damage_zone       the hull cost. LIGHT and continuous: being caught is never
+#                     instant death, and lingering is what kills.
+#   radar_dampening   the crew's picture shrinks. This is the effect that makes
+#                     the storm a PLANNING problem — a band you cannot see past
+#                     is a band you have to have routed around already.
+#   sensor_blind      … and the readings they do have go stale.
+#   comms_jammed      … and they cannot ask anyone about it. Every party in the
+#                     corridor is behind a channel that stops working exactly
+#                     when the crew most want it.
+#   slow_zone         external work stretches. `slow_zone` is what an operation's
+#                     `[[operations.capability.interrupt]]` names with
+#                     `region_effect = "slow_zone"`, and the RATE lives on the
+#                     capability rather than here — how much worse a storm makes
+#                     a particular job is a judgement about the job.
+#
+# ── The tuning, and what it is tuned FOR ─────────────────────────────────────
+#
+# The target the scenario is written against: a ship caught by a band survives
+# the crossing; a ship that loiters in one does not. Both halves are the same
+# two numbers.
+#
+# `shield_pierce = 0.5` splits the damage in half. The pierced half goes straight
+# to the hull; the absorbed half is spread uniformly across the shield facings,
+# which for a per-tick slice this small rounds away — so 5 points a second of
+# radiation is TWO AND A HALF points a second of hull, and the arithmetic below
+# is written against that effective figure rather than against the nominal one.
+#
+#   Alliance Destroyer, 300 hull points
+#     crossing one 520-unit band at 18 u/s      ~29 s    72 pts   survives
+#     working the Falling Skyway rescue and
+#       then flying for the lee                 ~60 s   150 pts   survives, hurt
+#     loitering in the corridor for the whole
+#       three-band sweep the mission authors   ~124 s   310 pts   DESTROYED
+#
+#   Alliance Courier, 200 hull points            80 s of exposure  DESTROYED
+#   Civilian bulk hauler, 60 hull points         24 s of exposure  DESTROYED
+#
+# The last line is why Falling Skyway orders its traffic off the lane rather than
+# trusting it to fly through: a hauler makes 12 units a second and cannot cross a
+# 520-unit band alive. Traffic has to be routed AROUND a sweep, which is the
+# whole point of announcing one.
+#
+# [ai] Every number here is unratified. `damage_per_second` and `shield_pierce`
+# are the pair the tuning pass (#1044) moves to make "you can be caught, you
+# cannot camp" land exactly; `radius` is sized to the Falling Skyway corridor,
+# which runs about 2,100 units north to south, so three bands sweep it in three
+# legible steps rather than smothering it in one.
+
+name = "entity.region_radiation_band.name"
+tags = ["region", "storm", "radiation", "slow_zone"]
+
+[radar_appearance]
+# Hot orange, and distinct from `region_storm_band.toml`'s duller amber: the two
+# read differently on a radar because one of them hurts.
+region_colour = [0.95, 0.45, 0.15]
+
+[target]
+tags = ["region"]
+threat_level = "none"
+description = "entity.region_radiation_band.target.description"
+
+[shape]
+type = "sphere"
+radius = 260.0
+
+[effects]
+
+# Light, and continuous. See the tuning table above for what these two numbers
+# buy against the two hulls the scenario fields.
+[effects.damage_zone]
+damage_per_second = 5.0
+shield_pierce = 0.5
+
+# The picture shrinks to a third. Enough that a crew inside a band are working
+# off what they knew a minute ago, not enough that the radar goes dark — a blank
+# scope reads as a broken console rather than as weather.
+#
+# NEGATIVE, and that is not a typo. `range_modifier` is a signed BONUS on
+# `ModifierSlot::RadarRange`, not a multiplier, and it goes through PRD #117's
+# negative-bonus formula: −2.0 is a range multiplier of 1/(1+2) — one third.
+# A POSITIVE number here would make a radiation front improve the radar.
+[effects.radar_dampening]
+range_modifier = -2.0
+
+[effects.sensor_blind]
+
+[effects.comms_jammed]
+
+# The thrust/yaw numbers are the region system's own — flying through a front is
+# slower than flying around it. An OPERATION reads only that a slow zone is
+# present; what that costs the work is the capability's rate to author.
+[effects.slow_zone]
+thrust_modifier = 0.6
+yaw_rate_modifier = 0.7

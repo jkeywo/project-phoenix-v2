@@ -1437,3 +1437,46 @@ repair_teams = 1
 cause = "work_stoppage"
 response = "slow"
 rate_percent = 35
+
+# Taking a crippled craft under tow (issue #1037). The third verb this hull
+# works a crisis with, and the one the Falling Skyway rescue is made of.
+# [ai] Every number below is unratified.
+#
+# `range = 300` is close work: a tow is run from alongside, and a crew who drift
+# off the rig stall rather than dragging a hulk from a kilometre away. The load
+# rides 90 units astern in the DESTROYER'S own frame, so turning the ship swings
+# it round rather than dragging it sideways.
+#
+# 24 seconds of held time is the honest length of "get a line on her, take the
+# strain, and hold it until she is following". It is short enough that a crew who
+# start early finish before a storm band reaches them, and long enough that a
+# crew who wait until the band is on top of them cannot — which is the whole
+# shape of the rescue, authored in two numbers rather than scripted anywhere.
+[[operations.capability]]
+verb = "tow"
+range = 300.0
+duration_secs = 24
+power_group = "helm"
+min_power_level = 2
+tow_offset = [0.0, 0.0, -90.0]
+# What a COMPLETED tow is worth to the craft on the other end of the line, in
+# condition points, for any craft that keeps a condition track. It is the lump
+# form (`condition_on_complete`, not `condition_per_second`) for `stabilise`'s
+# reason: a tow half-run has moved nobody anywhere, and a crew who let go at
+# twenty seconds should not keep twenty seconds of rescue.
+#
+# It is also the SIGNAL a scenario reads. There is no "operation completed"
+# trigger — what a completion leaves behind IS its payoff — so a mission that
+# needs to know a tow landed authors a condition threshold on the towed craft
+# and hangs `on_flag_set` off it. Falling Skyway does exactly that; its Act-2
+# section says so at length.
+condition_on_complete = 45.0
+
+# A storm stretches a tow rather than ending it. `slow`, not `pause` and not
+# `fail`: the line is on, the crew are holding it, and the front is simply
+# making every metre cost more. Half rate turns 24 authored seconds into 48.
+[[operations.capability.interrupt]]
+cause = "region"
+region_effect = "slow_zone"
+response = "slow"
+rate_percent = 50

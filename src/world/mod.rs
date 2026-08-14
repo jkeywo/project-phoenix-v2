@@ -1,3 +1,7 @@
+/// The promises a captain makes, and whether they end up kept (issue #1029) —
+/// a pure record whose resolution writes campaign flags, carrying no queue and
+/// no evaluator of its own.
+pub mod commitments;
 pub mod config;
 pub mod content;
 /// Named, inspectable, mutable mission deadlines (issue #1024) — a *record*

@@ -45,10 +45,12 @@
 #         fact sheet has to be able to show.
 #
 # BASELINE (release headless, `--ship assets/entities/alliance_destroyer.toml
-# --seed 42 --ticks 900`, clean tree): final digest 0x7922703197b58ceb
-# (8728662386098408683). A NEW number — nothing to compare it against yet — so
-# it is written down to be the thing a later change is A/B'd against, the way
-# the shipped worlds' digests already are.
+# --seed 42 --ticks 900`, clean tree): final digest 0x481af0922239bfd2
+# (5195729630555389906). Re-blessed once, from 0x7922703197b58ceb
+# (8728662386098408683): that number was recorded before #1027 landed beneath
+# this world and made capacity LEVELS movable, digest-folded state — the
+# condition-track family the paragraph below names as this digest's legitimate
+# movers. The projection itself is still folded by nothing.
 #
 # Nothing this world exists to exercise is IN that digest. A dossier is derived
 # every tick and folded by nothing; what moves this number is the depot's

@@ -1892,6 +1892,30 @@ describe('buildCommsConsoleState', () => {
     expect(parse(buildCommsConsoleState({ commsRejection: rejection })).rejection).toEqual(rejection);
     expect(parse(buildCommsConsoleState({})).rejection).toBeNull();
   });
+
+  // Issue #1030. Dossiers ride their own blackboard channel, so they are read
+  // from their own key on BOTH arms of this builder: a comms blackboard that has
+  // not arrived says nothing about whether a dossier one has.
+  it('forwards the dossier list from its own blackboard, with or without a comms one', () => {
+    const dossiers = [{
+      uuid: 'skyhook-1',
+      name: 'world.probe_dossier.entity.skyhook.name',
+      summary: 'world.probe_dossier.entity.skyhook.description',
+      facts: [{ label: 'dossier.fact.condition', value: { kind: 'fraction', value: 0.42 } }],
+      evidence: [],
+    }];
+    expect(parse(buildCommsConsoleState({ blackboards: { dossiers: { subjects: dossiers } } })).dossiers)
+      .toEqual(dossiers);
+    expect(parse(buildCommsConsoleState({
+      blackboards: { comms: { messages: [] }, dossiers: { subjects: dossiers } },
+    })).dossiers).toEqual(dossiers);
+  });
+
+  it('reports an empty dossier list when the world holds no files, or has no blackboard yet', () => {
+    expect(parse(buildCommsConsoleState({})).dossiers).toEqual([]);
+    expect(parse(buildCommsConsoleState({ blackboards: { dossiers: {} } })).dossiers).toEqual([]);
+    expect(parse(buildCommsConsoleState({ blackboards: { comms: {} } })).dossiers).toEqual([]);
+  });
 });
 
 // ── buildNavigationConsoleState ───────────────────────────────────────────────

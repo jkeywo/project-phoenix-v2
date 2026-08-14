@@ -1491,8 +1491,28 @@ export function buildSensorsConsoleState(state) {
  *
  * @typedef {{ messages: Array, objectives?: Array, contacts: Array,
  *             on_screen: boolean, own_hull: StationHullAggregate,
- *             comms_auto: boolean }} CommsConsolePayload
+ *             dossiers: Array, comms_auto: boolean }} CommsConsolePayload
  */
+
+/**
+ * The crew's intelligence picture (issue #1030).
+ *
+ * Its own blackboard under its own channel key, read from there rather than off
+ * the comms one, for the reason {@link operationsPayload} reads from `operations`:
+ * a dossier is something the crew knows, not something a system aboard the ship
+ * publishes. It rides the comms payload because comms is the family that owns
+ * *who is out there* — on the destroyer that family is on the tactical station,
+ * which is where the panel is mounted, and on a hull with a real comms console it
+ * arrives there without another builder.
+ *
+ * A world with no subjects publishes an empty list rather than nothing, so the
+ * panel renders its own empty state instead of the console guessing.
+ * @param {{ blackboards }} state
+ */
+function dossiersPayload(state) {
+  const bb = (state.blackboards && state.blackboards['dossiers']) || {};
+  return bb.subjects ?? [];
+}
 
 /**
  * Comms console. Returns JSON of {@link CommsConsolePayload}.
@@ -1510,6 +1530,10 @@ export function buildCommsConsoleState(state) {
       contacts:   bb.contacts   ?? [],
       on_screen:  state.currentView === 'Comms',
       own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),
+      // Dossiers ride their own blackboard (issue #1030), so they are read from
+      // their own key on BOTH arms: a comms blackboard that has not arrived says
+      // nothing about whether a dossier one has.
+      dossiers:   dossiersPayload(state),
       comms_auto: state.stationRatings?.['comms'] === 'Backfill',
       rejection,
     });
@@ -1520,6 +1544,7 @@ export function buildCommsConsoleState(state) {
     contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
     own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
+    dossiers:  dossiersPayload(state),
     comms_auto: state.stationRatings?.['comms'] === 'Backfill',
     rejection,
   });

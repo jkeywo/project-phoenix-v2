@@ -466,6 +466,7 @@ console.destroyer_engineering.subtitle,engineering console — hero sub-heading 
 console.engineering.shields,"engineering console — ""Shields"" panel heading",Shields
 console.tactical.navigation,"tactical console — ""Navigation"" panel heading",Navigation
 console.tactical.comms,"tactical console — ""Comms"" panel heading",Comms
+console.tactical.intel,"tactical console — ""Intel"" panel heading (issue #1030)",Intel
 console.common.no_waypoint,Console footer when no waypoint is set,NO WAYPOINT
 console.engineering.station_footer,engineering console — footer station name,ENGINEERING STATION
 console.science.station_footer,science console — footer station name,SCIENCE STATION
@@ -478,6 +479,7 @@ console.navigation.custom,Navigation console — selected-entity readout for a c
 console.navigation.none,Navigation console — selected-entity readout when nothing is selected,NONE
 console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
 console.common.comms_toggle,Button that toggles the comms overlay,Comms
+console.common.intel_toggle,Button that toggles the intelligence-files overlay (issue #1030),Intel
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
 console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
 console.pilot.cam_cinematic,Courier pilot — cinematic camera button,Cinematic
@@ -951,3 +953,24 @@ world.probe_commitments.commitment.surface_records.resolves,"What counts as keep
 world.probe_commitments.comms.committee_calls,"Body of the committee's follow-up hail in the #1029 probe world","[Committee to Phoenix. Where do we stand?]"
 world.probe_commitments.comms.stall,"Response text — stalling the committee, always offered, in the #1029 probe world","[Nothing to report yet.]"
 world.probe_commitments.comms.honour_word,"Response text — offered ONLY while the safe-passage promise is still owed, in the #1029 probe world","[You have my word, and I mean to keep it.]"
+component.dossier.heading,"Dossier panel on the destroyer tactical console — heading over the subject list (issue #1030)","[INTEL FILES]"
+component.dossier.empty,"Dossier panel when this crew hold no files at all (issue #1030)","[NO FILES]"
+component.dossier.back,"Dossier fact sheet — returns to the subject list, leaving the overlay open (issue #1030)","[← FILES]"
+component.dossier.nothing_on_file,"Dossier panel — a subject exists and nothing is known about it yet; shown in the list and on the sheet (issue #1030)","[NOTHING ON FILE]"
+component.dossier.gathered,"Dossier fact sheet — heading over the entries this crew gathered themselves, as distinct from what they were given (issues #1030/#1031)","[GATHERED]"
+component.dossier.yes,"Dossier fact sheet — a yes/no fact that holds (issue #1030)","[YES]"
+component.dossier.no,"Dossier fact sheet — a yes/no fact that does not hold (issue #1030)","[NO]"
+component.dossier.provenance.scan,"Dossier evidence — learned from a sensor scan (issue #1031)","[FROM SCAN]"
+component.dossier.provenance.dialogue,"Dossier evidence — learned from something somebody said (issue #1031)","[FROM DIALOGUE]"
+component.dossier.provenance.records,"Dossier evidence — learned by comparing records (issue #1031)","[FROM RECORDS]"
+component.dossier.provenance.briefing,"Dossier evidence — learned from the mission briefing (issue #1031)","[FROM BRIEFING]"
+dossier.fact.faction,"Dossier fact label — which faction the subject belongs to (issue #1030)","[Affiliation]"
+dossier.fact.comms,"Dossier fact label — whether the subject is inside comms range right now (issue #1030)","[In hailing range]"
+dossier.fact.condition,"Dossier fact label — the subject structure's condition (issue #1030)","[Condition]"
+dossier.fact.commitment_open,"Dossier fact label — a promise made to this party and still owed (issue #1030)","[Promised]"
+dossier.fact.commitment_kept,"Dossier fact label — a promise made to this party and kept (issue #1030)","[Promise kept]"
+dossier.fact.commitment_broken,"Dossier fact label — a promise made to this party and broken (issue #1030)","[Promise broken]"
+faction.federation.display_name,"assets/factions/federation.toml -> display_name","[Alliance]"
+faction.harrow.display_name,"assets/factions/harrow.toml -> display_name","[Harrow]"
+faction.pirate.display_name,"assets/factions/pirate.toml -> display_name","[Raiders]"
+faction.requiem.display_name,"assets/factions/requiem.toml -> display_name","[Requiem]"

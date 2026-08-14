@@ -68,6 +68,7 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | `[script]` | table | none | Scenario logic — event registrations, handler fns and comms dialogue nodes (see §1.5, §1.7). |
 | `[[deadline]]` | array of tables | `[]` | Named mission deadlines the crew can be shown and script can slip or cancel (see §1.6). |
 | `[[route]]` | array of tables | `[]` | Named civilian traffic lanes: anchor chains a `[civilian]` craft flies (see §1.8). |
+| `[[workforce]]` | array of tables | `[]` | The sides of a labour dispute: who staffs a structure, whether they are out, and what they make of the crew (see §1.12). |
 | `[ambient_light]` | table | none | World ambient light override; omitted sub-fields fall back to renderer constants. |
 | `[dust]` | table | none | Ambient dust / velocity-mote effect (see §1.3). |
 
@@ -700,6 +701,76 @@ Things worth knowing before authoring one:
 
 See `assets/worlds/probe_evidence.toml` for both routes in one world — a survey
 deadline and a dialogue the ship's own Comms officer answers.
+
+### 1.12 Workforces: who staffs a structure, and what a strike does
+
+A **workforce** is a body of people a scenario can put out on strike. It is not
+a faction: a faction answers *who shoots whom*, a workforce answers *who turns
+up for work*, and the two sides of a labour dispute are usually the same
+faction and will never fire on each other.
+
+```toml
+[[workforce]]
+id          = "skyway_workers"                            # unique in the world
+label       = "world.fs.workforce.skyway_workers.label"   # strings.csv id; optional
+on_strike   = true                                        # the state the crew ARRIVE into
+disposition = 25                                          # 0..=100, what they make of the crew
+```
+
+A structure says who works it, on its own `[infrastructure]` table (or a
+per-world `overrides`):
+
+```toml
+[infrastructure]
+workforce = "skyway_workers"      # matched against [[workforce]] id; never rendered
+```
+
+Naming a workforce this world has no dispute about is legal and means what it
+says — work there carries on. That is what lets one depot template ship in five
+scenarios when only one of them has a strike.
+
+**What a stoppage does is authored per verb, on the operating hull**, not here.
+The same cause means different things to different work:
+
+```toml
+# assets/entities/alliance_destroyer.toml
+[[operations.capability]]
+verb = "transfer"
+# … nobody is signing this off, so it is refused outright
+[[operations.capability.interrupt]]
+cause    = "work_stoppage"
+response = "fail"
+
+[[operations.capability]]
+verb = "field_repair"
+# … the local crews are gone, so your own team does the whole job, slowly
+[[operations.capability.interrupt]]
+cause        = "work_stoppage"
+response     = "slow"
+rate_percent = 35
+```
+
+A refused operation comes back on the operations panel carrying
+`operation.refused.work_stopped` — words, not a bar that never moves.
+
+**Script moves a side**, and both effects reverse the moment it does, because
+nothing about a stoppage latches:
+
+```rhai
+ctx.effects.call_strike("skyway_workers");
+ctx.effects.settle_strike("skyway_workers");
+ctx.effects.set_workforce_disposition("skyway_workers", 70);
+```
+
+Every move also writes two ordinary world flags —
+`workforce.<id>.on_strike` and `workforce.<id>.disposition` — so a script
+condition reads the state with the vocabulary it already has
+(`ctx.flags["workforce.skyway_workers.on_strike"]`) and an
+`on_flag_cleared("workforce.skyway_workers.on_strike", "…")` trigger chains off
+a settlement.
+
+See `assets/worlds/probe_strike.toml` for both bites, both controls, and the
+settlement, in one world.
 
 ### Example — a world, end to end
 

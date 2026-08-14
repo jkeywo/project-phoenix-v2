@@ -4267,6 +4267,13 @@ struct MeshLods {
     /// Flat mesh config supplying fallback fields (colour/radius/emissive/size/
     /// minor_radius) and the shared `variant` for levels that omit them.
     base: crate::entity_config::MeshConfig,
+    /// The primary model sidecar's `[base].scale`. Every LOD tier of one model
+    /// shares the SAME base sidecar (`ModelRig::lod`), but each tier's own GLB
+    /// resolves its OWN (usually absent) sidecar in `spawn_glb_visual` — so only
+    /// the near tier, whose model IS the primary GLB, ever picked up this scale.
+    /// Captured here so `update_mesh_lod` can apply it to every tier (GLB and
+    /// billboard) uniformly, matching the near tier at all view distances.
+    base_scale: [f32; 3],
     /// Active level index; `None` until the first evaluation establishes it.
     current: Option<usize>,
     /// The child carrying the active level's visual — a GLB level's
@@ -4382,6 +4389,7 @@ fn render_spawned_entities(
                     commands.entity(entity).insert(MeshLods {
                         levels: rig.lod.clone(),
                         base: cfg.clone(),
+                        base_scale: rig.base.scale,
                         current: None,
                         scene_child: None,
                         is_local_ship: local_ship.is_some(),
@@ -4560,8 +4568,24 @@ fn update_mesh_lod(
         // so switching between levels that do and do not declare one is
         // symmetric and leaves nothing to unwind: a level with no `scale` puts
         // the entity back to exactly what it spawned with.
-        transform.scale =
-            Vec3::splat(lods.base.scale) * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
+        //
+        // `tier_base` folds in the primary sidecar's `[base].scale`. The near
+        // tier (index 0) is the primary GLB itself, so its child already
+        // carries that scale from its own sidecar (`spawn_glb_visual` below);
+        // applying it again on the parent would double it, so it stays 1.
+        // Every generated mid/far tier resolves its own (absent) sidecar to an
+        // identity child, so without this its geometry would render at raw,
+        // unscaled model size — the model visibly snapping smaller past the
+        // near band. Baking the base scale onto the parent there holds the
+        // model's authored size at every view distance.
+        let tier_base = if target == 0 {
+            Vec3::ONE
+        } else {
+            Vec3::from_array(lods.base_scale)
+        };
+        transform.scale = Vec3::splat(lods.base.scale)
+            * tier_base
+            * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
 
         if let Some(model_path) = level.model.as_deref() {
             let variant = level.variant.clone().or_else(|| lods.base.variant.clone());
@@ -4646,7 +4670,17 @@ fn update_mesh_lod(
             // The width/height instead ride the child's own scale (see
             // `spawn_billboard_child`), leaving the parent uniform.
             transform.scale = Vec3::splat(lods.base.scale);
-            let [w, h] = level.scale.map(|s| [s[0], s[1]]).unwrap_or([1.0, 1.0]);
+            // The billboard's authored `scale` is the model's RAW extents
+            // (width, height) at unit base scale, so fold in the primary
+            // sidecar's `[base].scale` here the same way the GLB tiers above do
+            // — otherwise the far imposter renders at raw size while the near
+            // GLB renders scaled, and the model snaps smaller at range. Width
+            // rides the horizontal (z) base scale, height the vertical (y).
+            let bs = lods.base_scale;
+            let [w, h] = level
+                .scale
+                .map(|s| [s[0] * bs[2], s[1] * bs[1]])
+                .unwrap_or([bs[2], bs[1]]);
             let views = level
                 .capture
                 .as_ref()

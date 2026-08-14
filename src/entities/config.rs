@@ -6578,7 +6578,7 @@ surfase_colour = [1.0, 0.7, 0.1]
             .star
             .as_ref()
             .expect("star_sun.toml must have [star]");
-        assert!((star.radius - 50.0).abs() < 1e-6);
+        assert!((star.radius - 75.0).abs() < 1e-6);
         assert!(config.mesh.is_none(), "star_sun.toml must not keep [mesh]");
         assert!(
             !config.light.is_empty(),
@@ -6590,7 +6590,7 @@ surfase_colour = [1.0, 0.7, 0.1]
             .as_ref()
             .expect("star_sun.toml must have [collider]");
         assert_eq!(collider.shape, ColliderShape::Ball);
-        assert!((collider.radius - 50.0).abs() < 1e-6);
+        assert!((collider.radius - 75.0).abs() < 1e-6);
     }
 
     #[test]
@@ -6604,7 +6604,7 @@ surfase_colour = [1.0, 0.7, 0.1]
             .as_ref()
             .expect("planet_earth.toml must have [collider]");
         assert_eq!(collider.shape, ColliderShape::Ball);
-        assert!((collider.radius - 20.0).abs() < 1e-6);
+        assert!((collider.radius - 30.0).abs() < 1e-6);
 
         // Textured-planet section: earth has clouds, atmosphere, and
         // night-gated city-light emission without a separate mask.
@@ -6612,7 +6612,7 @@ surfase_colour = [1.0, 0.7, 0.1]
             .planet
             .as_ref()
             .expect("planet_earth.toml must have [planet]");
-        assert!((planet.radius - 20.0).abs() < 1e-6);
+        assert!((planet.radius - 30.0).abs() < 1e-6);
         assert!(planet.surface.normal.is_some());
         assert!(planet.surface.emissive_colour.is_some());
         assert!(planet.surface.emissive_mask.is_none());

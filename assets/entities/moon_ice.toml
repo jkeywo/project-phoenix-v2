@@ -8,23 +8,23 @@ description = "entity.moon_ice.target.description"
 
 [collider]
 shape = "Ball"
-radius = 7.0
+radius = 10.5
 length = 0.0
 
 [radar_appearance]
 colour = [0.6, 0.8, 1.0]
-size = 7.0
+size = 10.5
 icon = "planet"
 
 # Procedural fallback for headless/editor contexts; [planet] wins on the
 # viewscreen.
 [mesh]
 shape = "sphere"
-radius = 7.0
+radius = 10.5
 colour = [0.7, 0.85, 1.0]
 
 [planet]
-radius = 7.0
+radius = 10.5
 longitude_segments = 128
 latitude_segments = 64
 

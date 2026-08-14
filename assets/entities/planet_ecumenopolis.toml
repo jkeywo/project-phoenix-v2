@@ -8,23 +8,23 @@ description = "entity.planet_ecumenopolis.target.description"
 
 [collider]
 shape = "Ball"
-radius = 22.0
+radius = 33.0
 length = 0.0
 
 [radar_appearance]
 colour = [1.0, 0.8, 0.4]
-size = 22.0
+size = 33.0
 icon = "planet"
 
 # Procedural fallback for headless/editor contexts; [planet] wins on the
 # viewscreen.
 [mesh]
 shape = "sphere"
-radius = 22.0
+radius = 33.0
 colour = [0.7, 0.6, 0.45]
 
 [planet]
-radius = 22.0
+radius = 33.0
 longitude_segments = 128
 latitude_segments = 64
 

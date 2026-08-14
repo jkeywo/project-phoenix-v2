@@ -20,6 +20,9 @@ describe('world-toml', () => {
       expect(result.anchors.test).toEqual([1.0, 0.0, 2.0]);
     });
 
+    // default.toml is [script]-authored since issue #984 — triggers AND comms —
+    // so it carries no `trigger` / `comms` arrays at all. What the editor has to
+    // parse instead is the one `[script] setup` multi-line string.
     it('parses default.toml', () => {
       const text = readWorld('default.toml');
       const result = parseWorldToml(text);
@@ -27,8 +30,11 @@ describe('world-toml', () => {
       expect(result.anchors.starbase_alpha).toEqual([1000.0, 0.0, 0.0]);
       expect(Array.isArray(result.entity)).toBe(true);
       expect(result.entity.length).toBeGreaterThanOrEqual(5);
-      expect(Array.isArray(result.trigger)).toBe(true);
-      expect(Array.isArray(result.comms)).toBe(true);
+      expect(result.trigger).toBeUndefined();
+      expect(result.comms).toBeUndefined();
+      expect(typeof result.script.setup).toBe('string');
+      expect(result.script.setup).toContain('on_hailed(');
+      expect(result.script.setup).toContain('open_comms(');
     });
 
     it('parses patrol.toml', () => {
@@ -204,8 +210,11 @@ entity = "raider_alpha"
       expect(reparsed.global.seed).toEqual(parsed.global.seed);
       expect(reparsed.anchors).toEqual(parsed.anchors);
       expect(reparsed.entity.length).toEqual(parsed.entity.length);
-      expect(reparsed.trigger.length).toEqual(parsed.trigger.length);
-      expect(reparsed.comms.length).toEqual(parsed.comms.length);
+      // The [script] block replaced this world's triggers and comms (#984). Its
+      // `setup` value is Rhai source in a multi-line string, so the writer has
+      // to hand it back byte-for-byte: a re-quoted or re-escaped body is a
+      // world whose handlers no longer compile.
+      expect(reparsed.script.setup).toBe(parsed.script.setup);
 
       for (let i = 0; i < parsed.entity.length; i++) {
         expect(reparsed.entity[i].template_path).toBe(parsed.entity[i].template_path);

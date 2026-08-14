@@ -122,3 +122,16 @@ colour = [ 0.3, 0.8, 0.6 ]
 
 [comms]
 range = 800
+# On the hail roster (issue #985). Until #984 converted `default.toml` to
+# `[script]`, this station reached the roster only as a `[[comms]] from`
+# reference id — a source the conversion deletes. `hailable` is the replacement,
+# and it is authored on the TEMPLATE rather than per-world because both worlds
+# that field this station (`default`, `combat_test`) already list it as their
+# one hailable contact. `combat_test` is unaffected either way: it still authors
+# `[[comms]]`, and a declarative entry wins the roster's UUID de-duplication, so
+# its contact keeps its authored metadata untouched.
+#
+# No `display_name`: the contact label falls through to the entity's
+# `EntityName`, which for a world-declared `[[entity]]` is its `name` reference
+# id — the SAME string the deleted `[[comms]] from` supplied.
+hailable = true

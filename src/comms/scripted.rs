@@ -1185,6 +1185,261 @@ fn on_send(ctx) {
         );
     }
 
+    // ── The shipped converted world (issue #984) ──────────────────────────────
+    //
+    // `default.toml` is the first world whose COMMS moved to `[script]`, and
+    // the digest A/B that gates a conversion cannot speak for it: nothing in
+    // that world attacks or hails anything during a headless run, and
+    // `state_digest` folds no comms state in any case. These three tests are the
+    // behavioural half of the evidence — the real shipped script, compiled the
+    // way production compiles it, driven through the live path.
+
+    /// The reference id `default.toml` gives Starbase Alpha. The `[[comms]]`
+    /// blocks the conversion deleted named it in `from` and `entity`; the
+    /// `[script]` block names it in `on_hailed(…)` and `open_comms(#{from})`.
+    const DEFAULT_STARBASE: &str = "world.entity.starbase_alpha.name";
+    const DEFAULT_RAIDER: &str = "world.entity.raider_alpha.name";
+
+    /// Compile the SHIPPED `default.toml`'s `[script]` block exactly as
+    /// `compile_world_scripts` does, and return it alongside the virtual path
+    /// its inline block was lifted to.
+    fn compile_default_world() -> (WorldScriptRuntime, String) {
+        let text = include_str!("../../assets/worlds/default.toml");
+        let value: toml::Value = toml::from_str(text).expect("default.toml is valid TOML");
+        let compiled = crate::world::script::load::load_world_scripts(
+            "assets/worlds/default.toml",
+            &value,
+            &NoScriptResolver,
+        );
+        assert!(
+            !crate::world::validate::has_error(&compiled.findings),
+            "the shipped default.toml script must compile and lint clean: {:?}",
+            compiled.findings
+        );
+        let path = compiled
+            .asts
+            .keys()
+            .next()
+            .cloned()
+            .expect("default.toml lifts one inline script unit");
+        (
+            WorldScriptRuntime {
+                host: RuntimeHost::new(),
+                asts: compiled.asts,
+                triggers: compiled.script_triggers,
+                handlers: Vec::new(),
+                budget: TickBudget::new(),
+                budget_tick: 0,
+                content_hash: compiled.content_hash,
+                pending_callbacks: PendingCallbacks::new(),
+                pending_comms_opens: Vec::new(),
+            },
+            path,
+        )
+    }
+
+    /// Every registration the deleted `[[trigger]]` blocks and `[[comms]]`
+    /// templates carried is present, in the authored order — the order intra-tick
+    /// dispatch (and therefore the digest) depends on.
+    ///
+    /// The pairing is the conversion map: two of these were `[[trigger]]`
+    /// blocks and three were a `[[comms]]` template's `trigger =` / `entity =`
+    /// pair, and the raider's `on_attacked` carries BOTH of that event's old
+    /// reactions in one handler.
+    #[test]
+    fn default_worlds_script_registers_every_trigger_its_declarative_blocks_carried() {
+        use crate::world::config::TriggerCondition;
+        let (sr, _path) = compile_default_world();
+        let registered: Vec<(TriggerCondition, &str)> = sr
+            .triggers
+            .iter()
+            .map(|t| (t.trigger.condition.clone(), t.handler.as_str()))
+            .collect();
+        assert_eq!(
+            registered,
+            vec![
+                (
+                    TriggerCondition::OnDestroyed {
+                        entity_name: DEFAULT_RAIDER.into()
+                    },
+                    "on_raider_destroyed"
+                ),
+                (
+                    TriggerCondition::OnAttacked {
+                        entity_name: DEFAULT_RAIDER.into()
+                    },
+                    "on_raider_attacked"
+                ),
+                (
+                    TriggerCondition::OnAttacked {
+                        entity_name: DEFAULT_STARBASE.into()
+                    },
+                    "on_starbase_attacked"
+                ),
+                (
+                    TriggerCondition::OnHailed {
+                        entity_name: DEFAULT_STARBASE.into()
+                    },
+                    "on_starbase_hailed"
+                ),
+            ]
+        );
+    }
+
+    /// The raider's `on_attacked` handler emits BOTH of what that event used to
+    /// do: the `[[trigger]]`'s `load_world` — byte-identical to what
+    /// `dispatch_action` produces for the declarative action, so the
+    /// reinforcements LAYER still loads — and the `[[comms]]` template's
+    /// broadcast, now an `open_comms` naming the announcement node.
+    #[test]
+    fn default_worlds_raider_attack_still_loads_the_reinforcements_layer_and_broadcasts() {
+        use crate::world::script::effects::BufferedEffect;
+        let (sr, path) = compile_default_world();
+        let mut budget = TickBudget::new();
+        let (effects, node) = crate::world::script::comms::enter_node(
+            &sr.host,
+            &mut budget,
+            &SchedClock::ZERO,
+            sr.asts.get(&path).expect("compiled unit"),
+            &path,
+            "on_raider_attacked",
+            &crate::world::flags::FlagStore::new(),
+        )
+        .expect("the handler runs");
+        assert!(node.is_none(), "a trigger handler returns no dialogue node");
+
+        assert_eq!(
+            effects.commands,
+            vec![BufferedEffect::Cmd(
+                crate::world::dispatch::ActionCmd::LoadWorld {
+                    path: "assets/worlds/reinforcements.toml".into(),
+                    loader_path: None,
+                }
+            )],
+            "the layer load survived the conversion unchanged"
+        );
+        assert_eq!(effects.comms_opens.len(), 1);
+        assert_eq!(effects.comms_opens[0].from, DEFAULT_RAIDER);
+        assert_eq!(effects.comms_opens[0].root_fn, "raider_mayday");
+        assert!(
+            !effects.comms_opens[0].urgent,
+            "neither distress template authored `urgent`"
+        );
+    }
+
+    /// Seat the shipped `default.toml` script over the live comms harness, with
+    /// Starbase Alpha under the reference id the world actually uses.
+    fn seat_default_world(app: &mut App) {
+        setup_game_with_comms(app, STATION_UUID);
+        {
+            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+            // The converted world authors NO declarative templates; drop the
+            // harness's own so the inbox holds only what the script delivers.
+            comms.comms_template_states.clear();
+        }
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert(DEFAULT_STARBASE.into(), STATION_UUID.into());
+        }
+        let (mut sr, _path) = compile_default_world();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        }
+        app.world_mut().insert_resource(sr);
+        app.world_mut()
+            .insert_resource(crate::world_id::WorldIdMint::default());
+    }
+
+    /// Hailing Starbase Alpha delivers the SAME message the `[[comms]]`
+    /// `on_hailed` template delivered: the same body id, the same two response
+    /// text ids, in the same order.
+    ///
+    /// The ids are the point. A dialogue node's `message` and a response's
+    /// `text` reach the wire as message bodies exactly as the declarative
+    /// `message` / `text` fields did, so every `strings.csv` row the world used
+    /// still resolves and none had to be renumbered.
+    #[test]
+    fn default_worlds_hail_delivers_the_same_body_and_responses_as_its_template() {
+        let mut app = live_comms_app();
+        seat_default_world(&mut app);
+        hail(&mut app);
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 1, "the hail opens exactly one thread");
+        let msg = &messages[0];
+        assert_eq!(msg.body, "world.default.comms.2.message");
+        assert_eq!(
+            msg.sender_uuid, STATION_UUID,
+            "the open's `from` resolves through name_to_uuid, as the template's did"
+        );
+        assert_eq!(
+            msg.sender_name, "Starbase Alpha",
+            "with no `display_name` the label falls back to the CONTACT's name — \
+             which after #985 is the entity's own reference id"
+        );
+        assert!(!msg.is_urgent);
+        assert_eq!(
+            msg.responses
+                .iter()
+                .map(|r| (r.text.as_str(), r.important))
+                .collect::<Vec<_>>(),
+            vec![
+                ("world.default.comms.response.0.text", false),
+                ("world.default.comms.response.1.text", false),
+            ]
+        );
+    }
+
+    /// Each response adds the objective its `[[comms.response.action]]` added,
+    /// with the same id, the same text id and the same `mandatory` flag — and
+    /// the thread ends there, as both terminal responses always did.
+    #[test]
+    fn default_worlds_hail_responses_add_the_objectives_their_actions_did() {
+        for (index, id, text, mandatory) in [
+            (
+                0usize,
+                "obj-survey",
+                "world.default.comms.response.action.obj_survey.text",
+                false,
+            ),
+            (
+                1usize,
+                "obj-dock",
+                "world.default.comms.response.action.obj_dock.text",
+                true,
+            ),
+        ] {
+            let mut app = live_comms_app();
+            seat_default_world(&mut app);
+            hail(&mut app);
+            let message_id = app.world().resource::<CommsInboxRes>().0.messages()[0]
+                .id
+                .clone();
+
+            respond(&mut app, &message_id, index);
+
+            let snapshot = app
+                .world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == id)
+                .unwrap_or_else(|| panic!("response {index} must add objective '{id}'"));
+            assert_eq!(snapshot.text, text, "the strings.csv id is unchanged");
+            assert_eq!(snapshot.mandatory, mandatory);
+
+            assert_eq!(
+                app.world().resource::<CommsInboxRes>().0.messages().len(),
+                1,
+                "both responses are terminal — no follow-up node is delivered"
+            );
+        }
+    }
+
     /// The no-op guard at full scale: the SAME hail on a world with no scripts
     /// delivers the declarative twin and nothing else, and the new system leaves
     /// no trace — every shipped world takes this path.

@@ -5053,11 +5053,26 @@ entity    = "raider"
     }
 
     #[test]
-    fn parse_world_default_toml_loads_triggers_and_comms() {
+    fn parse_world_default_toml_is_script_authored_with_no_declarative_content() {
         let toml = include_str!("../../assets/worlds/default.toml");
         let cfg = parse_world(toml).expect("default.toml must parse");
-        assert_eq!(cfg.triggers.len(), 2, "default.toml has 2 [[trigger]]s");
-        assert_eq!(cfg.comms.len(), 3, "default.toml has 3 [[comms]] templates");
+        // (#984) default.toml is the first world whose COMMS converted to
+        // `[script]`, not just its triggers: its two `[[trigger]]` blocks and
+        // its three `[[comms]]` templates are all Rhai now, so both declarative
+        // lists parse empty. `scripted_comms` stays empty too — the M4
+        // `[[comms]] script = "fn"` metadata form is a different (dormant)
+        // front-end, and this conversion opens its threads from trigger
+        // handlers via `ctx.effects.open_comms` instead.
+        //
+        // The scripted behaviour is pinned by the dialogue-tree parity test in
+        // `comms::scripted` and by the conversion's digest parity.
+        assert!(cfg.triggers.is_empty());
+        assert!(cfg.comms.is_empty());
+        assert!(cfg.scripted_comms.is_empty());
+        assert!(
+            toml.contains("[script]"),
+            "default.toml must carry its [script] block"
+        );
     }
 
     #[test]

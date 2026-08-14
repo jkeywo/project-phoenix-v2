@@ -604,25 +604,30 @@ mod tests {
 
     // ── Shipped-world integration ─────────────────────────────────────────
 
+    /// A real shipped world's `[[comms]]` template fires from a real world
+    /// event through this evaluator.
+    ///
+    /// This used to read `default.toml`'s `on_attacked` raider template. Issue
+    /// #984 converted that world's comms to `[script]`, so `combat_test` — the
+    /// demo scenario, and the last shipped world authoring `[[comms]]` — is the
+    /// remaining declarative subject. The converted world's equivalent coverage
+    /// is `comms::scripted`'s `default_world_dialogue_tree_*` tests, which run
+    /// its dialogue tree through the scripted front-end.
     #[test]
-    fn default_world_on_attacked_fires_comms_template() {
-        let toml = include_str!("../../assets/worlds/default.toml");
-        let world = crate::world::config::parse_world(toml).expect("default.toml must parse");
+    fn combat_test_world_on_world_loaded_fires_comms_template() {
+        let toml = include_str!("../../assets/worlds/combat_test.toml");
+        let world = crate::world::config::parse_world(toml).expect("combat_test.toml must parse");
         let mut states = comms_template_states_from_world(&world);
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("world.entity.raider_alpha.name".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Attacked {
-            uuid: "uuid-r".into(),
-            attacker_uuid: "uuid-p".into(),
-        }];
+        let name_to_uuid: HashMap<String, String> = HashMap::new();
+        let events = vec![WorldEvent::WorldLoaded];
         let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
         assert!(
             !fired.is_empty(),
-            "raider_alpha on_attacked comms must fire"
+            "starbase_alpha on_world_loaded comms must fire"
         );
         assert!(fired
             .iter()
-            .any(|f| f.from == "world.entity.raider_alpha.name"));
+            .any(|f| f.from == "world.entity.starbase_alpha.name"));
     }
 
     // ── follow_up_trigger_holds (pure evaluator) ──────────────────────────

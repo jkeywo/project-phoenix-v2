@@ -672,8 +672,9 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 
 ## Configuration & Authoring
 
-### World TOML (`assets/worlds/default.toml`)
+### World TOML (`assets/worlds/*.toml`)
 - `seed` (global) plus `[anchors]`, `[[entity]]` instances (template_path + optional name/anchor/relative_to+offset/position/spawn_on/overrides), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries. Single block type for all spawnables (PRD #337).
+- `[script]` is the Rhai alternative to `[[trigger]]` / `[[comms]]` (issue #984): one block whose top level registers `on_*(…)` handlers and whose fns supply the effects and the comms dialogue trees. Every shipped world except `combat_test.toml` is authored this way; `assets/worlds/default.toml` is the reference for a converted world that carries dialogue.
 
 ### Entity TOML (`assets/entities/*.toml`)
 - Component-bag: each `[section]` present produces a Bevy component on the spawned entity.

@@ -9,8 +9,8 @@
 #   [anchors]   — named positions for [[entity]] entries to reference
 #   [[entity]]  — direct entity instances (Immediate or GameStart spawn);
 #                 named entries are trigger / comms eligible
-#   [[trigger]] — world event reactions (on_destroyed, on_attacked, on_timer)
-#   [[comms]]   — comms dialogue templates keyed by trigger condition
+#   [script]    — Rhai: trigger registrations, their handlers, and the comms
+#                 dialogue trees those handlers open (issue #984, Rhai M6)
 
 [global]
 # Master seed for the simulation RNG (issue #837). `phoenix-headless --seed`
@@ -150,36 +150,25 @@ transform = { anchor = "starbase_alpha" }
 # Destroy 38 undisturbed; attacked flips it to 63 > 30), superseding the old
 # engage-on-sight reading. Flagged for review if engage-on-sight is actually
 # wanted for this raider.
+#
+# `comms = { hailable = true }` (issue #985) is the hail-roster opt-in this
+# world's `[[comms]]` block used to supply implicitly: every `[[comms]] from`
+# became a `CommsRuntime::contacts` entry, and the M6 conversion below deletes
+# that source. Authored HERE rather than on `ship_harrow_patrol.toml` because
+# the hull also flies in `combat_test` (wave 8), `patrol`, `probe_huge_rock` and
+# `reinforcements`, none of which listed it as a contact — a template-level
+# opt-in would put a raider on four other worlds' rosters. The station's opt-in
+# IS template-level: see the note in `station_axiom.toml`.
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "world.entity.raider_alpha.name"
 transform     = { anchor = "patrol_alpha" }
-overrides = { tags = ["ship", "npc", "enemy"], behaviour = { doctrine = [
+overrides = { tags = ["ship", "npc", "enemy"], comms = { hailable = true }, behaviour = { doctrine = [
   { id = "patrol-ironveil", directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"] },
   { id = "retreat-when-hurt", directive_kind = "Retreat", directive_anchor = "pirate_haven",
     base_priority = 100.0, target_speed = 1.0,
     zero_gates = [{ condition = "hull_below", threshold = 0.3 }] },
 ] } }
-
-# ── Triggers ──────────────────────────────────────────────────────────────────
-
-[[trigger]]
-condition = "on_destroyed"
-entity    = "world.entity.raider_alpha.name"
-
-  [[trigger.action]]
-  type      = "add_objective"
-  id        = "obj-raider-destroyed"
-  text      = "world.default.trigger.action.obj_raider_destroyed.text"
-  mandatory = false
-
-[[trigger]]
-condition = "on_attacked"
-entity    = "world.entity.raider_alpha.name"
-
-  [[trigger.action]]
-  type = "load_world"
-  path = "assets/worlds/reinforcements.toml"
 
 [[available_ships]]
 template_path = "assets/entities/alliance_cruiser.toml"
@@ -189,39 +178,111 @@ label = "world.default.available_ships.0.label"
 template_path = "assets/entities/alliance_destroyer.toml"
 label = "world.default.available_ships.1.label"
 
-# ── Comms templates ──────────────────────────────────────────────────────────
+# ── Script ────────────────────────────────────────────────────────────────────
+#
+# Issue #984 (Rhai M6): this world's two `[[trigger]]` blocks and its three
+# `[[comms]]` templates are authored here instead. It is the first conversion of
+# a world that carries DIALOGUE, so the shape is worth stating once:
+#
+#   * a trigger registration names a handler fn, exactly as in `patrol.toml`;
+#   * a comms template's `trigger =` / `entity =` pair becomes that same
+#     registration, and its `message` becomes a DIALOGUE NODE fn — a fn
+#     returning `#{ message, responses }` — which the handler opens with
+#     `ctx.effects.open_comms(#{ from, node_fn })`;
+#   * an announcement (a template with no `[[comms.response]]`) is a node with
+#     an EMPTY `responses` array — the one-way broadcast the two distress calls
+#     always were;
+#   * a response's `[[comms.response.action]]` list becomes its `on_pick` fn,
+#     which buffers the same effects through the same `ActionCmd` boundary and
+#     returns the follow-up node, or `()` for a terminal response. Both of this
+#     world's responses are terminal, so both fns return unit.
+#
+# Every player-visible string keeps its `strings.csv` id: a dialogue node's
+# `message` and a response's `text` reach the wire as message bodies exactly as
+# the declarative `message` / `text` fields did (`project_node` →
+# `CommsMessage::injected`), so the ids resolve client-side unchanged.
+#
+# Registration order mirrors the authored order of what it replaces — the two
+# `[[trigger]]` blocks first, then the three `[[comms]]` templates — because
+# intra-tick trigger order is part of the authoritative digest. The raider's
+# on_attacked handler carries BOTH of that event's old reactions: the trigger's
+# `load_world` and the comms template's broadcast.
+[script]
+setup = """
+on_destroyed("world.entity.raider_alpha.name", "on_raider_destroyed");
+on_attacked("world.entity.raider_alpha.name", "on_raider_attacked");
+on_attacked("world.entity.starbase_alpha.name", "on_starbase_attacked");
+on_hailed("world.entity.starbase_alpha.name", "on_starbase_hailed");
 
-# Automatic distress call broadcast when the raider is first attacked.
-[[comms]]
-from    = "world.entity.raider_alpha.name"
-trigger = "on_attacked"
-entity  = "world.entity.raider_alpha.name"
-message = "world.default.comms.0.message"
+// ── Trigger handlers ──
 
-# Automatic distress call broadcast from Starbase Alpha when the station is first attacked.
-[[comms]]
-from    = "world.entity.starbase_alpha.name"
-trigger = "on_attacked"
-entity  = "world.entity.starbase_alpha.name"
-message = "world.default.comms.1.message"
+fn on_raider_destroyed(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-raider-destroyed",
+        text: "world.default.trigger.action.obj_raider_destroyed.text",
+        mandatory: false
+    });
+}
 
-[[comms]]
-from    = "world.entity.starbase_alpha.name"
-trigger = "on_hailed"
-entity  = "world.entity.starbase_alpha.name"
-message = "world.default.comms.2.message"
+// The reinforcements LAYER is still a layer: `load_world` is the same effect
+// the `[[trigger]]` dispatched, so `reinforcements.toml` keeps being loaded as
+// a sub-world rather than being inlined here.
+fn on_raider_attacked(ctx) {
+    ctx.effects.load_world("assets/worlds/reinforcements.toml");
+    ctx.effects.open_comms(#{
+        from: "world.entity.raider_alpha.name",
+        node_fn: "raider_mayday"
+    });
+}
 
-  [[comms.response]]
-  text = "world.default.comms.response.0.text"
-    [[comms.response.action]]
-    type = "add_objective"
-    id   = "obj-survey"
-    text = "world.default.comms.response.action.obj_survey.text"
+fn on_starbase_attacked(ctx) {
+    ctx.effects.open_comms(#{
+        from: "world.entity.starbase_alpha.name",
+        node_fn: "starbase_mayday"
+    });
+}
 
-  [[comms.response]]
-  text = "world.default.comms.response.1.text"
-    [[comms.response.action]]
-    type      = "add_objective"
-    id        = "obj-dock"
-    text      = "world.default.comms.response.action.obj_dock.text"
-    mandatory = true
+fn on_starbase_hailed(ctx) {
+    ctx.effects.open_comms(#{
+        from: "world.entity.starbase_alpha.name",
+        node_fn: "starbase_hail"
+    });
+}
+
+// ── Dialogue nodes ──
+
+// Automatic distress call broadcast when the raider is first attacked.
+fn raider_mayday(ctx) {
+    #{ message: "world.default.comms.0.message", responses: [] }
+}
+
+// Automatic distress call broadcast from Starbase Alpha when the station is
+// first attacked.
+fn starbase_mayday(ctx) {
+    #{ message: "world.default.comms.1.message", responses: [] }
+}
+
+fn starbase_hail(ctx) {
+    #{ message: "world.default.comms.2.message", responses: [
+        #{ text: "world.default.comms.response.0.text", on_pick: "on_survey" },
+        #{ text: "world.default.comms.response.1.text", on_pick: "on_dock" },
+    ] }
+}
+
+// ── Response effects ──
+
+fn on_survey(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-survey",
+        text: "world.default.comms.response.action.obj_survey.text"
+    });
+}
+
+fn on_dock(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-dock",
+        text: "world.default.comms.response.action.obj_dock.text",
+        mandatory: true
+    });
+}
+"""

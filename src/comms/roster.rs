@@ -321,12 +321,13 @@ mod shipped_world_rosters {
         out
     }
 
-    /// INVARIANT 1 — the entity-derived source is authored on NOTHING.
+    /// INVARIANT 1 — the entity-derived source is authored on exactly the
+    /// templates a converted world needs, and nothing else.
     ///
-    /// `[comms] hailable = true` is opt-in and no shipped template sets it, so
-    /// the entity-derived half of the union contributes zero contacts to every
-    /// shipped world and every roster below is produced by the declarative half
-    /// alone, exactly as before this commit.
+    /// `[comms] hailable = true` is the opt-in that replaces a deleted
+    /// `[[comms]] from` as a roster source. It is TEMPLATE-level, so switching
+    /// it on adds a contact to every world that spawns the hull — which is why
+    /// the set is pinned here rather than left to grow.
     ///
     /// The census that forced the opt-in: 13 shipped entity templates declare
     /// `[comms] range` (every Alliance hull, every Harrow hull, the Requiem
@@ -337,10 +338,21 @@ mod shipped_world_rosters {
     /// which author no `[[comms]]` at all — a non-empty roster where they have
     /// none today.
     ///
-    /// The M7-era world conversions are what turn this on, per world. When one
-    /// does, THIS test is the thing that must be updated deliberately.
+    /// The world conversions are what turn this on, per world. When one does,
+    /// THIS test is the thing that must be updated deliberately.
+    ///
+    /// `station_axiom` is the first and so far only entry (issue #984, the
+    /// `default.toml` conversion). It is safe at template level because the two
+    /// worlds that field the station — `default` and `combat_test` — both
+    /// already listed it as their one hailable contact, and `combat_test` still
+    /// authors `[[comms]]`, whose entry WINS the roster's UUID de-duplication.
+    /// The same conversion's other sender, `ship_harrow_patrol`, is deliberately
+    /// NOT here: it also flies in four worlds that never listed it, so its
+    /// opt-in is a per-instance override in `default.toml` (see INVARIANT 3).
     #[test]
-    fn no_shipped_entity_opts_in_to_the_hail_roster() {
+    fn only_the_converted_worlds_senders_opt_in_to_the_hail_roster() {
+        const EXPECTED: &[&str] = &["station_axiom.toml"];
+
         let mut opted_in: Vec<String> = Vec::new();
         for path in entity_templates() {
             let text = std::fs::read_to_string(&path).expect("entity template must be readable");
@@ -348,21 +360,29 @@ mod shipped_world_rosters {
                 Ok(v) => v,
                 Err(e) => panic!("{} must be valid TOML: {e}", path.display()),
             };
-            let hailable = value
-                .get("comms")
-                .and_then(|c| c.get("hailable"))
-                .and_then(|h| h.as_bool())
-                .unwrap_or(false);
-            if hailable {
-                opted_in.push(path.display().to_string());
+            if template_hailable(&value) {
+                opted_in.push(
+                    path.file_name()
+                        .and_then(|f| f.to_str())
+                        .expect("template file name")
+                        .to_string(),
+                );
             }
         }
-        assert!(
-            opted_in.is_empty(),
-            "issue #985 landed `[comms] hailable` authored on NOTHING so shipped rosters are \
-             unchanged. These templates now opt in, which ADDS contacts to every world that \
-             spawns them — update the roster snapshots below in the same commit: {opted_in:?}"
+        assert_eq!(
+            opted_in, EXPECTED,
+            "`[comms] hailable` ADDS a contact to every world that spawns the template. Changing \
+             this set changes shipped rosters — update the snapshots below in the same commit"
         );
+    }
+
+    /// Read `[comms] hailable` out of an entity document (template or merged).
+    fn template_hailable(value: &toml::Value) -> bool {
+        value
+            .get("comms")
+            .and_then(|c| c.get("hailable"))
+            .and_then(|h| h.as_bool())
+            .unwrap_or(false)
     }
 
     /// INVARIANT 2 — the declarative rosters themselves, snapshotted.
@@ -371,18 +391,15 @@ mod shipped_world_rosters {
     /// `from` list. A world absent from this table must have an EMPTY roster.
     /// `combat_test` is the demo scenario: twelve `[[comms]]` templates, all
     /// from Starbase Alpha, collapsing to a single contact.
+    ///
+    /// `default.toml` LEFT this table in issue #984: its comms converted to
+    /// `[script]`, so it produces no declarative contacts at all and its roster
+    /// is now entirely entity-derived. INVARIANT 3 is what holds that roster to
+    /// the two senders this table used to carry.
     #[test]
     fn shipped_world_declarative_rosters_are_unchanged() {
-        const EXPECTED: &[(&str, &[&str])] = &[
-            ("combat_test.toml", &["world.entity.starbase_alpha.name"]),
-            (
-                "default.toml",
-                &[
-                    "world.entity.raider_alpha.name",
-                    "world.entity.starbase_alpha.name",
-                ],
-            ),
-        ];
+        const EXPECTED: &[(&str, &[&str])] =
+            &[("combat_test.toml", &["world.entity.starbase_alpha.name"])];
 
         let dir = manifest("assets/worlds");
         let mut worlds: Vec<PathBuf> = std::fs::read_dir(&dir)
@@ -420,6 +437,103 @@ mod shipped_world_rosters {
                  needs `[comms] hailable = true` on its sender in the same commit"
             );
         }
+    }
+
+    /// The entity-derived roster a world produces: the label of every NAMED
+    /// `[[entity]]` whose merged `[comms]` block opts in, in the `(name, uuid)`
+    /// order [`merge_entity_contacts`] appends. Names are distinct reference
+    /// ids, so ordering on the name alone reproduces that order.
+    ///
+    /// The merge is the `comms` sub-table only — enough for the opt-in, and
+    /// deliberately not a re-implementation of `merge_entity_config_toml`. It
+    /// reads the template file directly, so a `[comms]` block arriving through
+    /// an include fragment would be missed; no shipped template does that, and
+    /// [`only_the_converted_worlds_senders_opt_in_to_the_hail_roster`] is what
+    /// notices if one starts.
+    fn entity_derived_roster(text: &str) -> Vec<String> {
+        let world: toml::Value = toml::from_str(text).expect("world must be valid TOML");
+        let mut out: Vec<String> = Vec::new();
+        let Some(entities) = world.get("entity").and_then(|e| e.as_array()) else {
+            return out;
+        };
+        for entity in entities {
+            let Some(name) = entity.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            let template_path = entity
+                .get("template_path")
+                .and_then(|p| p.as_str())
+                .expect("a world entity must name a template");
+            let template: toml::Value = toml::from_str(
+                &std::fs::read_to_string(manifest(template_path))
+                    .expect("entity template must be readable"),
+            )
+            .expect("entity template must be valid TOML");
+            let base = template
+                .get("comms")
+                .cloned()
+                .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
+            let merged = match entity.get("overrides").and_then(|o| o.get("comms")) {
+                Some(over) => crate::entity_override::merge_toml(&base, over),
+                None => base,
+            };
+            let mut wrapper = toml::map::Map::new();
+            wrapper.insert("comms".to_string(), merged);
+            if template_hailable(&toml::Value::Table(wrapper)) {
+                out.push(name.to_string());
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// INVARIANT 3 — `default.toml`'s roster survived its conversion (#984).
+    ///
+    /// The world's comms are `[script]` now, so the declarative source that
+    /// produced its two contacts is gone. The entity-derived source has to
+    /// produce the SAME two senders, and in the same order: the declarative
+    /// roster was `[raider_alpha, starbase_alpha]` in authored order, and the
+    /// entity-derived one appends in `(name, uuid)` order — which for these two
+    /// reference ids is the same sequence. That coincidence is load-bearing:
+    /// `tests/smoke/comms.spec.js` hails `contacts[0]`.
+    ///
+    /// The raider's opt-in is a per-instance `overrides.comms.hailable`, which
+    /// is what keeps `patrol`, `probe_huge_rock`, `reinforcements` and
+    /// `combat_test`'s wave 8 — all of which fly the same hull and never listed
+    /// it as a contact — with the rosters they have.
+    #[test]
+    fn default_worlds_converted_roster_matches_the_declarative_one_it_replaced() {
+        let default_text = include_str!("../../assets/worlds/default.toml");
+        let world = crate::world::config::parse_world(default_text).expect("default.toml parses");
+        assert!(
+            world.comms.is_empty(),
+            "default.toml's comms are [script]-authored (#984)"
+        );
+        assert_eq!(
+            entity_derived_roster(default_text),
+            vec![
+                "world.entity.raider_alpha.name".to_string(),
+                "world.entity.starbase_alpha.name".to_string(),
+            ],
+            "the conversion must preserve default.toml's two contacts, in order"
+        );
+
+        // The layer the converted world still loads authors no contacts, and
+        // must not start doing so through the shared hull.
+        let reinforcements = include_str!("../../assets/worlds/reinforcements.toml");
+        assert!(
+            entity_derived_roster(reinforcements).is_empty(),
+            "reinforcements.toml has no hail contacts and must not gain any"
+        );
+
+        // The other world that fields the station keeps its declarative entry,
+        // which wins the UUID de-duplication — so its roster is untouched.
+        let combat_test = include_str!("../../assets/worlds/combat_test.toml");
+        assert_eq!(
+            entity_derived_roster(combat_test),
+            vec!["world.entity.starbase_alpha.name".to_string()],
+            "combat_test's one entity-derived candidate is the contact it already had"
+        );
     }
 
     /// The demo scenario's twelve templates really are twelve, collapsing to

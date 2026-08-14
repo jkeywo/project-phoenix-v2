@@ -1116,6 +1116,16 @@ pub fn spawn_entity(
         }
     }
 
+    // Infrastructure condition + capacity (issue #1025) — attach the track when
+    // `[infrastructure]` is present. Placed BEFORE the hull block for the same
+    // reason the shields block is: the hull block has an early return for the
+    // empty-hull case, and anything after it could be skipped.
+    if let Some(infrastructure) = &config.infrastructure {
+        entity_commands.insert(crate::infrastructure::InfrastructureCondition(
+            crate::infrastructure::InfrastructureState::from_config(infrastructure),
+        ));
+    }
+
     // Hull -- attach an EntitySystemHull component if the config has hull data.
     // Per-system entries take precedence; if absent we fall back to the
     // legacy scalar `hull_integrity` value mapped to a single `SystemId("captain")`
@@ -1196,6 +1206,151 @@ mod tests {
         };
         app.update();
         entity
+    }
+
+    // ── Issue #1025: `[infrastructure]`, on both authoring paths ──
+
+    /// The exemplar depot template, trimmed to the two blocks under test.
+    const DEPOT_TOML: &str = r#"
+[hull]
+hull_integrity = 400.0
+
+[infrastructure]
+condition_max = 100.0
+hull_damage_share = 0.5
+
+[[infrastructure.capacity]]
+id = "depot_transfer_throughput"
+amount = 40
+
+[[infrastructure.threshold]]
+flag = "depot_transfer_capable"
+fails_below = 0.4
+"#;
+
+    fn lenient(source: &str) -> EntityConfig {
+        EntityConfig::from_toml_in_mode(
+            source,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("the fixture parses")
+    }
+
+    /// **AC1.** A template that authors `[infrastructure]` spawns with a live
+    /// condition track; one that does not spawns exactly as it did before the
+    /// section existed.
+    ///
+    /// Both directions, because a gate that only ever reads true would pass the
+    /// first half alone — and the second half is the whole "omitting it changes
+    /// nothing" claim.
+    #[test]
+    fn an_authored_infrastructure_table_attaches_a_condition_track_and_omitting_it_attaches_none() {
+        let mut app = test_app();
+        let e = spawn_and_flush(
+            &mut app,
+            &lenient(DEPOT_TOML),
+            Vec3::ZERO,
+            "depot".into(),
+            None,
+        );
+        let track = app
+            .world()
+            .get::<crate::infrastructure::InfrastructureCondition>(e)
+            .expect("an authored [infrastructure] table must attach the track");
+        assert_eq!(
+            track.0.condition(),
+            100.0,
+            "intact unless authored otherwise"
+        );
+        assert_eq!(
+            track.0.capacity("depot_transfer_throughput"),
+            Some(40),
+            "the authored capacity travels onto the entity"
+        );
+        assert_eq!(
+            track.0.flag("depot_transfer_capable"),
+            Some(true),
+            "and its operational flag starts level-evaluated against the condition"
+        );
+
+        let mut app = test_app();
+        let e = spawn_and_flush(
+            &mut app,
+            &lenient("[hull]\nhull_integrity = 400.0\n"),
+            Vec3::ZERO,
+            "plain".into(),
+            None,
+        );
+        assert!(
+            app.world()
+                .get::<crate::infrastructure::InfrastructureCondition>(e)
+                .is_none(),
+            "an entity that authors no [infrastructure] must carry no track — every station, \
+             asteroid and hull in the repository is in this arm"
+        );
+        assert!(
+            app.world().get::<EntitySystemHull>(e).is_some(),
+            "…and is otherwise spawned exactly as before, hull and all"
+        );
+    }
+
+    /// **AC1.** The world's `[[entity]].overrides` path reaches the same table.
+    ///
+    /// This is the half a template test cannot cover: a scenario placing a
+    /// shared depot has to be able to say "this one arrives already battered"
+    /// without forking the template.
+    #[test]
+    fn a_world_entity_override_retunes_the_authored_infrastructure_table() {
+        let overrides: toml::Value = toml::from_str("[infrastructure]\ncondition = 80.0\n")
+            .expect("the override document parses");
+        let merged = crate::entity_loader::apply_overrides(&lenient(DEPOT_TOML), &overrides)
+            .expect("the override merges onto the template");
+        let infrastructure = merged
+            .infrastructure
+            .as_ref()
+            .expect("the merged config still has the table");
+        assert_eq!(
+            infrastructure.condition,
+            Some(80.0),
+            "the world's starting condition wins"
+        );
+        assert_eq!(
+            infrastructure.condition_max, 100.0,
+            "…while everything the override was silent about survives from the template"
+        );
+        assert_eq!(
+            infrastructure.capacities.len(),
+            1,
+            "including the authored capacity, which a plain table-replacing merge would have \
+             dropped"
+        );
+        assert_eq!(infrastructure.thresholds.len(), 1, "…and the threshold");
+
+        let mut app = test_app();
+        let e = spawn_and_flush(&mut app, &merged, Vec3::ZERO, "depot".into(), None);
+        let track = app
+            .world()
+            .get::<crate::infrastructure::InfrastructureCondition>(e)
+            .expect("the merged config still attaches a track");
+        assert_eq!(track.0.condition(), 80.0);
+    }
+
+    /// **AC1.** An `[infrastructure]` table that cannot mean anything is a load
+    /// error naming the field, not a structure that silently never degrades.
+    #[test]
+    fn an_unauthorable_infrastructure_table_fails_the_entity_load() {
+        let source = format!(
+            "{DEPOT_TOML}\n[[infrastructure.threshold]]\nflag = \"other\"\nfails_below = 40.0\n"
+        );
+        let err = EntityConfig::from_toml_in_mode(
+            &source,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect_err("a threshold authored in points rather than fractions must be refused");
+        assert!(
+            err.to_string().contains("FRACTION"),
+            "the refusal must say what the field wanted, got {err}"
+        );
     }
 
     /// A `[repair]` table that exists only to carry `[repair.selector]` gives
@@ -1316,6 +1471,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1396,6 +1552,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1446,6 +1603,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1501,6 +1659,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1560,6 +1719,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1625,6 +1785,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1701,6 +1862,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             comms: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1760,6 +1922,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1863,6 +2026,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             cinematic_camera: None,
             ai_profile: None,
             lod_bubble: None,
+            infrastructure: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1921,6 +2085,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             audio: None,
             comms: None,
             asteroid_field: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1961,6 +2126,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             ship_config: None,
             shield_arcs: Vec::new(),
             tags: vec![],
+            infrastructure: None,
             faction: Some(faction_id),
             hull: None,
             collider: None,
@@ -2068,6 +2234,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2281,6 +2448,7 @@ regen_per_sec = 0.0
             asteroid_field: None,
             shape: None,
             effects: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,

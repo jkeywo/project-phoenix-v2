@@ -238,6 +238,23 @@ pub const HOST_FNS: &[HostFn] = &[
                   thread_id?, urgent?}`. No delayed form — defer it with \
                   `schedule.after`.",
     },
+    HostFn {
+        name: "repair_infrastructure",
+        receiver: "effects",
+        params: &["entity", "points"],
+        category: "effect",
+        summary: "Raise the named structure's infrastructure condition by whole \
+                  points, or by a `flt(\"…\")` slice. No delayed form — a timed \
+                  repair applies a slice per tick.",
+    },
+    HostFn {
+        name: "damage_infrastructure",
+        receiver: "effects",
+        params: &["entity", "points"],
+        category: "effect",
+        summary: "Lower the named structure's infrastructure condition by whole \
+                  points, or by a `flt(\"…\")` slice.",
+    },
     // ── ctx.flags.* (runtime engine) ─────────────────────────────────────────
     HostFn {
         name: "increment",
@@ -453,6 +470,10 @@ mod tests {
                 "open_comms" => {
                     "ctx.effects.open_comms(#{ from: \"a\", node_fn: \"f\" })".to_string()
                 }
+                // The infrastructure hooks take (entity, points).
+                "repair_infrastructure" | "damage_infrastructure" => {
+                    format!("ctx.effects.{}(\"x\", 1)", hf.name)
+                }
                 _ => format!("ctx.effects.{}(\"x\")", hf.name),
             },
             "delay" => format!("ctx.schedule.in_seconds(0).{}(\"x\")", hf.name),
@@ -570,6 +591,13 @@ mod tests {
         // deferred open is authored as `schedule.after(n, |ctx| …open_comms…)`).
         assert!(names.contains(&("effects", "open_comms")));
         assert!(!names.contains(&("delay", "open_comms")));
+        // Likewise the #1025 infrastructure hooks: a repair that takes time is
+        // a timed operation applying a slice per tick, not one effect fired
+        // late, so neither verb has a delay-builder twin.
+        for verb in ["repair_infrastructure", "damage_infrastructure"] {
+            assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
+            assert!(!names.contains(&("delay", verb)), "unexpected delay.{verb}");
+        }
         // ctx.flags.* (flags.rs) and ctx.schedule.* (schedule.rs).
         assert!(names.contains(&("flags", "increment")));
         assert!(names.contains(&("schedule", "in_seconds")));

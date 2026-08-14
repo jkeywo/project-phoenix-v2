@@ -99,6 +99,18 @@ pub struct WorldContentRuntime {
     /// (`tests/authoritative_state_enumeration.rs`) sees no new registration —
     /// the same shape `WorldScriptRuntime::pending_callbacks` has.
     pub deadlines: crate::world::deadlines::DeadlineTable,
+    /// Infrastructure condition adjustments queued this tick by a scripted
+    /// `repair_infrastructure` / `damage_infrastructure` effect (issue #1025),
+    /// already resolved to the target's UUID.
+    ///
+    /// Drained every tick by
+    /// [`crate::infrastructure::tick_infrastructure_condition`] in
+    /// `SimSet::Modifiers`, so it is empty at every tick boundary — including
+    /// the one a snapshot is taken at. It exists so that the one system that
+    /// owns threshold edges is also the one system that moves condition:
+    /// an effect writing the component directly would cross a threshold with
+    /// nobody listening, and the world flag store would never hear about it.
+    pub pending_condition_adjustments: Vec<crate::infrastructure::ConditionAdjustment>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -478,7 +490,11 @@ impl Plugin for WorldPlugin {
         // `tick_delayed_actions`; `broadcast_objective_summary` after
         // `broadcast_comms_state`) all resolve against systems guaranteed to be
         // registered.
+        // Infrastructure condition (issue #1025) is added here for the same
+        // reason comms is: it writes `WorldContentRuntime`'s flag store and
+        // world-event queue, so it has no meaning in an app that has no world.
         app.add_plugins(crate::comms::CommsWorldPlugin)
+            .add_plugins(crate::infrastructure::InfrastructurePlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
@@ -2368,6 +2384,23 @@ pub(crate) fn apply_dispatch_result(
                 if let Some(ns) = next_state.as_deref_mut() {
                     ns.set(phase);
                 }
+            }
+
+            // Issue #1025. Name resolution here (the applier holds
+            // `name_to_uuid`); the arithmetic and the flag edges happen in
+            // `tick_infrastructure_condition`, which drains this queue in
+            // `SimSet::Modifiers`.
+            ActionCmd::AdjustInfrastructureCondition { entity, delta } => {
+                let Some(uuid) = runtime.name_to_uuid.get(&entity).cloned() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: AdjustInfrastructureCondition: no entity named '{entity}' \
+                         in this world — ignoring"
+                    );
+                    continue;
+                };
+                runtime
+                    .pending_condition_adjustments
+                    .push(crate::infrastructure::ConditionAdjustment { uuid, delta });
             }
 
             ActionCmd::LoadWorld { path, loader_path } => {
@@ -8479,6 +8512,7 @@ seed = 1
             audio: None,
             comms: None,
             asteroid_field: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -8770,6 +8804,7 @@ seed = 1
             audio: None,
             comms: None,
             asteroid_field: None,
+            infrastructure: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,

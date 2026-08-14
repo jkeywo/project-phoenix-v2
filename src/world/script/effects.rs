@@ -304,6 +304,52 @@ pub fn register_effects(engine: &mut Engine) {
             Ok(())
         },
     );
+    // Infrastructure condition hooks (issue #1025). Two verbs rather than one
+    // signed one: the sign convention lives in the name, so a scenario cannot
+    // repair a skyhook by getting a minus sign wrong. Each takes whole
+    // condition POINTS, with a `flt("…")` overload for the fractional slice a
+    // timed operation applies per tick — the same `no_float` boundary
+    // `on_hull_below(entity, flt("0.75"), …)` uses.
+    //
+    // Both buffer a resolved `ActionCmd` carrying the entity NAME; the applier
+    // resolves it and queues the delta for `tick_infrastructure_condition`,
+    // which is where every operational-flag edge is detected and mirrored.
+    engine.register_fn(
+        "repair_infrastructure",
+        |sink: &mut EffectSink, entity: ImmutableString, points: i64| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: points as f32,
+            });
+        },
+    );
+    engine.register_fn(
+        "repair_infrastructure",
+        |sink: &mut EffectSink, entity: ImmutableString, points: RealLit| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: points.0 as f32,
+            });
+        },
+    );
+    engine.register_fn(
+        "damage_infrastructure",
+        |sink: &mut EffectSink, entity: ImmutableString, points: i64| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: -(points as f32),
+            });
+        },
+    );
+    engine.register_fn(
+        "damage_infrastructure",
+        |sink: &mut EffectSink, entity: ImmutableString, points: RealLit| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: -(points.0 as f32),
+            });
+        },
+    );
     engine.register_fn(
         "add_faction_enemy",
         |sink: &mut EffectSink, faction: ImmutableString, enemy: ImmutableString| {

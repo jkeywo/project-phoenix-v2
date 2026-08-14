@@ -1,0 +1,448 @@
+//! Bevy adapter for infrastructure condition + capacity (issue #1025).
+//!
+//! One component, one fixed-tick system, and a mirror into the world flag
+//! store. The arithmetic and every threshold edge live in the pure sibling
+//! [`super::condition`]; nothing here decides anything a unit test cannot
+//! already reach.
+//!
+//! # The one write site
+//!
+//! Condition moves for three reasons — authored decay, damage the entity took,
+//! and a scripted repair or hit — and all three land in
+//! [`tick_infrastructure_condition`]. That is deliberate: a threshold crossing
+//! is only observable if the code that crosses it is also the code that mirrors
+//! the resulting flag, so scripted adjustments are *queued* on
+//! `WorldContentRuntime::pending_condition_adjustments` and drained here rather
+//! than written where they are authored. `#1027`'s field-repair operation feeds
+//! the same queue, one slice of progress per tick.
+//!
+//! # Where the flags become observable
+//!
+//! Each crossing is written into the base-world [`FlagStore`] and pushed onto
+//! `WorldContentRuntime::pending_world_events` as a `FlagSet` / `FlagCleared`.
+//! `collect_world_events` drains that queue at the top of the next tick's
+//! `SimSet::Physics`, so an `on_flag_set` / `on_flag_cleared` hook fires one
+//! tick after the crossing — the same one-tick bridge `WaypointReached` already
+//! rides, and for the same reason: this system runs in `SimSet::Modifiers`,
+//! after the collector has already run for the tick.
+//!
+//! [`FlagStore`]: crate::world::flags::FlagStore
+
+use bevy::prelude::*;
+
+use crate::entities::spawner::{EntitySystemHull, EntityUuid};
+use crate::infrastructure::condition::{FlagChange, InfrastructureState};
+use crate::logging::LogFilterConfig;
+use crate::world::content::WorldEvent;
+use crate::world::server::WorldContentRuntime;
+
+/// Present when the entity's TOML declared an `[infrastructure]` table.
+///
+/// Authoritative per-entity simulation state: it decides whether a structure
+/// can still transfer, dock or hold, and two hosts that disagreed about it
+/// would disagree about whether a mission is winnable.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct InfrastructureCondition(pub InfrastructureState);
+
+/// Registers the condition tick. Added by `WorldPlugin` — the flag store and
+/// the world-event queue this writes to are its resources.
+pub struct InfrastructurePlugin;
+
+impl Plugin for InfrastructurePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            FixedUpdate,
+            tick_infrastructure_condition.in_set(crate::sim_sets::SimSet::Modifiers),
+        );
+    }
+}
+
+/// Advance every infrastructure track by one logical tick.
+///
+/// Per structure, in UUID order: publish its capacities and starting flags on
+/// the first tick it exists, fold in any hull it lost, apply authored decay,
+/// then apply this tick's queued script adjustments. Every operational flag
+/// that changed along the way is mirrored into the base-world flag store.
+///
+/// UUID order, not query order: Bevy's archetype iteration order is not part of
+/// the simulation's contract, and two structures sharing a flag name would
+/// otherwise resolve differently on two hosts. Same rule
+/// [`crate::sim_digest`] applies to its own walks.
+pub fn tick_infrastructure_condition(
+    runtime: Option<ResMut<WorldContentRuntime>>,
+    time: Option<Res<Time>>,
+    mut structures: Query<(
+        Entity,
+        &EntityUuid,
+        Option<&EntitySystemHull>,
+        &mut InfrastructureCondition,
+    )>,
+    log: Option<Res<LogFilterConfig>>,
+) {
+    let Some(mut runtime) = runtime else {
+        return;
+    };
+    // A read, so a world with no infrastructure and no queued work never marks
+    // `WorldContentRuntime` changed.
+    if structures.is_empty() && runtime.pending_condition_adjustments.is_empty() {
+        return;
+    }
+    let queued = std::mem::take(&mut runtime.pending_condition_adjustments);
+    let delta_secs = time.map(|t| t.delta_secs()).unwrap_or(0.0);
+
+    let mut rows: Vec<(String, Entity)> = structures
+        .iter()
+        .map(|(entity, uuid, _, _)| (uuid.0.clone(), entity))
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
+
+    for (uuid, entity) in rows {
+        let Ok((_, _, hull, mut condition)) = structures.get_mut(entity) else {
+            continue;
+        };
+        let first_tick = condition.is_added();
+        let hull_total = hull.map(|h| h.0.total_current());
+        // Immutable reads through `Mut`'s `Deref`, so deciding there is nothing
+        // to do costs no change-detection mark.
+        let hull_moved = hull_total.is_some() && condition.0.last_observed_hull() != hull_total;
+        let decay = condition.0.decay_per_sec() * delta_secs;
+        let adjustments: Vec<f32> = queued
+            .iter()
+            .filter(|a| a.uuid == uuid)
+            .map(|a| a.delta)
+            .collect();
+        if !first_tick && !hull_moved && decay <= 0.0 && adjustments.is_empty() {
+            continue;
+        }
+
+        let mut changes: Vec<FlagChange> = Vec::new();
+        let mut capacities: Vec<(String, i64)> = Vec::new();
+        {
+            let state = &mut condition.0;
+            if first_tick {
+                capacities = state
+                    .capacities()
+                    .iter()
+                    .map(|c| (c.id.clone(), c.amount))
+                    .collect();
+                changes.extend(state.initial_flags());
+            }
+            if let Some(total) = hull_total {
+                changes.extend(state.observe_hull(total));
+            }
+            if decay > 0.0 {
+                changes.extend(state.degrade(decay));
+            }
+            for delta in adjustments {
+                changes.extend(state.apply_delta(delta));
+            }
+        }
+
+        // A capacity is a published quantity, not an operational flag: its
+        // counter is readable from a script predicate, but it deliberately
+        // fires no `on_flag_set`. "This depot has berths" is not an event.
+        for (id, amount) in capacities {
+            runtime.flags.set_flag_value(&id, amount);
+        }
+        mirror_flags(&mut runtime, &changes, &uuid, &log);
+    }
+}
+
+/// Write each changed operational flag into the base-world store and queue the
+/// matching world event.
+///
+/// The transition is decided from the store's own `(before, after)` rather than
+/// from `FlagChange::raised`, so a flag two structures share does not emit a
+/// second `FlagSet` for a value that was already up.
+fn mirror_flags(
+    runtime: &mut WorldContentRuntime,
+    changes: &[FlagChange],
+    uuid: &str,
+    log: &Option<Res<LogFilterConfig>>,
+) {
+    for change in changes {
+        let (before, after) = if change.raised {
+            runtime.flags.set_flag(&change.flag)
+        } else {
+            runtime.flags.clear_flag(&change.flag)
+        };
+        if (before != 0) == (after != 0) {
+            continue;
+        }
+        crate::pdebug!(
+            log,
+            crate::logging::LogCat::World,
+            "infrastructure {uuid}: {} -> {}",
+            change.flag,
+            change.raised
+        );
+        runtime.pending_world_events.push(if after != 0 {
+            WorldEvent::FlagSet {
+                name: change.flag.clone(),
+                origin_layer: None,
+            }
+        } else {
+            WorldEvent::FlagCleared {
+                name: change.flag.clone(),
+                origin_layer: None,
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::condition::{
+        CapacityConfig, ConditionAdjustment, InfrastructureConfig, ThresholdConfig,
+    };
+
+    const FLAG: &str = "depot_transfer_capable";
+
+    fn depot_config(decay_per_sec: f32) -> InfrastructureConfig {
+        InfrastructureConfig {
+            condition_max: 100.0,
+            decay_per_sec,
+            capacities: vec![CapacityConfig {
+                id: "depot_transfer_throughput".to_string(),
+                amount: 40,
+            }],
+            thresholds: vec![ThresholdConfig {
+                flag: FLAG.to_string(),
+                fails_below: 0.4,
+                restores_above: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// A bare app with the one system under test, ticked by hand. No
+    /// `TimePlugin`: a decay-free fixture must not depend on a clock, and the
+    /// decay tests insert `Time` themselves.
+    fn app_with(config: &InfrastructureConfig) -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.add_systems(Update, tick_infrastructure_condition);
+        let entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid("depot-1".to_string()),
+                InfrastructureCondition(InfrastructureState::from_config(config)),
+            ))
+            .id();
+        (app, entity)
+    }
+
+    fn flag(app: &App, name: &str) -> bool {
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .flag(name)
+    }
+
+    fn counter(app: &App, name: &str) -> i64 {
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter(name)
+    }
+
+    fn drain_events(app: &mut App) -> Vec<WorldEvent> {
+        std::mem::take(
+            &mut app
+                .world_mut()
+                .resource_mut::<WorldContentRuntime>()
+                .pending_world_events,
+        )
+    }
+
+    // ── AC3: the flag surface ──
+
+    #[test]
+    fn a_structure_publishes_its_flags_and_capacities_on_its_first_tick() {
+        let (mut app, _) = app_with(&depot_config(0.0));
+        app.update();
+        assert!(
+            flag(&app, FLAG),
+            "an intact depot's operational flag is up in the world store, where a script \
+             predicate can read it"
+        );
+        assert_eq!(
+            counter(&app, "depot_transfer_throughput"),
+            40,
+            "…and its authored capacity is a readable counter, so a scenario asks the depot \
+             how much it moves instead of restating the number"
+        );
+        let events = drain_events(&mut app);
+        assert_eq!(
+            events,
+            vec![WorldEvent::FlagSet {
+                name: FLAG.to_string(),
+                origin_layer: None,
+            }],
+            "exactly one world event: the flag going up. The capacity counter deliberately \
+             fires none — a published quantity is not an operational event."
+        );
+    }
+
+    #[test]
+    fn a_crossing_writes_the_store_and_queues_the_event_a_hook_reacts_to() {
+        let (mut app, entity) = app_with(&depot_config(0.0));
+        app.update();
+        drain_events(&mut app);
+
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_condition_adjustments
+            .push(ConditionAdjustment {
+                uuid: "depot-1".to_string(),
+                delta: -65.0,
+            });
+        app.update();
+
+        assert!(
+            !flag(&app, FLAG),
+            "crossing the authored threshold clears the flag in the world store"
+        );
+        assert_eq!(
+            drain_events(&mut app),
+            vec![WorldEvent::FlagCleared {
+                name: FLAG.to_string(),
+                origin_layer: None,
+            }],
+            "…and queues the FlagCleared a scenario's on_flag_cleared hook fires from"
+        );
+
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_condition_adjustments
+            .push(ConditionAdjustment {
+                uuid: "depot-1".to_string(),
+                delta: 20.0,
+            });
+        app.update();
+        assert!(flag(&app, FLAG), "and a repair puts it back");
+        assert_eq!(
+            drain_events(&mut app),
+            vec![WorldEvent::FlagSet {
+                name: FLAG.to_string(),
+                origin_layer: None,
+            }],
+            "…with the matching FlagSet — the flag flips in BOTH directions"
+        );
+        let condition = app
+            .world()
+            .get::<InfrastructureCondition>(entity)
+            .expect("the component is still attached");
+        assert_eq!(condition.0.condition(), 55.0);
+    }
+
+    #[test]
+    fn a_queued_adjustment_for_an_unknown_entity_is_simply_not_applied() {
+        let (mut app, entity) = app_with(&depot_config(0.0));
+        app.update();
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_condition_adjustments
+            .push(ConditionAdjustment {
+                uuid: "no-such-depot".to_string(),
+                delta: -90.0,
+            });
+        app.update();
+        let condition = app.world().get::<InfrastructureCondition>(entity).unwrap();
+        assert_eq!(
+            condition.0.condition(),
+            100.0,
+            "an adjustment naming an entity that is not there must not land on whichever \
+             structure happens to be first"
+        );
+        assert!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .pending_condition_adjustments
+                .is_empty(),
+            "…and the queue is drained regardless, so a stale name cannot accumulate"
+        );
+    }
+
+    // ── Decay ──
+
+    #[test]
+    fn authored_decay_walks_a_structure_down_through_its_threshold() {
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.insert_resource(Time::<()>::default());
+        app.add_systems(Update, tick_infrastructure_condition);
+        app.world_mut().spawn((
+            EntityUuid("depot-1".to_string()),
+            InfrastructureCondition(InfrastructureState::from_config(&depot_config(10.0))),
+        ));
+        // One second per update, so ten condition points a tick.
+        for _ in 0..7 {
+            app.world_mut()
+                .resource_mut::<Time<()>>()
+                .advance_by(std::time::Duration::from_secs(1));
+            app.update();
+        }
+        assert!(
+            !flag(&app, FLAG),
+            "seventy points of authored decay takes a depot below its 40 % threshold with no \
+             damage and no script involved"
+        );
+    }
+
+    #[test]
+    fn a_structure_with_nothing_to_do_leaves_the_runtime_unmarked() {
+        let (mut app, _) = app_with(&depot_config(0.0));
+        app.update();
+        app.update();
+        let changed = app
+            .world()
+            .resource_ref::<WorldContentRuntime>()
+            .is_changed();
+        assert!(
+            !changed,
+            "a static structure on a quiet tick must not mark WorldContentRuntime changed — \
+             every world in the repo carries that resource, and a needless mark is a needless \
+             wake-up for everything that watches it"
+        );
+    }
+
+    // ── Determinism ──
+
+    #[test]
+    fn structures_are_walked_in_uuid_order_whatever_order_they_spawned_in() {
+        let mut config = depot_config(0.0);
+        config.thresholds[0].flag = "shared_flag".to_string();
+        config.capacities.clear();
+        let mut forward = App::new();
+        forward.init_resource::<WorldContentRuntime>();
+        forward.add_systems(Update, tick_infrastructure_condition);
+        for uuid in ["depot-a", "depot-b", "depot-c"] {
+            forward.world_mut().spawn((
+                EntityUuid(uuid.to_string()),
+                InfrastructureCondition(InfrastructureState::from_config(&config)),
+            ));
+        }
+        forward.update();
+
+        let mut reverse = App::new();
+        reverse.init_resource::<WorldContentRuntime>();
+        reverse.add_systems(Update, tick_infrastructure_condition);
+        for uuid in ["depot-c", "depot-b", "depot-a"] {
+            reverse.world_mut().spawn((
+                EntityUuid(uuid.to_string()),
+                InfrastructureCondition(InfrastructureState::from_config(&config)),
+            ));
+        }
+        reverse.update();
+
+        assert_eq!(
+            drain_events(&mut forward),
+            drain_events(&mut reverse),
+            "the emitted event sequence is a function of the UUIDs, not of the order the \
+             entities happen to sit in the archetype — two hosts that spawned the same \
+             structures in different orders must agree"
+        );
+    }
+}

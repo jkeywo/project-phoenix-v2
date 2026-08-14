@@ -100,6 +100,9 @@ pub mod content_ledger;
 /// world both a native test and the browser drive, under deliberately
 /// different frame pacing, folding the canonical digest at shared ticks.
 pub mod cross_target_probe;
+/// Infrastructure condition + capacity on authored world furniture (issue
+/// #1025): the pure degradation/repair track and its Bevy adapter.
+pub mod infrastructure;
 pub mod radar;
 pub mod radar_config;
 pub mod ship_plugin;

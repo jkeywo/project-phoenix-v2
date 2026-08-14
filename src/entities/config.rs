@@ -4355,6 +4355,13 @@ pub struct EntityConfig {
     pub shape: Option<RegionShape>,
     /// Region effects section — present for region entities with effects.
     pub effects: Option<RegionEffectsConfig>,
+    /// Infrastructure condition + capacity (issue #1025). Present for authored
+    /// world furniture — skyhooks, fuel depots, transfer platforms — that
+    /// degrades and is repaired over a mission and publishes named capacities.
+    /// Absent for everything else, which behaves exactly as it did before this
+    /// section existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub infrastructure: Option<crate::infrastructure::InfrastructureConfig>,
     /// Optional faction UUID this entity belongs to.
     #[serde(default)]
     pub faction: Option<Uuid>,
@@ -4694,6 +4701,16 @@ impl EntityConfig {
                     "region entity has effects but no [shape] section",
                 ));
             }
+        }
+
+        // Validation: an [infrastructure] table has to describe a track that
+        // can actually degrade (issue #1025). A ceiling of zero, a threshold
+        // authored in points rather than fractions, an inverted hysteresis
+        // band, or two capacities sharing an id are all author mistakes whose
+        // only other symptom would be a structure that silently never crosses
+        // anything.
+        if let Some(ref infrastructure) = config.infrastructure {
+            infrastructure.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [radar_appearance] table must declare at least one

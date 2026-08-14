@@ -194,6 +194,15 @@ pub enum ActionCmd {
     ResetTrigger { id: String },
     /// Mark an objective failed. A no-op for unknown / non-Active ids.
     FailObjective { id: String },
+    /// Move the named entity's infrastructure condition by `delta` points —
+    /// negative degrades, positive repairs (issue #1025).
+    ///
+    /// `entity` is the world's authored entity NAME, not a UUID: the applier
+    /// resolves it against `WorldContentRuntime::name_to_uuid` and *queues* the
+    /// delta rather than applying it on the spot, so every condition move lands
+    /// in the one system that owns operational-flag edges. A timed field-repair
+    /// operation applies one small slice of this per tick.
+    AdjustInfrastructureCondition { entity: String, delta: f32 },
     /// Add or update a float modifier on the entity with `uuid`.
     ApplyModifier {
         uuid: String,

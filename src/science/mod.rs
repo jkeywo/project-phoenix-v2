@@ -24,8 +24,8 @@ pub mod scan;
 pub mod server;
 
 pub use scan::{
-    derive, quantise, ScanBandConfig, ScanConditions, ScanConfig, ScanReading, ScanRefusal,
-    ScanSubject,
+    derive, quantise, scanned_flag, ScanBandConfig, ScanConditions, ScanConfig, ScanReading,
+    ScanRefusal, ScanSubject,
 };
 pub use server::{
     publish_scan_blackboard, scan_blackboard_key, tick_scans, ScanSaveState, SciencePlugin,

@@ -39,6 +39,23 @@
 //! `AdmittedCommands` is cleared and refilled once per tick, before
 //! `SimSet::Input`, so a `Modifiers` reader sees the whole tick's set.
 //!
+//! # The one place a reading becomes something a scenario can see (issue #1038)
+//!
+//! [`tick_scans`] is also where [`scanned_flag`] is mirrored into the base-world
+//! flag store, for [`tick_infrastructure_condition`]'s reason spelled out at
+//! length in `infrastructure/server.rs`: a fact is only observable if the code
+//! that produces it is also the code that mirrors it, so there is **one write
+//! site** rather than a second system re-deriving "has this been scanned" from
+//! the record a tick later. Like a threshold crossing, the flag is written here
+//! and a `FlagSet` is pushed onto `WorldContentRuntime::pending_world_events`,
+//! which `collect_world_events` drains at the top of the next tick's
+//! `SimSet::Physics` — so an `on_flag_set` hook fires one tick after the reading
+//! lands, on the same one-tick bridge #1025's crossings ride.
+//!
+//! Nothing new is registered by that: the flag store is state the world plugin
+//! already owns, snapshots and censuses. See [`scanned_flag`] for why the flag
+//! exists when the reading is already stored, and why it latches.
+//!
 //! # Determinism
 //!
 //! Ships are walked in UUID order, never archetype order, and the subject is
@@ -58,9 +75,11 @@ use crate::messages::{
 };
 use crate::operations::RegionEffectName;
 use crate::science::scan::{
-    derive, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject,
+    derive, scanned_flag, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject,
 };
 use crate::ship::power::ShipPowerSystem;
+use crate::world::content::WorldEvent;
+use crate::world::server::WorldContentRuntime;
 
 /// The blackboard channel key a ship's last scan is published under.
 ///
@@ -181,9 +200,13 @@ impl Plugin for SciencePlugin {
 /// it is asked to scan, so it gets the record holding
 /// [`ScanRefusal::NotCapable`] rather than having the command dropped on the
 /// floor.
+///
+/// Every reading that comes back also raises the subject's [`scanned_flag`] —
+/// see the module docs for why the mirror is written here and nowhere else.
 #[allow(clippy::too_many_arguments)]
 pub fn tick_scans(
     tick: Option<Res<crate::sim_tick::SimTick>>,
+    mut runtime: Option<ResMut<WorldContentRuntime>>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     mut ships: Query<
         (
@@ -290,6 +313,7 @@ pub fn tick_scans(
                     );
                     record.last = Some(reading);
                     record.refusal = None;
+                    mirror_scanned(runtime.as_deref_mut(), &target_uuid, &log);
                 }
                 Err(refusal) => {
                     crate::pdebug!(
@@ -305,6 +329,42 @@ pub fn tick_scans(
             }
         }
     }
+}
+
+/// Latch "this crew have read that structure" into the base-world flag store,
+/// and queue the world event a scenario hangs its beat on.
+///
+/// The transition is decided from the store's own `(before, after)` rather than
+/// from "this is a scan", which is
+/// [`mirror_flags`](crate::infrastructure::server) exactly: re-scanning the same
+/// structure is an ordinary thing for a crew to do and must not emit a second
+/// `FlagSet` for a bit that was already up, in the same way a re-append of a
+/// finding is a no-op in [`EvidenceLog`](crate::dossier::EvidenceLog).
+///
+/// A world with no `WorldContentRuntime` — every bare-`App` fixture — takes the
+/// `None` arm and scans exactly as it did before this existed.
+fn mirror_scanned(
+    runtime: Option<&mut WorldContentRuntime>,
+    subject_uuid: &str,
+    log: &Option<Res<LogFilterConfig>>,
+) {
+    let Some(runtime) = runtime else {
+        return;
+    };
+    let flag = scanned_flag(subject_uuid);
+    let (before, after) = runtime.flags.set_flag(&flag);
+    if (before != 0) == (after != 0) {
+        return;
+    }
+    crate::pdebug!(
+        log,
+        crate::logging::LogCat::Sensors,
+        "scan mirror: {flag} raised — this crew have now read {subject_uuid}"
+    );
+    runtime.pending_world_events.push(WorldEvent::FlagSet {
+        name: flag,
+        origin_layer: None,
+    });
 }
 
 /// The subject's published condition track, paired with the labels its scenario
@@ -465,6 +525,11 @@ mod tests {
     fn app_with(config: ScanConfig, condition: f32, depot_x: f32) -> (App, Entity) {
         let mut app = App::new();
         app.add_systems(Update, (tick_scans, publish_scan_blackboard).chain());
+        // The world's flag store, so the mirror (issue #1038) has somewhere to
+        // land. Every test in this module reads it or ignores it; the one below
+        // that builds its own bare `App` deliberately leaves it out, which is
+        // the `None` arm every fixture in the crate takes.
+        app.insert_resource(WorldContentRuntime::default());
         let ship = app
             .world_mut()
             .spawn((
@@ -730,6 +795,108 @@ mod tests {
         };
         assert_eq!(bb.refusal.as_deref(), Some("scan.refusal.no_such_target"));
         assert!(bb.reading.is_none());
+    }
+
+    // ── The mirror flag (issue #1038) ───────────────────────────────────────
+
+    fn runtime(app: &App) -> &WorldContentRuntime {
+        app.world().resource::<WorldContentRuntime>()
+    }
+
+    /// Every `FlagSet` this run has queued, in order.
+    fn queued_flag_sets(app: &App) -> Vec<String> {
+        runtime(app)
+            .pending_world_events
+            .iter()
+            .filter_map(|e| match e {
+                WorldEvent::FlagSet { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **Issue #1038's engine seam.** A reading that comes back raises the
+    /// subject's own `scan.<uuid>.taken` in the world flag store and queues the
+    /// `FlagSet` a scenario's `on_flag_set` hook fires from.
+    #[test]
+    fn a_reading_that_comes_back_raises_the_subjects_scanned_flag() {
+        let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+        assert_eq!(runtime(&app).flags.counter(&scanned_flag(DEPOT)), 0);
+
+        ask_for_scan(&mut app, ship, DEPOT);
+        app.update();
+
+        assert_eq!(
+            runtime(&app).flags.counter(&scanned_flag(DEPOT)),
+            1,
+            "the crew have now read this structure, and a script can ask so"
+        );
+        assert_eq!(queued_flag_sets(&app), vec![scanned_flag(DEPOT)]);
+    }
+
+    /// It LATCHES. A second reading of the same structure does not queue a
+    /// second event — an ordinary re-scan must not re-fire a beat — and reading
+    /// something else afterwards does not unlearn the first.
+    #[test]
+    fn re_scanning_raises_nothing_twice_and_scanning_elsewhere_unlearns_nothing() {
+        let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+        app.world_mut().spawn((
+            EntityUuid("depot-2".to_string()),
+            Transform::from_xyz(120.0, 0.0, 0.0),
+            EntityName("world.probe.entity.other.name".to_string()),
+            depot_condition(55.0),
+        ));
+
+        ask_for_scan(&mut app, ship, DEPOT);
+        app.update();
+        ask_for_scan(&mut app, ship, DEPOT);
+        app.update();
+        ask_for_scan(&mut app, ship, "depot-2");
+        app.update();
+
+        assert_eq!(
+            queued_flag_sets(&app),
+            vec![scanned_flag(DEPOT), scanned_flag("depot-2")],
+            "one event per structure the crew have read, however often they read it"
+        );
+        assert_eq!(
+            runtime(&app).flags.counter(&scanned_flag(DEPOT)),
+            1,
+            "the console's `last` reading has moved on to the other depot; what \
+             the crew KNOW they have looked at has not"
+        );
+    }
+
+    /// A refusal raises nothing. Being told there is nothing to read is not
+    /// having read it, and a scenario that fired its comparison off a refused
+    /// scan would be firing off "the player pressed the button".
+    #[test]
+    fn a_refused_scan_raises_no_flag_for_the_thing_it_could_not_read() {
+        use crate::infrastructure::{InfrastructureConfig, InfrastructureState};
+
+        let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+        app.world_mut().spawn((
+            EntityUuid("sealed-1".to_string()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            EntityName("world.probe.entity.sealed.name".to_string()),
+            InfrastructureCondition(InfrastructureState::from_config(&InfrastructureConfig {
+                condition_max: 100.0,
+                condition: Some(31.0),
+                publish: false,
+                ..InfrastructureConfig::default()
+            })),
+        ));
+
+        ask_for_scan(&mut app, ship, "sealed-1");
+        app.update();
+        ask_for_scan(&mut app, ship, "not-in-this-world");
+        app.update();
+
+        assert_eq!(runtime(&app).flags.counter(&scanned_flag("sealed-1")), 0);
+        assert!(
+            queued_flag_sets(&app).is_empty(),
+            "neither refusal is an act of reading"
+        );
     }
 
     /// The save projection carries the reading and the refusal and leaves the

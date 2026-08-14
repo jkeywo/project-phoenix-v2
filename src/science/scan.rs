@@ -411,6 +411,51 @@ pub struct ScanReading {
     pub capacities: Vec<(String, i64)>,
 }
 
+// ── The mirror flag: that the crew went and looked ───────────────────────────
+
+/// The world flag mirroring that a reading of `uuid` has come back at least
+/// once: `scan.<uuid>.taken`.
+///
+/// A free function rather than an inlined `format!` at the one write site, for
+/// [`strike_flag`](crate::world::workforce::strike_flag)'s reason: the name is a
+/// contract with scenario authors — an `on_flag_set("scan.depot_ladder_b.taken",
+/// …)` trigger is written against this exact string — and a contract stated in
+/// two places can be changed in one of them.
+///
+/// # Why a flag exists at all, when the reading is already stored
+///
+/// [`ScanReading`] is on the scanning hull's own record, where a console reads
+/// it. A **scenario** needs a different question answered: *did this crew ever
+/// go and look at that structure?* Issue #1038's scan-versus-dossier beat turns
+/// on it, and neither of the two things script could already reach answers it —
+/// a timer says how long the mission has run, and the subject's own condition
+/// flags say what is true whether anyone looked or not.
+///
+/// So this is a **mirror**, in the sense #1025's threshold flags and #1035's
+/// workforce flags are: the reading stays the authority, the flag is a
+/// derived-and-latched restatement of one bit of it, written at the same site
+/// that takes the reading so the two cannot drift. Three things fall out of
+/// spelling it as an ordinary world flag rather than as new machinery:
+///
+/// * a script reads it with the vocabulary it already has —
+///   `ctx.flags["scan.depot_ladder_b.taken"]`;
+/// * an `on_flag_set` trigger chains off the moment the reading lands, so a
+///   scenario hangs a beat on the crew's own act without a new trigger kind;
+/// * and it is in the save already, because the flag store is.
+///
+/// # It LATCHES, and that is the claim it is making
+///
+/// [`ShipScanRecord::last`](super::server::ShipScanRecord::last) holds one
+/// reading and the next scan replaces it — a console shows what is on screen
+/// now. This flag says something the console does not: that the crew *have
+/// read* this structure. Scanning something else afterwards does not unlearn
+/// it, exactly as [`EvidenceLog`](crate::dossier::EvidenceLog) never forgets a
+/// finding, so the flag is raised once and never cleared. A refusal raises
+/// nothing: being told there is nothing to read is not having read it.
+pub fn scanned_flag(uuid: &str) -> String {
+    format!("scan.{uuid}.taken")
+}
+
 /// Round a fraction to a band's reporting step.
 ///
 /// `+ - * /` and `round` only — every one of them IEEE-754 exact on every
@@ -490,6 +535,20 @@ pub fn derive(
 mod tests {
     use super::*;
     use crate::messages::InfrastructureSnapshot;
+
+    /// The mirror flag's spelling is a **contract with scenario authors** —
+    /// `falling_skyway.toml` and `probe_scandiff.toml` write
+    /// `on_flag_set("scan.depot_ladder_b.taken", …)` against it — so it is
+    /// pinned here rather than left to be re-read out of a `format!`.
+    #[test]
+    fn the_scanned_flag_is_named_after_the_subject_it_was_read_from() {
+        assert_eq!(scanned_flag("depot_ladder_b"), "scan.depot_ladder_b.taken");
+        assert_ne!(
+            scanned_flag("depot_ladder_a"),
+            scanned_flag("depot_ladder_b"),
+            "two structures do not share one 'somebody scanned something' bit"
+        );
+    }
 
     fn band(id: &str, max_range: f32, step: f32) -> ScanBandConfig {
         ScanBandConfig {

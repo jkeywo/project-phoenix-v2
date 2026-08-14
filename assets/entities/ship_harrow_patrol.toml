@@ -124,6 +124,7 @@ beam_duration_secs = 5.0
 cooldown_secs = 4.0
 shield_pierce = 0.1
 beam_color = [1.0, 0.22, 0.08, 1.0]
+marker = "phasers_port"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
   # synthesised (#885b). One unconditional rule: when the host offers the bank a
@@ -157,6 +158,7 @@ beam_duration_secs = 5.0
 cooldown_secs = 4.0
 shield_pierce = 0.1
 beam_color = [1.0, 0.22, 0.08, 1.0]
+marker = "phasers_starboard"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
   # synthesised (#885b). One unconditional rule: when the host offers the bank a

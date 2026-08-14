@@ -215,7 +215,7 @@ debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "power-reactor"
-display_name = "entity.alliance_cruiser.hull.system_hull.power_reactor.display_name"
+display_name = "system_hull.power_reactor.display_name"
 max_hp = 44
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -223,7 +223,7 @@ debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "power-battery"
-display_name = "entity.alliance_cruiser.hull.system_hull.power_battery.display_name"
+display_name = "system_hull.power_battery.display_name"
 max_hp = 29
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -231,7 +231,7 @@ debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "core"
-display_name = "entity.alliance_cruiser.hull.system_hull.core.display_name"
+display_name = "system_hull.core.display_name"
 max_hp = 58
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25

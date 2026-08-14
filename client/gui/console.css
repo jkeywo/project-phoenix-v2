@@ -589,6 +589,7 @@ body .frame { height: 100dvh; }
 .hero {
   display: flex; align-items: center; gap: 1.5rem;
   padding: 1.25rem 0 1.5rem;
+  align-self: flex-start;
 }
 .hero .bar {
   width: 0.5rem; align-self: stretch;

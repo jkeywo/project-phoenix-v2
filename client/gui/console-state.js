@@ -710,7 +710,7 @@ export function buildWeaponsConsoleState(state) {
  *             red_alert_auto: boolean, viewscreen_system_id: string,
  *             viewscreen_auto: boolean, view_direction: string,
  *             camera_views: Array, view_mode: string, objectives: Array,
- *             boosted_objective_id: string|null,
+ *             boosted_objective_id: string|null, deadlines: Array,
  *             hull_integrity_pct: number, game_status: string,
  *             blips: RadarBlip[],
  *             own_hull: StationHullAggregate }} CaptainConsolePayload
@@ -735,6 +735,9 @@ export function buildCaptainConsoleState(state) {
       camera_views:          bb.camera_views           ?? [],
       objectives:            bb.objectives             ?? [],
       boosted_objective_id:  bb.boosted_objective_id   ?? null,
+      // Visible mission deadlines, already counted down server-side against the
+      // authoritative SimTick (issue #1024) — the client formats, never clocks.
+      deadlines:             bb.deadlines              ?? [],
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
@@ -758,6 +761,9 @@ export function buildCaptainConsoleState(state) {
     camera_views:          state.cameraViews || [],
     objectives:            state.objectives  || [],
     boosted_objective_id:  null,
+    // No blackboard, no deadlines: the legacy fallback has no wire source for
+    // them, and an empty list renders the panel's own empty state.
+    deadlines:             [],
     hull_integrity_pct:    state.hullPct     || 100,
     game_status:           state.redAlert
                              ? 'RED ALERT — All hands to battlestations.'

@@ -8,23 +8,23 @@ description = "entity.planet_lava.target.description"
 
 [collider]
 shape = "Ball"
-radius = 15.0
+radius = 22.5
 length = 0.0
 
 [radar_appearance]
 colour = [1.0, 0.4, 0.1]
-size = 15.0
+size = 22.5
 icon = "planet"
 
 # Procedural fallback for headless/editor contexts; [planet] wins on the
 # viewscreen.
 [mesh]
 shape = "sphere"
-radius = 15.0
+radius = 22.5
 colour = [0.6, 0.2, 0.1]
 
 [planet]
-radius = 15.0
+radius = 22.5
 longitude_segments = 128
 latitude_segments = 64
 

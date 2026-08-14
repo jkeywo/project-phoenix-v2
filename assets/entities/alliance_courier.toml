@@ -99,7 +99,7 @@ target_speed  = 0.0
 # authors those entries; these four simply never trigger it.
 [[hull.system_hull]]
 system_id = "core"
-display_name = "entity.alliance_courier.hull.system_hull.core.display_name"
+display_name = "system_hull.core.display_name"
 max_hp = 32
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -139,7 +139,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "power-reactor"
-display_name = "entity.alliance_courier.hull.system_hull.power_reactor.display_name"
+display_name = "system_hull.power_reactor.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -147,7 +147,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "power-battery"
-display_name = "entity.alliance_courier.hull.system_hull.power_battery.display_name"
+display_name = "system_hull.power_battery.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25

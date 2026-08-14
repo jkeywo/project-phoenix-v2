@@ -8,16 +8,16 @@ description = "entity.star_sun.target.description"
 
 [collider]
 shape = "Ball"
-radius = 50.0
+radius = 75.0
 length = 0.0
 
 [radar_appearance]
 colour = [1.0, 0.85, 0.3]
-size = 50.0
+size = 75.0
 icon = "star"
 
 [star]
-radius = 50.0
+radius = 75.0
 longitude_segments = 64
 latitude_segments = 32
 surface_colour = [1.0, 0.72, 0.12]

@@ -8,23 +8,23 @@ description = "entity.planet_gas_giant.target.description"
 
 [collider]
 shape = "Ball"
-radius = 50.0
+radius = 75.0
 length = 0.0
 
 [radar_appearance]
 colour = [0.9, 0.7, 0.5]
-size = 50.0
+size = 75.0
 icon = "planet"
 
 # Procedural fallback for headless/editor contexts; [planet] wins on the
 # viewscreen.
 [mesh]
 shape = "sphere"
-radius = 50.0
+radius = 75.0
 colour = [0.8, 0.6, 0.4]
 
 [planet]
-radius = 50.0
+radius = 75.0
 longitude_segments = 192
 latitude_segments = 96
 

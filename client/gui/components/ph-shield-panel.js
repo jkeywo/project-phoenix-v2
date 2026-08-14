@@ -28,8 +28,10 @@ export class PhShieldPanel extends HTMLElement {
     .hull-row .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .hull-row .val { min-width: 3rem; text-align: right; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 0.9rem; }
     .facings { display: flex; flex-direction: column; gap: 0.25rem; }
-    .facing-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.6rem; }
+    .facing-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.6rem; border-left: 2px solid transparent; padding-left: 0.3rem; }
+    .facing-row.focused { border-left-color: var(--loaded); background: rgba(78,200,112,0.08); }
     .facing-row .lbl { color: var(--ink-dim); min-width: 2.5rem; letter-spacing: 0.15em; }
+    .facing-row.focused .lbl { color: var(--ink); font-weight: 600; }
     .facing-row .bar-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); position: relative; overflow: hidden; }
     .facing-row .bar-wrap .fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.5s ease; }
     .facing-row .bar-wrap .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
@@ -105,19 +107,21 @@ export class PhShieldPanel extends HTMLElement {
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
+    const focused = s.focused_facing || null;
     facings.forEach(f => {
       const key = f.label || '';
       const pct = f.max_hp > 0 ? Math.round(f.hp / f.max_hp * 100) : 0;
       const cls = !f.online ? 'down' : pct > 60 ? '' : pct > 25 ? 'warn' : 'crit';
       const pctLabel = !f.online ? t('component.shield_facings.off') : pct + '%';
+      const isFocused = focused === f.label;
       let row = this.#facingCache.get(key);
       if (!row) {
         row = document.createElement('div');
-        row.className = 'facing-row';
         row.innerHTML = '<span class="lbl"></span><div class="bar-wrap"><div class="fill"></div></div><span class="pct"></span>';
         this.#facingCache.set(key, row);
         container.appendChild(row);
       }
+      row.className = 'facing-row' + (isFocused ? ' focused' : '');
       row.children[0].textContent = (f.label || '?').substring(0, 4).toUpperCase();
       row.children[1].firstChild.className = 'fill ' + cls;
       row.children[1].firstChild.style.width = pct + '%';

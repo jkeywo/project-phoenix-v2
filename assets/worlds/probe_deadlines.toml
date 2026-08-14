@@ -1,0 +1,109 @@
+# Probe world for issue #1024 — named mission deadlines, end to end.
+#
+# A player Alliance destroyer (AI-backfilled in a headless run) sits alone; no
+# combat is involved on purpose. This is a deterministic tripwire for the whole
+# deadline path — `[[deadline]]` parse → `on_deadline` pairing → arming onto the
+# EXISTING `pending_callbacks` queue → `ctx.deadlines` inspection → slip/cancel
+# re-keying that queue → firing on a `SimTick`.
+#
+# The authored timeline, in mission seconds:
+#
+#   t=2   `adjust` runs. It reads `window_opens`' remaining time (8 s: authored
+#         for 10, two seconds in), SLIPS it by 5, and CANCELS
+#         `stabiliser_failure`.
+#   t=4   `first_warning` fires. Not slipped, not cancelled, not visible — the
+#         control, proving arming works and that `visible = false` keeps a
+#         deadline off the crew's panel without keeping it off the clock.
+#   t=10  NOTHING. `window_opens`' authored time passes with its queued call
+#         retracted. This is the assertion the whole slice turns on.
+#   t=12  NOTHING. `stabiliser_failure`'s authored time passes; it was cancelled.
+#   t=15  `window_opens` fires, at 10 + 5.
+#
+# Every handler increments a counter flag, so the headless test reads fire ORDER
+# and fire COUNT out of the flag store rather than out of a log line, and
+# `window_remaining_at_adjust` records what script read back mid-run.
+#
+# BASELINE (this world is new in #1024, so this is its first recorded digest):
+# `--seed 42 --ticks 900` gives final digest 0xc419b89426b6013c
+# (14130528252295774524). Measured on a clean tree at the commit that added this
+# line. It is a NEW number, not a preserved one — nothing to compare it against
+# yet — so it is written down here to be the thing a later change is A/B'd
+# against, the way the shipped worlds' digests already are.
+
+[global]
+seed = 1024
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The named deadlines ──────────────────────────────────────────────────────
+# Authored data only: id, crew-facing label (a strings.csv id, never English),
+# due time in whole seconds from mission start, and whether the crew sees it.
+# The fn each one runs is named by `on_deadline` in the [script] block below.
+
+[[deadline]]
+id = "window_opens"
+label = "world.probe_deadlines.deadline.window_opens.label"
+due_secs = 10
+visible = true
+
+[[deadline]]
+id = "stabiliser_failure"
+label = "world.probe_deadlines.deadline.stabiliser_failure.label"
+due_secs = 12
+visible = true
+
+# Deliberately invisible: it still arms, still fires, and still runs its handler
+# — it simply never reaches the captain's panel.
+[[deadline]]
+id = "first_warning"
+label = "world.probe_deadlines.deadline.first_warning.label"
+due_secs = 4
+visible = false
+
+[script]
+setup = """
+on_timer(2, "adjust");
+
+on_deadline("window_opens", "on_window_opens");
+on_deadline("stabiliser_failure", "on_stabiliser_failure");
+on_deadline("first_warning", "on_first_warning");
+
+// The mutation beat. Reads a deadline back before touching it — the
+// inspectability half — then moves one and calls the other off.
+fn adjust(ctx) {
+    ctx.flags.increment("window_remaining_at_adjust", ctx.deadlines.remaining("window_opens"));
+    ctx.deadlines.slip("window_opens", 5);
+    ctx.deadlines.cancel("stabiliser_failure");
+    // Read-after-write within the one call: both must already report the new
+    // state to the rest of this handler.
+    ctx.flags.increment("window_remaining_after_slip", ctx.deadlines.remaining("window_opens"));
+    if ctx.deadlines.state("stabiliser_failure") == "cancelled" {
+        ctx.flags.increment("stabiliser_reads_cancelled", 1);
+    }
+}
+
+fn on_window_opens(ctx) {
+    ctx.flags.increment("window_fired", 1);
+    // A deadline's own handler sees its state as fired while it runs.
+    if ctx.deadlines.state("window_opens") == "fired" {
+        ctx.flags.increment("window_reads_fired", 1);
+    }
+}
+
+fn on_stabiliser_failure(ctx) {
+    ctx.flags.increment("stabiliser_fired", 1);
+}
+
+fn on_first_warning(ctx) {
+    ctx.flags.increment("warning_fired", 1);
+}
+"""

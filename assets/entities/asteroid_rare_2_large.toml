@@ -1,4 +1,4 @@
-name = "entity.asteroid_rare_2_large.name"
+name = "entity.asteroid.name"
 tags = ["asteroid", "gameplay", "large"]
 
 [target]

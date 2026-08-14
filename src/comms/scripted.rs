@@ -33,7 +33,7 @@ use crate::comms::server::{current_sender_in_range, CommsChannel2Event, CommsRun
 use crate::entity_spawner::EntityUuid;
 use crate::messages::{CommsMessage, GamePhase};
 use crate::world::content::WorldEvent;
-use crate::world::script::comms::{enter_node, project_node};
+use crate::world::script::comms::{enter_node, project_node, EnterError};
 use crate::world::script::schedule::{SchedClock, TickBudget};
 use crate::world::server::{
     apply_script_commands, ObjectiveManagerRes, ScriptRuntimeParams, ShipModifiersParams,
@@ -76,7 +76,7 @@ pub(crate) struct ScriptedCommsAux<'w> {
 ///    unresolvable `from` falls through to itself, which
 ///    [`current_sender_in_range`] treats as always-readable);
 /// 2. enter the root node under the tick's SHARED [`TickBudget`], gated on a
-///    pre-flight `tripped()` check;
+///    pre-flight [`can_admit`](TickBudget::can_admit) check;
 /// 3. route the call's `commands` through [`apply_script_commands`] with the
 ///    same `uuid_source` / `template_loader` / anchors bindings the trigger and
 ///    callback paths bind — so a root fn's `spawn_entity` / `add_objective`
@@ -187,12 +187,17 @@ pub(crate) fn open_scripted_comms_threads(
     let runtime = &mut *runtime;
 
     for req in requests {
-        // A tripped budget refuses every remaining call this tick by contract, so
+        // A spent budget refuses every remaining call this tick by contract, so
         // stop here rather than logging once per request. Deterministic: the trip
         // is a pure function of the tick's call/op sequence, so every peer drops
         // the same tail. The requests are dropped, not re-queued — re-queueing a
         // refused open would let a busy tick push work forward indefinitely.
-        if sr.budget.tripped() {
+        //
+        // `can_admit()`, not `tripped()`: the call that REACHES the call cap is
+        // refused and trips the budget in one step, so a `tripped()` pre-flight
+        // passes on a call that is about to be dropped — and the drop would then
+        // surface below as the misleading "root fn returned no node".
+        if !sr.budget.can_admit() {
             bevy::log::warn!(
                 target: crate::logging::LogCat::World.target(),
                 "open_scripted_comms_threads: the tick's script budget is spent; \
@@ -211,12 +216,29 @@ pub(crate) fn open_scripted_comms_threads(
         } else {
             req.from.clone()
         };
-        let sender_name = req.display_name.clone().unwrap_or(channel_name);
         let sender_uuid = runtime
             .name_to_uuid
             .get(&req.from)
             .cloned()
             .unwrap_or_else(|| req.from.clone());
+        // The same three-step fallback `handle_hail` resolves a channel label
+        // with: the open's own `display_name` first, then the CONTACT's authored
+        // name (so a scripted thread from a known station is labelled the way
+        // every other message from that station is), and only then the raw
+        // reference id. Without the middle step a scripted open that omitted
+        // `display_name` showed the player an internal id where the declarative
+        // path showed a name.
+        let sender_name = req
+            .display_name
+            .clone()
+            .or_else(|| {
+                comms
+                    .contacts
+                    .iter()
+                    .find(|c| c.uuid == sender_uuid)
+                    .map(|c| c.name.clone())
+            })
+            .unwrap_or(channel_name);
 
         // Enter the root node under the tick's SHARED budget. Split
         // `WorldScriptRuntime` into disjoint field borrows so the one `&self` call
@@ -249,14 +271,26 @@ pub(crate) fn open_scripted_comms_threads(
         let Some(entered) = entered else {
             continue;
         };
-        let (effects, node) = match entered {
-            Ok(pair) => pair,
-            Err(err) => {
-                // A shape error (the fn compiled but returned the wrong thing) —
-                // authoring-facing, distinct from a script error, which
-                // `call_dialogue` already handled under the failure policy.
+        // Three outcomes, three log lines — a malformed return, an unresolvable
+        // name and a refused call are different authoring problems, and none of
+        // them is the "returned no node" case below.
+        let (effects, node, malformed) = match entered {
+            Ok((effects, node)) => (effects, node, false),
+            Err(EnterError::Shape { effects, message }) => {
+                // The call SUCCEEDED and drained its buffers; only the returned
+                // value is malformed. Its effects are applied below before the
+                // request is abandoned — see `EnterError::Shape`.
                 bevy::log::warn!(
-                    "open_scripted_comms_threads: root fn '{}' in '{}': {err}",
+                    "open_scripted_comms_threads: root fn '{}' in '{}': {message}",
+                    req.root_fn,
+                    req.script_path
+                );
+                (effects, None, true)
+            }
+            Err(err @ (EnterError::Unresolved | EnterError::Refused)) => {
+                bevy::log::warn!(
+                    "open_scripted_comms_threads: root fn '{}' in '{}' {err}; \
+                     no message injected",
                     req.root_fn,
                     req.script_path
                 );
@@ -308,9 +342,17 @@ pub(crate) fn open_scripted_comms_threads(
         sr.pending_callbacks.extend(effects.callbacks);
         sr.pending_comms_opens.extend(effects.comms_opens);
 
+        // A malformed return was already logged above; its effects have now been
+        // applied, and there is no node to show.
+        if malformed {
+            continue;
+        }
+
         // A root fn that returned `()` opened no thread — its effects still
         // applied above. Authoring error rather than a supported shape (an open
-        // with nothing to show), so it is worth a line in the log.
+        // with nothing to show), so it is worth a line in the log. Genuinely a
+        // no-node return: a budget refusal cannot reach here (the `can_admit`
+        // pre-flight above breaks the loop first).
         let Some(node) = node else {
             bevy::log::warn!(
                 "open_scripted_comms_threads: root fn '{}' returned no node; \
@@ -631,6 +673,130 @@ pub(crate) mod tests {
         assert_eq!(bodies, vec!["One.".to_string(), "Two.".to_string()]);
     }
 
+    /// Display-name parity with `handle_hail`: an open that omits
+    /// `display_name` falls back to the CONTACT's authored name, not to the raw
+    /// reference id. Every fixture above hardcodes `display_name`, which is what
+    /// hid this — a scripted thread from a known station used to label itself
+    /// with an internal id where the declarative path showed a name.
+    #[test]
+    fn an_open_without_a_display_name_falls_back_to_the_contact_name() {
+        let mut app = scripted_comms_app();
+        let mut sr = compile_fixture(AXIOM_TREE);
+        sr.pending_comms_opens.push(request("hail_axiom", "axiom"));
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert("axiom".into(), "axiom-uuid".into());
+        app.world_mut()
+            .resource_mut::<CommsRuntime>()
+            .contacts
+            .push(crate::messages::CommsContact {
+                uuid: "axiom-uuid".into(),
+                name: "Axiom Control".into(),
+                in_range: true,
+                is_urgent: false,
+            });
+        app.world_mut().insert_resource(sr);
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(
+            messages[0].sender_name, "Axiom Control",
+            "the contact's name is the fallback, exactly as handle_hail resolves it"
+        );
+    }
+
+    /// And with no contact either, the reference id is still the last resort —
+    /// the third step of the same fallback.
+    #[test]
+    fn an_open_with_neither_display_name_nor_contact_uses_the_reference_id() {
+        let mut app = scripted_comms_app();
+        let mut sr = compile_fixture(AXIOM_TREE);
+        sr.pending_comms_opens.push(request("hail_axiom", "axiom"));
+        app.world_mut().insert_resource(sr);
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages[0].sender_name, "axiom");
+    }
+
+    /// Finding 3 on the open path: a root fn that completed an objective and
+    /// then returned a malformed map keeps the objective completed. The call
+    /// SUCCEEDED and its buffers drained — only the return value is wrong, which
+    /// is a different thing from the script ERROR settled decision 10 discards
+    /// whole.
+    #[test]
+    fn a_malformed_root_return_still_applies_the_effects_it_produced() {
+        let mut app = scripted_comms_app();
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "reach_axiom",
+            "reach Axiom",
+            true,
+            vec![],
+        );
+        let mut sr = compile_fixture(
+            r#"
+            fn hail_axiom(ctx) {
+                ctx.effects.complete_objective("reach_axiom");
+                "not a node map"
+            }
+            "#,
+        );
+        sr.pending_comms_opens.push(request("hail_axiom", "axiom"));
+        app.world_mut().insert_resource(sr);
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == "reach_axiom")
+                .expect("the objective exists")
+                .status,
+            crate::messages::ObjectiveStatus::Completed,
+            "the completed objective must survive the malformed return"
+        );
+        assert!(
+            app.world()
+                .resource::<CommsInboxRes>()
+                .0
+                .messages()
+                .is_empty(),
+            "and no message is injected — there was no node to show"
+        );
+    }
+
+    /// An unresolvable root fn opens nothing and does not panic: the name is
+    /// resolved against the unit BEFORE the call, so an authoring typo is a
+    /// refusal rather than a mid-mission `CallError`.
+    #[test]
+    fn an_unresolvable_root_fn_opens_no_thread() {
+        let mut app = scripted_comms_app();
+        let mut sr = compile_fixture(AXIOM_TREE);
+        sr.pending_comms_opens
+            .push(request("hail_axium_typo", "axiom"));
+        app.world_mut().insert_resource(sr);
+
+        app.update();
+
+        assert!(app
+            .world()
+            .resource::<CommsInboxRes>()
+            .0
+            .messages()
+            .is_empty());
+        assert!(app
+            .world()
+            .resource::<CommsRuntime>()
+            .active_dialogues
+            .is_empty());
+    }
+
     /// The synthetic-sender escape, mirroring `inject_comms_templates`: an
     /// unresolvable `from` falls through to itself and stays readable, and the
     /// reserved `_self` renders as the internal-report channel.
@@ -759,9 +925,16 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
     /// The full live path: `comms_test_app`'s Input → Broadcast chain with the
     /// world-script Physics systems spliced in exactly where `CommsWorldPlugin`
     /// puts them (`collect_world_events` → `tick_trigger_pipeline` →
-    /// `open_scripted_comms_threads`, between the follow-up tick and the
-    /// channel-2 delivery). The order is total, not merely implied: every added
-    /// system is pinned against the chain it joins.
+    /// `tick_script_callbacks` → `open_scripted_comms_threads`, between the
+    /// follow-up tick and the channel-2 delivery). The order is total, not
+    /// merely implied: every added system is pinned against the chain it joins.
+    ///
+    /// `tick_script_callbacks` is in the chain because production's
+    /// `open_scripted_comms_threads` is registered `.after(` it — an open queued
+    /// by a deferred `ctx.schedule.after(n, …)` callback is materialised on the
+    /// tick it was made, and that edge is only exercised if both systems are
+    /// present. Leaving it out let the fixture pass on an ordering the shipped
+    /// schedule does not have.
     fn live_comms_app() -> App {
         let mut app = comms_test_app();
         app.init_resource::<crate::world::server::WorldEventBuffer>()
@@ -773,6 +946,7 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
                 (
                     crate::world::server::collect_world_events,
                     crate::world::server::tick_trigger_pipeline,
+                    crate::world::server::tick_script_callbacks,
                     open_scripted_comms_threads,
                 )
                     .chain()
@@ -996,6 +1170,18 @@ fn on_send(ctx) {
         assert!(
             q.iter(app.world()).any(|u| u.0 == escort_uuid),
             "and the entity must actually exist in the ECS after the response"
+        );
+        // R1's OTHER half: the id came from the REAL `WorldIdMint` the
+        // declarative arm draws from, not from a fallback mint inside the
+        // effects boundary. A fallback would leave this counter at zero while
+        // still producing a plausible-looking uuid — which is exactly the
+        // divergence that breaks structural byte-identity between peers.
+        assert_eq!(
+            app.world()
+                .resource::<crate::world_id::WorldIdMint>()
+                .minted_so_far(crate::world_id::IdNamespace::Entity),
+            1,
+            "exactly one entity id, minted from the shared tick-scoped mint"
         );
     }
 

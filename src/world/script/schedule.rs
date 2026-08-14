@@ -233,15 +233,28 @@ impl TickBudget {
         self.calls_used
     }
 
+    /// Whether the NEXT [`admit_call`](Self::admit_call) would be admitted —
+    /// pure, so a caller can pre-flight a call it must refuse *visibly* rather
+    /// than discover the refusal from an empty result (issue #984).
+    ///
+    /// [`tripped`](Self::tripped) alone is NOT that predicate and testing it
+    /// instead is the bug this exists to remove: the call that *reaches*
+    /// [`MAX_CALLS_PER_TICK`] is refused and trips the budget in the same step,
+    /// so a `tripped()` pre-flight passes on a call that is about to be
+    /// dropped. [`admit_call`](Self::admit_call) is implemented over this, so
+    /// the gate a caller tests and the gate the host applies cannot drift.
+    pub fn can_admit(&self) -> bool {
+        !self.tripped && self.calls_used < MAX_CALLS_PER_TICK
+    }
+
     /// Reserve a call slot. Returns `false` — dropping the call — when the tick
     /// is already tripped or the call cap [`MAX_CALLS_PER_TICK`] is reached.
     /// Reaching the cap trips the budget so every following call this tick is
     /// dropped too.
     pub fn admit_call(&mut self) -> bool {
-        if self.tripped {
-            return false;
-        }
-        if self.calls_used >= MAX_CALLS_PER_TICK {
+        if !self.can_admit() {
+            // Reaching the cap trips the budget (an already-tripped one simply
+            // stays tripped), so every following call this tick is dropped too.
             self.tripped = true;
             return false;
         }
@@ -549,6 +562,32 @@ mod tests {
         assert!(
             !budget.admit_call(),
             "a tripped budget drops every later call"
+        );
+    }
+
+    #[test]
+    fn can_admit_agrees_with_admit_call_at_every_step() {
+        // The pre-flight predicate and the gate must never disagree — including
+        // on the call that REACHES the cap, which `tripped()` alone gets wrong.
+        let mut budget = TickBudget::new();
+        for _ in 0..MAX_CALLS_PER_TICK + 2 {
+            let predicted = budget.can_admit();
+            assert_eq!(
+                predicted,
+                budget.admit_call(),
+                "can_admit must predict admit_call exactly"
+            );
+        }
+        // And the specific case the pre-flight used to miss: at the cap, the
+        // budget has NOT tripped yet, but the next call will be refused.
+        let mut budget = TickBudget::new();
+        for _ in 0..MAX_CALLS_PER_TICK {
+            assert!(budget.admit_call());
+        }
+        assert!(!budget.tripped(), "reaching the cap exactly does not trip");
+        assert!(
+            !budget.can_admit(),
+            "but the next call is already refused — what `tripped()` could not see"
         );
     }
 

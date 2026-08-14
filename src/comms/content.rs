@@ -110,11 +110,16 @@ pub struct ActiveDialogue {
 /// The script half of an [`ActiveDialogue`] — what a scripted thread needs to
 /// answer the next `RespondToMessage` (issue #984).
 ///
-/// Strings only, so the dialogue state round-trips through a save (issue #864)
-/// exactly as [`OpenCommsRequest`] does: no `AST`, no closure, no `Entity`. A
-/// restore binds against `WorldScriptRuntime::content_hash`, so a save whose
+/// Strings only, so the dialogue state *can* round-trip through a save (issue
+/// #864) exactly as [`OpenCommsRequest`] does: no `AST`, no closure, no
+/// `Entity`. Nothing snapshots it YET — neither `CommsRuntime::active_dialogues`
+/// nor `WorldScriptRuntime::pending_comms_opens` is in the snapshot today, so a
+/// save taken mid-thread reloads without it. When #864's comms slice (S8) lands,
+/// a restore will bind against `WorldScriptRuntime::content_hash` so a save whose
 /// scripts changed refuses rather than resolving `node_fn` against a different
-/// tree.
+/// tree. Both fields must join the snapshot together: a restored
+/// `pending_comms_opens` without its `active_dialogues` would re-open threads the
+/// player had already answered.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptedDialogue {
     /// Content-relative path of the unit defining this thread's node fns — the

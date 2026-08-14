@@ -195,6 +195,60 @@ pub fn project_node(node: &ScriptDialogueNode) -> (CommsDialogueNode, Vec<String
     )
 }
 
+/// Why [`enter_node`] produced no node — the three ways short of "the fn ran and
+/// returned a well-shaped node or `()`" (issue #984).
+///
+/// Distinct variants because the consumers owe the player different things: a
+/// pick that produced nothing must be REFUSED visibly (the control flashes red)
+/// rather than recorded as though the thread ended, and the log line has to name
+/// which of these happened or an authoring typo reads as a budget problem.
+#[derive(Debug)]
+pub enum EnterError {
+    /// The fn RAN — buffering effects and flag writes, which are handed back
+    /// here — and then returned a value that is neither a `#{message, responses}`
+    /// map nor `()`.
+    ///
+    /// The effects come back because the call SUCCEEDED. Settled decision 10
+    /// discards a call's buffers whole on a script ERROR, and the reason it can:
+    /// the buffers were never drained, so nothing was half-applied. A shape error
+    /// is the other side of that line — the fn completed, its buffers drained,
+    /// and only the *return value* is malformed. Dropping a completed
+    /// `complete_objective` because the author also mistyped the follow-up map
+    /// would silently un-apply work the script really did.
+    Shape {
+        /// Everything the call produced before its malformed return.
+        effects: CallEffects,
+        /// The authoring-facing shape complaint.
+        message: String,
+    },
+    /// `fn_name` is not defined in this unit, so the call was never ATTEMPTED.
+    ///
+    /// An unresolvable `on_pick` reaches here rather than the host's failure
+    /// policy (which would panic in dev on the resulting `CallError` and, in
+    /// release, return an empty result the caller could not tell from a terminal
+    /// response). A load-time lint is what should stop an authored typo reaching
+    /// here at all; this is the runtime backstop for names a load-time pass
+    /// cannot see.
+    Unresolved,
+    /// The call was attempted but produced nothing: the tick's [`TickBudget`]
+    /// refused it, or it raised and settled decision 10 discarded its buffers
+    /// whole.
+    Refused,
+}
+
+impl std::fmt::Display for EnterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EnterError::Shape { message, .. } => write!(f, "{message}"),
+            EnterError::Unresolved => write!(f, "names no function defined in this script unit"),
+            EnterError::Refused => write!(
+                f,
+                "did not run: the tick's script budget refused it, or it raised"
+            ),
+        }
+    }
+}
+
 /// Enter a dialogue node: run the fn named `fn_name` and materialize both
 /// everything it produced ([`CallEffects`] — immediate effects in authored
 /// order, delayed effects, deferred callbacks) and the node it returned.
@@ -212,6 +266,11 @@ pub fn project_node(node: &ScriptDialogueNode) -> (CommsDialogueNode, Vec<String
 /// scheduled — a delayed comms reply is authored as
 /// `ctx.schedule.after(n, |ctx| …)`, so both are load-bearing rather than
 /// ceremonial.
+///
+/// `Ok` means the fn ran and returned a node (`Some`) or ended the thread
+/// (`None`). Every other outcome is an [`EnterError`] naming which one — see its
+/// docs for why the three are not collapsed, and why
+/// [`EnterError::Shape`] still carries the call's effects.
 pub fn enter_node(
     host: &RuntimeHost,
     budget: &mut TickBudget,
@@ -220,11 +279,25 @@ pub fn enter_node(
     path: &str,
     fn_name: &str,
     base_flags: &FlagStore,
-) -> Result<(CallEffects, Option<ScriptDialogueNode>), String> {
-    let (effects, value) =
-        host.call_dialogue(budget, clock, ast, path, fn_name, base_flags, Map::new());
-    let node = read_dialogue_node(value)?;
-    Ok((effects, node))
+) -> Result<(CallEffects, Option<ScriptDialogueNode>), EnterError> {
+    // Resolve the name against the unit BEFORE calling. `call_fn` reports a
+    // missing function as an ordinary `CallError`, which the host's failure
+    // policy turns into a dev panic mid-mission and a release no-op — neither of
+    // which a caller can distinguish from a terminal response. A name that
+    // resolves to nothing is authoring data being wrong, not the script failing,
+    // so it is answered here as a refusal the player can see.
+    if !ast.iter_functions().any(|f| f.name == fn_name) {
+        return Err(EnterError::Unresolved);
+    }
+    let Some((effects, value)) =
+        host.call_dialogue(budget, clock, ast, path, fn_name, base_flags, Map::new())
+    else {
+        return Err(EnterError::Refused);
+    };
+    match read_dialogue_node(value) {
+        Ok(node) => Ok((effects, node)),
+        Err(message) => Err(EnterError::Shape { effects, message }),
+    }
 }
 
 #[cfg(test)]
@@ -248,7 +321,7 @@ mod tests {
         ast: &rhai::AST,
         fn_name: &str,
         flags: &FlagStore,
-    ) -> Result<(CallEffects, Option<ScriptDialogueNode>), String> {
+    ) -> Result<(CallEffects, Option<ScriptDialogueNode>), EnterError> {
         let mut budget = TickBudget::new();
         enter_node(
             host,
@@ -388,7 +461,69 @@ mod tests {
         let ast = compile(r#"fn root(ctx) { 42 }"#);
         let host = RuntimeHost::new();
         let err = enter(&host, &ast, "root", &FlagStore::new()).unwrap_err();
-        assert!(err.contains("message"), "{err}");
+        assert!(matches!(err, EnterError::Shape { .. }), "{err:?}");
+        assert!(err.to_string().contains("message"), "{err}");
+    }
+
+    /// A shape error must NOT un-apply work the fn really did: the call
+    /// succeeded and its buffers drained, so its effects come back alongside the
+    /// complaint. (Settled decision 10 discards a call's buffers whole on a
+    /// script ERROR — it can, because they were never drained. A malformed
+    /// return AFTER a successful call is the other side of that line.)
+    #[test]
+    fn a_shape_error_still_returns_the_effects_the_call_produced() {
+        let ast = compile(
+            r#"fn root(ctx) {
+                ctx.effects.complete_objective("reach_axiom");
+                "not a node map"
+            }"#,
+        );
+        let host = RuntimeHost::new();
+        let err = enter(&host, &ast, "root", &FlagStore::new()).unwrap_err();
+        let EnterError::Shape { effects, .. } = err else {
+            panic!("expected a shape error, got {err:?}");
+        };
+        assert_eq!(
+            cmds(&effects),
+            vec![ActionCmd::CompleteObjective {
+                id: "reach_axiom".into()
+            }],
+            "the completed objective must survive the malformed return"
+        );
+    }
+
+    /// An unresolvable `on_pick` is answered as a refusal, not as a `CallError`
+    /// (which the failure policy would turn into a dev panic mid-mission and a
+    /// release result indistinguishable from a terminal response).
+    #[test]
+    fn a_fn_name_that_resolves_to_nothing_is_unresolved_not_a_panic() {
+        let ast = compile(r#"fn root(ctx) { #{ message: "hi", responses: [] } }"#);
+        let host = RuntimeHost::new();
+        let err = enter(&host, &ast, "no_such_fn", &FlagStore::new()).unwrap_err();
+        assert!(matches!(err, EnterError::Unresolved), "{err:?}");
+    }
+
+    /// A budget-refused call is `Refused`, NOT a terminal `Ok((empty, None))` —
+    /// the distinction the player's rejection feedback rides on.
+    #[test]
+    fn a_budget_refused_call_is_refused_not_terminal() {
+        let ast = compile(r#"fn root(ctx) { }"#);
+        let host = RuntimeHost::new();
+        let mut budget = TickBudget::new();
+        for _ in 0..crate::world::script::MAX_CALLS_PER_TICK {
+            budget.admit_call();
+        }
+        let err = enter_node(
+            &host,
+            &mut budget,
+            &SchedClock::ZERO,
+            &ast,
+            PATH,
+            "root",
+            &FlagStore::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, EnterError::Refused), "{err:?}");
     }
 
     // ── parity: scripted thread == TOML thread, same ActionCmds (issue #982) ──

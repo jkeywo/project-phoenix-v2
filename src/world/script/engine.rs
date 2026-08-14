@@ -307,14 +307,25 @@ impl RuntimeHost {
     /// comms reply is authored as `ctx.schedule.after(n, …)`); and the same
     /// settled-decision-10 failure policy — on a script error it **panics in dev**
     /// (`debug_assertions`) and, in release, discards this call's effects whole,
-    /// logs, and returns `(empty, ())` so the game continues.
+    /// logs, and returns `None` so the game continues.
     ///
-    /// A refused call returns empty effects and `()`, which is also what a
-    /// terminal dialogue fn with no effects returns. A caller that must tell the
-    /// player its response was dropped (issue #984 R5) therefore reads the budget
-    /// rather than the return value: every refusal leaves the budget
-    /// [`tripped`](TickBudget::tripped), so testing that BEFORE the call is the
-    /// cheap pre-flight gate the comms path uses.
+    /// # `None` is not `()` (issue #984)
+    ///
+    /// A dialogue fn that returns `()` is a TERMINAL response — a real, authored
+    /// outcome. A call that never ran (refused by the budget, or discarded by the
+    /// failure policy) produced no outcome at all. Returning `(empty, ())` for
+    /// both made them indistinguishable, so a refused pick was recorded as though
+    /// the player had ended the thread. The `Option` is that distinction:
+    /// `Some((effects, value))` means the fn RAN and `value` is what it returned;
+    /// `None` means it did not, and the caller must tell the player its response
+    /// was dropped (issue #984 R5) rather than advance the thread.
+    ///
+    /// A caller that wants to refuse *before* spending the attempt pre-flights
+    /// with [`can_admit`](TickBudget::can_admit) — the same predicate
+    /// [`admit_call`](TickBudget::admit_call) is implemented over, so the two
+    /// cannot disagree. (`tripped()` is NOT that predicate: the call that reaches
+    /// the call cap is refused and trips the budget in one step, so a `tripped()`
+    /// pre-flight passes on a call that is about to be dropped.)
     pub fn call_dialogue(
         &self,
         budget: &mut TickBudget,
@@ -324,15 +335,15 @@ impl RuntimeHost {
         fn_name: &str,
         base_flags: &FlagStore,
         extra: Map,
-    ) -> (CallEffects, rhai::Dynamic) {
+    ) -> Option<(CallEffects, rhai::Dynamic)> {
         if !budget.admit_call() {
             // Dropped: the call cap is reached or the tick has already tripped.
-            return (CallEffects::default(), rhai::Dynamic::UNIT);
+            return None;
         }
         match self.try_call_returning(clock, ast, path, fn_name, base_flags, extra) {
             Ok((effects, value, ops)) => {
                 budget.charge_ops(ops);
-                (effects, value)
+                Some((effects, value))
             }
             Err(err) => {
                 // Charge the operations the failed call still consumed, exactly as
@@ -347,7 +358,7 @@ impl RuntimeHost {
                     target: crate::logging::LogCat::World.target(),
                     "{err}; discarding this dialogue call's effects"
                 );
-                (CallEffects::default(), rhai::Dynamic::UNIT)
+                None
             }
         }
     }
@@ -599,41 +610,40 @@ mod tests {
             )
             .expect("compiles");
         let mut budget = TickBudget::new();
-        let (effects, node) = host.call_dialogue(
-            &mut budget,
-            &SchedClock::ZERO,
-            &ast,
-            "t.rhai",
-            "node",
-            &FlagStore::new(),
-            Map::new(),
-        );
+        let (effects, node) = host
+            .call_dialogue(
+                &mut budget,
+                &SchedClock::ZERO,
+                &ast,
+                "t.rhai",
+                "node",
+                &FlagStore::new(),
+                Map::new(),
+            )
+            .expect("an admitted call runs");
         assert_eq!(effects.commands.len(), 1);
         assert!(!node.is_unit());
         assert_eq!(budget.calls_used(), 1, "a dialogue call takes a call slot");
         assert!(budget.ops_used() > 0, "and charges its operations");
 
-        // Exhaust the call cap, then a dialogue call is refused cleanly: empty
-        // effects, a unit return, and the buffered effects discarded.
+        // Exhaust the call cap, then a dialogue call is refused cleanly: `None`,
+        // which is what distinguishes it from a terminal fn returning `()`.
         for _ in 0..crate::world::script::MAX_CALLS_PER_TICK {
             budget.admit_call();
         }
-        let (refused, node) = host.call_dialogue(
-            &mut budget,
-            &SchedClock::ZERO,
-            &ast,
-            "t.rhai",
-            "node",
-            &FlagStore::new(),
-            Map::new(),
-        );
         assert!(
-            refused.commands.is_empty()
-                && refused.delayed.is_empty()
-                && refused.callbacks.is_empty(),
-            "a dialogue call over the cap is dropped whole"
+            host.call_dialogue(
+                &mut budget,
+                &SchedClock::ZERO,
+                &ast,
+                "t.rhai",
+                "node",
+                &FlagStore::new(),
+                Map::new(),
+            )
+            .is_none(),
+            "a dialogue call over the cap is dropped whole and reported as such"
         );
-        assert!(node.is_unit(), "and returns no node");
         assert!(budget.tripped(), "the refusal leaves the budget tripped");
     }
 

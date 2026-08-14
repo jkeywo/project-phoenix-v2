@@ -579,16 +579,29 @@ pub(crate) fn handle_respond_to_message(
                 reject(&mut aux.outbox, message_id, *response_index);
                 continue;
             };
-            // Issue #1050 / R5: a budget-refused call returns empty effects and
-            // `()`, which is indistinguishable from a terminal response that
-            // buffered nothing — so the refusal is detected BEFORE the call, not
-            // inferred from its return value. Every refusal leaves the budget
-            // tripped, which makes this pre-flight the whole gate. A player's
-            // pick the tick cannot afford therefore flashes the attempted
-            // control red through the SAME `reject` closure the stale,
-            // out-of-range and out-of-bounds refusals use, instead of appearing
-            // to do nothing.
-            if sr.budget.tripped() {
+            // Reset the shared budget once per tick, `SimTick`-keyed and
+            // idempotent — the same block `tick_trigger_pipeline`,
+            // `tick_script_callbacks` and `open_scripted_comms_threads` open
+            // with. This handler runs in `SimSet::Input`, BEFORE any of them, so
+            // without it the arm would read (and charge) the PREVIOUS tick's
+            // budget: a stale trip would spuriously refuse this tick's pick, and
+            // the charges it did make would land on a budget wiped moments later
+            // in `Physics` — leaving live dialogue calls effectively unbudgeted.
+            if sr.budget_tick != now_tick {
+                sr.budget = crate::world::script::schedule::TickBudget::new();
+                sr.budget_tick = now_tick;
+            }
+            // Issue #1050 / R5: a call the budget refuses produces nothing, and
+            // "nothing" is what a terminal response that buffered nothing also
+            // produces — so the refusal is caught BEFORE the call rather than
+            // inferred from its result. `can_admit()`, not `tripped()`: the call
+            // that REACHES the call cap is refused and trips the budget in one
+            // step, so a `tripped()` pre-flight passes on a pick that is about to
+            // be dropped. A player's pick the tick cannot afford therefore
+            // flashes the attempted control red through the SAME `reject` closure
+            // the stale, out-of-range and out-of-bounds refusals use, instead of
+            // appearing to do nothing.
+            if !sr.budget.can_admit() {
                 reject(&mut aux.outbox, message_id, *response_index);
                 continue;
             }
@@ -629,13 +642,20 @@ pub(crate) fn handle_respond_to_message(
                     }
                 }
             };
+            // A malformed return is refused like any other pick that produced no
+            // node — but only AFTER the effects the call really did buffer have
+            // been applied below, which is why it is carried as a flag rather
+            // than `continue`d here. An unresolvable name and a refused call
+            // produced nothing at all, so both refuse immediately.
+            let mut malformed: Option<String> = None;
             let (effects, follow_up) = match entered {
                 Some(Ok(pair)) => pair,
+                Some(Err(crate::world::script::comms::EnterError::Shape { effects, message })) => {
+                    malformed = Some(message);
+                    (effects, None)
+                }
                 Some(Err(err)) => {
-                    // A shape error: the fn compiled but returned neither a node
-                    // nor `()`. The pick produced nothing, so it is refused like
-                    // any other pick that produced nothing.
-                    bevy::log::warn!("handle_respond_to_message: on_pick '{on_pick_fn}': {err}");
+                    bevy::log::warn!("handle_respond_to_message: on_pick '{on_pick_fn}' {err}");
                     reject(&mut aux.outbox, message_id, *response_index);
                     continue;
                 }
@@ -687,9 +707,27 @@ pub(crate) fn handle_respond_to_message(
             sr.pending_callbacks.extend(effects.callbacks);
             sr.pending_comms_opens.extend(effects.comms_opens);
 
+            // The malformed-return refusal, taken here so the effects the call
+            // genuinely produced are applied first (see `EnterError::Shape`).
+            // The pick itself is refused: nothing recorded, no node injected.
+            if let Some(message) = malformed {
+                bevy::log::warn!("handle_respond_to_message: on_pick '{on_pick_fn}': {message}");
+                reject(&mut aux.outbox, message_id, *response_index);
+                continue;
+            }
+
             // Record the chosen response on the inbox message (the tail both
             // arms share).
             inbox.0.record_response(message_id, *response_index);
+            // Issue #984 finding 9, scripted threads ONLY: retire the answered
+            // node's dialogue entry so a duplicate submission on the same
+            // message id cannot re-run `on_pick` — which for a spawning or
+            // objective-mutating response would apply its effects twice. The
+            // second submission takes the stale-submission arm above instead and
+            // flashes red. The declarative arm below is deliberately untouched:
+            // its `active_dialogues` retention is the #1049 leak, shared with
+            // `handle_clear_comms`, and unpicking it is that issue's job.
+            comms.active_dialogues.remove(message_id);
 
             // Advance to the follow-up node the `on_pick` fn returned. `None` is
             // a terminal response and ends the thread — the scripted analogue of
@@ -883,6 +921,18 @@ pub(crate) fn handle_respond_to_message(
 /// An unmanned (Backfill) ship therefore never reaches this handler at all, and
 /// its latch re-arms through [`operate_comms_ai`]'s candidacy retirement
 /// instead. See [`has_open_hail_thread_with`].
+///
+/// # Known leak: `active_dialogues` (issue #1049)
+///
+/// Clearing empties the inbox and `open_hails` but NOT
+/// `CommsRuntime::active_dialogues`, so every cleared message's dialogue state
+/// stays resident for the rest of the mission — unbounded in a long scenario, and
+/// a submission against a cleared message id still resolves. Scripted threads
+/// (issue #984) inherit the leak unchanged: their `ActiveDialogue` carries a
+/// [`ScriptedDialogue`](crate::comms::content::ScriptedDialogue) and is retained
+/// the same way. Fixing it is #1049's job, deliberately not this handler's — the
+/// retention is load-bearing for the declarative follow-up path and unpicking it
+/// is a behaviour change, not a cleanup.
 pub(crate) fn handle_clear_comms(
     ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     mut inbox: ResMut<CommsInboxRes>,
@@ -4666,10 +4716,30 @@ weight = 100.0
         );
     }
 
+    /// The tick the responding `handle_respond_to_message` will read — what a
+    /// budget must be stamped with to belong to THIS tick rather than a stale
+    /// one. `advance_sim_tick` runs in `FixedLast`, so the value the handler
+    /// sees during a step is the one readable before that step runs; a fixture
+    /// with no `SimTick` at all reads 0, exactly as the handler's
+    /// `unwrap_or(0)` does.
+    fn responding_tick(app: &App) -> u64 {
+        app.world()
+            .get_resource::<crate::sim_tick::SimTick>()
+            .map(|t| t.0)
+            .unwrap_or(0)
+    }
+
     /// Issue #1050 / R5: a dialogue call refused by the tick's script budget
     /// must flash the attempted control red, not vanish. The refusal is detected
-    /// BEFORE the call, because a refused call returns exactly what a terminal
-    /// response with no effects returns.
+    /// BEFORE the call, because a refused call produces exactly what a terminal
+    /// response with no effects produces.
+    ///
+    /// The budget is stamped with the RESPONDING tick, so this proves the
+    /// refusal on a budget that genuinely belongs to this tick — not on a stale
+    /// one the handler's per-tick reset would (and now does) wipe. Before that
+    /// reset existed, this arm read the previous tick's budget and a spent one
+    /// leaked forward into a spurious rejection; setting `budget_tick` here is
+    /// what keeps the test honest about which defect it is asserting.
     #[test]
     fn a_budget_refused_scripted_response_is_rejected() {
         let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456986";
@@ -4681,6 +4751,7 @@ weight = 100.0
         // tick leaves behind.
         sr.budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
         assert!(sr.budget.tripped());
+        sr.budget_tick = responding_tick(&app);
         app.world_mut().insert_resource(sr);
         app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
             "reach_axiom",
@@ -4718,6 +4789,199 @@ weight = 100.0
             app.world().resource::<CommsInboxRes>().0.messages().len(),
             1,
             "and injected nothing"
+        );
+    }
+
+    /// The other half of the budget contract, and the defect the per-tick reset
+    /// closes: a budget left tripped by a PREVIOUS tick must not refuse this
+    /// tick's pick. This arm runs in `SimSet::Input`, ahead of every `Physics`
+    /// script system, so it is the one call site that would otherwise read a
+    /// stale budget — and its charges would land on a budget wiped later in the
+    /// same tick, leaving live dialogue calls effectively unbudgeted.
+    #[test]
+    fn a_stale_tripped_budget_does_not_refuse_this_ticks_scripted_response() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456996";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        let mut sr = crate::comms::scripted::tests::compile_fixture(DIALOGUE_TREE);
+        sr.budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
+        assert!(sr.budget.tripped());
+        // Stamped with a tick that is NOT the responding one: a spent budget
+        // belonging to the past.
+        sr.budget_tick = responding_tick(&app).wrapping_sub(1);
+        app.world_mut().insert_resource(sr);
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "reach_axiom",
+            "reach Axiom",
+            true,
+            vec![],
+        );
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_ack", "on_decline"],
+            false,
+        );
+
+        let out = respond(&mut app, &id, 0);
+
+        assert!(
+            find_rejection(&out).is_none(),
+            "last tick's spent budget must not refuse this tick's pick"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == "reach_axiom")
+                .expect("the objective exists")
+                .status,
+            crate::messages::ObjectiveStatus::Completed,
+            "the pick runs on a fresh budget"
+        );
+        // And the charge landed on THIS tick's budget, adopted by the reset.
+        let sr = app
+            .world()
+            .resource::<crate::world::server::WorldScriptRuntime>();
+        assert_eq!(sr.budget_tick, responding_tick(&app));
+        assert_eq!(sr.budget.calls_used(), 1, "the dialogue call was charged");
+    }
+
+    /// Finding 4's immediate half: an `on_pick` naming a fn that does not exist
+    /// must be DISTINGUISHABLE from a terminal response. It refuses the pick —
+    /// the control flashes red and nothing is recorded — instead of silently
+    /// killing the thread (or panicking mid-mission on the `CallError`).
+    #[test]
+    fn a_scripted_response_whose_on_pick_is_missing_is_rejected() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456997";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        app.world_mut()
+            .insert_resource(crate::comms::scripted::tests::compile_fixture(
+                DIALOGUE_TREE,
+            ));
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_typo_never_defined"],
+            false,
+        );
+
+        let out = respond(&mut app, &id, 0);
+
+        let (rejected_id, idx) =
+            find_rejection(&out).expect("an unresolvable on_pick must be rejected");
+        assert_eq!(rejected_id, id);
+        assert_eq!(idx, 0);
+        assert_eq!(
+            app.world().resource::<CommsInboxRes>().0.messages()[0].selected_response,
+            None,
+            "and the response must NOT be recorded as answered"
+        );
+    }
+
+    /// Finding 3 through the live handler: a malformed return does not un-apply
+    /// the work the fn really did. The call succeeded and its buffers drained,
+    /// so the objective it completed stays completed — while the pick itself is
+    /// still refused, because there is no node to advance to.
+    #[test]
+    fn a_malformed_on_pick_return_still_applies_the_effects_it_produced() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456998";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        app.world_mut()
+            .insert_resource(crate::comms::scripted::tests::compile_fixture(
+                r#"
+                fn on_ack(ctx) {
+                    ctx.effects.complete_objective("reach_axiom");
+                    "not a node map"
+                }
+                "#,
+            ));
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "reach_axiom",
+            "reach Axiom",
+            true,
+            vec![],
+        );
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_ack"],
+            false,
+        );
+
+        let out = respond(&mut app, &id, 0);
+
+        assert_eq!(
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == "reach_axiom")
+                .expect("the objective exists")
+                .status,
+            crate::messages::ObjectiveStatus::Completed,
+            "the completed objective must survive the malformed return"
+        );
+        assert!(
+            find_rejection(&out).is_some(),
+            "and the pick is still refused — there is no node to advance to"
+        );
+        assert_eq!(
+            app.world().resource::<CommsInboxRes>().0.messages()[0].selected_response,
+            None,
+            "so the response is not recorded either"
+        );
+    }
+
+    /// Finding 9: answering the same scripted message twice must not re-run its
+    /// `on_pick`. The answered node's dialogue entry is retired, so the second
+    /// submission takes the stale-submission arm and flashes red instead of
+    /// applying the response's effects a second time.
+    #[test]
+    fn answering_a_scripted_message_twice_does_not_re_run_its_on_pick() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456999";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        app.world_mut()
+            .insert_resource(crate::comms::scripted::tests::compile_fixture(
+                r#"fn on_ack(ctx) { ctx.flags.increment("acks", 1); }"#,
+            ));
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_ack"],
+            false,
+        );
+
+        let _ = respond(&mut app, &id, 0);
+        let after_first = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("acks");
+        let out = respond(&mut app, &id, 0);
+
+        assert_eq!(after_first, 1, "the first pick ran its on_pick once");
+        assert_eq!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter("acks"),
+            1,
+            "the second submission must not re-run it"
+        );
+        assert!(
+            find_rejection(&out).is_some(),
+            "the answered message has no active dialogue any more, so it is refused"
         );
     }
 

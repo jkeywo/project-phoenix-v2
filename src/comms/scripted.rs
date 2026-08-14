@@ -362,7 +362,7 @@ pub(crate) fn open_scripted_comms_threads(
 // -- Tests -------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::comms::content::OpenCommsRequest;
     use crate::comms::server::CommsInboxRes;
@@ -370,7 +370,10 @@ mod tests {
     use crate::world::script::engine::RuntimeHost;
     use crate::world::script::schedule::PendingCallbacks;
 
-    const PATH: &str = "fixture/scripted.toml#script.setup";
+    /// The virtual path an inline `[script] setup = …` block compiles under.
+    /// Shared with the `console::comms::server` tests that seat a scripted
+    /// dialogue, so both name the same unit.
+    pub(crate) const PATH: &str = "fixture/scripted.toml#script.setup";
 
     /// A test resolver that reads no sibling files — inline `[script]` blocks are
     /// lifted from the TOML directly and never consult a resolver.
@@ -383,7 +386,7 @@ mod tests {
 
     /// Build a `WorldScriptRuntime` from an inline-`[script]` fixture the SAME
     /// way `compile_world_scripts` does in production.
-    fn compile_fixture(body: &str) -> WorldScriptRuntime {
+    pub(crate) fn compile_fixture(body: &str) -> WorldScriptRuntime {
         let world_toml = format!("[script]\nsetup = '''{body}'''\n");
         let value: toml::Value = toml::from_str(&world_toml).expect("valid fixture toml");
         let compiled = crate::world::script::load::load_world_scripts(

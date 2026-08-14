@@ -336,7 +336,8 @@ pub(crate) fn handle_hail(
 /// `SystemParam` so the system stays within Bevy's 16-argument limit
 /// (issue #761 added the rejection-feedback seam). Carries the tick-scoped id
 /// mint and balance-event ledger the shared dispatch pass needs, plus `Sessions` +
-/// `SimOutbox` for routing `CommsResponseRejected` to the submitting holder.
+/// `SimOutbox` for routing `CommsResponseRejected` to the submitting holder, and
+/// the script runtime + clock the scripted arm answers a dialogue with.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CommsRespondAux<'w> {
     sessions: Res<'w, crate::lobby::Sessions>,
@@ -347,6 +348,16 @@ pub(crate) struct CommsRespondAux<'w> {
     /// draws a random number any more, it only mints identities.
     id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
     balance_events: Option<ResMut<'w, bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    /// The Rhai runtime a scripted thread's `on_pick` fn runs on, plus the tick
+    /// its deferred work is stamped against (issue #984). Bundled here rather
+    /// than added as system params because the system is already at Bevy's
+    /// argument limit — which is what this bundle exists for. Both halves are
+    /// `Option`, so a script-free world (every shipped one) never reaches the
+    /// scripted arm at all.
+    script: crate::world::server::ScriptRuntimeParams<'w>,
+    /// Mission-clock source for the same stamping. `Option` for the bare-`App`
+    /// fixtures that run this handler without a `TimePlugin`.
+    time: Option<Res<'w, bevy::time::Time>>,
 }
 
 /// Handle `RespondToMessage { message_id, response_index }` from Comms holders.
@@ -503,6 +514,206 @@ pub(crate) fn handle_respond_to_message(
                 crate::world_id::IdNamespace::Entity,
             )
         };
+
+        // ── Scripted thread (issue #984) ─────────────────────────────────────
+        //
+        // The two dialogue stores are disjoint: a declarative thread's `script`
+        // is `None` and never enters this arm, and a scripted thread never runs
+        // the declarative dispatch below it. What they SHARE is everything above
+        // — the drain, the dialogue lookup, the range gate, the bounds check —
+        // and, load-bearingly, the dispatch bindings built just above: the same
+        // `uuid_source` (the real `WorldIdMint`, so a scripted `spawn_entity`
+        // mints inside `dispatch_spawn_entity` in the same order as its
+        // declarative twin), the same `WasmTemplateLoader`, the same anchors,
+        // the same pre-resolved `sender_entity_name`, and `origin_layer: None`
+        // (a comms thread carries no originating sub-world layer). One
+        // construction site, two arms — issue #984 R1.
+        if let Some(sd) = dialogue.script.as_ref() {
+            // Read the clock BEFORE borrowing the runtime, so the two reads of
+            // `aux` stay sequential.
+            let now_tick = aux.script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
+            let elapsed_secs = aux.time.as_ref().and_then(|t| {
+                runtime
+                    .mission_clock_anchor_secs
+                    .map(|loaded| (t.elapsed_secs() - loaded).max(0.0))
+            });
+            let script_clock = crate::world::script::schedule::SchedClock {
+                tick: now_tick,
+                elapsed_secs: elapsed_secs.unwrap_or(0.0),
+                tick_hz: world_layers
+                    .base_world_config
+                    .as_ref()
+                    .map(|wc| wc.global.sim_tick_hz)
+                    .unwrap_or(crate::world::script::schedule::SchedClock::ZERO.tick_hz),
+            };
+
+            let Some(sr) = aux.script.runtime.as_deref_mut() else {
+                // A scripted dialogue with no script runtime behind it is an
+                // inconsistent state (a reload dropped the runtime under a live
+                // thread). Refuse rather than silently doing nothing.
+                reject(&mut aux.outbox, message_id, *response_index);
+                continue;
+            };
+            // Issue #1050 / R5: a budget-refused call returns empty effects and
+            // `()`, which is indistinguishable from a terminal response that
+            // buffered nothing — so the refusal is detected BEFORE the call, not
+            // inferred from its return value. Every refusal leaves the budget
+            // tripped, which makes this pre-flight the whole gate. A player's
+            // pick the tick cannot afford therefore flashes the attempted
+            // control red through the SAME `reject` closure the stale,
+            // out-of-range and out-of-bounds refusals use, instead of appearing
+            // to do nothing.
+            if sr.budget.tripped() {
+                reject(&mut aux.outbox, message_id, *response_index);
+                continue;
+            }
+            // Parallel to the shown responses by construction (`project_node`),
+            // so the bounds check above already covers this index; refused
+            // rather than indexed, so a future drift cannot panic mid-mission.
+            let Some(on_pick_fn) = sd.on_pick.get(*response_index).cloned() else {
+                reject(&mut aux.outbox, message_id, *response_index);
+                continue;
+            };
+
+            // Entering a node and picking a response are the SAME operation:
+            // call the fn, take the effects it buffered, read the follow-up node
+            // it returned. Disjoint field borrows so the one `&self` call takes
+            // `&mut budget` and `&ast` at once while `&runtime.flags` (a
+            // DISJOINT resource) is the flag overlay base.
+            let entered = {
+                let crate::world::server::WorldScriptRuntime {
+                    host, asts, budget, ..
+                } = &mut *sr;
+                match asts.get(&sd.script_path) {
+                    Some(ast) => Some(crate::world::script::comms::enter_node(
+                        host,
+                        budget,
+                        &script_clock,
+                        ast,
+                        &sd.script_path,
+                        &on_pick_fn,
+                        &runtime.flags,
+                    )),
+                    None => {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: on_pick '{on_pick_fn}' names a missing \
+                             unit '{}'",
+                            sd.script_path
+                        );
+                        None
+                    }
+                }
+            };
+            let (effects, follow_up) = match entered {
+                Some(Ok(pair)) => pair,
+                Some(Err(err)) => {
+                    // A shape error: the fn compiled but returned neither a node
+                    // nor `()`. The pick produced nothing, so it is refused like
+                    // any other pick that produced nothing.
+                    bevy::log::warn!("handle_respond_to_message: on_pick '{on_pick_fn}': {err}");
+                    reject(&mut aux.outbox, message_id, *response_index);
+                    continue;
+                }
+                None => {
+                    reject(&mut aux.outbox, message_id, *response_index);
+                    continue;
+                }
+            };
+
+            let mut new_events: Vec<WorldEvent> = Vec::new();
+            crate::world::server::apply_script_commands(
+                effects.commands,
+                "handle_respond_to_message (script)",
+                &mut new_events,
+                &uuid_to_entity,
+                &mut runtime,
+                &mut objectives,
+                &mut commands,
+                &mut ship_modifiers,
+                world_layers.pending_layers.as_deref_mut(),
+                world_layers.layer_map.as_deref_mut(),
+                next_state.as_deref_mut(),
+                game_over_reason.as_deref_mut(),
+                &mut faction_dispatch,
+                &mut ai_query,
+                aux.balance_events.as_deref_mut(),
+                &uuid_source,
+                &template_loader,
+                world_layers
+                    .base_world_config
+                    .as_ref()
+                    .map(|wc| &wc.anchors)
+                    .unwrap_or(&empty_anchors),
+                origin_layer.clone(),
+                sender_entity_name.clone(),
+            );
+            // Single-shot dispatch, not a chaining pass — `new_events` go onto
+            // `pending_world_events` for `tick_trigger_pipeline` to observe, the
+            // same routing the declarative arm below uses.
+            runtime.pending_world_events.extend(new_events);
+            // An `on_pick`'s own deferred work: `in_seconds` effects join the
+            // delayed queue (dropped when the mission clock is unanchored, the
+            // trigger path's rule), `after` callbacks join the callback queue,
+            // and an `open_comms` from a response queues for the next drain —
+            // which is how a DELAYED scripted reply is authored.
+            if elapsed_secs.is_some() {
+                runtime.pending_delayed_actions.extend(effects.delayed);
+            }
+            sr.pending_callbacks.extend(effects.callbacks);
+            sr.pending_comms_opens.extend(effects.comms_opens);
+
+            // Record the chosen response on the inbox message (the tail both
+            // arms share).
+            inbox.0.record_response(message_id, *response_index);
+
+            // Advance to the follow-up node the `on_pick` fn returned. `None` is
+            // a terminal response and ends the thread — the scripted analogue of
+            // a declarative response with no `follow_up`.
+            if let Some(node) = follow_up {
+                let thread_id = dialogue.thread_id.clone();
+                let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
+                let sender_name = inbox.0.sender_name_for(message_id).unwrap_or_default();
+                // R6, a DELIBERATE divergence from the declarative arm below,
+                // which hardcodes `urgent: false` because follow-up urgency is
+                // not a TOML-level concept: a scripted follow-up INHERITS the
+                // urgency the thread was opened with, so an urgent thread stays
+                // urgent as it advances. Scripted-only and digest-neutral (no
+                // digest folds comms state).
+                let urgent = inbox.0.is_urgent_for(message_id).unwrap_or(false);
+                let (wire_node, on_pick) = crate::world::script::comms::project_node(&node);
+                let new_msg_id = crate::world_id::mint_id_with(
+                    aux.id_mint.as_deref(),
+                    crate::world_id::IdNamespace::Message,
+                );
+                let available = current_sender_in_range(&comms, &sender_uuid);
+                let new_responses =
+                    crate::comms::content::response_views(&wire_node.responses, available);
+                let new_msg = CommsMessage::injected(
+                    new_msg_id.clone(),
+                    sender_uuid,
+                    sender_name,
+                    wire_node.body.clone(),
+                    new_responses,
+                    thread_id.clone(),
+                    available,
+                    urgent,
+                );
+                channel2_writer.write(CommsChannel2Event { message: new_msg });
+                comms.active_dialogues.insert(
+                    new_msg_id,
+                    ActiveDialogue {
+                        current_node: wire_node,
+                        thread_id,
+                        script: Some(crate::comms::content::ScriptedDialogue {
+                            script_path: sd.script_path.clone(),
+                            node_fn: on_pick_fn,
+                            on_pick,
+                        }),
+                    },
+                );
+            }
+            continue;
+        }
 
         for action in &response.actions {
             let layers =
@@ -4215,6 +4426,312 @@ weight = 100.0
             find_rejection(&out).expect("out-of-range response must be rejected");
         assert_eq!(rejected_id, msg_id);
         assert_eq!(idx, 0);
+    }
+
+    // -- Issue #984: the scripted arm of handle_respond_to_message -------------
+    //
+    // The arm under test lives in this file; its fixture helper is shared with
+    // `comms::scripted`, which owns the open half of the same thread lifecycle.
+
+    /// Seat a scripted thread the way `open_scripted_comms_threads` would: the
+    /// projected node in the inbox and in `active_dialogues`, with the
+    /// `ScriptedDialogue` naming the unit and the `on_pick` fn per response.
+    /// Returns the message id.
+    fn seat_scripted_dialogue(
+        app: &mut App,
+        sender_uuid: &str,
+        body: &str,
+        on_pick: Vec<&str>,
+        urgent: bool,
+    ) -> String {
+        let id = format!("scripted-msg-{}", on_pick.len());
+        let responses: Vec<CommsResponse> = on_pick
+            .iter()
+            .enumerate()
+            .map(|(i, _)| CommsResponse {
+                text: format!("Response {i}"),
+                important: false,
+                actions: vec![],
+                follow_up: None,
+            })
+            .collect();
+        let mut message = msg(&id);
+        message.sender_uuid = sender_uuid.to_string();
+        message.body = body.to_string();
+        message.is_urgent = urgent;
+        message.responses = crate::comms::content::response_views(&responses, true);
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(message);
+        app.world_mut()
+            .resource_mut::<CommsRuntime>()
+            .active_dialogues
+            .insert(
+                id.clone(),
+                ActiveDialogue {
+                    current_node: CommsDialogueNode {
+                        body: body.to_string(),
+                        responses,
+                        speaker: None,
+                        trigger: None,
+                    },
+                    thread_id: "scripted-thread".to_string(),
+                    script: Some(crate::comms::content::ScriptedDialogue {
+                        script_path: crate::comms::scripted::tests::PATH.to_string(),
+                        node_fn: "root".to_string(),
+                        on_pick: on_pick.iter().map(|s| s.to_string()).collect(),
+                    }),
+                },
+            );
+        id
+    }
+
+    fn respond(
+        app: &mut App,
+        message_id: &str,
+        response_index: usize,
+    ) -> Vec<crate::lobby::OutboundMessage> {
+        push_msg(
+            app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: message_id.to_string(),
+                    response_index,
+                },
+            },
+        );
+        tick(app)
+    }
+
+    const DIALOGUE_TREE: &str = r#"
+        fn on_ack(ctx) {
+            ctx.effects.complete_objective("reach_axiom");
+            #{ message: "Docking clamps released.", responses: [
+                #{ text: "Confirm", on_pick: "on_confirm" },
+            ] }
+        }
+        fn on_decline(ctx) { ctx.effects.fail_objective("reach_axiom"); }
+        fn on_confirm(ctx) { }
+    "#;
+
+    /// Picking a scripted response runs its `on_pick` fn through the shared
+    /// dispatch path and injects the follow-up node the fn returned — the whole
+    /// scripted arm, end to end through the live handler.
+    #[test]
+    fn a_scripted_response_runs_its_on_pick_and_injects_the_follow_up() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456984";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        app.world_mut()
+            .insert_resource(crate::comms::scripted::tests::compile_fixture(
+                DIALOGUE_TREE,
+            ));
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "reach_axiom",
+            "reach Axiom",
+            true,
+            vec![],
+        );
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_ack", "on_decline"],
+            false,
+        );
+
+        let _ = respond(&mut app, &id, 0);
+
+        assert_eq!(
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == "reach_axiom")
+                .expect("the objective exists")
+                .status,
+            crate::messages::ObjectiveStatus::Completed,
+            "the on_pick fn's effects must reach the shared apply path"
+        );
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        let follow = messages
+            .iter()
+            .find(|m| m.body == "Docking clamps released.")
+            .expect("the follow-up node the on_pick returned must be injected");
+        assert_eq!(
+            follow.thread_id, "scripted-thread",
+            "a follow-up stays in its thread"
+        );
+        assert_eq!(
+            follow.responses.iter().map(|r| &r.text).collect::<Vec<_>>(),
+            vec!["Confirm"]
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .find(|m| m.id == id)
+                .expect("the answered message is still in the inbox")
+                .selected_response,
+            Some(0),
+            "the pick is recorded on the message the player answered"
+        );
+
+        let comms = app.world().resource::<CommsRuntime>();
+        let script = comms
+            .active_dialogues
+            .get(&follow.id)
+            .expect("the follow-up seats its own dialogue")
+            .script
+            .as_ref()
+            .expect("and it is a scripted one");
+        assert_eq!(
+            script.node_fn, "on_ack",
+            "the fn that produced the shown node is the one recorded"
+        );
+        assert_eq!(script.on_pick, vec!["on_confirm".to_string()]);
+    }
+
+    /// A scripted `on_pick` that returns `()` is a terminal response: its
+    /// effects apply and the thread ends with no further message.
+    #[test]
+    fn a_terminal_scripted_response_ends_the_thread() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456985";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        app.world_mut()
+            .insert_resource(crate::comms::scripted::tests::compile_fixture(
+                DIALOGUE_TREE,
+            ));
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "reach_axiom",
+            "reach Axiom",
+            true,
+            vec![],
+        );
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_ack", "on_decline"],
+            false,
+        );
+
+        let _ = respond(&mut app, &id, 1);
+
+        assert_eq!(
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == "reach_axiom")
+                .expect("the objective exists")
+                .status,
+            crate::messages::ObjectiveStatus::Failed,
+        );
+        assert_eq!(
+            app.world().resource::<CommsInboxRes>().0.messages().len(),
+            1,
+            "a terminal response injects nothing"
+        );
+    }
+
+    /// Issue #1050 / R5: a dialogue call refused by the tick's script budget
+    /// must flash the attempted control red, not vanish. The refusal is detected
+    /// BEFORE the call, because a refused call returns exactly what a terminal
+    /// response with no effects returns.
+    #[test]
+    fn a_budget_refused_scripted_response_is_rejected() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456986";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        let mut sr = crate::comms::scripted::tests::compile_fixture(DIALOGUE_TREE);
+        // Spend the tick's whole operation budget: `charge_ops` trips it, and a
+        // tripped budget refuses every remaining call — exactly the state a busy
+        // tick leaves behind.
+        sr.budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
+        assert!(sr.budget.tripped());
+        app.world_mut().insert_resource(sr);
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "reach_axiom",
+            "reach Axiom",
+            true,
+            vec![],
+        );
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_ack", "on_decline"],
+            false,
+        );
+
+        let out = respond(&mut app, &id, 0);
+
+        let (rejected_id, idx) =
+            find_rejection(&out).expect("a budget-refused response must be rejected");
+        assert_eq!(rejected_id, id);
+        assert_eq!(idx, 0);
+        assert_eq!(
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == "reach_axiom")
+                .expect("the objective exists")
+                .status,
+            crate::messages::ObjectiveStatus::Active,
+            "and the refused pick must have applied nothing"
+        );
+        assert_eq!(
+            app.world().resource::<CommsInboxRes>().0.messages().len(),
+            1,
+            "and injected nothing"
+        );
+    }
+
+    /// R6, the deliberate divergence: a scripted follow-up INHERITS the urgency
+    /// the thread was opened with, where a declarative one hardcodes `false`.
+    #[test]
+    fn a_scripted_follow_up_inherits_the_threads_urgency() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456987";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        app.world_mut()
+            .insert_resource(crate::comms::scripted::tests::compile_fixture(
+                DIALOGUE_TREE,
+            ));
+        app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+            "reach_axiom",
+            "reach Axiom",
+            true,
+            vec![],
+        );
+        let id = seat_scripted_dialogue(
+            &mut app,
+            station_uuid,
+            "Axiom Station, go ahead.",
+            vec!["on_ack", "on_decline"],
+            true,
+        );
+
+        let _ = respond(&mut app, &id, 0);
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        let follow = messages
+            .iter()
+            .find(|m| m.body == "Docking clamps released.")
+            .expect("the follow-up is injected");
+        assert!(
+            follow.is_urgent,
+            "an urgent scripted thread stays urgent as it advances"
+        );
     }
 
     #[test]

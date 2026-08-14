@@ -109,6 +109,19 @@ impl CommsInbox {
             .map(|r| r.message.sender_uuid.clone())
     }
 
+    /// Return the `is_urgent` flag of the message with `message_id`, or `None`.
+    ///
+    /// A scripted thread's follow-up inherits the urgency of the message it
+    /// answers (issue #984), so the response handler reads it back from the
+    /// delivered message — the one authoritative record of what the thread was
+    /// opened as.
+    pub fn is_urgent_for(&self, message_id: &str) -> Option<bool> {
+        self.records
+            .iter()
+            .find(|r| r.message.id == message_id)
+            .map(|r| r.message.is_urgent)
+    }
+
     /// Return the `sender_name` of the message with `message_id`, or `None`.
     pub fn sender_name_for(&self, message_id: &str) -> Option<String> {
         self.records

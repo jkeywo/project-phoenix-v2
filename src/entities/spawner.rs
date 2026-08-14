@@ -1005,9 +1005,18 @@ pub fn spawn_entity(
         entity_commands.insert(HelmCapabilitySection(cap.clone()));
     }
 
-    // Comms range - attach CommsRange component when [comms] is present.
+    // Comms range - attach CommsRange component when [comms] is present, and
+    // the CommsHailable opt-in marker when that block asks for the hail roster
+    // (issue #985). Two components, not one: `range` gates reachability for
+    // EVERY comms endpoint, while `hailable` is what puts the entity on the
+    // roster the Comms officer can call up.
     if let Some(comms) = &config.comms {
         entity_commands.insert(crate::comms::CommsRange(comms.range));
+        if comms.hailable {
+            entity_commands.insert(crate::comms::CommsHailable {
+                display_name: comms.display_name.clone(),
+            });
+        }
     }
 
     // Shields — translate the [shields_console] config block + designer
@@ -1299,7 +1308,11 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             torpedoes: None,
             repair: None,
             audio: None,
-            comms: Some(crate::entity_config::CommsConfig { range: 8000.0 }),
+            comms: Some(crate::entity_config::CommsConfig {
+                range: 8000.0,
+                hailable: false,
+                display_name: None,
+            }),
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -1321,6 +1334,33 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             .get::<crate::comms::CommsRange>(spawned)
             .expect("CommsRange component should be inserted when [comms] is present");
         assert_eq!(range.0, 8000.0);
+        assert!(
+            world.get::<crate::comms::CommsHailable>(spawned).is_none(),
+            "a range-only [comms] block must NOT put the entity on the hail roster (#985)"
+        );
+    }
+
+    /// Issue #985: `[comms] hailable = true` is the opt-in that puts an entity
+    /// on the hail roster, and `display_name` rides along as the contact label.
+    #[test]
+    fn spawn_entity_with_hailable_comms_inserts_the_opt_in_marker() {
+        let mut app = test_app();
+        let config = EntityConfig {
+            name: Some("world.entity.outpost.name".into()),
+            comms: Some(crate::entity_config::CommsConfig {
+                range: 800.0,
+                hailable: true,
+                display_name: Some("Relay Outpost".into()),
+            }),
+            ..EntityConfig::default()
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        let world = app.world_mut();
+        let hailable = world
+            .get::<crate::comms::CommsHailable>(spawned)
+            .expect("hailable = true must insert CommsHailable");
+        assert_eq!(hailable.display_name.as_deref(), Some("Relay Outpost"));
     }
 
     #[test]

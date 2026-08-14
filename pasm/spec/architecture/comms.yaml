@@ -31,7 +31,7 @@ entities:
     architecture:
       classification: authoritative
       owner: comms-dialogue-controller
-      writers: [comms-dialogue-controller, world-comms-runtime]
+      writers: [comms-dialogue-controller, world-comms-runtime, comms-hail-roster]
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
@@ -89,6 +89,31 @@ entities:
       # dedicated type; CommsRange is the per-entity authored range component
       # they are computed from.
       symbols: [CommsRuntime, CommsRange]
+
+  - component: comms-hail-roster
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Comms Hail Roster
+      summary: Builds the set of endpoints the Comms officer may hail from TWO sources during the Rhai transition — the world's declarative [[comms]] templates and the live entities that opt in with [comms] hailable = true — unioned on entity UUID with the declarative entry winning its display metadata, and appended in a query-order-independent sort so the player-visible contact order is deterministic.
+      rationale:
+        - "[ai] Issue #985: the roster had exactly ONE source — world_config.comms, resolved from each template's `from` reference id through name_to_uuid by init_comms_runtime and merge_world_comms. The Rhai conversion's milestone M7 deletes [[comms]] parsing outright, which would empty CommsRuntime.contacts and take resolve_hail_target, candidate_fact(source_comms_contact) and every hail candidate with it. The entity-derived source therefore has to land BEFORE the teardown, behaviour-preserving while both sources coexist, rather than as part of it."
+        - "[ai] Issue #985 DUAL-SOURCE RULE, stated as the invariant the coexistence period rests on. The roster is the union of the declarative and entity-derived sets, keyed on entity UUID. On a collision the DECLARATIVE entry wins outright: its authored name and its live in_range / is_urgent stamps are left untouched, and the entity-derived candidate adds nothing. That is what makes the union a no-op for every world authoring [[comms]] today. At M7 the declarative half is gone and the entity-derived half is the sole source, so a converting world moves its [[comms]] display_name onto the entity as [comms] display_name — the label precedence (display_name, then the entity's EntityName reference id, then the raw UUID) is written to make that move label-preserving, because for a world-declared [[entity]] the EntityName IS the `name` its [[comms]] from would have named."
+        - "[ai] Issue #985 OPT-IN, chosen on an entity census rather than on taste. Thirteen shipped entity templates declare [comms] range — every Alliance hull, every Harrow hull, the Requiem courier, all three stations, and the RNG-coverage lancer — because `range` marks a range-gated comms ENDPOINT, not a hailable contact. Deriving the roster from the range component alone would take combat_test from one contact (Starbase Alpha) to that plus every hostile wave ship the trigger pipeline spawns, and would give patrol, reinforcements and rng_coverage — which author no [[comms]] at all — a non-empty roster where they have none. So reachability and hailability are separate authored facts: `[comms] hailable = true` is the opt-in, authored on NOTHING at this commit, and the M7-era world conversions turn it on per world. Two shipped-content tests hold that line: one asserts no shipped template opts in, the other snapshots each shipped world's declarative roster."
+        - "[ai] Issue #985 DETERMINISM: the entity-derived candidates come off a Bevy query, whose iteration order is archetype order and not a stable contract, and the roster is player-visible (CommsState.contacts) and AI-visible (the hail candidate set). merge_entity_contacts therefore sorts each tick's candidates by (name, uuid) before appending, and appends only — it never re-sorts the declarative prefix, which would itself be a behaviour change. Within a tick the order is a pure function of the candidate set; across ticks it follows the sim's own deterministic spawn order."
+        - "[ai] Issue #985 LIFECYCLE is deliberately fused with the range pass rather than given its own system. update_comms_range_flags already walked every CommsRange entity to refresh range_flags and already pruned contacts, open_hails and stale flags against that same live set; the derivation reads the same query in the same pass. A hailable entity therefore joins the roster the tick after it spawns and leaves it the tick after it is destroyed, and the roster can never disagree with the range flags about which entities are live. The union runs AFTER the prune (so a candidate is never added and dropped in one pass) and BEFORE the in_range stamp (so a new contact carries its real reachability on the tick it appears, not a default-true first frame)."
+        - "[ai] Issue #985 KNOWN GAP, recorded so M7 does not rediscover it: a scripted [[comms]] thread (WorldConfig.scripted_comms, Rhai milestone M4) contributes NO contact today — only the declarative WorldConfig.comms list does. No shipped world scripts a comms thread yet, and a shipped-content test asserts that, so the gap is currently unreachable. The entity-derived source is what closes it: a world converting a thread to Rhai authors hailable = true on that thread's sender in the same commit."
+    architecture:
+      kind: derivation
+      authority: authoritative
+      reads: [world-configuration-state, world-name-binding-state, comms-range-state]
+      writes: [comms-inbox-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/comms/roster.rs, src/comms/component.rs, src/comms/server.rs, src/entities/config.rs, src/entities/spawner.rs]
+      symbols: [EntityContact, merge_entity_contacts, entity_contact_label, CommsHailable, CommsConfig, update_comms_range_flags, init_comms_runtime, merge_world_comms]
+      tests: [cargo test]
 
   - component: comms-blackboard-publisher
     core:

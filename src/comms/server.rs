@@ -540,7 +540,8 @@ fn auto_clear_on_screen_message(
     }
 }
 
-/// Recompute per-entity comms-range flags from ship + entity transforms.
+/// Recompute per-entity comms-range flags from ship + entity transforms, and
+/// maintain the entity-derived half of the hail roster.
 ///
 /// Runs before `broadcast_comms_state`. Finds the player ship (entity with
 /// `Ship` marker + `Transform` + optional `CommsRange`) and computes
@@ -548,6 +549,15 @@ fn auto_clear_on_screen_message(
 /// entity carrying `EntityUuid` + `Transform` + `CommsRange`. Updates the
 /// `comms.range_flags` map and stamps `comms.contacts[i].in_range`. Sets
 /// `comms.needs_broadcast = true` if any flag flipped vs. the prior snapshot.
+///
+/// This is also the roster's LIFECYCLE system (issue #985). It already pruned
+/// contacts whose entity has left the ECS; it now also ADDS a contact for every
+/// live entity that opted in with `[comms] hailable = true`
+/// (`crate::comms::CommsHailable`). The same live query drives both halves, so a
+/// hailable entity appears on the roster the tick after it spawns and drops off
+/// the tick after it is destroyed. The declarative `[[comms]]` roster built by
+/// `init_comms_runtime` / `merge_world_comms` is untouched — the union rule and
+/// the deterministic append order live in `crate::comms::roster`.
 pub(crate) fn update_comms_range_flags(
     mut comms: ResMut<CommsRuntime>,
     ship_q: Query<
@@ -558,6 +568,8 @@ pub(crate) fn update_comms_range_flags(
         &crate::entities::spawner::EntityUuid,
         &Transform,
         &crate::comms::CommsRange,
+        Option<&crate::comms::CommsHailable>,
+        Option<&crate::entities::spawner::EntityName>,
     )>,
 ) {
     let Some((ship_tf, ship_range_opt)) = ship_q.iter().next() else {
@@ -595,9 +607,13 @@ pub(crate) fn update_comms_range_flags(
     let mut any_changed = !comms.range_active;
     comms.range_active = true;
 
-    // Build the live set of comms-range-bearing UUIDs and refresh flags.
+    // Build the live set of comms-range-bearing UUIDs and refresh flags. The
+    // same pass collects the entity-derived hail candidates (issue #985) —
+    // unsorted here, because ECS iteration order is archetype order;
+    // `merge_entity_contacts` is what imposes the deterministic append order.
     let mut live: HashSet<String> = HashSet::new();
-    for (uuid, tf, range) in entity_q.iter() {
+    let mut derived_contacts: Vec<crate::comms::EntityContact> = Vec::new();
+    for (uuid, tf, range, hailable, entity_name) in entity_q.iter() {
         let dist = ship_pos.distance(tf.translation);
         let in_range = crate::comms::in_range(dist, ship_range, range.0);
         let prior = comms.range_flags.insert(uuid.0.clone(), in_range);
@@ -605,6 +621,16 @@ pub(crate) fn update_comms_range_flags(
             any_changed = true;
         }
         live.insert(uuid.0.clone());
+        if let Some(hailable) = hailable {
+            derived_contacts.push(crate::comms::EntityContact {
+                name: crate::comms::entity_contact_label(
+                    hailable.display_name.as_deref(),
+                    entity_name.map(|n| n.0.as_str()),
+                    &uuid.0,
+                ),
+                uuid: uuid.0.clone(),
+            });
+        }
     }
 
     // Remove stale flags for despawned entities.
@@ -640,6 +666,16 @@ pub(crate) fn update_comms_range_flags(
     // of the broadcast `CommsState`, so dropping a stale entry is not a reason
     // to re-broadcast.
     comms.open_hails.retain(|uuid| live_ref.contains(uuid));
+
+    // Union in the entity-derived contacts (issue #985), AFTER the prune so a
+    // candidate is never added and dropped in the same pass, and BEFORE the
+    // range stamp below so a freshly added contact gets its real `in_range` on
+    // the tick it appears rather than a default-true first frame. Declarative
+    // entries win a UUID collision, which is what keeps every shipped world's
+    // roster byte-identical while `[[comms]]` still exists.
+    if crate::comms::merge_entity_contacts(&mut comms.contacts, &mut derived_contacts) {
+        any_changed = true;
+    }
 
     // Stamp the surviving contacts in place from the flag map.
     let CommsRuntime {
@@ -1709,6 +1745,283 @@ pub(crate) mod tests {
         assert!(
             messages[0].responses[0].important,
             "important flag is range-independent"
+        );
+    }
+
+    // -- Entity-derived hail contacts (#985) ----------------------------------
+
+    /// Broadcast contacts, in the order the Comms console receives them.
+    fn broadcast_contacts(out: &[OutboundMessage]) -> Vec<CommsContact> {
+        out.iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { contacts, .. } = &m.msg {
+                    Some(contacts.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("CommsState must be broadcast")
+    }
+
+    /// A `CommsRange` entity that did NOT opt in stays off the roster. This is
+    /// the whole reason `hailable` exists: every shipped warship and station
+    /// declares a range, so range-only derivation would put the entire
+    /// `combat_test` wave order on the Comms officer's contact list.
+    #[test]
+    fn a_comms_range_entity_without_the_opt_in_is_not_a_contact() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::{EntityName, EntityUuid};
+        use crate::simulation::Ship;
+
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, "declared-station");
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        // The declarative contact's own entity, so it survives the prune.
+        app.world_mut().spawn((
+            EntityUuid("declared-station".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        // A range-bearing enemy that never opted in.
+        app.world_mut().spawn((
+            EntityUuid("harrow-wave-1".into()),
+            EntityName("wave_1".into()),
+            Transform::from_xyz(20.0, 0.0, 0.0),
+            CommsRange(600.0),
+        ));
+
+        let contacts = broadcast_contacts(&tick(&mut app));
+        assert_eq!(
+            contacts.iter().map(|c| c.uuid.as_str()).collect::<Vec<_>>(),
+            vec!["declared-station"],
+            "only the declarative contact belongs on the roster, got {contacts:?}"
+        );
+    }
+
+    /// The opt-in marker puts a live entity on the roster, labelled from its
+    /// `EntityName` (the world's `name` reference id — the same string a
+    /// `[[comms]] from` would have carried).
+    #[test]
+    fn a_hailable_entity_joins_the_roster_labelled_from_its_entity_name() {
+        use crate::comms::{CommsHailable, CommsRange};
+        use crate::entities::spawner::{EntityName, EntityUuid};
+        use crate::simulation::Ship;
+
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, "declared-station");
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid("declared-station".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid("courier-uuid".into()),
+            EntityName("world.entity.courier.name".into()),
+            Transform::from_xyz(30.0, 0.0, 0.0),
+            CommsRange(500.0),
+            CommsHailable::default(),
+        ));
+
+        let contacts = broadcast_contacts(&tick(&mut app));
+        let derived = contacts
+            .iter()
+            .find(|c| c.uuid == "courier-uuid")
+            .expect("the hailable entity must join the roster");
+        assert_eq!(derived.name, "world.entity.courier.name");
+        assert!(
+            derived.in_range,
+            "the new contact must carry its real range stamp on the tick it appears"
+        );
+        // The declarative entry is still first — entity-derived contacts are
+        // APPENDED, never interleaved.
+        assert_eq!(contacts[0].uuid, "declared-station");
+    }
+
+    /// An authored `[comms] display_name` beats the reference id, and the
+    /// out-of-range stamp reaches an entity-derived contact just like a
+    /// declarative one.
+    #[test]
+    fn an_entity_derived_contact_uses_its_authored_display_name_and_range_stamp() {
+        use crate::comms::{CommsHailable, CommsRange};
+        use crate::entities::spawner::{EntityName, EntityUuid};
+        use crate::simulation::Ship;
+
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, "declared-station");
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid("outpost-uuid".into()),
+            EntityName("world.entity.outpost.name".into()),
+            Transform::from_xyz(5_000.0, 0.0, 0.0),
+            CommsRange(100.0),
+            CommsHailable {
+                display_name: Some("Relay Outpost".into()),
+            },
+        ));
+
+        let contacts = broadcast_contacts(&tick(&mut app));
+        let derived = contacts
+            .iter()
+            .find(|c| c.uuid == "outpost-uuid")
+            .expect("the hailable entity must join the roster");
+        assert_eq!(derived.name, "Relay Outpost");
+        assert!(
+            !derived.in_range,
+            "a distant entity-derived contact must be stamped out of range"
+        );
+    }
+
+    /// Lifecycle: a hailable entity that spawns mid-mission joins the roster,
+    /// and leaves it when it is destroyed. Same live query that drives the
+    /// range flags, so the two can never disagree.
+    #[test]
+    fn an_entity_derived_contact_appears_on_spawn_and_drops_on_despawn() {
+        use crate::comms::{CommsHailable, CommsRange};
+        use crate::entities::spawner::{EntityName, EntityUuid};
+        use crate::simulation::Ship;
+
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, "declared-station");
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid("declared-station".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        let before = broadcast_contacts(&tick(&mut app));
+        assert!(!before.iter().any(|c| c.uuid == "reinforcement-uuid"));
+
+        // Spawn.
+        let reinforcement = app
+            .world_mut()
+            .spawn((
+                EntityUuid("reinforcement-uuid".into()),
+                EntityName("world.entity.reinforcement.name".into()),
+                Transform::from_xyz(40.0, 0.0, 0.0),
+                CommsRange(500.0),
+                CommsHailable::default(),
+            ))
+            .id();
+        let after_spawn = broadcast_contacts(&tick(&mut app));
+        assert!(
+            after_spawn.iter().any(|c| c.uuid == "reinforcement-uuid"),
+            "contact must appear when the entity spawns, got {after_spawn:?}"
+        );
+
+        // Despawn.
+        app.world_mut().entity_mut(reinforcement).despawn();
+        let after_despawn = broadcast_contacts(&tick(&mut app));
+        assert!(
+            !after_despawn.iter().any(|c| c.uuid == "reinforcement-uuid"),
+            "contact must drop when the entity is destroyed, got {after_despawn:?}"
+        );
+        assert!(
+            after_despawn.iter().any(|c| c.uuid == "declared-station"),
+            "the declarative contact must survive the despawn of an unrelated entity"
+        );
+    }
+
+    /// A declarative `[[comms]]` contact and an entity-derived one that name
+    /// the SAME entity collapse to a single roster row, and the declarative
+    /// display metadata is the one that survives.
+    #[test]
+    fn a_declarative_contact_wins_the_uuid_collision_with_its_entity() {
+        use crate::comms::{CommsHailable, CommsRange};
+        use crate::entities::spawner::{EntityName, EntityUuid};
+        use crate::simulation::Ship;
+
+        let mut app = comms_test_app();
+        // `setup_game_with_comms` seats the declarative contact named
+        // "Starbase Alpha" for this UUID.
+        setup_game_with_comms(&mut app, "starbase-uuid");
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid("starbase-uuid".into()),
+            EntityName("world.entity.starbase_alpha.name".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+            CommsRange(500.0),
+            CommsHailable {
+                display_name: Some("Ignored By The Declarative Entry".into()),
+            },
+        ));
+
+        let contacts = broadcast_contacts(&tick(&mut app));
+        assert_eq!(
+            contacts.len(),
+            1,
+            "the two sources must collapse to one row, got {contacts:?}"
+        );
+        assert_eq!(contacts[0].name, "Starbase Alpha");
+    }
+
+    /// Roster order must not depend on ECS archetype iteration order: several
+    /// hailable entities land in `(name, uuid)` order no matter what.
+    #[test]
+    fn entity_derived_contacts_are_appended_in_deterministic_order() {
+        use crate::comms::{CommsHailable, CommsRange};
+        use crate::entities::spawner::{EntityName, EntityUuid};
+        use crate::simulation::Ship;
+
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, "declared-station");
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid("declared-station".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        // Spawned in a deliberately unsorted order.
+        for (uuid, name) in [
+            ("u-delta", "Delta"),
+            ("u-alpha", "Alpha"),
+            ("u-charlie", "Charlie"),
+            ("u-bravo", "Bravo"),
+        ] {
+            app.world_mut().spawn((
+                EntityUuid(uuid.into()),
+                EntityName(name.into()),
+                Transform::from_xyz(25.0, 0.0, 0.0),
+                CommsRange(500.0),
+                CommsHailable::default(),
+            ));
+        }
+
+        let contacts = broadcast_contacts(&tick(&mut app));
+        assert_eq!(
+            contacts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec!["Starbase Alpha", "Alpha", "Bravo", "Charlie", "Delta"],
+            "declarative first, then entity-derived in (name, uuid) order"
         );
     }
 

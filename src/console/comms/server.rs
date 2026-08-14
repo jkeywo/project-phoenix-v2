@@ -539,6 +539,7 @@ pub(crate) fn handle_respond_to_message(
                     &runtime.flags,
                     &runtime.deadlines,
                     &runtime.commitments,
+                    &runtime.evidence,
                 )),
                 None => {
                     bevy::log::warn!(

@@ -886,6 +886,7 @@ size_max = 2.0
                     &flags,
                     &crate::world::deadlines::DeadlineTable::default(),
                     &crate::world::commitments::CommitmentLedger::default(),
+                    &crate::dossier::evidence::EvidenceLog::default(),
                     rhai::Map::new(),
                 );
                 for effect in effects.commands {

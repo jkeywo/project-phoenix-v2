@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 
 use rhai::{Engine, Map, AST};
 
+use crate::dossier::evidence::EvidenceLog;
 use crate::world::commitments::CommitmentLedger;
 use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
@@ -262,6 +263,7 @@ impl RuntimeHost {
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
         extra: Map,
     ) -> CallEffects {
         if !budget.admit_call() {
@@ -276,6 +278,7 @@ impl RuntimeHost {
             base_flags,
             base_deadlines,
             base_commitments,
+            base_evidence,
             extra,
         ) {
             Ok((effects, ops)) => {
@@ -322,6 +325,7 @@ impl RuntimeHost {
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
         extra: Map,
     ) -> Result<(CallEffects, u64), vellum_script::CallError> {
         self.try_call_returning(
@@ -332,6 +336,7 @@ impl RuntimeHost {
             base_flags,
             base_deadlines,
             base_commitments,
+            base_evidence,
             extra,
         )
         .map(|(effects, _value, ops)| (effects, ops))
@@ -383,6 +388,7 @@ impl RuntimeHost {
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
         extra: Map,
     ) -> Option<(CallEffects, rhai::Dynamic)> {
         if !budget.admit_call() {
@@ -397,6 +403,7 @@ impl RuntimeHost {
             base_flags,
             base_deadlines,
             base_commitments,
+            base_evidence,
             extra,
         ) {
             Ok((effects, value, ops)) => {
@@ -441,6 +448,7 @@ impl RuntimeHost {
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
         extra: Map,
     ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
         let sink = EffectSink::new();
@@ -457,10 +465,12 @@ impl RuntimeHost {
         // rather than appended after the call's other work.
         let commitments = Commitments::new(base_commitments, sink.clone(), clock.tick);
         // Shares the SAME sink again (issue #1031), so an appended finding keeps
-        // its authored position among the call's flag writes and effects. It
-        // needs no base state: nothing on this vocabulary reads, so there is no
-        // snapshot for a read-after-write to see.
-        let dossier = Dossier::new(sink.clone(), clock.tick);
+        // its authored position among the call's flag writes and effects — and
+        // snapshots `base_evidence` (issue #1036), which is what lets a
+        // negotiation node offer an option the crew earned by going and looking.
+        // Read-only: see `Dossier`'s docs on why an append made in THIS call is
+        // deliberately not visible to a `holds` after it.
+        let dossier = Dossier::new(sink.clone(), clock.tick, base_evidence);
 
         let mut ctx = extra;
         ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
@@ -535,6 +545,11 @@ impl RuntimeHost {
                 // immediate commands only, and a commitment mutation is never
                 // one of them (it drains to `commitment_changes`).
                 &CommitmentLedger::default(),
+                // Inert for a third reason of its own: `ctx.dossier.holds` is a
+                // READ, so a handler that consults it here sees an empty file
+                // rather than a wrong one, and a handler that appends still
+                // emits its command onto the buffer this entry point drains.
+                &EvidenceLog::default(),
                 extra,
             )
             .commands,
@@ -634,6 +649,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new(),
             )
             .expect("the dialogue call must not error");
@@ -680,6 +696,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new(),
             )
             .expect("the dialogue call must not error");
@@ -717,6 +734,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new(),
             )
             .expect("an admitted call runs");
@@ -740,6 +758,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new(),
             )
             .is_none(),
@@ -774,6 +793,7 @@ mod tests {
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
             Map::new(),
         );
         // The immediate effect applies now; the delayed one is deferred. The
@@ -822,6 +842,7 @@ mod tests {
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
             Map::new(),
         );
         assert_eq!(effects.callbacks.len(), 1);
@@ -866,6 +887,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new(),
             )
             .callbacks
@@ -899,6 +921,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new(),
             );
             // Reduce to comparable, `PartialEq` parts (DelayedAction is not Eq).
@@ -935,6 +958,7 @@ mod tests {
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
             Map::new(),
         );
         assert!(
@@ -965,6 +989,7 @@ mod tests {
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
             Map::new(),
         );
         let after_one = budget.ops_used();
@@ -978,6 +1003,7 @@ mod tests {
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
             Map::new(),
         );
         assert!(
@@ -1003,6 +1029,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new(),
             )
             .expect_err("a runaway must be refused");
@@ -1033,6 +1060,7 @@ mod tests {
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
                 Map::new()
             )
             .is_err());

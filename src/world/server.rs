@@ -2033,6 +2033,7 @@ pub(crate) fn tick_trigger_pipeline(
                                 &runtime.flags,
                                 &runtime.deadlines,
                                 &runtime.commitments,
+                                &runtime.evidence,
                                 Map::new(),
                             )),
                             None => {
@@ -3164,6 +3165,7 @@ pub(crate) fn tick_script_callbacks(
                     &runtime.flags,
                     &runtime.deadlines,
                     &runtime.commitments,
+                    &runtime.evidence,
                     Map::new(),
                 )),
                 None => {
@@ -4065,6 +4067,7 @@ pub(crate) mod tests {
             &crate::world::flags::FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
             Map::new(),
         );
         assert_eq!(effects.delayed.len(), 1, "one delayed effect was scheduled");

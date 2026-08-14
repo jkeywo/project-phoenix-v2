@@ -109,6 +109,7 @@ impl ScriptedWorld {
             flags,
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
             Map::new(),
         )
     }

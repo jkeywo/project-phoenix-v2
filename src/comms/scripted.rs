@@ -261,6 +261,7 @@ pub(crate) fn open_scripted_comms_threads(
                     &runtime.flags,
                     &runtime.deadlines,
                     &runtime.commitments,
+                    &runtime.evidence,
                 )),
                 None => {
                     bevy::log::warn!(
@@ -1391,6 +1392,7 @@ fn on_honour(ctx) {
             &crate::world::flags::FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
+            &crate::dossier::evidence::EvidenceLog::default(),
         )
         .expect("the handler runs");
         assert!(node.is_none(), "a trigger handler returns no dialogue node");
@@ -1798,6 +1800,7 @@ fn on_honour(ctx) {
                 &flags,
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
             )
             .unwrap_or_else(|e| panic!("{handler} must run: {e}"));
             assert!(node.is_none(), "{handler} is a trigger handler, not a node");
@@ -1823,6 +1826,7 @@ fn on_honour(ctx) {
                 &flags,
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
             )
             .unwrap_or_else(|e| panic!("{node_fn} must run: {e}"));
             let node = node.unwrap_or_else(|| panic!("{node_fn} must return a dialogue node"));
@@ -1865,6 +1869,7 @@ fn on_honour(ctx) {
                 &flags,
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
+                &crate::dossier::evidence::EvidenceLog::default(),
             )
             .expect("the handler runs");
             queued.extend(effects.comms_opens);

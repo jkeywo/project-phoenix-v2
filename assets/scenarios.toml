@@ -27,3 +27,15 @@ epoch = 1
 [[scenario]]
 id = "combat_test"
 world = "assets/worlds/combat_test.toml"
+
+# Falling Skyway (issue #1034, parent #852) — the first Thin Margin scenario.
+# Selectable from the host panel alongside combat_test; its title, description
+# and single playable hull are read from the world's own `[global]` and
+# `[[available_ships]]`, so nothing about the mission is restated here.
+#
+# Deliberately NOT added to `assets/scenarios.demo.toml`: the public demo build
+# is combat_test and the Alliance Destroyer only (issue #931), and what the demo
+# curates is a separate decision from what the dev catalogue offers.
+[[scenario]]
+id = "falling_skyway"
+world = "assets/worlds/falling_skyway.toml"

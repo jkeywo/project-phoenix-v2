@@ -985,21 +985,26 @@ world = "assets/worlds/mod_skirmish.toml"
 
     // -- shipped manifest ----------------------------------------------------
 
-    /// The real shipped manifest must parse, list exactly the one selectable
-    /// root (`combat_test`), and validate cleanly against the shipped world
-    /// files — the pre-load catalog is authoritative, so a broken manifest must
-    /// fail in CI rather than at host startup.
+    /// The real shipped manifest must parse, list exactly the selectable roots
+    /// (`combat_test`, and since issue #1034 `falling_skyway`), and validate
+    /// cleanly against the shipped world files — the pre-load catalog is
+    /// authoritative, so a broken manifest must fail in CI rather than at host
+    /// startup.
     #[test]
     fn shipped_manifest_parses_and_validates() {
         let manifest_toml = include_str!("../../assets/scenarios.toml");
         let m = parse_manifest(manifest_toml).expect("scenarios.toml must parse");
         let ids: Vec<&str> = m.scenarios.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, ["combat_test"]);
+        assert_eq!(ids, ["combat_test", "falling_skyway"]);
 
         let mut map = HashMap::new();
         map.insert(
             "assets/worlds/combat_test.toml".to_string(),
             include_str!("../../assets/worlds/combat_test.toml").to_string(),
+        );
+        map.insert(
+            "assets/worlds/falling_skyway.toml".to_string(),
+            include_str!("../../assets/worlds/falling_skyway.toml").to_string(),
         );
 
         let findings = validate_manifest(&m, manifest_toml, resolver(map.clone()));
@@ -1010,7 +1015,23 @@ world = "assets/worlds/mod_skirmish.toml"
 
         // The catalog exposes each scenario's own ships, drawn from its world.
         let catalog = build_catalog(&m, resolver(map));
-        assert_eq!(catalog.scenarios.len(), 1);
+        assert_eq!(catalog.scenarios.len(), 2);
+        // Falling Skyway offers exactly the destroyer — the small-crew hull the
+        // mission is authored for (issue #1034). Read from the WORLD's own
+        // `[[available_ships]]`, not curated in the manifest.
+        let skyway = catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "falling_skyway")
+            .expect("the manifest lists Falling Skyway");
+        assert_eq!(
+            skyway
+                .ships
+                .iter()
+                .map(|s| s.template_path.as_str())
+                .collect::<Vec<_>>(),
+            ["assets/entities/alliance_destroyer.toml"]
+        );
     }
 
     /// The demo curation manifest (issue #917): must parse, curate the

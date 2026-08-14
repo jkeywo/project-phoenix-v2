@@ -25,6 +25,22 @@ direction = [ 0, 0, 1 ]
 position = [ 0.65, 0.0, 1.55 ]
 direction = [ 0, 0, 1 ]
 
+[markers.phasers_fore]
+position = [ 0, -0.15, -0.95 ]
+direction = [ 0, 0, -1 ]
+
+[markers.phasers_aft]
+position = [ 0, 0.5, 1.5 ]
+direction = [ 0, 0, 1 ]
+
+[markers.phasers_port]
+position = [ -1.369, 0.2, 0.3 ]
+direction = [ -1, 0, 0 ]
+
+[markers.phasers_starboard]
+position = [ 1.369, 0.2, 0.3 ]
+direction = [ 1, 0, 0 ]
+
 [[lod]]
 max_distance = 15.0
 model = "assets/models/dynasty_cruiser.glb"

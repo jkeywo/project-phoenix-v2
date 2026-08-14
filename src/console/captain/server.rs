@@ -595,6 +595,12 @@ fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
 /// wire broadcaster is `LocalShip`-filtered).
 fn publish_captain_blackboard(
     objectives: Option<Res<ObjectiveManagerRes>>,
+    // The named-deadline readout (issue #1024). Both `Option` so a bare-`App`
+    // fixture and a world with no content runtime keep working; both read-only,
+    // so this system stays a pure publisher.
+    world_content: Option<Res<crate::world::server::WorldContentRuntime>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     boost: Res<crate::server_app::CaptainPriorityBoost>,
     markers_q: Query<&crate::model_rig::ModelMarkers, With<crate::server_app::LocalShip>>,
     cinematic_q: Query<
@@ -660,6 +666,7 @@ fn publish_captain_blackboard(
         let mut camera_views: Vec<String> = Vec::new();
         let mut objectives_snap: Vec<ObjectiveSnapshot> = Vec::new();
         let mut boosted_objective_id: Option<String> = None;
+        let mut deadlines: Vec<crate::messages::DeadlineSnapshot> = Vec::new();
         if is_local {
             camera_views = markers_q
                 .single()
@@ -698,6 +705,33 @@ fn publish_captain_blackboard(
                 })
                 .unwrap_or_default();
             boosted_objective_id = boost.boosted_for(scope).map(str::to_string);
+
+            // Visible deadlines only: `visible = false` is a mission keeping a
+            // clock to itself, and the wire is the boundary that keeps it there.
+            // `remaining_secs` is computed HERE, against the authoritative
+            // `SimTick`, so the console renders a number rather than guessing at
+            // one (issue #1024).
+            if let Some(content) = world_content.as_ref() {
+                let now_tick = sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
+                let tick_hz = world_config
+                    .as_ref()
+                    .map(|wc| wc.global.sim_tick_hz)
+                    .unwrap_or(crate::world::script::schedule::SchedClock::ZERO.tick_hz);
+                deadlines = content
+                    .deadlines
+                    .records
+                    .iter()
+                    .filter(|record| record.visible)
+                    .map(|record| crate::messages::DeadlineSnapshot {
+                        id: record.id.clone(),
+                        label: record.label.clone(),
+                        remaining_secs: content
+                            .deadlines
+                            .remaining_secs(&record.id, now_tick, tick_hz),
+                        state: record.state.as_str().to_string(),
+                    })
+                    .collect();
+            }
         }
 
         let game_status = if red_alert {
@@ -720,6 +754,7 @@ fn publish_captain_blackboard(
             hull_integrity_pct,
             game_status,
             boosted_objective_id,
+            deadlines,
         };
 
         bbs.0.insert(

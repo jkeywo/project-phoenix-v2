@@ -19,6 +19,7 @@
     .cmd-col .controls-row { display: flex; gap: 12px; flex-shrink: 0; }
     .cmd-col .controls-row > * { flex: 1; min-width: 0; }
     ph-objective-list { flex: 1; min-height: 0; }
+    ph-deadline-list { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
     ph-sensor-panel { flex: 1; min-height: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
@@ -60,6 +61,7 @@
             <ph-red-alert id="red-alert"></ph-red-alert>
           </div>
           <ph-objective-list id="objective-list"></ph-objective-list>
+          <ph-deadline-list id="deadline-list"></ph-deadline-list>
           <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
         </div>
       </div>
@@ -78,6 +80,7 @@
     import '../components/ph-camera-select.js';
     import '../components/ph-red-alert.js';
     import '../components/ph-objective-list.js';
+    import '../components/ph-deadline-list.js';
     import '../components/ph-sensor-radar.js';
     import '../components/ph-sensor-panel.js';
     import '../components/ph-station-damage.js';
@@ -102,6 +105,8 @@
         cameraEl.state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
         redAlertEl.state = { active: !!cap.red_alert, auto: cap.red_alert_auto || false };
         objectiveEl.state = { objectives: cap.objectives || [], boosted_objective_id: cap.boosted_objective_id ?? null };
+        // Visible mission deadlines, counted down server-side (issue #1024).
+        document.getElementById('deadline-list').state = { deadlines: cap.deadlines || [] };
         sensorRadarEl.state = sensors;
         sensorEl.state = sensors;
         var targetName = sensors.target_name || null;

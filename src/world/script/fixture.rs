@@ -100,8 +100,16 @@ impl ScriptedWorld {
             .clone();
         let ast = &self.asts[&path];
         let mut budget = TickBudget::new();
-        self.host
-            .call(&mut budget, clock, ast, &path, fn_name, flags, Map::new())
+        self.host.call(
+            &mut budget,
+            clock,
+            ast,
+            &path,
+            fn_name,
+            flags,
+            &crate::world::deadlines::DeadlineTable::default(),
+            Map::new(),
+        )
     }
 
     /// Call the handler of trigger `index`, in registration order.

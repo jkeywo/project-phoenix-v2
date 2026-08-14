@@ -5517,3 +5517,233 @@ fn a_hull_never_ends_a_tick_inside_a_huge_asteroid() {
          never coming back"
     );
 }
+
+// ── Named mission deadlines (issue #1024, parent #851) ───────────────────────
+
+/// `probe_deadlines.toml`, driven for twenty mission seconds: a deadline that is
+/// **slipped** fires at its new tick and never at its old one, a deadline that is
+/// **cancelled** never fires at all, and the control deadline fires untouched.
+///
+/// This is the whole slice on one run — `[[deadline]]` parse, `on_deadline`
+/// pairing, arming onto the EXISTING `pending_callbacks` queue, `ctx.deadlines`
+/// inspection, slip/cancel re-keying that queue, and firing on a `SimTick`. The
+/// probe world's own header carries the authored timeline it is asserted
+/// against.
+///
+/// Every assertion is on a tick, never on a wall-clock reading: `due_tick` is
+/// the arm tick plus a whole number of sim ticks, so two peers running this
+/// world at the same `sim_tick_hz` reach every one of these states on the same
+/// tick.
+#[test]
+fn a_slipped_deadline_fires_at_its_new_tick_and_a_cancelled_one_never_fires() {
+    use project_phoenix::sim_tick::SimTick;
+    use project_phoenix::world::deadlines::DeadlineState;
+    use project_phoenix::world::server::{WorldContentRuntime, WorldScriptRuntime};
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_deadlines.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(20.0, dt),
+        seed: Some(1024),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // `(tick, window state, window fire count)` for every step after arming, so
+    // the span between the OLD due tick and the new one can be inspected whole
+    // rather than sampled at one hopeful moment.
+    let mut trace: Vec<(u64, DeadlineState, i64)> = Vec::new();
+    let mut warning_fired_at: Option<u64> = None;
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        let tick = app.world().resource::<SimTick>().0;
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        if !runtime.deadlines.armed {
+            continue;
+        }
+        let window = runtime
+            .deadlines
+            .get("window_opens")
+            .expect("the authored window is armed");
+        trace.push((tick, window.state, runtime.flags.counter("window_fired")));
+        if warning_fired_at.is_none() && runtime.flags.counter("warning_fired") > 0 {
+            warning_fired_at = Some(tick);
+        }
+    }
+
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    let flags = &runtime.flags;
+    let deadlines = &runtime.deadlines;
+
+    // AC1: every authored deadline is armed under its own id, carrying its
+    // authored label and visibility flag.
+    assert_eq!(deadlines.records.len(), 3, "three authored deadlines");
+    let warning = deadlines
+        .get("first_warning")
+        .expect("the control deadline")
+        .clone();
+    assert!(
+        !warning.visible,
+        "first_warning is authored invisible and stays that way"
+    );
+    assert_eq!(deadlines.get("window_opens").map(|d| d.visible), Some(true));
+    assert_eq!(
+        deadlines.get("window_opens").map(|d| d.label.as_str()),
+        Some("world.probe_deadlines.deadline.window_opens.label"),
+        "the crew-facing label is a strings.csv id, never English"
+    );
+
+    // The arm tick, derived from the control deadline nothing touched: 4 s at
+    // 60 Hz. Everything below is stated relative to it.
+    let arm_tick = warning.due_tick - 240;
+
+    // AC4: script read the deadline back mid-run — 8 s left two seconds into a
+    // ten-second deadline, and 13 s immediately after a five-second slip.
+    assert_eq!(
+        flags.counter("window_remaining_at_adjust"),
+        8,
+        "ctx.deadlines.remaining reported the live countdown"
+    );
+    assert_eq!(
+        flags.counter("window_remaining_after_slip"),
+        13,
+        "and the same call read back its own slip"
+    );
+    assert_eq!(
+        flags.counter("stabiliser_reads_cancelled"),
+        1,
+        "a cancel is visible to the rest of the call that made it"
+    );
+
+    // AC3, the load-bearing half: the slipped deadline is due 15 s in, and it is
+    // still PENDING and unfired across every tick of the span its ORIGINAL due
+    // tick falls in.
+    assert_eq!(
+        deadlines.get("window_opens").map(|d| d.due_tick),
+        Some(arm_tick + 900),
+        "10 s authored + a 5 s slip = tick 900 at 60 Hz"
+    );
+    let old_due = arm_tick + 600;
+    let new_due = arm_tick + 900;
+    let straddle: Vec<_> = trace
+        .iter()
+        .filter(|(tick, ..)| *tick >= old_due && *tick < new_due)
+        .collect();
+    assert!(
+        !straddle.is_empty(),
+        "precondition: the run covered the span between the old and new due ticks"
+    );
+    for (tick, state, fires) in &straddle {
+        assert_eq!(
+            *state,
+            DeadlineState::Pending,
+            "tick {tick}: a slipped deadline must not fire at its old time"
+        );
+        assert_eq!(*fires, 0, "tick {tick}: and must not have run its handler");
+    }
+
+    // …and it DOES fire, exactly once, at the new tick.
+    assert_eq!(
+        flags.counter("window_fired"),
+        1,
+        "the slipped deadline fired exactly once"
+    );
+    assert_eq!(
+        flags.counter("window_reads_fired"),
+        1,
+        "and its own handler read its state as fired while running"
+    );
+    assert_eq!(
+        deadlines.get("window_opens").map(|d| d.state),
+        Some(DeadlineState::Fired)
+    );
+    let first_fire = trace
+        .iter()
+        .find(|(_, state, _)| *state == DeadlineState::Fired)
+        .map(|(tick, ..)| *tick)
+        .expect("the window fired inside the run");
+    assert!(
+        first_fire >= new_due && first_fire <= new_due + 1,
+        "it fired ON its new tick ({new_due}), not merely near it: {first_fire}"
+    );
+
+    // AC3, the other half: a cancelled deadline never fires, and its authored
+    // due tick (12 s) passed inside this run.
+    assert!(
+        arm_tick + 720 < args.max_ticks,
+        "precondition: the run outlasts the cancelled deadline's authored tick"
+    );
+    assert_eq!(
+        deadlines.get("stabiliser_failure").map(|d| d.state),
+        Some(DeadlineState::Cancelled)
+    );
+    assert_eq!(
+        flags.counter("stabiliser_fired"),
+        0,
+        "a cancelled deadline never runs its handler"
+    );
+
+    // The control: untouched, fired once, on its authored tick.
+    assert_eq!(flags.counter("warning_fired"), 1);
+    assert_eq!(
+        warning_fired_at,
+        // `advance_sim_tick` runs in `FixedLast`, so a step that reads tick N
+        // inside the fixed schedule leaves `SimTick` at N+1 for this test to
+        // read after the frame. The fire happened ON `due_tick`; the observation
+        // of it is one tick later, and saying so is more honest than widening
+        // the assertion to a band.
+        Some(warning.due_tick + 1),
+        "the invisible control deadline fired on its authored tick"
+    );
+    assert_eq!(warning.state, DeadlineState::Fired);
+
+    // AC2, made concrete: the deferred work IS the existing queue, and nothing
+    // stale is left on it. A slip that failed to retract, or a cancel that only
+    // marked the record, would leave a `ScheduledCall` sitting here.
+    let queued = app
+        .world()
+        .resource::<WorldScriptRuntime>()
+        .pending_callbacks
+        .len();
+    assert_eq!(
+        queued, 0,
+        "every armed call either fired or was retracted — no stale deferred work"
+    );
+
+    // AC5's server half: the visible deadlines — and only those — reach the
+    // captain blackboard with a server-computed countdown. (The panel that
+    // renders them is covered by tests/client/console-state.test.js.)
+    let mut q = app
+        .world_mut()
+        .query::<&project_phoenix::server_app::ShipSystemBlackboards>();
+    let published: Vec<_> = q
+        .iter(app.world())
+        .filter_map(|bbs| {
+            bbs.0
+                .values()
+                .find_map(|bb| match bb {
+                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    _ => None,
+                })
+                .filter(|c| !c.deadlines.is_empty())
+                .map(|c| c.deadlines.clone())
+        })
+        .collect();
+    let published = published
+        .first()
+        .expect("the local ship publishes its visible deadlines");
+    assert_eq!(
+        published.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+        vec!["window_opens", "stabiliser_failure"],
+        "only the visible deadlines are published, in authored order"
+    );
+    assert_eq!(published[0].state, "fired");
+    assert_eq!(published[1].state, "cancelled");
+    assert_eq!(
+        published[1].remaining_secs, -1,
+        "a cancelled deadline reports no countdown rather than a stale one"
+    );
+}

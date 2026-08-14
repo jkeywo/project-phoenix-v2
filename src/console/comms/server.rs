@@ -537,6 +537,7 @@ pub(crate) fn handle_respond_to_message(
                     &sd.script_path,
                     &on_pick_fn,
                     &runtime.flags,
+                    &runtime.deadlines,
                 )),
                 None => {
                     bevy::log::warn!(
@@ -612,6 +613,15 @@ pub(crate) fn handle_respond_to_message(
         }
         sr.pending_callbacks.extend(effects.callbacks);
         sr.pending_comms_opens.extend(effects.comms_opens);
+        // And an `on_pick` that slipped or cancelled a named deadline (issue
+        // #1024): the player's answer moves the mission's clock.
+        crate::world::server::apply_deadline_changes(
+            &effects.deadline_changes,
+            &mut runtime.deadlines,
+            &mut sr.pending_callbacks,
+            script_clock.tick,
+            script_clock.tick_hz,
+        );
 
         // The malformed-return refusal, taken here so the effects the call
         // genuinely produced are applied first (see `EnterError::Shape`).

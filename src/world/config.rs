@@ -512,6 +512,10 @@ pub struct RawWorld {
     retired_triggers: Vec<toml::Value>,
     #[serde(default, rename = "comms")]
     retired_comms: Vec<toml::Value>,
+    /// Named mission deadlines (issue #1024). The field name already matches the
+    /// `[[deadline]]` array key, so no rename is needed.
+    #[serde(default)]
+    pub deadline: Vec<crate::world::deadlines::Deadline>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -1347,6 +1351,14 @@ pub struct WorldConfig {
     pub available_ships: Vec<AvailableShipEntry>,
     /// Optional spawn point for the player ship.
     pub player_spawn: Option<PlayerSpawnEntry>,
+    /// Named mission deadlines, in authored order (issue #1024).
+    ///
+    /// Authored data only. The *live* state — due tick, pending/fired/cancelled,
+    /// and the queued call that fires it — is
+    /// [`WorldContentRuntime::deadlines`](crate::world::server::WorldContentRuntime::deadlines),
+    /// armed from this list on the first simulation tick of the mission. Ids are
+    /// unique within a world; [`parse_world`] refuses a duplicate by name.
+    pub deadlines: Vec<crate::world::deadlines::Deadline>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -1562,6 +1574,35 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         ));
     }
 
+    // Named mission deadlines (issue #1024): ids are the only handle script has
+    // on a deadline — `on_deadline("id", …)`, `ctx.deadlines.slip("id", …)` — so
+    // a duplicate is not a cosmetic clash, it is two records competing for every
+    // mutation. Refused at parse time, naming BOTH entries by index and id, so a
+    // designer sees which two lines to reconcile rather than which one silently
+    // won. An empty id is refused for the same reason: nothing can address it.
+    for (i, deadline) in raw.deadline.iter().enumerate() {
+        if deadline.id.trim().is_empty() {
+            return Err(format!(
+                "[[deadline]] #{i} has an empty id; every deadline needs a stable \
+                 id for script to name it"
+            ));
+        }
+        if let Some((j, earlier)) = raw
+            .deadline
+            .iter()
+            .enumerate()
+            .take(i)
+            .find(|(_, other)| other.id == deadline.id)
+        {
+            return Err(format!(
+                "duplicate deadline id '{}': [[deadline]] #{j} (due_secs = {}) and \
+                 [[deadline]] #{i} (due_secs = {}) both declare it; deadline ids must \
+                 be unique within a world",
+                deadline.id, earlier.due_secs, deadline.due_secs
+            ));
+        }
+    }
+
     // Validate extra_worlds: every entry must be a non-empty string.
     for (i, path) in raw.extra_worlds.iter().enumerate() {
         if path.trim().is_empty() {
@@ -1614,6 +1655,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         dust: raw.dust,
         available_ships,
         player_spawn: raw.player_spawn,
+        deadlines: raw.deadline,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }

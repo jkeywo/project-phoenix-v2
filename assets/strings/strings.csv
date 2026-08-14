@@ -914,3 +914,10 @@ shield.facing.arc_4,"Shield console / chatter — default facing label for the 5
 shield.facing.arc_5,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 5 (issue #977)","Arc 5"
 shield.facing.arc_6,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 6 (issue #977)","Arc 6"
 shield.facing.arc_7,"Shield console / chatter — default facing label for the 5+-arc legacy constructor, arc 7 (issue #977)","Arc 7"
+component.deadlines.empty,"Deadline countdown panel when the mission has authored no visible deadlines (issue #1024)","[NO MISSION DEADLINES]"
+component.deadlines.heading,"Deadline countdown panel — heading above the list of visible mission deadlines (issue #1024)","[MISSION CLOCK]"
+component.deadlines.fired,"Deadline countdown panel — shown in place of the countdown once a deadline's time has run out (issue #1024)","[TIME UP]"
+component.deadlines.cancelled,"Deadline countdown panel — shown in place of the countdown once the mission has called a deadline off (issue #1024)","[STOOD DOWN]"
+world.probe_deadlines.deadline.window_opens.label,assets/worlds/probe_deadlines.toml → [deadline] label,[Transfer window opens]
+world.probe_deadlines.deadline.stabiliser_failure.label,assets/worlds/probe_deadlines.toml → [deadline] label,[Stabiliser failure]
+world.probe_deadlines.deadline.first_warning.label,assets/worlds/probe_deadlines.toml → [deadline] label,[First warning]

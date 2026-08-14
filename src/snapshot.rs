@@ -176,6 +176,7 @@ use crate::sim_rng::{SimRng, SimRngState};
 use crate::sim_tick::SimTick;
 use crate::torpedo::{Torpedo, TubeBurstState, TubeLoadState};
 use crate::world::content::WorldEvent;
+use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
 use crate::world::script::schedule::{PendingCallbacks, ScheduledCall, TickBudget};
 use crate::world::server::{WorldContentRuntime, WorldScriptRuntime};
@@ -228,7 +229,19 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// fired and seat a message no `on_pick` exists for. Nothing in the payload
 /// distinguishes that save from one whose world simply had no declarative
 /// content, so both are refused by `Versions::check`, which names the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 4;
+///
+/// `5` — issue #1024 added [`ScenarioState::deadlines`], and this is the format-2
+/// argument run again on a new vocabulary. Every new field carries
+/// `#[serde(default)]`, so a format-4 save still parses — and a format-4 save of
+/// a deadline-free world would restore correctly, which is exactly why the
+/// constant cannot be left at 4. A format-4 payload carries no deadline record at
+/// all, so restoring one into a world that authors `[[deadline]]` blocks re-arms
+/// every deadline the run had cancelled, rewinds every one it had slipped back to
+/// its authored due time, and un-fires the ones already spent — the same class of
+/// silent re-arming that moved this constant to 2 for trigger latches. Nothing in
+/// the payload distinguishes that save from one whose world simply authored no
+/// deadlines, so both are refused by `Versions::check`, which names the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 5;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -1018,6 +1031,33 @@ pub struct ScenarioState {
     /// already the stable key the rule asks for: no AST, no closure, no handle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub script_callbacks: Vec<ScheduledCall>,
+    /// `WorldContentRuntime::deadlines`, whole (issue #1024).
+    ///
+    /// The named half of the queue above. [`Self::script_callbacks`] already
+    /// carries the `ScheduledCall` a pending deadline is waiting on — but the key
+    /// is `(fire_tick, script_path, fn_name)` and nothing in it says *which*
+    /// deadline, whether the crew can see it, or whether the two that are NOT in
+    /// the queue were cancelled or already fired. Restoring the queue without the
+    /// table therefore resumes a mission whose deadlines have no names and no
+    /// history: a cancelled `stabiliser_failure` comes back armed at its authored
+    /// time, and a window the crew bought two minutes on comes back due when it
+    /// originally was.
+    ///
+    /// Stored as the whole [`DeadlineTable`] rather than a per-field projection,
+    /// which is [`EntityState::pass_surface`]'s exception, taken for its reason:
+    /// every field is a scalar, a `String`, or the already-stored
+    /// [`ScheduledCall`], with one small enum
+    /// ([`DeadlineState`](crate::world::deadlines::DeadlineState)) that travels by
+    /// its own `snake_case` serde name rather than by variant order. There is
+    /// nothing here whose shape a save would pin that this payload does not pin
+    /// already — and writing it whole is what keeps the table impossible to drift
+    /// out of sync with the queue one field at a time.
+    ///
+    /// In authored order, never sorted, for [`Self::script_callbacks`]' reason:
+    /// the order is the world file's, it is what the panel renders, and it is
+    /// already deterministic across peers.
+    #[serde(default, skip_serializing_if = "DeadlineTable::is_empty")]
+    pub deadlines: DeadlineTable,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -1441,6 +1481,10 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
             .get_resource::<WorldScriptRuntime>()
             .map(|script| script.pending_callbacks.0.clone())
             .unwrap_or_default(),
+        // The named half (issue #1024). Empty — and so absent from the payload —
+        // for every world that authors no `[[deadline]]`, which is every shipped
+        // world today.
+        deadlines: runtime.deadlines.clone(),
     })
 }
 
@@ -2745,6 +2789,12 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
             .iter()
             .filter_map(world_event_from_record)
             .collect();
+        // Wholesale replacement, this module's rule throughout: the fresh app ran
+        // its own `arm_mission_deadlines` on the way to the restore point, so
+        // merging would leave the resumed world holding the bootstrap's due ticks
+        // beside the capture's. Taking the table whole also carries its `armed`
+        // latch, which is what stops the arming system re-arming over the top.
+        runtime.deadlines = stored.deadlines.clone();
     }
 
     match world.get_resource_mut::<WorldScriptRuntime>() {

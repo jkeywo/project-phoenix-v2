@@ -29,7 +29,8 @@ use vellum_script::ScriptSource;
 
 use crate::world::script::engine::{loading_engine, BuilderState, Registration, ScriptTrigger};
 use crate::world::script::validate::{
-    validate_flag_opassign, validate_on_pick_fns, validate_registrations, validate_script_triggers,
+    validate_deadline_handlers, validate_flag_opassign, validate_on_pick_fns,
+    validate_registrations, validate_script_triggers,
 };
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
 
@@ -54,6 +55,10 @@ pub struct CompiledScripts {
     /// each unit's top level (issue #980, M2). Feed the existing pipeline exactly
     /// as TOML-authored triggers do.
     pub script_triggers: Vec<ScriptTrigger>,
+    /// `on_deadline("id", "handler")` declarations collected while running each
+    /// unit's top level (issue #1024). Paired with the world's `[[deadline]]`
+    /// blocks by `arm_mission_deadlines`.
+    pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
     /// Content hash binding a save to the exact scripts it was recorded against.
     pub content_hash: u64,
     /// All findings: source lifting, compilation, and cross-reference. Any
@@ -221,6 +226,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
         .unwrap_or_default();
     let registrations = builder.registrations;
     let script_triggers = builder.script_triggers;
+    let deadline_handlers = builder.deadline_handlers;
 
     let content_hash = vellum_script::content_hash(&sorted);
 
@@ -229,6 +235,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
         defined_fns,
         registrations,
         script_triggers,
+        deadline_handlers,
         content_hash,
         findings,
     }
@@ -293,6 +300,18 @@ pub fn load_world_scripts(
     ));
     compiled.findings.extend(validate_script_triggers(
         &compiled.script_triggers,
+        &compiled.defined_fns,
+    ));
+    // And the named-deadline pairing (issue #1024): every `on_deadline(id, fn)`
+    // must name a `[[deadline]]` this world authored AND a fn that exists, and
+    // every authored `[[deadline]]` must have exactly one handler. All three are
+    // error findings on the same channel, so the atomic activation gate blocks a
+    // world whose deadlines could never fire — the failure that would otherwise
+    // surface as a countdown running to zero and nothing happening.
+    compiled.findings.extend(validate_deadline_handlers(
+        world_path,
+        world_toml,
+        &compiled.deadline_handlers,
         &compiled.defined_fns,
     ));
     // Walk each script body for a compound assignment on the `flags` accessor

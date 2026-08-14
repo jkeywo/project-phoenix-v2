@@ -81,6 +81,24 @@ pub struct WorldContentRuntime {
     pub entity_groups: HashMap<String, HashSet<String>>,
     /// Actions queued for deferred dispatch (via `action_delays` on triggers).
     pub pending_delayed_actions: Vec<DelayedAction>,
+    /// Named mission deadlines (issue #1024): the live state of every
+    /// `[[deadline]]` the world authored.
+    ///
+    /// A *record*, not a queue — read [`crate::world::deadlines`] before adding
+    /// anything to it. Each deadline's firing is one ordinary `ScheduledCall` on
+    /// [`WorldScriptRuntime::pending_callbacks`], drained by the callback system
+    /// that already exists; what lives here is the name, label, visibility and
+    /// mutable due tick that the raw `(fire_tick, script_path, fn_name)` key
+    /// cannot carry. Armed once by [`arm_mission_deadlines`] on the first
+    /// simulation tick of the mission — the same tick [`anchor_mission_clock`]
+    /// stamps, so `due_secs` measures from mission start rather than from boot.
+    ///
+    /// It sits on this resource rather than becoming a resource of its own so
+    /// every site that already borrows the content runtime to apply a call's
+    /// effects can apply its deadline mutations too, and so the state census
+    /// (`tests/authoritative_state_enumeration.rs`) sees no new registration —
+    /// the same shape `WorldScriptRuntime::pending_callbacks` has.
+    pub deadlines: crate::world::deadlines::DeadlineTable,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -389,6 +407,11 @@ pub struct WorldScriptRuntime {
     /// #816 split intact: world runtime holds the strings, the comms module owns
     /// what they mean.
     pub pending_comms_opens: Vec<crate::comms::content::OpenCommsRequest>,
+    /// `on_deadline("id", "handler")` declarations collected at load (issue
+    /// #1024), pairing each authored `[[deadline]]` with the fn it runs and the
+    /// unit that said so. Read once, by [`arm_mission_deadlines`]; the unit path
+    /// is half of the `ScheduledCall` key each deadline arms with.
+    pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
 }
 
 /// The two script-related reads [`tick_trigger_pipeline`] needs, bundled into a
@@ -500,6 +523,11 @@ impl Plugin for WorldPlugin {
                 FixedUpdate,
                 (
                     anchor_mission_clock,
+                    // Immediately after the anchor and before anything reads the
+                    // table: a `[[deadline]]` is due N seconds into the MISSION,
+                    // so it is keyed off the same first-InProgress-tick moment
+                    // (issue #1024). Runs its body exactly once per mission.
+                    arm_mission_deadlines,
                     collect_world_events,
                     tick_trigger_pipeline,
                 )
@@ -734,6 +762,7 @@ pub(crate) fn compile_world_scripts(mut commands: Commands, raw: Option<Res<RawW
         content_hash: compiled.content_hash,
         pending_callbacks: PendingCallbacks::new(),
         pending_comms_opens: Vec::new(),
+        deadline_handlers: compiled.deadline_handlers,
     });
 }
 
@@ -1356,6 +1385,100 @@ pub(crate) fn anchor_mission_clock(
     }
 }
 
+/// Arm every `[[deadline]]` this world authored, on the first simulation tick of
+/// the mission (issue #1024).
+///
+/// Chained immediately after [`anchor_mission_clock`] and gated the same way, so
+/// "the tick this runs for the first time" IS "the first simulation tick of the
+/// mission": `SimSet::Physics` is gated on `InProgress`, and `due_secs` therefore
+/// measures from mission start rather than from app boot. That is the #960 fix
+/// applied to this vocabulary from the outset — a ninety-second lobby must not
+/// retire a mission's deadlines before the crew has the con.
+///
+/// # It arms; it does not tick
+///
+/// The only thing arming *does* is push one ordinary
+/// [`ScheduledCall`](crate::world::script::schedule::ScheduledCall) per deadline
+/// onto `WorldScriptRuntime::pending_callbacks` — the queue
+/// [`tick_script_callbacks`] already drains. No system introduced by issue #1024
+/// walks the deadline table looking for due work, and this one runs its body
+/// exactly once per mission. See [`crate::world::deadlines`] for why that is the
+/// whole point.
+///
+/// # Determinism
+///
+/// A no-op for every world that authors no deadline: the early returns happen
+/// before any `DerefMut`, so no change-detection tick flips and a deadline-free
+/// run is byte-identical to one from before this system existed. Where deadlines
+/// ARE authored, every fire tick is `now_tick + seconds_to_ticks(due_secs, hz)`
+/// over values two peers both read from the world file, so both peers arm the
+/// same ticks.
+pub(crate) fn arm_mission_deadlines(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut script: Option<ResMut<WorldScriptRuntime>>,
+) {
+    // Immutable reads only on the already-armed path, so an armed mission does
+    // not mark `WorldContentRuntime` changed every tick.
+    let Some(world_config) = world_config else {
+        return;
+    };
+    if runtime.deadlines.armed || world_config.deadlines.is_empty() {
+        return;
+    }
+    // A deadline fires a script fn, so a world with deadlines and no script
+    // runtime has nothing to arm against. `validate_deadline_handlers` already
+    // blocks such a world at load; this is the belt to that brace.
+    let Some(script) = script.as_deref_mut() else {
+        return;
+    };
+    let now_tick = sim_tick.map(|t| t.0).unwrap_or(0);
+    let queued = runtime.deadlines.arm(
+        &world_config.deadlines,
+        &script.deadline_handlers,
+        now_tick,
+        world_config.global.sim_tick_hz,
+    );
+    // THE reuse, in one line: a deadline's firing is an entry on the EXISTING
+    // deferred-callback queue.
+    script.pending_callbacks.extend(queued);
+}
+
+/// Replay a script call's buffered `ctx.deadlines.slip(…)` / `.cancel(…)` against
+/// the live table, taking each resulting edit to the **existing** callback queue
+/// (issue #1024).
+///
+/// This is where "a slipped deadline does not also fire at its old time" is
+/// actually enforced: the pure table returns the exact `ScheduledCall` to
+/// retract, and it is removed from `pending_callbacks` here before the
+/// replacement is pushed. Nothing reconciles a table against a queue later;
+/// there is one edit, applied at the point the script authored it.
+///
+/// Free function rather than a system because it is called from all four sites
+/// that consume a call's [`CallEffects`] — the trigger pipeline, the callback
+/// drain, and the two comms answer paths — each of which already holds both
+/// borrows.
+pub(crate) fn apply_deadline_changes(
+    changes: &[crate::world::deadlines::DeadlineChange],
+    deadlines: &mut crate::world::deadlines::DeadlineTable,
+    pending_callbacks: &mut PendingCallbacks,
+    now_tick: u64,
+    tick_hz: f32,
+) {
+    for change in changes {
+        let Some(edit) = deadlines.apply(change, now_tick, tick_hz) else {
+            continue;
+        };
+        if let Some(stale) = edit.retract {
+            pending_callbacks.retract(&stale);
+        }
+        if let Some(fresh) = edit.push {
+            pending_callbacks.push(fresh);
+        }
+    }
+}
+
 // -- AI-event trigger system -------------------------------------------------
 
 /// Collect this tick's externally-sourced `WorldEvent`s into `WorldEventBuffer`.
@@ -1699,6 +1822,7 @@ pub(crate) fn tick_trigger_pipeline(
                                 &h.script_path,
                                 &h.fn_name,
                                 &runtime.flags,
+                                &runtime.deadlines,
                                 Map::new(),
                             )),
                             None => {
@@ -1759,6 +1883,17 @@ pub(crate) fn tick_trigger_pipeline(
                         // A scripted `open_comms` queues for the comms module to
                         // materialise; empty for every world that authors none.
                         sr.pending_comms_opens.extend(effects.comms_opens);
+                        // And its named-deadline mutations (issue #1024): applied
+                        // against the live table, each taking its edit to the SAME
+                        // callback queue above — which is what stops a slipped
+                        // deadline also firing at its old tick.
+                        apply_deadline_changes(
+                            &effects.deadline_changes,
+                            &mut runtime.deadlines,
+                            &mut sr.pending_callbacks,
+                            script_clock.tick,
+                            script_clock.tick_hz,
+                        );
                     }
                 }
             }
@@ -2628,6 +2763,13 @@ pub(crate) fn tick_script_callbacks(
         return;
     }
 
+    // Named deadlines (issue #1024): whichever of the calls just split off IS a
+    // deadline's arming becomes that deadline's firing. A lookup inside a drain
+    // that already happens — not a second drain, and nothing here reads a clock
+    // or scans for due work. Done BEFORE dispatch so a deadline's own handler
+    // reads its state as `"fired"`, which is the honest answer while it runs.
+    runtime.deadlines.note_fired(&due);
+
     // The clock a callback's OWN deferred work is stamped against — same shape as
     // `tick_trigger_pipeline`'s `script_clock`. `elapsed_secs` anchors a
     // callback-scheduled `in_seconds` effect; `tick`/`tick_hz` anchor a
@@ -2685,6 +2827,7 @@ pub(crate) fn tick_script_callbacks(
                     &call.script_path,
                     &call.fn_name,
                     &runtime.flags,
+                    &runtime.deadlines,
                     Map::new(),
                 )),
                 None => {
@@ -2745,6 +2888,16 @@ pub(crate) fn tick_script_callbacks(
         sr.pending_callbacks.extend(effects.callbacks);
         // A callback that opened a comms thread queues it for the comms module.
         sr.pending_comms_opens.extend(effects.comms_opens);
+        // A callback that slipped or cancelled a deadline re-keys it here
+        // (issue #1024) — including a deadline's OWN fire handler, which may
+        // legitimately arm the next one in a chain.
+        apply_deadline_changes(
+            &effects.deadline_changes,
+            &mut runtime.deadlines,
+            &mut sr.pending_callbacks,
+            script_clock.tick,
+            script_clock.tick_hz,
+        );
     }
 }
 
@@ -3569,6 +3722,7 @@ pub(crate) mod tests {
             "world.toml#script.setup",
             "on_x",
             &crate::world::flags::FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
             Map::new(),
         );
         assert_eq!(effects.delayed.len(), 1, "one delayed effect was scheduled");
@@ -3644,6 +3798,7 @@ pub(crate) mod tests {
             content_hash: compiled.content_hash,
             pending_callbacks: PendingCallbacks::new(),
             pending_comms_opens: Vec::new(),
+            deadline_handlers: Vec::new(),
         }
     }
 

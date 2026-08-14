@@ -49,6 +49,12 @@
 //!   boundary the TOML `[[comms.response.action]]` array does, so the two
 //!   front-ends emit identical command sequences. Dormant in M4 — the live
 //!   `handle_respond_to_message` collapse is deferred to M7.
+//! * [`deadlines`] — the named-deadline vocabulary (issue #1024): a loading-engine
+//!   `on_deadline("id", "fn")` declaration pairing an authored `[[deadline]]`
+//!   block with the fn it runs, and a runtime `ctx.deadlines` handle that reads a
+//!   deadline's remaining time and state and buffers `slip`/`cancel`. A deadline's
+//!   firing rides the **existing** `pending_callbacks` queue — see
+//!   [`crate::world::deadlines`] for why that is the whole design.
 //! * [`validate`] — a cross-reference pass over `AST::iter_functions()` proving
 //!   every registered handler name (and every TOML `script = "fn"` reference, for
 //!   both `[[trigger]]` and `[[comms]]`) resolves at load, emitting the existing
@@ -86,6 +92,9 @@
 
 pub mod authoring;
 pub mod comms;
+/// The `deadlines` script vocabulary (issue #1024): `on_deadline` on the
+/// loading engine, `ctx.deadlines.remaining/state/slip/cancel` on the runtime one.
+pub mod deadlines;
 pub mod effects;
 pub mod engine;
 /// Test-only harness for driving a `[script]`-authored world's handlers, shared

@@ -498,6 +498,7 @@ mod tests {
                 "probe.rhai",
                 "probe",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             );
             if let Err(err) = res {

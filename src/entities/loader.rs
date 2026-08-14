@@ -884,6 +884,7 @@ size_max = 2.0
                     &st.source_path,
                     &st.handler,
                     &flags,
+                    &crate::world::deadlines::DeadlineTable::default(),
                     rhai::Map::new(),
                 );
                 for effect in effects.commands {

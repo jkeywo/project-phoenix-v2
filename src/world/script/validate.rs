@@ -37,6 +37,17 @@ pub const UNRESOLVED_SCRIPT_FN: &str = "unresolved-script-fn";
 /// lint turns that silent degradation into a blocking finding.
 pub const FLAG_OPASSIGN_NOT_COMPOSABLE: &str = "flag-opassign-not-composable";
 
+/// Category slug for a `[[deadline]]` block and an `on_deadline(…)` declaration
+/// that do not pair up (issue #1024).
+///
+/// A deadline is authored in TOML but *named* by script, so the two halves can
+/// disagree in two directions: an `on_deadline("typo", …)` naming a block that
+/// does not exist, and a `[[deadline]]` block no `on_deadline` ever claims. Both
+/// produce a deadline that can never fire, which shows the crew a countdown
+/// running to zero with nothing behind it — a failure no runtime check can
+/// report, because nothing goes wrong until the moment nothing happens.
+pub const DEADLINE_NOT_PAIRED: &str = "deadline-not-paired";
+
 fn unresolved_finding(handler: &str, source_path: &str, context: &str) -> WorldFinding {
     WorldFinding {
         severity: Severity::Error,
@@ -90,6 +101,88 @@ pub fn validate_script_triggers(
                 &st.source_path,
                 "scripted trigger",
             ));
+        }
+    }
+    findings
+}
+
+/// Prove every named deadline and its handler pair up (issue #1024).
+///
+/// Three error findings, all on the existing authoring-validation channel so the
+/// atomic activation gate (`world::validate::has_error`) blocks the world:
+///
+/// 1. an `on_deadline(id, fn)` whose `fn` is not defined anywhere in the
+///    compiled set — the same check every other handler name gets;
+/// 2. an `on_deadline(id, …)` naming an `id` no `[[deadline]]` block declares;
+/// 3. a `[[deadline]]` block no `on_deadline` claims.
+///
+/// (3) is an error rather than a shrug because a deadline without a handler is
+/// not "a deadline that does nothing" — it is a deadline that cannot be *armed*,
+/// since arming it means queuing the call it runs. An author who genuinely wants
+/// a pure countdown writes an empty handler, which says so.
+///
+/// Reads the authored ids straight out of `world_toml` rather than taking a
+/// parsed `WorldConfig`, because this pass runs inside the script loader, which
+/// is handed the raw document and no config. `parse_world` has already refused a
+/// duplicate id by the time a world reaches activation, so a repeated id here
+/// cannot silently satisfy two registrations.
+pub fn validate_deadline_handlers(
+    world_path: &str,
+    world_toml: &toml::Value,
+    handlers: &[crate::world::deadlines::DeadlineHandler],
+    defined_fns: &BTreeSet<String>,
+) -> Vec<WorldFinding> {
+    let authored: Vec<String> = world_toml
+        .get("deadline")
+        .and_then(|v| v.as_array())
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|b| b.get("id").and_then(|v| v.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut findings = Vec::new();
+    for handler in handlers {
+        if !defined_fns.contains(&handler.handler) {
+            findings.push(unresolved_finding(
+                &handler.handler,
+                &handler.source_path,
+                &format!("on_deadline(\"{}\", …)", handler.deadline_id),
+            ));
+        }
+        if !authored.contains(&handler.deadline_id) {
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: DEADLINE_NOT_PAIRED,
+                message: format!(
+                    "on_deadline(\"{}\", \"{}\") names a deadline no [[deadline]] block                      declares in '{world_path}'",
+                    handler.deadline_id, handler.handler
+                ),
+                source: SourceLocation {
+                    file: handler.source_path.clone(),
+                    line: None,
+                    reference: handler.deadline_id.clone(),
+                },
+            });
+        }
+    }
+    for id in &authored {
+        if !handlers.iter().any(|h| &h.deadline_id == id) {
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: DEADLINE_NOT_PAIRED,
+                message: format!(
+                    "[[deadline]] '{id}' has no on_deadline(\"{id}\", \"fn\") registration, so                      nothing can be armed for it; a deadline with no effect still needs an                      (empty) handler"
+                ),
+                source: SourceLocation {
+                    file: world_path.to_string(),
+                    line: None,
+                    reference: id.clone(),
+                },
+            });
         }
     }
     findings

@@ -259,6 +259,7 @@ pub(crate) fn open_scripted_comms_threads(
                     &req.script_path,
                     &req.root_fn,
                     &runtime.flags,
+                    &runtime.deadlines,
                 )),
                 None => {
                     bevy::log::warn!(
@@ -342,6 +343,16 @@ pub(crate) fn open_scripted_comms_threads(
         }
         sr.pending_callbacks.extend(effects.callbacks);
         sr.pending_comms_opens.extend(effects.comms_opens);
+        // A dialogue node that slipped or cancelled a named deadline (issue
+        // #1024) — the shape a negotiation beat takes: promise safe passage,
+        // push the transfer window out.
+        crate::world::server::apply_deadline_changes(
+            &effects.deadline_changes,
+            &mut runtime.deadlines,
+            &mut sr.pending_callbacks,
+            script_clock.tick,
+            script_clock.tick_hz,
+        );
 
         // A malformed return was already logged above; its effects have now been
         // applied, and there is no node to show.
@@ -452,6 +463,7 @@ pub(crate) mod tests {
             content_hash: compiled.content_hash,
             pending_callbacks: PendingCallbacks::new(),
             pending_comms_opens: Vec::new(),
+            deadline_handlers: Vec::new(),
         }
     }
 
@@ -1145,6 +1157,7 @@ fn on_send(ctx) {
                 content_hash: compiled.content_hash,
                 pending_callbacks: PendingCallbacks::new(),
                 pending_comms_opens: Vec::new(),
+                deadline_handlers: Vec::new(),
             },
             path,
         )
@@ -1216,6 +1229,7 @@ fn on_send(ctx) {
             &path,
             "on_raider_attacked",
             &crate::world::flags::FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
         )
         .expect("the handler runs");
         assert!(node.is_none(), "a trigger handler returns no dialogue node");
@@ -1417,6 +1431,7 @@ fn on_send(ctx) {
                 content_hash: compiled.content_hash,
                 pending_callbacks: PendingCallbacks::new(),
                 pending_comms_opens: Vec::new(),
+                deadline_handlers: Vec::new(),
             },
             path,
         )
@@ -1620,6 +1635,7 @@ fn on_send(ctx) {
                 &path,
                 handler,
                 &flags,
+                &crate::world::deadlines::DeadlineTable::default(),
             )
             .unwrap_or_else(|e| panic!("{handler} must run: {e}"));
             assert!(node.is_none(), "{handler} is a trigger handler, not a node");
@@ -1643,6 +1659,7 @@ fn on_send(ctx) {
                 &path,
                 node_fn,
                 &flags,
+                &crate::world::deadlines::DeadlineTable::default(),
             )
             .unwrap_or_else(|e| panic!("{node_fn} must run: {e}"));
             let node = node.unwrap_or_else(|| panic!("{node_fn} must return a dialogue node"));
@@ -1683,6 +1700,7 @@ fn on_send(ctx) {
                 &path,
                 handler,
                 &flags,
+                &crate::world::deadlines::DeadlineTable::default(),
             )
             .expect("the handler runs");
             queued.extend(effects.comms_opens);

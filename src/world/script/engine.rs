@@ -24,7 +24,9 @@ use std::sync::{Arc, Mutex};
 
 use rhai::{Engine, Map, AST};
 
+use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
+use crate::world::script::deadlines::{register_deadlines, Deadlines};
 use crate::world::script::effects::{
     register_effects, register_real_lit, BufferedEffect, EffectSink,
 };
@@ -121,6 +123,9 @@ pub struct BuilderState {
     /// Triggers built by the typed registration fns (`on_destroyed`, …), one per
     /// `TriggerCondition` variant (issue #980, M2).
     pub script_triggers: Vec<ScriptTrigger>,
+    /// `on_deadline("id", "handler")` declarations (issue #1024), pairing an
+    /// authored `[[deadline]]` id with the fn it runs and the unit that said so.
+    pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
 }
 
 /// Build the loading engine, registering the builder vocabulary against
@@ -153,7 +158,11 @@ pub fn loading_engine(state: Arc<Mutex<BuilderState>>) -> Engine {
 
     // The typed trigger-builder vocabulary (issue #980, M2): one registration fn
     // per `TriggerCondition` variant, each building a `Trigger` into `state`.
-    super::triggers::register_trigger_builders(&mut engine, state);
+    super::triggers::register_trigger_builders(&mut engine, state.clone());
+
+    // `on_deadline("id", "handler")` (issue #1024): names the fn a `[[deadline]]`
+    // block runs when it expires, attributed to the unit that declared it.
+    super::deadlines::register_deadline_builders(&mut engine, state);
 
     engine
 }
@@ -166,6 +175,8 @@ pub fn runtime_engine() -> Engine {
     register_flags(&mut engine);
     register_effects(&mut engine);
     register_scheduling(&mut engine);
+    // The `deadlines` read/write vocabulary (issue #1024).
+    register_deadlines(&mut engine);
     engine
 }
 
@@ -242,13 +253,14 @@ impl RuntimeHost {
         path: &str,
         fn_name: &str,
         base_flags: &FlagStore,
+        base_deadlines: &DeadlineTable,
         extra: Map,
     ) -> CallEffects {
         if !budget.admit_call() {
             // Dropped: the call cap is reached or the tick has already tripped.
             return CallEffects::default();
         }
-        match self.try_call(clock, ast, path, fn_name, base_flags, extra) {
+        match self.try_call(clock, ast, path, fn_name, base_flags, base_deadlines, extra) {
             Ok((effects, ops)) => {
                 budget.charge_ops(ops);
                 effects
@@ -291,9 +303,10 @@ impl RuntimeHost {
         path: &str,
         fn_name: &str,
         base_flags: &FlagStore,
+        base_deadlines: &DeadlineTable,
         extra: Map,
     ) -> Result<(CallEffects, u64), vellum_script::CallError> {
-        self.try_call_returning(clock, ast, path, fn_name, base_flags, extra)
+        self.try_call_returning(clock, ast, path, fn_name, base_flags, base_deadlines, extra)
             .map(|(effects, _value, ops)| (effects, ops))
     }
 
@@ -341,13 +354,15 @@ impl RuntimeHost {
         path: &str,
         fn_name: &str,
         base_flags: &FlagStore,
+        base_deadlines: &DeadlineTable,
         extra: Map,
     ) -> Option<(CallEffects, rhai::Dynamic)> {
         if !budget.admit_call() {
             // Dropped: the call cap is reached or the tick has already tripped.
             return None;
         }
-        match self.try_call_returning(clock, ast, path, fn_name, base_flags, extra) {
+        match self.try_call_returning(clock, ast, path, fn_name, base_flags, base_deadlines, extra)
+        {
             Ok((effects, value, ops)) => {
                 budget.charge_ops(ops);
                 Some((effects, value))
@@ -388,6 +403,7 @@ impl RuntimeHost {
         path: &str,
         fn_name: &str,
         base_flags: &FlagStore,
+        base_deadlines: &DeadlineTable,
         extra: Map,
     ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
         let sink = EffectSink::new();
@@ -395,11 +411,16 @@ impl RuntimeHost {
         // in authored order, interleaved with effects (issue #981 hazard 2).
         let flags = Flags::new(base_flags, sink.clone());
         let schedule = ScheduleSink::new();
+        // Measured against the SAME clock a deferred effect is stamped with, so
+        // `ctx.deadlines.remaining(…)` and `ctx.schedule.after(n, …)` agree about
+        // what "now" is (issue #1024).
+        let deadlines = Deadlines::new(base_deadlines, clock.tick, clock.tick_hz);
 
         let mut ctx = extra;
         ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
         ctx.insert("flags".into(), rhai::Dynamic::from(flags));
         ctx.insert("schedule".into(), rhai::Dynamic::from(schedule.clone()));
+        ctx.insert("deadlines".into(), rhai::Dynamic::from(deadlines.clone()));
 
         // Reset the op counter, then call. On error we return before draining
         // anything, so the effect buffer and the schedule buffer are dropped
@@ -420,6 +441,9 @@ impl RuntimeHost {
                 delayed,
                 callbacks,
                 comms_opens,
+                // Dropped whole on the error path above with the other buffers,
+                // so a raising handler slips nothing (settled decision 10).
+                deadline_changes: deadlines.take_changes(),
             },
             value,
             ops,
@@ -449,6 +473,10 @@ impl RuntimeHost {
                 path,
                 fn_name,
                 base_flags,
+                // Inert, for `SchedClock::ZERO`'s reason: this entry point wants
+                // a call's immediate commands only, and a deadline mutation is
+                // never one of them (it drains to `deadline_changes`).
+                &DeadlineTable::default(),
                 extra,
             )
             .commands,
@@ -546,6 +574,7 @@ mod tests {
                 "t.rhai",
                 "node",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             )
             .expect("the dialogue call must not error");
@@ -590,6 +619,7 @@ mod tests {
                 "t.rhai",
                 "on_pick",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             )
             .expect("the dialogue call must not error");
@@ -625,6 +655,7 @@ mod tests {
                 "t.rhai",
                 "node",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             )
             .expect("an admitted call runs");
@@ -646,6 +677,7 @@ mod tests {
                 "t.rhai",
                 "node",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             )
             .is_none(),
@@ -678,6 +710,7 @@ mod tests {
             "t.rhai",
             "on_x",
             &FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
             Map::new(),
         );
         // The immediate effect applies now; the delayed one is deferred. The
@@ -724,6 +757,7 @@ mod tests {
             "t.rhai",
             "on_x",
             &FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
             Map::new(),
         );
         assert_eq!(effects.callbacks.len(), 1);
@@ -766,6 +800,7 @@ mod tests {
                 "t.rhai",
                 "on_x",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             )
             .callbacks
@@ -797,6 +832,7 @@ mod tests {
                 "t.rhai",
                 "on_x",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             );
             // Reduce to comparable, `PartialEq` parts (DelayedAction is not Eq).
@@ -831,6 +867,7 @@ mod tests {
             "t.rhai",
             "on_x",
             &FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
             Map::new(),
         );
         assert!(
@@ -859,6 +896,7 @@ mod tests {
             "t.rhai",
             "on_x",
             &FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
             Map::new(),
         );
         let after_one = budget.ops_used();
@@ -870,6 +908,7 @@ mod tests {
             "t.rhai",
             "on_x",
             &FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
             Map::new(),
         );
         assert!(
@@ -893,6 +932,7 @@ mod tests {
                 "scenario.rhai",
                 "boom",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new(),
             )
             .expect_err("a runaway must be refused");
@@ -921,6 +961,7 @@ mod tests {
                 "t.rhai",
                 "boom",
                 &FlagStore::new(),
+                &crate::world::deadlines::DeadlineTable::default(),
                 Map::new()
             )
             .is_err());

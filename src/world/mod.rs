@@ -1,5 +1,9 @@
 pub mod config;
 pub mod content;
+/// Named, inspectable, mutable mission deadlines (issue #1024) — a *record*
+/// layered over the existing `pending_callbacks` deferred-work queue, never a
+/// second scheduler.
+pub mod deadlines;
 pub mod delayed;
 pub mod dispatch;
 pub mod flags;

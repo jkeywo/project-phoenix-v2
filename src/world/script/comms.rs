@@ -276,6 +276,7 @@ pub fn enter_node(
     path: &str,
     fn_name: &str,
     base_flags: &FlagStore,
+    base_deadlines: &crate::world::deadlines::DeadlineTable,
 ) -> Result<(CallEffects, Option<ScriptDialogueNode>), EnterError> {
     // Resolve the name against the unit BEFORE calling. `call_fn` reports a
     // missing function as an ordinary `CallError`, which the host's failure
@@ -286,9 +287,16 @@ pub fn enter_node(
     if !ast.iter_functions().any(|f| f.name == fn_name) {
         return Err(EnterError::Unresolved);
     }
-    let Some((effects, value)) =
-        host.call_dialogue(budget, clock, ast, path, fn_name, base_flags, Map::new())
-    else {
+    let Some((effects, value)) = host.call_dialogue(
+        budget,
+        clock,
+        ast,
+        path,
+        fn_name,
+        base_flags,
+        base_deadlines,
+        Map::new(),
+    ) else {
         return Err(EnterError::Refused);
     };
     match read_dialogue_node(value) {
@@ -326,6 +334,7 @@ mod tests {
             PATH,
             fn_name,
             flags,
+            &crate::world::deadlines::DeadlineTable::default(),
         )
     }
 
@@ -490,6 +499,7 @@ mod tests {
             PATH,
             "root",
             &FlagStore::new(),
+            &crate::world::deadlines::DeadlineTable::default(),
         )
         .unwrap_err();
         assert!(matches!(err, EnterError::Refused), "{err:?}");

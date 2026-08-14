@@ -2609,6 +2609,27 @@ pub struct SensorRadarBlackboard {
     pub selected_target_alert: Option<bool>,
 }
 
+/// One visible mission deadline, as the Captain console reads it (issue #1024).
+///
+/// `remaining_secs` is computed **server-side**, on the authoritative `SimTick`,
+/// and re-published every tick. The client does not hold a clock and does not
+/// interpolate between updates: a countdown the client guessed at would drift
+/// away from the tick the deadline actually fires on, and two players would read
+/// different numbers off the same mission.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DeadlineSnapshot {
+    /// The authored `[[deadline]] id` — the panel's stable row key.
+    pub id: String,
+    /// `strings.csv` id for the crew-facing name. The client looks it up; no
+    /// English crosses the wire (AGENTS.md rule 11).
+    pub label: String,
+    /// Whole seconds left, rounded up. `0` once it has fired; `-1`
+    /// ([`NO_DEADLINE`](crate::world::deadlines::NO_DEADLINE)) once cancelled.
+    pub remaining_secs: i64,
+    /// `"pending"` / `"fired"` / `"cancelled"`.
+    pub state: String,
+}
+
 /// Raw sim truth for the Captain system, published each tick into the ship
 /// blackboard (issue #563).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -2650,6 +2671,11 @@ pub struct CaptainBlackboard {
     /// The objective id the captain has chosen to prioritize, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boosted_objective_id: Option<String>,
+    /// The mission deadlines authored as `visible = true`, in authored order
+    /// (issue #1024). Empty for every world that authors none, so a world
+    /// without deadlines publishes exactly the payload it did before.
+    #[serde(default)]
+    pub deadlines: Vec<DeadlineSnapshot>,
 }
 
 fn default_red_alert_system_id() -> SystemId {
@@ -2675,6 +2701,7 @@ impl Default for CaptainBlackboard {
             hull_integrity_pct: 100.0,
             game_status: String::new(),
             boosted_objective_id: None,
+            deadlines: Vec::new(),
         }
     }
 }

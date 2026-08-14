@@ -75,6 +75,13 @@ pub struct CallEffects {
     /// vocabulary the applier has no resources for — see
     /// [`EffectSink`](super::effects::EffectSink).
     pub comms_opens: Vec<crate::comms::content::OpenCommsRequest>,
+    /// Named-deadline mutations from `ctx.deadlines.slip(…)` / `.cancel(…)`, in
+    /// authored order (issue #1024). A FIFTH field for `comms_opens`' reason: a
+    /// deadline mutation edits `WorldScriptRuntime::pending_callbacks`, a queue
+    /// the generic action applier holds no handle on. Buffered, never deferred —
+    /// the adapter replays them in the same tick, at the same point as the call's
+    /// other effects.
+    pub deadline_changes: Vec<crate::world::deadlines::DeadlineChange>,
 }
 
 /// The clock a deferred-work drain stamps absolute fire times against.
@@ -170,6 +177,25 @@ impl PendingCallbacks {
     /// Number of pending callbacks.
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// Remove the first queued callback equal to `call`, returning whether one
+    /// was found.
+    ///
+    /// The retraction half of a named deadline's re-keying (issue #1024): when a
+    /// deadline slips or is cancelled, the call it armed is taken back OUT of
+    /// this queue, which is what stops a slipped deadline also firing at its old
+    /// time. "First equal" rather than "all equal" is deliberate — two deadlines
+    /// may legitimately share a handler fn AND a fire tick, producing equal keys,
+    /// and retracting one of them must leave the other queued.
+    pub fn retract(&mut self, call: &ScheduledCall) -> bool {
+        match self.0.iter().position(|queued| queued == call) {
+            Some(index) => {
+                self.0.remove(index);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Split off the callbacks due at `now_tick` (`now_tick >= fire_tick`),
@@ -626,6 +652,39 @@ mod tests {
         assert_eq!(due_names, vec!["a", "c", "d"]);
         let pending_names: Vec<&str> = queue.0.iter().map(|c| c.fn_name.as_str()).collect();
         assert_eq!(pending_names, vec!["b"]);
+    }
+
+    #[test]
+    fn retract_removes_one_equal_call_and_leaves_its_twin() {
+        // The deadline re-keying primitive (issue #1024). Equal keys are legal —
+        // two deadlines may share a handler and a tick — so a retraction takes
+        // exactly one.
+        let call = |fire: u64, name: &str| ScheduledCall {
+            fire_tick: fire,
+            script_path: "s.rhai".to_string(),
+            fn_name: name.to_string(),
+        };
+        let mut queue = PendingCallbacks::new();
+        queue.push(call(300, "shared"));
+        queue.push(call(300, "shared"));
+        queue.push(call(600, "other"));
+
+        assert!(
+            queue.retract(&call(300, "shared")),
+            "the first equal one goes"
+        );
+        assert_eq!(queue.len(), 2);
+        assert!(queue.retract(&call(300, "shared")), "and so does its twin");
+        assert_eq!(queue.len(), 1);
+        assert!(
+            !queue.retract(&call(300, "shared")),
+            "a third retraction finds nothing and says so"
+        );
+        assert_eq!(
+            queue.drain_due(600).len(),
+            1,
+            "the unrelated call is untouched"
+        );
     }
 
     #[test]

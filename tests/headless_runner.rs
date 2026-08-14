@@ -8684,3 +8684,660 @@ fn a_scan_from_past_the_last_band_is_refused_as_out_of_range() {
          'too far' rather than 'you cannot do this'"
     );
 }
+
+// ── Negotiation, and the other way it ends (issue #1036, parent #852) ────────
+
+/// The workers' entity — the party every promise in this act is made to, and
+/// the file the casualty finding lands on.
+const SKYWAY_COMMITTEE: &str = "world.falling_skyway.entity.strike_committee.name";
+/// The operator's security cutter — the other open channel.
+const SKYWAY_CUTTER: &str = "world.falling_skyway.entity.havelock_cutter.name";
+/// The rung the dispute is about.
+const SKYWAY_DEPOT_B: &str = "world.falling_skyway.entity.depot_ladder_b.name";
+/// The finding the evidence branch reads. Filed by the operator's own file, and
+/// what `ctx.dossier.holds` is asked about.
+const SKYWAY_FILE: &str = "world.falling_skyway.evidence.ladder_b_maintenance_file";
+/// Unregistered, so a submission routes to the LocalShip through the ordinary
+/// admission path — the same door `command_admission_moves_with_the_logical_tick`
+/// uses for a helm command.
+const SKYWAY_TOKEN: &str = "ai:skyway-comms";
+/// Every test in this group drives the scenario at the #1035 test's timestep.
+const SKYWAY_DT: f64 = 1.0 / 30.0;
+
+/// Build Falling Skyway and step it to the act-2 boundary, with the destroyer
+/// stood off the ladder transit leg where both parties are inside the hull's
+/// authored 1000-unit comms range.
+///
+/// Stepped rather than jumped: the survey deadline is what OPENS both threads,
+/// so a test that shortcut the act boundary would be testing a hand-built
+/// situation instead of the one the mission produces. The hull is then moved by
+/// hand, which is the honest analogue of helm flying the act-2 objective's own
+/// Reach directive — the same substitution the #1035 test makes, and for its
+/// reason: closing the range is helm's job, not this test's subject.
+fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/falling_skyway.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt: SKYWAY_DT,
+        max_ticks: ticks_for_sim_seconds(300.0, SKYWAY_DT),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+
+    // THE COMMS OFFICER IS A PERSON IN THESE TESTS, and saying so is setup
+    // rather than cheating. The destroyer merges `fragments/ai/fleet_baseline`,
+    // whose Comms policy answers any open thread with its first response — on a
+    // real destroyer Tactical (which is where the comms overlay lives) is one of
+    // the four seats a crew hold, and this hull is fully AI-backfilled only
+    // because a headless run has nobody in it. Dropping the response policy off
+    // the LocalShip is the closest thing this harness has to seating somebody:
+    // the thread then waits for the `RespondToMessage` this test submits, which
+    // is the same admitted command a human's finger produces.
+    //
+    // It cannot be authored in the world file instead — see the note in
+    // `havelock_offer`: the player hull's config comes from the lobby selection
+    // wholesale, so an override on the `player-ship` row is discarded.
+    // Stepped far enough for the game to start and the hull to spawn first; the
+    // threads this matters for do not open until the act boundary, 90 s away.
+    run(&mut app, 10);
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<project_phoenix::comms_plugin::CommsResponseAiPolicy>();
+
+    // The survey falls due at an authored 90 s; the limit is generous so the
+    // tuning pass (#1044) can lengthen the act without touching this test.
+    let limit = ticks_for_sim_seconds(150.0, SKYWAY_DT);
+    for _ in 0..limit {
+        run(&mut app, 1);
+        if skyway_flag(&app, "act") == 2 {
+            break;
+        }
+    }
+    assert_eq!(
+        skyway_flag(&app, "act"),
+        2,
+        "the survey deadline must open act 2"
+    );
+    let _ = std::any::type_name::<WorldContentRuntime>();
+
+    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(900.0, 0.0, 40.0));
+    // Two ticks for the comms range pass to see the new position, so a pick is
+    // never refused by a stale range flag.
+    run(&mut app, 2);
+    (app, ship)
+}
+
+fn skyway_move(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, to: bevy::prelude::Vec3) {
+    let mut physics = app
+        .world_mut()
+        .get_mut::<ShipPhysics>(ship)
+        .expect("a ship");
+    physics.x = to.x;
+    physics.y = to.y;
+    physics.z = to.z;
+}
+
+fn skyway_flag(app: &bevy::prelude::App, name: &str) -> i64 {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .counter(name)
+}
+
+/// Every inbox message from `sender`, oldest first.
+fn skyway_messages(
+    app: &bevy::prelude::App,
+    sender: &str,
+) -> Vec<project_phoenix::messages::CommsMessage> {
+    let uuid = app
+        .world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .get(sender)
+        .cloned()
+        .unwrap_or_else(|| panic!("{sender} is not in this world"));
+    app.world()
+        .resource::<project_phoenix::comms::server::CommsInboxRes>()
+        .0
+        .messages()
+        .into_iter()
+        .filter(|m| m.sender_uuid == uuid)
+        .collect()
+}
+
+/// The live, unanswered node on `sender`'s thread.
+fn skyway_open_node(
+    app: &bevy::prelude::App,
+    sender: &str,
+) -> project_phoenix::messages::CommsMessage {
+    skyway_messages(app, sender)
+        .into_iter()
+        .rfind(|m| m.selected_response.is_none() && !m.responses.is_empty())
+        .unwrap_or_else(|| panic!("no open dialogue node from {sender}"))
+}
+
+fn skyway_options(msg: &project_phoenix::messages::CommsMessage) -> Vec<String> {
+    msg.responses.iter().map(|r| r.text.clone()).collect()
+}
+
+/// Submit `text`'s response on `sender`'s open node through the ordinary
+/// admitted `RespondToMessage` path, and step far enough for the pick's effects
+/// and its follow-up node to land.
+///
+/// Addressed by TEXT rather than by index on purpose: the whole point of this
+/// tree is that which options are offered depends on the world, so a hard-coded
+/// index would be asserting the opposite of what the slice is for.
+fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemControlPayload};
+
+    let msg = skyway_open_node(app, sender);
+    let index = msg
+        .responses
+        .iter()
+        .position(|r| r.text == text)
+        .unwrap_or_else(|| {
+            panic!(
+                "{sender}'s open node offers no '{text}'; it offers {:?}",
+                skyway_options(&msg)
+            )
+        });
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: SKYWAY_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::system_registry::comms_system_id(),
+                payload: SystemControlPayload::RespondToMessage {
+                    message_id: msg.id.clone(),
+                    response_index: index,
+                },
+            },
+        });
+    run(app, 4);
+    assert!(
+        skyway_messages(app, sender)
+            .iter()
+            .any(|m| m.id == msg.id && m.selected_response == Some(index)),
+        "the pick '{text}' was refused rather than recorded"
+    );
+}
+
+/// Order one operation on the crew's hull through the queue a scripted
+/// `ctx.effects.transfer(…)` fills — the #1035 test's route, which is where the
+/// reasoning for using it lives.
+fn skyway_order(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    verb: project_phoenix::operations::OperationVerb,
+    target: &str,
+) -> project_phoenix::operations::OperationHold {
+    use project_phoenix::operations::{PendingOperationStart, ShipOperations};
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let ship_uuid = app
+        .world()
+        .get::<project_phoenix::entities::spawner::EntityUuid>(ship)
+        .expect("the hull carries a uuid")
+        .0
+        .clone();
+    let target_uuid = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .name_to_uuid
+        .get(target)
+        .cloned()
+        .unwrap_or_else(|| panic!("{target} is not in this world"));
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .pending_operation_starts
+        .push(PendingOperationStart {
+            ship_uuid,
+            verb,
+            target_uuid,
+        });
+    run(app, 4);
+    app.world()
+        .get::<ShipOperations>(ship)
+        .and_then(|ops| ops.active.clone())
+        .expect("the operation opened")
+}
+
+/// One structure's live condition, read off the entity rather than off the file.
+fn skyway_condition(app: &mut bevy::prelude::App, name: &str) -> f32 {
+    use project_phoenix::entities::spawner::EntityName;
+    use project_phoenix::infrastructure::InfrastructureCondition;
+
+    let mut q = app
+        .world_mut()
+        .query::<(&EntityName, &InfrastructureCondition)>();
+    q.iter(app.world())
+        .find(|(n, _)| n.0 == name)
+        .map(|(_, c)| c.0.condition())
+        .unwrap_or_else(|| panic!("{name} has no condition track"))
+}
+
+/// **AC1/AC2/AC3/AC4/AC7 — Path A, end to end.** The committee are talked round,
+/// both promises land on the books with the workers as the party, and the strike
+/// clears: #1035's two bites let go, through the one settlement lever, at the
+/// pace the tree authored.
+///
+/// The evidence branch is asserted here in its NEGATIVE form — a crew who never
+/// went and looked are not offered the line about the file, and must therefore
+/// give both promises to get the vote called. Its positive form is the test
+/// below.
+#[test]
+fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promises() {
+    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb, ProgressRate};
+    use project_phoenix::world::commitments::CommitmentState;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let (mut app, ship) = skyway_at_act_two();
+
+    // Both channels open on the act boundary, and neither is behind the other.
+    assert!(
+        !skyway_messages(&app, SKYWAY_COMMITTEE).is_empty(),
+        "the committee hail the destroyer when act 2 opens"
+    );
+    assert!(
+        !skyway_messages(&app, SKYWAY_CUTTER).is_empty(),
+        "and so does the operator's cutter — the force-open path is reachable \
+         without saying a word to the workers"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.listen",
+    );
+
+    // The terms node, as read by a crew who have gathered nothing.
+    let terms = skyway_open_node(&app, SKYWAY_COMMITTEE);
+    assert_eq!(
+        terms.body, "world.falling_skyway.comms.committee_terms",
+        "the committee state their two demands"
+    );
+    assert_eq!(
+        skyway_options(&terms),
+        vec![
+            "world.falling_skyway.comms.promise_passage".to_string(),
+            "world.falling_skyway.comms.promise_records".to_string(),
+            "world.falling_skyway.comms.stall".to_string(),
+        ],
+        "no maintenance file on the crew's sheet, so no line about it — and no \
+         vote to call yet either"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_passage",
+    );
+    let after_one = skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE));
+    assert!(
+        !after_one.contains(&"world.falling_skyway.comms.promise_passage".to_string()),
+        "a promise already on the books is not offered a second time"
+    );
+    assert!(
+        !after_one.contains(&"world.falling_skyway.comms.call_the_vote".to_string()),
+        "ONE promise is not enough for a crew who did not do the evidence work"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_records",
+    );
+    let ready = skyway_open_node(&app, SKYWAY_COMMITTEE);
+    assert_eq!(
+        ready.body, "world.falling_skyway.comms.committee_ready",
+        "with two pieces of ground the committee's own line changes"
+    );
+    assert!(
+        skyway_options(&ready).contains(&"world.falling_skyway.comms.call_the_vote".to_string())
+    );
+
+    // AC2: both promises on the books, open, with the striking workers as the
+    // party.
+    {
+        let ledger = &app.world().resource::<WorldContentRuntime>().commitments;
+        for id in ["skyway_safe_passage", "skyway_surface_records"] {
+            let promise = ledger
+                .get(id)
+                .unwrap_or_else(|| panic!("{id} is not on the books"));
+            assert_eq!(
+                promise.state,
+                CommitmentState::Open,
+                "given, not yet settled — keeping it is the transfer window's business"
+            );
+            assert_eq!(
+                promise.made_to, SKYWAY_COMMITTEE,
+                "the striking workers are the party"
+            );
+        }
+    }
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.call_the_vote",
+    );
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_settled"),
+        0,
+        "the floor has to vote first — the settlement is not on the pick"
+    );
+
+    // The PACE of this ending, measured rather than asserted: seven seconds
+    // after the vote is called the rung is still stopped. The other ending has
+    // finished by then (see the test below).
+    run(&mut app, ticks_for_sim_seconds(7.0, SKYWAY_DT));
+    assert_eq!(
+        skyway_flag(&app, "strike_resolved"),
+        0,
+        "a floor vote takes longer than a boarding party"
+    );
+
+    run(&mut app, ticks_for_sim_seconds(20.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&app, "strike_resolved"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-line"),
+        project_phoenix::core::messages::ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_worker_corroboration_closed"),
+        0,
+        "nothing about talking to them closes the route to talking to them"
+    );
+    {
+        let register = &app.world().resource::<WorldContentRuntime>().workforce;
+        assert!(
+            !register.on_strike("skyway_workers"),
+            "the workers are back on the rung"
+        );
+    }
+
+    // AC3: #1035's two effects, reversed. The transfer that came back refused
+    // in words now stands up, and the head repair comes off the unassisted rate.
+    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(1180.0, 0.0, 300.0));
+    let transfer = skyway_order(&mut app, ship, OperationVerb::Transfer, SKYWAY_DEPOT_B);
+    assert_ne!(
+        transfer.state(),
+        HoldState::Failed(Ineligibility::WorkStopped),
+        "nobody down there is refusing to authorise it now"
+    );
+    assert_eq!(transfer.state(), HoldState::Holding);
+
+    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(200.0, 0.0, 0.0));
+    let repair = skyway_order(
+        &mut app,
+        ship,
+        OperationVerb::FieldRepair,
+        "world.falling_skyway.entity.skyhook.name",
+    );
+    assert_eq!(
+        repair.rate(),
+        ProgressRate::FULL,
+        "assisted again: the people who work the spine are back on it"
+    );
+}
+
+/// **AC4's positive form.** The same tree, asked by a crew who went and got the
+/// maintenance file, offers a line it offers nobody else — and that line is
+/// worth a promise: one commitment plus the file calls the vote, where an
+/// empty-handed crew needed two.
+///
+/// The branch reads the run's own evidence log through `ctx.dossier.holds`, so
+/// what makes the difference is a finding on a fact sheet rather than a flag set
+/// beside one.
+#[test]
+fn the_skyway_maintenance_file_opens_a_line_in_the_negotiation_nobody_else_gets() {
+    use project_phoenix::dossier::evidence::EvidenceProvenance;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let (mut app, _ship) = skyway_at_act_two();
+
+    // The operator hands over their own file, which is this scenario's joke: it
+    // is what makes the workers listen to the crew.
+    let offer = skyway_open_node(&app, SKYWAY_CUTTER);
+    assert!(
+        skyway_options(&offer).contains(&"world.falling_skyway.comms.ask_for_file".to_string()),
+        "the file is on the table before any authorisation is"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.ask_for_file",
+    );
+
+    {
+        let log = &app.world().resource::<WorldContentRuntime>().evidence;
+        let entry = log
+            .entries
+            .iter()
+            .find(|e| e.text == SKYWAY_FILE)
+            .expect("the file is on the crew's sheet");
+        assert_eq!(
+            entry.provenance,
+            EvidenceProvenance::Records,
+            "a document comparison — not a scan, and not somebody's word"
+        );
+    }
+    assert!(
+        !skyway_options(&skyway_open_node(&app, SKYWAY_CUTTER))
+            .contains(&"world.falling_skyway.comms.ask_for_file".to_string()),
+        "and it is not offered twice"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.listen",
+    );
+    let terms = skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE));
+    assert!(
+        terms.contains(&"world.falling_skyway.comms.show_file".to_string()),
+        "THE branch: this option exists only because the crew hold the finding — \
+         the node offers {terms:?}"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.show_file",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_passage",
+    );
+    let ready = skyway_open_node(&app, SKYWAY_COMMITTEE);
+    assert_eq!(ready.body, "world.falling_skyway.comms.committee_ready");
+    assert!(
+        skyway_options(&ready).contains(&"world.falling_skyway.comms.call_the_vote".to_string()),
+        "the file plus ONE promise carries it, where two promises were needed \
+         without it — the evidence work is a promise the captain did not have to \
+         make"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.call_the_vote",
+    );
+    run(&mut app, ticks_for_sim_seconds(25.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&app, "strike_resolved"), 1);
+    {
+        let ledger = &app.world().resource::<WorldContentRuntime>().commitments;
+        assert!(
+            ledger.get("skyway_surface_records").is_none(),
+            "and the promise the file bought is one the captain never had to give"
+        );
+    }
+}
+
+/// **AC5/AC6 — Path B, end to end.** The operator clears the picket: faster than
+/// the vote, reachable without negotiating, it costs people, and what it shuts
+/// is said out loud rather than latched in silence.
+#[test]
+fn forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let (mut app, _ship) = skyway_at_act_two();
+
+    let before = skyway_condition(&mut app, SKYWAY_DEPOT_B);
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+
+    // The order's own consequences, on the tick it is given.
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_force_casualties"),
+        2,
+        "read off the workers' disposition as it stood when the order was given \
+         — 25, dug in, nobody having talked to them"
+    );
+    // AC5: the campaign remembers, on both sides of the same act.
+    assert_eq!(skyway_flag(&app, "relationship.skyway_workers.damaged"), 1);
+    assert_eq!(
+        skyway_flag(&app, "relationship.havelock_operations.favoured"),
+        1
+    );
+    {
+        let register = &app.world().resource::<WorldContentRuntime>().workforce;
+        assert_eq!(register.disposition("skyway_workers"), Some(5));
+        assert_eq!(register.disposition("havelock_operations"), Some(70));
+    }
+
+    // AC6: the closure is LEGIBLE — a flag a later mission reads, an objective
+    // gone red on the crew's own list, and the workers saying why.
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_closed"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed,
+        "the corroboration objective fails where the crew can see it"
+    );
+    assert!(
+        skyway_messages(&app, SKYWAY_COMMITTEE)
+            .iter()
+            .any(|m| m.body == "world.falling_skyway.comms.committee_signs_off"),
+        "and the workers say it themselves before the channel goes quiet"
+    );
+
+    // AC5's pace: settled seven seconds after the order, where the vote had not
+    // carried by then.
+    run(&mut app, ticks_for_sim_seconds(7.0, SKYWAY_DT));
+    assert_eq!(
+        skyway_flag(&app, "strike_resolved"),
+        1,
+        "a boarding party is faster than a floor vote"
+    );
+    {
+        let register = &app.world().resource::<WorldContentRuntime>().workforce;
+        assert!(!register.on_strike("skyway_workers"));
+    }
+
+    // The casualties, resolved ON SCREEN rather than in a flag: the cutter
+    // reports what it cost, the finding lands on the workers' file, and the rung
+    // itself takes the damage.
+    assert!(
+        skyway_messages(&app, SKYWAY_CUTTER)
+            .iter()
+            .any(|m| m.body == "world.falling_skyway.comms.force_report_hurt"),
+        "the outcome comes back in words, on the channel that asked for it"
+    );
+    {
+        let log = &app.world().resource::<WorldContentRuntime>().evidence;
+        assert!(
+            log.entries
+                .iter()
+                .any(|e| e.text == "world.falling_skyway.evidence.picket_cleared_hurt"),
+            "and onto the crew's own record of what happened"
+        );
+    }
+    let after = skyway_condition(&mut app, SKYWAY_DEPOT_B);
+    assert!(
+        (before - after - 8.0).abs() < 0.001,
+        "four condition points a casualty, on a track the operations panel is \
+         already showing: {before} -> {after}"
+    );
+}
+
+/// **AC5's "real risk".** The casualty count is a function of the situation the
+/// order was given in — how dug in the workers are, and whether the captain gave
+/// the picket ten minutes on the open channel first — and it is the same number
+/// every time for the same seed and the same choices.
+#[test]
+fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
+    // Talked down to first: they are further dug in, and it goes worse.
+    let mut app = skyway_at_act_two().0;
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.dismiss",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+    assert_eq!(skyway_flag(&app, "skyway_force_casualties"), 3);
+
+    // The same run again from a fresh app on the same seed: the risk is resolved
+    // from state, so it does not move.
+    let mut repeat = skyway_at_act_two().0;
+    skyway_pick(
+        &mut repeat,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.dismiss",
+    );
+    skyway_pick(
+        &mut repeat,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+    assert_eq!(
+        skyway_flag(&repeat, "skyway_force_casualties"),
+        3,
+        "deterministic per seed, because it is read rather than rolled"
+    );
+
+    // The captain's lever: ten minutes on the open channel takes a step off the
+    // count, and costs time doing it.
+    let mut warned = skyway_at_act_two().0;
+    skyway_pick(
+        &mut warned,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_warned",
+    );
+    assert_eq!(skyway_flag(&warned, "skyway_force_casualties"), 1);
+    run(&mut warned, ticks_for_sim_seconds(7.0, SKYWAY_DT));
+    assert_eq!(
+        skyway_flag(&warned, "strike_resolved"),
+        0,
+        "warning them first is slower than not"
+    );
+    run(&mut warned, ticks_for_sim_seconds(8.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&warned, "strike_resolved"), 1);
+    assert!(
+        skyway_messages(&warned, SKYWAY_CUTTER)
+            .iter()
+            .any(|m| m.body == "world.falling_skyway.comms.force_report_one"),
+        "one casualty is its own report, not the same one with a number in it"
+    );
+}

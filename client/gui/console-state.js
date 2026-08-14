@@ -711,10 +711,31 @@ export function buildWeaponsConsoleState(state) {
  *             viewscreen_auto: boolean, view_direction: string,
  *             camera_views: Array, view_mode: string, objectives: Array,
  *             boosted_objective_id: string|null, deadlines: Array,
+ *             operations: {capabilities: Array, active: object|null,
+ *                          refusal: string|null},
  *             hull_integrity_pct: number, game_status: string,
  *             blips: RadarBlip[],
  *             own_hull: StationHullAggregate }} CaptainConsolePayload
  */
+
+/**
+ * The ship's external-operation readout (issue #1026).
+ *
+ * Its own blackboard under its own channel key, not a field on the captain's:
+ * an operation is something the ship does rather than a system aboard it. A
+ * hull that authored no `[operations]` publishes none at all, which is the empty
+ * shape returned here — the panel renders its own "no capability" state off it
+ * rather than the console guessing.
+ * @param {{ blackboards }} state
+ */
+function operationsPayload(state) {
+  const bb = (state.blackboards && state.blackboards['operations']) || {};
+  return {
+    capabilities: bb.capabilities ?? [],
+    active:       bb.active       ?? null,
+    refusal:      bb.refusal      ?? null,
+  };
+}
 
 /**
  * CaptainChair console. Returns JSON of {@link CaptainConsolePayload}.
@@ -738,6 +759,9 @@ export function buildCaptainConsoleState(state) {
       // Visible mission deadlines, already counted down server-side against the
       // authoritative SimTick (issue #1024) — the client formats, never clocks.
       deadlines:             bb.deadlines              ?? [],
+      // The external-operation readout (issue #1026) — a blackboard of its own,
+      // so it is read from its own key rather than off the captain's.
+      operations:            operationsPayload(state),
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
@@ -764,6 +788,10 @@ export function buildCaptainConsoleState(state) {
     // No blackboard, no deadlines: the legacy fallback has no wire source for
     // them, and an empty list renders the panel's own empty state.
     deadlines:             [],
+    // Operations ride their own blackboard, so the legacy fallback carries them
+    // unchanged rather than blanking them: a captain blackboard that has not
+    // arrived says nothing about whether an operations one has.
+    operations:            operationsPayload(state),
     hull_integrity_pct:    state.hullPct     || 100,
     game_status:           state.redAlert
                              ? 'RED ALERT — All hands to battlestations.'
@@ -1325,9 +1353,32 @@ export function buildShieldsConsoleState(state) {
  *             target_shield_freq: number|null, target_shields: Array,
  *             target_shield_fraction: number|null,
  *             target_alert: boolean|null,
+ *             scan: {capable: boolean, reading: object|null,
+ *                    refusal: string|null},
  *             own_hull: StationHullAggregate,
  *             sensors_auto: boolean }} SensorsConsolePayload
  */
+
+/**
+ * The ship's last sensor reading (issue #1032).
+ *
+ * Its own blackboard under its own channel key, not a field on the sensors
+ * one, for the reason {@link operationsPayload} reads from `operations`: the
+ * thing aboard the ship that can be commanded and damaged is the sensors
+ * system, and a reading is a result rather than a system's live state. A hull
+ * that authored no `[scan]` publishes none at all, which is the empty shape
+ * returned here — the panel renders its own "no capability" state off
+ * `capable`, so the console never has to guess.
+ * @param {{ blackboards }} state
+ */
+function scanPayload(state) {
+  const bb = (state.blackboards && state.blackboards['scan']) || {};
+  return {
+    capable: bb.capable ?? false,
+    reading: bb.reading ?? null,
+    refusal: bb.refusal ?? null,
+  };
+}
 
 /**
  * Sensors console. Returns JSON of {@link SensorsConsolePayload}.
@@ -1452,6 +1503,9 @@ export function buildSensorsConsoleState(state) {
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
     target_alert:       targetAlert,
+    // The last scan reading (issue #1032) — a blackboard of its own, so it is
+    // read from its own channel key rather than off the sensors one.
+    scan:               scanPayload(state),
     own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
     sensors_auto: state.stationRatings?.['sensors'] === 'Backfill',
   });
@@ -1463,8 +1517,28 @@ export function buildSensorsConsoleState(state) {
  *
  * @typedef {{ messages: Array, objectives?: Array, contacts: Array,
  *             on_screen: boolean, own_hull: StationHullAggregate,
- *             comms_auto: boolean }} CommsConsolePayload
+ *             dossiers: Array, comms_auto: boolean }} CommsConsolePayload
  */
+
+/**
+ * The crew's intelligence picture (issue #1030).
+ *
+ * Its own blackboard under its own channel key, read from there rather than off
+ * the comms one, for the reason {@link operationsPayload} reads from `operations`:
+ * a dossier is something the crew knows, not something a system aboard the ship
+ * publishes. It rides the comms payload because comms is the family that owns
+ * *who is out there* — on the destroyer that family is on the tactical station,
+ * which is where the panel is mounted, and on a hull with a real comms console it
+ * arrives there without another builder.
+ *
+ * A world with no subjects publishes an empty list rather than nothing, so the
+ * panel renders its own empty state instead of the console guessing.
+ * @param {{ blackboards }} state
+ */
+function dossiersPayload(state) {
+  const bb = (state.blackboards && state.blackboards['dossiers']) || {};
+  return bb.subjects ?? [];
+}
 
 /**
  * Comms console. Returns JSON of {@link CommsConsolePayload}.
@@ -1482,6 +1556,10 @@ export function buildCommsConsoleState(state) {
       contacts:   bb.contacts   ?? [],
       on_screen:  state.currentView === 'Comms',
       own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),
+      // Dossiers ride their own blackboard (issue #1030), so they are read from
+      // their own key on BOTH arms: a comms blackboard that has not arrived says
+      // nothing about whether a dossier one has.
+      dossiers:   dossiersPayload(state),
       comms_auto: state.stationRatings?.['comms'] === 'Backfill',
       rejection,
     });
@@ -1492,6 +1570,7 @@ export function buildCommsConsoleState(state) {
     contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
     own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
+    dossiers:  dossiersPayload(state),
     comms_auto: state.stationRatings?.['comms'] === 'Backfill',
     rejection,
   });
@@ -1510,7 +1589,7 @@ export const NAVIGATION_RADAR_RANGE = 5000.0;
  *             own_hull: StationHullAggregate, ship_speed: number,
  *             impulse_charge_progress: number, cancel_visible: boolean,
  *             on_screen: boolean, radar_range: number,
- *             regions: RadarRegion[],
+ *             regions: RadarRegion[], civilians: Array,
  *             navigation_auto: boolean }} NavigationConsolePayload
  */
 
@@ -1594,6 +1673,11 @@ export function buildNavigationConsoleState(state) {
     on_screen:               onScreen,
     radar_range:             range,
     regions:                 state.regions || buildRadarRegions(navEntities, state.objectives),
+    // Civilian traffic (issue #1028): who is on which lane, and who is not
+    // doing as asked. Server-derived — the client never infers compliance from
+    // watching a contact move, because "it has not started turning yet" and
+    // "it has decided not to" look identical on a chart.
+    civilians:               (bb && bb.civilians) || [],
     navigation_auto:         state.stationRatings?.['navigation'] === 'Backfill',
   });
 }

@@ -29,7 +29,7 @@
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(5,8,24,0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
     .overlay-panel.open { display: flex; }
     .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    .overlay-panel ph-navigation-map, .overlay-panel ph-comms-contact-list, .overlay-panel ph-comms-current-message { flex: 1; min-height: 0; }
+    .overlay-panel ph-navigation-map, .overlay-panel ph-comms-contact-list, .overlay-panel ph-comms-current-message, .overlay-panel ph-dossier-panel { flex: 1; min-height: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
@@ -47,6 +47,7 @@
           <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
           <button class="overlay-toggle" id="nav-toggle" data-active="false" data-i18n="console.common.nav_toggle">Nav</button>
           <button class="overlay-toggle" id="comms-toggle" data-active="false"><span data-i18n="console.common.comms_toggle">Comms</span><span class="unread-badge" id="comms-unread">!</span></button>
+          <button class="overlay-toggle" id="intel-toggle" data-active="false" data-i18n="console.common.intel_toggle">Intel</button>
         </div>
       </div>
       <div class="console-body">
@@ -72,12 +73,21 @@
       <button class="overlay-back" id="nav-back" data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.navigation">Navigation</h2>
       <ph-navigation-map id="navigation-map"></ph-navigation-map>
+      <ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>
     </div>
     <div class="overlay-panel" id="comms-overlay">
       <button class="overlay-back" id="comms-back" data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.comms">Comms</h2>
       <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
       <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
+    </div>
+    <!-- Intelligence files (issue #1030). A sibling overlay to Comms, not a
+         panel inside it: the destroyer has no comms console, comms is a toggle
+         here, and this is a toggle beside it. -->
+    <div class="overlay-panel" id="intel-overlay">
+      <button class="overlay-back" id="intel-back" data-i18n="console.common.back">&#8592; Back</button>
+      <h2 data-i18n="console.tactical.intel">Intel</h2>
+      <ph-dossier-panel id="dossier-panel"></ph-dossier-panel>
     </div>
   </div>
   <script type="module">
@@ -88,13 +98,15 @@
     import '../components/ph-comms-contact-list.js';
     import '../components/ph-comms-current-message.js';
     import '../components/ph-navigation-map.js';
+    import '../components/ph-civilian-traffic.js';
+    import '../components/ph-dossier-panel.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
 
     function closeAllOverlays() {
-      ['nav-overlay', 'comms-overlay'].forEach(function(oid) {
+      ['nav-overlay', 'comms-overlay', 'intel-overlay'].forEach(function(oid) {
         var el = document.getElementById(oid);
         if (el) el.classList.remove('open');
       });
@@ -131,6 +143,8 @@
         var commsContactsEl = document.getElementById('comms-contact-list');
         var commsMsgEl = document.getElementById('comms-current-message');
         var navMapEl = document.getElementById('navigation-map');
+        var civilianEl = document.getElementById('civilian-traffic');
+        var dossierEl = document.getElementById('dossier-panel');
         var commsUnread = document.getElementById('comms-unread');
         var w = system(s, 'tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard');
         var n = system(s, 'navigation');
@@ -146,6 +160,13 @@
         var threadMsg = messages.find(function(m) { return !m.is_read; }) || messages[messages.length - 1] || null;
         commsMsgEl.state = { thread: threadMsg, rejection: c.rejection };
         navMapEl.state = { blips: n.blips || [], regions: n.regions || [], range: n.radar_range || 5000, ship_pos: { x: n.ship_x || 0, z: n.ship_z || 0 }, ship_heading: n.ship_heading || 0, waypoint: n.waypoint || null };
+        // Civilian traffic (issue #1028): who is on which lane, and who is
+        // not doing as asked. Server-derived; the panel never infers it.
+        civilianEl.state = { civilians: n.civilians || [] };
+        // Intelligence files (issue #1030). Server-projected: which facts the
+        // crew may see is decided by src/dossier/projection.rs, which has no
+        // field for hidden truth — there is nothing to filter here.
+        dossierEl.state = { dossiers: c.dossiers || [] };
         var targetName = w.target_name || w.target_uuid || null;
         document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : t('console.common.no_target');
         document.getElementById('footer-target').style.color = targetName ? 'var(--fire-bright)' : 'var(--ink-faint)';
@@ -161,6 +182,8 @@
     document.getElementById('comms-toggle').addEventListener('click', function() { toggleOverlay('comms-overlay', 'comms-toggle'); });
     document.getElementById('nav-back').addEventListener('click', closeAllOverlays);
     document.getElementById('comms-back').addEventListener('click', closeAllOverlays);
+    document.getElementById('intel-toggle').addEventListener('click', function() { toggleOverlay('intel-overlay', 'intel-toggle'); });
+    document.getElementById('intel-back').addEventListener('click', closeAllOverlays);
   </script>
 </body>
 </html>

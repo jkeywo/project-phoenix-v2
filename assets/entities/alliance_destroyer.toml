@@ -512,6 +512,44 @@ range = 250
 shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
+# The survey suite (issue #1032). What comes back from a scan is DERIVED from
+# the subject's own [infrastructure] condition track — there is no authored
+# scan text anywhere in this file or any other — so everything authored here is
+# about how good a reading the crew get, never about what it says.
+#
+# Both bands are scaled to the long-range radar's own 250-unit reach above: a
+# contact the captain cannot select is a contact there is no point authoring a
+# band for. Inside 120 the suite reads whole percent and counts capacities;
+# beyond that it reports condition to the nearest quarter and stops claiming to
+# count anything. That is the decision the slice exists for — the reading the
+# crew have is worth what their range and their power bought.
+[scan]
+# The sensor bus rides the shields group, which is what #952 put in the retired
+# sensors group's place. Level 2 is where the group boots, so a nominal ship can
+# always scan and a Power officer who robs shields to feed weapons has taken the
+# survey suite down with it.
+power_group = "shields"
+min_power_level = 2
+# The storm bands Falling Skyway is built around. A destroyer sitting in one
+# reads a band coarser; sitting in one at long range gets nothing at all.
+degraded_by = [ "nebula_fog", "sensor_blind", "radar_dampening" ]
+interference_bands = 1
+
+[[scan.band]]
+id = "detailed"
+label = "entity.alliance_destroyer.scan.band.detailed.label"
+max_range = 120.0
+condition_step = 0.01
+
+[[scan.band]]
+id = "coarse"
+label = "entity.alliance_destroyer.scan.band.coarse.label"
+max_range = 260.0
+condition_step = 0.25
+# A sweep this coarse resolves whether a system is up or down but does not
+# pretend to count berths.
+report_capacities = false
+
 [helm_console]
 # Red-alert hostile weapon-arc overlay (issue #874): RGBA 0-1, the fourth
 # entry being the fill opacity. Deliberately far fainter than the Tactical
@@ -1325,3 +1363,77 @@ commit_range = 120.0
 [ai_profile]
 aggression = 1.0
 sensor_range = 400.0
+
+# ── External operations (issue #1035) ────────────────────────────────────────
+#
+# The two verbs the band-A crew hull works the Falling Skyway with, and the
+# first `[operations]` table on a shipped hull rather than on a probe world's
+# override. Both are here rather than on the world because
+# `spawn_game_start_entities` replaces the player row's config with the
+# LOBBY-SELECTED template wholesale — a world cannot give the crew's own hull a
+# capability, which the probe worlds record at length.
+#
+# BOTH CARRY THE SAME AUTHORED CAUSE AND ANSWER IT DIFFERENTLY. That is the
+# whole of #1035 in eight lines of TOML: a stoppage means "nobody is signing
+# this off" to a transfer and "you are on your own" to a repair, and neither
+# meaning is anywhere in Rust. Settle the strike and both rules stop firing;
+# there is no restoration path, because nothing latched.
+#
+# Adding this table moves NO shipped world's simulation digest: a hull that can
+# perform an operation and never has folds nothing (`fold_operations_namespace`),
+# and this hull deliberately gains no `[infrastructure]` block — a condition
+# track on the crew's own hull would fold in every world it flies in, over state
+# no scenario asked for.
+
+# Working a berth at a depot or a skyhook head. [ai] Every number below is
+# unratified.
+#
+# It authors NO `[transfer]` terms, which is deliberate and is the reason
+# `target_requirement` is stated by hand: what a Falling Skyway transfer
+# actually MOVES is #1042's (the transfer window), both ends of a real transfer
+# have to carry the same `[[infrastructure.capacity]]` id, and this hull carries
+# no hold to put one on. What the verb means TODAY is the crew standing a
+# transfer up at a structure — timed, interruptible, and refusable by the people
+# who work it, which is what the strike is about.
+[[operations.capability]]
+verb = "transfer"
+range = 500.0
+duration_secs = 20
+power_group = "helm"
+min_power_level = 2
+target_requirement = "condition_track"
+
+# Nobody is authorising a pump. `fail` rather than `pause`, because a refused
+# transfer is a refusal and not a queue: the crew are told, on the operations
+# panel, in words, and they go and do something about it.
+[[operations.capability.interrupt]]
+cause = "work_stoppage"
+response = "fail"
+
+# Putting condition back into a structure in the field. [ai] Unratified.
+#
+# 30 seconds and half a condition point a second is 15 points — enough to take a
+# skyhook head that has slipped under its 45 % lift line back over it, inside an
+# act, with one of the hull's two repair teams committed for the duration.
+[[operations.capability]]
+verb = "field_repair"
+range = 400.0
+duration_secs = 30
+power_group = "helm"
+min_power_level = 2
+condition_per_second = 0.5
+repair_teams = 1
+
+# The local crews have walked off, so the ship's own team does the whole job.
+# `slow`, not `fail`: a repair party with a torch can still work a spine, it
+# simply takes them far longer without the people who know the structure.
+#
+# 35 % of normal turns a 30-second job into an 86-second one and pays out at
+# 0.175 points a second instead of 0.5 — the rate scales the payout, so the work
+# and what it earns cannot come apart. [ai] Unratified: this is the number the
+# tuning pass moves to make "a job that used to take one act now takes longer
+# than you have" land exactly.
+[[operations.capability.interrupt]]
+cause = "work_stoppage"
+response = "slow"
+rate_percent = 35

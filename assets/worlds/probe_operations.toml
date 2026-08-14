@@ -1,0 +1,256 @@
+# Probe world for issue #1027 — the four remaining operation verbs, end to end.
+#
+# #1026's `probe_stabilise` walked the chain for one verb. This walks it for the
+# other four, and for the shared interrupt rules all five obey. Every operation
+# here is opened by a scripted effect on a timer, so the whole run is authored
+# and deterministic rather than a fight that happens to involve a tow.
+#
+# THE FIVE PAIRS, and why each one is a separate pair of entities:
+#
+#   tug        tows      hauler-hulk   the load's position becomes the tug's rig
+#   outrider   escorts   hauler-convoy a MOVING escortee, on its own lane
+#   tender     transfers depot-berth   twice: the first fills it, the second
+#                                      finds it full and stalls
+#   sister     repairs   depot-clear   in clear space, at the full rate
+#   packhorse  repairs   depot-storm   inside a storm band, at half the rate
+#
+# The last two are the point of having two repair pairs rather than one. Same
+# capability, same duration, same authored rate — the ONLY difference is which
+# side of the band the tender is parked on, so "the storm stretched the work"
+# is measured against a control rather than against a number someone wrote down.
+# A single repair pair would pass whatever the rate did.
+#
+# NO COMBAT. Nothing here is hostile, nothing is armed at anything, and the
+# storm band carries no `damage_zone` — so a run that produces a shot has gone
+# wrong, and every operation that stalls stalled for the reason the probe was
+# testing.
+#
+# THE OPERATORS ARE NAMED WORLD ENTITIES, not the player-ship row, for the
+# reason `probe_stabilise` records at length: `spawn_game_start_entities` mints
+# the player ship a fresh uuid and takes its loadout from the lobby-selected
+# template, so a `name` on that row resolves to a uuid nothing carries and an
+# `overrides` block on it is discarded. A scripted operation addresses both ends
+# by authored NAME, so both ends have to be entities whose name and uuid meet.
+#
+# RANGES ARE DELIBERATELY GENEROUS. Every operator is on AI backfill in a
+# headless run and will drift; this is a probe of the operation chain, not of
+# station-keeping, so the drift must not be able to reach a range gate and turn
+# a verb test into a helm test. The headless tests that DO exercise the gates
+# move a ship by hand, which is the honest analogue of helm flying off station.
+#
+# Timeline (60 Hz):
+#
+#   tick    0   everything spawns; depot-berth at 20/40 berths, depot-clear and
+#               depot-storm both at 40/100 condition
+#   tick   60   t=1 s: tow, escort and both field-repairs open
+#   tick  120   t=2 s: the first transfer opens
+#   tick  480   t=8 s: the first transfer completes — 20 berths move off the
+#               tender and into the depot, taking it to 40/40, its ceiling
+#   tick  720   t=12 s: the second transfer opens against a depot that is now
+#               FULL, and stalls on `capacity_unavailable` for the rest of the
+#               run
+#   tick  ...   the two field-repairs run for 20 authored seconds each, paying
+#               2 condition points a second — 40 points in clear space, 20 in
+#               the band
+#
+# BASELINE (this world is new in #1027, so this is its first recorded digest):
+# `--seed 42 --ticks 900` gives final digest 0xc5998d7cbe9f5e9c
+# (14238567263822110364), and 14610045728400012134 at tick 0. Measured on a
+# clean tree at the commit that added this line. It is a NEW number, not a
+# preserved one — nothing to compare it against yet — so it is written down here
+# to be the thing a later change is A/B'd against, the way the other probes'
+# already are.
+
+[global]
+seed = 1027
+ai_helm_tick_hz = 30.0
+
+[anchors]
+# The convoy lane. Short and tight so the escortee actually traverses it inside
+# a probe-length run rather than merely setting off — "the escort held station
+# on something that MOVED" is the claim, and it needs real movement behind it.
+convoy_north = [-1400.0, 0.0, -120.0]
+convoy_south = [-1400.0, 0.0, 120.0]
+
+[[route]]
+id = "convoy_lane"
+on_complete = "loop"
+
+[[route.leg]]
+anchor = "convoy_north"
+speed = 1.0
+
+[[route.leg]]
+anchor = "convoy_south"
+speed = 1.0
+
+[player_spawn]
+position = [6000.0, 0.0, 6000.0]
+
+# The player ship. Present because a world needs one; parked far enough away
+# that nothing it does reaches any operation under test.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [6000.0, 0.0, 6000.0] }
+spawn_on = "game_start"
+
+# ── TOW ──────────────────────────────────────────────────────────────────────
+#
+# The load rides 120 units astern of the tug in the TUG'S own frame, so a tug
+# that turns swings it round rather than dragging it sideways. `duration_secs`
+# is long because a tow is a journey, not a task: the probe wants it still
+# running at the end of the run so the load can be watched following.
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_operations.entity.tug.name"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { operations = { capability = [{ verb = "tow", range = 4000.0, duration_secs = 600, power_group = "helm", min_power_level = 2, tow_offset = [0.0, 0.0, -120.0] }] } }
+
+# A civilian hauler rather than an inert prop, because a towed craft in this
+# game is usually traffic — and because that is the case where the tow has to
+# win over a hull that is flying itself. It carries no `[civilian] route`: a
+# derelict under tow is not on a lane, and giving it one would have the probe
+# testing #1028's compliance machine at the same time.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_operations.entity.hulk.name"
+transform = { position = [80.0, 0.0, 0.0] }
+
+# ── ESCORT ───────────────────────────────────────────────────────────────────
+#
+# The separation limit is well beyond the operating range, which is the shape
+# the validator enforces: past `range` the escort stalls and the crew close
+# back up, past `separation_limit` the relationship is over. Both are generous
+# here so the SUCCESS path is what this world produces; the headless test drives
+# the separation by moving the escortee, which is the honest analogue of a
+# convoy running for it.
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_operations.entity.outrider.name"
+transform = { position = [-1400.0, 0.0, 0.0] }
+overrides = { operations = { capability = [{ verb = "escort", range = 20000.0, duration_secs = 600, power_group = "helm", min_power_level = 2, separation_limit = 40000.0 }] } }
+
+# The escortee, on its own looping lane, moving throughout.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_operations.entity.convoy.name"
+transform = { position = [-1400.0, 0.0, 60.0] }
+overrides = { civilian = { route = "convoy_lane" } }
+
+# ── TRANSFER ─────────────────────────────────────────────────────────────────
+#
+# Two infrastructure entities, both carrying `depot_transfer_throughput`: the
+# tender's own hold and the depot's berths. The tender is a cruiser with an
+# `[infrastructure]` block bolted on by override, which is the honest way to say
+# "this ship is carrying something" without inventing a cargo system.
+#
+# 40 aboard the tender, 20 in a depot whose ceiling is 40. One delivery of 20
+# exactly fills it, which is what makes the SECOND delivery's refusal a fact
+# about the destination and not about the source — the tender still has 20 left.
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_operations.entity.tender.name"
+transform = { position = [1200.0, 0.0, 0.0] }
+overrides = { operations = { capability = [{ verb = "transfer", range = 4000.0, duration_secs = 6, power_group = "helm", min_power_level = 2, transfer = { capacity = "depot_transfer_throughput", amount = 20, direction = "deliver" } }] }, infrastructure = { publish = false, capacity = [{ id = "depot_transfer_throughput", amount = 40 }] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_operations.entity.berth.name"
+transform = { position = [1400.0, 0.0, 0.0] }
+overrides = { infrastructure = { capacity = [{ id = "depot_transfer_throughput", amount = 20, ceiling = 40 }] } }
+
+# ── FIELD REPAIR, in clear space and in the storm ────────────────────────────
+#
+# Both depots spawn at 40/100 — above `depot_transfer.toml`'s own 40 % failure
+# point, so neither run is also a threshold-crossing test. `condition_per_second`
+# is whole points per second so the arithmetic a test asserts on is legible:
+# 2 points a second for 20 seconds is 40 in clear space, and half that under the
+# band's authored 50 % rate.
+#
+# `repair_teams = 1` on a hull that carries two. Enough that the commitment is
+# real and observable, not so much that eligibility itself turns on it — the
+# starving case is unit-tested where it can be isolated.
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_operations.entity.sister.name"
+transform = { position = [0.0, 0.0, 2400.0] }
+overrides = { operations = { capability = [{ verb = "field_repair", range = 4000.0, duration_secs = 20, power_group = "helm", min_power_level = 2, condition_per_second = 2.0, repair_teams = 1, interrupt = [{ cause = "region", region_effect = "slow_zone", response = "slow", rate_percent = 50 }] }] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_operations.entity.depot_clear.name"
+transform = { position = [200.0, 0.0, 2400.0] }
+overrides = { infrastructure = { condition = 40.0 } }
+
+# The same capability, the same authored rate, parked inside the band.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_operations.entity.packhorse.name"
+transform = { position = [0.0, 0.0, 4800.0] }
+overrides = { operations = { capability = [{ verb = "field_repair", range = 4000.0, duration_secs = 20, power_group = "helm", min_power_level = 2, condition_per_second = 2.0, repair_teams = 1, interrupt = [{ cause = "region", region_effect = "slow_zone", response = "slow", rate_percent = 50 }] }] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_operations.entity.depot_storm.name"
+transform = { position = [200.0, 0.0, 4800.0] }
+overrides = { infrastructure = { condition = 40.0 } }
+
+# The band. 400-unit radius centred on the packhorse, so it is inside from tick
+# zero and its AI drift cannot take it out; the sister is 2400 units away, which
+# is six radii clear.
+[[entity]]
+template_path = "assets/entities/region_storm_band.toml"
+name = "world.probe_operations.entity.storm.name"
+transform = { position = [0.0, 0.0, 4800.0] }
+
+[script]
+setup = """
+on_timer(1, "begin_operations");
+on_timer(2, "begin_transfer");
+on_timer(12, "attempt_second_transfer");
+
+fn begin_operations(ctx) {
+    ctx.effects.tow(
+        "world.probe_operations.entity.tug.name",
+        "world.probe_operations.entity.hulk.name",
+    );
+    ctx.effects.escort(
+        "world.probe_operations.entity.outrider.name",
+        "world.probe_operations.entity.convoy.name",
+    );
+    ctx.effects.field_repair(
+        "world.probe_operations.entity.sister.name",
+        "world.probe_operations.entity.depot_clear.name",
+    );
+    ctx.effects.field_repair(
+        "world.probe_operations.entity.packhorse.name",
+        "world.probe_operations.entity.depot_storm.name",
+    );
+    ctx.flags.operations_begun = 1;
+}
+
+fn begin_transfer(ctx) {
+    ctx.effects.transfer(
+        "world.probe_operations.entity.tender.name",
+        "world.probe_operations.entity.berth.name",
+    );
+    ctx.flags.transfer_begun = 1;
+}
+
+// The same delivery again, against a depot the first one filled to its ceiling.
+// A start is only ever refused for a capability the hull lacks, so this OPENS
+// and then stalls on `capacity_unavailable` — which is the readable behaviour:
+// the crew are alongside with cargo and nowhere to put it.
+fn attempt_second_transfer(ctx) {
+    ctx.effects.transfer(
+        "world.probe_operations.entity.tender.name",
+        "world.probe_operations.entity.berth.name",
+    );
+    ctx.flags.second_transfer_begun = 1;
+}
+"""

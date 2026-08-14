@@ -1,0 +1,160 @@
+# Probe world for issue #1030 — the dossier projection, with the thing it must
+# never show sitting right there in the world.
+#
+# Four subjects and one non-subject, chosen so that every branch of the roster
+# rule and both hidden-truth gates are on screen at once and none can be
+# mistaken for another. No combat: every fact here is authored, so the run is a
+# deterministic tripwire for the projection rather than a fight that happens to
+# damage something.
+#
+#   skyway_control      a hailable starbase, Federation      -> affiliation + hailing range
+#   strike_committee    a hailable hull, Requiem, and the
+#                       party a promise is made to           -> affiliation + range + promise
+#   skyway_depot        a PUBLISHED structure, not hailable  -> condition + the LABELLED
+#                                                               threshold and capacity only
+#   sealed_depot        a hailable structure the scenario
+#                       keeps OFF the wire, sitting at 31/100 -> hailing range, and no
+#                                                                condition of any kind
+#   lonely_beacon       hailable by nobody, publishing
+#                       nothing                              -> NOT a subject at all
+#
+# THE TWO GATES, both authored here rather than described:
+#
+#   1. `sealed_depot` authors `publish = false` and a real condition of 31
+#      points. It is still a subject — the crew can see it out of the window and
+#      can hail it — but its condition reaches no fact, because the projection
+#      consumes `InfrastructureSnapshot::from_state`, which is #1025's publish
+#      gate, and therefore never holds the number at all.
+#   2. `skyway_depot` publishes two capacities and one threshold, and authors a
+#      crew-facing `label` for only one capacity. The unlabelled
+#      `depot_transfer_throughput` is published DATA a script can read and not
+#      published PROSE, so it is not a row. A capacity id is a machine name in
+#      the author's namespace (#1025 says so on the field itself) and putting one
+#      on a fact sheet would be the first English on the wire.
+#
+# `lonely_beacon` is the fifth entity for the reason #1028's probe has four
+# haulers: a rule that only ever admits is not a rule. It carries a name and a
+# description and is hailable by nobody, so it proves the roster is a decision
+# rather than "every entity in the world".
+#
+# The timeline, in mission seconds:
+#
+#   t=2   `give_word` records a promise to `strike_committee` — matched onto its
+#         dossier by the world's own `[[entity]] id`, which is how #1029 records
+#         a party. Nothing resolves it, so it stays OPEN, which is the state the
+#         fact sheet has to be able to show.
+#
+# BASELINE (release headless, `--seed 42 --ticks 900`, no --ship, clean tree):
+# final digest 0x481af0922239bfd2
+# (5195729630555389906). Re-blessed once, from 0x7922703197b58ceb
+# (8728662386098408683): that number was recorded before #1027 landed beneath
+# this world and made capacity LEVELS movable, digest-folded state — the
+# condition-track family the paragraph below names as this digest's legitimate
+# movers. The projection itself is still folded by nothing.
+#
+# Nothing this world exists to exercise is IN that digest. A dossier is derived
+# every tick and folded by nothing; what moves this number is the depot's
+# condition track and the entity population, both of which #1025 already folds.
+# If a later change makes the digest move without moving either, something
+# started folding a projection, and that is the question to ask before
+# re-blessing this line.
+
+[global]
+seed = 1030
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── Subject: a hailable starbase ─────────────────────────────────────────────
+# On the roster through the comms door, which `station_axiom.toml` opens at the
+# template level (`[comms] hailable = true`, issue #985). Federation, so its
+# affiliation row resolves through the faction's own authored `display_name`.
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "skyway_control"
+name = "world.probe_dossier.entity.skyway_control.name"
+transform = { position = [700.0, 0.0, 0.0] }
+
+# ── Subject: the party a promise is made to ──────────────────────────────────
+# A civilian hull the scenario has made hailable per-instance, which is the
+# other half of "both authoring paths open the same door". Its `[[entity]] id`
+# is what a `made_to` names — see the script below.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "strike_committee"
+name = "world.probe_dossier.entity.strike_committee.name"
+transform = { position = [500.0, 0.0, 300.0] }
+overrides = { comms = { hailable = true } }
+
+# ── Subject: a published structure ───────────────────────────────────────────
+# NOT hailable: this one is on the roster purely through the infrastructure
+# door, which is what proves the two doors are independent. Its capacity and
+# threshold tables are replaced wholesale by this instance (arrays replace at
+# the instance layer), so the labelled/unlabelled split is authored here rather
+# than pushed onto every world that fields a depot.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "skyway_depot"
+name = "world.probe_dossier.entity.skyway_depot.name"
+transform = { position = [900.0, 0.0, -200.0] }
+
+[[entity.overrides.infrastructure.capacity]]
+# Labelled, so the crew can be told what the number is.
+id = "depot_berths"
+amount = 4
+label = "world.probe_dossier.capacity.berths.label"
+
+[[entity.overrides.infrastructure.capacity]]
+# Unlabelled on purpose. A script can read this; a fact sheet cannot show it.
+id = "depot_transfer_throughput"
+amount = 40
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "depot_transfer_capable"
+fails_below = 0.4
+label = "world.probe_dossier.threshold.transfer_capable.label"
+
+# ── Subject: the structure the scenario is keeping back ──────────────────────
+# Hailable, so it is on the roster; `publish = false`, so its condition is not.
+# 31 of 100 points is a real, live, degraded track — the number a bug would
+# leak, sitting in the world for the test to fail to find.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "sealed_depot"
+name = "world.probe_dossier.entity.sealed_depot.name"
+transform = { position = [1100.0, 0.0, 400.0] }
+overrides = { comms = { hailable = true }, infrastructure = { condition = 31.0, publish = false, capacity = [], threshold = [] } }
+
+# ── Not a subject ────────────────────────────────────────────────────────────
+# Named, and reachable by neither door. A rule that only ever admits
+# is not a rule.
+[[entity]]
+template_path = "assets/entities/nav_beacon.toml"
+id = "lonely_beacon"
+name = "world.probe_dossier.entity.lonely_beacon.name"
+transform = { position = [400.0, 0.0, -600.0] }
+
+[script]
+setup = """
+on_timer(2, "give_word");
+
+// The promise, made to a party the world also happens to field as an entity.
+// `made_to` is the `[[entity]] id` — not a UUID, which #1029 refuses on purpose
+// because a promise outlives the hull it was made to. Nothing resolves it, so
+// the fact sheet shows a word still owed.
+fn give_word(ctx) {
+    ctx.commitments.record(#{
+        id:            "safe_passage",
+        made_to:       "strike_committee",
+        terms:         "world.probe_dossier.commitment.safe_passage.terms",
+        resolves_when: "world.probe_dossier.commitment.safe_passage.resolves",
+    });
+}
+"""

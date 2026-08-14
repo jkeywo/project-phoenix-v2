@@ -1,0 +1,239 @@
+# Probe world for issue #1035 — a strike, its two bites, and the control that
+# proves each one is about the strike.
+#
+# Every claim this slice makes is a COMPARISON, so every pair here is an
+# experiment beside a control that differs in exactly one authored fact: which
+# workforce staffs the far end. A single struck pair would pass whatever the
+# code did.
+#
+#   tender_struck    transfers to   depot_struck    staffed by `probe_workers`,
+#                                                   who are OUT       -> refused
+#   tender_working   transfers to   depot_working   staffed by `probe_operator`,
+#                                                   who are AT WORK   -> completes
+#   sister_struck    repairs        rig_struck      `probe_workers`    -> 40 %
+#   sister_clear     repairs        rig_clear       nobody at all      -> full
+#
+# The two tenders carry the SAME capability shape and the same interrupt rule;
+# the two sisters carry the same rate and the same duration. Nothing separates
+# either pair but the `[infrastructure] workforce` on the structure and the
+# `on_strike` on the world's own `[[workforce]]` table.
+#
+# NO COMBAT. Nothing here is hostile, nothing is armed at anything, and there is
+# no hazard band — so an operation that stalls stalled for the reason this probe
+# is testing, and a run that produces a shot has gone wrong.
+#
+# RANGES ARE DELIBERATELY GENEROUS, for `probe_operations`' reason: every
+# operator is on AI backfill in a headless run and will drift, and this is a
+# probe of a labour dispute rather than of station-keeping.
+#
+# ── The reversal, and the lever that drives it ───────────────────────────────
+#
+# At t=10 s a handler sets an ordinary world flag. `on_flag_set` chains off it
+# and settles the strike — which is the whole seam #1036's negotiation will
+# pull, authored here so the restoration is proved through the SAME path a
+# dialogue pick will take rather than by a test reaching into the register.
+#
+# Timeline (60 Hz), in mission seconds:
+#
+#   t=1    both transfers open. The struck one FAILS on its first tick carrying
+#          `operation.refused.work_stopped`; the working one holds.
+#          Both field-repairs open, one at 40 % and one at full.
+#   t=7    the working transfer completes: 20 units leave the tender and land in
+#          the depot. The struck depot is still empty.
+#   t=10   `settle_the_strike` sets `probe_strike_settled`; `on_flag_set` fires
+#          `on_settled`, which settles `probe_workers` and moves what they make
+#          of the crew from 20 to 70. From this tick the struck rig repairs at
+#          full rate, with no restoration path anywhere — the rule simply stops
+#          firing.
+#   t=12   the SAME transfer is stood up again against the SAME depot, and this
+#          time it runs.
+#   t=18   it completes, and the depot that refused a delivery eight seconds ago
+#          is holding one.
+#
+# BASELINE (this world is new in #1035, so this is its first recorded digest):
+# `--seed 42 --ticks 1800` gives final digest 0x076dbc97893247d3
+# (535291289754814419), and 10532609271901567113 at tick 0. Measured on a clean
+# tree at the commit that added this line. It is a NEW number, not a preserved
+# one — nothing to compare it against yet — so it is written down here to be the
+# thing a later change is A/B'd against, the way the other probes' already are.
+#
+# What legitimately moves it: this file's entity list, the authored conditions
+# and capacities, the operation durations and rates, and any engine change to
+# what the digest folds. The strike state itself is NOT in the digest — the
+# workforce register is a field on `WorldContentRuntime`, which nothing folds,
+# exactly like the flag store and the deadline table beside it. What IS folded
+# is everything the strike causes: the holds' states, their banked ticks, their
+# rates, and the depots' capacity levels.
+
+[global]
+seed = 1035
+ai_helm_tick_hz = 30.0
+
+# ── The dispute ──────────────────────────────────────────────────────────────
+#
+# Two sides, and the second one exists to be the control. `probe_operator` is
+# not on strike and never goes on strike, so a depot its people staff is a depot
+# where a transfer works — which is what makes the other depot's refusal a fact
+# about the STRIKE rather than about transfers, depots, or this probe's wiring.
+
+[[workforce]]
+id = "probe_workers"
+label = "world.probe_strike.workforce.workers.label"
+on_strike = true
+# [ai] Low, and it moves at the settlement — so the run exercises both halves of
+# a side's state rather than only the one the operations tick reads.
+disposition = 20
+
+[[workforce]]
+id = "probe_operator"
+label = "world.probe_strike.workforce.operator.label"
+disposition = 60
+
+[player_spawn]
+position = [6000.0, 0.0, 6000.0]
+
+# The player ship. Present because a world needs one; parked far enough away
+# that nothing it does reaches any operation under test.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [6000.0, 0.0, 6000.0] }
+spawn_on = "game_start"
+
+# ── TRANSFER, against a depot whose people are out ───────────────────────────
+#
+# A real transfer with real terms, unlike the crew hull's: both ends carry
+# `struck_depot_load`, the tender is holding 40 of it and the depot has room for
+# 40, so eligibility PASSES on every count. The only thing standing between the
+# cargo and the berth is that nobody down there will sign for it — which is what
+# makes the refusal readable as a refusal rather than as a missing capacity.
+#
+# The tender's own hold authors `publish = false`: two structures sharing a
+# published capacity id would write the same world counter and overwrite each
+# other every tick, which is why the two PAIRS use different ids.
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_strike.entity.tender_struck.name"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { operations = { capability = [{ verb = "transfer", range = 4000.0, duration_secs = 6, power_group = "helm", min_power_level = 2, transfer = { capacity = "struck_depot_load", amount = 20, direction = "deliver" }, interrupt = [{ cause = "work_stoppage", response = "fail" }] }] }, infrastructure = { publish = false, capacity = [{ id = "struck_depot_load", amount = 40 }] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_strike.entity.depot_struck.name"
+transform = { position = [200.0, 0.0, 0.0] }
+overrides = { infrastructure = { workforce = "probe_workers", capacity = [{ id = "struck_depot_load", amount = 0, ceiling = 40 }], threshold = [] } }
+
+# ── TRANSFER, against a depot whose people are at work — the control ─────────
+#
+# Same hull, same verb, same range, same duration, same load, same interrupt
+# rule. The one authored difference is four words on the depot.
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_strike.entity.tender_working.name"
+transform = { position = [0.0, 0.0, 1200.0] }
+overrides = { operations = { capability = [{ verb = "transfer", range = 4000.0, duration_secs = 6, power_group = "helm", min_power_level = 2, transfer = { capacity = "working_depot_load", amount = 20, direction = "deliver" }, interrupt = [{ cause = "work_stoppage", response = "fail" }] }] }, infrastructure = { publish = false, capacity = [{ id = "working_depot_load", amount = 40 }] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_strike.entity.depot_working.name"
+transform = { position = [200.0, 0.0, 1200.0] }
+overrides = { infrastructure = { workforce = "probe_operator", capacity = [{ id = "working_depot_load", amount = 0, ceiling = 40 }], threshold = [] } }
+
+# ── FIELD REPAIR, with the local crews gone and with nobody to lose ──────────
+#
+# Both rigs spawn at 40/100 — above `depot_transfer.toml`'s own 40 % failure
+# point, so neither run is also a threshold-crossing test. `condition_per_second`
+# is whole points per second so the arithmetic a test asserts on is legible:
+# 2 points a second, at 40 % of normal for as long as the strike holds.
+#
+# `rig_clear` names no workforce at all, which is the third of the three ways a
+# structure reads as worked — no `workforce`, a workforce this world never
+# declared, and a workforce that is at work all mean the same thing to an
+# operation, and this pair covers the first against the strike.
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_strike.entity.sister_struck.name"
+transform = { position = [0.0, 0.0, 2400.0] }
+overrides = { operations = { capability = [{ verb = "field_repair", range = 4000.0, duration_secs = 20, power_group = "helm", min_power_level = 2, condition_per_second = 2.0, repair_teams = 1, interrupt = [{ cause = "work_stoppage", response = "slow", rate_percent = 40 }] }] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_strike.entity.rig_struck.name"
+transform = { position = [200.0, 0.0, 2400.0] }
+overrides = { infrastructure = { condition = 40.0, workforce = "probe_workers" } }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_strike.entity.sister_clear.name"
+transform = { position = [0.0, 0.0, 3600.0] }
+overrides = { operations = { capability = [{ verb = "field_repair", range = 4000.0, duration_secs = 20, power_group = "helm", min_power_level = 2, condition_per_second = 2.0, repair_teams = 1, interrupt = [{ cause = "work_stoppage", response = "slow", rate_percent = 40 }] }] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_strike.entity.rig_clear.name"
+transform = { position = [200.0, 0.0, 3600.0] }
+overrides = { infrastructure = { condition = 40.0 } }
+
+[script]
+setup = """
+on_timer(1, "begin_operations");
+on_timer(10, "settle_the_strike");
+on_timer(12, "attempt_the_refused_transfer_again");
+
+// THE SEAM. The settlement is chained off an ordinary world flag rather than
+// wired straight into the timer, because that is the shape #1036's negotiation
+// needs: whoever sets the flag — a dialogue pick, a deadline, a later act — gets
+// the same settlement, applied in one place. Falling Skyway authors the
+// identical lever under its own flag name.
+on_flag_set("probe_strike_settled", "on_settled");
+
+fn begin_operations(ctx) {
+    // The refused one and its control, opened on the same tick against the same
+    // kind of depot with the same cargo aboard.
+    ctx.effects.transfer(
+        "world.probe_strike.entity.tender_struck.name",
+        "world.probe_strike.entity.depot_struck.name",
+    );
+    ctx.effects.transfer(
+        "world.probe_strike.entity.tender_working.name",
+        "world.probe_strike.entity.depot_working.name",
+    );
+    // The degraded one and its control.
+    ctx.effects.field_repair(
+        "world.probe_strike.entity.sister_struck.name",
+        "world.probe_strike.entity.rig_struck.name",
+    );
+    ctx.effects.field_repair(
+        "world.probe_strike.entity.sister_clear.name",
+        "world.probe_strike.entity.rig_clear.name",
+    );
+    ctx.flags.operations_begun = 1;
+}
+
+fn settle_the_strike(ctx) {
+    ctx.flags.probe_strike_settled = 1;
+}
+
+fn on_settled(ctx) {
+    ctx.effects.settle_strike("probe_workers");
+    // The other half of a side's state, moved at the same beat: they are back
+    // at work AND they think better of the crew for it. [ai] Unratified.
+    ctx.effects.set_workforce_disposition("probe_workers", 70);
+    ctx.flags.increment("strike_settled_handled", 1);
+}
+
+// The same delivery, to the same depot, after the strike is over. It is a fresh
+// start rather than a resumption on purpose: the first one FAILED, and a failed
+// operation is over. What reversibility means here is that the crew may ask
+// again and get a different answer.
+fn attempt_the_refused_transfer_again(ctx) {
+    ctx.effects.transfer(
+        "world.probe_strike.entity.tender_struck.name",
+        "world.probe_strike.entity.depot_struck.name",
+    );
+    ctx.flags.second_transfer_begun = 1;
+}
+"""

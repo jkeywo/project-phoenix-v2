@@ -5,4 +5,7 @@
 # worlds (Starbase Alpha, Before the Fire).
 uuid = "cccccccc-3333-4333-8333-cccccccccccc"
 name = "Harrow"
+# Crew-facing label (issue #1030). `name` above is the reference key world
+# triggers use; this is the only string a player ever sees.
+display_name = "faction.harrow.display_name"
 enemies = []

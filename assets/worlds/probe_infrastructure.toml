@@ -27,6 +27,18 @@
 # The intermediate value matters: 30 → 55 crosses 40 % on the way up but the
 # flag only returns at 45 %, so the run also proves the restore point is the one
 # being honoured rather than the failure point read backwards.
+#
+# BASELINE (recorded here for the first time in #1027, which moved it).
+# `--seed 42 --ticks 900` gives final digest 0x2274bea11a99df66
+# (2482818893733289830), and 15523228394889164256 at tick 0.
+#
+# It moved because a capacity's LEVEL is now folded into the authoritative
+# digest. #1025 published capacity as a read-only number; #1027's `transfer`
+# operation moves it, so two hosts that disagree about how much a depot holds
+# now disagree about the digest too. Nothing in THIS world transfers anything —
+# the depot's capacity sits where it was authored for the whole run — but the
+# fold applies to every structure that declares one, which is what makes it a
+# guarantee rather than a special case.
 
 [global]
 seed = 1025

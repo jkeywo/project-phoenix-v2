@@ -20,6 +20,8 @@
     .cmd-col .controls-row > * { flex: 1; min-width: 0; }
     ph-objective-list { flex: 1; min-height: 0; }
     ph-deadline-list { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
+    ph-operation-panel { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
+    ph-scan-readout { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
     ph-sensor-panel { flex: 1; min-height: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
@@ -62,6 +64,8 @@
           </div>
           <ph-objective-list id="objective-list"></ph-objective-list>
           <ph-deadline-list id="deadline-list"></ph-deadline-list>
+          <ph-operation-panel id="operation-panel"></ph-operation-panel>
+          <ph-scan-readout id="scan-readout"></ph-scan-readout>
           <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
         </div>
       </div>
@@ -81,6 +85,8 @@
     import '../components/ph-red-alert.js';
     import '../components/ph-objective-list.js';
     import '../components/ph-deadline-list.js';
+    import '../components/ph-operation-panel.js';
+    import '../components/ph-scan-readout.js';
     import '../components/ph-sensor-radar.js';
     import '../components/ph-sensor-panel.js';
     import '../components/ph-station-damage.js';
@@ -107,6 +113,24 @@
         objectiveEl.state = { objectives: cap.objectives || [], boosted_objective_id: cap.boosted_objective_id ?? null };
         // Visible mission deadlines, counted down server-side (issue #1024).
         document.getElementById('deadline-list').state = { deadlines: cap.deadlines || [] };
+        // External operations (issue #1026). The hold's progress is computed
+        // server-side off eligible ticks; the panel paints it and runs no clock.
+        // Its start button aims at whatever the captain has selected on the
+        // sensor radar — the science target IS how this console names a thing
+        // outside the hull, so an operation orders itself against the same one.
+        document.getElementById('operation-panel').state = {
+          operations: cap.operations || {},
+          target_uuid: sensors.target_uuid || null,
+        };
+        // The science scan (issue #1032). The readout is DERIVED server-side
+        // from the subject's own condition track — there is no authored scan
+        // text anywhere behind it — and the button aims at whatever the captain
+        // has selected on the sensor radar, the same target the operation panel
+        // orders against.
+        document.getElementById('scan-readout').state = {
+          scan: sensors.scan || {},
+          target_uuid: sensors.target_uuid || null,
+        };
         sensorRadarEl.state = sensors;
         sensorEl.state = sensors;
         var targetName = sensors.target_name || null;

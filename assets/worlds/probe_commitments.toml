@@ -1,0 +1,195 @@
+# Probe world for issue #1029 — the commitments ledger with a LIVE consumer.
+#
+# A player Alliance destroyer (AI-backfilled in a headless run) sits alone; no
+# combat is involved on purpose. This is a deterministic tripwire for the whole
+# commitments path — `ctx.commitments.record` → a dialogue node fn GATING an
+# option on `ctx.commitments.state` → `keep`/`break_promise` → the campaign flag
+# → an `on_flag_set` trigger reacting to it.
+#
+# THE LIVE CONSUMER, which is what this issue turns on: `committee_calls` is a
+# real scripted dialogue node fn, opened through the real
+# `ctx.effects.open_comms` pipeline, and the number of options it offers is a
+# function of the ledger. It is opened TWICE against the same fn — once while
+# `safe_passage` is still owed, once after it has been kept — so the probe
+# proves the gate closes as well as opens, from one authored node.
+#
+# The authored timeline, in mission seconds:
+#
+#   t=2   `give_word` records two promises to the same party: `safe_passage`
+#         and `surface_records`. It reads a third, never-made id back as
+#         "unknown" — the answer that is NOT "broken", and the guard an author
+#         uses against recording the same promise twice.
+#   t=4   `open_committee_channel` opens a thread on `committee_calls`. The
+#         promise is OPEN, so the node offers TWO responses: the stall, and the
+#         one that exists only because the captain gave their word.
+#   t=6   `honour` keeps `safe_passage`. That writes `commitment.safe_passage.kept`
+#         as an ordinary world flag, which fires...
+#   t=6+  ...`on_flag_set("commitment.safe_passage.kept", "word_kept")`, one tick
+#         later, through the trigger pipeline that already existed. THIS is the
+#         "consequences beyond the scene it was made in" half: nothing in the
+#         ledger knows this trigger exists.
+#   t=10  The `records_deadline` deadline fires. Its handler finds
+#         `surface_records` still open and BREAKS it — the composition decision
+#         made visible. The ledger carries no timer of its own; a promise-by-time
+#         is a `[[deadline]]` whose handler settles it.
+#   t=12  `open_committee_channel_again` opens the SAME node fn. `safe_passage`
+#         now reads "kept", so the gated option is gone and the node offers ONE.
+#
+# Every handler increments a counter flag, so the headless test reads what
+# happened out of the flag store, and asserts the option counts against the
+# LIVE `CommsRuntime::active_dialogues` rather than against what script says it
+# offered.
+#
+# BASELINE (this world is new in #1029, so this is its first recorded digest):
+# `--seed 42 --ticks 900` gives final digest 0xc419b89426b6013c
+# (14130528252295774524). Measured on a clean tree at the commit that added this
+# line. It is a NEW number, not a preserved one — nothing to compare it against
+# yet — so it is written down here to be the thing a later change is A/B'd
+# against, the way the shipped worlds' digests already are.
+#
+# It is also, deliberately, the SAME number probe_deadlines.toml records, and
+# that is worth reading rather than glossing over. The two worlds differ only in
+# scenario-script state — deadlines there, commitments here — and neither is
+# folded into `state_digest`; they place the same hull at the same origin under
+# the same master seed. So the digests agreeing is the "authoritative but not
+# folded" decision showing its work. If a later change makes these two numbers
+# diverge, something started folding scenario state, and that is the question to
+# ask before re-blessing either line.
+
+[global]
+seed = 1029
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The deadline a promise is settled against ────────────────────────────────
+# There is deliberately no `[[commitment]]` block anywhere in this file: a
+# promise is a RUNTIME artifact, made in the beat where the captain gives their
+# word, and a world file cannot declare one because whether it exists at all
+# depends on what the player chose to say. What a world file CAN declare is the
+# clock the promise is tested against — and that is an ordinary deadline.
+[[deadline]]
+id = "records_deadline"
+label = "world.probe_commitments.deadline.records_deadline.label"
+due_secs = 10
+visible = true
+
+[script]
+setup = """
+on_timer(2, "give_word");
+on_timer(4, "open_committee_channel");
+on_timer(6, "honour");
+on_timer(12, "open_committee_channel_again");
+
+on_deadline("records_deadline", "on_records_deadline");
+
+// The campaign-flag chain. Nothing in the ledger knows these exist — they are
+// ordinary flag triggers, watching ordinary world flags.
+on_flag_set("commitment.safe_passage.kept", "word_kept");
+on_flag_set("commitment.surface_records.broken", "word_broken");
+
+// The negotiation beat: giving your word. In a shipped mission this body is a
+// dialogue `on_pick`; here a timer stands in for the player's finger so the run
+// is deterministic. The vocabulary is identical either way — the live
+// player-driven loop is covered by the comms tests in src/comms/scripted.rs.
+fn give_word(ctx) {
+    ctx.commitments.record(#{
+        id:            "safe_passage",
+        made_to:       "skyway_strike_committee",
+        terms:         "world.probe_commitments.commitment.safe_passage.terms",
+        resolves_when: "world.probe_commitments.commitment.safe_passage.resolves",
+    });
+    ctx.commitments.record(#{
+        id:            "surface_records",
+        made_to:       "skyway_strike_committee",
+        terms:         "world.probe_commitments.commitment.surface_records.terms",
+        resolves_when: "world.probe_commitments.commitment.surface_records.resolves",
+    });
+    // Read-after-write within the one call: a promise made earlier in this
+    // handler is already on the books for the rest of it.
+    if ctx.commitments.state("safe_passage") == "open" {
+        ctx.flags.increment("passage_reads_open", 1);
+    }
+    // The fourth answer. A promise that was never made is "unknown" — never
+    // "broken" — and this is the guard against recording a duplicate.
+    if ctx.commitments.state("never_promised") == "unknown" {
+        ctx.flags.increment("unmade_reads_unknown", 1);
+    }
+}
+
+// THE LIVE CONSUMER. One node fn, opened twice; its option list is a function
+// of the ledger. Gating is ordinary control flow — there is no `when:` field on
+// a response, and this slice does not add one.
+fn committee_calls(ctx) {
+    let responses = [
+        #{ text: "world.probe_commitments.comms.stall", on_pick: "on_stall" },
+    ];
+    if ctx.commitments.state("safe_passage") == "open" {
+        responses.push(#{
+            text: "world.probe_commitments.comms.honour_word",
+            on_pick: "on_honour_word",
+        });
+    }
+    #{ message: "world.probe_commitments.comms.committee_calls", responses: responses }
+}
+
+fn on_stall(ctx) { }
+
+fn on_honour_word(ctx) {
+    ctx.commitments.keep("safe_passage");
+}
+
+fn open_committee_channel(ctx) {
+    ctx.effects.open_comms(#{ from: "_self", node_fn: "committee_calls" });
+}
+
+fn open_committee_channel_again(ctx) {
+    ctx.effects.open_comms(#{ from: "_self", node_fn: "committee_calls" });
+}
+
+// Keeping the promise. Writes `commitment.safe_passage.kept` as an ordinary
+// world flag, on the same ordered effect buffer this handler's own flag writes
+// use.
+fn honour(ctx) {
+    ctx.commitments.keep("safe_passage");
+    // Read-after-write again: the rest of this call sees a settled promise.
+    if ctx.commitments.state("safe_passage") == "kept" {
+        ctx.flags.increment("passage_reads_kept", 1);
+    }
+}
+
+// The composition decision, made visible: the ledger carries no timer, so a
+// promise-by-time is a `[[deadline]]` whose handler settles it.
+fn on_records_deadline(ctx) {
+    if ctx.commitments.state("surface_records") == "open" {
+        ctx.commitments.break_promise("surface_records");
+        ctx.flags.increment("records_broken_by_deadline", 1);
+    }
+}
+
+// The chain. These fire from the trigger pipeline on the tick AFTER the flag
+// transition, which is why they can read the settled ledger back.
+fn word_kept(ctx) {
+    ctx.flags.increment("kept_flag_chained", 1);
+    if ctx.commitments.state("safe_passage") == "kept" {
+        ctx.flags.increment("chain_reads_kept", 1);
+    }
+}
+
+fn word_broken(ctx) {
+    ctx.flags.increment("broken_flag_chained", 1);
+    // The distinction the whole slice turns on: a broken promise is not an
+    // unresolved one, and the chained handler can tell.
+    if ctx.commitments.state("surface_records") == "broken" {
+        ctx.flags.increment("chain_reads_broken", 1);
+    }
+}
+"""

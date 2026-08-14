@@ -176,6 +176,48 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /**
+   * Order an external operation on a named target (issue #1026).
+   *
+   * Targets the `captain` system, not an operations system of its own: an
+   * operation is something the ship does, not a thing aboard it, so the command
+   * rides the captain's ordinary station-tenure admission.
+   */
+  start_operation: (a, send) => {
+    if (!a.verb || !a.target_uuid) return;
+    send('ControlSystem', {
+      target: 'captain',
+      payload: {
+        type: 'StartOperation',
+        data: { verb: a.verb, target_uuid: a.target_uuid },
+      },
+    });
+  },
+
+  /** Stand the running external operation down (issue #1026). */
+  abort_operation: (a, send) => {
+    send('ControlSystem', {
+      target: 'captain',
+      payload: { type: 'AbortOperation' },
+    });
+  },
+
+  /**
+   * Take a sensor reading of a named external structure (issue #1032).
+   *
+   * Targets the `sensors` system — the one the science target selection already
+   * rides — so a scan takes the ordinary station-tenure admission check. The
+   * uuid is carried rather than left implicit: the console says what it meant,
+   * and the server never has to guess which contact was selected when.
+   */
+  scan_target: (a, send) => {
+    if (!a.uuid) return;
+    send('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'ScanTarget', data: { uuid: a.uuid } },
+    });
+  },
+
   /** Send helm thrust / steering inputs.
    *
    *  One joystick action fans out to the two per-axis wire messages (issue
@@ -350,6 +392,48 @@ export const ACTION_MAP = Object.freeze({
     send('ControlSystem', {
       target: 'navigation',
       payload: { type: 'ClearNavigationWaypoint' },
+    });
+  },
+
+  /**
+   * Order a civilian craft to hold, divert or dock (issue #1028).
+   *
+   * `a.target` is the craft's UUID (what the traffic panel's row key is);
+   * `a.verb` is `hold` / `divert` / `dock`; `a.route`, `a.anchor` and
+   * `a.structure` carry the destination for the verbs that need one. A divert
+   * takes EXACTLY ONE of route/anchor — the server refuses both and neither,
+   * and this mirrors that rather than guessing, because a mistyped lane that
+   * silently reads as an anchor name is the failure the split exists to stop.
+   *
+   * Nothing is mutated locally: an order is a request to another actor, and the
+   * craft's answer — acknowledged, complying, refused — arrives on the
+   * navigation blackboard seconds later. Predicting it here would show the
+   * operator compliance that has not happened.
+   *
+   * No console control emits this yet — `<ph-civilian-traffic>` is the readout
+   * half, and the destination pickers a divert and a dock need are a console
+   * slice of their own. The action exists here because the wire surface is
+   * complete and scripted orders already exercise it end to end; the same shape
+   * as `set_sensors_target`'s deselect, which shipped ahead of its control.
+   */
+  order_civilian: (a, send) => {
+    if (typeof a.target !== 'string' || a.target.length === 0) return;
+    let order = null;
+    if (a.verb === 'hold') {
+      order = { verb: 'hold' };
+    } else if (a.verb === 'divert') {
+      const hasRoute = typeof a.route === 'string' && a.route.length > 0;
+      const hasAnchor = typeof a.anchor === 'string' && a.anchor.length > 0;
+      if (hasRoute === hasAnchor) return;
+      order = hasRoute ? { verb: 'divert', route: a.route } : { verb: 'divert', anchor: a.anchor };
+    } else if (a.verb === 'dock') {
+      if (typeof a.structure !== 'string' || a.structure.length === 0) return;
+      order = { verb: 'dock', structure: a.structure };
+    }
+    if (!order) return;
+    send('ControlSystem', {
+      target: 'navigation',
+      payload: { type: 'OrderCivilian', data: { target: a.target, order } },
     });
   },
 

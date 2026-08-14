@@ -51,6 +51,9 @@
             <div class="metric"><span data-i18n="console.navigation.waypoint">Waypoint</span><strong id="waypoint-name" data-i18n="console.navigation.not_set">NOT SET</strong></div>
             <div class="metric"><span data-i18n="console.navigation.contacts">Contacts</span><strong id="nav-contact-count">0</strong></div>
           </div>
+          <div class="side-panel">
+            <ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>
+          </div>
           <div class="side-panel" style="flex:1">
             <ph-objective-list id="objective-list"></ph-objective-list>
           </div>
@@ -67,6 +70,7 @@
   </div>
   <script type="module">
     import '../components/ph-navigation-map.js';
+    import '../components/ph-civilian-traffic.js';
     import '../components/ph-objective-list.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
@@ -82,6 +86,11 @@
         // on both the regions and the blips.
         document.getElementById('navigation-map').state = { blips: s.blips || [], regions: s.regions || [], range: s.radar_range || 5000, ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0, waypoint: s.waypoint || null };
         document.getElementById('objective-list').state = { objectives: s.objectives || [] };
+        // Civilian traffic (issue #1028): who is on which lane, and who is not
+        // doing as asked. Server-derived; the panel never infers it from the
+        // chart, because a craft that has not turned yet and one that has
+        // refused look identical on a map.
+        document.getElementById('civilian-traffic').state = { civilians: s.civilians || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
         document.getElementById('nav-contact-count').textContent = String((s.blips || []).length);
         var wpName = s.waypoint && s.waypoint.name ? s.waypoint.name : (s.waypoint ? t('console.common.waypoint') : t('console.navigation.not_set'));

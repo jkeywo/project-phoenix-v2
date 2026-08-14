@@ -466,6 +466,7 @@ console.destroyer_engineering.subtitle,engineering console — hero sub-heading 
 console.engineering.shields,"engineering console — ""Shields"" panel heading",Shields
 console.tactical.navigation,"tactical console — ""Navigation"" panel heading",Navigation
 console.tactical.comms,"tactical console — ""Comms"" panel heading",Comms
+console.tactical.intel,"tactical console — ""Intel"" panel heading (issue #1030)",Intel
 console.common.no_waypoint,Console footer when no waypoint is set,NO WAYPOINT
 console.engineering.station_footer,engineering console — footer station name,ENGINEERING STATION
 console.science.station_footer,science console — footer station name,SCIENCE STATION
@@ -478,6 +479,7 @@ console.navigation.custom,Navigation console — selected-entity readout for a c
 console.navigation.none,Navigation console — selected-entity readout when nothing is selected,NONE
 console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
 console.common.comms_toggle,Button that toggles the comms overlay,Comms
+console.common.intel_toggle,Button that toggles the intelligence-files overlay (issue #1030),Intel
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
 console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
 console.pilot.cam_cinematic,Courier pilot — cinematic camera button,Cinematic
@@ -883,3 +885,174 @@ system_hull.power_reactor.display_name,Shared hull component display name — th
 system_hull.power_battery.display_name,Shared hull component display name — the ship's battery. Shared by every hull carrying that component,Power Battery
 system_hull.core.display_name,Shared hull component display name — the ship's core. Shared by every hull carrying that component,Core
 entity.asteroid.name,Shared entity name for every asteroid variant (assets/entities/asteroid_*.toml),Asteroid
+component.operations.heading,"External-operation panel — heading above the ship's current operation (issue #1026)","[EXTERNAL OPS]"
+component.operations.none,"External-operation panel when the hull can perform no operations at all (issue #1026)","[NO OPS CAPABILITY]"
+component.operations.idle,"External-operation panel when the hull is capable and running nothing (issue #1026)","[NO OPERATION RUNNING]"
+component.operations.start,"External-operation panel — button that orders the operation against the selected target (issue #1026)","[BEGIN OPERATION]"
+component.operations.abort,"External-operation panel — button that stands the running operation down (issue #1026)","[STAND DOWN]"
+component.operations.verb_picker,"External-operation panel — accessible label on the control that chooses which of the hull's verbs to order (issue #1027)","[OPERATION]"
+component.operations.slowed,"External-operation panel — shown beside the bar when a hazard band is stretching the operation; {rate} is the percentage of normal speed (issue #1027)","[SLOWED TO {rate}%]"
+component.operations.state.holding,"External-operation panel — state word while the crew are holding the conditions and progress is advancing (issue #1026)","[HOLDING]"
+component.operations.state.stalled,"External-operation panel — state word while eligibility has lapsed and progress is frozen (issue #1026)","[STALLED]"
+component.operations.state.completed,"External-operation panel — state word once the operation has run to term (issue #1026)","[COMPLETE]"
+component.operations.state.aborted,"External-operation panel — state word once a console has stood the operation down (issue #1026)","[STOOD DOWN]"
+component.operations.state.failed,"External-operation panel — state word once the operation has ended without completing (issue #1026)","[FAILED]"
+operation.verb.stabilise,"Crew-facing name of the stabilise operation verb (issue #1026)","[Stabilise]"
+operation.verb.tow,"Crew-facing name of the tow operation verb (issue #1027)","[Take Under Tow]"
+operation.verb.escort,"Crew-facing name of the escort operation verb (issue #1027)","[Escort]"
+operation.verb.transfer,"Crew-facing name of the transfer operation verb (issue #1027)","[Transfer Cargo]"
+operation.verb.field_repair,"Crew-facing name of the field-repair operation verb (issue #1027)","[Field Repair]"
+operation.refused.not_capable,"External-operation refusal — this hull authored no capability for the verb (issue #1026)","[This hull cannot perform that operation.]"
+operation.refused.target_gone,"External-operation refusal — the target is no longer there (issue #1026)","[Target lost.]"
+operation.refused.target_not_applicable,"External-operation refusal — the target is there but the verb means nothing on it (issue #1026)","[Nothing to work on there.]"
+operation.refused.out_of_range,"External-operation refusal — the ship is outside the operation's authored range (issue #1026)","[Out of range — close on the target.]"
+operation.refused.insufficient_power,"External-operation refusal — the operation's power group is below its authored level (issue #1026)","[Insufficient power allocated.]"
+operation.refused.separated,"External-operation refusal — the escorted party is past the authored separation limit and the escort is over (issue #1027)","[Escort separated — contact lost.]"
+operation.refused.capacity_unavailable,"External-operation refusal — one end of the transfer has nothing to give or no room to take it (issue #1027)","[No capacity at one end of the transfer.]"
+operation.refused.teams_unavailable,"External-operation refusal — fewer repair teams are free than the operation commits (issue #1027)","[Not enough repair teams free.]"
+operation.refused.under_attack,"External-operation refusal — the ship is under fire and the operation cannot be worked through it (issue #1027)","[Under fire — cannot work the operation.]"
+operation.refused.hazard_band,"External-operation refusal — the ship is inside a hazard band the operation cannot be worked in (issue #1027)","[Hazard band — cannot work the operation.]"
+operation.refused.work_stopped,"External-operation refusal — the people who staff the target have stopped work, and an authored interrupt rule says this operation cannot be worked without them (issue #1035)","[The line is down. Nobody down there is authorising anything.]"
+component.scan.heading,"Science scan readout — heading above the last sensor reading (issue #1032)","[SENSOR RETURN]"
+component.scan.none,"Science scan readout when the hull carries no survey suite at all (issue #1032)","[NO SURVEY SUITE]"
+component.scan.idle,"Science scan readout when the suite is fitted and nothing has been read yet (issue #1032)","[NOTHING SCANNED]"
+component.scan.take,"Science scan readout — button that reads the selected contact (issue #1032)","[TAKE READING]"
+component.scan.condition,"Science scan readout — row label for the subject's structural condition, derived from its condition track (issue #1032)","[Structural condition]"
+component.scan.flag.held,"Science scan readout — value shown for an operational flag the subject is still holding (issue #1032)","[Nominal]"
+component.scan.flag.down,"Science scan readout — value shown for an operational flag the subject has dropped (issue #1032)","[Failed]"
+scan.refusal.not_capable,"Scan refusal — this hull authored no survey suite (issue #1032)","[This hull carries no survey suite.]"
+scan.refusal.no_such_target,"Scan refusal — nothing in the world answers to the contact the console named (issue #1032)","[Contact lost.]"
+scan.refusal.no_readable_condition,"Scan refusal — the contact carries nothing structural the suite can read (issue #1032)","[Nothing structural to read on that contact.]"
+scan.refusal.out_of_range,"Scan refusal — the contact is past the coarsest authored band (issue #1032)","[Out of sensor range — close on the contact.]"
+scan.refusal.underpowered,"Scan refusal — the sensor bus is below its authored power level or the grid is locked out (issue #1032)","[Insufficient power to the sensor bus.]"
+scan.refusal.blinded,"Scan refusal — interference has pushed the return past the coarsest band (issue #1032)","[Interference — the return is noise.]"
+entity.alliance_destroyer.scan.band.detailed.label,"assets/entities/alliance_destroyer.toml -> [[scan.band]] label","[Detailed Survey]"
+entity.alliance_destroyer.scan.band.coarse.label,"assets/entities/alliance_destroyer.toml -> [[scan.band]] label","[Coarse Sweep]"
+world.probe_scan.entity.skyway_depot.name,assets/worlds/probe_scan.toml -> [[entity]] name,[Skyway Transfer Depot]
+world.probe_scan.entity.sealed_depot.name,assets/worlds/probe_scan.toml -> [[entity]] name,[Sealed Depot]
+world.probe_scan.entity.lonely_beacon.name,assets/worlds/probe_scan.toml -> [[entity]] name,[Lonely Beacon]
+world.probe_scan.capacity.berths.label,assets/worlds/probe_scan.toml -> [[entity.overrides.infrastructure.capacity]] label,[Berths]
+world.probe_scan.threshold.transfer_capable.label,assets/worlds/probe_scan.toml -> [[entity.overrides.infrastructure.threshold]] label,[Transfer arm]
+world.probe_stabilise.entity.tender.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Tender]
+world.probe_operations.entity.tug.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Tug]
+world.probe_operations.entity.hulk.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Derelict Hauler]
+world.probe_operations.entity.outrider.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Outrider]
+world.probe_operations.entity.convoy.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Convoy Hauler]
+world.probe_operations.entity.tender.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Transfer Tender]
+world.probe_operations.entity.berth.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Berth Depot]
+world.probe_operations.entity.sister.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Sister Ship]
+world.probe_operations.entity.depot_clear.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Clearwater Depot]
+world.probe_operations.entity.packhorse.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Packhorse]
+world.probe_operations.entity.depot_storm.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Stormside Depot]
+world.probe_operations.entity.storm.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Radiation Storm Band]
+world.probe_stabilise.entity.skyhook.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Skyhook]
+component.civilians.heading,"Civilian traffic panel on the Navigation console — heading above the list of civilian craft (issue #1028)","[TRAFFIC]"
+component.civilians.empty,"Civilian traffic panel when the world carries no civilian craft (issue #1028)","[NO CIVILIAN TRAFFIC]"
+component.civilians.compliance.unordered,"Civilian traffic panel — the craft is under no order and flying its own lane (issue #1028)","[ON LANE]"
+component.civilians.compliance.received,"Civilian traffic panel — an order has reached the craft and it has not answered yet (issue #1028)","[HAILED]"
+component.civilians.compliance.acknowledged,"Civilian traffic panel — the craft has answered the order but has not acted on it yet (issue #1028)","[ACK]"
+component.civilians.compliance.complying,"Civilian traffic panel — the craft is doing as it was asked (issue #1028)","[COMPLYING]"
+component.civilians.compliance.non_compliant,"Civilian traffic panel — the craft agreed and then could not carry the order out (issue #1028)","[STUCK]"
+component.civilians.compliance.refused,"Civilian traffic panel — the craft declined the order and carried on with its own lane (issue #1028)","[REFUSED]"
+civilian.compliance.reason.declined,"Reason a civilian gives for refusing an order when its disposition authors none of its own (issue #1028)","[Not able to oblige.]"
+civilian.compliance.reason.unable,"Reason shown when a civilian accepted an order and the world then made it impossible — the dock is gone, the lane resolves nowhere (issue #1028)","[Unable to comply.]"
+civilian.order.rejected.unknown_target,"Navigation console feedback when an order names a craft this world does not have (issue #1028)","[No such craft.]"
+civilian.order.rejected.malformed,"Navigation console feedback when an order is malformed — a divert naming both a route and an anchor, or neither (issue #1028)","[Order not understood.]"
+entity.ship_civilian_hauler.name,assets/entities/ship_civilian_hauler.toml → name (top level),[Civilian Hauler]
+entity.ship_civilian_hauler.target.description,assets/entities/ship_civilian_hauler.toml → [target] description,[Bulk hauler. Unarmed. Running a contracted lane.]
+world.entity.probe_depot.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Probe Depot]
+world.entity.hauler_kestrel.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Kestrel]
+world.entity.hauler_wren.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Wren]
+world.entity.hauler_teal.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Teal]
+world.entity.hauler_gull.name,assets/worlds/probe_civilian_traffic.toml -> [[entity]] name,[Gull]
+world.probe_civilian_traffic.wren.refusal,"Reason the Wren gives for refusing a divert in the #1028 probe world","[Contracted lane. Not diverting.]"
+world.probe_commitments.deadline.records_deadline.label,assets/worlds/probe_commitments.toml -> [[deadline]] label,[Records hearing convenes]
+world.probe_commitments.commitment.safe_passage.terms,"Terms of the safe-passage promise in the #1029 probe world","[Safe passage for the strike committee's people]"
+world.probe_commitments.commitment.safe_passage.resolves,"What counts as keeping the safe-passage promise in the #1029 probe world","[They are clear of the skyway]"
+world.probe_commitments.commitment.surface_records.terms,"Terms of the surface-the-records promise in the #1029 probe world","[The maintenance records go to the hearing]"
+world.probe_commitments.commitment.surface_records.resolves,"What counts as keeping the surface-the-records promise in the #1029 probe world","[The hearing has them before it convenes]"
+world.probe_commitments.comms.committee_calls,"Body of the committee's follow-up hail in the #1029 probe world","[Committee to Phoenix. Where do we stand?]"
+world.probe_commitments.comms.stall,"Response text — stalling the committee, always offered, in the #1029 probe world","[Nothing to report yet.]"
+world.probe_commitments.comms.honour_word,"Response text — offered ONLY while the safe-passage promise is still owed, in the #1029 probe world","[You have my word, and I mean to keep it.]"
+component.dossier.heading,"Dossier panel on the destroyer tactical console — heading over the subject list (issue #1030)","[INTEL FILES]"
+component.dossier.empty,"Dossier panel when this crew hold no files at all (issue #1030)","[NO FILES]"
+component.dossier.back,"Dossier fact sheet — returns to the subject list, leaving the overlay open (issue #1030)","[← FILES]"
+component.dossier.nothing_on_file,"Dossier panel — a subject exists and nothing is known about it yet; shown in the list and on the sheet (issue #1030)","[NOTHING ON FILE]"
+component.dossier.gathered,"Dossier fact sheet — heading over the entries this crew gathered themselves, as distinct from what they were given (issues #1030/#1031)","[GATHERED]"
+component.dossier.yes,"Dossier fact sheet — a yes/no fact that holds (issue #1030)","[YES]"
+component.dossier.no,"Dossier fact sheet — a yes/no fact that does not hold (issue #1030)","[NO]"
+component.dossier.provenance.scan,"Dossier evidence — learned from a sensor scan (issue #1031)","[FROM SCAN]"
+component.dossier.provenance.dialogue,"Dossier evidence — learned from something somebody said (issue #1031)","[FROM DIALOGUE]"
+component.dossier.provenance.records,"Dossier evidence — learned by comparing records (issue #1031)","[FROM RECORDS]"
+component.dossier.provenance.briefing,"Dossier evidence — learned from the mission briefing (issue #1031)","[FROM BRIEFING]"
+dossier.fact.faction,"Dossier fact label — which faction the subject belongs to (issue #1030)","[Affiliation]"
+dossier.fact.comms,"Dossier fact label — whether the subject is inside comms range right now (issue #1030)","[In hailing range]"
+dossier.fact.condition,"Dossier fact label — the subject structure's condition (issue #1030)","[Condition]"
+dossier.fact.commitment_open,"Dossier fact label — a promise made to this party and still owed (issue #1030)","[Promised]"
+dossier.fact.commitment_kept,"Dossier fact label — a promise made to this party and kept (issue #1030)","[Promise kept]"
+dossier.fact.commitment_broken,"Dossier fact label — a promise made to this party and broken (issue #1030)","[Promise broken]"
+faction.federation.display_name,"assets/factions/federation.toml -> display_name","[Alliance]"
+faction.harrow.display_name,"assets/factions/harrow.toml -> display_name","[Harrow]"
+faction.pirate.display_name,"assets/factions/pirate.toml -> display_name","[Raiders]"
+faction.requiem.display_name,"assets/factions/requiem.toml -> display_name","[Requiem]"
+world.probe_dossier.entity.skyway_control.name,"assets/worlds/probe_dossier.toml -> [[entity]] name","[Skyway Control]"
+world.probe_dossier.entity.strike_committee.name,"assets/worlds/probe_dossier.toml -> [[entity]] name","[Strike Committee]"
+world.probe_dossier.entity.skyway_depot.name,"assets/worlds/probe_dossier.toml -> [[entity]] name","[Skyway Depot]"
+world.probe_dossier.entity.sealed_depot.name,"assets/worlds/probe_dossier.toml -> [[entity]] name","[Sealed Depot]"
+world.probe_dossier.entity.lonely_beacon.name,"assets/worlds/probe_dossier.toml -> [[entity]] name","[Marker Beacon]"
+world.probe_dossier.capacity.berths.label,"Crew-facing label for the berths capacity in the #1030 probe world","[Berths]"
+world.probe_dossier.threshold.transfer_capable.label,"Crew-facing label for the transfer-arm operational flag in the #1030 probe world","[Transfer arm serviceable]"
+world.probe_dossier.commitment.safe_passage.terms,"Terms of the safe-passage promise in the #1030 probe world","[Safe passage for the committee's people]"
+world.probe_dossier.commitment.safe_passage.resolves,"What counts as keeping the safe-passage promise in the #1030 probe world","[They are clear of the skyway]"
+world.probe_destroy.entity.tender.name,assets/worlds/probe_destroy.toml -> [[entity]] name,[Tender]
+world.probe_destroy.entity.skyhook.name,assets/worlds/probe_destroy.toml -> [[entity]] name,[Skyhook]
+world.probe_destroy.deadline.skyhook_collapse.label,assets/worlds/probe_destroy.toml -> [[deadline]] label,[Skyhook collapse]
+world.probe_destroy.objective.hold_skyhook.text,"Objective text — the skyhook the crew is meant to keep standing, in the #1033 probe world","[Hold the skyhook.]"
+world.probe_destroy.objective.clear_band.text,"Objective text — the storm bands the sweep retires, in the #1033 probe world","[Clear the storm band.]"
+entity.skyhook.name,assets/entities/skyhook.toml -> name (top level),[Orbital Skyhook]
+entity.skyhook.target.description,assets/entities/skyhook.toml -> [target] description,"[The orbital head of a planetary tether. Lifts freight and people between the surface and the sky.]"
+entity.skyhook.capacity.transfer_berths.label,assets/entities/skyhook.toml -> [[infrastructure.capacity]] label,[Transfer berths]
+entity.skyhook.capacity.climber_load.label,assets/entities/skyhook.toml -> [[infrastructure.capacity]] label,[Souls per climber]
+entity.skyhook.threshold.lift_capable.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Certified to lift]
+entity.skyhook.threshold.tether_stable.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Tether stable]
+world.falling_skyway.global.title,assets/worlds/falling_skyway.toml -> [global] title,[Falling Skyway]
+world.falling_skyway.global.description,assets/worlds/falling_skyway.toml -> [global] description,"[A skyhook over a city of forty million, and it is coming apart. Three parties need the same two berths. The corridor does not stop while you decide.]"
+world.falling_skyway.available_ships.0.label,assets/worlds/falling_skyway.toml -> [[available_ships]] label,[Alliance Destroyer]
+world.falling_skyway.entity.skyhook.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Skyhook Verrow]
+world.falling_skyway.entity.depot_ladder_a.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Ladder Depot A]
+world.falling_skyway.entity.depot_ladder_b.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Ladder Depot B]
+world.falling_skyway.entity.skyway_control.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Skyway Control]
+world.falling_skyway.entity.strike_committee.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Strike Committee]
+world.falling_skyway.entity.havelock_cutter.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Havelock Cutter]
+world.falling_skyway.entity.convoy_meridian.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Convoy Meridian]
+world.falling_skyway.entity.hauler_lark.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Lark]
+world.falling_skyway.entity.hauler_pell.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Pell]
+world.falling_skyway.entity.shuttle_wick.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Shuttle Wick]
+world.falling_skyway.capacity.fuel_lift.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Fuel lift per window]
+world.falling_skyway.threshold.pumping.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.threshold]] label,[Pumping]
+world.falling_skyway.deadline.tether_slip.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Tether slip]
+world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Survey due to Control]
+world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Take station off the skyhook. Get a condition read on the head and on both depots.]"
+world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
+world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]
+world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
+world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
+world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"
+world.probe_evidence.deadline.survey_window.label,"assets/worlds/probe_evidence.toml -> [[deadline]] label","[Survey returns]"
+world.probe_evidence.evidence.stress_fracture,"Evidence text — what the hull scan of the skyway hook found, in the #1031 probe world","[Scan: stress fracture through the primary spar.]"
+world.probe_evidence.evidence.foreman_admission,"Evidence text — what the line foreman admitted on an open channel, in the #1031 probe world","[The foreman: the spar was signed off without being looked at.]"
+world.probe_evidence.comms.foreman_calls,"Dialogue body — the line foreman on an open channel, in the #1031 probe world","[Foreman here. You are asking about the hook.]"
+world.probe_evidence.comms.press,"Response text — pressing the foreman for what he knows, in the #1031 probe world","[Who signed the inspection off?]"
+world.probe_evidence.comms.let_it_go,"Response text — letting the foreman off the hook, in the #1031 probe world","[Nothing further.]"
+world.falling_skyway.workforce.skyway_workers.label,assets/worlds/falling_skyway.toml -> [[workforce]] label,[Skyway Workers]
+world.falling_skyway.workforce.havelock_operations.label,assets/worlds/falling_skyway.toml -> [[workforce]] label,[Havelock Operations]
+world.probe_strike.workforce.workers.label,assets/worlds/probe_strike.toml -> [[workforce]] label,[Probe Workers]
+world.probe_strike.workforce.operator.label,assets/worlds/probe_strike.toml -> [[workforce]] label,[Probe Operator]
+world.probe_strike.entity.tender_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck-side Tender]
+world.probe_strike.entity.depot_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck Depot]
+world.probe_strike.entity.tender_working.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Working-side Tender]
+world.probe_strike.entity.depot_working.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Working Depot]
+world.probe_strike.entity.sister_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck-side Sister]
+world.probe_strike.entity.rig_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck Rig]
+world.probe_strike.entity.sister_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Clear-side Sister]
+world.probe_strike.entity.rig_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Unworked Rig]

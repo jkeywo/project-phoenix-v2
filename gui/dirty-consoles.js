@@ -88,14 +88,30 @@ const CONSOLE_FAMILIES = Object.freeze(new Set([
 ]));
 
 /**
+ * Reserved blackboard CHANNEL keys — ids no `[[system]]` block declares and no
+ * station owns — mapped to the console family that renders them.
+ *
+ * `scan` (issue #1032) is the sensor suite's last reading. It is not a system
+ * id (the commandable, damageable thing is `sensors`), so neither the fine
+ * matcher nor the coarse family set below resolves it, and without this entry a
+ * fresh reading would only reach a console that happened to be pushed for some
+ * other reason.
+ */
+const CHANNEL_FAMILIES = Object.freeze({
+  scan: 'sensors',
+});
+
+/**
  * The console family a blackboard system id belongs to, or null.
- * Fine ids resolve through the shared matcher; coarse ids that equal a
- * console family name resolve by identity.
+ * Fine ids resolve through the shared matcher; reserved channel keys resolve
+ * through the table above; coarse ids that equal a console family name resolve
+ * by identity.
  */
 function familyForBlackboardId(id) {
   if (typeof id !== 'string') return null;
   const fine = consoleForSystemId(id);
   if (fine) return fine;
+  if (CHANNEL_FAMILIES[id]) return CHANNEL_FAMILIES[id];
   return CONSOLE_FAMILIES.has(id) ? id : null;
 }
 

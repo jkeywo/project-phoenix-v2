@@ -652,7 +652,15 @@ pub(crate) fn insert_world_config_resource(mut commands: Commands) {
 pub(crate) fn insert_raw_world_source_resource(mut commands: Commands) {
     #[cfg(all(target_arch = "wasm32", feature = "server"))]
     if let Some((path, toml_str)) = crate::server::bridge::get_raw_world_source() {
-        match toml_str.parse::<toml::Value>() {
+        // `toml::Value`'s `FromStr` parses a single VALUE EXPRESSION (`1`,
+        // `"x"`, `[1, 2]`), not a document — so it rejects every world file
+        // ("unexpected content, expected nothing"). This wasm-only arm shipped
+        // with that misuse in #984 P2a and stayed invisible while every world
+        // was script-free: the error logged, and there were no scripts to
+        // lose. `toml::from_str` is the document parser the rest of the crate
+        // uses (and the same route `parse_world` takes, which is why the world
+        // itself loaded while its scripts vanished).
+        match toml::from_str::<toml::Value>(&toml_str) {
             Ok(toml) => commands.insert_resource(RawWorldSource { path, toml }),
             Err(e) => bevy::log::error!(
                 target: "world",

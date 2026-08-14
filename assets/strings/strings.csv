@@ -1026,6 +1026,7 @@ world.falling_skyway.entity.depot_ladder_b.name,assets/worlds/falling_skyway.tom
 world.falling_skyway.entity.skyway_control.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Skyway Control]
 world.falling_skyway.entity.strike_committee.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Strike Committee]
 world.falling_skyway.entity.havelock_cutter.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Havelock Cutter]
+world.falling_skyway.entity.havelock_enforcer.name,"assets/worlds/falling_skyway.toml -> Havelock's hired security picket. [bracketed]: unapproved copy",[HAVELOCK PICKET]
 world.falling_skyway.entity.convoy_meridian.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Convoy Meridian]
 world.falling_skyway.entity.hauler_lark.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Lark]
 world.falling_skyway.entity.hauler_pell.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Pell]
@@ -1048,6 +1049,9 @@ world.probe_evidence.comms.press,"Response text — pressing the foreman for wha
 world.probe_evidence.comms.let_it_go,"Response text — letting the foreman off the hook, in the #1031 probe world","[Nothing further.]"
 world.falling_skyway.workforce.skyway_workers.label,assets/worlds/falling_skyway.toml -> [[workforce]] label,[Skyway Workers]
 world.falling_skyway.workforce.havelock_operations.label,assets/worlds/falling_skyway.toml -> [[workforce]] label,[Havelock Operations]
+world.probe_restraint.entity.enforcer.name,"assets/worlds/probe_restraint.toml -> the always-armed hostile the hold is tested on. [bracketed]: unapproved copy",[PROBE ENFORCER]
+world.probe_restraint.entity.claimant_disabled.name,"assets/worlds/probe_restraint.toml -> the claimant taken out of the fight alive. [bracketed]: unapproved copy",[PROBE CLAIMANT A]
+world.probe_restraint.entity.claimant_destroyed.name,"assets/worlds/probe_restraint.toml -> the claimant destroyed. [bracketed]: unapproved copy",[PROBE CLAIMANT B]
 world.probe_strike.workforce.workers.label,assets/worlds/probe_strike.toml -> [[workforce]] label,[Probe Workers]
 world.probe_strike.workforce.operator.label,assets/worlds/probe_strike.toml -> [[workforce]] label,[Probe Operator]
 world.probe_strike.entity.tender_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck-side Tender]

@@ -11343,3 +11343,310 @@ fn corroboration_opens_on_two_gates_and_on_neither_of_them_alone() {
     assert_eq!(diff_flag(&app, "unlocked_unheard"), 0);
     assert_eq!(diff_flag(&app, "unlocked_quiet"), 0);
 }
+
+// ── Issue #1041: the tactical restraint lever, and the choice it enables ─────
+
+const RESTRAINT: &str = "assets/worlds/probe_restraint.toml";
+
+const R_ENFORCER: &str = "world.probe_restraint.entity.enforcer.name";
+const R_DISABLED: &str = "world.probe_restraint.entity.claimant_disabled.name";
+const R_DESTROYED: &str = "world.probe_restraint.entity.claimant_destroyed.name";
+
+fn restraint_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: RESTRAINT.into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// The sim time of the named ship's last shot, or `None` if it has never fired.
+///
+/// Read off `RecentCombatActivity`, the same per-entity record the captain's own
+/// stand-down policy reads. A test that watched a beam component would be
+/// watching one weapon family; this watches "did this hull discharge anything".
+fn last_shot_secs(app: &mut bevy::prelude::App, name: &str) -> Option<f32> {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::ship::combat_activity::RecentCombatActivity,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .and_then(|(_, activity)| activity.last_weapon_fired)
+}
+
+fn restraint_flag(app: &bevy::prelude::App, name: &str) -> bool {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .flag(name)
+}
+
+fn restraint_counter(app: &bevy::prelude::App, name: &str) -> i64 {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .counter(name)
+}
+
+fn is_in_world(app: &mut bevy::prelude::App, name: &str) -> bool {
+    app.world_mut()
+        .query::<&project_phoenix::entities::spawner::EntityName>()
+        .iter(app.world())
+        .any(|entity_name| entity_name.0 == name)
+}
+
+fn is_holding_fire(app: &mut bevy::prelude::App, name: &str) -> bool {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::ship::state::ShipWeaponsHold,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, hold)| hold.0)
+        .unwrap_or_else(|| panic!("{name} is not in the world"))
+}
+
+/// Put the hull the crew fly under a weapons hold, as the admitted
+/// `SetWeaponsHold` command would leave it.
+fn hold_the_local_ships_fire(app: &mut bevy::prelude::App) {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut project_phoenix::ship::state::ShipWeaponsHold, With<LocalShip>>();
+    let mut hold = q
+        .single_mut(app.world_mut())
+        .expect("the headless run flies one local ship");
+    hold.0 = true;
+}
+
+/// **Issue #1041, the lever.** A weapons hold suppresses an always-armed hull's
+/// fire, and releasing it gives the fire back.
+///
+/// Every claim is a BEFORE and an AFTER on the SAME hull, in one run, with
+/// nothing else about the world moving: the picket stays hostile, stays in
+/// range and keeps its target throughout. What changes between the samples is
+/// one boolean, applied through the same state a captain's console writes.
+///
+/// The subject is a Harrow patrol boat deliberately. Its gun line authors
+/// `min_alert_to_fire = 0` — always armed, no captain to call an alert — so it
+/// is the hull a hold has to beat the hard way. An implementation that seeded a
+/// plain `0.0` for a held ship would satisfy every Alliance hull and leave this
+/// one shooting.
+#[test]
+fn a_weapons_hold_silences_an_always_armed_hull_and_releasing_it_gives_the_fire_back() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&restraint_args(dt, 24.0)).expect("app should build");
+
+    // ── Free: it shoots ─────────────────────────────────────────────────────
+    //
+    // Asserted first, and the whole test rests on it: a hull that never fired
+    // would pass every "it did not fire" assertion below for the wrong reason.
+    run(&mut app, ticks_for_sim_seconds(3.5, dt));
+    let before_hold = last_shot_secs(&mut app, R_ENFORCER)
+        .expect("the always-armed picket opens fire on its own");
+
+    // ── Held: it stops ──────────────────────────────────────────────────────
+    //
+    // The order lands at t=4. Sampled well after it, and compared against the
+    // instant of the last shot rather than against a shot count — the claim is
+    // "nothing has been fired since", which is what a stopped gun means.
+    run(&mut app, ticks_for_sim_seconds(3.5, dt));
+    assert!(
+        restraint_flag(&app, "enforcer_ordered_to_hold"),
+        "precondition: the scenario has issued the hold"
+    );
+    assert!(is_holding_fire(&mut app, R_ENFORCER));
+    let during_hold = last_shot_secs(&mut app, R_ENFORCER).expect("it fired before it was held");
+    assert_eq!(
+        during_hold, before_hold,
+        "held, the picket has not discharged a weapon since the order — through its \
+         OWN authored `fact(red_alert) >= param(min_alert_to_fire)` gate, with no new \
+         doctrine vocabulary and no Rust branch on who is flying"
+    );
+
+    // ── Released: it shoots again ───────────────────────────────────────────
+    //
+    // The half that makes the middle sample mean something. A lever that could
+    // not be released would be a ship that had disarmed itself.
+    run(&mut app, ticks_for_sim_seconds(6.0, dt));
+    assert!(restraint_flag(&app, "enforcer_released"));
+    assert!(!is_holding_fire(&mut app, R_ENFORCER));
+    let after_release = last_shot_secs(&mut app, R_ENFORCER).expect("still firing");
+    assert!(
+        after_release > during_hold,
+        "released, the same hull is shooting again — {after_release} > {during_hold}"
+    );
+}
+
+/// **Issue #1041, AC3.** The hold is readable by scenario script, and an
+/// authored party reacts to it.
+///
+/// The reaction is chained off the MIRROR flag rather than off a Rust hook, the
+/// shape issue #1035 established for `workforce.<id>.on_strike`: the component
+/// stays authoritative, the flag is a mirror of it, and the scenario reads the
+/// mirror. Nothing in `probe_restraint.toml` touches ship state.
+#[test]
+fn the_crews_own_hold_is_visible_to_the_scenario_and_something_answers_it() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&restraint_args(dt, 24.0)).expect("app should build");
+
+    // Before the order: no flag, and nobody has noticed anything. The named
+    // picket the scenario DID order to hold at t=4 already carries its own
+    // mirror, which is the second key this system writes.
+    run(&mut app, ticks_for_sim_seconds(8.0, dt));
+    assert!(!restraint_flag(&app, "weapons_hold.own_ship"));
+    assert!(!restraint_flag(&app, "operator_saw_restraint"));
+    assert!(
+        restraint_flag(
+            &app,
+            &project_phoenix::ship::state::weapons_hold_flag(R_ENFORCER)
+        ),
+        "a NAMED ship mirrors under its authored name, which is the key a scenario \
+         asking about one specific hull would use"
+    );
+
+    // The crew's captain calls the hold. Written as the state the admitted
+    // `SetWeaponsHold` command produces rather than pushed as that command,
+    // because a headless run has no console session to send one from — the
+    // command path itself is pinned by `console::captain::server`'s own tests.
+    // What is under test HERE is everything downstream of the state.
+    hold_the_local_ships_fire(&mut app);
+    run(&mut app, ticks_for_sim_seconds(1.0, dt));
+    assert!(
+        restraint_flag(&app, "weapons_hold.own_ship"),
+        "the hull the crew fly mirrors under a ROLE key, because a world's player \
+         ship is not required to declare a reference name — `falling_skyway.toml` \
+         gives its own player entry an id and no name"
+    );
+    assert!(
+        restraint_flag(&app, "operator_saw_restraint"),
+        "an authored party reacted to the hold — through `on_flag_set`, which only \
+         fires because the mirror emits a real transition event"
+    );
+    assert_eq!(
+        restraint_counter(&app, "operator_restraint_notices"),
+        1,
+        "once, on the transition — not once per tick the hold is up"
+    );
+}
+
+/// **Issue #1041, the choice.** Both branches of the disable-or-destroy
+/// interaction, and the campaign flags each writes.
+///
+/// Two claimants spawned identical, taken out of the fight two different ways,
+/// in one run — so the flags are read against a control rather than against an
+/// expectation. Neither branch invents a combat state: DISABLED is a condition
+/// track crossing the threshold that owns its gun mount (#1025), at which point
+/// this issue's own lever makes the silence real; DESTROYED is the ordinary
+/// `WorldEvent::Destroyed` chain (#1033).
+#[test]
+fn a_claimant_can_be_disabled_or_destroyed_and_each_writes_its_own_flags() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&restraint_args(dt, 24.0)).expect("app should build");
+
+    // Both are in the world, whole, and neither branch has been taken.
+    run(&mut app, ticks_for_sim_seconds(12.0, dt));
+    assert!(is_in_world(&mut app, R_DISABLED));
+    assert!(is_in_world(&mut app, R_DESTROYED));
+    assert!(!restraint_flag(&app, "claimant_disabled"));
+    assert!(!restraint_flag(&app, "claimant_destroyed"));
+
+    // ── DISABLED (t=14) ─────────────────────────────────────────────────────
+    run(&mut app, ticks_for_sim_seconds(3.0, dt));
+    assert!(
+        restraint_flag(&app, "claimant_disabled"),
+        "the condition crossing chained into the disable handler"
+    );
+    assert!(
+        is_in_world(&mut app, R_DISABLED),
+        "…and the claimant is STILL THERE. That is the whole point of the branch: it \
+         is out of the fight and it is not dead."
+    );
+    assert!(
+        is_holding_fire(&mut app, R_DISABLED),
+        "…silenced through the restraint lever rather than through a new combat state"
+    );
+    assert!(
+        restraint_flag(&app, "restraint_shown"),
+        "the campaign records which way the crew took it out"
+    );
+    assert!(!restraint_flag(&app, "claimant_destroyed"));
+
+    // ── DESTROYED (t=18) — the control ──────────────────────────────────────
+    run(&mut app, ticks_for_sim_seconds(4.0, dt));
+    assert!(restraint_flag(&app, "claimant_destroyed"));
+    assert!(
+        !is_in_world(&mut app, R_DESTROYED),
+        "the other claimant is gone — same hull, same authored condition track, \
+         different ending"
+    );
+    assert!(
+        !restraint_flag(&app, "restraint_shown"),
+        "…and the campaign's answer to 'how did you take it out?' moved with it. One \
+         question, two answers, written by two handlers."
+    );
+    assert!(
+        restraint_flag(&app, "claimant_disabled"),
+        "the disabled claimant's own flag is untouched by its twin's ending"
+    );
+}
+
+/// **Issue #1041, in the mission it was written for.** Falling Skyway's Havelock
+/// picket arrives, arms nothing, and provokes nobody.
+///
+/// The restraint interaction is a CHOICE, which means a run in which the crew
+/// make no choice must be indistinguishable from one in which the picket is not
+/// there at all — no faction turns hostile, no branch is taken, and Act 1 runs
+/// its own clock undisturbed. This is the guard for that: the picket is the only
+/// armed hull the mission fields and the only way it can matter is if somebody
+/// shoots at it first.
+#[test]
+fn falling_skyways_picket_sits_there_until_somebody_starts_something() {
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/falling_skyway.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(20.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, ticks_for_sim_seconds(20.0, dt));
+
+    const PICKET: &str = "world.falling_skyway.entity.havelock_enforcer.name";
+    assert!(is_in_world(&mut app, PICKET), "the picket is on station");
+    assert!(
+        !is_holding_fire(&mut app, PICKET),
+        "…weapons-free, which is the state a hull nobody has ordered anything is in"
+    );
+    assert!(
+        restraint_flag(&app, "havelock_enforcer_guns_online"),
+        "its mount is online: the condition threshold arms UP, so `on_flag_cleared` \
+         is a crossing the crew have to cause"
+    );
+    for untaken in [
+        "picket_engaged",
+        "havelock_enforcer_disabled",
+        "havelock_enforcer_destroyed",
+        "restraint_shown",
+        "havelock_saw_restraint",
+    ] {
+        assert!(
+            !restraint_flag(&app, untaken),
+            "`{untaken}` is unset in a run where nobody chose anything — every one of \
+             these flags is a consequence of a crew's decision, and an Act 1 that set \
+             them by itself would be authoring the choice rather than offering it"
+        );
+    }
+    assert!(
+        last_shot_secs(&mut app, PICKET).is_none(),
+        "and it has not fired a shot: the Harrow are neutral until provoked, which is \
+         the premise the whole lever rests on"
+    );
+}

@@ -272,7 +272,22 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// rewrite when they found out. Nothing in the payload distinguishes that save
 /// from one whose run had simply not scanned anything yet, so both are refused by
 /// `Versions::check`, which names the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 7;
+///
+/// `8` — issue #1035 added [`ScenarioState::workforce`], and this is #1024's
+/// argument rather than #1029's: a strike IS declared in the world file, so it
+/// might look as though the content digest could stand in. It cannot, and the
+/// reason is one line in [`crate::world::config`]: `RawWorld` sets no
+/// `deny_unknown_fields`. A build that predates this vocabulary therefore loads
+/// a world authoring `[[workforce]]` perfectly happily, drops the table on the
+/// floor, and writes a format-7 save of the SAME files with the SAME content
+/// digest — a save that says nothing about a dispute the world is entirely
+/// about. Restoring it here arms an empty register, so every structure the
+/// strike was gating reads as worked: the depot that was refusing transfers
+/// takes one, and the repair that was running unassisted comes back at full
+/// rate. Nothing in the payload distinguishes that save from one whose world
+/// simply declared no sides, so both are refused by `Versions::check`, which
+/// names the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 8;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -1222,6 +1237,32 @@ pub struct ScenarioState {
     /// sheet renders.
     #[serde(default, skip_serializing_if = "EvidenceLog::is_empty")]
     pub evidence: EvidenceLog,
+    /// `WorldContentRuntime::workforce`, whole (issue #1035).
+    ///
+    /// Which sides of the world's labour dispute are out right now, what each
+    /// makes of the crew, and whether the register has been armed at all.
+    ///
+    /// The `armed` latch is the field that makes this necessary rather than
+    /// merely tidy. Without it a resumed mission's first tick re-arms from the
+    /// world file and puts a settled strike straight back on — the loudest
+    /// possible way to lose a negotiation the crew already won, and the same
+    /// class of silent re-arming that carried [`Self::deadlines`] into the
+    /// payload. The two live facts have to come back with it: restore the latch
+    /// without the records and the register is armed and empty, so every
+    /// structure reads as worked.
+    ///
+    /// Stored as the whole register rather than a per-side projection, for
+    /// [`Self::deadlines`]' reason: every field is a scalar, a `String` or a
+    /// `bool`, there is no enum among them, and writing it whole is what keeps
+    /// three facts about one side impossible to drift apart one at a time.
+    ///
+    /// In authored order, never sorted — the world file's order, which every
+    /// peer reads the same way.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::world::workforce::WorkforceRegister::is_empty"
+    )]
+    pub workforce: crate::world::workforce::WorkforceRegister,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -1657,6 +1698,10 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // payload — for every run whose scenario never said the crew learned
         // anything, which is every shipped world today.
         evidence: runtime.evidence.clone(),
+        // The labour dispute (issue #1035). Empty — and so absent from the
+        // payload — for every world that authors no `[[workforce]]`, which is
+        // every shipped world but Falling Skyway.
+        workforce: runtime.workforce.clone(),
     })
 }
 
@@ -2319,14 +2364,23 @@ fn capture_infrastructure(
 /// The external-operation records, in a query of their own, joined by uuid —
 /// see [`EntityState::operations`]. Only hulls that authored `[operations]`
 /// carry one, so most worlds capture an empty list.
+///
+/// A hull that CAN perform an operation and never has captures nothing, which
+/// is the same reading `fold_operations_namespace` takes of the same record: no
+/// hold, no refusal and a zero id counter is byte-for-byte the state of a hull
+/// built before operations existed, and writing it would charge every world
+/// fielding a capable hull for a feature its crew never used. Since #1035 gave
+/// the shipped destroyer an `[operations]` table, that is most of them.
 fn capture_operations(world: &World) -> Vec<(String, crate::operations::OperationsSaveState)> {
     let Some(mut query) = world.try_query::<(&EntityUuid, &crate::operations::ShipOperations)>()
     else {
         return Vec::new();
     };
+    let idle = crate::operations::OperationsSaveState::default();
     query
         .iter(world)
         .map(|(uuid, ops)| (uuid.0.clone(), ops.save_state()))
+        .filter(|(_, state)| *state != idle)
         .collect()
 }
 
@@ -3039,6 +3093,11 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // let the fresh app's own appends land first would re-stamp a finding at
         // the bootstrap's tick and quietly rewrite when the crew learned it.
         runtime.evidence = stored.evidence.clone();
+        // And the workforce register (issue #1035), wholesale for the deadline
+        // table's rule. The `armed` latch travels with it, which is what stops
+        // `arm_mission_workforces` running on the resumed mission's first tick
+        // and putting a settled strike back on.
+        runtime.workforce = stored.workforce.clone();
     }
 
     match world.get_resource_mut::<WorldScriptRuntime>() {

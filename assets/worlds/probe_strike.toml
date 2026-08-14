@@ -51,8 +51,8 @@
 #          is holding one.
 #
 # BASELINE (this world is new in #1035, so this is its first recorded digest):
-# `--seed 42 --ticks 1800` gives final digest 0x0f5b52ea3aecb8d1
-# (1106051222192832721), and 3320248744224805452 at tick 0. Measured on a clean
+# `--seed 42 --ticks 1800` gives final digest 0x076dbc97893247d3
+# (535291289754814419), and 10532609271901567113 at tick 0. Measured on a clean
 # tree at the commit that added this line. It is a NEW number, not a preserved
 # one — nothing to compare it against yet — so it is written down here to be the
 # thing a later change is A/B'd against, the way the other probes' already are.

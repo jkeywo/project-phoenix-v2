@@ -2822,6 +2822,228 @@ fn a_save_written_before_commitment_state_is_refused_on_format() {
     );
 }
 
+// ── Issue #1035: a settled strike stays settled across a resume ──────────────
+
+/// The strike probe: two sides, two refusals, and a settlement at t=10 s.
+const STRIKE: &str = "assets/worlds/probe_strike.toml";
+
+/// Frames to run before the strike capture.
+///
+/// The probe settles `probe_workers` on a t=10 s handler, so this has to land
+/// after it: a capture taken while the strike still held would round-trip
+/// identically even if the restore dropped the register and let the world re-arm
+/// itself from the file. The precondition below asserts the settlement rather
+/// than trusting the number.
+const STRIKE_CAPTURE_AT: u64 = 700;
+
+fn strike_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: STRIKE.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+fn live_workforce(
+    app: &bevy::prelude::App,
+) -> &project_phoenix::world::workforce::WorkforceRegister {
+    &app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .workforce
+}
+
+/// **Issue #1035.** A strike the crew settled before the save is still settled
+/// after it — and the depot that was refusing transfers goes on taking them.
+///
+/// This is the sharpest thing a resume can get wrong about authored-then-moved
+/// state, and it is sharp for the reason the destroy test below is: the fresh
+/// app does not start from the save. It boots the same world file first, which
+/// ARMS the register from `[[workforce]]` and puts `probe_workers` straight back
+/// out on strike, and only then has the capture laid over it. So the resumed
+/// world genuinely holds the wrong answer at the moment `restore` is called, and
+/// something has to correct it. That something is the `armed` latch travelling
+/// in the payload with the records.
+///
+/// The register is **not** folded into the simulation digest — it sits with
+/// `FlagStore` and the deadline table on that side of the line — so digest
+/// agreement here checks that the resume did not disturb the *simulation*, and
+/// every claim about the dispute is asserted directly.
+#[test]
+fn a_settled_strike_stays_settled_across_a_resume() {
+    let mut live = boot(&strike_args());
+    step(&mut live, STRIKE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+    let scenario = scenario_of(&payload);
+
+    // The capture is genuinely past the settlement, and past the disposition
+    // move that came with it. Both are what make the measurement discriminating.
+    assert!(
+        !scenario.workforce.on_strike("probe_workers"),
+        "precondition: the capture is taken AFTER the strike was settled — a capture \
+         taken while it held would round-trip identically even if restore dropped \
+         the field entirely"
+    );
+    assert_eq!(
+        scenario.workforce.disposition("probe_workers"),
+        Some(70),
+        "precondition: and after the settlement moved what they make of the crew"
+    );
+    assert!(
+        scenario.workforce.armed,
+        "precondition: the latch is in the payload — it is the field that stops the \
+         resumed mission re-arming itself"
+    );
+    assert!(
+        !scenario.workforce.on_strike("probe_operator"),
+        "the side that never walked out is still at work"
+    );
+
+    let mut resumed = boot_to_restore_point(&strike_args(), &payload);
+
+    // The bootstrap's own state, before the restore overwrites it. This is the
+    // control: the fresh app has read the same world file and is either still
+    // short of arming or holding the OPENING state it authors — never the
+    // settled one. So nothing below can be satisfied by a bootstrap
+    // coincidence.
+    let bootstrap = live_workforce(&resumed).clone();
+    assert_ne!(
+        bootstrap.disposition("probe_workers"),
+        Some(70),
+        "precondition: the freshly booted world has not reached the settlement — it is \
+         a fresh read of the same `[[workforce]]` table, not a resumed one"
+    );
+    assert!(
+        !bootstrap.armed || bootstrap.on_strike("probe_workers"),
+        "precondition: and once it arms, it arms the strike ON"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert!(
+        !live_workforce(&resumed).on_strike("probe_workers"),
+        "the restore takes the register whole: a negotiation the crew already won is \
+         not un-won by reloading"
+    );
+    assert_eq!(
+        live_workforce(&resumed).disposition("probe_workers"),
+        Some(70),
+        "…with the disposition it ended on, not the one the file authored"
+    );
+    assert_eq!(
+        world_counter(&resumed, "workforce.probe_workers.disposition"),
+        70,
+        "and the mirror flag a script condition reads came back with it, through the \
+         flag store that was already in the payload"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did"
+    );
+
+    // Both worlds step across the second delivery — the one the strike refused
+    // the first time. It only lands if the resumed register is really settled.
+    step(&mut live, 700);
+    step(&mut resumed, 700);
+
+    assert!(
+        !live_workforce(&resumed).on_strike("probe_workers"),
+        "the resumed mission's own ticks did not re-arm the register"
+    );
+    assert_eq!(
+        world_counter(&resumed, "second_transfer_begun"),
+        world_counter(&live, "second_transfer_begun"),
+        "both worlds stood the refused delivery up again"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        world_digest(live.world()),
+        "and it landed the same way on both sides of the resume — the depot's capacity \
+         level IS folded, so a resumed strike that had come back on would show here"
+    );
+}
+
+/// The register round-trips through the save's RON, and a world that declares no
+/// dispute writes nothing workforce-shaped at all.
+#[test]
+fn the_workforce_register_round_trips_and_a_dispute_free_world_writes_none() {
+    let mut live = boot(&strike_args());
+    step(&mut live, STRIKE_CAPTURE_AT);
+    let payload = capture(live.world());
+
+    let run = run_for(
+        payload.clone(),
+        world_digest(live.world()),
+        SEED,
+        STRIKE,
+        current_versions(STRIKE),
+    );
+    let store = FileStore::new(scratch("workforce-roundtrip"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let reloaded = load_from(&store, "autosave", &current_versions(STRIKE))
+        .expect("the save reloads")
+        .snapshot
+        .expect("a saved game carries a snapshot");
+    assert_eq!(
+        scenario_of(&reloaded.state).workforce,
+        scenario_of(&payload).workforce,
+        "every field a run moves — both sides' status, both dispositions and the armed \
+         latch — round-trips through RON"
+    );
+
+    // The compatibility half: a world that authors no `[[workforce]]` captures
+    // no workforce state, so its payload is byte-identical to one from before
+    // this vocabulary existed.
+    let mut quiet = duel();
+    step(&mut quiet, 120);
+    assert!(
+        scenario_of(&capture(quiet.world())).workforce.is_empty(),
+        "a world with no dispute captures no dispute"
+    );
+}
+
+/// A save written before workforce state was recorded is refused on **format**.
+///
+/// The field carries `#[serde(default)]`, so the older payload still parses —
+/// which is exactly why the constant had to move. A strike IS authored in the
+/// world file, so it looks as though the content digest could stand in; it
+/// cannot, because `RawWorld` sets no `deny_unknown_fields`. An older build
+/// loads a world authoring `[[workforce]]`, drops the table, and writes a save
+/// of the same files with the same content digest and no dispute in it.
+///
+/// The save this refuses is written at `SNAPSHOT_FORMAT - 1` rather than at a
+/// literal, which since #1031 landed beneath this slice means a **format-7**
+/// payload: one that carries the evidence log perfectly well and is silent
+/// about the dispute. That is the sharp case rather than a weaker one — a
+/// payload missing everything is obviously stale, and a payload missing exactly
+/// the one table the world is about is not.
+#[test]
+fn a_save_written_before_workforce_state_is_refused_on_format() {
+    let mut live = boot(&strike_args());
+    step(&mut live, STRIKE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(STRIKE);
+
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, STRIKE, previous);
+    let store = FileStore::new(scratch("workforce-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}
+
 // ── Issue #1033: an entity destroyed before the save stays destroyed ─────────
 
 /// The destroy probe: a skyhook collapsed by script, two storm bands retired.

@@ -93,6 +93,20 @@
 # it against yet — so it is written down here to be the thing a later change is
 # A/B'd against, the way the shipped worlds' digests already are.
 #
+# STILL 0x14d6dc5dcf05a3c1 AFTER #1035, and that is a claim rather than an
+# oversight. The strike slice adds a `[[workforce]]` table, a `workforce` line
+# on three structures and an `[operations]` table on the hull the crew fly —
+# and the digest folds none of them. The register is a field on
+# `WorldContentRuntime`, which nothing folds, exactly like the flag store and
+# the deadline table beside it; the `workforce` on a condition track is authored
+# content, which `content_digest` is the thing answerable for; and a hull that
+# CAN perform an operation and never has folds nothing at all
+# (`fold_operations_namespace` says so at length). What the fold does catch is
+# everything the strike CAUSES — a hold's state, its banked ticks, its rate and
+# a depot's capacity level — none of which an Act 1 run reaches, because Act 1
+# opens no operations. `probe_strike.toml` is where those numbers move, and its
+# own baseline is where they are written down.
+#
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls
 # it fields; and any engine change to what the authoritative digest folds. What

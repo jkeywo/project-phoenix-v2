@@ -60,7 +60,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: NPC AI Controller State
-      summary: Authoritative per-NPC recent combat activity (RecentCombatActivity); doctrine input and current intent are read live from console-owned surfaces, never a private mirror.
+      summary: Authoritative per-NPC recent combat activity (RecentCombatActivity) and the authored high-fidelity anchor bubble (LodBubble, "[lod_bubble] radius" in entity TOML) that keeps NPCs near a defended object promoted to full simulation; doctrine input and current intent are read live from console-owned surfaces, never a private mirror.
     architecture:
       classification: authoritative
       owner: npc-ai-controller-provisioner
@@ -68,7 +68,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/server.rs, src/ship/combat_activity.rs]
-      symbols: [RecentCombatActivity]
+      symbols: [RecentCombatActivity, LodBubble]
 
   - component: npc-doctrine-evaluator
     core:

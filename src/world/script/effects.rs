@@ -712,10 +712,7 @@ mod tests {
 
     /// Compile and call, returning BOTH drained buffers: the ordered effects and
     /// the comms opens (stamped with the unit path, as the host does).
-    fn run_with_opens(
-        source: &str,
-        fn_name: &str,
-    ) -> (Vec<BufferedEffect>, Vec<OpenCommsRequest>) {
+    fn run_with_opens(source: &str, fn_name: &str) -> (Vec<BufferedEffect>, Vec<OpenCommsRequest>) {
         let engine = runtime_engine();
         let ast = engine.compile(source).expect("compiles");
         let sink = EffectSink::new();

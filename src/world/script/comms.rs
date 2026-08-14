@@ -409,7 +409,8 @@ mod tests {
         // For EACH choice, the scripted `on_pick` effects == the TOML response
         // actions dispatched.
         for i in 0..2 {
-            let (scripted, follow) = enter(&host, &ast, &root.responses[i].on_pick, &flags).unwrap();
+            let (scripted, follow) =
+                enter(&host, &ast, &root.responses[i].on_pick, &flags).unwrap();
             assert!(follow.is_none(), "response {i} is terminal");
             let toml_cmds = dispatch_toml(&toml_node.responses[i].actions);
             assert_eq!(

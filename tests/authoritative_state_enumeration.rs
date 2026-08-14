@@ -108,7 +108,7 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "HazardAssessment", "HazardAssessmentRaw", "HazardContribution", "HelmAiShipFrame",
     "HelmAiSurfacesFrame", "HelmBoostAiPolicy", "HelmCapabilityConfig", "HelmCapabilitySection",
     "HelmImpulseAiPolicy", "INTENT_NARRATION_SPAWN_SITES", "ImpulseCommand", "ImpulsePhase",
-    "ImpulseState", "LastHelmInput", "LateralThrustInput", "Manifest", "MergeStep",
+    "ImpulseState", "LastHelmInput", "LateralThrustInput", "LodBubble", "Manifest", "MergeStep",
     "ModelMarkers", "ModelRig", "NavigationWaypoint", "ObjectiveManager",
     "PendingArcBearingRequest", "PendingFollowUp", "PendingWorldLayerChanges", "PhaserCooldown",
     "Player", "PowerBlackboard", "Provenance", "QualifiedRef", "RecentCombatActivity",

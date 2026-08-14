@@ -10231,6 +10231,7 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
          time"
     );
 }
+
 // ── The scan-versus-dossier diff (issue #1038, parent #852) ──────────────────
 
 /// `probe_scandiff.toml` — four rungs authored identically except for the one

@@ -24,13 +24,13 @@ function facts(host) {
   ]);
 }
 
-const SKYHOOK = {
-  uuid: 'skyhook-1',
-  name: 'world.probe_dossier.entity.skyhook.name',
-  summary: 'world.probe_dossier.entity.skyhook.description',
+const DEPOT = {
+  uuid: 'skyway_depot-1',
+  name: 'world.probe_dossier.entity.skyway_depot.name',
+  summary: 'entity.depot_transfer.target.description',
   facts: [
     { label: 'dossier.fact.condition', value: { kind: 'fraction', value: 0.42 } },
-    { label: 'dossier.fact.commitment_open', value: { kind: 'text', value: 'component.dossier.gathered' } },
+    { label: 'dossier.fact.commitment_open', value: { kind: 'text', value: 'world.probe_dossier.commitment.safe_passage.terms' } },
   ],
   evidence: [],
 };
@@ -63,10 +63,10 @@ describe('PhDossierPanel', () => {
 
   it('lists every subject by resolved name, in the order the host sent them', () => {
     const el = setup();
-    el.state = { dossiers: [CLAIMANT, SKYHOOK] };
+    el.state = { dossiers: [CLAIMANT, DEPOT] };
     expect(subjects(el)).toEqual([
       { uuid: 'claimant-1', name: t(CLAIMANT.name), count: t('component.dossier.nothing_on_file') },
-      { uuid: 'skyhook-1', name: t(SKYHOOK.name), count: '2' },
+      { uuid: 'skyway_depot-1', name: t(DEPOT.name), count: '2' },
     ]);
   });
 
@@ -85,21 +85,21 @@ describe('PhDossierPanel', () => {
 
   it('opens the fact sheet on tap and renders each typed value as itself', () => {
     const el = setup();
-    el.state = { dossiers: [SKYHOOK] };
+    el.state = { dossiers: [DEPOT] };
     el.shadowRoot.querySelector('.subject').click();
-    expect(el.shadowRoot.querySelector('.sheet .name').textContent).toBe(t(SKYHOOK.name));
-    expect(el.shadowRoot.querySelector('.sheet .summary').textContent).toBe(t(SKYHOOK.summary));
+    expect(el.shadowRoot.querySelector('.sheet .name').textContent).toBe(t(DEPOT.name));
+    expect(el.shadowRoot.querySelector('.sheet .summary').textContent).toBe(t(DEPOT.summary));
     expect(facts(el)).toEqual([
       [t('dossier.fact.condition'), '42%'],
-      [t('dossier.fact.commitment_open'), t('component.dossier.gathered')],
+      [t('dossier.fact.commitment_open'), t('world.probe_dossier.commitment.safe_passage.terms')],
     ]);
   });
 
   it('goes back to the list from the sheet without closing the overlay', () => {
     const el = setup();
-    el.state = { dossiers: [SKYHOOK] };
+    el.state = { dossiers: [DEPOT] };
     el.shadowRoot.querySelector('.subject').click();
-    expect(el.open.uuid).toBe('skyhook-1');
+    expect(el.open.uuid).toBe('skyway_depot-1');
     el.shadowRoot.getElementById('dossier-back').click();
     expect(el.open).toBeNull();
     expect(subjects(el)).toHaveLength(1);
@@ -109,11 +109,11 @@ describe('PhDossierPanel', () => {
   // it: the facts move under the operator rather than freezing at the tap.
   it('re-renders the open sheet from the newest payload', () => {
     const el = setup();
-    el.state = { dossiers: [SKYHOOK] };
-    el.select('skyhook-1');
+    el.state = { dossiers: [DEPOT] };
+    el.select('skyway_depot-1');
     el.state = {
       dossiers: [{
-        ...SKYHOOK,
+        ...DEPOT,
         facts: [{ label: 'dossier.fact.condition', value: { kind: 'fraction', value: 0.1 } }],
       }],
     };
@@ -122,8 +122,8 @@ describe('PhDossierPanel', () => {
 
   it('drops back to the list when the open subject leaves the world', () => {
     const el = setup();
-    el.state = { dossiers: [SKYHOOK, CLAIMANT] };
-    el.select('skyhook-1');
+    el.state = { dossiers: [DEPOT, CLAIMANT] };
+    el.select('skyway_depot-1');
     el.state = { dossiers: [CLAIMANT] };
     expect(el.open).toBeNull();
     expect(subjects(el)).toEqual([
@@ -136,15 +136,15 @@ describe('PhDossierPanel', () => {
   // until there is something in it.
   it('separates gathered evidence from the baseline facts, and hides the block when empty', () => {
     const el = setup();
-    el.state = { dossiers: [SKYHOOK] };
-    el.select('skyhook-1');
+    el.state = { dossiers: [DEPOT] };
+    el.select('skyway_depot-1');
     expect(el.shadowRoot.querySelector('.gathered')).toBeNull();
 
     el.state = {
       dossiers: [{
-        ...SKYHOOK,
+        ...DEPOT,
         evidence: [{
-          text: 'component.dossier.nothing_on_file',
+          text: 'world.probe_dossier.commitment.safe_passage.resolves',
           provenance: 'scan',
           gathered_at_tick: 900,
         }],
@@ -153,7 +153,8 @@ describe('PhDossierPanel', () => {
     const entry = el.shadowRoot.querySelector('.gathered .entry');
     expect(el.shadowRoot.querySelector('.gathered .heading').textContent)
       .toBe(t('component.dossier.gathered'));
-    expect(entry.querySelector('.text').textContent).toBe(t('component.dossier.nothing_on_file'));
+    expect(entry.querySelector('.text').textContent)
+      .toBe(t('world.probe_dossier.commitment.safe_passage.resolves'));
     expect(entry.querySelector('.provenance').textContent)
       .toBe(t('component.dossier.provenance.scan'));
   });

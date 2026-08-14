@@ -7033,3 +7033,161 @@ fn every_operating_ship_publishes_its_verb_and_its_rate_on_the_wire() {
          as a bug rather than as the storm."
     );
 }
+
+// ── The dossier projection (issue #1030, parent #851) ───────────────────────
+
+/// `probe_dossier.toml`, driven for four mission seconds: four subjects on the
+/// crew's intelligence channel, and — sitting in the same world, on a live
+/// track, at 31 of 100 points — the one condition the scenario is keeping back.
+///
+/// The load-bearing assertion is the negative one, and it is made against the
+/// published payload rather than against the projection's own return value:
+/// this is the whole path a console would read, and the withheld number is on
+/// no fact of any subject anywhere in it.
+///
+/// The probe world's own header carries the roster the subjects are asserted
+/// against and the two gates it authors.
+#[test]
+fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
+    use project_phoenix::dossier::{
+        dossier_blackboard_key, FACT_COMMITMENT_OPEN, FACT_COMMS, FACT_CONDITION, FACT_FACTION,
+    };
+    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
+    use project_phoenix::server_app::ShipSystemBlackboards;
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_dossier.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(4.0, dt),
+        seed: Some(1030),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+
+    // Read off the local ship's own blackboard rather than off the wire:
+    // `broadcast_blackboard_updates` is diffed, so a picture that stopped
+    // changing is deliberately not re-sent.
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let blackboards = q
+        .iter(app.world())
+        .next()
+        .expect("the local ship publishes");
+    let bb: DossierBlackboard = match blackboards.0.get(&dossier_blackboard_key()) {
+        Some(SystemBlackboard::Dossiers(bb)) => bb.clone(),
+        other => panic!("expected a dossier blackboard, got {other:?}"),
+    };
+
+    let by_name = |id: &str| {
+        bb.subjects
+            .iter()
+            .find(|d| d.name == id)
+            .unwrap_or_else(|| panic!("{id} is a subject; the roster was {:?}", names(&bb)))
+            .clone()
+    };
+    fn names(bb: &DossierBlackboard) -> Vec<&str> {
+        bb.subjects.iter().map(|d| d.name.as_str()).collect()
+    }
+    fn labels(d: &project_phoenix::messages::DossierSnapshot) -> Vec<&str> {
+        d.facts.iter().map(|f| f.label.as_str()).collect()
+    }
+
+    // THE ROSTER. Four subjects through two doors, and the marker beacon —
+    // hailable by nobody, publishing nothing — is not one of them.
+    let mut roster = names(&bb);
+    roster.sort_unstable();
+    assert_eq!(
+        roster,
+        vec![
+            "world.probe_dossier.entity.sealed_depot.name",
+            "world.probe_dossier.entity.skyway_control.name",
+            "world.probe_dossier.entity.skyway_depot.name",
+            "world.probe_dossier.entity.strike_committee.name",
+        ],
+        "a dossier exists for what the crew can already observe, and for nothing else"
+    );
+    assert!(
+        bb.subjects.windows(2).all(|w| w[0].uuid <= w[1].uuid),
+        "and the list is UUID-ordered, never archetype-ordered"
+    );
+
+    // THE PUBLISHED STRUCTURE. On the roster through the infrastructure door
+    // alone, so it carries no comms row — which is what proves the two doors
+    // are independent rather than one door with two names.
+    let depot = by_name("world.probe_dossier.entity.skyway_depot.name");
+    assert_eq!(
+        labels(&depot),
+        vec![
+            FACT_CONDITION,
+            "world.probe_dossier.threshold.transfer_capable.label",
+            "world.probe_dossier.capacity.berths.label",
+        ],
+        "condition, the labelled flag and the labelled capacity — and the UNLABELLED \
+         capacity is published data that is not published prose"
+    );
+    assert!(
+        !labels(&depot).contains(&"depot_transfer_throughput"),
+        "a machine id in the author's namespace never becomes a row label"
+    );
+    assert_eq!(
+        depot.summary, "entity.depot_transfer.target.description",
+        "the sheet's one line is the entity's own authored description, which the \
+         target info panel already shows"
+    );
+    assert_eq!(depot.facts[2].value, DossierValue::Count(4));
+
+    // THE ONE BEING KEPT BACK. Still a subject — the crew can hail it — and its
+    // real, live, degraded condition is on no fact at all.
+    let sealed = by_name("world.probe_dossier.entity.sealed_depot.name");
+    assert_eq!(
+        labels(&sealed),
+        vec![FACT_COMMS],
+        "hailable, and that is the whole file"
+    );
+    for subject in &bb.subjects {
+        for fact in &subject.facts {
+            assert!(
+                !matches!(fact.value, DossierValue::Fraction(f) if (f - 0.31).abs() < 1e-3),
+                "the withheld 31/100 reached {} as {:?}",
+                subject.name,
+                fact.label
+            );
+        }
+    }
+
+    // AFFILIATION resolves through the faction's own authored label, so no
+    // English crosses the wire even for a faction's name.
+    let control = by_name("world.probe_dossier.entity.skyway_control.name");
+    assert_eq!(control.facts[0].label, FACT_FACTION);
+    assert_eq!(
+        control.facts[0].value,
+        DossierValue::Text("faction.federation.display_name".into())
+    );
+
+    // THE PROMISE, on the sheet of the party it was made to and nobody else's.
+    let committee = by_name("world.probe_dossier.entity.strike_committee.name");
+    assert_eq!(labels(&committee), vec![FACT_FACTION, FACT_COMMS, FACT_COMMITMENT_OPEN]);
+    assert_eq!(
+        committee.facts[2].value,
+        DossierValue::Text("world.probe_dossier.commitment.safe_passage.terms".into()),
+        "the row carries the terms the crew gave, by string id, under the label for \
+         the state the promise is in"
+    );
+    for subject in &bb.subjects {
+        if subject.name != "world.probe_dossier.entity.strike_committee.name" {
+            assert!(
+                !labels(subject).contains(&FACT_COMMITMENT_OPEN),
+                "{} was promised nothing and its sheet says so",
+                subject.name
+            );
+        }
+    }
+
+    // #1031's seam: carried on every subject, written by nothing in this slice.
+    assert!(bb.subjects.iter().all(|d| d.evidence.is_empty()));
+}

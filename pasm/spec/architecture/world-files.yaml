@@ -330,8 +330,8 @@ entities:
     architecture:
       kind: subsystem
       authority: derived
-      owns: [dossier-published-state]
-      reads: [infrastructure-condition-state, world-configuration-state, dossier-evidence-state]
+      owns: [dossier-published-state, dossier-evidence-state]
+      reads: [infrastructure-condition-state, world-configuration-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
@@ -393,7 +393,7 @@ entities:
     architecture:
       classification: authoritative
       owner: dossier-projection
-      writers: [world-script-runtime, dossier-projection]
+      writers: [scenario-script-host-seam, dossier-projection]
     implementation:
       status: declared
       paths:

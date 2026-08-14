@@ -77,8 +77,14 @@ describe('rowLineNumbers', () => {
       expect(physical[lines[i] - 1].startsWith(row[0])).toBe(true);
     });
 
-    // And the drift is real, so this is not a no-op: the file has more physical
-    // lines than parsed rows, and the last row proves the gap.
-    expect(lines[lines.length - 1]).toBeGreaterThan(rows.length);
+    // Physical line numbers never run BEHIND row count — every multi-line
+    // quoted value the file happens to carry only pushes later rows further
+    // down, never up. Not `toBeGreaterThan`: that would assert the file
+    // currently contains at least one multi-line value, which is a fact
+    // about today's content rather than about `rowLineNumbers` and drifts
+    // whenever strings.csv's data changes shape (as of this writing the file
+    // has none, so `lines` equals `rows.length` one-for-one). The dedicated
+    // synthetic cases above already exercise the swallowed-lines behaviour.
+    expect(lines[lines.length - 1]).toBeGreaterThanOrEqual(rows.length);
   });
 });

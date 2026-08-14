@@ -505,3 +505,98 @@ entities:
       - kind: test
         reference: "src/world/commitments.rs tests; tests/snapshot_resume.rs"
         summary: "The pure ledger's record/query/resolve-kept/resolve-broken behaviour without Bevy, including the duplicate refusal, the re-resolution no-op, and open/kept/broken/unknown never collapsing into each other; plus the save round-trip. `SNAPSHOT_FORMAT` moved 5 → 6, and here the content digest could NOT stand in for it: a promise is a runtime artifact, so an older save of the SAME world file carries the same content digest and nothing else would refuse it. Restoring it resumes a captain who has promised nothing — a plausible state rather than an obviously missing one, which is what would let a resumed scenario re-offer a word already given."
+
+  - component: workforce-vocabulary
+    core:
+      status: implemented
+      confidence: confirmed
+      title: The Workforce — Who Staffs a Structure, and What a Stoppage Does to the Work
+      summary: "Issue #1035 (parent #852, Falling Skyway). A skyhook is not a machine that runs itself: somebody authorises the pump and somebody rides the climber down with a torch. A world declares the sides of a labour dispute in `[[workforce]]` blocks (id, `strings.csv` label, `on_strike`, `disposition` on an authored 0..=100 scale); a structure names the side that staffs it on its own `[infrastructure] workforce = \"…\"`; and script moves a side through `ctx.effects.call_strike(id)` / `settle_strike(id)` / `set_workforce_disposition(id, n)`. What a stoppage DOES to a piece of work is authored per verb on the operating hull's `[[operations.capability.interrupt]]` with `cause = \"work_stoppage\"` — `response = \"fail\"` refuses a transfer nobody will sign off, `response = \"slow\"` with a `rate_percent` stretches a repair the local crews have walked away from — so the same authored cause produces a refusal for one verb and a slower job for another with neither meaning anywhere in Rust."
+      rationale:
+        - "IT IS NOT A FACTION AND IT IS NOT A SECOND ONE. `FactionConfig` answers who shoots whom; a workforce answers who turns up for work. The Skyway workers and the operator that employs them are both Federation, neither will ever fire on the other, and the whole crisis is between them — folding a strike into the enemies list would have made 'the line is down' mean 'the depot is hostile' on every console that reads a faction. A party that is both (the strike committee is a hull with a faction AND a side in the dispute) carries one of each."
+        - "THE STOPPAGE JOINS THE #1027 INTERRUPT VOCABULARY RATHER THAN THE ELIGIBILITY LADDER, and that is the whole reason both bites are authorable. Eligibility is uniform across verbs: a stoppage placed there would have forced ONE answer on transfers and repairs alike. As an `InterruptCause` it is the first that is a fact about the far end rather than about the operator, and the capability says what it means — which is a designer's judgement about the fiction, not a property of the word strike."
+        - "REVERSIBILITY IS FREE BECAUSE NOTHING LATCHES. Settling a side stops the rule firing on the next tick: the repair rate returns to full and the depot takes a delivery, with no restoration path anywhere to write, to test, or to forget. The register holds the fact; the capability holds the consequence; and there is no third place holding a memory of the consequence."
+        - "Three verbs rather than one setter, for the reason `repair_infrastructure`/`damage_infrastructure` are two: the direction lives in the name, so a scenario cannot end a strike by getting a boolean the wrong way round. Each pushes TWO commands on the call's shared ordered buffer — the register move, then the mirror flag — so the flag gets its `FlagSet`/`FlagCleared` transition from the one path that emits them and an `on_flag_cleared` trigger chains off a settlement without this vocabulary knowing triggers exist."
+        - "A settlement is an ordinary `ActionCmd` (`SetWorkforceState`) rather than a seventh `CallEffects` field, which is where it differs from `commitment_changes`. The applier already holds the runtime the register lives on and a workforce is a PARTY rather than an entity, so there is nothing to resolve and nothing to queue — no buffered-change plumbing was needed and none was added."
+        - "The `workforce` a structure names is deliberately NOT cross-checked against the world's `[[workforce]]` table at load. The same depot template ships in five scenarios and only one of them has a strike, so 'this world has never heard of those people' honestly means work there carries on — and a template that could not name a side it might one day be in dispute with would have to be forked per mission."
+        - "The refusal reaches the crew as `operation.refused.work_stopped` on the operations blackboard — the SAME field a `TargetGone` or a `CapacityUnavailable` travels on, resolved through `t()` by the panel that already existed. No parallel channel, no new wire field, and the console renders it because it renders every refusal."
+    architecture:
+      kind: domain-model
+      authority: authoritative
+      owns: [workforce-register-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/workforce.rs
+        - src/world/config.rs
+        - src/world/dispatch.rs
+        - src/world/server.rs
+        - src/world/script/effects.rs
+        - src/infrastructure/condition.rs
+        - src/operations/hold.rs
+        - src/operations/server.rs
+        - assets/worlds/probe_strike.toml
+        - assets/worlds/falling_skyway.toml
+        - assets/entities/alliance_destroyer.toml
+      symbols:
+        - Workforce
+        - WorkforceMutation
+        - FlagMirror
+        - strike_flag
+        - disposition_flag
+        - arm_mission_workforces
+        - InterruptCause
+        - Ineligibility
+        - OperationConditions
+        - InfrastructureConfig
+      tests: [cargo test, "cargo test --features headless --test headless_runner a_strike_refuses"]
+    evidence:
+      - kind: test
+        reference: "tests/headless_runner.rs::a_strike_refuses_a_depot_transfer_and_unassists_a_repair_until_it_is_settled"
+        summary: "`probe_strike.toml` driven for thirty mission seconds as four pairs, each an experiment beside a control differing in exactly one authored word. Two tenders with the same capability, cargo and interrupt rule: the one delivering to a depot whose people are out FAILS on its first tick carrying `operation.refused.work_stopped`, and its twin completes and moves twenty units of load. Two sisters with the same rate and duration against two rigs that spawned identical: the struck one holds at 40% and has banked under half the control's time, and its rig's condition is behind. At t=10 s a handler sets an ordinary world flag, `on_flag_set` chains, `ctx.effects.settle_strike` runs — and the rate is back to full on the next tick with no restoration path anywhere, and the same delivery to the same depot lands."
+      - kind: test
+        reference: "tests/headless_runner.rs::the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted"
+        summary: "The same two bites in the scenario rather than in a probe, met by the crew's own hull. A transfer stood up alongside Ladder Depot B — in range, powered, eligible on every count — comes back `Failed(WorkStopped)` with its `strings.csv` reason; a field-repair on the head runs at the 35% the destroyer's capability authors; and the identical repair on Ladder Depot A, staffed by people who did not walk out, runs at full rate on the same tick. Falling Skyway's digest is UNCHANGED by the slice (0x14d6dc5dcf05a3c1), which is the claim that the register, the authored `workforce` and an unused capability table are all outside the fold."
+
+  - state: workforce-register-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Workforce Register State
+      summary: "Every side of a world's labour dispute, in authored order: a stable id, a `strings.csv` label, whether they are out right now, and what they make of the crew on an authored 0..=100 scale — plus an `armed` latch. Held as a `WorkforceRegister` FIELD on `WorldContentRuntime`, beside the commitments ledger and the deadline table, so the slice registers no new component or resource. Armed once by `arm_mission_workforces` from the world's `[[workforce]]` blocks, on the same tick the deadline table is armed; after that it moves only when a script says so."
+      rationale:
+        - "THE OPENING STATE IS AUTHORED, NOT SCRIPTED ON TICK ONE, for the reason a skyhook's 48 starting points are: the crew arrive INTO a situation that was already happening, and a world that had to script its own opening state would be describing a change nobody was there for. `arm_mission_workforces` therefore writes the mirror flags straight into the store rather than through the trigger pipeline — a transition event on tick one would announce 'the strike just started' for a strike the crew flew into, and fire every trigger authored to watch for its opposite. The same reading `InfrastructureState::from_config` takes when it level-evaluates a degraded structure's thresholds."
+        - "IT IS A RECORD AND IT DECIDES NOTHING. Nothing in the module knows what a transfer is, what a repair rate is, or that operations exist; it holds two facts per side and hands them to whoever asks. `apply` returns the mirror-flag write its caller must make rather than performing it, because a pure record that reached for the world's flags would be the second thing that owns them and flag transitions are the trigger pipeline's to emit."
+        - "An unknown id reads as AT WORK rather than as an error. That is the load-bearing default: an entity template may name a workforce a given world has no dispute about, and the honest reading of 'this world has never heard of those people' is that work there carries on."
+        - "Status and disposition move independently, through separate mutations. A side can go back to work still resenting the crew, and can walk out while thinking well of them; folding the two into one number would make both unsayable, and the negotiation (#1036) needs to be able to say each."
+        - "Disposition is an absolute set, clamped, rather than a delta: a negotiation's outcome is a POSITION — 'they will work with you now' — and two beats that each nudged by five would compose into a number no author chose."
+        - "Records are an ordered `Vec` rather than a map, for `CommitmentLedger`'s reason: the order is the world file's, it is the order a debrief reads them in, and a `HashMap`'s iteration order must never reach a payload or a fold."
+        - "AUTHORITATIVE BUT NOT FOLDED, exactly like `FlagStore`, `ObjectiveManager`, `DeadlineTable` and `CommitmentLedger`: `state_digest` does not walk it. What the digest DOES catch is everything a stoppage causes — a hold's state and reason, its banked ticks, its rate, and a depot's capacity level — so two peers that disagreed about whether a strike was on would disagree about a transfer's outcome on the tick it mattered. Falling Skyway's own digest is unchanged by the slice, which is that claim measured."
+    architecture:
+      classification: authoritative
+      owner: workforce-vocabulary
+      writers: [workforce-vocabulary]
+    implementation:
+      status: observed
+      # `src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `mission-deadline-state` and `commitment-ledger-state` omit it: it is a
+      # whole-payload module whose own imports the scanner would attribute
+      # wholesale to this entity. The persistence (`ScenarioState::workforce`,
+      # and the 6 → 7 `SNAPSHOT_FORMAT` bump the evidence below records) is
+      # traced through the evidence instead.
+      paths:
+        - src/world/workforce.rs
+        - src/world/server.rs
+      symbols:
+        - WorkforceRegister
+        - WorkforceRecord
+        - Workforce
+        - DISPOSITION_MIN
+        - DISPOSITION_MAX
+        - WorldContentRuntime
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike"]
+    evidence:
+      - kind: test
+        reference: "src/world/workforce.rs tests; tests/snapshot_resume.rs"
+        summary: "The pure register's arm/read/settle/re-strike/disposition behaviour without Bevy, including the arm-twice no-op that stops a resumed mission re-arming, the unknown-side-is-at-work default, and the two facts moving independently. Plus the save round-trip: `SNAPSHOT_FORMAT` moved 6 → 7 because the content digest could NOT stand in even though a strike IS authored — `RawWorld` sets no `deny_unknown_fields`, so an older build loads a `[[workforce]]`-authoring world, drops the table, and writes a save of the same files with the same content digest and no dispute in it. Restoring that arms an empty register and every structure the strike was gating reads as worked."

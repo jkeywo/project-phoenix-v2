@@ -126,6 +126,28 @@ describe('PhOperationPanel', () => {
     expect(el.getAttribute('data-state')).toBe('stalled');
   });
 
+  it('tells the crew a strike refused the operation, in words, on the panel', () => {
+    // Issue #1035. The refusal a work stoppage produces is TERMINAL — the hold
+    // fails on its first tick rather than stalling — so the two things the crew
+    // need are the word FAILED and the reason beside it. Nothing in this
+    // component knows what a strike is: the reason arrives as a strings.csv id
+    // on the same field an out-of-range stall travels on, which is the whole
+    // point of not inventing a second channel for it.
+    const el = setup();
+    el.state = panelState({
+      operations: {
+        capabilities: [CAPABILITY],
+        active: { ...HOLDING, state: 'failed', reason: 'operation.refused.work_stopped' },
+      },
+    });
+    expect(el.shadowRoot.querySelector('.state').textContent)
+      .toBe(t('component.operations.state.failed'));
+    const reason = el.shadowRoot.getElementById('reason');
+    expect(reason.hidden).toBe(false);
+    expect(reason.textContent).toBe(t('operation.refused.work_stopped'));
+    expect(reason.textContent).not.toContain('operation.refused');
+  });
+
   it('renders every terminal state as its own word rather than a stale bar', () => {
     // 'completed' at 100% and 'failed' at 100% would be the same picture; the
     // word is what tells them apart, and the mission cares about the difference.

@@ -353,6 +353,25 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // pasm/spec/architecture/scenario-scripting.yaml's `commitment-ledger-state`
     // entity for the `implementation.symbols` naming those Rust types.
     //
+    // Issue #1035's workforce register is covered the same way again, by
+    // `WorldContentRuntime` above: `WorkforceRegister` — with its
+    // `WorkforceRecord`, the authored `Workforce` row it is armed from, and the
+    // `WorkforceMutation`/`FlagMirror` a settlement travels as — is a FIELD on
+    // that resource, sitting beside the commitments ledger for the reason the
+    // ledger sits beside the deadline table. The slice registers no
+    // `#[derive(Resource)]` and no `#[derive(Component)]`, so nothing new
+    // appears in the registry this guard scans, and it adds nothing to
+    // `WorldScriptRuntime` either: the `[[workforce]]` blocks are parsed onto
+    // `WorldConfig` (authored content, not runtime state) and a settlement is
+    // an ordinary `ActionCmd` on the effect buffer that already existed.
+    //
+    // The one place it DOES touch a scanned type is `InfrastructureState`,
+    // which gained an authored, immutable `workforce` naming the side that
+    // staffs a structure — a field on state `InfrastructureCondition` already
+    // covers, not a registration. See `src/world/workforce.rs`, and
+    // pasm/spec/architecture/scenario-scripting.yaml's `workforce-register-state`
+    // entity for the `implementation.symbols` naming those Rust types.
+    //
     // Issue #1030's dossiers add nothing here either, and for a stronger reason
     // than either of the two above: they add no STATE at all, anywhere. A dossier
     // is a projection folded fresh every tick out of state other subsystems

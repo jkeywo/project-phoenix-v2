@@ -1,0 +1,117 @@
+# Orbital skyhook head — the structure Falling Skyway is named after (issue
+# #1034, parent #852).
+#
+# A skyhook is a tether anchored to the world below and a transfer head in orbit
+# above it. Only the head is an entity: the ribbon is scenery, the climbers are
+# traffic, and what a crew can actually DO to a skyhook — read its condition,
+# stabilise it, watch its lift tolerance go — all happens at this end of it.
+#
+# It is authored as its own template rather than as a dressed-up
+# `depot_transfer.toml` because the two structures answer different questions. A
+# depot is asked "how much can you move this window"; a skyhook is asked "how
+# many can you lift, and are you still safe to lift them". Those are different
+# capacities and different thresholds, and folding them onto one template would
+# have every future world that places a depot inherit a tether-stability flag it
+# has no tether for.
+#
+# Two health tracks, exactly as on `depot_transfer.toml`:
+#
+#   [hull]           what weapons destroy. At zero the head is despawned.
+#   [infrastructure] what neglect, a storm and a repair team move. At zero the
+#                    head is still there — it simply cannot lift anything.
+#
+# `hull_damage_share = 0.5` couples them: a head that takes a torpedo is
+# structurally worse off at half a condition point per hull point, without hull
+# damage BEING condition damage.
+#
+# THE TWO THRESHOLDS ARE A LADDER, not a pair of alternatives. The upper one is
+# an operational limit a crew can trade against — below it the head stops being
+# certified to lift, and the mission's transfer window is in trouble. The lower
+# one is structural, and it is the one a later slice (#1040) hangs the collapse
+# off. A world that wants the collapse authors the condition low enough to reach
+# it; nothing here decides that.
+
+name = "entity.skyhook.name"
+tags = ["station", "infrastructure"]
+
+[target]
+tags = ["station"]
+threat_level = "none"
+description = "entity.skyhook.target.description"
+
+[hull]
+# Sturdier than a depot: this is the biggest thing in the sky over the city, and
+# a scenario that wants it gone should have to take its CONDITION down rather
+# than shoot the head off in a pass.
+hull_integrity = 1200.0
+
+[collider]
+shape = "Ball"
+radius = 26.0
+length = 0.0
+
+[radar_appearance]
+colour = [0.85, 0.74, 0.45]
+size = 22.0
+icon = "station"
+
+[mesh]
+# The starbase hull — the largest station silhouette in the library, and the
+# only one that reads as a transfer head rather than as an outpost. The torus is
+# the streaming/flat-render fallback, as on every other station.
+model = "assets/models/alliance_starbase.glb"
+shape = "torus"
+radius = 26.0
+minor_radius = 6.0
+colour = [0.85, 0.74, 0.45]
+
+[comms]
+# Long-range: the head talks to the whole corridor, and a crew that has to close
+# to hailing range before they can ask it anything would spend Act 1 flying.
+range = 1600.0
+
+[infrastructure]
+# 100 condition points, intact on arrival unless a world overrides it — and
+# every world that fields this structure in Falling Skyway does, because the
+# mission opens on a head that is already in trouble.
+condition_max = 100.0
+hull_damage_share = 0.5
+
+# No `decay_per_sec`, deliberately. Condition ticks from the moment the entity
+# spawns, which for a `spawn_on = "immediate"` structure is world LOAD — i.e.
+# during the lobby, before the mission clock exists. An authored decay would
+# therefore charge a scenario for how long its crew spent picking seats, and a
+# skyhook's deterioration is a mission beat rather than a lobby tax. A world
+# that wants the head to fall on a schedule authors a `[[deadline]]` and spends
+# condition from its handler, which is anchored on the mission's first tick.
+
+# How many claimants the head can put through one transfer window. THE NUMBER IS
+# THE SCENARIO'S CENTRAL PRESSURE and belongs on the structure rather than in a
+# script: Falling Skyway fields three parties who each need to be on it.
+[[infrastructure.capacity]]
+id = "skyhook_transfer_berths"
+amount = 2
+label = "entity.skyhook.capacity.transfer_berths.label"
+
+# What one climber carries. Published and labelled so the crew can do the
+# arithmetic themselves rather than being told the answer.
+[[infrastructure.capacity]]
+id = "skyhook_climber_load"
+amount = 180
+label = "entity.skyhook.capacity.climber_load.label"
+
+# The operational limit. Below 45 % the head is out of lift tolerance and stops
+# being certified to run a climber; it comes back at 50 % — `fails_below` plus
+# the default hysteresis band — so a head hovering on the line does not flap.
+[[infrastructure.threshold]]
+flag = "skyhook_lift_capable"
+fails_below = 0.45
+label = "entity.skyhook.threshold.lift_capable.label"
+
+# The structural one. Nothing in the skeleton scenario reaches it; it is here so
+# the collapse slice has an authored line to cross rather than a number invented
+# at the point of use.
+[[infrastructure.threshold]]
+flag = "skyhook_tether_stable"
+fails_below = 0.2
+label = "entity.skyhook.threshold.tether_stable.label"

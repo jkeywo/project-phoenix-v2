@@ -988,3 +988,29 @@ world.probe_destroy.entity.skyhook.name,assets/worlds/probe_destroy.toml -> [[en
 world.probe_destroy.deadline.skyhook_collapse.label,assets/worlds/probe_destroy.toml -> [[deadline]] label,[Skyhook collapse]
 world.probe_destroy.objective.hold_skyhook.text,"Objective text — the skyhook the crew is meant to keep standing, in the #1033 probe world","[Hold the skyhook.]"
 world.probe_destroy.objective.clear_band.text,"Objective text — the storm bands the sweep retires, in the #1033 probe world","[Clear the storm band.]"
+entity.skyhook.name,assets/entities/skyhook.toml -> name (top level),[Orbital Skyhook]
+entity.skyhook.target.description,assets/entities/skyhook.toml -> [target] description,"[The orbital head of a planetary tether. Lifts freight and people between the surface and the sky.]"
+entity.skyhook.capacity.transfer_berths.label,assets/entities/skyhook.toml -> [[infrastructure.capacity]] label,[Transfer berths]
+entity.skyhook.capacity.climber_load.label,assets/entities/skyhook.toml -> [[infrastructure.capacity]] label,[Souls per climber]
+entity.skyhook.threshold.lift_capable.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Certified to lift]
+entity.skyhook.threshold.tether_stable.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Tether stable]
+world.falling_skyway.global.title,assets/worlds/falling_skyway.toml -> [global] title,[Falling Skyway]
+world.falling_skyway.global.description,assets/worlds/falling_skyway.toml -> [global] description,"[A skyhook over a city of forty million, and it is coming apart. Three parties need the same two berths. The corridor does not stop while you decide.]"
+world.falling_skyway.available_ships.0.label,assets/worlds/falling_skyway.toml -> [[available_ships]] label,[Alliance Destroyer]
+world.falling_skyway.entity.skyhook.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Skyhook Verrow]
+world.falling_skyway.entity.depot_ladder_a.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Ladder Depot A]
+world.falling_skyway.entity.depot_ladder_b.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Ladder Depot B]
+world.falling_skyway.entity.skyway_control.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Skyway Control]
+world.falling_skyway.entity.strike_committee.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Strike Committee]
+world.falling_skyway.entity.havelock_cutter.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Havelock Cutter]
+world.falling_skyway.entity.convoy_meridian.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Convoy Meridian]
+world.falling_skyway.entity.hauler_lark.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Lark]
+world.falling_skyway.entity.hauler_pell.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Pell]
+world.falling_skyway.entity.shuttle_wick.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Shuttle Wick]
+world.falling_skyway.capacity.fuel_lift.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Fuel lift per window]
+world.falling_skyway.threshold.pumping.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.threshold]] label,[Pumping]
+world.falling_skyway.deadline.tether_slip.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Tether slip]
+world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Survey due to Control]
+world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Take station off the skyhook. Get a condition read on the head and on both depots.]"
+world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
+world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]

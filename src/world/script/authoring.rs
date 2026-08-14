@@ -267,6 +267,47 @@ pub const HOST_FNS: &[HostFn] = &[
                   it with `schedule.after`.",
     },
     HostFn {
+        name: "tow",
+        receiver: "effects",
+        params: &["ship", "target"],
+        category: "effect",
+        summary: "Order the named ship to take the named target under tow. \
+                  While the hold is running the target rides at the hull's \
+                  authored `tow_offset` and its own motion is held at zero; a \
+                  tow that stalls lets go.",
+    },
+    HostFn {
+        name: "escort",
+        receiver: "effects",
+        params: &["ship", "target"],
+        category: "effect",
+        summary: "Order the named ship to escort the named target. Progress \
+                  runs while the escortee is inside the authored range as it \
+                  travels, and the hold FAILS if it gets past the authored \
+                  `separation_limit`.",
+    },
+    HostFn {
+        name: "transfer",
+        receiver: "effects",
+        params: &["ship", "target"],
+        category: "effect",
+        summary: "Order the named ship to run its authored transfer against the \
+                  named target. Both ends' `[[infrastructure.capacity]]` levels \
+                  are checked every tick and the load moves once, on \
+                  completion.",
+    },
+    HostFn {
+        name: "field_repair",
+        receiver: "effects",
+        params: &["ship", "target"],
+        category: "effect",
+        summary: "Order the named ship to field-repair the named structure. \
+                  Pays the hull's authored `condition_per_second` for every \
+                  second held — a crew pulled off early keeps what they did — \
+                  and commits `repair_teams` of the ship's own teams for the \
+                  duration.",
+    },
+    HostFn {
         name: "order_hold",
         receiver: "effects",
         params: &["entity"],
@@ -519,8 +560,10 @@ mod tests {
                 "repair_infrastructure" | "damage_infrastructure" => {
                     format!("ctx.effects.{}(\"x\", 1)", hf.name)
                 }
-                // The operation verbs take (ship, target).
-                "stabilise" => format!("ctx.effects.{}(\"x\", \"y\")", hf.name),
+                // The five operation verbs take (ship, target).
+                "stabilise" | "tow" | "escort" | "transfer" | "field_repair" => {
+                    format!("ctx.effects.{}(\"x\", \"y\")", hf.name)
+                }
                 // The civilian order hooks take (entity, destination) — except
                 // `order_hold`, whose verb IS the whole instruction.
                 "order_divert_route" | "order_divert_anchor" | "order_dock" => {

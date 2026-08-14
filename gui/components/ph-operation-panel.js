@@ -1,9 +1,21 @@
-// External-operation readout and control (issue #1026).
+// External-operation readout and control (issues #1026, #1027).
 //
 // Sits under <ph-deadline-list> on the captain console: deadlines are what the
 // mission is doing to the crew, operations are what the crew are doing to the
 // world. One ship runs at most one operation, so this is a single row plus a
 // control, not a list.
+//
+// NOTHING HERE KNOWS WHAT A VERB IS. The five verbs (#1027 completed the set)
+// reach this component as `{verb, label}` pairs on the blackboard and are
+// rendered by walking that list — there is no per-verb branch, no verb-specific
+// icon table and no special case for the one that tows. A sixth verb authored
+// tomorrow appears in the picker with no change here, which is the test at the
+// bottom of tests/client/ph-operation-panel.test.js.
+//
+// THE PICKER EXISTS BECAUSE THERE ARE NOW FIVE. Up to #1026 a hull offered one
+// verb and the button ordered it; a tender that can tow, escort, transfer and
+// field-repair needs the crew to say which. A hull offering exactly one verb
+// still shows no picker, so the single-capability console is unchanged.
 //
 // THE BAR IS NOT CLIENT-SIDE. `progress` arrives already computed server-side
 // off ELIGIBLE ticks and is re-published every tick, so this component paints a
@@ -47,6 +59,13 @@ const SETTLED = new Set(['completed', 'aborted', 'failed']);
 export class PhOperationPanel extends HTMLElement {
   #state = null;
 
+  /**
+   * Which of the hull's verbs the crew have selected, or `null` for "whichever
+   * the hull offers first". Purely local: the server is never told what a
+   * console is *about* to order.
+   */
+  #chosenVerb = null;
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -63,6 +82,10 @@ export class PhOperationPanel extends HTMLElement {
     .track { height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; margin: 0.25rem 0.2rem; }
     .fill { height: 100%; width: 0; background: var(--cyan); }
     .reason { font-size: 0.62rem; color: var(--warn, var(--ink-dim)); padding: 0 0.2rem 0.2rem; letter-spacing: 0.05em; }
+    .slowed { font-size: 0.62rem; color: var(--warn, var(--ink-dim)); padding: 0 0.2rem 0.2rem; letter-spacing: 0.05em; }
+    select { width: 100%; font-family: inherit; font-size: 0.65rem; letter-spacing: 0.1em;
+             padding: 0.3rem; margin-top: 0.2rem; background: transparent; color: var(--ink);
+             border: 1px solid var(--line-soft); border-radius: 2px; }
     :host([data-state="stalled"]) .fill { background: var(--warn, var(--ink-dim)); }
     :host([data-state="stalled"]) .state { color: var(--warn, var(--ink-dim)); }
     :host([data-state="failed"]) .fill,
@@ -77,12 +100,24 @@ export class PhOperationPanel extends HTMLElement {
   </style>
   <div class="heading" id="heading"></div>
   <div id="body"></div>
+  <div class="slowed" id="slowed" hidden></div>
   <div class="reason" id="reason" hidden></div>
+  <select id="verb" hidden></select>
   <button id="action" type="button" hidden></button>
 `;
     this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.shadowRoot.getElementById('heading').textContent = t('component.operations.heading');
     this.shadowRoot.getElementById('action').addEventListener('click', () => this.#onAction());
+    const verb = this.shadowRoot.getElementById('verb');
+    verb.setAttribute('aria-label', t('component.operations.verb_picker'));
+    // The chosen verb is UI state, not sim state: it is what the crew are about
+    // to order, and nothing on the wire has an opinion about it until they
+    // press the button. Re-rendering on change keeps the button's label and the
+    // action it would send in step with the selection.
+    verb.addEventListener('change', () => {
+      this.#chosenVerb = verb.value || null;
+      this.#render();
+    });
   }
 
   set state(val) {
@@ -103,10 +138,17 @@ export class PhOperationPanel extends HTMLElement {
     if (active && !SETTLED.has(active.state || '')) {
       return { action: 'abort_operation' };
     }
-    const first = (ops.capabilities || [])[0];
+    const capabilities = Array.isArray(ops.capabilities) ? ops.capabilities : [];
+    // The selection, or the hull's first verb when nothing has been chosen —
+    // which is exactly the #1026 behaviour for a hull that offers one verb. A
+    // selection the hull no longer offers (a save resumed onto a different
+    // ship, a capability withdrawn) falls back rather than sending a verb the
+    // server would refuse by name.
+    const chosen =
+      capabilities.find((c) => c && c.verb === this.#chosenVerb) || capabilities[0];
     const target = (this.#state && this.#state.target_uuid) || null;
-    if (!first || !target) return null;
-    return { action: 'start_operation', verb: first.verb, target_uuid: target };
+    if (!chosen || !target) return null;
+    return { action: 'start_operation', verb: chosen.verb, target_uuid: target };
   }
 
   connectedCallback() {
@@ -128,6 +170,8 @@ export class PhOperationPanel extends HTMLElement {
     const active = ops.active || null;
     const body = this.shadowRoot.getElementById('body');
     const reasonEl = this.shadowRoot.getElementById('reason');
+    const slowedEl = this.shadowRoot.getElementById('slowed');
+    const picker = this.shadowRoot.getElementById('verb');
     const button = this.shadowRoot.getElementById('action');
 
     // A hull that can perform nothing gets a panel that says so, rather than an
@@ -136,6 +180,8 @@ export class PhOperationPanel extends HTMLElement {
       this.removeAttribute('data-state');
       body.innerHTML = `<div class="empty">${t('component.operations.none')}</div>`;
       reasonEl.hidden = true;
+      slowedEl.hidden = true;
+      picker.hidden = true;
       button.hidden = true;
       return;
     }
@@ -163,6 +209,20 @@ export class PhOperationPanel extends HTMLElement {
       body.querySelector('.fill').style.width = `${pct}%`;
     }
 
+    // A hazard band stretching the work (issue #1027). Shown only when the rate
+    // is below normal, because a bar labelled "100%" on every ordinary
+    // operation is noise — and a bar crawling with NOTHING beside it reads as a
+    // bug rather than as the storm, which is the whole reason the rate is on
+    // the wire at all.
+    const rate = active && Number.isFinite(active.rate_percent)
+      ? active.rate_percent
+      : 100;
+    const slowed = !!active && !SETTLED.has(active.state || '') && rate < 100;
+    slowedEl.hidden = !slowed;
+    if (slowed) {
+      slowedEl.textContent = t('component.operations.slowed').replace('{rate}', String(rate));
+    }
+
     // A refusal (no operation was ever opened) and a stall reason (one was, and
     // it is not advancing) are different things; the crew act on them
     // differently, so only one is ever shown and the live one wins.
@@ -176,6 +236,31 @@ export class PhOperationPanel extends HTMLElement {
       button.textContent = action.action === 'abort_operation'
         ? t('component.operations.abort')
         : t('component.operations.start');
+    }
+
+    // The verb picker. Offered only when there is a choice to make and only
+    // when the button would start something — a running operation has one verb
+    // and it is already decided. Rebuilt from the wire's own capability list,
+    // so a hull that gains a verb gains an option here with no change to this
+    // file.
+    const choosing = capabilities.length > 1 && action
+      && action.action === 'start_operation';
+    picker.hidden = !choosing;
+    if (choosing) {
+      const selected = action.verb;
+      const rendered = capabilities.map((c) => c && c.verb).join(' ');
+      if (picker.dataset.rendered !== rendered) {
+        picker.textContent = '';
+        for (const capability of capabilities) {
+          if (!capability || !capability.verb) continue;
+          const option = document.createElement('option');
+          option.value = capability.verb;
+          option.textContent = capability.label ? t(capability.label) : capability.verb;
+          picker.appendChild(option);
+        }
+        picker.dataset.rendered = rendered;
+      }
+      picker.value = selected;
     }
   }
 }

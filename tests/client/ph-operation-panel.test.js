@@ -212,4 +212,153 @@ describe('PhOperationPanel', () => {
       expect(t(id), `state ${code} renders a raw id`).not.toContain('⟨');
     }
   });
+
+  // ── Issue #1027: five verbs, and a storm that stretches the work ──
+
+  const ALL_VERBS = [
+    { verb: 'stabilise',    label: 'operation.verb.stabilise' },
+    { verb: 'tow',          label: 'operation.verb.tow' },
+    { verb: 'escort',       label: 'operation.verb.escort' },
+    { verb: 'transfer',     label: 'operation.verb.transfer' },
+    { verb: 'field_repair', label: 'operation.verb.field_repair' },
+  ];
+
+  function picker(el) {
+    return el.shadowRoot.getElementById('verb');
+  }
+
+  it('renders every verb the hull offers without knowing what any of them are', () => {
+    // The panel walks the wire's own capability list. A sixth verb authored
+    // tomorrow appears here with no change to the component.
+    const el = setup();
+    el.state = panelState({
+      operations: { capabilities: ALL_VERBS, active: null, refusal: null },
+    });
+    const options = [...picker(el).options];
+    expect(options.map((o) => o.value)).toEqual(ALL_VERBS.map((c) => c.verb));
+    expect(options.map((o) => o.textContent)).toEqual(ALL_VERBS.map((c) => t(c.label)));
+    for (const option of options) {
+      expect(option.textContent, `${option.value} rendered a raw id`).not.toContain('⟨');
+    }
+  });
+
+  it('offers no picker when the hull has only one verb to offer', () => {
+    // The single-capability console is exactly what it was in #1026.
+    const el = setup();
+    el.state = panelState({
+      operations: { capabilities: [CAPABILITY], active: null, refusal: null },
+    });
+    expect(picker(el).hidden).toBe(true);
+    expect(el.action).toEqual({
+      action: 'start_operation',
+      verb: 'stabilise',
+      target_uuid: '00000000-0000-8000-8000-000000000042',
+    });
+  });
+
+  it('sends the verb the crew chose, not whichever the hull listed first', () => {
+    const el = setup();
+    el.state = panelState({
+      operations: { capabilities: ALL_VERBS, active: null, refusal: null },
+    });
+    expect(el.action.verb).toBe('stabilise');
+
+    const select = picker(el);
+    select.value = 'field_repair';
+    select.dispatchEvent(new Event('change'));
+    expect(el.action).toEqual({
+      action: 'start_operation',
+      verb: 'field_repair',
+      target_uuid: '00000000-0000-8000-8000-000000000042',
+    });
+
+    const sent = [];
+    el.sendAction = (name, payload) => sent.push([name, payload]);
+    el.shadowRoot.getElementById('action').click();
+    expect(sent).toEqual([
+      ['start_operation', { verb: 'field_repair', target_uuid: '00000000-0000-8000-8000-000000000042' }],
+    ]);
+  });
+
+  it('falls back rather than sending a verb the hull no longer offers', () => {
+    const el = setup();
+    el.state = panelState({
+      operations: { capabilities: ALL_VERBS, active: null, refusal: null },
+    });
+    const select = picker(el);
+    select.value = 'tow';
+    select.dispatchEvent(new Event('change'));
+    expect(el.action.verb).toBe('tow');
+
+    // A save resumed onto a different ship, or a capability withdrawn.
+    el.state = panelState({
+      operations: { capabilities: [CAPABILITY], active: null, refusal: null },
+    });
+    expect(el.action.verb, 'a stale selection must not be sent for the server to refuse by name')
+      .toBe('stabilise');
+  });
+
+  it('hides the picker while an operation is running', () => {
+    // A running operation has one verb and it is already decided; the button
+    // stands it down rather than starting anything.
+    const el = setup();
+    el.state = panelState({
+      operations: { capabilities: ALL_VERBS, active: HOLDING, refusal: null },
+    });
+    expect(picker(el).hidden).toBe(true);
+    expect(el.action).toEqual({ action: 'abort_operation' });
+  });
+
+  it('says so when a hazard band is stretching the operation', () => {
+    const el = setup();
+    el.state = panelState({
+      operations: {
+        capabilities: [CAPABILITY],
+        active: { ...HOLDING, rate_percent: 25 },
+        refusal: null,
+      },
+    });
+    const slowed = el.shadowRoot.getElementById('slowed');
+    expect(slowed.hidden).toBe(false);
+    expect(slowed.textContent).toBe(t('component.operations.slowed').replace('{rate}', '25'));
+    expect(slowed.textContent, 'the rate reaches the crew as a number, not as a placeholder')
+      .toContain('25');
+  });
+
+  it('says nothing about the rate when the operation is running normally', () => {
+    // A bar labelled "100%" on every ordinary operation is noise. A bar that
+    // CRAWLS with nothing beside it reads as a bug, which is why the label
+    // exists at all.
+    const el = setup();
+    for (const active of [HOLDING, { ...HOLDING, rate_percent: 100 }]) {
+      el.state = panelState({
+        operations: { capabilities: [CAPABILITY], active, refusal: null },
+      });
+      expect(el.shadowRoot.getElementById('slowed').hidden).toBe(true);
+    }
+  });
+
+  it('drops the rate label once the operation has settled', () => {
+    const el = setup();
+    el.state = panelState({
+      operations: {
+        capabilities: [CAPABILITY],
+        active: { ...HOLDING, rate_percent: 25, state: 'completed', progress: 1 },
+        refusal: null,
+      },
+    });
+    expect(
+      el.shadowRoot.getElementById('slowed').hidden,
+      'a finished operation is not being slowed by anything',
+    ).toBe(true);
+  });
+
+  it('has a string-table row behind every verb the server can offer', () => {
+    for (const capability of ALL_VERBS) {
+      expect(t(capability.label), `${capability.verb} renders a raw id`).not.toContain('⟨');
+    }
+    for (const id of ['component.operations.verb_picker', 'component.operations.slowed']) {
+      expect(t(id), `${id} renders a raw id`).not.toContain('⟨');
+    }
+  });
 });

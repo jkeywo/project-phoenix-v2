@@ -478,13 +478,18 @@ pub fn register_effects(engine: &mut Engine) {
 /// call's whole effect buffer under the failure policy (settled decision 10),
 /// so a malformed `add_objective` / `spawn_entity` map or a bad `game_over`
 /// outcome drops the call rather than emitting a half-built effect.
-fn raise(message: String) -> Box<EvalAltResult> {
+///
+/// `pub(super)` because the sibling `commitments` vocabulary (issue #1029)
+/// raises on the same terms — a malformed record map, a duplicate id — and must
+/// produce the same kind of error: two spellings of "raise" would be two failure
+/// policies.
+pub(super) fn raise(message: String) -> Box<EvalAltResult> {
     Box::new(EvalAltResult::ErrorRuntime(message.into(), Position::NONE))
 }
 
 /// Read an optional string field out of a script map (mirrors the comms map
 /// readers). `None` when the key is absent or not a string.
-fn map_str(spec: &Map, key: &str) -> Option<String> {
+pub(super) fn map_str(spec: &Map, key: &str) -> Option<String> {
     spec.get(key).and_then(|d| d.clone().into_string().ok())
 }
 

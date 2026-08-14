@@ -538,6 +538,7 @@ pub(crate) fn handle_respond_to_message(
                     &on_pick_fn,
                     &runtime.flags,
                     &runtime.deadlines,
+                    &runtime.commitments,
                 )),
                 None => {
                     bevy::log::warn!(
@@ -621,6 +622,12 @@ pub(crate) fn handle_respond_to_message(
             &mut sr.pending_callbacks,
             script_clock.tick,
             script_clock.tick_hz,
+        );
+        // And a beat that gave the captain's word, or settled it (issue #1029).
+        crate::world::server::apply_commitment_changes(
+            &effects.commitment_changes,
+            &mut runtime.commitments,
+            script_clock.tick,
         );
 
         // The malformed-return refusal, taken here so the effects the call

@@ -284,6 +284,7 @@ pub fn enter_node(
     fn_name: &str,
     base_flags: &FlagStore,
     base_deadlines: &crate::world::deadlines::DeadlineTable,
+    base_commitments: &crate::world::commitments::CommitmentLedger,
 ) -> Result<(CallEffects, Option<ScriptDialogueNode>), EnterError> {
     // Resolve the name against the unit BEFORE calling. `call_fn` reports a
     // missing function as an ordinary `CallError`, which the host's failure
@@ -302,6 +303,7 @@ pub fn enter_node(
         fn_name,
         base_flags,
         base_deadlines,
+        base_commitments,
         Map::new(),
     ) else {
         return Err(EnterError::Refused);
@@ -345,6 +347,7 @@ mod tests {
             fn_name,
             flags,
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
         )
     }
 
@@ -510,6 +513,7 @@ mod tests {
             "root",
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
         )
         .unwrap_err();
         assert!(matches!(err, EnterError::Refused), "{err:?}");

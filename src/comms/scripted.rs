@@ -260,6 +260,7 @@ pub(crate) fn open_scripted_comms_threads(
                     &req.root_fn,
                     &runtime.flags,
                     &runtime.deadlines,
+                    &runtime.commitments,
                 )),
                 None => {
                     bevy::log::warn!(
@@ -352,6 +353,12 @@ pub(crate) fn open_scripted_comms_threads(
             &mut sr.pending_callbacks,
             script_clock.tick,
             script_clock.tick_hz,
+        );
+        // And a beat that gave the captain's word, or settled it (issue #1029).
+        crate::world::server::apply_commitment_changes(
+            &effects.commitment_changes,
+            &mut runtime.commitments,
+            script_clock.tick,
         );
 
         // A malformed return was already logged above; its effects have now been
@@ -1230,6 +1237,7 @@ fn on_send(ctx) {
             "on_raider_attacked",
             &crate::world::flags::FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
         )
         .expect("the handler runs");
         assert!(node.is_none(), "a trigger handler returns no dialogue node");
@@ -1636,6 +1644,7 @@ fn on_send(ctx) {
                 handler,
                 &flags,
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
             )
             .unwrap_or_else(|e| panic!("{handler} must run: {e}"));
             assert!(node.is_none(), "{handler} is a trigger handler, not a node");
@@ -1660,6 +1669,7 @@ fn on_send(ctx) {
                 node_fn,
                 &flags,
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
             )
             .unwrap_or_else(|e| panic!("{node_fn} must run: {e}"));
             let node = node.unwrap_or_else(|| panic!("{node_fn} must return a dialogue node"));
@@ -1701,6 +1711,7 @@ fn on_send(ctx) {
                 handler,
                 &flags,
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
             )
             .expect("the handler runs");
             queued.extend(effects.comms_opens);

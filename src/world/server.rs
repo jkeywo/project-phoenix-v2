@@ -99,6 +99,22 @@ pub struct WorldContentRuntime {
     /// (`tests/authoritative_state_enumeration.rs`) sees no new registration —
     /// the same shape `WorldScriptRuntime::pending_callbacks` has.
     pub deadlines: crate::world::deadlines::DeadlineTable,
+    /// The promises this run has made (issue #1029): every
+    /// `ctx.commitments.record(…)` a dialogue beat wrote, and whether each ended
+    /// up kept or broken.
+    ///
+    /// A pure record with no queue and no evaluator — read
+    /// [`crate::world::commitments`] before adding anything to it. Nothing arms
+    /// it, nothing scans it, and no system this slice adds runs per tick: a
+    /// promise is written when a script says so and settled when a script says
+    /// so, and the campaign flag a resolution writes travels as an ordinary
+    /// `MutateFlag` on the effect buffer that already existed.
+    ///
+    /// It sits on this resource beside `deadlines`, and for the same reason:
+    /// every site that already borrows the content runtime to apply a call's
+    /// effects can apply its commitment mutations too, and the state census
+    /// (`tests/authoritative_state_enumeration.rs`) sees no new registration.
+    pub commitments: crate::world::commitments::CommitmentLedger,
     /// Infrastructure condition adjustments queued this tick by a scripted
     /// `repair_infrastructure` / `damage_infrastructure` effect (issue #1025),
     /// already resolved to the target's UUID.
@@ -1527,6 +1543,43 @@ pub(crate) fn apply_deadline_changes(
     }
 }
 
+/// Replay a script call's buffered `ctx.commitments.record(…)` / `.keep(…)` /
+/// `.break_promise(…)` against the live ledger (issue #1029).
+///
+/// The twin of [`apply_deadline_changes`], and deliberately smaller: a
+/// commitment mutation edits no queue, so there is nothing to retract and
+/// nothing to push. The campaign flag a resolution writes is **not** applied
+/// here — it was emitted into the call's ordered effect buffer at the point the
+/// script authored it, and `apply_script_commands` has already written it by the
+/// time this runs. That ordering is deliberate rather than incidental: the
+/// `FlagSet` it produces is queued as a `WorldEvent` and evaluated by the
+/// trigger pipeline on a LATER tick, so an `on_flag_set` handler reading
+/// `ctx.commitments.state(…)` sees the settled promise.
+///
+/// A duplicate id is logged rather than propagated. The script surface already
+/// raised on it — dropping that call's whole buffer under settled decision 10,
+/// which is where the author is told — so reaching here means the live ledger
+/// disagreed with the per-call snapshot the raise was decided against, which
+/// only two calls resolving the same new id in one tick can produce. Refusing
+/// the second is the same answer the snapshot would have given.
+///
+/// Free function rather than a system, for [`apply_deadline_changes`]' reason:
+/// it is called from all four sites that consume a call's [`CallEffects`].
+pub(crate) fn apply_commitment_changes(
+    changes: &[crate::world::commitments::CommitmentChange],
+    commitments: &mut crate::world::commitments::CommitmentLedger,
+    now_tick: u64,
+) {
+    for change in changes {
+        if let Err(duplicate) = commitments.apply(change, now_tick) {
+            bevy::log::warn!(
+                target: crate::logging::LogCat::World.target(),
+                "{duplicate}"
+            );
+        }
+    }
+}
+
 // -- AI-event trigger system -------------------------------------------------
 
 /// Collect this tick's externally-sourced `WorldEvent`s into `WorldEventBuffer`.
@@ -1871,6 +1924,7 @@ pub(crate) fn tick_trigger_pipeline(
                                 &h.fn_name,
                                 &runtime.flags,
                                 &runtime.deadlines,
+                                &runtime.commitments,
                                 Map::new(),
                             )),
                             None => {
@@ -1941,6 +1995,11 @@ pub(crate) fn tick_trigger_pipeline(
                             &mut sr.pending_callbacks,
                             script_clock.tick,
                             script_clock.tick_hz,
+                        );
+                        apply_commitment_changes(
+                            &effects.commitment_changes,
+                            &mut runtime.commitments,
+                            script_clock.tick,
                         );
                     }
                 }
@@ -2942,6 +3001,7 @@ pub(crate) fn tick_script_callbacks(
                     &call.fn_name,
                     &runtime.flags,
                     &runtime.deadlines,
+                    &runtime.commitments,
                     Map::new(),
                 )),
                 None => {
@@ -3011,6 +3071,11 @@ pub(crate) fn tick_script_callbacks(
             &mut sr.pending_callbacks,
             script_clock.tick,
             script_clock.tick_hz,
+        );
+        apply_commitment_changes(
+            &effects.commitment_changes,
+            &mut runtime.commitments,
+            script_clock.tick,
         );
     }
 }
@@ -3837,6 +3902,7 @@ pub(crate) mod tests {
             "on_x",
             &crate::world::flags::FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
             Map::new(),
         );
         assert_eq!(effects.delayed.len(), 1, "one delayed effect was scheduled");

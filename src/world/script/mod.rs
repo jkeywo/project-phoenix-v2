@@ -91,6 +91,9 @@
 //! and the game continues. See [`engine::RuntimeHost::call`].
 
 pub mod authoring;
+/// The `commitments` read/write vocabulary (issue #1029): record a promise,
+/// settle it kept or broken, and read its state back to gate a dialogue option.
+pub mod commitments;
 pub mod comms;
 /// The `deadlines` script vocabulary (issue #1024): `on_deadline` on the
 /// loading engine, `ctx.deadlines.remaining/state/slip/cancel` on the runtime one.

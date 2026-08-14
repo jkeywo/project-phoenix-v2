@@ -108,6 +108,7 @@ impl ScriptedWorld {
             fn_name,
             flags,
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
             Map::new(),
         )
     }

@@ -572,6 +572,7 @@ mod tests {
                 "probe",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             );
             if let Err(err) = res {

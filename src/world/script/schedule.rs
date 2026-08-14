@@ -82,6 +82,16 @@ pub struct CallEffects {
     /// the adapter replays them in the same tick, at the same point as the call's
     /// other effects.
     pub deadline_changes: Vec<crate::world::deadlines::DeadlineChange>,
+    /// Commitment mutations from `ctx.commitments.record(…)` / `.keep(…)` /
+    /// `.break_promise(…)`, in authored order (issue #1029). A SIXTH field for
+    /// `deadline_changes`' reason: the generic action applier holds no handle on
+    /// the ledger, and a promise is not an `ActionCmd`.
+    ///
+    /// The campaign flag a resolution writes is deliberately NOT here — that
+    /// half is an ordinary `MutateFlag` in `commands`, so an `on_flag_set`
+    /// trigger authored against `commitment.<id>.kept` chains through machinery
+    /// that already exists.
+    pub commitment_changes: Vec<crate::world::commitments::CommitmentChange>,
 }
 
 /// The clock a deferred-work drain stamps absolute fire times against.

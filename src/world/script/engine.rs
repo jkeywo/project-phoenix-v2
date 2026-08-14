@@ -24,8 +24,10 @@ use std::sync::{Arc, Mutex};
 
 use rhai::{Engine, Map, AST};
 
+use crate::world::commitments::CommitmentLedger;
 use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
+use crate::world::script::commitments::{register_commitments, Commitments};
 use crate::world::script::deadlines::{register_deadlines, Deadlines};
 use crate::world::script::effects::{
     register_effects, register_real_lit, BufferedEffect, EffectSink,
@@ -177,6 +179,8 @@ pub fn runtime_engine() -> Engine {
     register_scheduling(&mut engine);
     // The `deadlines` read/write vocabulary (issue #1024).
     register_deadlines(&mut engine);
+    // The `commitments` read/write vocabulary (issue #1029).
+    register_commitments(&mut engine);
     engine
 }
 
@@ -254,13 +258,23 @@ impl RuntimeHost {
         fn_name: &str,
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
         extra: Map,
     ) -> CallEffects {
         if !budget.admit_call() {
             // Dropped: the call cap is reached or the tick has already tripped.
             return CallEffects::default();
         }
-        match self.try_call(clock, ast, path, fn_name, base_flags, base_deadlines, extra) {
+        match self.try_call(
+            clock,
+            ast,
+            path,
+            fn_name,
+            base_flags,
+            base_deadlines,
+            base_commitments,
+            extra,
+        ) {
             Ok((effects, ops)) => {
                 budget.charge_ops(ops);
                 effects
@@ -304,10 +318,20 @@ impl RuntimeHost {
         fn_name: &str,
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
         extra: Map,
     ) -> Result<(CallEffects, u64), vellum_script::CallError> {
-        self.try_call_returning(clock, ast, path, fn_name, base_flags, base_deadlines, extra)
-            .map(|(effects, _value, ops)| (effects, ops))
+        self.try_call_returning(
+            clock,
+            ast,
+            path,
+            fn_name,
+            base_flags,
+            base_deadlines,
+            base_commitments,
+            extra,
+        )
+        .map(|(effects, _value, ops)| (effects, ops))
     }
 
     /// Run a scripted comms dialogue fn (issue #982, M4) under the tick's shared
@@ -355,14 +379,23 @@ impl RuntimeHost {
         fn_name: &str,
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
         extra: Map,
     ) -> Option<(CallEffects, rhai::Dynamic)> {
         if !budget.admit_call() {
             // Dropped: the call cap is reached or the tick has already tripped.
             return None;
         }
-        match self.try_call_returning(clock, ast, path, fn_name, base_flags, base_deadlines, extra)
-        {
+        match self.try_call_returning(
+            clock,
+            ast,
+            path,
+            fn_name,
+            base_flags,
+            base_deadlines,
+            base_commitments,
+            extra,
+        ) {
             Ok((effects, value, ops)) => {
                 budget.charge_ops(ops);
                 Some((effects, value))
@@ -404,6 +437,7 @@ impl RuntimeHost {
         fn_name: &str,
         base_flags: &FlagStore,
         base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
         extra: Map,
     ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
         let sink = EffectSink::new();
@@ -415,12 +449,20 @@ impl RuntimeHost {
         // `ctx.deadlines.remaining(…)` and `ctx.schedule.after(n, …)` agree about
         // what "now" is (issue #1024).
         let deadlines = Deadlines::new(base_deadlines, clock.tick, clock.tick_hz);
+        // Shares the SAME sink as `flags` (issue #1029): a resolution's campaign
+        // flag is an ordinary `MutateFlag`, emitted where the author put it
+        // rather than appended after the call's other work.
+        let commitments = Commitments::new(base_commitments, sink.clone(), clock.tick);
 
         let mut ctx = extra;
         ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
         ctx.insert("flags".into(), rhai::Dynamic::from(flags));
         ctx.insert("schedule".into(), rhai::Dynamic::from(schedule.clone()));
         ctx.insert("deadlines".into(), rhai::Dynamic::from(deadlines.clone()));
+        ctx.insert(
+            "commitments".into(),
+            rhai::Dynamic::from(commitments.clone()),
+        );
 
         // Reset the op counter, then call. On error we return before draining
         // anything, so the effect buffer and the schedule buffer are dropped
@@ -444,6 +486,9 @@ impl RuntimeHost {
                 // Dropped whole on the error path above with the other buffers,
                 // so a raising handler slips nothing (settled decision 10).
                 deadline_changes: deadlines.take_changes(),
+                // Dropped whole on the error path with the other buffers, so a
+                // raising handler neither settles a promise nor makes one.
+                commitment_changes: commitments.take_changes(),
             },
             value,
             ops,
@@ -477,6 +522,10 @@ impl RuntimeHost {
                 // a call's immediate commands only, and a deadline mutation is
                 // never one of them (it drains to `deadline_changes`).
                 &DeadlineTable::default(),
+                // Inert for the same reason: this entry point wants a call's
+                // immediate commands only, and a commitment mutation is never
+                // one of them (it drains to `commitment_changes`).
+                &CommitmentLedger::default(),
                 extra,
             )
             .commands,
@@ -575,6 +624,7 @@ mod tests {
                 "node",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             )
             .expect("the dialogue call must not error");
@@ -620,6 +670,7 @@ mod tests {
                 "on_pick",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             )
             .expect("the dialogue call must not error");
@@ -656,6 +707,7 @@ mod tests {
                 "node",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             )
             .expect("an admitted call runs");
@@ -678,6 +730,7 @@ mod tests {
                 "node",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             )
             .is_none(),
@@ -711,6 +764,7 @@ mod tests {
             "on_x",
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
             Map::new(),
         );
         // The immediate effect applies now; the delayed one is deferred. The
@@ -758,6 +812,7 @@ mod tests {
             "on_x",
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
             Map::new(),
         );
         assert_eq!(effects.callbacks.len(), 1);
@@ -801,6 +856,7 @@ mod tests {
                 "on_x",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             )
             .callbacks
@@ -833,6 +889,7 @@ mod tests {
                 "on_x",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             );
             // Reduce to comparable, `PartialEq` parts (DelayedAction is not Eq).
@@ -868,6 +925,7 @@ mod tests {
             "on_x",
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
             Map::new(),
         );
         assert!(
@@ -897,6 +955,7 @@ mod tests {
             "on_x",
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
             Map::new(),
         );
         let after_one = budget.ops_used();
@@ -909,6 +968,7 @@ mod tests {
             "on_x",
             &FlagStore::new(),
             &crate::world::deadlines::DeadlineTable::default(),
+            &crate::world::commitments::CommitmentLedger::default(),
             Map::new(),
         );
         assert!(
@@ -933,6 +993,7 @@ mod tests {
                 "boom",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new(),
             )
             .expect_err("a runaway must be refused");
@@ -962,6 +1023,7 @@ mod tests {
                 "boom",
                 &FlagStore::new(),
                 &crate::world::deadlines::DeadlineTable::default(),
+                &crate::world::commitments::CommitmentLedger::default(),
                 Map::new()
             )
             .is_err());

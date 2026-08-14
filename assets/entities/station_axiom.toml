@@ -21,6 +21,21 @@ tags = [ "station", "comms_contact", "allied" ]
 # independent, not alternatives.
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
+# High-fidelity bubble. LOD promotion (`lod_ai_ships`) only runs the weapons /
+# target-selection AI (`ai_target_selection`, `ai_phaser_auto_fire`) for hulls
+# inside a bubble; a `LodBubble` carrier anchors its own zone and is itself always
+# full-fidelity. Without this the station spends most of a fight demoted to
+# low-LOD (the player roams to hunt, taking the only other bubble with them),
+# where its phaser never runs and it is a sitting duck the raid grinds down for
+# zero return — it dealt ZERO damage and died in the combat_test pacing run. The
+# 250-unit radius also keeps the raiders SIEGING the station promoted while the
+# player is elsewhere, so the defence — theirs and the station's — actually
+# happens instead of being dead-reckoned. Smaller than a player hull's bubble on
+# purpose: it covers the station's own airspace, not the whole map — the player's
+# own 600-unit bubble already promotes the running fight it is flying through.
+[lod_bubble]
+radius = 250.0
+
 # Autonomous point defence. The station is an AI-operated static combatant: it
 # carries only the Tactical systems needed to acquire and fire, never Helm or
 # player stations. Its omni phaser covers the immediate defence perimeter,
@@ -68,7 +83,7 @@ facing_deg = 0
 fire_arc_deg = 360
 auto_arc_deg = 360
 beam_range = 60
-beam_damage_per_sec = 5
+beam_damage_per_sec = 15
 beam_duration_secs = 4
 cooldown_secs = 4
 
@@ -86,7 +101,7 @@ threat_level = "none"
 description = "entity.station_axiom.target.description"
 
 [hull]
-hull_integrity = 800
+hull_integrity = 1600
 
 [collider]
 shape = "Ball"

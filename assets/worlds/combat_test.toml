@@ -202,6 +202,16 @@
 seed = 475
 title = "world.combat_test.global.title"
 description = "world.combat_test.global.description"
+# How long a landed hit keeps a Harrow's `not_attacked` zero-gate closed, i.e.
+# how long a raider that the player has shot fights the PLAYER (self-defence via
+# the base `destroy_hostiles` arm) before its `assault-starbase` Destroy re-arms
+# and it turns back on the station. At the 8 s default a tagged raider slips back
+# to the station almost immediately, so the player cannot peel the raid off the
+# station faster than it re-commits and the whole fleet grinds the station down.
+# A longer reprieve is what "attacked enemies attack the player, not the station,
+# unless left alone long enough" means: the player draws hulls onto itself and
+# gets time to kill them, and only a raider genuinely left alone resumes the run.
+attacked_memory_secs = 18.0
 
 [ambient_light]
 color      = [0.6, 0.55, 0.5]

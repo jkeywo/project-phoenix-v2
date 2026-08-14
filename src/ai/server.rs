@@ -247,6 +247,38 @@ pub struct LodTransitionTimer {
     pub last_state_change_secs: f64,
 }
 
+/// A high-fidelity **bubble**: this entity projects a zone of `radius` world
+/// units inside which every NPC is kept promoted to `AiHighFidelity`, and the
+/// carrier itself is always high-fidelity.
+///
+/// LOD used to be a single implicit bubble around the player's `LocalShip`
+/// ([`lod_ai_ships`]) sized by each NPC's own `sensor_range`: a ship ran the
+/// full weapons / target-selection AI only while it was near the player, so any
+/// combat the player was not standing next to happened in the cheap low-LOD path
+/// where movement is dead-reckoned. That is wrong for a defended object —
+/// Starbase Alpha in `combat_test` sat in low-LOD being ground down while the
+/// player hunted elsewhere, its own point defence never running and the raiders
+/// sieging it dead-reckoned rather than fighting. A bubble makes "is this near
+/// enough to the action to simulate in full" a property of *anchors*: a player
+/// ship always projects one (the `LocalShip` is an implicit anchor at
+/// [`DEFAULT_PLAYER_LOD_BUBBLE_RADIUS`] unless it authors its own), and a
+/// stationary defended object like the station projects a smaller one, so the
+/// raid sieging it — and the station's own guns — run in full whether or not the
+/// player is looking. Authored as `[lod_bubble] radius = N`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct LodBubble {
+    pub radius: f32,
+}
+
+/// The bubble radius a player `LocalShip` projects when it authors no
+/// `[lod_bubble]` of its own — every player hull is an anchor without having to
+/// repeat the block. Generous enough to cover a normal engagement so an NPC
+/// closing on the player is in full fidelity before it opens fire; deliberately
+/// WIDER than the old per-NPC `sensor_range` promotion, which is what re-timed
+/// far-from-player combats (`probe_despawn`'s duel gains its natural second kill
+/// once both hulls run in full).
+pub const DEFAULT_PLAYER_LOD_BUBBLE_RADIUS: f32 = 600.0;
+
 /// Per-objective route cursors: where this ship is on each objective's route.
 ///
 /// Each entry is a [`PatrolCursor`] tracking the current waypoint for one
@@ -681,14 +713,27 @@ fn entity_direct_fire_banks(
 pub(crate) fn aggregate_doctrine_blackboards(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    mut query: Query<(
-        &BehaviourSection,
-        &crate::entity_spawner::EntitySystemHull,
-        &mut crate::server_app::ShipSystemBlackboards,
-        Option<&crate::ship_state::ShipRedAlert>,
-        Option<&crate::ship::combat_activity::RecentCombatActivity>,
-        Option<&crate::weapons_plugin::LastShipAttacker>,
-    )>,
+    mut query: Query<
+        (
+            // Optional so a static point-defence platform (the station), which
+            // authors no `[behaviour]`, still gets a Viewscreen blackboard. Its
+            // phaser AI (`ai_phaser_auto_fire`) aims at the `combat_lock` this
+            // publishes, so without an entry here the station's Tactical lock was
+            // consumed by nothing and it never fired. The `Or<>` filter keeps
+            // scenery (stars, asteroids) out — only doctrine ships and turrets
+            // qualify.
+            Option<&BehaviourSection>,
+            &crate::entity_spawner::EntitySystemHull,
+            &mut crate::server_app::ShipSystemBlackboards,
+            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::combat_activity::RecentCombatActivity>,
+            Option<&crate::weapons_plugin::LastShipAttacker>,
+        ),
+        Or<(
+            With<BehaviourSection>,
+            With<crate::entity_spawner::StaticPointDefence>,
+        )>,
+    >,
 ) {
     // Sim seconds off the fixed clock — Bevy context-switches `Res<Time>` to
     // `Time<Fixed>` inside `FixedUpdate`, so this is the tick's own elapsed
@@ -801,7 +846,11 @@ pub(crate) fn aggregate_doctrine_blackboards(
         //
         // `hull_fraction` below is what `hull_below` gates on, so the trigger
         // is unchanged — only now it is tunable per hull without a recompile.
-        let scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
+        // A point-defence turret has no doctrine pool; it scores nothing and
+        // relies entirely on the `combat_lock` lift below.
+        let scored = behaviour
+            .map(|b| crate::ai::score_doctrine_pool(&b.0.doctrine, &conditions))
+            .unwrap_or_default();
         // Lift Combat Lock + Science Target from this ship's own radar
         // blackboards (issue #829). They were published this tick in
         // `SimSet::Publish`, which runs before this `PublishAggregate` system.
@@ -981,19 +1030,33 @@ const LOD_HYSTERESIS: f32 = 0.2;
 /// Minimum time (seconds) that must elapse before a demotion is allowed.
 const LOD_DWELL_SECS: f64 = 2.0;
 
-/// Evaluate LOD for every NPC ship vs the player ship's position.
-/// Inserts `AiHighFidelity` when an NPC enters sensor range (promotion),
-/// removes it when the NPC leaves range after the hysteresis + dwell window
-/// has elapsed (demotion). `LocalShip` is never evaluated and is guaranteed
-/// to keep its `AiHighFidelity` marker.
+/// Evaluate LOD for every NPC ship against the high-fidelity **bubbles** in the
+/// world (see [`LodBubble`]).
+///
+/// An NPC is promoted to `AiHighFidelity` while it is inside any bubble and
+/// demoted once it has left every bubble by the hysteresis margin for the dwell
+/// window. The anchors are the player `LocalShip` (an implicit bubble at
+/// [`DEFAULT_PLAYER_LOD_BUBBLE_RADIUS`], or its authored `[lod_bubble]` radius)
+/// plus every entity carrying a [`LodBubble`] — the station's smaller one. An
+/// NPC that is itself a bubble carrier (the station) is held high-fidelity
+/// unconditionally: it anchors a zone, so it is never demoted out of one.
+/// `LocalShip` is never evaluated and keeps its `AiHighFidelity` marker.
+///
+/// Promotion keys on the ANCHOR's radius, not the NPC's own `sensor_range` as it
+/// used to: "is this near enough to the action to run in full" is a fact about
+/// how close a bubble is, not about how far the NPC can see. The most-inside
+/// anchor (the one maximising `radius - distance`) decides, so an NPC counts as
+/// inside if ANY bubble contains it, and the hysteresis is measured against that
+/// same bubble.
 fn lod_ai_ships(
     time: Res<Time>,
-    player: Query<&Transform, (With<LocalShip>, With<Ship>)>,
+    player: Query<(&Transform, Option<&LodBubble>), (With<LocalShip>, With<Ship>)>,
+    anchor_bubbles: Query<(&Transform, &LodBubble), Without<LocalShip>>,
     npcs: Query<
         (
             Entity,
             &Transform,
-            &AiProfile,
+            Has<LodBubble>,
             Has<AiHighFidelity>,
             Option<&LodTransitionTimer>,
         ),
@@ -1001,34 +1064,70 @@ fn lod_ai_ships(
     >,
     mut commands: Commands,
 ) {
-    let Ok(player_transform) = player.single() else {
+    let Ok((player_transform, player_bubble)) = player.single() else {
         return;
     };
     let now_secs = time.elapsed_secs() as f64;
-    let px = player_transform.translation.x;
-    let pz = player_transform.translation.z;
 
-    for (entity, transform, profile, is_high, timer) in &npcs {
-        let dx = transform.translation.x - px;
-        let dz = transform.translation.z - pz;
-        let distance = (dx * dx + dz * dz).sqrt();
+    // Anchors: the player (implicit or authored radius) plus every non-player
+    // bubble carrier (the station). `(x, z, radius)`.
+    let player_radius = player_bubble
+        .map(|b| b.radius)
+        .unwrap_or(DEFAULT_PLAYER_LOD_BUBBLE_RADIUS);
+    let mut anchors: Vec<(f32, f32, f32)> = vec![(
+        player_transform.translation.x,
+        player_transform.translation.z,
+        player_radius,
+    )];
+    for (transform, bubble) in &anchor_bubbles {
+        anchors.push((
+            transform.translation.x,
+            transform.translation.z,
+            bubble.radius,
+        ));
+    }
 
+    for (entity, transform, has_bubble, is_high, timer) in &npcs {
         let current_state = if is_high {
             LodState::High
         } else {
             LodState::Low
         };
-        let last_change = timer.map(|t| t.last_state_change_secs).unwrap_or(0.0);
 
-        let new_state = evaluate_lod(
-            current_state,
-            distance,
-            profile.sensor_range,
-            now_secs,
-            last_change,
-            LOD_DWELL_SECS,
-            LOD_HYSTERESIS,
-        );
+        // A bubble carrier (the station) anchors its own zone — hold it high
+        // unconditionally so a defended object's own guns always run.
+        let new_state = if has_bubble {
+            LodState::High
+        } else {
+            // The most-inside anchor: the bubble with the largest signed
+            // penetration (`radius - distance`). Feeding that pair to
+            // `evaluate_lod` makes "inside if ANY bubble contains it" fall out
+            // of the same distance-vs-threshold comparison the single-bubble
+            // form used, with the hysteresis judged against that same bubble.
+            let (distance, radius) = anchors
+                .iter()
+                .map(|&(ax, az, r)| {
+                    let dx = transform.translation.x - ax;
+                    let dz = transform.translation.z - az;
+                    ((dx * dx + dz * dz).sqrt(), r)
+                })
+                .max_by(|(d1, r1), (d2, r2)| {
+                    (r1 - d1)
+                        .partial_cmp(&(r2 - d2))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .expect("anchors always contains at least the player");
+            let last_change = timer.map(|t| t.last_state_change_secs).unwrap_or(0.0);
+            evaluate_lod(
+                current_state,
+                distance,
+                radius,
+                now_secs,
+                last_change,
+                LOD_DWELL_SECS,
+                LOD_HYSTERESIS,
+            )
+        };
 
         if new_state != current_state {
             let timer_comp = LodTransitionTimer {
@@ -3082,6 +3181,7 @@ verb = "fire_blaster"
             target: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let mut commands = app.world_mut().commands();
@@ -3188,6 +3288,61 @@ verb = "fire_blaster"
                 .iter()
                 .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm)),
             "at least one scored objective must carry SystemAffinity::Helm"
+        );
+    }
+
+    /// A `StaticPointDefence` platform (the station) carries NO `[behaviour]`, so
+    /// it used to fall outside `aggregate_doctrine_blackboards`' query and never
+    /// got a Viewscreen blackboard — and `ai_phaser_auto_fire` aims at the
+    /// Viewscreen `combat_lock`, so the station's Tactical lock was consumed by
+    /// nothing and it never fired. It must now get a Viewscreen entry whose
+    /// `combat_lock` mirrors its tactical radar's `selected_target`.
+    #[test]
+    fn aggregate_publishes_combat_lock_for_a_behaviourless_point_defence() {
+        use crate::damage::SystemHull;
+        use crate::entity_spawner::{EntitySystemHull, StaticPointDefence};
+        use crate::messages::{SystemBlackboard, SystemId, TacticalRadarBlackboard};
+        use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::system_registry::{tactical_radar_system_id, VIEWSCREEN_SYSTEM_ID};
+
+        let mut app = build_test_app();
+
+        let locked = uuid::Uuid::new_v4().to_string();
+        let mut blackboards = ShipSystemBlackboards::default();
+        blackboards.0.insert(
+            tactical_radar_system_id(),
+            SystemBlackboard::TacticalRadar(TacticalRadarBlackboard {
+                selected_target: Some(locked.clone()),
+                ..Default::default()
+            }),
+        );
+        let hull = EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            100.0,
+        )]));
+
+        // No `BehaviourSection`: a static point-defence platform with no doctrine.
+        app.world_mut()
+            .spawn((StaticPointDefence, hull, blackboards));
+
+        app.update();
+
+        let mut q = app.world_mut().query::<&ShipSystemBlackboards>();
+        let bb = q
+            .iter(app.world())
+            .next()
+            .expect("entity must have ShipSystemBlackboards");
+        let viewscreen =
+            bb.0.get(&SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+                .expect("a StaticPointDefence must get a Viewscreen entry with no behaviour");
+        let combat_lock = match viewscreen {
+            SystemBlackboard::Viewscreen(v) => v.combat_lock.clone(),
+            _ => panic!("expected Viewscreen blackboard"),
+        };
+        assert_eq!(
+            combat_lock.as_deref(),
+            Some(locked.as_str()),
+            "the station's Viewscreen combat_lock must mirror its tactical radar selected_target"
         );
     }
 
@@ -3823,6 +3978,12 @@ verb = "fire_blaster"
                 ShipPhysics::default(),
                 // Same shared set the production player-ship spawn uses.
                 ai_high_fidelity_components(),
+                // LOD keys on the ANCHOR's bubble radius, so these mechanic tests
+                // give the player a 100-unit bubble — the threshold they were
+                // written against back when it was `spawn_npc`'s `sensor_range`
+                // arg — so their promote/demote distances (50 in, 200 out,
+                // 110/120 hysteresis) still mean what they say.
+                LodBubble { radius: 100.0 },
             ))
             .id()
     }
@@ -3996,6 +4157,80 @@ verb = "fire_blaster"
         assert!(
             app.world().get::<AiHighFidelity>(npc).is_none(),
             "NPC must demote after dwell window elapses"
+        );
+    }
+
+    /// A `LodBubble` carrier anchors its own zone, so it is held high-fidelity
+    /// unconditionally — the station must run its own guns even when the player
+    /// (the only other bubble) is on the far side of the map.
+    #[test]
+    fn lod_bubble_carrier_is_always_high_fidelity() {
+        let mut app = build_lod_test_app();
+        spawn_player(&mut app, 5000.0, 0.0);
+        let station = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                ShipPhysics::default(),
+                AiProfile::default(),
+                LodBubble { radius: 250.0 },
+            ))
+            .id();
+        tick_with_dt(&mut app, 0.1);
+        assert!(
+            app.world().get::<AiHighFidelity>(station).is_some(),
+            "a LodBubble carrier must stay high-fidelity even with the player far away"
+        );
+    }
+
+    /// An NPC inside a NON-player bubble (the station's) is promoted even though
+    /// the player is nowhere near — the raid sieging the station runs in full
+    /// fidelity so its guns, and the station's, actually fire.
+    #[test]
+    fn npc_inside_a_non_player_bubble_is_promoted() {
+        let mut app = build_lod_test_app();
+        // Player's 100-unit bubble parked far away.
+        spawn_player(&mut app, 5000.0, 0.0);
+        // Station anchor at the origin with a 250-unit bubble.
+        app.world_mut().spawn((
+            Ship,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            ShipPhysics::default(),
+            AiProfile::default(),
+            LodBubble { radius: 250.0 },
+        ));
+        // NPC 200 units from the station (inside its bubble), far from the player.
+        let npc = spawn_npc(&mut app, 200.0, 0.0, 100.0);
+        tick_with_dt(&mut app, 0.1);
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_some(),
+            "an NPC inside the station's bubble must be promoted with the player far away"
+        );
+    }
+
+    /// An NPC outside EVERY bubble stays low — the station's bubble does not
+    /// blanket the map, it covers its own airspace.
+    #[test]
+    fn npc_outside_every_bubble_stays_low() {
+        let mut app = build_lod_test_app();
+        // Player's 100-unit bubble at the origin.
+        spawn_player(&mut app, 0.0, 0.0);
+        // Station's 250-unit bubble a kilometre away.
+        app.world_mut().spawn((
+            Ship,
+            Transform::from_xyz(1000.0, 0.0, 0.0),
+            ShipPhysics::default(),
+            AiProfile::default(),
+            LodBubble { radius: 250.0 },
+        ));
+        // NPC at 500: 500 from the player (outside 100) and 500 from the station
+        // (outside 250).
+        let npc = spawn_npc(&mut app, 500.0, 0.0, 100.0);
+        tick_with_dt(&mut app, 0.1);
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "an NPC outside every bubble must not be promoted"
         );
     }
 

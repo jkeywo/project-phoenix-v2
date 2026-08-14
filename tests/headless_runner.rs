@@ -894,7 +894,7 @@ fn budget_exhausted_mid_fight_classifies_as_timeout() {
 }
 
 /// Issue #838 double-despawn: a destroyed entity must emit `EntityDespawned`
-/// exactly once.
+/// exactly ONCE — never a second time from the reconcile sweep.
 ///
 /// Two emitters used to fire for one kill: the weapon kill site
 /// (`tick_beams_apply_damage` and siblings) despawned the entity and pushed
@@ -903,8 +903,9 @@ fn budget_exhausted_mid_fight_classifies_as_timeout() {
 /// `TrackedEntities` registry. The fix has every kill site call
 /// `TrackedEntities::forget`, so the sweep no longer re-emits.
 ///
-/// `probe_despawn.toml` produces exactly one kill (a Harrow battleship destroys
-/// a Federation destroyer, far from the uninvolved player), so the count of
+/// `probe_despawn.toml` produces exactly one kill (a battleship destroys a
+/// courier, far from the uninvolved player and OUTSIDE its LOD bubble so the duel
+/// stays low-LOD and single-weapon — see that world's own note), so the count of
 /// `EntityDespawned` over the whole run is a direct assertion of the invariant:
 /// one before the bug's second emitter, two with it.
 #[test]
@@ -1943,14 +1944,19 @@ fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
     //    that dips under its reserve stops firing at the very waves whose deaths
     //    would let it fire again.
     //
-    //    Measured on this seed after #960's clock:
-    //      {8: (12, 6), 7: (6, 2), 6: (2, 2), 5: (2, 2)}
-    //    — six rounds survive the full-threat stretch (the guaranteed floor is
-    //    3), four more are spent as the count falls to 6, and the last two are
-    //    then held: 2/6 and 2/5 are both under the 0.5 reserve, so they wait
-    //    for a count of 4 this run never reaches. Under the clock the top
-    //    bucket spans wave 1 AND the first stretch of wave 2, which is why it
-    //    bottoms lower than the 7 the death-gated chain used to show.
+    //    Measured on this seed after the stationary-station combat retune (a
+    //    firing point-defence station + LOD bubbles keeping the raid sieging it
+    //    in full fidelity + an 18 s `attacked_memory_secs` that peels raiders
+    //    onto the player):
+    //      {8: (12, 8), 7: (8, 2), 6: (2, 2), 5: (2, 2), 4: (2, 1), 3: (1, 1), ...}
+    //    — the destroyer now hunts effectively and the run clears wave after wave
+    //    (a VICTORY), so rounds keep coming down across the whole schedule rather
+    //    than stalling after the opening. The two invariants below are what
+    //    matter, not the exact figures: the opening does not eat the payload
+    //    (lowest at full threat >= 3), and the hull keeps spending after wave 1.
+    //    Before the retune the stationary station was a sitting duck, the raid
+    //    ignored the player to grind it down, and this stretch went dry — the
+    //    exact regression this half of the test guards.
     let later_waves: Vec<_> = trace.iter().filter(|(threat, _)| **threat < 8).collect();
     assert!(
         !later_waves.is_empty(),

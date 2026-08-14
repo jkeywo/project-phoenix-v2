@@ -274,6 +274,19 @@ pub(crate) fn default_low_lod_turn_rate_fraction() -> f32 {
     0.5
 }
 
+/// High-fidelity bubble section: `[lod_bubble] radius = N`. An entity carrying
+/// one projects a zone inside which NPCs stay promoted to full-fidelity AI, and
+/// is itself always full-fidelity. See [`crate::ai_plugin::LodBubble`]. A player
+/// hull may author one to size its zone; a stationary defended object (the
+/// station) authors a smaller one so the raid sieging it runs in full even when
+/// the player is elsewhere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LodBubbleConfig {
+    /// Bubble radius in world units.
+    pub radius: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BehaviourConfig {
@@ -4332,6 +4345,9 @@ pub struct EntityConfig {
     /// Optional AI profile (aggression, sensor range).
     #[serde(default)]
     pub ai_profile: Option<AiProfileConfig>,
+    /// Optional high-fidelity bubble ([`crate::ai_plugin::LodBubble`]).
+    #[serde(default)]
+    pub lod_bubble: Option<LodBubbleConfig>,
     /// Radar appearance (colour, optional radius) for the helm radar blip.
     #[serde(default)]
     pub radar_appearance: Option<RadarAppearanceConfig>,
@@ -6348,8 +6364,10 @@ radius = 100.0
         let toml_str = include_str!("../../assets/entities/station_axiom.toml");
         let config = EntityConfig::from_toml(toml_str).expect("station_axiom.toml must parse");
         let hull = config.hull.as_ref().expect("must have [hull]");
-        // (#474) Buffed from 200 to 800 for the combat-test scenario.
-        assert!((hull.hull_integrity - 800.0).abs() < 1e-6);
+        // (#474) Buffed 200 → 800 for the combat-test scenario, then 800 → 1600
+        // in the stationary-station combat retune so the station survives the
+        // eight-wave raid alongside its tripled point-defence damage.
+        assert!((hull.hull_integrity - 1600.0).abs() < 1e-6);
     }
 
     #[test]

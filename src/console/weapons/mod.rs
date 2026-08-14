@@ -1143,6 +1143,13 @@ fn ai_target_selection(
             // `Option` so bare-`App` fixtures without an attached component fall
             // back to the canonical default selector built once below.
             Option<&TacticalTargetSelector>,
+            // A static point-defence platform (the station) has no `[behaviour]`
+            // doctrine, so `top_destroy` is always `None` and the untargeted-
+            // Destroy licence below would never open the nearest-hostile source.
+            // A turret whose whole purpose is to shoot the nearest hostile its
+            // radar can see needs that source without a doctrine, so it licenses
+            // the source directly (mirrors the `hostile_scan_q` `Or<>` filter).
+            Has<crate::entity_spawner::StaticPointDefence>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1241,6 +1248,7 @@ fn ai_target_selection(
         self_uuid,
         self_faction,
         target_selector,
+        is_static_point_defence,
     ) in ship_query.iter_mut()
     {
         // Only select for ships whose TACTICAL RADAR is AI-controlled (issue
@@ -1459,9 +1467,14 @@ fn ai_target_selection(
                 }
             }
         }
-        // Source: radar-contacts — nearest faction-hostile, licensed only by
-        // untargeted combat doctrine (see `destroy_is_untargeted`).
-        if destroy_is_untargeted {
+        // Source: radar-contacts — nearest faction-hostile, licensed by
+        // untargeted combat doctrine (see `destroy_is_untargeted`) OR by being a
+        // static point-defence platform. A turret has no doctrine to make its
+        // Destroy untargeted, but "shoot the nearest hostile my radar sees" is
+        // its entire job; every candidate still passes the selector's own
+        // hostility + detectability + radar-horizon eligibility, so this only
+        // ever locks a hostile actually in range.
+        if destroy_is_untargeted || is_static_point_defence {
             if let Some(nearest) = nearest_hostile(registry) {
                 if let Some(c) = make_candidate(&nearest, "source_radar") {
                     candidates.push(c);

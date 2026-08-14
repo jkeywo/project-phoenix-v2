@@ -10,9 +10,15 @@
 # the fix the kill site forgets the uuid from `TrackedEntities`, so the run
 # emits exactly one `EntityDespawned`.
 #
-# The player sits at the origin, ~500 units away and outside the 100-unit AI
-# sensor range, so it never joins the fight — keeping the despawn count at
-# exactly one.
+# The player sits at the origin, ~900 units away and OUTSIDE its own high-LOD
+# bubble (the default 600 units, 720 with hysteresis — see `LodBubble`), so the
+# duel runs in the cheap low-LOD path: the aggressor kills the victim with a
+# single beam and nothing escalates to a torpedo exchange. That single-weapon
+# kill is the point — this test guards the #838 RECONCILE double-emit (one kill,
+# one `EntityDespawned`). Pulling the duel INTO the bubble would promote both
+# hulls to full fidelity, where they trade torpedoes and two kill sites race to
+# despawn one victim — a separate, pre-existing multi-weapon double-emit that
+# does not belong to this fixture.
 
 [global]
 seed = 8380
@@ -44,7 +50,7 @@ fn on_start(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/alliance_battleship.toml",
         name: "aggressor",
-        position: [500, 0, 0],
+        position: [900, 0, 0],
         overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc", behaviour: #{ doctrine: [
             #{ id: "kill", directive_kind: "Destroy",
                base_priority: 80, target_speed: flt("0.9"), maintain_range: 20 },
@@ -57,7 +63,7 @@ fn on_start(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/alliance_courier.toml",
         name: "victim",
-        position: [514, 0, 0],
+        position: [914, 0, 0],
         overrides: #{ behaviour: #{ doctrine: [
             #{ id: "kill", directive_kind: "Destroy",
                base_priority: 80, target_speed: flt("0.9"), maintain_range: 12 },

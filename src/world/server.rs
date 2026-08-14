@@ -8896,6 +8896,7 @@ condition = "on_world_loaded"
             target: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
         let mut commands = app.world_mut().commands();
         spawn_entity(
@@ -9197,6 +9198,7 @@ condition = "on_world_loaded"
             target: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
         {
             let mut commands = app.world_mut().commands();

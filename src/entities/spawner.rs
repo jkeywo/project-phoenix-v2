@@ -765,6 +765,17 @@ pub fn spawn_entity(
         entity_commands.insert(crate::ai_plugin::AiProfile::default());
     }
 
+    // LodBubble section — a high-fidelity zone this entity projects (issue: the
+    // station being ground down in low-LOD). Authored `[lod_bubble] radius = N`;
+    // a player hull that omits it still anchors an implicit default-radius bubble
+    // in `lod_ai_ships`, so only a NON-default zone (the station's smaller one)
+    // needs the block.
+    if let Some(bubble) = &config.lod_bubble {
+        entity_commands.insert(crate::ai_plugin::LodBubble {
+            radius: bubble.radius,
+        });
+    }
+
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.
     if !config.tags.is_empty() {
         entity_commands.insert(EntityTagsSection(config.tags.clone()));
@@ -1301,6 +1312,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             planet: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -1353,6 +1365,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             planet: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -1402,6 +1415,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             planet: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1456,6 +1470,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             planet: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1512,6 +1527,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1580,6 +1596,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shield_arcs: Vec::new(),
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1651,6 +1668,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1709,6 +1727,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1803,6 +1822,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1868,6 +1888,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1927,6 +1948,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -2013,6 +2035,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -2225,6 +2248,7 @@ regen_per_sec = 0.0
             mesh: None,
             cinematic_camera: None,
             ai_profile: None,
+            lod_bubble: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);

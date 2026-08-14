@@ -196,7 +196,15 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
                 SystemAffinity::Captain,
             ]
         }
-        AiDirective::Patrol { .. } | AiDirective::Reach { .. } | AiDirective::Retreat { .. } => {
+        // Dock (issue #1028) joins the travel directives: it names a place to
+        // be, its destination is resolved by the same navigation-objective path
+        // Destroy's is, and the hull flies it with the same waypoint hand-off.
+        // Deliberately NOT `Weapons` — a civilian berthing at a depot is not
+        // acquiring it.
+        AiDirective::Patrol { .. }
+        | AiDirective::Reach { .. }
+        | AiDirective::Retreat { .. }
+        | AiDirective::Dock { .. } => {
             vec![SystemAffinity::Helm]
         }
         // Hail is a Comms action: the Backfill Comms AI (issue #753) consumes

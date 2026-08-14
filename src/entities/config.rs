@@ -53,6 +53,12 @@ pub struct DoctrineObjective {
     /// Named anchor for `Reach` and `Retreat` directives.
     #[serde(default)]
     pub directive_anchor: Option<String>,
+    /// Named structure for `Dock` directives (issue #1028): the authored world
+    /// entity name of the thing to berth at. Resolved to a live UUID by the same
+    /// `resolve_destroy_target` a `Destroy` target goes through, so it accepts a
+    /// UUID too.
+    #[serde(default)]
+    pub directive_dock_target: Option<String>,
     /// Named target for `Hail` directives.
     #[serde(default)]
     pub directive_hail_target: Option<String>,
@@ -99,6 +105,7 @@ const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
     ("directive_target", "Destroy"),
     ("directive_anchor", "Reach / Retreat"),
     ("directive_hail_target", "Hail"),
+    ("directive_dock_target", "Dock"),
 ];
 
 /// Reject a doctrine entry that authors a `directive_*` field belonging to a
@@ -140,10 +147,14 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
             // `Reach`/`Retreat` mission objective with no `directive_anchor`.
             Some("Reach") | Some("Retreat") => (&["directive_anchor"], &["directive_anchor"]),
             Some("Hail") => (&["directive_hail_target"], &[]),
+            // Issue #1028. Required for the same reason `Reach` requires its
+            // anchor: a Dock with nothing to dock at resolves to no destination
+            // and the hull silently never goes anywhere.
+            Some("Dock") => (&["directive_dock_target"], &["directive_dock_target"]),
             Some(other) => {
                 return Err(format!(
                     "doctrine '{}': unknown directive_kind '{other}'; \
-                     valid: Patrol, Destroy, Reach, Retreat, Hail",
+                     valid: Patrol, Destroy, Reach, Retreat, Hail, Dock",
                     d.id
                 ))
             }
@@ -161,6 +172,10 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
             d.directive_hail_target
                 .is_some()
                 .then_some("directive_hail_target"),
+            d.directive_dock_target
+                .as_deref()
+                .is_some_and(|t| !t.is_empty())
+                .then_some("directive_dock_target"),
         ]
         .into_iter()
         .flatten()
@@ -4369,6 +4384,12 @@ pub struct EntityConfig {
     /// be done *to* an entity, this one says what an entity can do.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operations: Option<crate::operations::OperationsConfig>,
+    /// Civilian traffic (issue #1028). Present for a hull that flies an authored
+    /// `[[route]]` and can be given `hold` / `divert` / `dock` orders. Absent for
+    /// everything else, which behaves exactly as it did before this section
+    /// existed — a warship is not traffic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub civilian: Option<crate::civilian::CivilianConfig>,
     /// Optional faction UUID this entity belongs to.
     #[serde(default)]
     pub faction: Option<Uuid>,
@@ -4727,6 +4748,14 @@ impl EntityConfig {
         // crew can start and never finish.
         if let Some(ref operations) = config.operations {
             operations.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [civilian] table has to name a lane something can fly
+        // (issue #1028). An empty route id, a negative priority or a disposition
+        // authored with negative delays are all author mistakes whose only other
+        // symptom would be traffic that sits still and never answers.
+        if let Some(ref civilian) = config.civilian {
+            civilian.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [radar_appearance] table must declare at least one

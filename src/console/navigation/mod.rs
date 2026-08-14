@@ -620,7 +620,16 @@ pub fn operate_navigation_ai(
                 // both the way every other objective consumer does. The candidate
                 // keys on the *resolved* entity UUID and maps to `Anchored`, so
                 // the waypoint tracks a moving target by UUID rather than name.
-                crate::messages::AiDirective::Destroy { target } if !target.is_empty() => {
+                // Dock (issue #1028) resolves EXACTLY as Destroy does, through
+                // the same resolver and onto the same `Anchored` waypoint: both
+                // name a live entity to close on, and the only difference is
+                // what the hull does once it arrives. Sharing the arm is what
+                // makes a civilian's berthing approach the same code path a
+                // warship's attack run already uses.
+                crate::messages::AiDirective::Destroy { target }
+                | crate::messages::AiDirective::Dock { target }
+                    if !target.is_empty() =>
+                {
                     if let Some((uuid, pos)) =
                         resolve_destroy_target(&all_entities, runtime.as_deref(), target)
                     {

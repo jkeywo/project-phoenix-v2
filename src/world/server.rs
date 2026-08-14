@@ -122,6 +122,16 @@ pub struct WorldContentRuntime {
     /// needs the ship's capability table, its power grid and the target's
     /// position.
     pub pending_operation_starts: Vec<crate::operations::PendingOperationStart>,
+    /// Civilian orders queued this tick by a scripted `order_civilian_*` effect
+    /// (issue #1028), already resolved to the target's UUID.
+    ///
+    /// Drained every tick by [`crate::civilian::tick_civilian_traffic`] in
+    /// `SimSet::Input`, so it is empty at every tick boundary — including the
+    /// one a snapshot is taken at. It exists for the same reason the condition
+    /// queue above does: one system owns the compliance state machine, and an
+    /// effect writing the component directly would skip the acknowledgement the
+    /// crew is meant to watch for.
+    pub pending_civilian_orders: Vec<crate::civilian::PendingCivilianOrder>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -509,9 +519,14 @@ impl Plugin for WorldPlugin {
         // pays into the infrastructure queue beside it, so the plugin is
         // meaningless in an app with no world — and its tick is explicitly
         // ordered before `InfrastructurePlugin`'s, which needs both registered.
+        // Civilian traffic (issue #1028) is added here for the same reason:
+        // routes are world data, the order queue is a field on
+        // `WorldContentRuntime`, and a dock target is resolved through its name
+        // table — none of which exist in an app with no world.
         app.add_plugins(crate::comms::CommsWorldPlugin)
             .add_plugins(crate::infrastructure::InfrastructurePlugin)
             .add_plugins(crate::operations::OperationsPlugin)
+            .add_plugins(crate::civilian::CivilianPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
@@ -2446,6 +2461,27 @@ pub(crate) fn apply_dispatch_result(
                         verb,
                         target_uuid,
                     });
+            }
+
+            // Issue #1028, and the same shape for the same reason: the applier
+            // holds `name_to_uuid`, so the name is resolved here and the order
+            // is queued for `tick_civilian_traffic`, which is the one system
+            // that owns the compliance state machine.
+            ActionCmd::OrderCivilian { entity, order } => {
+                if let Err(why) = order.validate() {
+                    bevy::log::warn!("{log_ctx}: OrderCivilian for '{entity}': {why} — ignoring");
+                    continue;
+                }
+                let Some(uuid) = runtime.name_to_uuid.get(&entity).cloned() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: OrderCivilian: no entity named '{entity}' in this \
+                         world — ignoring"
+                    );
+                    continue;
+                };
+                runtime
+                    .pending_civilian_orders
+                    .push(crate::civilian::PendingCivilianOrder { uuid, order });
             }
 
             ActionCmd::LoadWorld { path, loader_path } => {
@@ -8559,6 +8595,7 @@ seed = 1
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -8852,6 +8889,7 @@ seed = 1
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,

@@ -85,6 +85,10 @@ pub mod bounded_history;
 /// Compile-time build flags readable at runtime (issue #939) — currently just
 /// `PHOENIX_DEMO_BUILD`, which gates the host settings menu's Debug/Cheat tab.
 pub mod build_flags;
+/// Civilian traffic (issue #1028): the pure route / order / compliance
+/// vocabulary and the adapter that installs it as an ordinary NPC doctrine
+/// directive.
+pub mod civilian;
 /// Composite-key deterministic value derivation (issue #788). Pure, Bevy-free,
 /// domain-neutral.
 pub mod composite_rng;

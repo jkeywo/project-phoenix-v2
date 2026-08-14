@@ -1137,6 +1137,18 @@ pub fn spawn_entity(
         });
     }
 
+    // Civilian traffic (issue #1028) — attach the authored assignment and the
+    // live route/order/compliance state when `[civilian]` is present. Same
+    // placement argument as the infrastructure block above. The pair is
+    // deliberate: the section never changes after spawn, the traffic state is
+    // the only half a save has to carry.
+    if let Some(civilian) = &config.civilian {
+        entity_commands.insert((
+            crate::civilian::CivilianSection(civilian.clone()),
+            crate::civilian::CivilianTraffic(crate::civilian::CivilianState::from_config(civilian)),
+        ));
+    }
+
     // Hull -- attach an EntitySystemHull component if the config has hull data.
     // Per-system entries take precedence; if absent we fall back to the
     // legacy scalar `hull_integrity` value mapped to a single `SystemId("captain")`
@@ -1605,6 +1617,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1687,6 +1700,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1739,6 +1753,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1796,6 +1811,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1857,6 +1873,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1924,6 +1941,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2002,6 +2020,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2063,6 +2082,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2168,6 +2188,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -2228,6 +2249,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2270,6 +2292,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             tags: vec![],
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: Some(faction_id),
             hull: None,
             collider: None,
@@ -2379,6 +2402,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -2594,6 +2618,7 @@ regen_per_sec = 0.0
             effects: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,

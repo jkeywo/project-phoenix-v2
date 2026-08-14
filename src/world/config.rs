@@ -516,6 +516,10 @@ pub struct RawWorld {
     /// `[[deadline]]` array key, so no rename is needed.
     #[serde(default)]
     pub deadline: Vec<crate::world::deadlines::Deadline>,
+    /// Named civilian traffic routes (issue #1028). The field name already
+    /// matches the `[[route]]` array key, so no rename is needed.
+    #[serde(default)]
+    pub route: Vec<crate::civilian::RouteConfig>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -1359,6 +1363,16 @@ pub struct WorldConfig {
     /// armed from this list on the first simulation tick of the mission. Ids are
     /// unique within a world; [`parse_world`] refuses a duplicate by name.
     pub deadlines: Vec<crate::world::deadlines::Deadline>,
+    /// Named civilian traffic routes, in authored order (issue #1028).
+    ///
+    /// Authored data only — an anchor chain belongs to the map it crosses, so
+    /// two haulers running the same lane run the same record. The *live* state
+    /// (which leg, which order, whether it is being obeyed) is the per-entity
+    /// [`CivilianTraffic`](crate::civilian::CivilianTraffic) component. Ids are
+    /// unique within a world; [`parse_world`] refuses a duplicate by name, and
+    /// `world::validate` refuses a leg naming an anchor no world in the
+    /// composition declares.
+    pub routes: Vec<crate::civilian::RouteConfig>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -1386,6 +1400,14 @@ impl WorldConfig {
     /// Borrow the unified `[[entity]]` instance list.
     pub fn entities(&self) -> &[WorldEntity] {
         &self.entities
+    }
+
+    /// The authored civilian route with this id (issue #1028).
+    ///
+    /// Linear over a list a world authors a handful of; a map would buy nothing
+    /// and would lose the authored order the vocabulary is read in.
+    pub fn route(&self, id: &str) -> Option<&crate::civilian::RouteConfig> {
+        self.routes.iter().find(|r| r.id == id)
     }
 }
 
@@ -1603,6 +1625,34 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         }
     }
 
+    // Civilian traffic routes (issue #1028). Same argument as deadlines: the id
+    // is the only handle an entity's `[civilian] route` or a `divert` order has
+    // on a lane, so a duplicate is two records competing for every hauler that
+    // names it. The per-route structural checks (a lane with no legs, a leg with
+    // no anchor, a cruise fraction outside (0, 1]) live on the vocabulary itself
+    // so the same rules apply wherever a route is built. What is NOT checked
+    // here is whether each leg's anchor exists: routes may legitimately cross a
+    // sibling layer's anchors, so resolution is a composition-wide pass in
+    // `world::validate` — the same place doctrine anchors are resolved.
+    for (i, route) in raw.route.iter().enumerate() {
+        route
+            .validate()
+            .map_err(|e| format!("[[route]] #{i}: {e}"))?;
+        if let Some(j) = raw
+            .route
+            .iter()
+            .enumerate()
+            .take(i)
+            .position(|(_, other)| other.id == route.id)
+        {
+            return Err(format!(
+                "duplicate route id '{}': [[route]] #{j} and [[route]] #{i} both \
+                 declare it; route ids must be unique within a world",
+                route.id
+            ));
+        }
+    }
+
     // Validate extra_worlds: every entry must be a non-empty string.
     for (i, path) in raw.extra_worlds.iter().enumerate() {
         if path.trim().is_empty() {
@@ -1656,6 +1706,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         available_ships,
         player_spawn: raw.player_spawn,
         deadlines: raw.deadline,
+        routes: raw.route,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }

@@ -1612,6 +1612,24 @@ pub enum SystemControlPayload {
         source_uuid: Option<String>,
     },
     ClearNavigationWaypoint,
+    /// Order a civilian craft to hold, divert or dock (issue #1028).
+    ///
+    /// Targets the `navigation` system, so it is admitted exactly like the
+    /// waypoint payloads above: the Navigation station's holder may send it, an
+    /// AI operating that station may emit it, and nobody else is admitted.
+    /// Unlike those, it is addressed to *another entity* — Navigation talking to
+    /// traffic rather than to its own hull — and the recipient is free to refuse
+    /// it. An order the console cannot deliver at all (an unknown craft, a
+    /// divert naming both a route and an anchor) bounces back as
+    /// [`ServerMessage::CivilianOrderRejected`]; an order the *civilian*
+    /// declines is not a bounce, and shows up seconds later in its compliance
+    /// state on the Navigation blackboard.
+    OrderCivilian {
+        /// The civilian's authored world entity name, or its UUID.
+        target: String,
+        /// What it is being asked to do.
+        order: crate::civilian::CivilianOrder,
+    },
     LateralThrustInput {
         lateral: f32,
     },
@@ -2356,6 +2374,23 @@ pub enum ServerMessage {
     CommsResponseRejected {
         message_id: String,
         response_index: usize,
+    },
+    /// Sent to the submitting Navigation console holder when an `OrderCivilian`
+    /// command cannot be delivered at all (issue #1028): the named craft is not
+    /// in this world, or the order is malformed (a divert naming both a route
+    /// and an anchor, or neither).
+    ///
+    /// Modelled on [`ServerMessage::CommsResponseRejected`] and, like it, a
+    /// rejection-only feedback channel — a delivered order is answered by the
+    /// civilian itself, over seconds, through its compliance state. The two are
+    /// deliberately different surfaces: this one says "nobody heard you", the
+    /// other says "they heard you and said no".
+    CivilianOrderRejected {
+        /// The target as the console named it, so the client can flash the
+        /// control it was sent from.
+        target: String,
+        /// `strings.csv` id for why. Display text, so an id and not English.
+        reason: String,
     },
     /// Broadcast to all players when every console's HP reaches 0.
     /// Clients should show a game-over screen.
@@ -3669,6 +3704,16 @@ pub enum AiDirective {
     Hail { target: String },
     /// Retreat to the named anchor position.
     Retreat { anchor: String },
+    /// Proceed to and berth at the named structure (issue #1028).
+    ///
+    /// A *destination* directive, not a mover: the target is resolved to a live
+    /// entity by the same `resolve_destroy_target` a `Destroy` target goes
+    /// through, becomes the ship's own anchored navigation waypoint through the
+    /// same `operate_navigation_ai` every hull already runs, and is flown by the
+    /// helm's existing waypoint hand-off. The close-in berthing manoeuvre is the
+    /// existing `DockingMotionIntent` one. Named by a world entity name or a
+    /// UUID, exactly like `Destroy`.
+    Dock { target: String },
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.

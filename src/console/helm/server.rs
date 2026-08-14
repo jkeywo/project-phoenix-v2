@@ -378,11 +378,13 @@ mod tests {
             uuid: OWN_FACTION,
             name: "Own".into(),
             enemies: vec![ENEMY_FACTION],
+            compliance: None,
         });
         registry.insert(crate::faction::FactionConfig {
             uuid: ENEMY_FACTION,
             name: "Enemy".into(),
             enemies: vec![OWN_FACTION],
+            compliance: None,
         });
         app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
             registry,

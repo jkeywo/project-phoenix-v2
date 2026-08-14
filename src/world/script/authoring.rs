@@ -266,6 +266,40 @@ pub const HOST_FNS: &[HostFn] = &[
                   out of position simply opens stalled. No delayed form: defer \
                   it with `schedule.after`.",
     },
+    HostFn {
+        name: "order_hold",
+        receiver: "effects",
+        params: &["entity"],
+        category: "effect",
+        summary: "Order the named civilian to stop where it is. A request, not a \
+                  remote control: it is answered after the hull's authored \
+                  acknowledgement delay and may be refused.",
+    },
+    HostFn {
+        name: "order_divert_route",
+        receiver: "effects",
+        params: &["entity", "route"],
+        category: "effect",
+        summary: "Order the named civilian onto another authored `[[route]]`, by \
+                  route id. Refusable.",
+    },
+    HostFn {
+        name: "order_divert_anchor",
+        receiver: "effects",
+        params: &["entity", "anchor"],
+        category: "effect",
+        summary: "Order the named civilian to make for a single world anchor, by \
+                  anchor name. Refusable.",
+    },
+    HostFn {
+        name: "order_dock",
+        receiver: "effects",
+        params: &["entity", "structure"],
+        category: "effect",
+        summary: "Order the named civilian to proceed to and berth at the named \
+                  structure. Refusable, and lands in `non_compliant` if the \
+                  structure is not there.",
+    },
     // ── ctx.flags.* (runtime engine) ─────────────────────────────────────────
     HostFn {
         name: "increment",
@@ -487,6 +521,11 @@ mod tests {
                 }
                 // The operation verbs take (ship, target).
                 "stabilise" => format!("ctx.effects.{}(\"x\", \"y\")", hf.name),
+                // The civilian order hooks take (entity, destination) — except
+                // `order_hold`, whose verb IS the whole instruction.
+                "order_divert_route" | "order_divert_anchor" | "order_dock" => {
+                    format!("ctx.effects.{}(\"x\", \"y\")", hf.name)
+                }
                 _ => format!("ctx.effects.{}(\"x\")", hf.name),
             },
             "delay" => format!("ctx.schedule.in_seconds(0).{}(\"x\")", hf.name),
@@ -627,6 +666,19 @@ mod tests {
                 "unexpected delay.{}",
                 verb.as_str()
             );
+        }
+        // Likewise the #1028 civilian order hooks. An order that should arrive
+        // later is `schedule.after(n, |ctx| …)`; a delay-builder twin would put
+        // a second, silent gap in front of the authored acknowledgement delay
+        // the compliance machine already applies.
+        for verb in [
+            "order_hold",
+            "order_divert_route",
+            "order_divert_anchor",
+            "order_dock",
+        ] {
+            assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
+            assert!(!names.contains(&("delay", verb)), "unexpected delay.{verb}");
         }
         // ctx.flags.* (flags.rs) and ctx.schedule.* (schedule.rs).
         assert!(names.contains(&("flags", "increment")));

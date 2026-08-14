@@ -22,6 +22,17 @@ pub struct FactionConfig {
     /// UUIDs of factions this faction considers enemies.
     #[serde(default)]
     pub enemies: Vec<Uuid>,
+    /// How this faction's civilian traffic answers crew orders (issue #1028).
+    ///
+    /// The *fallback* half of the two-level ladder an ordered civilian resolves
+    /// through: a hull's own `[civilian.compliance]` table wins, this stands in
+    /// when it authors none, and a cooperative default stands in when neither
+    /// exists. Faction-level because "the Combine's haulers never divert" is a
+    /// fact about the operator rather than about one ship, and a scenario that
+    /// wants a whole shipping line to be difficult should not have to say so on
+    /// every hull.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compliance: Option<crate::civilian::ComplianceDisposition>,
 }
 
 /// Registry of all loaded factions, keyed by their UUID.
@@ -155,11 +166,13 @@ mod tests {
             uuid: fed_uuid(),
             name: "Federation".to_string(),
             enemies: vec![pirate_uuid()],
+            compliance: None,
         });
         reg.insert(FactionConfig {
             uuid: pirate_uuid(),
             name: "Pirate".to_string(),
             enemies: vec![],
+            compliance: None,
         });
         reg
     }
@@ -204,11 +217,13 @@ mod tests {
             uuid: alpha,
             name: "Alpha".to_string(),
             enemies: vec![],
+            compliance: None,
         });
         reg.insert(FactionConfig {
             uuid: beta,
             name: "Beta".to_string(),
             enemies: vec![],
+            compliance: None,
         });
         assert!(!is_enemy(Some(alpha), Some(beta), &reg));
         assert!(!is_enemy(Some(beta), Some(alpha), &reg));
@@ -353,11 +368,13 @@ name = "Pirate"
             uuid: alpha,
             name: "Alpha".to_string(),
             enemies: vec![],
+            compliance: None,
         });
         reg.insert(FactionConfig {
             uuid: beta,
             name: "Beta".to_string(),
             enemies: vec![],
+            compliance: None,
         });
         assert!(!is_enemy(Some(alpha), Some(beta), &reg));
         assert!(reg.add_enemy(alpha, beta), "first add returns true");

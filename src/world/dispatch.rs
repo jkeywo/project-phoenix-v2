@@ -217,6 +217,18 @@ pub enum ActionCmd {
         verb: crate::operations::OperationVerb,
         target: String,
     },
+    /// Order the named civilian to hold, divert or dock (issue #1028).
+    ///
+    /// `entity` is the world's authored entity NAME, not a UUID, and the applier
+    /// resolves it against `WorldContentRuntime::name_to_uuid` before *queueing*
+    /// the order — it is not applied on the spot, so a scripted order goes
+    /// through the same compliance state machine, the same acknowledgement
+    /// delay and the same authored disposition a crew's order does. A scenario
+    /// cannot remote-control traffic that a crew has to negotiate with.
+    OrderCivilian {
+        entity: String,
+        order: crate::civilian::CivilianOrder,
+    },
     /// Add or update a float modifier on the entity with `uuid`.
     ApplyModifier {
         uuid: String,
@@ -1251,11 +1263,13 @@ mod tests {
             uuid: harrow,
             name: "Harrow".to_string(),
             enemies: vec![],
+            compliance: None,
         });
         registry.insert(FactionConfig {
             uuid: federation,
             name: "Federation".to_string(),
             enemies: vec![],
+            compliance: None,
         });
         (registry, harrow, federation)
     }

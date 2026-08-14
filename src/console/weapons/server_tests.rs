@@ -6173,11 +6173,13 @@ fn setup_harrow_ship_hostile_to_federation(app: &mut App) {
         uuid: harrow_faction(),
         name: "Harrow".into(),
         enemies: vec![federation_faction()],
+        compliance: None,
     });
     registry.insert(FactionConfig {
         uuid: federation_faction(),
         name: "Federation".into(),
         enemies: vec![],
+        compliance: None,
     });
     app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
         registry,
@@ -12438,11 +12440,13 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
         uuid: shooter_faction,
         name: "Federation".into(),
         enemies: vec![enemy_faction],
+        compliance: None,
     });
     reg.insert(crate::faction::FactionConfig {
         uuid: enemy_faction,
         name: "Pirate".into(),
         enemies: vec![],
+        compliance: None,
     });
     app.insert_resource(FactionRegistryResource(reg));
 
@@ -12510,6 +12514,7 @@ fn los_friendly_blocker_absorbs_beam_with_no_damage() {
         uuid: faction_uuid,
         name: "Federation".into(),
         enemies: vec![],
+        compliance: None,
     });
     app.insert_resource(FactionRegistryResource(reg));
 

@@ -8690,6 +8690,7 @@ mod tests {
             uuid: own_faction,
             name: "Own".into(),
             enemies: vec![hostile_faction],
+            compliance: None,
         });
         app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
             registry,

@@ -710,6 +710,9 @@ pub fn parse_doctrine_directive(
         Some("Retreat") => crate::messages::AiDirective::Retreat {
             anchor: d.directive_anchor.clone().unwrap_or_default(),
         },
+        Some("Dock") => crate::messages::AiDirective::Dock {
+            target: d.directive_dock_target.clone().unwrap_or_default(),
+        },
         _ => crate::messages::AiDirective::None,
     }
 }
@@ -910,6 +913,16 @@ pub fn plan_helm_travel(
                     )
                 })
             }
+            // Dock (issue #1028) resolves NOTHING here, on purpose. It is a
+            // destination directive, and its destination reaches the helm the
+            // way a destination the helm cannot see for itself always has:
+            // `operate_navigation_ai` turns the objective into this ship's own
+            // anchored waypoint, and the fall-through below flies it at
+            // `nav_handoff_speed`. Resolving it a second time here would be the
+            // second steering implementation the slice exists to avoid — and
+            // would fly a stale position, since the anchored waypoint is the
+            // thing that tracks a structure as it moves.
+            crate::messages::AiDirective::Dock { .. } => None,
             _ => None,
         };
         if let Some(result) = result {
@@ -2208,6 +2221,7 @@ mod tests {
             uuid: own_faction,
             name: "Own".into(),
             enemies: vec![hostile_faction],
+            compliance: None,
         });
 
         let armed = |z: f32, half: f32| AiWorldEntity {

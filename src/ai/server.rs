@@ -2483,6 +2483,7 @@ verb = "fire_blaster"
             uuid: own_faction,
             name: "Own".into(),
             enemies: vec![hostile_faction],
+            compliance: None,
         });
         let view = crate::ai::WorldView {
             entity_pos: [100.0, 0.0, 0.0],
@@ -2544,6 +2545,7 @@ verb = "fire_blaster"
             uuid: same_faction,
             name: "Own".into(),
             enemies: vec![],
+            compliance: None,
         });
         let view = crate::ai::WorldView {
             entity_pos: [100.0, 0.0, 0.0],
@@ -3155,6 +3157,7 @@ verb = "fire_blaster"
             shield_arcs: Vec::new(),
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             hull: None,
             weapons_console: Some(make_weapons_console_config(80.0)),

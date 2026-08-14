@@ -370,6 +370,55 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
+    // Civilian order hooks (issue #1028). Four verbs rather than one taking a
+    // verb string, for the reason the two infrastructure verbs are two: the
+    // vocabulary lives in the name, so a scenario cannot divert a hauler onto a
+    // lane by misspelling an anchor and having it read as an anchor anyway.
+    // `divert` is split by destination for exactly that reason — a single
+    // `order_divert(entity, "depot_run")` could not tell a route id from an
+    // anchor name, and guessing is how a mistyped lane becomes a silent no-op.
+    //
+    // Each buffers a resolved `ActionCmd` carrying the civilian's NAME; the
+    // applier resolves it and queues the order for `tick_civilian_traffic`,
+    // which is where the acknowledgement delay and the authored disposition are
+    // applied. A scripted order is a request, not a remote control: a civilian
+    // whose disposition refuses `divert` refuses a scripted divert too.
+    engine.register_fn(
+        "order_hold",
+        |sink: &mut EffectSink, entity: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::Hold,
+            });
+        },
+    );
+    engine.register_fn(
+        "order_divert_route",
+        |sink: &mut EffectSink, entity: ImmutableString, route: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::divert_to_route(route.to_string()),
+            });
+        },
+    );
+    engine.register_fn(
+        "order_divert_anchor",
+        |sink: &mut EffectSink, entity: ImmutableString, anchor: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::divert_to_anchor(anchor.to_string()),
+            });
+        },
+    );
+    engine.register_fn(
+        "order_dock",
+        |sink: &mut EffectSink, entity: ImmutableString, structure: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::dock_at(structure.to_string()),
+            });
+        },
+    );
     engine.register_fn(
         "add_faction_enemy",
         |sink: &mut EffectSink, faction: ImmutableString, enemy: ImmutableString| {

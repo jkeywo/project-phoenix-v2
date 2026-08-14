@@ -715,6 +715,13 @@ mod tests {
                 },
             ),
             (
+                ServerMessageDiscriminants::CivilianOrderRejected,
+                ServerMessage::CivilianOrderRejected {
+                    target: "world.entity.hauler_kestrel.name".into(),
+                    reason: "civilian.order.rejected.unknown_target".into(),
+                },
+            ),
+            (
                 ServerMessageDiscriminants::ShipDestroyed,
                 ServerMessage::ShipDestroyed,
             ),
@@ -2266,6 +2273,50 @@ mod tests {
             encoded,
             r#"{"type":"ControlSystem","data":{"target":"navigation","payload":{"type":"ClearNavigationWaypoint"}}}"#,
             "ClearNavigationWaypoint wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// Civilian orders (issue #1028) round-trip inside the `ControlSystem`
+    /// envelope, targeting the same `navigation` system the waypoint payloads do.
+    ///
+    /// All three verbs, and both flavours of `divert`, because the order is a
+    /// *nested* enum on the payload — the one shape in this envelope where a
+    /// serde tag sits inside a serde tag — and a rename on either level would
+    /// break traffic control while every other navigation payload kept working.
+    #[test]
+    fn civilian_order_payloads_round_trip() {
+        use crate::civilian::CivilianOrder;
+        for order in [
+            CivilianOrder::Hold,
+            CivilianOrder::divert_to_route("depot_run"),
+            CivilianOrder::divert_to_anchor("holding_point"),
+            CivilianOrder::dock_at("world.entity.skyhook_depot.name"),
+        ] {
+            let msg = ClientMessage::ControlSystem {
+                target: crate::system_registry::navigation_system_id(),
+                payload: SystemControlPayload::OrderCivilian {
+                    target: "world.entity.hauler_kestrel.name".into(),
+                    order,
+                },
+            };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_client_roundtrip(&PrettyJsonCodec, msg);
+        }
+
+        // Pin the wire shape the nav console's order controls send.
+        let encoded = JsonCodec
+            .encode_client(&ClientMessage::ControlSystem {
+                target: crate::system_registry::navigation_system_id(),
+                payload: SystemControlPayload::OrderCivilian {
+                    target: "hauler".into(),
+                    order: CivilianOrder::divert_to_route("depot_run"),
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"navigation","payload":{"type":"OrderCivilian","data":{"target":"hauler","order":{"verb":"divert","route":"depot_run"}}}}}"#,
+            "the civilian order wire shape must match what action-map.js sends"
         );
     }
 

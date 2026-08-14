@@ -1466,11 +1466,13 @@ mod tests {
             uuid: fed_uuid,
             name: "Federation".into(),
             enemies: vec![harrow_uuid],
+            compliance: None,
         });
         reg.insert(crate::faction::FactionConfig {
             uuid: harrow_uuid,
             name: "Harrow".into(),
             enemies: vec![fed_uuid],
+            compliance: None,
         });
         app.insert_resource(crate::entities::config_cache::FactionRegistryResource(reg));
 
@@ -2351,11 +2353,13 @@ mod tests {
             uuid: fed,
             name: "Federation".into(),
             enemies: vec![harrow],
+            compliance: None,
         });
         reg.insert(crate::faction::FactionConfig {
             uuid: harrow,
             name: "Harrow".into(),
             enemies: vec![fed],
+            compliance: None,
         });
         app.insert_resource(crate::entities::config_cache::FactionRegistryResource(reg));
 

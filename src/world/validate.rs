@@ -708,6 +708,105 @@ fn validate_doctrine_anchors_in(
     findings
 }
 
+/// The `[[route]]` id one spawned instance's `[civilian]` table names.
+///
+/// Same shape, and the same silences, as [`doctrine_anchor_refs`]: a template
+/// that cannot be loaded or whose override merge fails yields nothing, because
+/// both are *different* defects with their own findings.
+fn civilian_route_ref(inst: &SpawnedInstance, loader: &dyn TemplateLoader) -> Option<String> {
+    let template = loader.load_template(inst.template_path)?;
+    let config = match inst.overrides {
+        None => template,
+        Some(overrides) => crate::entity_loader::apply_overrides(&template, overrides).ok()?,
+    };
+    config
+        .civilian
+        .as_ref()
+        .and_then(|c| c.route.clone())
+        .filter(|id| !id.is_empty())
+}
+
+/// Reject a `[[route]]` leg naming an anchor no world in the composition
+/// declares (issue #1028).
+///
+/// The same argument as [`validate_doctrine_anchors_in`], which this sits
+/// beside and shares its resolution scope with: the anchor table is parsed once
+/// and never written again, so a leg that misses at load misses on every tick
+/// forever and the hauler flying that lane silently skips it. There is nothing
+/// for a warning to be tentative about.
+fn validate_route_anchors_in(
+    src: &WorldSource,
+    declared_anchors: &HashSet<&str>,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    for route in &src.config.routes {
+        for leg in &route.legs {
+            if declared_anchors.contains(leg.anchor.as_str()) {
+                continue;
+            }
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: "unresolved-anchor",
+                message: format!(
+                    "civilian route '{}' has a leg referencing anchor '{}', which no \
+                     world in the composition declares, in '{}'",
+                    route.id, leg.anchor, src.path
+                ),
+                source: SourceLocation {
+                    file: src.path.clone(),
+                    line: line_of(src.toml, &leg.anchor).or_else(|| line_of(src.toml, &route.id)),
+                    reference: leg.anchor.clone(),
+                },
+            });
+        }
+    }
+    findings
+}
+
+/// Reject an entity whose `[civilian] route` names a lane no world in the
+/// composition declares (issue #1028).
+///
+/// Routes are world data and civilians reference them by id, so this is the
+/// same class of dangling reference as an unresolved anchor and gets the same
+/// treatment. A civilian pointed at a lane that does not exist installs no
+/// directive at all and holds station for the whole mission — visibly *there*,
+/// and doing nothing, with no diagnostic anywhere.
+fn validate_civilian_routes_in(
+    src: &WorldSource,
+    declared_routes: &HashSet<&str>,
+    loader: &dyn TemplateLoader,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    let mut reported: HashSet<(String, String)> = HashSet::new();
+    for inst in collect_spawned_instances(src.config) {
+        let Some(route) = civilian_route_ref(&inst, loader) else {
+            continue;
+        };
+        if declared_routes.contains(route.as_str()) {
+            continue;
+        }
+        if !reported.insert((inst.label.clone(), route.clone())) {
+            continue;
+        }
+        findings.push(WorldFinding {
+            severity: Severity::Error,
+            category: "unresolved-route",
+            message: format!(
+                "entity '{}' (template '{}') is assigned civilian route '{route}', which \
+                 no world in the composition declares, in '{}'",
+                inst.label, inst.template_path, src.path
+            ),
+            source: SourceLocation {
+                file: src.path.clone(),
+                line: line_of(src.toml, &inst.label)
+                    .or_else(|| line_of(src.toml, inst.template_path)),
+                reference: route,
+            },
+        });
+    }
+    findings
+}
+
 /// Reject an entity template whose include closure cannot be composed
 /// (issue #906).
 ///
@@ -1350,6 +1449,31 @@ pub fn validate_composition_with_fragments(
         ));
     }
 
+    // Civilian route references (issue #1028), resolved against the same two
+    // unions for the same reason: a route's legs are anchors, and a hauler
+    // spawned by a layer may fly a lane the base world declares.
+    findings.extend(validate_route_anchors_in(root, &declared_anchors));
+    for child in children {
+        findings.extend(validate_route_anchors_in(child, &declared_anchors));
+    }
+    let mut declared_routes: HashSet<&str> =
+        root.config.routes.iter().map(|r| r.id.as_str()).collect();
+    for child in children {
+        declared_routes.extend(child.config.routes.iter().map(|r| r.id.as_str()));
+    }
+    findings.extend(validate_civilian_routes_in(
+        root,
+        &declared_routes,
+        template_loader,
+    ));
+    for child in children {
+        findings.extend(validate_civilian_routes_in(
+            child,
+            &declared_routes,
+            template_loader,
+        ));
+    }
+
     // `relative_to` positioning references (issue #969). Resolved PER WORLD,
     // not against the composition union: the runtime lookup table
     // (`build_named_entity_positions`) is built from one `WorldConfig`, so a
@@ -1824,6 +1948,114 @@ name = "ghost"
                 .any(|f| f.category == "unresolvable-template" && f.is_error()),
             "the defect is reported as what it is, by the check that owns it \
              (issue #973): {findings:?}"
+        );
+    }
+
+    // ── civilian routes (issue #1028) ────────────────────────────────────────
+
+    /// **AC1.** A route leg naming an anchor nobody declares blocks the world.
+    ///
+    /// Routes go through the same gate doctrine anchors do, and for the same
+    /// reason: the anchor table is parsed once and never written again, so a
+    /// leg that misses at load misses forever and the hauler flying that lane
+    /// silently skips it.
+    #[test]
+    fn a_route_leg_naming_an_undeclared_anchor_is_rejected() {
+        let root = cfg(r#"
+[anchors]
+depot_north = [10.0, 0.0, 20.0]
+
+[[route]]
+id = "depot_run"
+
+[[route.leg]]
+anchor = "depot_north"
+
+[[route.leg]]
+anchor = "depot_south"
+"#);
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolved-anchor")
+            .expect("the undeclared leg anchor must be an error");
+        assert_eq!(err.source.reference, "depot_south");
+        assert!(err.message.contains("depot_run"), "{}", err.message);
+        assert!(err.is_error(), "it blocks activation rather than warning");
+    }
+
+    /// …and a route whose every leg resolves is silent, including one whose
+    /// anchors are declared by a *sibling layer* rather than by its own file.
+    #[test]
+    fn a_route_resolving_against_the_composition_is_accepted() {
+        let root = cfg(r#"
+[anchors]
+depot_north = [10.0, 0.0, 20.0]
+"#);
+        let layer = cfg(r#"
+[[route]]
+id = "depot_run"
+
+[[route.leg]]
+anchor = "depot_north"
+"#);
+        let root_src = WorldSource::new("assets/worlds/base.toml", "", &root);
+        let layer_src = WorldSource::new("assets/worlds/layer.toml", "", &layer);
+        let findings = validate_composition_with(&root_src, &[layer_src], &patroller_templates());
+        assert!(
+            !findings.iter().any(|f| f.category == "unresolved-anchor"),
+            "a lane may cross the base world's anchors: {findings:?}"
+        );
+    }
+
+    /// **AC1.** A civilian assigned a lane nobody declares blocks the world too
+    /// — otherwise it spawns, installs no directive, and holds station for the
+    /// whole mission with no diagnostic anywhere.
+    #[test]
+    fn a_civilian_assigned_an_undeclared_route_is_rejected() {
+        let templates = FakeTemplates::new(&[(
+            "assets/entities/hauler.toml",
+            &format!(
+                "{PATROLLER}
+[civilian]
+route = \"storm_detour\"
+{CAPTAIN_AI}
+{BASELINE_AI}"
+            ),
+        )]);
+        let root = cfg(r#"
+[anchors]
+depot_north = [10.0, 0.0, 20.0]
+
+[[route]]
+id = "depot_run"
+
+[[route.leg]]
+anchor = "depot_north"
+
+[[entity]]
+template_path = "assets/entities/hauler.toml"
+name = "kestrel"
+"#);
+        let src = WorldSource::new("assets/worlds/scenario.toml", "name = \"kestrel\"", &root);
+        let findings = validate_composition_with(&src, &[], &templates);
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolved-route")
+            .expect("an unresolved civilian route assignment must be an error");
+        assert_eq!(err.source.reference, "storm_detour");
+        assert!(err.message.contains("kestrel"), "{}", err.message);
+
+        // The control: the same world with the lane declared is clean.
+        let mut with_lane = root.clone();
+        with_lane.routes[0].id = "storm_detour".into();
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &with_lane);
+        assert!(
+            !validate_composition_with(&src, &[], &templates)
+                .iter()
+                .any(|f| f.category == "unresolved-route"),
+            "a civilian pointed at a declared lane is silent"
         );
     }
 

@@ -578,6 +578,7 @@ mod tests {
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -883,6 +884,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -956,6 +958,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1403,6 +1406,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1573,6 +1577,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1937,6 +1942,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1997,6 +2003,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

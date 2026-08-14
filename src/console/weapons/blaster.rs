@@ -57,8 +57,10 @@ pub struct BlasterBankAiPolicies(
 /// edge for blaster banks: the host resolves the bank's live readiness before
 /// calling this, so a `fact(...)` guard evaluates over real per-bank state while
 /// `policy.rs` stays Bevy-free.
-/// `red_alert` is the SHIP-WIDE reading added by issue #872 — see
-/// [`crate::weapons_plugin::seed_phaser_bank_facts`] for the contract. Seeded
+/// `posture` carries the SHIP-WIDE readings — the alert added by issue #872 and
+/// the weapons hold added by issue #1041; see
+/// [`crate::weapons_plugin::seed_phaser_bank_facts`] and
+/// [`crate::weapons_plugin::WeaponsAlertPosture`] for the contract. Seeded
 /// unconditionally so an authored guard reads a real `0.0`, never an absent
 /// fact.
 pub fn seed_blaster_bank_facts(
@@ -67,7 +69,7 @@ pub fn seed_blaster_bank_facts(
     cooldown_remaining: f32,
     in_range: bool,
     in_arc: bool,
-    red_alert: bool,
+    posture: crate::weapons_plugin::WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
@@ -77,7 +79,7 @@ pub fn seed_blaster_bank_facts(
     facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
     facts.set(
         crate::entities::config::POWER_RED_ALERT_FACT,
-        if red_alert { 1.0 } else { 0.0 },
+        posture.alert_fact_value(),
     );
     facts
 }
@@ -267,6 +269,9 @@ pub(crate) fn tick_blaster_auto_fire(
             // fact for the bank's authored fire predicate. `Option<&_>` for
             // bare-`App` fixtures; absent reads `false`.
             Option<&crate::ship_state::ShipRedAlert>,
+            // Issue #1041: the captain's weapons hold, folded with the alert
+            // above into the one `red_alert` fact the authored gate reads.
+            Option<&crate::ship_state::ShipWeaponsHold>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -292,11 +297,18 @@ pub(crate) fn tick_blaster_auto_fire(
         bank_policies_opt,
         mut admitted,
         red_alert_opt,
+        weapons_hold_opt,
     ) in ship_q.iter_mut()
     {
         // Read once per ship; seeded into every bank's snapshot. No Rust rule
-        // consults it — the gate is the bank's authored predicate (#872).
-        let red_alert = red_alert_opt.is_some_and(|r| r.0);
+        // consults it — the gate is the bank's authored predicate (#872), and
+        // the weapons hold folded in beside it rides that same predicate
+        // (#1041).
+        let posture =
+            crate::weapons_plugin::WeaponsAlertPosture::from_components(
+                red_alert_opt,
+                weapons_hold_opt,
+            );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = crate::world::server::entity_flag_chain(
@@ -372,7 +384,7 @@ pub(crate) fn tick_blaster_auto_fire(
             let Some(policy) = bank_policies_opt.and_then(|p| p.0.get(&bank.config.id)) else {
                 continue;
             };
-            let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, red_alert);
+            let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, posture);
             if blaster_bank_policy_fires(policy, &facts, &flag_chain) {
                 banks_to_fire.push(bank.config.id.clone());
             }

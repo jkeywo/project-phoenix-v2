@@ -8810,8 +8810,10 @@ fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
                     // …and so is red alert (issue #872). The Harrow hulls are
                     // authored ALWAYS-ARMED, so their launch guard must not
                     // depend on a captain having raised the alert; leaving this
-                    // false throughout is that statement.
-                    false,
+                    // false throughout is that statement. No weapons hold
+                    // either (issue #1041) — a held hull is a separate claim,
+                    // pinned in `authored_ai_pins`.
+                    crate::weapons_plugin::WeaponsAlertPosture::alert(false),
                 ),
                 &[],
             )

@@ -911,6 +911,10 @@ pub(crate) fn ai_torpedo_auto_fire(
             // fact for the tube's authored LAUNCH predicate. `Option<&_>` for
             // fixtures that spawn a ship without it; absent reads `false`.
             Option<&crate::ship_state::ShipRedAlert>,
+            // Issue #1041: the captain's weapons hold, folded with the alert
+            // above into the one `red_alert` fact the tube's authored LAUNCH
+            // predicate already reads.
+            Option<&crate::ship_state::ShipWeaponsHold>,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -945,11 +949,17 @@ pub(crate) fn ai_torpedo_auto_fire(
         tube_policies,
         mut admitted,
         red_alert_opt,
+        weapons_hold_opt,
     ) in ships.iter_mut()
     {
         // Read once per ship; seeded into every tube's launch snapshot. No Rust
-        // rule consults it — the gate is the tube's authored predicate (#872).
-        let red_alert = red_alert_opt.is_some_and(|r| r.0);
+        // rule consults it — the gate is the tube's authored predicate (#872),
+        // and the weapons hold folded in beside it rides that same predicate
+        // (#1041).
+        let posture = crate::weapons_plugin::WeaponsAlertPosture::from_components(
+            red_alert_opt,
+            weapons_hold_opt,
+        );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = crate::world::server::entity_flag_chain(
@@ -1111,7 +1121,7 @@ pub(crate) fn ai_torpedo_auto_fire(
                 true,
                 target_facing_shields,
                 tubes_full,
-                red_alert,
+                posture,
             );
             if !crate::weapons_plugin::torpedo_tube_launch_policy_fires(
                 launch_policy,

@@ -357,6 +357,13 @@ pub struct PhaserBankAiPolicies(
 /// authored guard can read it in BOTH directions rather than only failing
 /// closed. Nothing in this file tests it — the fire gate is an authored
 /// predicate on the bank, never a Rust rule.
+///
+/// Since issue #1041 the reading is the ship's whole firing
+/// [`WeaponsAlertPosture`] rather than the bare alert: a captain who has called
+/// a weapons hold seeds a value below every authorable `min_alert_to_fire`
+/// floor, and one who has not seeds exactly the `1.0`/`0.0` this line always
+/// did. See that type for why the hold rides the existing fact instead of
+/// adding a second one.
 #[allow(clippy::too_many_arguments)]
 pub fn seed_phaser_bank_facts(
     target_valid: bool,
@@ -365,7 +372,7 @@ pub fn seed_phaser_bank_facts(
     in_range: bool,
     in_arc: bool,
     frequency: f32,
-    red_alert: bool,
+    posture: super::WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
@@ -376,7 +383,7 @@ pub fn seed_phaser_bank_facts(
     facts.set("frequency", frequency as f64);
     facts.set(
         crate::entities::config::POWER_RED_ALERT_FACT,
-        if red_alert { 1.0 } else { 0.0 },
+        posture.alert_fact_value(),
     );
     facts
 }
@@ -838,6 +845,11 @@ pub(crate) fn ai_phaser_auto_fire(
             // bare-`App` weapons fixtures spawn ships without it; a missing
             // component reads `false`, exactly as `ShipRedAlert::default()`.
             Option<&crate::ship_state::ShipRedAlert>,
+            // Issue #1041: the captain's weapons hold, folded together with the
+            // alert above into the ONE `red_alert` fact the bank's authored
+            // gate already reads. Same `Option<&_>` reasoning; absent reads
+            // "not holding".
+            Option<&crate::ship_state::ShipWeaponsHold>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -861,12 +873,16 @@ pub(crate) fn ai_phaser_auto_fire(
         bank_policies_opt,
         phaser_freq_opt,
         red_alert_opt,
+        weapons_hold_opt,
     ) in ship_q.iter_mut()
     {
         // Read once per ship, seeded into every bank's fact snapshot below.
         // NOT tested here: whether red alert gates fire is the authored
-        // predicate's business (issue #872).
-        let red_alert = red_alert_opt.is_some_and(|r| r.0);
+        // predicate's business (issue #872), and so is whether a weapons hold
+        // does (issue #1041) — the hold rides the same fact and the same
+        // authored predicate, which is exactly why no Rust branch appears here.
+        let posture =
+            super::WeaponsAlertPosture::from_components(red_alert_opt, weapons_hold_opt);
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = crate::world::server::entity_flag_chain(
@@ -958,7 +974,7 @@ pub(crate) fn ai_phaser_auto_fire(
                 ready,
                 ready,
                 phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
-                red_alert,
+                posture,
             );
             (ready
                 && !cooldown.is_bank_active("")
@@ -1027,7 +1043,7 @@ pub(crate) fn ai_phaser_auto_fire(
                         range_ok,
                         arc_ok,
                         phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
-                        red_alert,
+                        posture,
                     );
                     phaser_bank_policy_fires(policy, &facts, &flag_chain).then(|| b.id.clone())
                 })

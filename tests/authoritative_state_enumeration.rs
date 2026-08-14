@@ -141,7 +141,13 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "RegionEffectKind", "RepairBlackboard", "RepairTeams", "ResolvedTemplate", "ScenarioCatalog",
     "ScenarioCatalogWire", "ScoredObjective", "SensorRadarSelection", "SessionManager",
     "Severity", "ShieldSystem", "ShieldsDamageHistory", "ShipBoost", "ShipConfig", "ShipImpulse",
-    "ShipIntentNarration", "ShipModifiers", "ShipPhysics", "ShipRedAlert", "SimRng",
+    "ShipIntentNarration", "ShipModifiers", "ShipPhysics", "ShipRedAlert",
+    // Issue #1041's tactical restraint lever. Authoritative and FOLDED, in its
+    // own `fold_weapons_hold_namespace` — transcribed from the
+    // `authoritative-weapons-hold-state` entity in
+    // pasm/spec/architecture/red-alert.yaml.
+    "ShipWeaponsHold",
+    "SimRng",
     "SimRngState", "SimulationPaused", "SourceLocation", "StationConfig", "SteeringInput",
     "SystemBlackboard",
     "StaticPointDefence", "SystemHull", "TacticalRadarSelection", "TeamSlot", "ThrustInput", "Torpedo",

@@ -296,6 +296,8 @@ component.power.held,"Power group level readout while the reactor's battery floo
 component.red_alert.title,Red alert control heading (Captain console),RED ALERT
 component.red_alert.active,Red alert button while the alert is raised,RED ALERT
 component.red_alert.standby,Red alert button while the ship is stood down,STAND DOWN
+component.weapons_hold.free,"Weapons hold button while the guns are free to fire. [bracketed]: unapproved copy",[WEAPONS FREE]
+component.weapons_hold.held,"Weapons hold button while the captain is holding fire. [bracketed]: unapproved copy",[WEAPONS HOLD]
 component.repair_teams.title,Repair teams panel heading,REPAIR TEAMS
 component.repair_teams.empty,Repair panel when the ship has no repair teams,[NO REPAIR TEAMS]
 component.repair_teams.no_targets,Repair team row when nothing needs repair,[No repair targets]

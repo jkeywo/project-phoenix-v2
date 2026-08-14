@@ -76,6 +76,53 @@ pub struct ShipPhysics {
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ShipRedAlert(pub bool);
 
+/// Per-entity **weapons hold** for every ship entity (player and NPC), issue
+/// #1041.
+///
+/// The tactical restraint lever. Red Alert is binary and stays binary: this is a
+/// second, independent state layered *under* it, so a captain can be at
+/// stations, shields up, guns cold. It is set with the same explicit
+/// [`SetWeaponsHold`](crate::messages::SystemControlPayload::SetWeaponsHold)
+/// command on the same `red-alert` admitted-command target the alert itself uses
+/// — one console control source governs the ship's whole firing posture, and an
+/// NPC whose Red Alert system is AI-run can be ordered to hold through exactly
+/// the same path, with no second capability to provision.
+///
+/// # How it suppresses fire
+///
+/// It adds NO doctrine vocabulary. Every armed hull in the fleet gates its guns
+/// on one authored predicate — `fact(red_alert) >= param(min_alert_to_fire)` —
+/// and this state is composed into the *value* of that fact at the fire hosts,
+/// through [`WeaponsAlertPosture`](crate::weapons_plugin::WeaponsAlertPosture).
+/// Held, the fact reads below every authorable floor; released, it reads exactly
+/// the `1.0`/`0.0` it always did. See that type for the full argument.
+///
+/// # Not graduated rules of engagement
+///
+/// Deliberately one boolean. There are no authority tiers and no per-target
+/// rules of engagement here; that design is parked (issue #834) and this is the
+/// thin lever that was shipped instead.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShipWeaponsHold(pub bool);
+
+/// The world flag mirroring the hull the crew fly: `weapons_hold.own_ship`.
+///
+/// Keyed by ROLE rather than by an authored reference name, because the player's
+/// hull is not required to declare one — `falling_skyway.toml` gives its
+/// `player-ship` an `id` and no `name`, so there is no name to key on and a
+/// scenario still has to be able to ask the question.
+pub const OWN_SHIP_WEAPONS_HOLD_FLAG: &str = "weapons_hold.own_ship";
+
+/// The world flag mirroring a named ship's weapons hold: `weapons_hold.<name>`.
+///
+/// The naming imitates issue #1035's `workforce.<id>.on_strike` deliberately:
+/// authoritative state lives in the component, the flag is a MIRROR of it, and
+/// scenario script reads the mirror. `name` is the entity's authored reference
+/// name — the same string `on_destroyed(...)` and `hail(...)` take.
+pub fn weapons_hold_flag(name: &str) -> String {
+    format!("weapons_hold.{name}")
+}
+
 /// Per-entity viewscreen mode state for every ship entity (player and NPC).
 ///
 /// Replaces the `view_mode` field that was previously on the singleton

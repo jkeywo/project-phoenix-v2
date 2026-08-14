@@ -48,6 +48,7 @@ describe('ACTION_MAP', () => {
       'set_target',
       'set_torpedo_volley_target',
       'set_view',
+      'set_weapons_hold',
       'show_on_screen',
       'start_impulse_charge',
       'start_operation',
@@ -274,6 +275,40 @@ describe('set_red_alert', () => {
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: false } },
+    });
+  });
+});
+
+// Issue #1041: the tactical restraint lever. Same `red-alert` target as the
+// alert above — one control source governs the ship's whole firing posture —
+// and the same explicit-desired-state shape, so a stale or retried press
+// cannot invert the order.
+describe('set_weapons_hold', () => {
+  it('sends ControlSystem with the explicit desired held=true state', () => {
+    const send = mkSend();
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'SetWeaponsHold', data: { held: true } },
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the explicit desired held=false state', () => {
+    const send = mkSend();
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: false }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'SetWeaponsHold', data: { held: false } },
+    });
+  });
+
+  it('coerces a missing held flag to false (never inverts)', () => {
+    const send = mkSend();
+    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'SetWeaponsHold', data: { held: false } },
     });
   });
 });

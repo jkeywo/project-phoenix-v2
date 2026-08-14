@@ -87,6 +87,14 @@
 //! folded: it is re-derived from the same authored `hold_secs` on both hosts the
 //! moment a leg is left. Empty-namespace rule as above.
 //!
+//! **Folded (weapons-hold namespace, in `FoldKey` order — issue #1041):** the
+//! id of every ship currently under a captain's weapons hold, and nothing else —
+//! the state is one boolean and the namespace carries only the ships for which
+//! it is true. A host that disagreed about whether a hull had been ordered to
+//! hold fire would disagree about whether its guns may open up at all. Empty-
+//! namespace rule as above, and see [`fold_weapons_hold_namespace`] for why the
+//! released ships are left out rather than folded as zeroes.
+//!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
 //! id, its `Transform` translation as bit patterns (a rock's position is
 //! authoritative — it is what a collision resolves against), and its
@@ -174,7 +182,7 @@ use crate::lobby::WorldResource;
 use crate::messages::GamePhase;
 use crate::operations::{OperationHold, ShipOperations};
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
-use crate::ship::state::{ShipPhysics, ShipRedAlert};
+use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
 use crate::sim_rng::SimRng;
 use crate::sim_tick::SimTick;
 
@@ -312,6 +320,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_infrastructure_namespace(world, acc);
     acc = fold_operations_namespace(world, acc);
     acc = fold_civilian_namespace(world, acc);
+    acc = fold_weapons_hold_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -551,6 +560,59 @@ fn civilian_order_destination(order: &crate::civilian::CivilianOrder) -> String 
         }
         CivilianOrder::Dock { structure } => structure.clone(),
     }
+}
+
+/// Every ship currently under a **weapons hold** (issue #1041), in [`FoldKey`]
+/// order, in its own namespace.
+///
+/// Authoritative and folded: two hosts that disagreed about whether a hull had
+/// been ordered to hold fire would disagree about whether its guns are allowed
+/// to open up at all, which is about as divergent as two hosts get.
+///
+/// # Only the ships that ARE holding
+///
+/// The empty-namespace rule of [`fold_infrastructure_namespace`], turned one
+/// notch further: this walk folds nothing at all when no ship is holding, and
+/// the rows it does fold are the held ships alone rather than a bit per ship.
+/// The reason is the same and the argument is stronger here, because the state
+/// is on EVERY ship rather than on a handful of authored structures. Folding a
+/// released hold for every hull would have moved every committed world digest
+/// the moment this slice landed, over a lever none of those runs pull — and the
+/// acceptance criterion this slice is built to is precisely that Red Alert's
+/// behaviour is unchanged while the hold is not engaged. A run in which nobody
+/// holds fire and a run recorded before the lever existed *are the same
+/// authoritative state*, so they fold to the same number.
+///
+/// It is not a hole. The moment one ship holds, its id is in the accumulator
+/// and the count with it, so two hosts that disagree about whether ANY ship is
+/// holding disagree about this namespace immediately.
+fn fold_weapons_hold_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ShipWeaponsHold)>() else {
+        // A world that never registered the component holds nothing — the empty
+        // case above, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex)> = query
+        .iter(world)
+        .filter(|(_, _, hold)| hold.0)
+        .map(|(entity, uuid, _)| {
+            (
+                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                entity.index(),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "weapons-hold-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _) in rows {
+        acc = fold_str(acc, &key.id);
+    }
+    acc
 }
 
 /// Every entity carrying an infrastructure condition track (issue #1025), in

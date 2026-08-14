@@ -327,6 +327,15 @@ pub fn spawn_entity(
             crate::ship_state::ShipPhaserFrequency::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
         ));
+        // The restraint lever (issue #1041), beside the alert it layers under.
+        // Every ship carries it, player and NPC alike, so the captain's order
+        // and a scenario's order land on the same state and the fire hosts need
+        // no "is this an NPC?" branch. Defaults to released, so a hull that is
+        // never ordered to hold behaves exactly as it did before this issue.
+        //
+        // Its own `insert` because the bundle above is at Bevy's 15-element
+        // tuple ceiling.
+        entity_commands.insert(crate::ship_state::ShipWeaponsHold::default());
         // Per-entity helm intent (audit follow-up). Every ship carries
         // its own `LastHelmInput` so systems that iterate `With<Ship>`
         // and read `Option<&LastHelmInput>` see a real value on NPCs

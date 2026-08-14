@@ -41,6 +41,108 @@ entities:
       paths: [src/ship/state.rs, src/console/captain/server.rs]
       symbols: [ShipRedAlert]
 
+  - state: authoritative-weapons-hold-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Authoritative Weapons Hold State
+      summary: Per-ship host-owned boolean restraint lever, layered under the binary alert rather than replacing it, and set with the same explicit-target-state semantics.
+      rationale:
+        - "Issue #1041 ships the THIN restraint lever rather than graduated rules of engagement. There are no authority tiers and no per-target rules of engagement; that design stays parked under issue #834's out-of-scope list, and a review that finds either here has found scope creep."
+        - "The state is independent of the alert rather than a third alert value. A crew that had to stand down to hold fire would be choosing between shields and restraint, and the whole point of proportionate force is that it is not that choice."
+        - "[ai] It suppresses fire by composing into the VALUE of the fact the shipped gate already reads, not by adding a fact or a conjunct. Every armed hull authors one predicate — fact(red_alert) >= param(min_alert_to_fire) — differing only in the threshold, so a second fact would mean editing every one of those predicates, which is the new-vocabulary change the acceptance criteria forbid, and a hull whose author forgot it would ignore the captain's order in silence."
+        - "[ai] The seeded value is a LADDER, not a boolean with a sentinel. min_alert_to_fire is a floor on how hot the ship must be before a bank opens up, and a weapons hold is a rung below stood-down. Sitting under every authorable floor is what makes the lever work on the always-armed Harrow gun line, which authors a threshold of 0: a hold seeded as a plain 0.0 would have left those hulls firing through the order, because 0 >= 0."
+        - "Released, the seeded value is exactly the 1.0/0.0 the fire hosts inlined before this issue, so Red Alert's behaviour is unchanged when the hold is not engaged. The committed world digests are the standing proof, and the weapons-hold digest namespace folds nothing while no ship holds so that they can be."
+        - "AI/human symmetry is structural rather than asserted: the NPC fire hosts respect the hold because they seed the same fact and resolve the same authored predicate, with no branch anywhere on who is flying."
+        - "It rides the red-alert admitted-command target rather than declaring a system of its own, so every NPC whose Red Alert capability is already provisioned AI-only can be ordered to hold with no second capability to declare and no second consumer to register."
+    architecture:
+      classification: authoritative
+      owner: host-weapons-hold-control-router
+      writers:
+        - host-weapons-hold-control-router
+      replicas:
+        - weapons-hold-status-replica
+    implementation:
+      status: declared
+      paths: [src/ship/state.rs, src/console/captain/server.rs, src/console/weapons/mod.rs, src/sim_digest.rs]
+      symbols:
+        - ShipWeaponsHold
+        - WeaponsAlertPosture
+        - WEAPONS_HOLD_ALERT_FACT
+        - OWN_SHIP_WEAPONS_HOLD_FLAG
+      tests: [cargo test, "cargo test --lib a_weapons_hold_closes_every_shipped_fire_gate"]
+    evidence:
+      - kind: test
+        reference: "src/entities/authored_ai_pins.rs::a_weapons_hold_closes_every_shipped_fire_gate"
+        summary: "The suppression claim resolved through the REAL shipped predicates on the REAL shipped hulls — the fleet baseline's threshold of 1 and the Harrow gun line's always-armed 0 — with every readiness reading favourable and the alert raised. The released rows in the same test are the byte-identical half."
+
+  - component: host-weapons-hold-control-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Weapons Hold Control Router
+      summary: Authoritative handler that validates an admitted SetWeaponsHold command and assigns its held value to the addressed ship.
+      rationale:
+        - The router assigns rather than inverts, so a retried, duplicated or stale-console order cannot turn a ship's guns back on.
+        - It applies to the owning ship entity, so a scenario ordering one hull to hold fire leaves every other hull alone.
+        - "[ai] It decides nothing about firing. It writes one boolean; the suppression happens where every other firing decision happens, in the bank's own authored predicate."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns:
+        - authoritative-weapons-hold-state
+      consumes:
+        - set-weapons-hold-command
+      writes:
+        - authoritative-weapons-hold-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/core/messages.rs]
+      symbols: [SetWeaponsHold]
+      tests: [cargo test]
+
+  - message: set-weapons-hold-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Set Weapons Hold Command
+      summary: Client-to-host request carrying the desired weapons-hold state as held true or false, addressed to the red-alert system.
+      rationale:
+        - The payload expresses the requested end state, so retries and duplicate delivery cannot invert the order.
+        - It targets the red-alert system so one console control source governs the ship's whole firing posture, and so a hull needs no second capability to be orderable.
+    architecture:
+      authority: request
+      producer:
+        - red-alert-console-interface
+      consumer:
+        - host-command-admission
+        - host-weapons-hold-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: set-weapons-hold-held
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/action-map.js]
+      tests: [cargo test, npx vitest run]
+
+  - state: weapons-hold-status-replica
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Weapons Hold Status Replica
+      summary: Non-authoritative captain presentation of the local ship's weapons hold, published on the captain blackboard beside the alert.
+    architecture:
+      classification: replicated
+      derived_from:
+        - authoritative-weapons-hold-state
+      owner: red-alert-console-interface
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, gui/console-state.js, gui/components/ph-red-alert.js]
+
   - state: red-alert-status-replica
     core:
       status: implemented

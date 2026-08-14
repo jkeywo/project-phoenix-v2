@@ -62,6 +62,7 @@ impl Plugin for CaptainPlugin {
                     .before(handle_set_view)
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
                 handle_set_red_alert.in_set(crate::sim_sets::SimSet::Input),
+                handle_set_weapons_hold.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
                 crate::ship::combat_activity::update_combat_activity
@@ -118,6 +119,36 @@ fn handle_set_red_alert(
                         on: ra.0,
                     });
                 }
+            }
+        }
+    }
+}
+
+/// Applies `SetWeaponsHold { held }` commands from every ship's own
+/// `AdmittedCommands` to that ship's own `ShipWeaponsHold` (issue #1041) — the
+/// tactical restraint lever.
+///
+/// A deliberate twin of [`handle_set_red_alert`] above, down to the assign-not-
+/// invert semantics and the per-entity dispatch. It runs on the SAME
+/// `red-alert` admitted target, which is what makes the lever available on
+/// every hull that already has the alert: an NPC's Red Alert system is
+/// provisioned AI-only at spawn, so a scenario ordering a Harrow to hold fire
+/// needs no new capability on the hull and no new registration here.
+///
+/// Nothing in this handler decides whether the ship then fires. It writes one
+/// boolean; the suppression happens where every other firing decision happens,
+/// in the bank's own authored predicate reading the fact the hosts seed from
+/// [`crate::weapons_plugin::WeaponsAlertPosture`].
+fn handle_set_weapons_hold(
+    mut ship_query: Query<
+        (&AdmittedCommands, &mut crate::ship_state::ShipWeaponsHold),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (admitted, mut hold) in ship_query.iter_mut() {
+        for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
+            if let SystemControlPayload::SetWeaponsHold { held } = cmd.payload {
+                hold.0 = held;
             }
         }
     }
@@ -611,6 +642,9 @@ fn publish_captain_blackboard(
         (
             &ShipSystemControlSources,
             Option<&crate::ship_state::ShipRedAlert>,
+            // The restraint lever (issue #1041), replicated onto the same
+            // console that raises the alert.
+            Option<&crate::ship_state::ShipWeaponsHold>,
             Option<&crate::ship_state::ShipViewMode>,
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&crate::entity_spawner::EntityUuid>,
@@ -620,10 +654,19 @@ fn publish_captain_blackboard(
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (control_sources, red_alert_comp, view_mode_comp, hull_opt, uuid_opt, is_local, mut bbs) in
-        ship_query.iter_mut()
+    for (
+        control_sources,
+        red_alert_comp,
+        weapons_hold_comp,
+        view_mode_comp,
+        hull_opt,
+        uuid_opt,
+        is_local,
+        mut bbs,
+    ) in ship_query.iter_mut()
     {
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
+        let weapons_hold = weapons_hold_comp.map(|h| h.0).unwrap_or(false);
 
         let (hull_fraction, hull_integrity_pct) = hull_opt
             .map(|h| {
@@ -745,6 +788,7 @@ fn publish_captain_blackboard(
             red_alert,
             red_alert_system_id: crate::system_registry::red_alert_system_id(),
             red_alert_auto,
+            weapons_hold,
             viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
             viewscreen_auto,
             view_direction,
@@ -826,6 +870,16 @@ mod tests {
                     .expect("the shipped Captain policy decodes"),
             ),
         ));
+        // The restraint lever (issue #1041). Its own `insert` because the
+        // bundle above is at Bevy's 15-element tuple ceiling — the same reason
+        // the production spawner splits it out.
+        {
+            let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
+            let ship = q.single(app.world()).expect("the fixture ship");
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(crate::ship_state::ShipWeaponsHold::default());
+        }
         // One fixed step per update (issue #895): the plugin's systems run on
         // the logical tick, and each harness tick advances it once.
         crate::ship::test_support::drive_one_fixed_step_per_update(
@@ -858,6 +912,13 @@ mod tests {
         if let Ok(mut ra) = q.single_mut(app.world_mut()) {
             ra.0 = red;
         }
+    }
+
+    fn get_weapons_hold(app: &mut App) -> bool {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::ship_state::ShipWeaponsHold, With<LocalShip>>();
+        q.single(app.world()).map(|h| h.0).unwrap_or(false)
     }
 
     fn captain_bb(app: &mut App) -> CaptainBlackboard {
@@ -1005,6 +1066,112 @@ mod tests {
         );
         tick(&mut app);
         assert!(get_red_alert(&mut app));
+    }
+
+    /// Issue #1041 AC1: the hold is a state the captain sets, LAYERED on the
+    /// binary alert rather than replacing it — so the two move independently
+    /// and Red Alert's own behaviour is untouched.
+    ///
+    /// Both directions in one app, because "the captain can hold fire" is only
+    /// half a lever: a hold that could not be released would be a ship that had
+    /// disarmed itself.
+    #[test]
+    fn captain_holds_and_releases_fire_without_touching_the_alert() {
+        let mut app = test_app();
+        start_game(&mut app);
+        // Stations first. The alert is the state the hold layers under, and
+        // asserting it stays up throughout is the "does not replace" half.
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::SetRedAlert { active: true },
+            },
+        );
+        tick(&mut app);
+        assert!(get_red_alert(&mut app));
+        assert!(
+            !get_weapons_hold(&mut app),
+            "a ship at stations is weapons-free until someone says otherwise"
+        );
+
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::SetWeaponsHold { held: true },
+            },
+        );
+        tick(&mut app);
+        assert!(get_weapons_hold(&mut app), "the captain's order lands");
+        assert!(
+            get_red_alert(&mut app),
+            "and the ship is STILL at red alert — the hold layers under the \
+             alert, it does not stand it down"
+        );
+
+        // Releasing it puts the ship back exactly where it started.
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::SetWeaponsHold { held: false },
+            },
+        );
+        tick(&mut app);
+        assert!(!get_weapons_hold(&mut app));
+        assert!(get_red_alert(&mut app));
+    }
+
+    /// The command carries the desired END state, so a retried or duplicated
+    /// press is idempotent — the handler assigns, it does not invert. Same
+    /// contract as `SetRedAlert`, and for the same reason: a console showing a
+    /// stale posture must not be able to flip the ship's guns back on.
+    #[test]
+    fn a_repeated_weapons_hold_order_is_idempotent() {
+        let mut app = test_app();
+        start_game(&mut app);
+        for _ in 0..3 {
+            push(
+                &mut app,
+                "captain",
+                ClientMessage::ControlSystem {
+                    target: crate::system_registry::red_alert_system_id(),
+                    payload: SystemControlPayload::SetWeaponsHold { held: true },
+                },
+            );
+            tick(&mut app);
+            assert!(get_weapons_hold(&mut app));
+        }
+    }
+
+    /// The hold is replicated onto the same console that raises the alert, so
+    /// the captain reads one posture rather than inferring it.
+    #[test]
+    fn the_captain_blackboard_publishes_the_weapons_hold() {
+        let mut app = test_app();
+        start_game(&mut app);
+        tick(&mut app);
+        assert!(!captain_bb(&mut app).weapons_hold);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::SetWeaponsHold { held: true },
+            },
+        );
+        // Two ticks: one for the order to be admitted and applied, one for the
+        // publisher to export the settled reading. The assertion is on the
+        // PUBLISHED value rather than on the component deliberately — what is
+        // pinned here is the captain's readout of the posture, which is what
+        // makes the lever usable at all.
+        tick(&mut app);
+        tick(&mut app);
+        assert!(captain_bb(&mut app).weapons_hold);
     }
 
     #[test]

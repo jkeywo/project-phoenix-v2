@@ -391,7 +391,12 @@ pub struct WeaponsDoctrineAiPolicy(pub crate::ai::policy::AiPolicy);
 ///   could be expressed.
 /// * `red_alert` — this ship's own alert state, the same typed fact every fire
 ///   guard in the fleet is written against, so a doctrine can present a
-///   different family before and after the captain calls stations.
+///   different family before and after the captain calls stations. Since issue
+///   #1041 it is seeded from the ship's whole firing
+///   [`WeaponsAlertPosture`], so a hull under a weapons hold stops asking Helm
+///   to swing a gun into line as well as holding its fire — one posture, one
+///   value, rather than the same fact meaning two things on one ship in one
+///   tick.
 ///
 /// Every emitter's arc, range and online state is a HOST reading resolved after
 /// the order comes back, never a fact: which families are *capable* is not a
@@ -399,7 +404,7 @@ pub struct WeaponsDoctrineAiPolicy(pub crate::ai::policy::AiPolicy);
 /// turn for a gun that is not there.
 pub fn seed_weapons_doctrine_facts(
     target_facing_shields: i32,
-    red_alert: bool,
+    posture: WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set(
@@ -408,9 +413,106 @@ pub fn seed_weapons_doctrine_facts(
     );
     facts.set(
         crate::entities::config::POWER_RED_ALERT_FACT,
-        if red_alert { 1.0 } else { 0.0 },
+        posture.alert_fact_value(),
     );
     facts
+}
+
+/// The ship-wide firing posture every weapons host seeds the `red_alert` fact
+/// from (issue #1041): its Red Alert, and whether its captain has called a
+/// **weapons hold**.
+///
+/// # Why a posture rather than a second fact
+///
+/// Issue #1041's acceptance criteria require the hold to compose with the
+/// authored fire gate **with no new doctrine vocabulary**. Every armed hull in
+/// the fleet writes exactly one gate —
+/// `when = "fact(red_alert) >= param(min_alert_to_fire)"` — and differs only in
+/// the threshold: an Alliance hull with a captain's console authors `1`, the
+/// always-armed Harrow gun line authors `0` (issue #872). A second fact would
+/// mean editing every one of those predicates to AND it in, which is precisely
+/// the vocabulary change the AC forbids, and a hull whose author forgot would
+/// silently ignore the captain's order.
+///
+/// So the hold is composed into the VALUE of the fact the gate already reads.
+/// [`Self::alert_fact_value`] is the whole mechanism:
+///
+/// | posture | fact | `>= 0` (Harrow) | `>= 1` (Alliance) |
+/// |---|---|---|---|
+/// | stood down | `0.0` | fires | holds |
+/// | red alert | `1.0` | fires | fires |
+/// | **weapons hold** | [`WEAPONS_HOLD_ALERT_FACT`] | **holds** | **holds** |
+///
+/// Read the numbers as a LADDER rather than as a boolean with a sentinel bolted
+/// on: `min_alert_to_fire` is a floor on how hot the ship must be before a bank
+/// will open up, and a weapons hold is a rung BELOW stood-down — colder than
+/// cold, because a stood-down ship is merely not expecting trouble while a held
+/// one has been ordered not to shoot. Sitting under every authored floor is what
+/// makes the lever work on the always-armed hulls too, which a `0.0` could not
+/// do: `0 >= 0` is true, and a Harrow under orders would have kept firing. That
+/// is the AI/human symmetry half of the AC — the NPC fire hosts respect the hold
+/// identically because they read the same seeded fact through the same authored
+/// predicate, not because anything checks who is flying.
+///
+/// # Why Red Alert's own behaviour cannot have moved
+///
+/// With the hold released this returns exactly `1.0` / `0.0` — bit for bit the
+/// expression each host inlined before this issue. Nothing else in the fire path
+/// changed, so a run in which nobody engages a hold folds the same digest it
+/// always did; the committed world anchors are the standing proof.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WeaponsAlertPosture {
+    /// This ship's own [`crate::ship_state::ShipRedAlert`].
+    pub red_alert: bool,
+    /// This ship's own [`crate::ship_state::ShipWeaponsHold`].
+    pub weapons_hold: bool,
+}
+
+/// The `red_alert` fact value seeded at a weapons host while the ship is under a
+/// weapons hold — one rung BELOW stood-down, so it fails every `>= threshold`
+/// gate a hull can author, the always-armed `0` included.
+///
+/// Not authored TOML on purpose: it is not a tunable but the bottom of the
+/// ladder the authored `min_alert_to_fire` floors sit on, and a designer moving
+/// it could only ever break the lever. `authored_ai_pins` pins every shipped
+/// bank's threshold at or above zero so this stays true of the shipped fleet.
+pub const WEAPONS_HOLD_ALERT_FACT: f64 = -1.0;
+
+impl WeaponsAlertPosture {
+    /// Read the posture off one ship's two optional components. Absent reads as
+    /// "not at alert" / "not holding" — the same fail-open reading the hosts
+    /// used before #1041, so a bare-`App` fixture that spawns neither behaves
+    /// exactly as it did.
+    pub fn from_components(
+        red_alert: Option<&crate::ship_state::ShipRedAlert>,
+        weapons_hold: Option<&crate::ship_state::ShipWeaponsHold>,
+    ) -> Self {
+        Self {
+            red_alert: red_alert.is_some_and(|r| r.0),
+            weapons_hold: weapons_hold.is_some_and(|h| h.0),
+        }
+    }
+
+    /// A posture with no hold — the shorthand every test written before #1041
+    /// keeps working through, and the one the byte-identical claim rests on.
+    pub fn alert(red_alert: bool) -> Self {
+        Self {
+            red_alert,
+            weapons_hold: false,
+        }
+    }
+
+    /// The value seeded for the `red_alert` fact. See the type docs for the
+    /// ladder this implements.
+    pub fn alert_fact_value(self) -> f64 {
+        if self.weapons_hold {
+            WEAPONS_HOLD_ALERT_FACT
+        } else if self.red_alert {
+            1.0
+        } else {
+            0.0
+        }
+    }
 }
 
 /// Resolve the ship's authored weapon-family order for the channel-3 arc-bearing
@@ -619,6 +721,9 @@ fn tick_weapons_arc_request(
             Option<&torpedo::TorpedoSystemResource>,
             Option<&WeaponsDoctrineAiPolicy>,
             Option<&crate::ship_state::ShipRedAlert>,
+            // The restraint lever (issue #1041). `Option` for the same reason
+            // as the alert beside it: a bare-`App` fixture spawns neither.
+            Option<&crate::ship_state::ShipWeaponsHold>,
             &mut WeaponsArcRequestState,
         ),
         With<crate::server_app::Ship>,
@@ -654,6 +759,7 @@ fn tick_weapons_arc_request(
         torpedo_opt,
         doctrine_opt,
         red_alert_opt,
+        weapons_hold_opt,
         mut state,
     ) in ship_q.iter_mut()
     {
@@ -792,8 +898,10 @@ fn tick_weapons_arc_request(
                 )
             })
             .unwrap_or(0);
-        let doctrine_facts =
-            seed_weapons_doctrine_facts(target_facing_shields, red_alert_opt.is_some_and(|r| r.0));
+        let doctrine_facts = seed_weapons_doctrine_facts(
+            target_facing_shields,
+            WeaponsAlertPosture::from_components(red_alert_opt, weapons_hold_opt),
+        );
         let flag_chain = crate::world::server::entity_flag_chain(
             origin_q.get(ship_entity).ok(),
             runtime.as_deref(),

@@ -1533,6 +1533,17 @@ pub enum SystemControlPayload {
     SetRedAlert {
         active: bool,
     },
+    /// Set the ship's **weapons hold** to an explicit desired value (issue
+    /// #1041). Targets `red-alert`, the same admitted-command target the alert
+    /// itself uses: one console control source governs the whole firing
+    /// posture, and every NPC whose Red Alert is already AI-provisioned can be
+    /// ordered to hold with no second capability to declare.
+    ///
+    /// Explicit like its sibling above, and for the same reason — the handler
+    /// assigns, so a retried, duplicated or stale-UI command is idempotent.
+    SetWeaponsHold {
+        held: bool,
+    },
     /// Set the throttle axis. Targets `helm-thrust` (issue #801).
     SetThrust {
         value: f32,
@@ -2782,6 +2793,11 @@ pub struct CaptainBlackboard {
     /// True when Red Alert is AI-controlled.
     #[serde(default)]
     pub red_alert_auto: bool,
+    /// Whether the ship is under a weapons hold (issue #1041) — the restraint
+    /// lever layered under the alert above, published on the same blackboard
+    /// because it is the same console's posture control.
+    #[serde(default)]
+    pub weapons_hold: bool,
     /// Stable system id for the Viewscreen coarse system.
     #[serde(default = "default_viewscreen_system_id")]
     pub viewscreen_system_id: SystemId,
@@ -2832,6 +2848,7 @@ impl Default for CaptainBlackboard {
             red_alert: false,
             red_alert_system_id: default_red_alert_system_id(),
             red_alert_auto: false,
+            weapons_hold: false,
             viewscreen_system_id: default_viewscreen_system_id(),
             viewscreen_auto: false,
             view_direction: String::new(),

@@ -32,20 +32,20 @@ use crate::world::script::schedule::{
 };
 use crate::world::script::{init_hashing_seed, MAX_OPS_PER_CALL};
 
-/// Unwrap a drained buffer to its `ActionCmd`s for the effect-only entry points
-/// ([`RuntimeHost::call_immediate`] and the dialogue path,
-/// [`RuntimeHost::try_call_returning`]).
+/// Unwrap a drained buffer to its `ActionCmd`s for [`RuntimeHost::call_immediate`]
+/// — the one effect-only entry point left.
 ///
 /// A name-resolving [`BufferedEffect::Action`] (`spawn_entity` / `add_objective`
 /// / `add_faction_enemy`) needs the live pipeline's dispatch context
-/// (`world::server::apply_script_commands`), which these entry points do not
-/// carry. The trigger-handler and callback paths that route effects through that
-/// context take the full [`CallEffects`] and never come here — but a comms
-/// DIALOGUE fn shares the one runtime engine, so an `on_pick` CAN buffer an
-/// `Action`. Rather than panic (a hard sim crash in dev AND release), drop it
-/// with a warning per the deny-by-default failure policy (decision 10); the
-/// immediate `Cmd` effects still apply in order. Routing dialogue effects
-/// through the live applier is the comms milestone's job (M7 follow-on).
+/// (`world::server::apply_script_commands`), which this entry point does not
+/// carry. Every path that can produce one routes the full [`CallEffects`] through
+/// that context instead: the trigger handlers, the callback drain, and — since
+/// the dialogue entry point became full-effects (issue #984) — comms dialogue
+/// fns. So reaching here with an `Action` means a simple caller (a test, or the
+/// trigger-parity helper) used `call_immediate` on a handler that needs the
+/// applier. Rather than panic (a hard sim crash in dev AND release), drop it with
+/// a warning per the deny-by-default failure policy (decision 10); the immediate
+/// `Cmd` effects still apply in order.
 fn resolved_cmds(effects: Vec<BufferedEffect>) -> Vec<crate::world::dispatch::ActionCmd> {
     effects
         .into_iter()
@@ -270,6 +270,13 @@ impl RuntimeHost {
     /// panic/discard policy: returns the error, and — on success — the call's
     /// effects plus the operation count it consumed (for the caller to charge to
     /// a budget). On error the buffers are dropped whole (never returned).
+    ///
+    /// The call's `Dynamic` return value is discarded: effects are collected
+    /// imperatively via the buffers, not from a return value. A caller that needs
+    /// it (a comms dialogue fn communicates its node that way) takes
+    /// [`try_call_returning`](RuntimeHost::try_call_returning), of which this is
+    /// exactly the value-dropping form — one body, so the two entry points cannot
+    /// drift in what they drain.
     pub fn try_call(
         &self,
         clock: &SchedClock,
@@ -279,6 +286,92 @@ impl RuntimeHost {
         base_flags: &FlagStore,
         extra: Map,
     ) -> Result<(CallEffects, u64), vellum_script::CallError> {
+        self.try_call_returning(clock, ast, path, fn_name, base_flags, extra)
+            .map(|(effects, _value, ops)| (effects, ops))
+    }
+
+    /// Run a scripted comms dialogue fn (issue #982, M4) under the tick's shared
+    /// `budget`, returning its full [`CallEffects`] AND the `Dynamic` it returned.
+    /// A dialogue-node fn returns a `#{message, responses}` map; a response
+    /// `on_pick` fn runs `ctx.effects.*`/`ctx.flags.*` and returns the follow-up
+    /// node map (or `()` for a terminal response). Both [`call`](RuntimeHost::call)
+    /// and [`try_call`](RuntimeHost::try_call) discard the return value (they
+    /// collect effects imperatively from the buffer), so a dialogue call needs its
+    /// own entry point to keep the returned node.
+    ///
+    /// Otherwise this is the [`call`](RuntimeHost::call) shape exactly (issue
+    /// #984): the same `budget.admit_call()` gate and `charge_ops` charge, so
+    /// dialogue calls count against the tick's aggregate caps like every other
+    /// script call; the same [`SchedClock`] stamping, so a dialogue fn's
+    /// `in_seconds`/`after` work is kept rather than silently dropped (a delayed
+    /// comms reply is authored as `ctx.schedule.after(n, …)`); and the same
+    /// settled-decision-10 failure policy — on a script error it **panics in dev**
+    /// (`debug_assertions`) and, in release, discards this call's effects whole,
+    /// logs, and returns `(empty, ())` so the game continues.
+    ///
+    /// A refused call returns empty effects and `()`, which is also what a
+    /// terminal dialogue fn with no effects returns. A caller that must tell the
+    /// player its response was dropped (issue #984 R5) therefore reads the budget
+    /// rather than the return value: every refusal leaves the budget
+    /// [`tripped`](TickBudget::tripped), so testing that BEFORE the call is the
+    /// cheap pre-flight gate the comms path uses.
+    pub fn call_dialogue(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        base_flags: &FlagStore,
+        extra: Map,
+    ) -> (CallEffects, rhai::Dynamic) {
+        if !budget.admit_call() {
+            // Dropped: the call cap is reached or the tick has already tripped.
+            return (CallEffects::default(), rhai::Dynamic::UNIT);
+        }
+        match self.try_call_returning(clock, ast, path, fn_name, base_flags, extra) {
+            Ok((effects, value, ops)) => {
+                budget.charge_ops(ops);
+                (effects, value)
+            }
+            Err(err) => {
+                // Charge the operations the failed call still consumed, exactly as
+                // `call` does, so a runaway dialogue fn counts against the tick.
+                budget.charge_ops(self.ops_counter.load(Ordering::Relaxed));
+                if cfg!(debug_assertions) {
+                    panic!("{err}");
+                }
+                // Plain helper with no log config in scope, so a bare `warn!`
+                // per AGENTS.md.
+                bevy::log::warn!(
+                    target: crate::logging::LogCat::World.target(),
+                    "{err}; discarding this dialogue call's effects"
+                );
+                (CallEffects::default(), rhai::Dynamic::UNIT)
+            }
+        }
+    }
+
+    /// Like [`try_call`](RuntimeHost::try_call) but KEEPS the call's `Dynamic`
+    /// result alongside its effects and operation count — a scripted dialogue fn
+    /// communicates its node through the return value, not the effect buffer
+    /// (issue #982, M4).
+    ///
+    /// Identical in every other respect (issue #984): the buffered effects come
+    /// back whole as [`BufferedEffect`]s, so a dialogue `on_pick`'s name-resolving
+    /// verb survives for the live applier to dispatch instead of being warn-dropped;
+    /// the schedule sink is drained against `clock` like every other call, so a
+    /// dialogue fn's deferred work is kept; and on error both buffers are dropped
+    /// whole, never returned.
+    pub fn try_call_returning(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        base_flags: &FlagStore,
+        extra: Map,
+    ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
         let sink = EffectSink::new();
         // Flags share the one ordered command buffer, so a flag write is emitted
         // in authored order, interleaved with effects (issue #981 hazard 2).
@@ -292,10 +385,9 @@ impl RuntimeHost {
 
         // Reset the op counter, then call. On error we return before draining
         // anything, so the effect buffer and the schedule buffer are dropped
-        // whole. The returned `Dynamic` is discarded: effects are collected
-        // imperatively via the buffers, not from a return value.
+        // whole.
         self.ops_counter.store(0, Ordering::Relaxed);
-        let _ = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
+        let value = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
         let ops = self.ops_counter.load(Ordering::Relaxed);
 
         // `sink` already carries effects and flag writes in authored order.
@@ -307,91 +399,9 @@ impl RuntimeHost {
                 delayed,
                 callbacks,
             },
+            value,
             ops,
         ))
-    }
-
-    /// Run a scripted comms dialogue fn (issue #982, M4), returning its buffered
-    /// effects — the M1 [`ActionCmd`](crate::world::dispatch::ActionCmd) boundary —
-    /// AND the `Dynamic` it returned. A dialogue-node fn returns a `#{message,
-    /// responses}` map; a response `on_pick` fn runs `ctx.effects.*`/`ctx.flags.*`
-    /// and returns the follow-up node map (or `()` for a terminal response). Both
-    /// [`call`](RuntimeHost::call) and [`try_call`](RuntimeHost::try_call) discard
-    /// the return value (they collect effects imperatively from the buffer), so a
-    /// dialogue call needs its own entry point to keep the returned node.
-    ///
-    /// Uses a fresh per-tick budget and the zero clock, and applies the
-    /// settled-decision-10 failure policy: on a script error it **panics in dev**
-    /// (`debug_assertions`) and, in release, discards this call's effects whole,
-    /// logs, and returns `(empty, ())` so the game continues. Any deferred work a
-    /// dialogue fn scheduled is dropped (dialogue fns schedule none in M4).
-    pub fn call_dialogue(
-        &self,
-        ast: &AST,
-        path: &str,
-        fn_name: &str,
-        base_flags: &FlagStore,
-        extra: Map,
-    ) -> (Vec<crate::world::dispatch::ActionCmd>, rhai::Dynamic) {
-        match self.try_call_returning(ast, path, fn_name, base_flags, extra) {
-            Ok((commands, value, _ops)) => (commands, value),
-            Err(err) => {
-                if cfg!(debug_assertions) {
-                    panic!("{err}");
-                }
-                // Plain helper with no log config in scope, so a bare `warn!`
-                // per AGENTS.md.
-                bevy::log::warn!(
-                    target: crate::logging::LogCat::World.target(),
-                    "{err}; discarding this dialogue call's effects"
-                );
-                (Vec::new(), rhai::Dynamic::UNIT)
-            }
-        }
-    }
-
-    /// Like [`try_call`](RuntimeHost::try_call) but returns the call's `Dynamic`
-    /// result alongside its immediate effects and operation count — a scripted
-    /// dialogue fn communicates its node through the return value, not the effect
-    /// buffer (issue #982, M4). On error the buffers are dropped whole (never
-    /// returned), exactly as `try_call` does. Deferred/callback work is discarded
-    /// (dialogue fns schedule none in M4).
-    pub fn try_call_returning(
-        &self,
-        ast: &AST,
-        path: &str,
-        fn_name: &str,
-        base_flags: &FlagStore,
-        extra: Map,
-    ) -> Result<
-        (Vec<crate::world::dispatch::ActionCmd>, rhai::Dynamic, u64),
-        vellum_script::CallError,
-    > {
-        let sink = EffectSink::new();
-        // Flags share the one ordered command buffer, so a flag write is emitted
-        // in authored order, interleaved with effects (issue #981 hazard 2).
-        let flags = Flags::new(base_flags, sink.clone());
-
-        let mut ctx = extra;
-        ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
-        ctx.insert("flags".into(), rhai::Dynamic::from(flags));
-        // Inserted for ctx uniformity (a dialogue fn may reference `ctx.schedule`);
-        // it is never drained — dialogue fns schedule no deferred work in M4, so
-        // any `in_seconds`/`after` a dialogue fn buffered is dropped with it.
-        ctx.insert("schedule".into(), rhai::Dynamic::from(ScheduleSink::new()));
-
-        self.ops_counter.store(0, Ordering::Relaxed);
-        // On error we return before draining, so the effect buffer is dropped
-        // whole. Unlike `try_call`, the returned `Dynamic` is KEPT — it carries
-        // the dialogue node the fn returned.
-        let value = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
-        let ops = self.ops_counter.load(Ordering::Relaxed);
-        // A dialogue `on_pick` routes through the M1 `ActionCmd` boundary (comms
-        // module docs), so the drained buffer is all `Cmd`s here.
-        let commands = resolved_cmds(sink.take());
-        // Deferred work is dropped on the success path too (dialogue fns schedule
-        // none in M4); `schedule` is simply not drained.
-        Ok((commands, value, ops))
     }
 
     /// Convenience for callers wanting only a call's immediate effects, unwrapped
@@ -489,13 +499,13 @@ mod tests {
         );
     }
 
-    /// Issue #984 review: a comms dialogue fn shares the one runtime engine, so it
-    /// CAN call a name-resolving verb (`add_faction_enemy`). The effect-only
-    /// dialogue drain carries no dispatch context, so it must DROP the buffered
-    /// `Action` with a warning (settled decision 10) — NOT `unreachable!`-panic.
-    /// The immediate `Cmd` effects authored alongside it still apply, in order.
+    /// Issue #984: a comms dialogue fn shares the one runtime engine, so it CAN
+    /// call a name-resolving verb (`add_faction_enemy`). The dialogue entry point
+    /// now returns the full `CallEffects`, so that `Action` SURVIVES in authored
+    /// order for the live applier to dispatch — it is no longer warn-dropped
+    /// (which silently lost an authored effect).
     #[test]
-    fn dialogue_path_drops_a_name_resolving_effect_instead_of_panicking() {
+    fn dialogue_path_keeps_a_name_resolving_effect_for_the_live_applier() {
         let host = RuntimeHost::new();
         let ast = host
             .engine()
@@ -507,16 +517,120 @@ mod tests {
                 }"#,
             )
             .expect("compiles");
-        let (cmds, _node, _ops) = host
-            .try_call_returning(&ast, "t.rhai", "node", &FlagStore::new(), Map::new())
+        let (effects, _node, _ops) = host
+            .try_call_returning(
+                &SchedClock::ZERO,
+                &ast,
+                "t.rhai",
+                "node",
+                &FlagStore::new(),
+                Map::new(),
+            )
             .expect("the dialogue call must not error");
-        // The `Cmd` survives; the name-resolving `Action` was dropped, not applied.
         assert_eq!(
-            cmds,
-            vec![ActionCmd::CompleteObjective {
-                id: "a".to_string()
-            }]
+            effects.commands,
+            vec![
+                BufferedEffect::Cmd(ActionCmd::CompleteObjective {
+                    id: "a".to_string()
+                }),
+                BufferedEffect::Action(TriggerAction::AddFactionEnemy {
+                    faction: "Harrow".to_string(),
+                    enemy: "Federation".to_string(),
+                }),
+            ],
+            "a dialogue fn's name-resolving effect must reach the applier, in \
+             authored order alongside the resolved ones"
         );
+    }
+
+    /// Issue #984: a dialogue fn's `ctx.schedule.after(..)` used to be dropped on
+    /// the floor (the entry point never drained the schedule sink), which is what
+    /// a DELAYED scripted comms reply is authored as. It must now surface as a
+    /// stamped callback like any other call's.
+    #[test]
+    fn dialogue_path_keeps_scheduled_callbacks() {
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(
+                r#"fn on_pick(ctx) {
+                    ctx.schedule.after(5, |ctx| { ctx.effects.complete_objective("later"); });
+                    ctx.schedule.in_seconds(10).fail_objective("timeout");
+                    #{ message: "Stand by.", responses: [] }
+                }"#,
+            )
+            .expect("compiles");
+        let clk = clock();
+        let (effects, node, _ops) = host
+            .try_call_returning(
+                &clk,
+                &ast,
+                "t.rhai",
+                "on_pick",
+                &FlagStore::new(),
+                Map::new(),
+            )
+            .expect("the dialogue call must not error");
+        assert!(!node.is_unit(), "the node map still comes back");
+        assert_eq!(effects.callbacks.len(), 1, "the deferred callback survives");
+        assert_eq!(effects.callbacks[0].fire_tick, 300 + 5 * 60);
+        assert_eq!(effects.callbacks[0].script_path, "t.rhai");
+        assert_eq!(effects.delayed.len(), 1, "the delayed effect survives too");
+        assert_eq!(effects.delayed[0].fire_at_elapsed, 15.0);
+    }
+
+    /// Issue #984: dialogue calls join the tick's SHARED budget (they used to be
+    /// entirely unbudgeted). A refused call is dropped whole — no effects, no
+    /// node — exactly as `call` drops a refused handler.
+    #[test]
+    fn dialogue_call_charges_and_obeys_the_shared_budget() {
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(
+                r#"fn node(ctx) {
+                    ctx.effects.complete_objective("a");
+                    #{ message: "Go ahead.", responses: [] }
+                }"#,
+            )
+            .expect("compiles");
+        let mut budget = TickBudget::new();
+        let (effects, node) = host.call_dialogue(
+            &mut budget,
+            &SchedClock::ZERO,
+            &ast,
+            "t.rhai",
+            "node",
+            &FlagStore::new(),
+            Map::new(),
+        );
+        assert_eq!(effects.commands.len(), 1);
+        assert!(!node.is_unit());
+        assert_eq!(budget.calls_used(), 1, "a dialogue call takes a call slot");
+        assert!(budget.ops_used() > 0, "and charges its operations");
+
+        // Exhaust the call cap, then a dialogue call is refused cleanly: empty
+        // effects, a unit return, and the buffered effects discarded.
+        for _ in 0..crate::world::script::MAX_CALLS_PER_TICK {
+            budget.admit_call();
+        }
+        let (refused, node) = host.call_dialogue(
+            &mut budget,
+            &SchedClock::ZERO,
+            &ast,
+            "t.rhai",
+            "node",
+            &FlagStore::new(),
+            Map::new(),
+        );
+        assert!(
+            refused.commands.is_empty()
+                && refused.delayed.is_empty()
+                && refused.callbacks.is_empty(),
+            "a dialogue call over the cap is dropped whole"
+        );
+        assert!(node.is_unit(), "and returns no node");
+        assert!(budget.tripped(), "the refusal leaves the budget tripped");
     }
 
     #[test]

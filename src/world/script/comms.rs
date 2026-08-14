@@ -56,9 +56,9 @@
 
 use rhai::{Dynamic, Map};
 
-use crate::world::dispatch::ActionCmd;
 use crate::world::flags::FlagStore;
 use crate::world::script::engine::RuntimeHost;
+use crate::world::script::schedule::{CallEffects, SchedClock, TickBudget};
 
 /// One response option in a scripted dialogue node — the script analogue of a
 /// [`CommsResponse`](crate::world::config::CommsResponse).
@@ -149,8 +149,9 @@ fn read_response(value: Dynamic, index: usize) -> Result<ScriptDialogueResponse,
     })
 }
 
-/// Enter a dialogue node: run the fn named `fn_name` and materialize both the
-/// effects it buffered (the M1 `ActionCmd` boundary) and the node it returned.
+/// Enter a dialogue node: run the fn named `fn_name` and materialize both
+/// everything it produced ([`CallEffects`] — immediate effects in authored
+/// order, delayed effects, deferred callbacks) and the node it returned.
 ///
 /// This is the single operation behind BOTH "show the root node" (call the root
 /// fn; it buffers no effects and returns the node to display) and "pick response
@@ -158,29 +159,78 @@ fn read_response(value: Dynamic, index: usize) -> Result<ScriptDialogueResponse,
 /// returns the follow-up node, or `None` for a terminal response). The returned
 /// `commands` are exactly what the declarative TOML path would dispatch for the
 /// same choice — see the module docs.
+///
+/// `budget` is the caller's per-tick [`TickBudget`] (the live path threads the
+/// tick's shared one, so a dialogue call counts against the same aggregate caps
+/// every other script call does) and `clock` stamps any deferred work the fn
+/// scheduled — a delayed comms reply is authored as
+/// `ctx.schedule.after(n, |ctx| …)`, so both are load-bearing rather than
+/// ceremonial.
 pub fn enter_node(
     host: &RuntimeHost,
+    budget: &mut TickBudget,
+    clock: &SchedClock,
     ast: &rhai::AST,
     path: &str,
     fn_name: &str,
     base_flags: &FlagStore,
-) -> Result<(Vec<ActionCmd>, Option<ScriptDialogueNode>), String> {
-    let (commands, value) = host.call_dialogue(ast, path, fn_name, base_flags, Map::new());
+) -> Result<(CallEffects, Option<ScriptDialogueNode>), String> {
+    let (effects, value) =
+        host.call_dialogue(budget, clock, ast, path, fn_name, base_flags, Map::new());
     let node = read_dialogue_node(value)?;
-    Ok((commands, node))
+    Ok((effects, node))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::world::config::parse_world;
-    use crate::world::dispatch::{dispatch_action, DispatchContext};
+    use crate::world::dispatch::{dispatch_action, ActionCmd, DispatchContext};
+    use crate::world::script::effects::BufferedEffect;
     use crate::world::script::engine::RuntimeHost;
     use crate::world::script::load::compile_scripts;
     use std::collections::HashMap;
     use vellum_script::ScriptSource;
 
     const PATH: &str = "w.toml#script.axiom";
+
+    /// Enter a node with a fresh budget and the zero clock — the unit-test shape.
+    /// The live path (the M7 collapse) threads the tick's shared budget and its
+    /// real clock instead; nothing here schedules deferred work.
+    fn enter(
+        host: &RuntimeHost,
+        ast: &rhai::AST,
+        fn_name: &str,
+        flags: &FlagStore,
+    ) -> Result<(CallEffects, Option<ScriptDialogueNode>), String> {
+        let mut budget = TickBudget::new();
+        enter_node(
+            host,
+            &mut budget,
+            &SchedClock::ZERO,
+            ast,
+            PATH,
+            fn_name,
+            flags,
+        )
+    }
+
+    /// The `ActionCmd`s a dialogue call produced, for comparison against the
+    /// declarative dispatch. Panics on a name-resolving [`BufferedEffect::Action`]:
+    /// these fixtures author only resolved verbs, so an `Action` here would mean
+    /// the parity comparison had silently changed shape.
+    fn cmds(effects: &CallEffects) -> Vec<ActionCmd> {
+        effects
+            .commands
+            .iter()
+            .map(|e| match e {
+                BufferedEffect::Cmd(cmd) => cmd.clone(),
+                BufferedEffect::Action(action) => {
+                    panic!("parity fixture buffered a name-resolving action: {action:?}")
+                }
+            })
+            .collect()
+    }
 
     /// Compile one inline script unit and return `(compiled asts keyed by PATH)`.
     fn compile(source: &str) -> rhai::AST {
@@ -239,8 +289,11 @@ mod tests {
             "#,
         );
         let host = RuntimeHost::new();
-        let (effects, node) = enter_node(&host, &ast, PATH, "root", &FlagStore::new()).unwrap();
-        assert!(effects.is_empty(), "a root node fn buffers no effects");
+        let (effects, node) = enter(&host, &ast, "root", &FlagStore::new()).unwrap();
+        assert!(
+            effects.commands.is_empty(),
+            "a root node fn buffers no effects"
+        );
         let node = node.expect("root returns a node");
         assert_eq!(node.message, "Go ahead.");
         assert_eq!(
@@ -264,9 +317,9 @@ mod tests {
     fn a_terminal_response_fn_returns_none() {
         let ast = compile(r#"fn done(ctx) { ctx.effects.complete_objective("obj"); }"#);
         let host = RuntimeHost::new();
-        let (effects, node) = enter_node(&host, &ast, PATH, "done", &FlagStore::new()).unwrap();
+        let (effects, node) = enter(&host, &ast, "done", &FlagStore::new()).unwrap();
         assert_eq!(
-            effects,
+            cmds(&effects),
             vec![ActionCmd::CompleteObjective { id: "obj".into() }]
         );
         assert!(node.is_none(), "a fn returning () is a terminal response");
@@ -276,7 +329,7 @@ mod tests {
     fn a_node_with_no_responses_materializes_empty() {
         let ast = compile(r#"fn root(ctx) { #{ message: "One-way broadcast.", responses: [] } }"#);
         let host = RuntimeHost::new();
-        let (_e, node) = enter_node(&host, &ast, PATH, "root", &FlagStore::new()).unwrap();
+        let (_e, node) = enter(&host, &ast, "root", &FlagStore::new()).unwrap();
         let node = node.expect("returns a node");
         assert_eq!(node.message, "One-way broadcast.");
         assert!(node.responses.is_empty());
@@ -288,7 +341,7 @@ mod tests {
         // a panic — it is an authoring shape error, not a script runtime error.
         let ast = compile(r#"fn root(ctx) { 42 }"#);
         let host = RuntimeHost::new();
-        let err = enter_node(&host, &ast, PATH, "root", &FlagStore::new()).unwrap_err();
+        let err = enter(&host, &ast, "root", &FlagStore::new()).unwrap_err();
         assert!(err.contains("message"), "{err}");
     }
 
@@ -319,8 +372,8 @@ mod tests {
         let host = RuntimeHost::new();
         let flags = FlagStore::new();
 
-        let (root_effects, root) = enter_node(&host, &ast, PATH, "hail_axiom", &flags).unwrap();
-        assert!(root_effects.is_empty());
+        let (root_effects, root) = enter(&host, &ast, "hail_axiom", &flags).unwrap();
+        assert!(root_effects.commands.is_empty());
         let root = root.expect("root returns a node");
         assert_eq!(root.responses.len(), 2);
 
@@ -356,28 +409,28 @@ mod tests {
         // For EACH choice, the scripted `on_pick` effects == the TOML response
         // actions dispatched.
         for i in 0..2 {
-            let (scripted_cmds, follow) =
-                enter_node(&host, &ast, PATH, &root.responses[i].on_pick, &flags).unwrap();
+            let (scripted, follow) = enter(&host, &ast, &root.responses[i].on_pick, &flags).unwrap();
             assert!(follow.is_none(), "response {i} is terminal");
             let toml_cmds = dispatch_toml(&toml_node.responses[i].actions);
             assert_eq!(
-                scripted_cmds, toml_cmds,
+                cmds(&scripted),
+                toml_cmds,
                 "choice {i}: scripted and TOML must emit identical ActionCmds"
             );
         }
 
         // And the concrete expected sequences, so this pins behaviour not just
         // equality-to-itself.
-        let (ack, _) = enter_node(&host, &ast, PATH, "on_ack", &flags).unwrap();
+        let (ack, _) = enter(&host, &ast, "on_ack", &flags).unwrap();
         assert_eq!(
-            ack,
+            cmds(&ack),
             vec![ActionCmd::CompleteObjective {
                 id: "reach_axiom".into()
             }]
         );
-        let (decline, _) = enter_node(&host, &ast, PATH, "on_decline", &flags).unwrap();
+        let (decline, _) = enter(&host, &ast, "on_decline", &flags).unwrap();
         assert_eq!(
-            decline,
+            cmds(&decline),
             vec![ActionCmd::FailObjective {
                 id: "reach_axiom".into()
             }]
@@ -409,14 +462,16 @@ mod tests {
         let flags = FlagStore::new();
 
         // Pick the root's only response → effects + a follow-up node.
-        let (wait_cmds, follow) = enter_node(&host, &ast, PATH, "on_wait", &flags).unwrap();
+        let (wait_effects, follow) = enter(&host, &ast, "on_wait", &flags).unwrap();
+        let wait_cmds = cmds(&wait_effects);
         let follow = follow.expect("on_wait returns a follow-up node");
         assert_eq!(follow.message, "Patched through.");
         assert_eq!(follow.responses.len(), 1);
 
         // Pick the follow-up's response → its effects.
-        let (confirm_cmds, tail) =
-            enter_node(&host, &ast, PATH, &follow.responses[0].on_pick, &flags).unwrap();
+        let (confirm_effects, tail) =
+            enter(&host, &ast, &follow.responses[0].on_pick, &flags).unwrap();
+        let confirm_cmds = cmds(&confirm_effects);
         assert!(tail.is_none());
 
         // ---- TOML equivalent: nested response.follow_up. ----
@@ -483,9 +538,10 @@ mod tests {
             "#,
         );
         let host = RuntimeHost::new();
-        let (cmds, _) = enter_node(&host, &ast, PATH, "on_pick", &FlagStore::new()).unwrap();
+        let (effects, _) = enter(&host, &ast, "on_pick", &FlagStore::new()).unwrap();
+        let scripted = cmds(&effects);
         assert_eq!(
-            cmds,
+            scripted,
             vec![
                 ActionCmd::MutateFlag {
                     target_layer: None,
@@ -523,6 +579,6 @@ mod tests {
         )
         .expect("world parses");
         let toml_cmds = dispatch_toml(&cfg.comms[0].node.responses[0].actions);
-        assert_eq!(cmds, toml_cmds);
+        assert_eq!(scripted, toml_cmds);
     }
 }

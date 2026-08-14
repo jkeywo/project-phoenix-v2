@@ -364,11 +364,13 @@ mod tests {
                 condition: Some(100.0),
                 capacities: vec![
                     CapacityConfig {
+                        ceiling: None,
                         id: "berths".into(),
                         amount: 4,
                         label: Some("world.skyhook.berths.label".into()),
                     },
                     CapacityConfig {
+                        ceiling: None,
                         id: "throughput".into(),
                         amount: 900,
                         label: None,

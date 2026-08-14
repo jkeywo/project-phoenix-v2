@@ -579,7 +579,72 @@ fn on_honour(ctx) { ctx.commitments.keep("safe_passage"); }
 * Reads inside one handler see that handler's own writes.
 * `made_to` is stored exactly as you write it and is never resolved to an
   entity. A promise is made to a *party* — a faction, a committee, a person —
-  and it outlives the hull you were talking to.
+  and it outlives the hull you were talking to. If the party you name *is* an
+  entity in this world, name it by its `[[entity]] id` and the promise appears
+  on that subject's dossier (§1.10).
+
+
+### 1.10 Dossiers: what the crew know about a subject
+
+A **dossier** is the intelligence file on one subject, rendered as a list plus a
+fact sheet on the destroyer's tactical console (the Intel overlay). There is no
+`[dossier]` block and nothing to declare: the whole thing is projected, every
+tick, from state you author elsewhere.
+
+**Who gets a dossier.** A subject is any entity the crew *already* have an
+authoritative surface on — one of exactly two doors:
+
+* it is on the hail roster (`[comms] hailable = true`), or
+* it publishes an infrastructure condition track (`[infrastructure] publish =
+  true`, which is the default).
+
+That is the whole rule, and it is deliberate: there is no way to declare that
+the crew hold a file on something they have no other means of observing. A
+subject with nothing known about it still gets a sheet — an *empty* file is a
+different thing from a missing one, and the panel says so in as many words.
+
+**What lands on the sheet.**
+
+| Row | Comes from |
+| --- | --- |
+| the name, and the line under it | the entity's `name` and its `[target] description` |
+| affiliation | the subject's faction, via that faction's `display_name` |
+| in hailing range | the live comms roster |
+| condition | `[infrastructure]`, **only** when `publish = true` |
+| an operational flag | `[[infrastructure.threshold]]`, only when it has a `label` |
+| a capacity | `[[infrastructure.capacity]]`, only when it has a `label` |
+| a promise | a commitment whose `made_to` is this entity's `[[entity]] id` |
+
+**Two things are kept off it by construction.**
+
+1. `[infrastructure] publish = false` keeps a structure's condition off the wire
+   and therefore off its dossier — the projection never holds the number at all.
+   Use it for the record a mission is keeping back. The structure itself still
+   appears if it is hailable; only the condition is absent.
+2. A flag or capacity `id` is a machine name in *your* namespace and is never
+   shown as prose. Author a `label` — a `strings.csv` id — beside it when the
+   crew should be able to read it:
+
+```toml
+[[infrastructure.capacity]]
+id     = "depot_berths"
+amount = 4
+label  = "world.fs.capacity.berths.label"   # shown; without this, script-only
+
+[[infrastructure.threshold]]
+flag        = "depot_transfer_capable"
+fails_below = 0.4
+label       = "world.fs.threshold.transfer.label"
+```
+
+A faction's crew-facing name works the same way: `assets/factions/*.toml` takes
+an optional `display_name` beside its `name`. `name` stays the reference key
+that `add_faction_enemy` and entity templates use; `display_name` is a
+`strings.csv` id and the only string a player ever sees. A faction with no
+`display_name` simply has no affiliation row.
+
+See `assets/worlds/probe_dossier.toml` for all of the above in one world,
+including the structure whose condition is withheld.
 
 ### Example — a world, end to end
 

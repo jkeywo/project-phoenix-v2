@@ -7171,7 +7171,10 @@ fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
 
     // THE PROMISE, on the sheet of the party it was made to and nobody else's.
     let committee = by_name("world.probe_dossier.entity.strike_committee.name");
-    assert_eq!(labels(&committee), vec![FACT_FACTION, FACT_COMMS, FACT_COMMITMENT_OPEN]);
+    assert_eq!(
+        labels(&committee),
+        vec![FACT_FACTION, FACT_COMMS, FACT_COMMITMENT_OPEN]
+    );
     assert_eq!(
         committee.facts[2].value,
         DossierValue::Text("world.probe_dossier.commitment.safe_passage.terms".into()),

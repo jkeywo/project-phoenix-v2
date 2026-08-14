@@ -3298,7 +3298,8 @@ pub struct DossierBlackboard {
     /// Every subject the crew holds a dossier on, in UUID order. Empty for a
     /// world with no hailable entities and no published structures — which is
     /// most of them, so those worlds publish exactly the payload they did
-    /// before this existed.
+    /// before this existed. `combat_test` and `default` are the two that do not:
+    /// both field the hailable Starbase Alpha, so both gain a one-subject list.
     #[serde(default)]
     pub subjects: Vec<DossierSnapshot>,
 }

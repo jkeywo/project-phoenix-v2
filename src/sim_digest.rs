@@ -1288,6 +1288,7 @@ mod tests {
             let mut world = fold_world();
             let config = crate::infrastructure::InfrastructureConfig {
                 capacities: vec![crate::infrastructure::CapacityConfig {
+                    label: None,
                     id: "berths".to_string(),
                     amount: level,
                     ceiling: Some(40),

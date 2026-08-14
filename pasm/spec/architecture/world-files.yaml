@@ -307,6 +307,71 @@ entities:
         - ActiveOperationSnapshot
         - CapabilityOffer
       tests: [cargo test, npx vitest run]
+
+  - component: dossier-projection
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Dossier Projection
+      summary: Folds what a crew knows about one subject - its identity and authored description, its faction's crew-facing label, its standing on the hail roster, its PUBLISHED infrastructure condition, and the promises made to it - into a per-subject view, fresh every tick, and publishes the whole set on the local ship's intelligence channel. Owns no state; every fact is a projection of state some other subsystem already holds.
+      rationale:
+        - "[ai] HIDDEN TRUTH IS EXCLUDED STRUCTURALLY, not filtered. The mission this exists for turns on an official record that contradicts the structure it describes, so a leak here is not a cosmetic bug. The pure input port (DossierSubject) has a field for each of the five surfaces above and no field for anything else, so a withheld disposition, an unrevealed spawn, or a flag mirrored nowhere the crew can see has nowhere to go; adding one is a visible diff next to the paragraph forbidding it. The condition input arrives as InfrastructureSnapshot, which #1025's from_state returns None for when publish = false, so a structure kept off the wire is one the projection never HOLDS the condition of."
+        - "[ai] The claim is tested from both ends. The pure module asserts the fact list; codec.rs asserts the serialised payload's WHOLE KEY SET, which is what 'structurally absent rather than filtered at render time' can mean in a language with no reflection - a field a secret could ride in would have to be added there, moving that test. The probe world then walks every fact of every subject on the PUBLISHED payload looking for the withheld number."
+        - "[ai] LABELS ARE THE SECOND GATE. A published operational flag or capacity is a machine name in the author's namespace - #1025 says exactly that on both fields - so it becomes a fact-sheet row only where the scenario also authored a strings.csv label beside it. Published DATA that is not published PROSE stays a number a script predicate reads and a console never shows. Optional label fields on CapacityConfig and ThresholdConfig are the whole mechanism, and check-strings already enforces that an authored label is an id rather than English."
+        - "[ai] THE SUBJECT ROSTER IS DERIVED, not authored: an entity is a subject when the crew ALREADY has an authoritative surface on it - it is hailable (#985) or it publishes a condition track (#1025). A third, dossier-only opt-in was rejected: it would be a way to declare that the crew hold a file on something they have no other means of observing, which is the exact shape of leak this component exists to prevent. It also means no new component, no save field and no census entry."
+        - "[ai] Ships, stations and structures reach the roster through those same two doors, so per-kind coverage is a property of the world rather than of a list in Rust."
+        - "[ai] A promise lands on the sheet of the party it was made to, matched on the world's [[entity]] id - the way #1029 records a party. Not a UUID, which that module refuses because a promise outlives the hull it was made to; not a display name, which is a string id for a translator. A promise made to a party that is not an entity in this world lands on no dossier, which is honest: there is no sheet to put it on."
+        - "[ai] Subjects are walked in UUID order, never archetype order, so two hosts publish the same list and the rows do not move under an operator's finger."
+        - "[ai] The comms standing is read off CommsRuntime's live roster rather than recomputed from transforms: two readouts of the same range check on two cadences is how a contact list and a dossier come to disagree about whether somebody can be called."
+    architecture:
+      kind: subsystem
+      authority: derived
+      owns: [dossier-published-state]
+      reads: [infrastructure-condition-state, world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/dossier/projection.rs
+        - src/dossier/server.rs
+      symbols:
+        - DossierSubject
+        - SubjectCondition
+        - SHARED_FACT_LABELS
+        - project
+        - DossierPlugin
+        - publish_dossier_blackboard
+        - DOSSIER_BLACKBOARD_KEY
+      tests: [cargo test]
+
+  - state: dossier-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Published Dossier State
+      summary: The client-visible intelligence picture - one dossier per subject, carrying the subject's uuid, its name and description string ids, its baseline known facts as labelled typed values, and the (as yet always empty) list of gathered evidence. Published every tick under a reserved blackboard channel key, on the LOCAL ship only.
+      rationale:
+        - "[ai] NOT FOLDED, and nothing to snapshot. Every field is a projection of state another subsystem owns and already folds, or already declines to: the condition track, the commitments ledger, the comms roster, the faction registry, the entity's own name. Folding the projection would fold those numbers twice, and persisting it would let a save disagree with the state it was derived from. This slice therefore adds no snapshot fields and no census entries - a dossier is a view, and the answer to 'what does #863 persist here' is 'nothing, on purpose'."
+        - "[ai] A SystemBlackboard variant under a reserved CHANNEL key, in the same not-a-system-id bucket as operations: nothing aboard the ship owns a dossier, nothing repairs it, and no ControlSystem message may target it. Local ship only - an NPC's dossiers would be a second copy of the same world picture with no console to render it on."
+        - "[ai] A fact's value is TAGGED (text / fraction / count / flag) rather than pre-formatted on the host, because a percentage, a count and a yes/no read differently on screen and the string table is the client's to resolve. A kind the client does not know renders as nothing rather than as garbage - the failure a pre-formatted string would have hidden."
+        - "[ai] The evidence list ships EMPTY and is issue #1031's to append to. It is carried from this slice so that one adds entries rather than reshaping the payload, the console fold and the panel behind it; the panel already renders the block, separated from the baseline facts and ABSENT rather than empty until something is in it."
+        - "[ai] Empty is a valid dossier and a DIFFERENT thing from a missing one. A crew who open a file and find nothing on it have learned something; a subject that silently never appears in the list has told them nothing. The panel says so in as many words rather than showing a bare name."
+        - "[ai] Empty for every world that ships no hailable entity and no published structure, which is most of them. The two worlds that DO field one (combat_test and default both spawn the hailable Starbase Alpha) gain a one-subject list - a real payload change, and a deliberate one. It moves no digest, because a blackboard is not folded; the anchors were measured to confirm that rather than assumed."
+    architecture:
+      classification: client-projection
+      owner: dossier-projection
+      writers: [dossier-projection]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/components/ph-dossier-panel.js, gui/destroyer/tactical.html]
+      symbols:
+        - DossierBlackboard
+        - DossierSnapshot
+        - DossierFactSnapshot
+        - DossierValue
+        - DossierEvidenceSnapshot
+      tests: [cargo test, npx vitest run]
+
   - component: world-trigger-evaluator
     core:
       status: implemented

@@ -352,6 +352,23 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // `src/world/commitments.rs`, and
     // pasm/spec/architecture/scenario-scripting.yaml's `commitment-ledger-state`
     // entity for the `implementation.symbols` naming those Rust types.
+    //
+    // Issue #1030's dossiers add nothing here either, and for a stronger reason
+    // than either of the two above: they add no STATE at all, anywhere. A dossier
+    // is a projection folded fresh every tick out of state other subsystems
+    // already own — the condition track, the commitments ledger, the comms
+    // roster, the faction registry, an entity's own name — so there is nothing to
+    // register, nothing to fold (folding it would fold those numbers twice) and
+    // nothing for #863 to persist (a save carrying it could disagree with the
+    // state it was derived from). `DossierPlugin` adds one publisher system and
+    // no resource; the subject roster is DERIVED from `CommsHailable` and
+    // `InfrastructureCondition` rather than authored into a component of its own,
+    // which was a deliberate rejection — see the module docs in
+    // `src/dossier/server.rs` — and is what leaves this list untouched. The wire
+    // types (`DossierBlackboard` and friends) are plain message structs with no
+    // `#[derive(Component)]`/`#[derive(Resource)]`, so like `EntitySnapshot` they
+    // can never appear in the registry this guard scans. See
+    // pasm/spec/architecture/world-files.yaml's `dossier-published-state` entity.
     "RawWorldSource", "WorldScriptRuntime",
 ];
 

@@ -1940,6 +1940,7 @@ mod tests {
     fn depot(capacity: &str, level: i64, ceiling: i64) -> InfrastructureCondition {
         InfrastructureCondition(InfrastructureState::from_config(&InfrastructureConfig {
             capacities: vec![CapacityConfig {
+                label: None,
                 id: capacity.to_string(),
                 amount: level,
                 ceiling: Some(ceiling),

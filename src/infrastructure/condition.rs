@@ -188,6 +188,11 @@ pub struct ResolvedCapacity {
     pub level: i64,
     /// The most it can hold.
     pub ceiling: i64,
+    /// `strings.csv` id for a crew-facing label, carried through from
+    /// [`CapacityConfig::label`] so the dossier projection (issue #1030) reads
+    /// the LIVE capacity without a side-trip back to the authored table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl ResolvedCapacity {
@@ -457,6 +462,7 @@ impl InfrastructureState {
                     // what the depot holds", and that reading has to keep
                     // working unchanged.
                     ceiling: c.ceiling.unwrap_or(c.amount).max(c.amount),
+                    label: c.label.clone(),
                 })
                 .collect(),
             last_hull: None,

@@ -238,6 +238,25 @@ pub enum ActionCmd {
         id: String,
         mutation: crate::world::workforce::WorkforceMutation,
     },
+    /// Order the named ship to hold or release its fire (issue #1041).
+    ///
+    /// `entity` is the world's authored entity NAME, resolved by the applier
+    /// against `WorldContentRuntime::name_to_uuid` for the reason every other
+    /// name-carrying command here is, and queued rather than applied on the
+    /// spot because the applier holds that map and no entity query at all.
+    ///
+    /// The mirror flag is **not** written here, and this is where the shape
+    /// parts company with [`Self::SetWorkforceState`]: a weapons hold has a
+    /// second author — the ship's own captain, human or AI, through the
+    /// admitted `SetWeaponsHold` command — so the flag is mirrored off the
+    /// authoritative component every tick by the one system that owns the
+    /// mirror, and a scenario's order gets the same `FlagSet`/`FlagCleared`
+    /// transition a captain's press does. A flag written here would have been
+    /// written for the scenario's orders and silently absent for the crew's.
+    SetWeaponsHold {
+        entity: String,
+        held: bool,
+    },
     /// Order the named civilian to hold, divert or dock (issue #1028).
     ///
     /// `entity` is the world's authored entity NAME, not a UUID, and the applier

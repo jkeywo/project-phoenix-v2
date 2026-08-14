@@ -195,6 +195,17 @@ pub struct WorldContentRuntime {
     /// effect writing the component directly would skip the acknowledgement the
     /// crew is meant to watch for.
     pub pending_civilian_orders: Vec<crate::civilian::PendingCivilianOrder>,
+    /// Weapons-hold orders queued this tick by a scripted `hold_fire` /
+    /// `release_fire` effect (issue #1041), as `(ship uuid, held)`, already
+    /// resolved from the authored entity name.
+    ///
+    /// Drained every tick by
+    /// [`crate::captain_plugin::apply_scripted_weapons_holds`] in
+    /// `SimSet::Modifiers`, so it is empty at every tick boundary — including
+    /// the one a snapshot is taken at. Queued rather than applied where it is
+    /// authored for the reason every name-carrying command here is: the applier
+    /// holds `name_to_uuid` and no entity query at all.
+    pub pending_weapons_holds: Vec<(String, bool)>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -2644,6 +2655,23 @@ pub(crate) fn apply_dispatch_result(
                          declared, or was already in that state — nothing moved"
                     );
                 }
+            }
+
+            // Issue #1041. The name is resolved here — the applier is where
+            // `name_to_uuid` lives — and the order is queued for
+            // `apply_scripted_weapons_holds`, which is the one system holding
+            // an entity query. The mirror flag is NOT written here: it is
+            // mirrored off the authoritative component, so a scenario's order
+            // and a captain's press produce the same transition event.
+            ActionCmd::SetWeaponsHold { entity, held } => {
+                let Some(uuid) = runtime.name_to_uuid.get(&entity).cloned() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: SetWeaponsHold: no entity named '{entity}' in this \
+                         world — ignoring"
+                    );
+                    continue;
+                };
+                runtime.pending_weapons_holds.push((uuid, held));
             }
 
             // Issue #1028, and the same shape for the same reason: the applier

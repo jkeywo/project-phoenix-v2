@@ -478,6 +478,28 @@ pub fn register_effects(engine: &mut Engine) {
             });
         });
     }
+    // The tactical restraint lever, from the scenario's side (issue #1041).
+    // Two verbs rather than one setter, for the reason the strike hooks above
+    // are two and `repair_infrastructure`/`damage_infrastructure` are two: the
+    // direction lives in the name, so a scenario cannot arm a ship it meant to
+    // silence by getting a boolean the wrong way round.
+    //
+    // ONE command each, unlike the strike hooks: the mirror flag
+    // (`weapons_hold.<name>`) is written off the authoritative component by
+    // `mirror_weapons_hold_flags`, because a weapons hold has a second author —
+    // the ship's own captain — and a flag pushed here would have covered the
+    // scenario's orders and silently missed the crew's.
+    for (name, held) in [("hold_fire", true), ("release_fire", false)] {
+        engine.register_fn(
+            name,
+            move |sink: &mut EffectSink, entity: ImmutableString| {
+                sink.push(ActionCmd::SetWeaponsHold {
+                    entity: entity.to_string(),
+                    held,
+                });
+            },
+        );
+    }
     engine.register_fn(
         "set_workforce_disposition",
         |sink: &mut EffectSink, id: ImmutableString, value: i64| {

@@ -63,6 +63,17 @@ impl Plugin for CaptainPlugin {
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
                 handle_set_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_weapons_hold.in_set(crate::sim_sets::SimSet::Input),
+                // The scenario's half of the same lever, and its mirror. Both
+                // in `Modifiers`, chained: a scripted order lands and is
+                // mirrored in the same tick, so an `on_flag_set` handler
+                // chaining off it fires on the next pipeline pass exactly as a
+                // captain's press does.
+                (
+                    apply_scripted_weapons_holds,
+                    mirror_weapons_hold_flags,
+                )
+                    .chain()
+                    .in_set(crate::sim_sets::SimSet::Modifiers),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
                 crate::ship::combat_activity::update_combat_activity
@@ -151,6 +162,139 @@ fn handle_set_weapons_hold(
                 hold.0 = held;
             }
         }
+    }
+}
+
+/// Drain the scenario's queued `hold_fire` / `release_fire` orders onto their
+/// ships (issue #1041).
+///
+/// The scripted twin of [`handle_set_weapons_hold`] above, and it writes the
+/// SAME state: a scenario ordering a hull to hold fire and a captain pressing
+/// the button leave the ship in one place, so the fire hosts have one thing to
+/// read and the mirror below has one thing to publish.
+///
+/// It writes the component directly rather than manufacturing an admitted
+/// command, which is the shape every other scripted world effect already has
+/// (`destroy_entity`, `damage_infrastructure`, `set_workforce_disposition`).
+/// Admission is the boundary between an OPERATOR and the ship — human or AI,
+/// the same table either way — and the world is not an operator. What it is not
+/// is a bypass: nothing here decides whether the ship fires, only what its
+/// posture is, and the posture is then read through the same authored predicate
+/// a captain's order is.
+pub fn apply_scripted_weapons_holds(
+    runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    mut ships: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &mut crate::ship_state::ShipWeaponsHold,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    let Some(mut runtime) = runtime else {
+        return;
+    };
+    // A `Deref` read, so a world that queues nothing never marks
+    // `WorldContentRuntime` changed — the `tick_operations` precedent.
+    if runtime.pending_weapons_holds.is_empty() {
+        return;
+    }
+    let queued = std::mem::take(&mut runtime.pending_weapons_holds);
+    for (uuid, held) in queued {
+        let mut found = false;
+        for (ship_uuid, mut hold) in ships.iter_mut() {
+            if ship_uuid.0 == uuid {
+                hold.0 = held;
+                found = true;
+            }
+        }
+        if !found {
+            bevy::log::warn!(
+                "scripted weapons hold for '{uuid}': no ship with that uuid is in \
+                 the world — ignoring"
+            );
+        }
+    }
+}
+
+/// Mirror every ship's authoritative weapons hold into the world flag store
+/// (issue #1041), so scenario script can read the posture and react to it.
+///
+/// Imitates issue #1035's `workforce.<id>.on_strike` deliberately: the
+/// component stays authoritative, the flag is a MIRROR of it, and script reads
+/// the mirror. Two keys are written — `weapons_hold.own_ship` for the hull the
+/// crew fly, and `weapons_hold.<name>` for any ship carrying an authored
+/// reference name. The role key exists because a world's player hull is not
+/// required to declare a name (`falling_skyway.toml` gives its `player-ship` an
+/// `id` and no `name`), and "has the crew held fire?" is exactly the question a
+/// scenario wants to ask.
+///
+/// The transition is decided from the store's own `(before, after)` and the
+/// event pushed onto `pending_world_events`, exactly as
+/// `infrastructure::server::mirror_flags` does — so an
+/// `on_flag_set("weapons_hold.own_ship", …)` handler chains off the crew's
+/// order on the next pipeline pass, through machinery that was already there.
+///
+/// `Changed<ShipWeaponsHold>` rather than every ship every tick: insertion
+/// counts as a change, so each ship's flag is written once at spawn and then
+/// only when its posture actually moves. Rows are sorted by flag name before
+/// anything is written, so the order of the emitted events is a function of the
+/// content and never of archetype iteration order.
+pub fn mirror_weapons_hold_flags(
+    runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    ships: Query<
+        (
+            &crate::ship_state::ShipWeaponsHold,
+            Option<&crate::entity_spawner::EntityName>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        ),
+        (
+            With<crate::server_app::Ship>,
+            Changed<crate::ship_state::ShipWeaponsHold>,
+        ),
+    >,
+) {
+    let Some(mut runtime) = runtime else {
+        return;
+    };
+    if ships.is_empty() {
+        return;
+    }
+    let mut writes: Vec<(String, bool)> = Vec::new();
+    for (hold, name, is_local) in ships.iter() {
+        if is_local {
+            writes.push((
+                crate::ship_state::OWN_SHIP_WEAPONS_HOLD_FLAG.to_string(),
+                hold.0,
+            ));
+        }
+        if let Some(name) = name {
+            writes.push((crate::ship_state::weapons_hold_flag(&name.0), hold.0));
+        }
+    }
+    writes.sort();
+    for (flag, held) in writes {
+        let (before, after) = if held {
+            runtime.flags.set_flag(&flag)
+        } else {
+            runtime.flags.clear_flag(&flag)
+        };
+        if (before != 0) == (after != 0) {
+            continue;
+        }
+        runtime
+            .pending_world_events
+            .push(if after != 0 {
+                crate::world::content::WorldEvent::FlagSet {
+                    name: flag,
+                    origin_layer: None,
+                }
+            } else {
+                crate::world::content::WorldEvent::FlagCleared {
+                    name: flag,
+                    origin_layer: None,
+                }
+            });
     }
 }
 

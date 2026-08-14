@@ -54,7 +54,7 @@ describe('Scenario Mode script panel', () => {
     for (const id of [
       'scriptList', 'scriptEditorHost', 'scriptEditorPanel',
       'propertiesPanel', 'propertiesPanelContent', 'worldContentList',
-      'triggerableWorldsList', 'unsavedIndicator', 'saveAllBtn',
+      'unsavedIndicator', 'saveAllBtn',
       'saveLayerBtn', 'layersList', 'entitiesList', 'canvas',
     ]) {
       const tag = id.endsWith('Btn') ? 'button' : 'div';
@@ -89,7 +89,6 @@ describe('Scenario Mode script panel', () => {
         PropertiesPanel: StubPropertiesPanel,
         EntityEditor: StubEntityEditor,
         preloadEntityCache: async () => {},
-        renderTriggerableWorldsPanel: async () => {},
         renderWorldContentPanel: () => {},
         mountNewWorldButton: () => null,
         mountOpenWorldButton: () => null,

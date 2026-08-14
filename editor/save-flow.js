@@ -35,9 +35,10 @@ export class SaveFlow {
     /**
      * Optional predicate keyed by `${mode}:${path}` returning true if the
      * file should be EXCLUDED from getDirtyFiles (and therefore from
-     * Save All). Wired by Slice 4b for session-only triggerable-world
-     * layers — see `LayerManager.addInMemoryLayer({ sessionOnly: true })`.
-     * Set via `setSessionOnlyChecker`.
+     * Save All) — see `LayerManager.addInMemoryLayer({ sessionOnly: true })`.
+     * Set via `setSessionOnlyChecker`. No editor surface creates a
+     * session-only layer since issue #985 deleted the triggerable-worlds
+     * preview panel; the hook is kept for a future preview loader.
      */
     this._isSessionOnly = null;
     /**

@@ -120,16 +120,14 @@ entities:
         reference: "M0 spike, `mapord` binary; rhai-1.25.1 Map alias; vellum Cargo.toml:51"
         summary: "Scrambled insertion iterates in ASCII byte order on the Rust side; script-side `keys()` and a returned effect map both iterate sorted; runtime type name confirms BTreeMap; no `no_object` or container-swapping feature in the dependency chain."
 
-  # ── DELIVERED SEAM (M1-M5, issues #979-#983/#994) ────────────────────────────
+  # ── DELIVERED SEAM (M1-M7, issues #979-#985/#994) ────────────────────────────
   # The M0 spike above is the pre-implementation record; the entities below are
-  # the SEAM AS BUILT this batch. Cardinal fact for every one of them: the seam is
-  # DORMANT. The code exists, is unit-tested, and passes `pasm validate`, but no
-  # production caller constructs a `RuntimeHost` or calls `load_world_scripts` to
-  # run a scenario script in the live tick pipeline. The ONLY live wiring is the
-  # startup hashing seed (`init_hashing_seed`, called from `bridge::wasm_init` and
-  # `phoenix-headless`), the upload-time pack-script validation, and the editor
-  # authoring exports. Runtime activation is M6/M7 work — see
-  # `scenario-script-activation-obligations` below and roadmap #984/#985.
+  # the SEAM AS BUILT. It was DORMANT through M1-M5 — built and unit-tested with
+  # no production caller — and is now the ONLY scenario front-end there is: M6
+  # (#984) wired it into the live tick pipeline and converted every shipped
+  # world, and M7 (#985) deleted the declarative `[[trigger]]` / `[[comms]]`
+  # parsers it replaced. A world that still authors either is refused at load by
+  # name.
 
   - component: scenario-script-host-seam
     core:
@@ -204,7 +202,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Rhai Comms Dialogue Front-End (M4)
-      summary: "Issue #982. A dialogue node is a named fn returning `#{message, responses:[#{text, on_pick}]}` (`read_dialogue_node`/`enter_node`), and a response's `on_pick` names the next node fn — follow-ups are fn-to-fn references, not nested `[[comms.response.follow_up…]]` tables. Response effects route through the SAME `ActionCmd` boundary the TOML `[[comms.response.action]]` array does. SCRIPT front-end only and DORMANT in M4: the live `handle_respond_to_message` parallel-match collapse is DEFERRED to M7 (#985), so the declarative comms path is unchanged and this front-end is not yet dispatched."
+      summary: "Issue #982. A dialogue node is a named fn returning `#{message, responses:[#{text, on_pick}]}` (`read_dialogue_node`/`enter_node`), and a response's `on_pick` names the next node fn — follow-ups are fn-to-fn references, not nested `[[comms.response.follow_up…]]` tables. Response effects route through the `ActionCmd` boundary the declarative `[[comms.response.action]]` array used to reach. Dormant in M4; M6 (#984) wired it into `handle_respond_to_message` beside the declarative arm, and M7 (#985) deleted that arm — this is the only way a comms response's effects reach the world now."
     architecture:
       kind: authoring-front-end
       authority: authoritative
@@ -231,7 +229,7 @@ entities:
       paths:
         - src/world/script/load.rs
         - src/world/script/validate.rs
-      symbols: [ScriptResolver, CompiledScripts, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, validate_registrations, validate_script_triggers, validate_toml_script_triggers, validate_toml_script_comms, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
+      symbols: [ScriptResolver, CompiledScripts, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, validate_registrations, validate_script_triggers, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
       tests: [cargo test]
 
   - component: scenario-script-editor-host
@@ -254,12 +252,13 @@ entities:
 
   - component: scenario-script-activation-obligations
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
-      title: Activation-Wiring Obligations (M6, #984) — In Flight
-      summary: "The seam above is built; turning it on is M6 (#984), and M6 is now IN FLIGHT within release A rather than deferred to a later band. CONTENT CONVERSION IS COMPLETE: all 13 test-infrastructure worlds (the probe_* set plus duel, patrol, and rng_coverage), `default`, and finally `combat_test` — the shipped demo scenario and the only selectable root in `assets/scenarios.toml` — are `[script]`-authored, so no shipped world carries a `[[trigger]]` or `[[comms]]` block. The declarative front-ends stay parsed for mod packs and hand-authored worlds; what is gone is any shipped USER of them. Two conversions carried the load. `default` was the first COMMS-bearing world: its templates became dialogue-node fns that trigger handlers open through `ctx.effects.open_comms`, which made it the first world to need the #985 entity-derived hail roster (`[comms] hailable = true`), since deleting `[[comms]]` deletes the declarative roster source with it. `combat_test` was the first FULL SCENARIO, and completed the front-end: a trigger-level `.when(…)`, `on_hull_below` with a `flt(…)` threshold, and a delayed `game_over(reason, outcome)` on the schedule builder. It also forced a fifth preload surface — `entity_template_paths` now scans inline `[script]` bodies for literal `template_path` references, because a scripted handler does not run until long after preload and the demo's whole raid is spawned from one. Landing M6 carries three obligations recorded here so they are not rediscovered, tracked to completion as the wiring lands rather than confirmed done by this entity. (1) Wire `load_world_scripts` into scenario activation through `crate::config_cache::OverlayScriptResolver` (#988), so a mod pack's `.rhai` resolves through the overlay stack AND is recorded in `content_ledger` — that is what makes a pack's script FOLD INTO the content digest instead of drifting under snapshot/replay. (2) Add `on_pick` fn-name load-validation (#982): a dialogue response's `on_pick` names a node fn that must resolve, and the M4 front-end does not yet check it at load. (3) Add pipeline-level chaining parity tests proving the script trigger/comms front-ends emit the identical `ActionCmd` sequence the declarative path emits across all chaining passes, before the declarative evaluator is torn down. That teardown is M7 (#985), which has not started."
+      title: Activation Wiring (M6, #984) and Declarative Teardown (M7, #985)
+      summary: "The seam above is built; turning it on is M6 (#984), and M6 is now IN FLIGHT within release A rather than deferred to a later band. CONTENT CONVERSION IS COMPLETE: all 13 test-infrastructure worlds (the probe_* set plus duel, patrol, and rng_coverage), `default`, and finally `combat_test` — the shipped demo scenario and the only selectable root in `assets/scenarios.toml` — are `[script]`-authored, so no shipped world carries a `[[trigger]]` or `[[comms]]` block. M7 (#985) then deleted the declarative front-ends outright — the `[[trigger]]` and `[[comms]]` parsers, `Trigger`'s action payload and the pipeline arm that dispatched it, the comms template/follow-up runtime, and the layer trigger-merge — so a world that still authors either block is refused at load with a message naming it, rather than loading with its scenario logic silently absent. Two conversions carried the load. `default` was the first COMMS-bearing world: its templates became dialogue-node fns that trigger handlers open through `ctx.effects.open_comms`, which made it the first world to need the #985 entity-derived hail roster (`[comms] hailable = true`), since deleting `[[comms]]` deletes the declarative roster source with it — at M7 the entity-derived source became the only one. `combat_test` was the first FULL SCENARIO, and completed the front-end: a trigger-level `.when(…)`, `on_hull_below` with a `flt(…)` threshold, and a delayed `game_over(reason, outcome)` on the schedule builder. It also forced a fifth preload surface — `entity_template_paths` now scans inline `[script]` bodies for literal `template_path` references, because a scripted handler does not run until long after preload and the demo's whole raid is spawned from one. Landing M6 carries three obligations recorded here so they are not rediscovered, tracked to completion as the wiring lands rather than confirmed done by this entity. (1) Wire `load_world_scripts` into scenario activation through `crate::config_cache::OverlayScriptResolver` (#988), so a mod pack's `.rhai` resolves through the overlay stack AND is recorded in `content_ledger` — that is what makes a pack's script FOLD INTO the content digest instead of drifting under snapshot/replay. (2) Add `on_pick` fn-name load-validation (#982): a dialogue response's `on_pick` names a node fn that must resolve, and the M4 front-end does not yet check it at load. (3) The pipeline-level parity tests that proved the two front-ends emitted an identical `ActionCmd` sequence retired WITH the second front-end at M7: there is one applier now (`apply_script_commands` delegating to `apply_dispatch_result`) reached from one call site per consumer, so per-variant equivalence is structural rather than something a test can protect."
       rationale:
-        - "The seam pieces this obligation wires ALREADY EXIST: `load_world_scripts` (load.rs), `OverlayScriptResolver` (config_cache.rs), and the `content_ledger` recording it performs. Status stays `partially-implemented` even though content conversion is now complete, because none of the three numbered obligations above is independently confirmed here — re-verify each, and confirm the M7 teardown, before promoting this entity to `implemented`."
+        - "The seam pieces this obligation wires ALREADY EXIST: `load_world_scripts` (load.rs), `OverlayScriptResolver` (config_cache.rs), and the `content_ledger` recording it performs."
+        - "[ai] M7 (#985) landed the teardown and is gated on the same evidence M6 was: the six-world headless digest sweep (`--seed 42`, 900 ticks) is byte-identical across the deletion, which is what a teardown of dead code must be."
         - "Each conversion is gated on a headless digest A/B, and `combat_test`'s is the strongest available: `--seed 42` matches to the byte at 900, 2700 and 21600 ticks (the last reaching GameOver), with byte-identical replay artifacts and exit reports. What that CANNOT speak for is comms — a one-way report crosses Channel 2, which neither `SimOutbox` nor `state_digest` records — so the twelve reports are proven behaviourally instead, in `comms::scripted`, on the real shipped script. The one observable difference the conversion does carry is a ONE-TICK lag in the hail roster's first broadcast: the declarative source populated `CommsRuntime::contacts` at world load, and the #985 entity-derived source unions from the live ECS on the tick after, so the roster reads empty on the load tick and correct from the next one."
     architecture:
       kind: design-policy

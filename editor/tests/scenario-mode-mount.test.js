@@ -106,7 +106,7 @@ describe('mountScenarioMode', () => {
     elements = installDocumentWithIds([
       'saveAllBtn', 'saveLayerBtn',
       'newEntityBtn', 'newWorldBtn',
-      'unsavedIndicator', 'worldContentList', 'triggerableWorldsList',
+      'unsavedIndicator', 'worldContentList',
       'layersList', 'entitiesList', 'canvas', 'canvasContainer',
       'propertiesPanel', 'propertiesPanelContent', 'newEntityModal',
     ]);
@@ -146,7 +146,6 @@ describe('mountScenarioMode', () => {
         PropertiesPanel: StubPropertiesPanel,
         EntityEditor: StubEntityEditor,
         preloadEntityCache: async () => {},
-        renderTriggerableWorldsPanel: async () => {},
         renderWorldContentPanel: () => {},
         mountNewWorldButton: () => null,
       },

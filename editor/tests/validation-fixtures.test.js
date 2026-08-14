@@ -3,10 +3,10 @@
  * (assets/worlds/default.toml and assets/worlds/patrol.toml) through
  * smol-toml parse + validateFile and assert they are clean.
  *
- * Also tests a synthesised broken world to confirm the composed
- * validator surfaces cross-reference failures (`trigger[i].entity`,
- * `comms.response.action` entity). Per-action schema validation was
- * removed with the card-based scenario editor (#983).
+ * The synthesised broken-world cases that used to live here pinned the
+ * `[[trigger]]` / `[[comms]]` cross-reference validator, deleted with the
+ * declarative scenario front-end (issue #985). A scripted world's entity
+ * references are checked by the script diagnostics, not by `validateFile`.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -40,64 +40,9 @@ describe('validation against shipped world fixtures', () => {
 });
 
 describe('validation surfaces composed errors', () => {
-  it('flags an unknown trigger.entity reference', () => {
-    const world = {
-      global: { seed: 42 },
-      anchors: { start: [0, 0, 0] },
-      entity: [{ name: 'real_target' }],
-      trigger: [
-        {
-          condition: 'on_destroyed',
-          entity: 'phantom_target',
-          action: [{ type: 'add_objective', id: 'x', text: 'y' }],
-        },
-      ],
-    };
-    const results = validateFile('assets/worlds/broken.toml', world);
-    expect(results.length).toBeGreaterThan(0);
-    expect(results.some(r => /unknown entity "phantom_target"/.test(r.message))).toBe(true);
-  });
-
-  it('flags an unknown reference inside comms.response.action target_entity', () => {
-    const world = {
-      global: { seed: 42 },
-      anchors: { start: [0, 0, 0] },
-      entity: [{ name: 'station_a' }],
-      comms: [
-        {
-          from: 'station_a',
-          trigger: 'on_hailed',
-          entity: 'station_a',
-          message: 'Hello.',
-          response: [
-            {
-              text: 'Hi.',
-              action: [{ type: 'set_ai_state', entity: 'ghost_entity', state: 'patrol' }],
-            },
-          ],
-        },
-      ],
-    };
-    const results = validateFile('assets/worlds/broken.toml', world);
-    expect(results.some(r => /unknown entity "ghost_entity"/.test(r.message))).toBe(true);
-  });
-
-  it('treats comms.from as free-form (no error if it is not an entity)', () => {
-    const world = {
-      global: { seed: 42 },
-      anchors: { start: [0, 0, 0] },
-      entity: [{ name: 'station_a' }],
-      comms: [
-        {
-          from: 'Some Display Name Not An Entity',
-          trigger: 'on_hailed',
-          entity: 'station_a',
-          message: 'Hi.',
-        },
-      ],
-    };
-    const results = validateFile('assets/worlds/broken.toml', world);
-    // No reference error should be raised for the `from` field.
-    expect(results.filter(r => r.message.includes('Some Display Name'))).toEqual([]);
+  it('flags a world missing [global] and [anchors]', () => {
+    const results = validateFile('assets/worlds/broken.toml', { entity: [] });
+    expect(results.some(r => r.severity === 'error' && /\[global\]/.test(r.message))).toBe(true);
+    expect(results.some(r => r.severity === 'error' && /\[anchors\]/.test(r.message))).toBe(true);
   });
 });

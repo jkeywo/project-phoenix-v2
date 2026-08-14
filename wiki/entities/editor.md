@@ -2,8 +2,8 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, fsa, vitest]
-sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/action-schema.js, editor/world-toml.js, editor/entity-toml.js]
-updated: 2026-07-23
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/script-editor.js, editor/world-toml.js, editor/entity-toml.js]
+updated: 2026-08-14
 ---
 
 # Editor
@@ -16,7 +16,7 @@ The editor is **not part of the game runtime**. It does not link into the WASM b
 
 `editor/app-v2.js` is the sole boot entry. It wires up the `ModeShell`, `SaveFlow`, `InvalidationBus`, project-root picker, and mounts each of the three modes uniformly:
 
-- `mountScenarioMode(...)` (`editor/scenario-mode.js:66`) — World Mode. Owns the Konva spawn canvas, layers panel, properties panel, world-content sidebar, triggerable-worlds panel, and the "+ New World" dialog.
+- `mountScenarioMode(...)` (`editor/scenario-mode.js:66`) — World Mode. Owns the Konva spawn canvas, layers panel, properties panel, world-content sidebar, Rhai script panel, and the "+ New World" / "Open World…" dialogs.
 - `mountEntityMode(...)` (`editor/entity-mode-view.js`) — Entity Mode.
 - `mountDefinitionsMode(...)` (`editor/definitions-mode-view.js`) — Definitions Mode.
 
@@ -28,7 +28,7 @@ The legacy `editor/app.js` entry point has been deleted; everything it did is no
 
 `ModeShell` (`editor/mode-shell.js:5`) manages per-mode open files, dirty state, active file, and undo history. Default modes: `['World', 'Entity', 'Definitions']` (`editor/mode-shell.js:1`).
 
-- **World Mode** — edit unified world TOML files (`assets/worlds/*.toml`). Canvas renders entities by their `[radar_appearance]` colour and a tag-derived shape (Ship → triangle, Station → diamond, Asteroid → dot, Planet → ring, X fallback for missing appearance). Regions render as outlined sphere/box/torus shapes with a 15% alpha fill and a centre cluster of effect icons. Anchors are draggable canvas objects with rename-safety (in-layer ref rewrite + cross-layer warning) and delete-safety (blocked by references). A World Content sidebar lists anchors, named entities, triggers, comms templates, and derived objectives. Dedicated structured editors for triggers (stacked action cards) and comms templates (indented tree). Spawn `[entity.overrides]` are edited per-field against a resolved-template view.
+- **World Mode** — edit unified world TOML files (`assets/worlds/*.toml`). Canvas renders entities by their `[radar_appearance]` colour and a tag-derived shape (Ship → triangle, Station → diamond, Asteroid → dot, Planet → ring, X fallback for missing appearance). Regions render as outlined sphere/box/torus shapes with a 15% alpha fill and a centre cluster of effect icons. Anchors are draggable canvas objects with rename-safety (in-layer ref rewrite + cross-layer warning) and delete-safety (blocked by references) — both cover `[[entity]]` references only; an anchor named from a `[script]` body is not tracked (issue #985). A World Content sidebar lists anchors and named entities. Spawn `[entity.overrides]` are edited per-field against a resolved-template view. Scenario logic is authored in the SCRIPTS panel: a world's `[script]` Rhai units, edited with host-fn completion and WASM-backed diagnostics (`editor/script-editor.js`, `editor/script-editor-view.js`, `editor/script-wasm.js`). There is no declarative trigger or comms editor — issue #983 deleted the card editors, and issue #985 deleted the `[[trigger]]` / `[[comms]]` TOML front-end they wrote to, so `parse_world` now refuses a world authoring either array.
 
 - **Entity Mode** — edit entity template TOML files (`assets/entities/*.toml`). Three-pane: file list, component cards (one card per present TOML section + raw-TOML toggle + "+ Add component" picker with common-combo templates and a raw-section submenu), and a static top-down preview pane (collider, radar appearance, region shape, asteroid-field donut, forward arrow, overlay text). NPC behaviour editor: structured states-and-transitions two-list. Player-ship `[stations]` editor: tab-strip per player count with next/previous dropdowns populated from adjacent counts; dangling-chain and duplicate-name validation. Coordinator: `editor/entity-mode-view.js`.
 
@@ -53,7 +53,7 @@ Browsers without FSA (Firefox, Safari at time of writing) show a "browser not su
 - An optional `writeFile` (defaults to `project-root.writeFile`).
 - An optional `InvalidationBus`.
 - An optional `commentConfirm` gate (the one-time-per-session "comments will be lost" warning from `editor/comment-warning.js`).
-- A `setSessionOnlyChecker` hook so session-only files (slice 4b triggerable-world previews) are excluded from disk writes.
+- A `setSessionOnlyChecker` hook so session-only layers are excluded from disk writes. Nothing creates one now: the triggerable-worlds preview panel that did was deleted with the declarative scenario front-end (issue #985), and "Open World…" adds file-backed layers.
 
 `InvalidationBus` (`editor/invalidation-bus.js:1`) emits `EntitySaved`, `WorldSaved`, and `FactionSaved` events. Subscribers (entity cache, open canvases, file lists) re-fetch and re-render. There is no `ComplexitySaved` event yet — complexity presets only re-read on explicit mode re-open.
 
@@ -71,11 +71,12 @@ Save model: explicit save only. Cmd/Ctrl+S saves the active file; a "Save All" b
 - `validateEntityToml(obj)` (`editor/entity-toml.js:28`) — required `tags` non-empty + section sanity.
 - `validateEntitySections(obj)` (`editor/entity-toml.js:80`) — per-section schema checks against `component-schema.js`.
 - `validateStations(stationsConfig)` (`editor/stations-validate.js`) — dangling next/previous chains, duplicate names per player count, invalid console enum values.
-- `validateTriggerActions(actions)` (`editor/action-schema.js:205`) — every action validated against `ACTION_SCHEMA` (`editor/action-schema.js:32`), which mirrors the Rust `TriggerAction` enum from `src/world/config.rs`. Also exports `MODIFIER_SLOTS`, `INT_MODIFIER_SLOTS`, `FLAG_KINDS`.
-- `validateWorldReferences` / `validateWorldReferencesIndexed` (`editor/world-references.js`, `editor/world-references-indexed.js`) — cross-reference checks (trigger entity-names, objective ids, AI states, anchor refs).
 - `validateBehaviourBlock(behaviour)` (`editor/validation.js:53`) — exactly one `initial_state`, no orphan transitions.
+- `validateEntityMarkers` / `validateBlasterBanks` / `validateTorpedoTubes` — marker, blaster barrel-pattern, and torpedo-tube schema checks.
 
 All validation surfaces as inline error/warning badges (`editor/validation-badge.js`).
+
+A **world** file is checked for `[global]` / `[anchors]` shape and nothing else. The per-action schema (`action-schema.js`) and the entity cross-reference passes (`world-references.js`, `world-references-indexed.js`) are gone: every site they read lived in `[[trigger]]` / `[[comms]]`, which issues #983 and #985 removed. A scripted world names its entities inside its `[script]` Rhai body, which this TOML walk cannot read; those references are resolved by the script diagnostics in the editor and by `src/world/script/validate.rs` at activation.
 
 ### Save admission (issue #757)
 
@@ -97,12 +98,13 @@ primitive to block export.
 Severity classification is aligned with the host composition validator (#750):
 structural/duplicate/malformed problems are **errors** that block (missing
 `[global]`/`[anchors]`, duplicate station names, empty consoles, dangling
-station next/previous chains, missing/duplicate behaviour states, malformed
-trigger actions), while **dangling entity cross-references** (unknown
-`trigger`/`comms`/action entity names) are **non-blocking warnings** — the Rust
-validator treats a bare unresolved reference as `Severity::Warning` because the
-name may resolve to a runtime-spawned or engine-provided entity, or belong to a
-world still being authored across several files.
+station next/previous chains, missing/duplicate behaviour states), while
+softer findings (an `initial_state` naming no declared state, an unknown
+console, a missing `next`) are **non-blocking warnings**. The editor no longer
+raises the dangling entity cross-reference warning that mirrored the Rust
+validator's `Severity::Warning`; on the Rust side that check survives but is
+vacuous for the same reason — `collect_entity_references`
+(`src/world/validate.rs`) returns empty now that `config.triggers` is gone.
 
 A WASM-compiled full Rust pre-save pass remains deferred to a later phase.
 
@@ -152,10 +154,10 @@ Per-file op-log undo/redo (Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z) capped at 100 ops per f
 The two PRD #350 runtime additions have **landed** in `src/world/config.rs` and `src/world/server.rs` (shipped via issue #352):
 
 - World TOML carries a top-level `extra_worlds: Vec<String>` field (`src/world/config.rs:577`). Paths listed here are auto-loaded additively at startup by `load_extra_worlds` (`src/world/server.rs:730`), which pushes one `WorldLayerChange::Load` per path onto `PendingWorldLayerChanges` so the same code path handles startup and trigger-fired loads.
-- Two new trigger actions: `TriggerAction::LoadWorld { path }` (`src/world/config.rs:704`) and `TriggerAction::UnloadWorld { path }` (`src/world/config.rs:708`). Parsed from TOML at `src/world/config.rs:1110` / `:1116`. Decided by the pure dispatch table (`dispatch_action`, `src/world/dispatch.rs:370` / `:377`); the applier `apply_dispatch_result` turns each into a `WorldLayerChange` queued onto `PendingWorldLayerChanges` (`src/world/server.rs:1952` / `:1958`).
-- Additive-loading runtime state: `WorldLayerMap(HashMap<String, WorldRuntime>)` and `PendingWorldLayerChanges(Vec<WorldLayerChange>)` (`src/world/server.rs:161` / `:168`). `apply_world_layer_changes` (`src/world/server.rs:2628`) drains the queue each frame, mutating `WorldLayerMap` and `WorldContentRuntime`. Runtime test coverage lives in the `src/world/server.rs` test module (e.g. `load_world_trigger_action_queues_pending_layer_change`, `src/world/server.rs:5596`).
+- Two actions: `TriggerAction::LoadWorld { path }` (`src/world/config.rs:680`) and `TriggerAction::UnloadWorld { path }` (`src/world/config.rs:684`). Since issue #985 they are reached only from a world's `[script]` Rhai body — `parse_action` (`src/world/config.rs:1185` / `:1191`) still builds them, but no `[[trigger]]` array feeds it. Decided by the pure dispatch table (`dispatch_action`, `src/world/dispatch.rs`); the applier `apply_dispatch_result` turns each into a `WorldLayerChange` queued onto `PendingWorldLayerChanges`.
+- Additive-loading runtime state: `WorldLayerMap(HashMap<String, WorldRuntime>)` and `PendingWorldLayerChanges(Vec<WorldLayerChange>)` (`src/world/server.rs`). `apply_world_layer_changes` drains the queue each frame, mutating `WorldLayerMap` and `WorldContentRuntime`.
 
-The **remaining editor-side work** for this PRD: the World Mode layer tree must show `load_world`-reachable worlds in a "triggerable worlds" section with a session-only load/unload toggle for preview, and the trigger action editor needs file-picker wiring for `load_world` / `unload_world` paths. These are still in flight. The runtime additive-loading state machine that PRD #341 collapsed is partially reintroduced for these two actions only, scoped narrowly to path-keyed load/unload.
+The editor-side work this PRD once planned — a "triggerable worlds" section listing `load_world`-reachable worlds with a session-only preview toggle, and file-picker wiring inside a trigger action editor — is **cancelled, not pending**. Both read the `[[trigger]]` front-end that issue #985 deleted; the modules (`triggerable-worlds.js`, `triggerable-worlds-panel.js`, `world-file-picker.js`) are gone. Worlds are opened from disk through the "Open World…" picker instead.
 
 ## Test Infrastructure
 
@@ -164,13 +166,13 @@ Vitest (`npm run test:editor` → `vitest run`; root `package.json`). Tests live
 Coverage spans the deep modules and slice integration paths:
 
 - **Parsers/serializers:** `world-toml.test.js`, `entity-toml.test.js`, `toml-utils-transform.test.js`.
-- **Validation:** `validation.test.js`, `validation-fixtures.test.js`, `validation-badge.test.js`, `stations-validate.test.js`, `action-schema.test.js`, `world-references-indexed.test.js`, `cross-references.test.js`, `triggerable-worlds.test.js`.
+- **Validation:** `validation.test.js`, `validation-fixtures.test.js`, `validation-badge.test.js`, `stations-validate.test.js`, `marker-validate.test.js`, `blaster-validate.test.js`, `torpedo-validate.test.js`, `cross-references.test.js`.
 - **Schemas/templates:** `tag-shape-map.test.js`, `component-templates.test.js`.
-- **Editors:** `override-editor.test.js`, `behaviour-editor.test.js`, `comms-editor.test.js`, `comms-adapter.test.js`, `complexity-editor.test.js`, `complexity-form-view.test.js`, `faction-editor.test.js`, `faction-form-view.test.js`, `trigger-pickers.test.js`.
+- **Editors:** `override-editor.test.js`, `behaviour-editor.test.js`, `complexity-editor.test.js`, `complexity-form-view.test.js`, `faction-editor.test.js`, `faction-form-view.test.js`, `script-editor.test.js`, `script-editor-view.test.js`, `script-wasm.test.js`.
 - **Mode views:** `entity-mode.test.js`, `entity-component-card-view.test.js`, `entity-add-component-menu.test.js`, `entity-preview.test.js`, `entity-preview-view.test.js`, `definitions-file-list-view.test.js`.
 - **Anchors:** `anchor-rename.test.js`, `anchor-rename-integration.test.js`, `anchor-delete.test.js`, `canvas-anchor.test.js`, `canvas-region.test.js`, `canvas-world.test.js`.
-- **Shell / IO / lifecycle:** `mode-shell.test.js`, `save-flow.test.js`, `save-flow-comment-gate.test.js`, `save-confirm.test.js`, `comment-warning.test.js`, `invalidation-bus.test.js`, `entity-cache.test.js`, `project-root.test.js`, `project-root-listeners.test.js`, `undo-stack.test.js`, `undo-integration.test.js`, `new-world.test.js`, `world-file-picker.test.js`, `faction-complexity-discovery.test.js`, `layer-manager.test.js`, `world-content-panel.test.js`.
-- **Slice integration:** `slice-3-override-cycle`, `slice-4a-trigger-edit`, `slice-4b-comms-edit`, `slice-4b-new-world`, `slice-4b-triggerable-worlds`, `slice-5-add-component`, `slice-5-behaviour-edit`, `slice-5-entity-mode-cycle`, `slice-5-stations-tab`, `slice-6-definitions-mode`, `slice-6-faction-invalidation`, `slice-7-canvas-entity-invalidation`, `slice-7-stations-warning-badge`.
+- **Shell / IO / lifecycle:** `mode-shell.test.js`, `save-flow.test.js`, `save-flow-comment-gate.test.js`, `save-confirm.test.js`, `comment-warning.test.js`, `invalidation-bus.test.js`, `entity-cache.test.js`, `project-root.test.js`, `project-root-listeners.test.js`, `undo-stack.test.js`, `undo-integration.test.js`, `new-world.test.js`, `faction-complexity-discovery.test.js`, `layer-manager.test.js`, `world-content-panel.test.js`, `save-admission.test.js`, `scenario-mode-mount.test.js`, `scenario-script-panel.test.js`.
+- **Slice integration:** `slice-3-override-cycle`, `slice-4b-new-world`, `slice-5-add-component`, `slice-5-behaviour-edit`, `slice-5-entity-mode-cycle`, `slice-6-definitions-mode`, `slice-6-faction-invalidation`, `slice-7-canvas-entity-invalidation`, `slice-7-stations-warning-badge`.
 - **Bootstrapping:** `smoke.test.js`.
 
 ## What is NOT tested (manual QA only)
@@ -178,7 +180,7 @@ Coverage spans the deep modules and slice integration paths:
 - Canvas visuals (Konva output).
 - File System Access API integration (browser-only).
 - Mode-switcher and component-card DOM rendering.
-- Trigger / comms editor DOM behaviour.
+- The script editor's CodeMirror-side DOM behaviour (its data layer and the WASM diagnostics adapter are unit-tested).
 - Drag interactions, keyboard shortcuts beyond Cmd/Ctrl+S/Z.
 - Cross-mode live cache invalidation end-to-end.
 - The full save flow end-to-end (each step is unit-tested in isolation).

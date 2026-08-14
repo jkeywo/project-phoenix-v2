@@ -30,7 +30,7 @@ describe('admission primitive (validation.js)', () => {
   it('partitionFindings splits errors from warnings, preserving records', () => {
     const findings = [
       { severity: 'error', message: 'boom', path: 'global' },
-      { severity: 'warning', message: 'meh', path: 'trigger[0].entity' },
+      { severity: 'warning', message: 'meh', path: 'behaviour.initial_state' },
       { severity: 'error', message: 'bang', path: 'anchors' },
     ];
     const { errors, warnings } = partitionFindings(findings);
@@ -88,26 +88,29 @@ describe('SaveFlow admission gate', () => {
   });
 
   it('PROCEEDS on warning-only findings: written, warnings surfaced, caches invalidated', async () => {
-    const path = 'assets/worlds/warn.toml';
-    const modeShell = worldShell(path);
+    const path = 'assets/entities/warn.toml';
+    const modeShell = new ModeShell();
+    modeShell.switchMode('Entity');
+    modeShell.setOpenFiles('Entity', [path]);
+    modeShell.setActiveFile('Entity', path);
+    modeShell.markDirty('Entity', path, true);
 
     const writeFile = vi.fn(async () => {});
     const bus = new InvalidationBus();
     const fired = [];
-    bus.onWorldSaved((p) => fired.push(p));
+    bus.onEntitySaved((p) => fired.push(p));
 
     const saveFlow = new SaveFlow(
       modeShell,
-      { world: () => 'X', entity: () => '' },
+      { world: () => '', entity: () => 'E' },
       writeFile,
       bus,
     );
-    // Structurally valid, but a dangling trigger reference (warning only).
-    saveFlow.setContent('World', path, {
-      global: {},
-      anchors: {},
-      entity: [{ name: 'real' }],
-      trigger: [{ condition: 'on_destroyed', entity: 'phantom' }],
+    // Structurally valid, but `initial_state` names no declared state
+    // (warning only).
+    saveFlow.setContent('Entity', path, {
+      tags: ['ship'],
+      behaviour: { state: [{ name: 'idle' }], initial_state: 'phantom' },
     });
 
     const result = await saveFlow.saveActive();
@@ -118,7 +121,7 @@ describe('SaveFlow admission gate', () => {
     expect(writeFile).toHaveBeenCalledTimes(1);
     // Caches invalidate only on the ok-path.
     expect(fired).toEqual([path]);
-    expect(modeShell.isDirty('World', path)).toBe(false);
+    expect(modeShell.isDirty('Entity', path)).toBe(false);
   });
 
   it('blocked entity save does not fire EntitySaved invalidation', async () => {

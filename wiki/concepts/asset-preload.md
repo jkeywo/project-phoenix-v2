@@ -33,8 +33,9 @@ feature in `src/server_app.rs:239-257`.
 1. **Discover** (`asset_preload.rs:210` `discover_base_assets`) — walks the
    loaded `WorldConfig` and every entity template it references (via
    `[asteroid_field].asteroid_type_paths`, `[asteroid_field].cosmetic_type_paths`,
-   `[[trigger]]` `LoadWorld`/`SpawnEntity` actions, and `[[comms]]` response
-   actions). Builds an `AssetManifest` of unique GLB / icon / PFX-texture /
+   and literal `template_path:` references inside the `[script]` bodies — the
+   `[[trigger]]` / `[[comms]]` action walks went with those front-ends in issue
+   #985). Builds an `AssetManifest` of unique GLB / icon / PFX-texture /
    sidecar / sub-world paths.
 
    Discovery is **two-phase for LOD**. An entity template names one model; since

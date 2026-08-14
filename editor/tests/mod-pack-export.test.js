@@ -318,13 +318,15 @@ describe('exportModPack', () => {
     const result = exportModPack({
       pack: goodPack(),
       files: [
+        { path: DEFAULT_WORLD_PATH, parsed: goodWorld({ entity: [{ name: 'real' }] }) },
         {
-          path: DEFAULT_WORLD_PATH,
-          // Structurally valid, but a dangling trigger reference (warning only).
-          parsed: goodWorld({
-            entity: [{ name: 'real' }],
-            trigger: [{ condition: 'on_destroyed', entity: 'phantom' }],
-          }),
+          path: 'assets/entities/warn.toml',
+          // Structurally valid, but `initial_state` names no declared
+          // state (warning only).
+          parsed: {
+            ...goodEntity(),
+            behaviour: { state: [{ name: 'idle' }], initial_state: 'phantom' },
+          },
         },
       ],
       scenarios: [{ id: 'default', world: DEFAULT_WORLD_PATH }],

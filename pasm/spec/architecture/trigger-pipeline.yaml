@@ -6,18 +6,24 @@
 #   world-load / region / delayed-action events)
 #     -> world-event-collector            (collect_world_events)
 #     -> world-event-buffer-state         (WorldEventBuffer, per-tick)
-#     -> world-comms-template-injector    (inject_comms_templates)
 #     -> world-trigger-chaining-loop      (tick_trigger_pipeline:
-#          evaluate conditions -> dispatch_action table -> ActionCmds
-#          -> apply_dispatch_result, looped for same-tick chaining)
+#          evaluate conditions -> run each fired trigger's script handler
+#          -> ActionCmds -> apply_dispatch_result, looped for same-tick
+#          chaining)
 #   world-delayed-action-scheduler        (tick_delayed_actions) runs after
 #   the loop and feeds the NEXT tick's buffer.
 #
+# A world-comms-template-injector (inject_comms_templates) sat between the
+# buffer and the loop until issue #985 deleted the [[comms]] front-end it
+# fired. A scripted thread opens from a trigger handler instead, and
+# comms::scripted::open_scripted_comms_threads materialises the queued opens
+# after the loop.
+#
 # Per-caller routing of dispatch-produced events: the chaining loop feeds
 # them to the next pass of the SAME tick; only the delayed-action scheduler
-# queues them for the NEXT tick. (The comms-response dispatch site also
-# pushes onto pending_world_events, but it runs in SimSet::Input, before
-# Physics, so the pipeline fires those events later the SAME tick.)
+# queues them for the NEXT tick. (The comms-response site also pushes onto
+# pending_world_events, but it runs in SimSet::Input, before Physics, so the
+# pipeline fires those events later the SAME tick.)
 #
 # This slice complements world-files.yaml, which owns the evaluator
 # (world-trigger-evaluator) and the action catalogue
@@ -73,32 +79,12 @@ entities:
       symbols: [WorldEventBuffer]
       tests: [cargo test]
 
-  - component: world-comms-template-injector
-    core:
-      status: implemented
-      confidence: confirmed
-      title: World Comms Template Injector
-      summary: Auto-fires comms templates that match this tick's external events and injects the resulting messages onto the immediate comms channel. Ordered after event collection and before trigger dispatch, so it reads the same entity name bindings the trigger pipeline's tick-level snapshot sees.
-      rationale:
-        - running before dispatch means no spawn action has mutated the name map yet this tick, keeping template sender resolution deterministic
-    architecture:
-      kind: event-router
-      authority: authoritative
-      reads: [world-event-buffer-state, world-configuration-state, world-name-binding-state]
-      coordinates: [world-comms-runtime]
-      runs_in: [host-browser-runtime]
-    implementation:
-      status: declared
-      paths: [src/comms/server.rs]
-      symbols: [inject_comms_templates]
-      tests: [cargo test]
-
   - component: world-trigger-chaining-loop
     core:
       status: implemented
       confidence: confirmed
       title: World Trigger Chaining Loop
-      summary: Within one host tick, alternates trigger evaluation and action dispatch until a pass produces no new events, so chained triggers (a flag mutation firing a flag-watching trigger) resolve with zero frame latency. Bounded by a fixed pass cap of sixteen that breaks pathological trigger cycles with a warning instead of hanging the frame.
+      summary: Within one host tick, alternates trigger evaluation and handler execution until a pass produces no new events, so chained triggers (a flag mutation firing a flag-watching trigger) resolve with zero frame latency. Bounded by a fixed pass cap of sixteen that breaks pathological trigger cycles with a warning instead of hanging the frame.
       goals:
         - chained scenario logic resolves in the same frame that caused it
         - a mis-authored trigger cycle degrades to a logged cutoff, never a hang
@@ -107,6 +93,7 @@ entities:
         - "[ai] live-store freshness: action dispatch re-projects the live flag stores per action, never a pre-pass snapshot, so duplicate mutations preview correct before/after transitions and each boolean flip emits exactly one event"
         - "the dispatch name map is rebuilt at the top of every pass, so an action can resolve an entity name that a spawn registered in an earlier pass of the same tick"
         - "event routing is per-caller: this loop feeds produced events into its own next pass (same tick); the delayed-action scheduler queues them for the next tick; the comms-response site pushes onto pending_world_events from SimSet::Input, which the pipeline drains later the same tick"
+        - "[ai] a fire runs the trigger's SCRIPT HANDLER and nothing else. It also dispatched the trigger's own declarative action array, per-action `when` predicate and per-action delay; issue #985 deleted the `[[trigger]]` parser that was their only writer, so `Trigger` lost `actions`/`action_predicates`/`action_delays` and the loop lost the arm that read them. A handler defers with ctx.schedule.in_seconds and gates with ordinary Rhai control flow"
     architecture:
       kind: evaluation-loop
       authority: authoritative
@@ -123,14 +110,11 @@ entities:
         reference: trigger_chain_exceeding_max_passes_stops_at_the_cap
         summary: A chain longer than the cap performs exactly the capped number of passes, then breaks.
       - kind: test
-        reference: set_flag_action_fires_on_flag_set_trigger_within_same_tick
-        summary: Chained triggers fire in the same Bevy frame as the mutation that caused them.
+        reference: scripted_flag_write_chains_a_declarative_on_flag_set
+        summary: A scripted handler's flag write chains a downstream on_flag_set trigger in the same Bevy frame.
       - kind: test
-        reference: flag_stores_handed_to_dispatch_are_live_within_a_pass
-        summary: Dispatch previews transitions against live stores, never a per-pass snapshot.
-      - kind: test
-        reference: single_trigger_dispatches_every_action_variant_in_list_order
-        summary: One trigger carrying every action variant dispatches them in authored list order.
+        reference: flag_stores_handed_to_dispatch_are_live_within_one_drain
+        summary: Dispatch previews transitions against live stores, never a per-action snapshot.
       - kind: test
         reference: trigger_from_layer_missing_in_layer_map_reads_base_flags
         summary: A trigger whose origin layer is missing from the layer map evaluates against the base flag store.
@@ -168,12 +152,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Trigger Action Extension Contract
-      summary: The authored procedure for adding a new trigger action variant. Exhaustive matches in the dispatch table's routing match, the applier, the comms-response inline dispatch, and the parity enumeration mean the compiler walks the author to every site that must change; the one runtime-only gap is the group functions' unreachable! guards (covered by should_panic tests).
+      summary: The authored procedure for adding a new trigger action variant. Exhaustive matches in the dispatch table's routing match and the applier mean the compiler walks the author to every site that must change; the one runtime-only gap is the group functions' unreachable! guards (covered by should_panic tests). There were TWO dispatch sites until issue #985 — the comms-response handler carried an intentionally parallel match — and that duplication is what the retired parity enumeration protected.
       goals:
-        - declare the new variant on the TriggerAction enum and parse it from world TOML (src/world/config.rs)
+        - "declare the new variant on the TriggerAction enum and, if a script should be able to buffer it, give it a host fn (src/world/config.rs, src/world/script/effects.rs). It is no longer parsed from world TOML - issue #985 deleted the `[[trigger.action]]` array, so a variant reaches the world either as a `BufferedEffect::Action` from a script or as a `DelayedAction` from `ctx.schedule.in_seconds`"
         - add a dispatch arm in the pure table (src/world/dispatch.rs), routed into the matching per-group function or a new group function for a new action family
         - when the action needs a new ECS effect, add an ActionCmd variant and an applier arm (apply_dispatch_result in src/world/server.rs); actions that resolve to existing commands need no applier change
-        - add the variant's arm to the comms-response inline dispatch (handle_respond_to_message in src/console/comms/server.rs, an intentionally parallel match — the compiler forces this because that match is also exhaustive) and extend its parity enumeration tests so comms responses stay symmetric with world triggers
         - add pure unit tests beside the dispatch table and pipeline tests beside the Bevy systems
       rationale:
         - "[ai] keeping every match exhaustive turns \"did I wire the new variant everywhere\" into a compile error rather than a runtime gap"

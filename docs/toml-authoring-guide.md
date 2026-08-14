@@ -46,8 +46,9 @@ worlds through `extra_worlds`, and triggers can load worlds during play through
 
 **Parser:** `src/world/config.rs` owns the entire world schema. `parse_world`
 is a single-pass deserializer that produces a `WorldConfig` carrying the
-normalised anchor table, the `[[entity]]` list, `[[trigger]]` blocks, and
-`[[comms]]` templates. The JS-facing loader is `wasm_load_world` in
+normalised anchor table and the `[[entity]]` list. Scenario logic is not part
+of that struct: the `[script]` block is lifted and compiled separately
+(`src/world/script/`). The JS-facing loader is `wasm_load_world` in
 `src/server/bridge.rs`, which delegates to `entities::config_cache` to
 populate the `WORLD_CONFIG` thread-local. The Bevy startup chain
 (`insert_world_config_resource → spawn_world_entities → init_world_runtime
@@ -63,9 +64,8 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | `description` | string | `""` | Lobby display body. |
 | `[global]` | table | `{ seed = 42 }` | Global generation params. |
 | `[anchors]` | table | `{}` | Named `[x,y,z]` waypoints referenced by `[[entity]] anchor = "..."` and AI patrols. |
-| `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Single block type for all spawnables; named entries (with `name = "..."`) are trigger / comms eligible. |
-| `[[trigger]]` | array of tables | `[]` | World-event handlers (see §1.5). |
-| `[[comms]]` | array of tables | `[]` | Comms dialogue templates (see §1.6). |
+| `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Single block type for all spawnables; named entries (with `name = "..."`) are the ones a script can reference. |
+| `[script]` | table | none | Scenario logic — event registrations, handler fns and comms dialogue nodes (see §1.5, §1.6). |
 | `[ambient_light]` | table | none | World ambient light override; omitted sub-fields fall back to renderer constants. |
 | `[dust]` | table | none | Ambient dust / velocity-mote effect (see §1.3). |
 
@@ -260,129 +260,142 @@ relative_to   = "starbase_alpha"
 offset        = [10.0, 0.0, -5.0]
 ```
 
-### 1.5 `[[trigger]]`
+### 1.5 Scenario logic — the `[script]` block
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `condition` | string | **required** | One of `on_destroyed`, `on_attacked`, `on_timer`, `on_hailed`, `on_waypoint_reached`. |
-| `entity` | string | depends | Required for entity-based conditions; references a named `[[entity]]` `name`. |
-| `after_secs` | f32 | depends | Required for `on_timer`. |
-| `waypoint` | string | none | Only for `on_waypoint_reached`. Names an anchor on the ship's route. Omit to fire on arrival at *any* waypoint of that ship's route. |
-| `[[trigger.action]]` | array | `[]` | Actions to fire (in order). |
+A world's scenario logic — when something happens, and what happens — is
+authored in Rhai, in the world's own `[script]` block (or a sibling `.rhai`
+file). There is one front-end. The `[[trigger]]` and `[[comms]]` TOML arrays
+were the other one; issue #985 deleted them, and a world that still authors
+either is **refused at load** with a message naming the block, rather than
+loading with its logic silently absent.
 
-`on_waypoint_reached` fires when the named ship reaches a waypoint on the
-`Patrol` or `Reach` objective it is currently following. "Reached" means the
-ship came within that entity's `[behaviour] waypoint_arrival_radius` (see
-§ `[behaviour]`) of the waypoint's anchor — tune that radius per entity rather
-than expecting ships to land on an anchor exactly.
+```toml
+[script]
+setup = """
+# Registrations: one per world event you want to react to. Each names a handler
+# fn defined in the same unit.
+on_destroyed("raider_alpha", "on_raider_destroyed");
+on_timer(45, "second_wave");
+on_hailed("Starbase Alpha", "on_starbase_hailed");
 
-Triggers are single-shot: each fires at most once per session.
+fn on_raider_destroyed(ctx) {
+    ctx.effects.add_objective(#{ id: "raider_killed", text: "Pirate raider destroyed." });
+}
+"""
+```
 
-#### `[[trigger.action]]` types
+#### Conditions
 
-Every action has a `type` field. Additional fields vary:
+The registration fns mirror the `TriggerCondition` vocabulary one for one:
 
-| `type` | Required fields | Optional | Notes |
-|---|---|---|---|
-| `add_objective` | `id`, `text` | `mandatory` (default `false`) | Add to the objectives list. |
-| `complete_objective` | `id` | — | Mark complete. |
-| `fail_objective` | `id` | — | Mark failed. |
-| `set_ai_state` | `entity`, `state` | `target` | Force-set an AI controller's state. `target` may name another spawn whose UUID becomes the AI's target. |
-| `apply_modifier` | `entity`, `tag`, `slot`, `bonus` | — | Add a modifier. `slot` ∈ {`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`}. |
-| `remove_modifier` | `entity`, `tag`, `slot` | — | Remove by `(tag, slot)`. |
-| `apply_int_modifier` | `entity`, `tag`, `slot`, `int_bonus` | — | `slot` ∈ {`RepairTeams`}. |
-| `remove_int_modifier` | `entity`, `tag`, `slot` | — | |
-| `apply_flag` | `entity`, `tag`, `kind` (→ `flag_kind`) | — | `kind` ∈ {`CommsJammed`, `SensorBlind`}. |
-| `remove_flag` | `entity`, `tag`, `kind` | — | |
-| `game_over` | — | `message` | End the game with an optional message. |
+| Registration | Arguments | Notes |
+|---|---|---|
+| `on_destroyed(entity, handler)` | named `[[entity]]` reference id | Fires when that entity dies. |
+| `on_all_destroyed(group, handler)` | entity group name | Fires once every member is gone. |
+| `on_attacked(entity, handler)` | | |
+| `on_hull_below(entity, threshold, handler)` | `threshold` in `(0, 1]` | Fires on a strictly DOWNWARD crossing. |
+| `on_timer(after_secs, handler)` | world-relative seconds | |
+| `on_hailed(entity, handler)` | | The Comms officer's hail. |
+| `on_flag_set(name, handler)` / `on_flag_cleared(name, handler)` | flag name | |
+| `on_world_loaded(handler)` | | |
+| `on_entered_region(entity, handler)` / `on_exited_region(entity, handler)` | region entity | |
+| `on_waypoint_reached(entity, handler)` | | Fires on arrival at any waypoint of that ship's route; "reached" means within that entity's `[behaviour] waypoint_arrival_radius`. |
+
+A registration is single-shot: each fires at most once per session.
+
+#### Effects
+
+A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedule.*`:
+
+| Call | Notes |
+|---|---|
+| `ctx.effects.add_objective(#{ id, text, mandatory?, targets?, source?, base_priority?, directive_kind?, … })` | Add to the objectives list, with its AI directive and utility scoring. |
+| `ctx.effects.complete_objective(id)` / `fail_objective(id)` | |
+| `ctx.effects.spawn_entity(#{ template_path, name, position?/anchor?, rotation?, scale?, overrides? })` | `template_path` string literals are scanned statically for asset preload. |
+| `ctx.effects.destroy_entity(name)` | |
+| `ctx.effects.load_world(path)` / `unload_world(path)` | Runtime composition of sub-world layers. |
+| `ctx.effects.apply_modifier(…)` / `remove_modifier(…)` | `slot` ∈ {`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`}. |
+| `ctx.effects.apply_int_modifier(…)` / `remove_int_modifier(…)` | `slot` ∈ {`RepairTeams`}. |
+| `ctx.effects.apply_flag(…)` / `remove_flag(…)` | `kind` ∈ {`CommsJammed`, `SensorBlind`}. |
+| `ctx.effects.add_faction_enemy(…)` / `remove_faction_enemy(…)` | |
+| `ctx.effects.game_over(message, "victory" \| "defeat")` | `message` may be empty. |
+| `ctx.flags.name = n` / `ctx.flags.increment(name, by)` | World flags. Never `+=` on a `flags` member — the loader rejects it. |
+| `ctx.schedule.in_seconds(n, effect)` | Defers ONE effect by `n` world-elapsed seconds (the old per-action `delay_secs`). |
+| `ctx.schedule.after(n, \|ctx\| { … })` | Defers a whole closure. |
+
+Conditional effects are ordinary Rhai control flow — an `if` on a flag read —
+rather than a per-action `when` predicate. A trigger-level gate is still a
+`when` on the registration where one is offered.
 
 **Removed actions** (no longer supported): `load_scenario`, `unload_scenario`.
 Use `load_world` and `unload_world` for runtime composition.
 
-### 1.6 `[[comms]]`
+### 1.6 Comms threads
 
-A comms template — a top-level message and a tree of player response choices.
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `from` | string | **required** | Channel/source identity used for hailing, range, contact lookup, and synthetic broadcasts. Usually a named `[[entity]]` `name`; synthetic names such as `"Starcorp Command"` are allowed for broadcasts with no physical contact. |
-| `speaker` | string | none | Optional display speaker for this root message. Use when the voice on the channel is a specific character distinct from the hailed contact, e.g. `speaker = "Dr. Myst"` on a message sent via `from = "Research Outpost"`. |
-| `trigger` | trigger condition | **required** | When to deliver this message. Any `TriggerCondition` works: `on_hailed`, `on_destroyed`, `on_attacked`, `on_all_destroyed`, `on_world_loaded`, `on_timer`, `on_flag_set`, `on_flag_cleared`, `on_entered_region`, `on_exited_region`. Use `on_timer` + `after_secs` for time-delayed broadcasts (the migration target for the old `delay_secs` shortcut, now removed). |
-| `entity` | string | depends | The named `[[entity]]` whose event triggers delivery (typically the same as `from`). Required by entity-scoped triggers (`on_hailed`, `on_destroyed`, etc.). |
-| `entities` | array of strings | none | Required by `on_all_destroyed`. |
-| `after_secs` | number | none | Required by `on_timer`. World-relative seconds. |
-| `name` | string | none | Flag name. Required by `on_flag_set` / `on_flag_cleared`. |
-| `message` | string | **required** | The root message body. |
-| `[[comms.response]]` | array | `[]` | Player response options. |
-
-#### `[[comms.response]]`
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `text` | string | **required** | Display text on the response button. |
-| `[[comms.response.action]]` | array | `[]` | Same shape as `[[trigger.action]]`. |
-| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, speaker?, trigger?, response... }` block presented after this choice. Follow-ups may set `speaker`; legacy `from` is accepted as a display-speaker alias, but new content should use `speaker`. If `trigger` is set, the thread shows a `...` placeholder while waiting for the trigger to fire (or fires immediately on the next tick if the trigger condition is already true — see "Triggered follow-ups" below). |
-
-#### Triggered follow-ups
-
-A `[comms.response.follow_up]` (or a chained `[comms.follow_up]`) can optionally carry a `trigger` field that delays delivery until a world condition is met. Supported trigger conditions mirror the `[[trigger]]` block; the most common shapes are:
-
-| Trigger | Fields | Notes |
-|---|---|---|
-| `on_timer` | `after_secs` | Queue-relative — counts from the moment the follow-up is queued (the response is picked, or the parent message is injected), NOT from world load. Replaces the legacy `delay_secs` shortcut. |
-| `on_entered_region` | `entity` | The named region entity. Fires when the player ship enters the region, OR immediately on the next tick if the ship is already inside. |
-| `on_exited_region` | `entity` | Fires when the ship leaves the region, OR immediately if it is already outside. |
-| `on_flag_set` | `name` | Fires when the named world flag transitions to set, OR immediately if it is already set. |
-| `on_flag_cleared` | `name` | Fires when the named world flag transitions to cleared, OR immediately if it is already cleared. |
-| `on_destroyed` | `entity` | Fires when the named entity is destroyed, OR immediately if its UUID is no longer in the live ECS set. |
-| `on_all_destroyed` | `entities` | Fires when every named entity is destroyed. |
-| `on_attacked` | `entity` | Event-only: fires when a fresh `Attacked` event is observed for the entity. Does not have an "already attacked" state to short-circuit on. |
-| `on_hailed` | `entity` | Event-only: fires when a fresh `Hailed` event is observed. |
-| `on_world_loaded` | (none) | Fires immediately (the world is, by construction, loaded). |
-
-Worked example — Axiom Station acknowledges arrival when the player ship enters its dock region (`assets/worlds/before_the_fire.toml`):
+A comms thread is opened by a handler and authored as one fn per dialogue node:
 
 ```toml
-[[comms]]
-from    = "Axiom Station"
-trigger = "on_world_loaded"
-entity  = "Axiom Station"
-message = "This is Axiom Station — we have a situation. Please respond."
+[script]
+setup = """
+on_hailed("Starbase Alpha", "on_starbase_hailed");
 
-  [[comms.response]]
-  text = "Understood, Axiom Station. We are proceeding to your location."
+fn on_starbase_hailed(ctx) {
+    ctx.effects.open_comms(#{ from: "Starbase Alpha", node_fn: "starbase_hail" });
+}
 
-    [comms.response.follow_up]
-    trigger = "on_entered_region"
-    entity  = "Axiom Station Dock"
-    message = "Ardent, we have you on the dock approach. Welcome to Axiom."
+# A node fn returns #{ message, responses }. An announcement — the one-way
+# broadcast an announcement template used to be — is a node whose
+# `responses` array is empty.
+fn starbase_hail(ctx) {
+    #{ message: "USS Phoenix, this is Starbase Alpha. Please state your business.",
+       responses: [
+         #{ text: "We require docking clearance.", on_pick: "on_dock" },
+         #{ text: "No comment.", on_pick: "on_decline", important: true },
+       ] }
+}
+
+# A response's `on_pick` names the fn that runs when the player picks it. That fn
+# buffers the response's effects and RETURNS the follow-up node — or `()` for a
+# terminal response that ends the thread.
+fn on_dock(ctx) {
+    ctx.effects.add_objective(#{ id: "obj-dock", text: "Dock at Starbase Alpha.", mandatory: true });
+}
+fn on_decline(ctx) { }
+"""
 ```
 
-`from` is the radio endpoint; `speaker` is the voice currently talking on that endpoint. This lets one chat thread stay anchored to a station while multiple characters speak inside it:
+`open_comms` keys, all optional except `from` and `node_fn`:
+
+| Key | Notes |
+|---|---|
+| `from` | Sender reference id — a named `[[entity]]`, or a synthetic name such as `"_self"` for a ship-internal report. Resolved to a UUID for range and contact lookup. |
+| `node_fn` | The fn returning this thread's root node. |
+| `display_name` | Player-facing sender label. Falls back to `from`. |
+| `thread_id` | Joins an existing thread. A fresh id is minted when absent. |
+| `urgent` | Flags the message urgent; a follow-up inherits the thread's urgency. |
+
+A response's `important` flag makes the client confirm before submitting it.
+
+A DELAYED reply is `ctx.schedule.after(n, |ctx| ctx.effects.open_comms(#{ thread_id: "…", node_fn: "next" }))` — the placeholder-and-queue machinery the
+declarative `follow_up.trigger` needed is gone with it.
+
+#### Hailable contacts
+
+A contact reaches the Comms officer's hail roster by opting in on the ENTITY,
+not in the world:
 
 ```toml
-[[comms]]
-thread_id = "research-scholar"
-from      = "Research Outpost"
-trigger   = "on_hailed"
-entity    = "Research Outpost"
-message   = "A.E.V. Ardent, this is the Research Outpost. Stand by — patching you through to Dr. Myst now."
-
-  [[comms.response]]
-  text = "Patch them through."
-    [comms.response.follow_up]
-    speaker = "Dr. Myst"
-    message = "Ardent, this is Dr. Myst. The resonance signature is getting stronger."
+# assets/entities/station_axiom.toml
+[comms]
+range        = 800
+hailable     = true
+display_name = "Starbase Alpha"   # optional; falls back to the entity's name
 ```
 
-### Example — a declarative world, end to end
+Per-world opt-in is an `overrides` on the `[[entity]]` block:
+`overrides = { comms = { hailable = true } }`.
 
-> **No shipped world looks like this any more.** Issue #984 converted them all
-> — triggers *and* comms — to a single `[script]` block each, finishing with
-> `combat_test.toml`, so the real files are the worked examples of the Rhai form
-> rather than the declarative one. The listing below is kept because
-> `[[trigger]]` / `[[comms]]` are still parsed — a mod pack or a hand-authored
-> world may use them — and because this is the shape a conversion starts from.
+### Example — a world, end to end
 
 ```toml
 title = "Default Patrol"
@@ -395,7 +408,7 @@ seed = 42
 starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
 
-# Static map-half layout (anonymous — not trigger-eligible)
+# Static map-half layout (anonymous — not script-referenceable)
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
 position = [0.0, 0.0, 0.0]
@@ -406,40 +419,40 @@ id = "player-ship"
 position = [150.0, 0.0, 0.0]
 spawn_on = "game_start"
 
-# Named [[entity]] (trigger / comms-eligible — PRD #339 slice 2)
+# Named [[entity]] — a script can reference this by name
 [[entity]]
 template_path = "assets/entities/station_outpost.toml"
 name          = "Starbase Alpha"
 position      = [500.0, 0.0, 0.0]
 
-# Named NPC at an anchor (PRD #337 slice 3)
+# Named NPC at an anchor
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "raider_alpha"
 anchor        = "patrol_alpha"
 
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider_alpha"
+[script]
+setup = """
+on_destroyed("raider_alpha", "on_raider_destroyed");
+on_hailed("Starbase Alpha", "on_starbase_hailed");
 
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "raider_killed"
-  text = "Pirate raider destroyed."
+fn on_raider_destroyed(ctx) {
+    ctx.effects.add_objective(#{ id: "raider_killed", text: "Pirate raider destroyed." });
+}
 
-[[comms]]
-from    = "Starbase Alpha"
-trigger = "on_hailed"
-entity  = "Starbase Alpha"
-message = "USS Phoenix, this is Starbase Alpha. Please state your business."
+fn on_starbase_hailed(ctx) {
+    ctx.effects.open_comms(#{ from: "Starbase Alpha", node_fn: "starbase_hail" });
+}
 
-  [[comms.response]]
-  text = "We require docking clearance."
-    [[comms.response.action]]
-    type      = "add_objective"
-    id        = "obj-dock"
-    text      = "Dock at Starbase Alpha."
-    mandatory = true
+fn starbase_hail(ctx) {
+    #{ message: "USS Phoenix, this is Starbase Alpha. Please state your business.",
+       responses: [ #{ text: "We require docking clearance.", on_pick: "on_dock" } ] }
+}
+
+fn on_dock(ctx) {
+    ctx.effects.add_objective(#{ id: "obj-dock", text: "Dock at Starbase Alpha.", mandatory: true });
+}
+"""
 ```
 
 ---

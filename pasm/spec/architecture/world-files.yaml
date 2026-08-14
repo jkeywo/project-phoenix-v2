@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World File Parser
-      summary: Parses authoritative world TOML into WorldConfig, including entities, triggers, comms, visual settings, and predicates.
+      summary: Parses authoritative world TOML into WorldConfig - entities, anchors, visual settings and predicates. Since issue #985 it parses no scenario logic at all: the `[[trigger]]` and `[[comms]]` arrays are gone and a world that still authors either is refused by name, while the `[script]` block is lifted and compiled separately.
     architecture:
       kind: configuration-loader
       authority: authoritative
@@ -16,7 +16,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/config.rs]
-      symbols: [parse_world, WorldConfig, WorldEntity, Trigger]
+      symbols: [parse_world, WorldConfig, WorldEntity]
       tests: [cargo test]
 
   - state: world-configuration-state
@@ -117,7 +117,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/server.rs, src/world/config.rs, src/world/flags.rs]
-      symbols: [Trigger, TriggerAction, Predicate]
+      symbols: [Trigger, TriggerAction, Predicate, TriggerState, evaluate_single_trigger]
       tests: [cargo test]
 
   - component: world-objective-manager
@@ -140,7 +140,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Comms Runtime
-      summary: Evaluates world comms templates, maintains contacts and inbox state, and marks initial content for broadcast on game start.
+      summary: Maintains the hail roster and inbox state, and marks initial content for broadcast on game start.
     architecture:
       kind: subsystem
       authority: authoritative
@@ -341,7 +341,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Comms Identity Contract
-      summary: Resolves each authored comms sender reference (`from`) to its world entity identity for the sender UUID while carrying separate, independent sender display text. All world comms deliver to the ship Comms system, not role-specific inboxes.
+      summary: Resolves each scripted comms sender reference (`open_comms`'s `from`) to its world entity identity for the sender UUID while carrying separate, independent sender display text. All world comms deliver to the ship Comms system, not role-specific inboxes.
     architecture:
       kind: configuration-schema
       authority: authoritative
@@ -351,7 +351,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/config.rs, src/comms/content.rs, src/comms/server.rs]
-      symbols: [CommsTemplate, FiredCommsTemplate, inject_comms_templates, merge_world_comms]
+      symbols: [OpenCommsRequest, open_scripted_comms_threads, entity_contact_label]
       tests: [cargo test]
 
   - component: world-layer-runtime

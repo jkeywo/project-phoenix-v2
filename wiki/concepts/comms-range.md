@@ -22,8 +22,8 @@ entity to the roster. Nothing in shipped content sets it yet; see
 range = 500.0
 
 # Optional (#985) — opt in to the hail roster, with an optional contact label.
-# Authored on NOTHING in shipped content today; the Rhai M7 world conversions
-# turn it on per world as they retire that world's `[[comms]]` block.
+# This is the roster's ONLY source since M7 deleted the `[[comms]]` front-end
+# that used to derive a contact from every template's `from`.
 hailable = true
 display_name = "Relay Outpost"
 ```
@@ -44,15 +44,16 @@ Parsed by `CommsConfig { range, hailable, display_name }` in
 
 | Source | Built by | Contact label |
 |---|---|---|
-| Declarative `[[comms]]` templates in the world TOML | `init_comms_runtime` / `merge_world_comms`, resolving each template's `from` through `name_to_uuid` | template `display_name`, else `from` |
 | Live entities carrying `CommsHailable` | `update_comms_range_flags`, via the pure `merge_entity_contacts` in `src/comms/roster.rs` | `[comms] display_name`, else the entity's `EntityName`, else the UUID |
 
-On a UUID collision the **declarative entry wins** — it keeps its authored name
-and its live `in_range`/`is_urgent` stamps, so every shipped world's roster is
-unchanged while both sources coexist. Entity-derived contacts are appended
-after the declarative ones, sorted `(name, uuid)` so the player-visible order
-never depends on ECS query order. At Rhai M7 the declarative half is deleted
-and the entity-derived half becomes the only source.
+There was a second source until M7 (#985): every declarative `[[comms]]`
+template's `from`, resolved through `name_to_uuid` by `init_comms_runtime`. It
+won a UUID collision, which is what kept every shipped world's roster unchanged
+while both coexisted. With it deleted the same merge rule now buys idempotency
+instead: the roster is re-merged every tick, and a seated contact must not lose
+its label or its `in_range`/`is_urgent` stamps to its own re-derivation.
+Entity-derived contacts are appended sorted `(name, uuid)` so the
+player-visible order never depends on ECS query order.
 
 ### Wire
 
@@ -67,7 +68,7 @@ and the entity-derived half becomes the only source.
 1. Reads the player `Ship` Transform + its `CommsRange`.
 2. Walks `Query<(&EntityUuid, &Transform, &CommsRange, Option<&CommsHailable>, Option<&EntityName>)>`, computing per-entity `in_range` and collecting the entity-derived hail candidates in the same pass.
 3. Updates `WorldContentRuntime.range_flags: HashMap<String, bool>`.
-4. Prunes flags for despawned entities; prunes contacts whose entity lost (or never had) a `CommsRange` component (this is what excludes `[[comms]]`-template entries without a `[comms]` block).
+4. Prunes flags for despawned entities; prunes contacts whose entity lost (or never had) a `CommsRange` component.
 5. Unions the entity-derived candidates into `contacts` (#985) — after the prune, before the range stamp, so a new contact carries its real reachability on the tick it appears. This is also the roster's lifecycle: a hailable entity joins the tick after it spawns and drops the tick after it is destroyed, off the same live set the prune uses.
 6. Sets `needs_broadcast = true` on any flip so `CommsState` re-broadcasts even when the inbox is clean.
 
@@ -120,8 +121,8 @@ Default world puts the player hull at `(280, 0, 0)` and Starbase Alpha at the `s
 ## Tests
 
 - Pure: `src/comms/range.rs` — equal/less/greater/zero/negative/NaN distance and range.
-- Pure: `src/comms/roster.rs` — label precedence, UUID de-duplication, declarative-wins collision, query-order independence, idempotence across ticks.
-- Shipped content: `src/comms/roster.rs` (`shipped_world_rosters`) — asserts no shipped entity template opts in, and snapshots each shipped world's declarative roster (`combat_test`: 12 templates → 1 contact; `default`: 3 → 2; everything else empty).
+- Pure: `src/comms/roster.rs` — label precedence, UUID de-duplication, seated-entry-wins collision, query-order independence, idempotence across ticks.
+- Shipped content: `src/comms/roster.rs` — pins which entity templates and per-world overrides opt in, and asserts the converted worlds' rosters match the ones the deleted `[[comms]]` templates produced (`combat_test`: 1 contact; `default`: 2; everything else empty).
 - Codec round-trip + missing-field defaults: `src/core/codec.rs` (`comms_state_payload_with_no_range_flags_defaults_both_to_true` and per-type tests).
 - Entity spawning: `src/entities/spawner.rs` — `CommsRange` inserted iff `[comms]` block present; `CommsHailable` iff `hailable = true`.
 - Server: `src/comms/server.rs` integration tests cover broadcast stamping, contact pruning, server-side Hail/Respond rejection, entity-despawn-flips-sender-in-range, multi-entity independent flags, range-flip-triggers-broadcast, ship-despawn-keeps-gates-closed, and the entity-derived roster (opt-in gating, label precedence, spawn/despawn lifecycle, collision, append order).

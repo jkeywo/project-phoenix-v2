@@ -63,135 +63,58 @@ the client treats that as "own thread" (`effective_thread_id` falls back to `msg
 The pure-HTML phone console (`gui/comms-console.html`) also uses `thread_id` as
 the local selection key. Its inbox renders one row per thread, the chat panel
 renders every message in the selected thread, and response buttons target the
-latest unanswered message in that thread. This is what keeps the Before the Fire
-Research Outpost handoff and delayed Dr. Myst briefing in one conversation while
-still allowing the operator to reply to Dr. Myst.
+latest unanswered message in that thread. This is what keeps a handoff and a
+delayed follow-up briefing in one conversation while still allowing the operator
+to reply to the later speaker.
 
-### Auto-chained root follow-up (`[comms.follow_up]`)
+### Authoring a thread
 
-A root `[[comms]]` block can declare a sibling `[comms.follow_up]` that fires
-automatically after the root message is injected — no player response click
-required. Used for one-way broadcasts that promise more dialogue
-("Stand by — patching you through..."). The chained node:
+A comms thread is authored in Rhai, in the world's `[script]` block. Issue #985
+deleted the declarative `[[comms]]` front-end this page used to document at
+length — the root template, `[[comms.response]]`, the recursive
+`[comms.response.follow_up]` tree, the auto-chained `[comms.follow_up]`, and the
+per-follow-up `trigger` that gated injection behind a world condition. See
+`docs/toml-authoring-guide.md` §1.6 for the current form; in outline:
 
-- inherits the parent's `thread_id` (same conversation),
-- supports its own `speaker` override (see "Multi-speaker channels" below),
-- supports its own `trigger` (e.g. `on_timer` with `after_secs` for a delayed
-  reveal — silent during the wait, no `...` placeholder for root chains),
-- supports its own nested `[[comms.follow_up.response]]` tree (so the chained
-  message can become a branching dialogue),
-- inherits the parent template's `urgent` flag.
+```rhai
+on_hailed("Research Outpost", "on_outpost_hailed");
 
-`[comms.follow_up]` is **mutually exclusive** with `[[comms.response]]` on the
-root node: the parser hard-errors when both are present so authors pick one
-shape per node — branching dialogue (responses) OR a chained monologue
-(follow_up).
+fn on_outpost_hailed(ctx) {
+    ctx.effects.open_comms(#{ from: "Research Outpost", node_fn: "outpost_hail",
+                              thread_id: "research-scholar", urgent: true });
+}
 
-Worked example — Before the Fire Research Outpost (`assets/worlds/before_the_fire.toml`):
+fn outpost_hail(ctx) {
+    #{ message: "…Stand by — patching you through to Dr. Myst now.",
+       responses: [ #{ text: "Patch them through.", on_pick: "on_patch" } ] }
+}
 
-```toml
-[[comms]]
-thread_id = "research-scholar"
-from      = "Research Outpost"
-trigger   = "on_hailed"
-entity    = "Research Outpost"
-urgent    = true
-message   = "...Stand by — patching you through to Dr. Myst now."
-
-  [comms.follow_up]
-  speaker    = "Dr. Myst"
-  trigger    = "on_timer"
-  after_secs = 3.0
-  message    = "Ardent, this is Dr. Myst..."
-
-    [[comms.follow_up.response]]
-    text = "What happens if it fires?"
-
-      [comms.follow_up.response.follow_up]
-      speaker    = "Dr. Myst"
-      trigger    = "on_timer"
-      after_secs = 2.0
-      message    = "If it fires at full charge..."
+fn on_patch(ctx) { #{ message: "Ardent, this is Dr. Myst…", responses: [] } }
 ```
 
-Implementation: scheduled in `handle_hail` (`src/console/comms/server.rs:113`)
-and `inject_comms_templates` (`src/comms/server.rs`, the trigger-pipeline
-system that fires `[[comms]]` templates) by pushing a `PendingFollowUp` onto
-`runtime.pending_follow_ups` whose `placeholder_id = None`. The `tick_pending_follow_ups` system evaluates each pending
-follow-up's `trigger` each tick against current world state (region
-membership, flag store, live entity UUIDs) plus this tick's pending events;
-ready follow-ups are injected and replace any `...` placeholder.
+One fn is one node. A response's `on_pick` names the fn that runs when it is
+picked; that fn buffers the response's effects and returns the follow-up node,
+or `()` to end the thread. A node with an empty `responses` array is the one-way
+broadcast a template with no responses used to be.
+
+A **delayed** reply is `ctx.schedule.after(n, |ctx| ctx.effects.open_comms(#{ thread_id: "…", node_fn: "next" }))` — an ordinary deferred callback that
+opens into the same thread. The `PendingFollowUp` queue, its `…` placeholder row
+and the `follow_up_trigger_holds` evaluator that decided when to swap it went
+with the declarative front-end; a delayed reply now shows nothing until it
+arrives, like a chained root always did.
 
 ### Multi-speaker channels
 
-Comms threads can contain multiple displayed speakers while staying anchored to
-one physical or synthetic channel. In world TOML, top-level `from` is the radio
-endpoint used for hailing, range checks, contact lookup, and synthetic broadcast
-identity. Optional `speaker` on the root comms node or a follow-up changes only
-the delivered `CommsMessage.sender_name`. Legacy follow-up `from` is still
-accepted as a display-speaker alias, but new content should use `speaker`.
+A thread stays anchored to one physical or synthetic channel while different
+characters speak on it. `open_comms`' `from` is the radio endpoint used for
+hailing, range checks, contact lookup and synthetic broadcast identity;
+`display_name` is the player-facing label, and `thread_id` is what keeps
+successive opens in one conversation.
 
-Example: Before the Fire keeps `from = "Research Outpost"` and
-`thread_id = "research-scholar"` for the channel, while Dr. Myst's entries set
-`speaker = "Dr. Myst"`. The Comms inbox can remain labelled as the Research
-Outpost channel, while the chat transcript shows Dr. Myst as the speaker for
-the relevant messages.
-
-### Triggered follow-ups (proximity, flags, events)
-
-Any `[comms.response.follow_up]` (or chained `[comms.follow_up]`) can carry an
-optional `trigger` field that gates injection until a world condition is met.
-All `TriggerCondition` variants are supported, mirroring the `[[trigger]]`
-block:
-
-- **Time-based** — `on_timer` + `after_secs` (queue-relative; counts from when
-  the follow-up is queued, not from world load). Replaces the legacy
-  `delay_secs` shortcut, which was removed.
-- **State-based** — `on_entered_region`, `on_exited_region`, `on_flag_set`,
-  `on_flag_cleared`, `on_destroyed`, `on_all_destroyed`, `on_world_loaded`.
-  These fire on the next tick if the condition is **already true** at queue
-  time (e.g. the ship is currently inside the named region, the flag is
-  already set, the entity is already destroyed). This means a player who
-  picks "we are proceeding to your location" while already at the dock
-  receives the follow-up immediately rather than having to leave and
-  re-enter the region.
-- **Event-only** — `on_attacked`, `on_hailed`. These require a fresh event in
-  `pending_world_events` and have no "already-happened" short-circuit.
-
-Response follow-ups show a `...` placeholder in the chat while the trigger is
-pending; chained root follow-ups stay silent. The placeholder is removed and
-replaced with the real message when the trigger fires.
-
-Worked example — Axiom Station acknowledges arrival when the player ship
-enters its dock region (`assets/worlds/before_the_fire.toml`):
-
-```toml
-[[comms.response]]
-text = "Understood, Axiom Station. We are proceeding to your location."
-
-  [comms.response.follow_up]
-  trigger = "on_entered_region"
-  entity  = "Axiom Station Dock"
-  message = "Ardent, we have you on the dock approach. Welcome to Axiom..."
-```
-
-Implementation: the pure evaluator `follow_up_trigger_holds` in
-`src/comms/content.rs` (relocated in #816) returns true when the condition is met (or
-already-true at queue time). `tick_pending_follow_ups` runs first in the
-chained `SimSet::Physics` trigger pipeline (`tick_pending_follow_ups` →
-`collect_world_events` → `inject_comms_templates` → `tick_trigger_pipeline`),
-so it observes `pending_world_events` before `collect_world_events` drains
-them into `WorldEventBuffer`, and snapshots region membership + live UUIDs +
-flag store for the evaluator.
-
-### Delayed messages
-
-Use `trigger = "on_timer"` + `after_secs` on any follow-up for time-based
-delays. The clock is **queue-relative** for follow-ups (counts from when the
-follow-up is queued — i.e. when the response is picked or the parent message
-is injected), and **world-relative** for root `[[comms]]` blocks (counts from
-world load, matching the existing `on_timer` trigger semantics for top-level
-triggers).
+The per-NODE `speaker` override the declarative form carried is gone with it
+(issue #985): a scripted node is body and responses, and who is speaking is
+metadata on the OPEN. To change the visible speaker mid-thread, open again into
+the same `thread_id` with a different `display_name`.
 
 ### Inbox list — one row per thread
 
@@ -314,8 +237,9 @@ Comms conversation handlers were relocated from `src/world/server.rs` into `src/
 - `src/client_comms.rs`
 - `src/console/comms/inbox.rs`
 - `src/core/messages.rs`
-- `src/world/config.rs` (`speaker` parsing, legacy follow-up `from` alias, root-level `[comms.follow_up]` parsing + mutual-exclusion validation)
-- `src/comms/server.rs` (CommsRuntime, inject/broadcast/range systems — consolidated in #816)
-- `src/comms/content.rs` (pure evaluators; ActiveDialogue.thread_id; `FiredCommsTemplate.root_follow_up`)
+- `src/comms/server.rs` (CommsRuntime, broadcast/range/roster systems — consolidated in #816)
+- `src/comms/content.rs` (CommsDialogueNode/CommsResponse, ActiveDialogue, ScriptedDialogue, OpenCommsRequest)
+- `src/comms/scripted.rs` (`open_scripted_comms_threads` — the one thread-opening path since #985)
+- `src/world/script/comms.rs` (`enter_node`, `project_node` — script meets wire shape)
 - `src/world/server.rs` (dispatch appliers called by `handle_respond_to_message`)
-- `assets/worlds/before_the_fire.toml` (Research Outpost handoff → Dr. Myst chain via `[comms.follow_up]`)
+- `assets/worlds/default.toml` (the reference scripted dialogue tree)

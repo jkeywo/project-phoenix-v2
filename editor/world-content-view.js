@@ -1,20 +1,17 @@
 /**
  * world-content-view.js
  *
- * Renders the five-section "World Content" tree in the editor's left
- * panel, sourced from `getWorldContentData(worldState, crossRefIndex,
- * activeLayerPath)`.
+ * Renders the two-section "World Content" tree in the editor's left panel,
+ * sourced from `getWorldContentData(worldState)`.
  *
  * Pure DOM rendering + click-event-dispatch.  Section collapse state is
  * preserved across re-renders via module-local Set.  Clicking a named
- * entity (or a trigger/comms row whose `entity` is set) dispatches
- * `onSelectEntity(name)`; otherwise rows are inert.
+ * entity dispatches `onSelectEntity(name)`; anchor rows are inert.
  *
- * Slice 4a addition: trigger rows additionally fire
- * `onSelectTrigger(triggerIndex)`, and comms rows fire
- * `onSelectComms(commsIndex)`.  Both callbacks are wired alongside
- * `onSelectEntity` (no replacement) — the right-hand pane picks which
- * takes precedence in its selection state.
+ * The ⚡ Triggers / 💬 Comms templates / ☑ Objectives sections were removed
+ * with the declarative scenario front-end (issue #985): all three read
+ * `[[trigger]]` / `[[comms]]` arrays a loadable world can no longer author.
+ * Scenario logic is browsed through the SCRIPTS panel instead.
  */
 
 import { getWorldContentData } from './world-content-panel.js';
@@ -24,9 +21,6 @@ const collapsed = new Set();   // section keys that are collapsed
 const SECTIONS = [
   { key: 'anchors',        label: 'Anchors',         icon: '◆', render: renderAnchorRow },
   { key: 'namedEntities',  label: 'Named entities',  icon: '◦', render: renderEntityRow },
-  { key: 'triggers',       label: 'Triggers',        icon: '⚡', render: renderTriggerRow },
-  { key: 'commsTemplates', label: 'Comms templates', icon: '💬', render: renderCommsRow },
-  { key: 'objectives',     label: 'Objectives',      icon: '☑', render: renderObjectiveRow },
 ];
 
 /**
@@ -35,23 +29,13 @@ const SECTIONS = [
  *
  * @param {object} opts
  * @param {object|null} opts.worldState          Active layer's toml object.
- * @param {object}      opts.crossRefIndex       CrossReferenceIndex instance.
- * @param {string|null} opts.activeLayerPath     Filename of the active layer.
+ * @param {string|null} [opts.activeLayerPath]   Filename of the active layer.
  * @param {(name: string) => void}    [opts.onSelectEntity]
  *        Called when a clickable row identifies an entity to highlight.
- * @param {(triggerIndex: number) => void} [opts.onSelectTrigger]
- *        Called when a trigger row is clicked (Slice 4a). Fires in
- *        addition to `onSelectEntity` if the trigger has an entity.
- * @param {(commsIndex: number) => void} [opts.onSelectComms]
- *        Called when a comms row is clicked (Slice 4a stub for 4b).
  */
 export function renderWorldContentPanel({
   worldState,
-  crossRefIndex,
-  activeLayerPath,
   onSelectEntity,
-  onSelectTrigger,
-  onSelectComms,
 }) {
   const host = document.getElementById('worldContentList');
   if (!host) return;
@@ -61,14 +45,9 @@ export function renderWorldContentPanel({
     return;
   }
 
-  const data = getWorldContentData(worldState, crossRefIndex, activeLayerPath);
+  const data = getWorldContentData(worldState);
 
-  // Inject array indices so trigger/comms rows can dispatch index-based
-  // selection callbacks even though the pure data module doesn't track them.
-  (data.triggers || []).forEach((r, i) => { r.triggerIndex = i; });
-  (data.commsTemplates || []).forEach((r, i) => { r.commsIndex = i; });
-
-  const callbacks = { onSelectEntity, onSelectTrigger, onSelectComms };
+  const callbacks = { onSelectEntity };
 
   host.innerHTML = '';
   for (const section of SECTIONS) {
@@ -139,38 +118,6 @@ function renderEntityRow(row, icon, callbacks) {
     ? () => callbacks.onSelectEntity(row.name)
     : null;
   return makeRow(icon, `${row.name}${tail}`, row.refCount, handler);
-}
-
-function renderTriggerRow(row, icon, callbacks) {
-  const cond = row.condition || '*';
-  const ent  = row.entity ? `:${row.entity}` : '';
-  const handler = () => {
-    if (typeof callbacks.onSelectTrigger === 'function') {
-      callbacks.onSelectTrigger(row.triggerIndex);
-    }
-    if (row.entity && typeof callbacks.onSelectEntity === 'function') {
-      callbacks.onSelectEntity(row.entity);
-    }
-  };
-  return makeRow(icon, `${cond}${ent} (×${row.actionCount})`, null, handler);
-}
-
-function renderCommsRow(row, icon, callbacks) {
-  const parts = [row.from, row.trigger].filter(Boolean).join(' / ');
-  const handler = () => {
-    if (typeof callbacks.onSelectComms === 'function') {
-      callbacks.onSelectComms(row.commsIndex);
-    }
-    if (row.entity && typeof callbacks.onSelectEntity === 'function') {
-      callbacks.onSelectEntity(row.entity);
-    }
-  };
-  return makeRow(icon, parts || '(unnamed)', null, handler);
-}
-
-function renderObjectiveRow(row, icon, _callbacks) {
-  const text = row.text ? `: ${row.text}` : '';
-  return makeRow(icon, `${row.id}${text}`, row.refCount, null);
 }
 
 function shortPath(p) {

@@ -17,11 +17,11 @@ The merger of *map* and *scenario* into a single *world* concept is complete:
 - **One asset directory:** `assets/worlds/` (each session loads exactly one TOML)
 - **One WASM loader:** `wasm_load_world(path, toml_str)` in `src/server/bridge.rs`, which delegates to `entities/config_cache::wasm_load_world`
 - **One JS fetch** in `server.html`
-- **One parser:** `world::config::parse_world` → `WorldConfig` (anchors + `[[entity]]` instances + `[[trigger]]` + `[[comms]]` templates), single-pass, populates a `WORLD_CONFIG` thread-local
+- **One parser:** `world::config::parse_world` → `WorldConfig` (anchors + `[[entity]]` instances), single-pass, populates a `WORLD_CONFIG` thread-local. Scenario logic is not in that struct: the `[script]` block is lifted and compiled separately (`src/world/script/`). The declarative `[[trigger]]` / `[[comms]]` arrays were the other front-end; issue #985 deleted them, and a world that still authors either is refused at load
 - **One block type in TOML:** `[[entity]]`. The legacy `[[spawn]]` block was folded in (PRD #341)
 - **One immediate-spawn pipeline:** `world::server::spawn_world_entities`, driven by `world::config::partition_immediate_entities` to route asteroid-field templates and other templates through the shared spawner
-- **Layered runtime state:** a root world can load `extra_worlds` and triggers can add or unload named child layers. Each layer carries its own flags and loader path; entities and ad-hoc spawns are tracked for unload cleanup. Comms and objectives are not yet fully layer-owned, which is recorded as proposed PASM lifecycle work.
-- **Layer trigger actions:** `load_world` and `unload_world` are live additive layer-management actions. They are not scenario replacement; the root world remains active throughout the session.
+- **Layered runtime state:** a root world can load `extra_worlds` and a script handler can add or unload named child layers. Each layer carries its own flags and loader path; entities and ad-hoc spawns are tracked for unload cleanup. A layer contributes ENTITIES and nothing else — the declarative trigger merge was its only scenario-logic channel, and script-in-layers (#1045) is where that capability returns.
+- **Layer effects:** `load_world` and `unload_world` are live additive layer-management effects. They are not scenario replacement; the root world remains active throughout the session.
 
 ## Load path
 
@@ -38,10 +38,10 @@ At `Startup`, `insert_world_config_resource` copies the `WORLD_CONFIG` thread-lo
 
 ## Startup chain
 
-Run-once startup systems in `WorldPlugin`, chained in order (see `src/world/server.rs:391` for `insert_world_config_resource`):
+Run-once startup systems in `WorldPlugin`, chained in order (see `src/world/server.rs:632` for `insert_world_config_resource`):
 
-1. `insert_world_config_resource` (`src/world/server.rs:391`) — copies `WORLD_CONFIG` thread-local → `Res<WorldConfig>`
-2. `spawn_world_entities` — spawns the `[[entity]]` instances the unified pipeline owns: asteroid fields and any entry carrying a `name` (`is_owned_by_unified_pipeline`). Not all of them — anonymous non-asteroid entries (stars, planets, and `id`-only entries like `default.toml`'s `nebula-1`) belong to `setup_world` in `src/server_app.rs`, a separate `Startup` system with no ordering relationship to this one. Both call `world_activation_blocked` first, so an invalid world spawns neither half. Per-instance placement is resolved by `resolve_entity_position_with` (`src/world/config.rs:1734`), which delegates to `TransformConfig::resolve` (`src/world/config.rs:80`) with precedence `relative_to+offset` > `anchor` > `position` > origin; `rotation` (XYZ Euler radians) and `scale` (default `[1, 1, 1]`) are applied from the same `transform = { ... }` table
+1. `insert_world_config_resource` (`src/world/server.rs:632`) — copies `WORLD_CONFIG` thread-local → `Res<WorldConfig>`
+2. `spawn_world_entities` — spawns the `[[entity]]` instances the unified pipeline owns: asteroid fields and any entry carrying a `name` (`is_owned_by_unified_pipeline`). Not all of them — anonymous non-asteroid entries (stars, planets, and `id`-only entries like `default.toml`'s `nebula-1`) belong to `setup_world` in `src/server_app.rs`, a separate `Startup` system with no ordering relationship to this one. Both call `world_activation_blocked` first, so an invalid world spawns neither half. Per-instance placement is resolved by `resolve_entity_position_with` (`src/world/config.rs:1700`), which delegates to `TransformConfig::resolve` (`src/world/config.rs:80`) with precedence `relative_to+offset` > `anchor` > `position` > origin; `rotation` (XYZ Euler radians) and `scale` (default `[1, 1, 1]`) are applied from the same `transform = { ... }` table
 3. `init_world_runtime` — initialises `WorldContentRuntime`, `ObjectiveManagerRes` from the loaded `WorldConfig`; `init_comms_runtime` (`src/comms/server.rs`, runs `.after` it) initialises `CommsRuntime` + `CommsInboxRes` (comms state split out in #816)
 4. `load_extra_worlds` — loads any additional worlds declared in `WorldConfig.extra_worlds`
 
@@ -49,19 +49,19 @@ Production always loads a world TOML via the WASM bridge; when no `WorldConfig` 
 
 The viewscreen space backdrop is no longer spawned by `WorldPlugin`: `RendererPlugin` attaches a Bevy `Skybox` to `GameCamera` and loads `assets/skybox/phoenix_space_cubemap.png` via `prepare_space_skybox_cubemap` (`src/server/renderer.rs:247`), replacing the old runtime star-sphere field.
 
-A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/renderer.rs:296`, registered at `src/server/renderer.rs:94`), reads the optional `[ambient_light]` block (`AmbientLightConfig` at `src/world/config.rs:113`) and inserts the `AmbientLight` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`. Running it in `PostStartup` guarantees `insert_world_config_resource` has already executed.
+A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/renderer.rs:296`, registered at `src/server/renderer.rs:94`), reads the optional `[ambient_light]` block (`AmbientLightConfig` at `src/world/config.rs:117`) and inserts the `AmbientLight` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`. Running it in `PostStartup` guarantees `insert_world_config_resource` has already executed.
 
 ## Update systems
 
-- `handle_hail` — Comms officer hails a contact; matching comms templates fire and inject messages (lives in `src/console/comms/server.rs` since #608; registered by `CommsWorldPlugin` since #816)
-- `handle_respond_to_message` — player picks a response, may emit follow-up dialogue, runs response actions (also in `src/console/comms/server.rs`)
+- `handle_hail` — Comms officer hails a contact; range-gates it, records it on `open_hails`, and emits `WorldEvent::Hailed` for a scripted `on_hailed` handler to answer (lives in `src/console/comms/server.rs` since #608; registered by `CommsWorldPlugin` since #816)
+- `handle_respond_to_message` — player picks a response; runs its `on_pick` fn and injects the follow-up node the fn returned (also in `src/console/comms/server.rs`)
 - `handle_clear_comms` — drops orphaned and read messages (also in `src/console/comms/server.rs`)
 - `broadcast_comms_state` (`src/comms/server.rs`) / `broadcast_objective_summary` — push deltas on change
-- Trigger pipeline (issues #707–#719), chained in `SimSet::Physics`: `tick_pending_follow_ups` (`src/comms/server.rs`) → `collect_world_events` (`src/world/server.rs`, drains queued `WorldEvent`s — attacked, destroyed, hull-threshold crossings, hailed, timer, region, flag — into the per-tick `WorldEventBuffer` resource) → `inject_comms_templates` (`src/comms/server.rs`, fires matching `[[comms]]` templates) → `tick_trigger_pipeline` (`src/world/server.rs`, evaluates `[[trigger]]` conditions and dispatches the matching trigger actions). `tick_delayed_actions` runs after the pipeline, firing queued delayed actions through the same dispatch table. Comms systems live in `CommsWorldPlugin` (`src/comms/server.rs`), added by `WorldPlugin` (#816)
+- Trigger pipeline (issues #707–#719), chained in `SimSet::Physics`: `collect_world_events` (`src/world/server.rs`, drains queued `WorldEvent`s — attacked, destroyed, hull-threshold crossings, hailed, timer, region, flag — into the per-tick `WorldEventBuffer` resource) → `tick_trigger_pipeline` (`src/world/server.rs`, evaluates trigger conditions and runs each fired trigger's script handler) → `tick_script_callbacks` → `open_scripted_comms_threads` (`src/comms/scripted.rs`, materialises queued `open_comms` requests into live threads) → `tick_delayed_actions`, which fires queued delayed actions through the same dispatch table. Comms systems live in `CommsWorldPlugin` (`src/comms/server.rs`), added by `WorldPlugin` (#816)
 
 ## Trigger conditions
 
-Triggers in `[[trigger]]` blocks are matched against `WorldEvent`s by `evaluate_single_trigger` / `evaluate_triggers_with_flags` in `src/world/content.rs`. All conditions are single-shot (set `TriggerState.fired = true` once dispatched). The full list:
+Triggers registered from a world's `[script]` block are matched against `WorldEvent`s by `evaluate_single_trigger` / `evaluate_triggers_with_flags` in `src/world/content.rs`. All conditions are single-shot (set `TriggerState.fired = true` once dispatched). The full list:
 
 | `condition = ` | Required fields | Fires on |
 |---|---|---|
@@ -97,7 +97,7 @@ Authoring shape per action variant:
 | `destroy_entity` | `entity` | Despawn by name; emits `AiEntityDestroyed` so chained `on_destroyed` triggers fire. |
 | `add_faction_enemy` / `remove_faction_enemy` | `faction`, `enemy` | Mutate the live `FactionRegistry` by faction `name` (resolved via `FactionRegistry::uuid_by_name`, `src/ai/faction.rs:68`). Idempotent. `is_enemy` is asymmetric — flipping a relationship in both directions requires two actions. `remove_faction_enemy` additionally re-validates every AI controller's remembered target (via `revalidate_ai_targets_after_faction_change`, `src/world/server.rs:2352`) so an in-progress engagement does not stick on a now-friendly target. |
 
-The editor mirrors this catalogue in `editor/action-schema.js`'s `ACTION_SCHEMA` map (plus a `covers every action type` regression test in `editor/tests/action-schema.test.js`).
+The editor used to mirror this catalogue in `editor/action-schema.js`, which existed to drive its card-based trigger editor. Both went with the declarative front-end (issues #983, #985): scenario logic is authored in the editor's script panel now, and the catalogue has one home again.
 
 ### Objective directives
 
@@ -121,14 +121,15 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 | File | Contents |
 |------|----------|
 | `src/world/server.rs` | `WorldPlugin`, `insert_world_config_resource`, `spawn_world_entities`, `init_world_runtime`, `load_extra_worlds`, the trigger-pipeline systems (`collect_world_events`, `tick_trigger_pipeline`, `tick_delayed_actions`), the `apply_dispatch_result` applier, and world broadcast systems |
-| `src/comms/server.rs` | `CommsWorldPlugin`, `CommsRuntime`, `CommsInboxRes`, `init_comms_runtime`, `tick_pending_follow_ups`, `inject_comms_templates`, `update_comms_range_flags`, `broadcast_comms_state` (consolidated in #816) |
-| `src/comms/content.rs` | Pure (Bevy-free) comms runtime types + evaluators: `CommsTemplateState`, `ActiveDialogue`, `FiredCommsTemplate`, `PendingFollowUp`, `evaluate_comms_templates`, `follow_up_trigger_holds`, `comms_template_states_from_world` |
+| `src/comms/server.rs` | `CommsWorldPlugin`, `CommsRuntime`, `CommsInboxRes`, `init_comms_runtime`, `update_comms_range_flags`, `broadcast_comms_state` (consolidated in #816) |
+| `src/comms/scripted.rs` | `open_scripted_comms_threads` — the one path that opens a comms thread (#984) |
+| `src/comms/content.rs` | Pure (Bevy-free) comms runtime types: `CommsDialogueNode`, `CommsResponse`, `ActiveDialogue`, `ScriptedDialogue`, `OpenCommsRequest`, `response_views` |
 | `src/world/dispatch.rs` | Pure trigger-action decision layer: `dispatch_action` + five group functions returning `DispatchResult` for the applier |
 | `src/world/delayed.rs` | Pure (Bevy-free) delayed-action scheduling: `DelayedAction`, `partition_delayed_actions` deciding ready vs. still-pending for the `tick_delayed_actions` applier (#821) |
-| `src/world/layers.rs` | Pure (Bevy-free) world-layer decisions: `evaluate_layer_load` / `evaluate_layer_unload` (dedup, parse handling, origin tagging, name→UUID assignment, trigger-removal set) for the `apply_world_layer_changes` applier; shared `parse_world_triggers` core (#821) |
+| `src/world/layers.rs` | Pure (Bevy-free) world-layer decisions: `evaluate_layer_load` (dedup, parse handling, name→UUID assignment) for the `apply_world_layer_changes` applier (#821). The unload half computed a trigger-removal set until #985 left a layer with no triggers to remove |
 | `src/world/scenario.rs` | Pure (Bevy-free) additive scenario-load decisions: `evaluate_scenario_load` (dedup / requeue / parse branches) for the `apply_pending_scenario_loads` applier (#821) |
 | `src/world/config.rs` | Pure (Bevy-free): `WorldConfig`, `parse_world`, `entity_template_paths`, `partition_immediate_entities` |
-| `src/world/content.rs` | Pure (Bevy-free) runtime types: `TriggerState`, `FiredTrigger`, `WorldEvent`, `evaluate_triggers`, `condition_matches` (shared with comms), `trigger_states_from_world`. Schema types re-exported from `world/config` |
+| `src/world/content.rs` | Pure (Bevy-free) runtime types: `TriggerState`, `FiredTrigger`, `WorldEvent`, `evaluate_triggers`, `condition_matches`. Schema types re-exported from `world/config` |
 | `src/entities/config_cache.rs` | WASM-side storage: `wasm_load_world` (the real loader), `WORLD_CONFIG` thread-local, `get_world_config` |
 | `src/server/bridge.rs` | `#[wasm_bindgen]` exports including `wasm_load_world` (thin delegate to `config_cache::wasm_load_world`) |
 

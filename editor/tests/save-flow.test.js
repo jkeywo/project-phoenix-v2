@@ -218,25 +218,23 @@ describe('SaveFlow', () => {
     });
   });
 
-  describe('cross-reference warnings', () => {
-    it('do not block save (dangling reference is a warning, issue #757)', async () => {
-      // Structurally valid world ([global] + [anchors] present) with a
-      // trigger pointing at an entity that is not declared. That dangling
-      // cross-reference is a NON-BLOCKING warning — the save proceeds and
-      // the warning is surfaced.
+  describe('warning-severity findings', () => {
+    it('do not block save (issue #757)', async () => {
+      // Structurally valid entity (non-empty tags) whose `initial_state`
+      // names no declared state. That is a NON-BLOCKING warning — the save
+      // proceeds and the warning is surfaced.
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
-      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
+      modeShell.switchMode('Entity');
+      modeShell.setOpenFiles('Entity', ['assets/entities/test.toml']);
+      modeShell.setActiveFile('Entity', 'assets/entities/test.toml');
+      modeShell.markDirty('Entity', 'assets/entities/test.toml', true);
 
       const writeFile = vi.fn(async () => {});
-      const stringifyFns = { world: () => 'content', entity: () => '' };
+      const stringifyFns = { world: () => '', entity: () => 'content' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
-      saveFlow.setContent('World', 'assets/worlds/test.toml', {
-        global: {},
-        anchors: {},
-        entity: [{ name: 'real' }],
-        trigger: [{ condition: 'on_destroyed', entity: 'phantom' }],
+      saveFlow.setContent('Entity', 'assets/entities/test.toml', {
+        tags: ['ship'],
+        behaviour: { state: [{ name: 'idle' }], initial_state: 'phantom' },
       });
 
       const result = await saveFlow.saveActive();

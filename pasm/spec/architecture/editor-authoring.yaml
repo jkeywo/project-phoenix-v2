@@ -51,7 +51,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Editor Validation Service
-      summary: Runs local TOML, component, station, trigger-action, reference, and behavior checks and surfaces inline errors and warnings. The save gate blocks definite errors while keeping warnings non-blocking.
+      summary: Runs local TOML, component, station, marker, weapon-pattern, and behavior checks and surfaces inline errors and warnings. The save gate blocks definite errors while keeping warnings non-blocking. The trigger-action schema and entity cross-reference passes went with the declarative scenario front-end (issue #985); a scripted world's references are checked by the script diagnostics instead.
     architecture:
       kind: authoring-validator
       authority: local
@@ -60,7 +60,7 @@ entities:
       produces: [editor-validation-state]
     implementation:
       status: declared
-      paths: [editor/validation.js, editor/world-references.js, editor/world-references-indexed.js, editor/validation-badge.js]
+      paths: [editor/validation.js, editor/stations-validate.js, editor/marker-validate.js, editor/validation-badge.js]
       tests: [npm run test:editor]
 
   - component: editor-save-admission

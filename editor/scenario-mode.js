@@ -2,7 +2,7 @@
  * scenario-mode.js
  *
  * Mount the Scenario (World) editor — V1 canvas + layers + properties +
- * world content panel + triggerable worlds + new-world dialog + save flow
+ * world content panel + script panel + new-world dialog + save flow
  * wiring + Ctrl+Z restore.
  *
  * Extracted from the legacy `editor/app.js` so the editor has a single
@@ -18,7 +18,7 @@
  * The V1 legacy file-picker fallback (the path that produced "unsavable"
  * layers and emitted the "Saving through the new SaveFlow will fail"
  * warning) has been deleted — opening world TOMLs now goes through the FSA
- * project root only (triggerable-worlds panel, new-world dialog, etc.).
+ * project root only ("Open World…" picker, new-world dialog).
  */
 
 import { LayerManager, renderLayersPanel } from './layers.js';
@@ -32,9 +32,7 @@ import {
   invalidateEntity,
 } from './entity-cache.js';
 import { restoreWorldLayer, createUndoController } from './undo-controller.js';
-import { CrossReferenceIndex } from './cross-references.js';
 import { renderWorldContentPanel as defaultRenderWorldContent } from './world-content-view.js';
-import { renderTriggerableWorldsPanel as defaultRenderTriggerableWorlds } from './triggerable-worlds-panel.js';
 import { mountNewWorldButton as defaultMountNewWorldButton } from './new-world-dialog.js';
 import { mountOpenWorldButton as defaultMountOpenWorldButton } from './open-world-dialog.js';
 import {
@@ -75,7 +73,6 @@ import { createScriptWasm } from './script-wasm.js';
  * @param {object} [opts.deps] Class/factory overrides for tests:
  *                             { CanvasManager, PropertiesPanel, EntityEditor,
  *                               preloadEntityCache, renderWorldContentPanel,
- *                               renderTriggerableWorldsPanel,
  *                               mountNewWorldButton }
  * @returns {{
  *   layerManager: LayerManager,
@@ -121,7 +118,6 @@ export function mountScenarioMode({
   const EntityEditor      = deps?.EntityEditor      || DefaultEntityEditor;
   const preloadEntityCache       = deps?.preloadEntityCache       || defaultPreload;
   const renderWorldContentPanel  = deps?.renderWorldContentPanel  || defaultRenderWorldContent;
-  const renderTriggerableWorlds  = deps?.renderTriggerableWorldsPanel || defaultRenderTriggerableWorlds;
   const mountNewWorldButton      = deps?.mountNewWorldButton      || defaultMountNewWorldButton;
   const mountOpenWorldButton     = deps?.mountOpenWorldButton     || defaultMountOpenWorldButton;
 
@@ -135,7 +131,6 @@ export function mountScenarioMode({
   const sessionScriptSources = new Map(); // sibling path → in-memory edited source
 
   const layerManager = new LayerManager();
-  const crossRefIndex = new CrossReferenceIndex();
   const undoController = createUndoController({ modeShell });
   const canvasManager = new CanvasManager(
     layerManager,
@@ -209,7 +204,7 @@ export function mountScenarioMode({
       entityEditor.loadEntitiesPalette();
     });
 
-    // Session-only triggerable layers must skip the FSA-backed save flow.
+    // Session-only layers must skip the FSA-backed save flow.
     if (saveFlow && typeof saveFlow.setSessionOnlyChecker === 'function') {
       saveFlow.setSessionOnlyChecker((mode, path) => {
         if (mode !== 'World') return false;
@@ -280,19 +275,15 @@ export function mountScenarioMode({
   // ── Render ─────────────────────────────────────────────────────────────
 
   function renderAll() {
-    crossRefIndex.indexLayers(canvasManager.buildV2Layers());
-
     renderLayersPanel(layerManager, renderAll, onSpawnSelectFromTree);
     canvasManager.renderAll();
 
     const activeLayer = layerManager.getActiveLayer?.();
-    // Triggers/comms are read-only in the World Content tree since #983 — the
-    // card editors are gone and scenario logic is authored as Rhai. A trigger/
-    // comms row now just highlights its associated entity (no card open), so a
-    // declarative-TOML world still opens and is navigable, only degraded.
+    // The World Content tree lists what a world still declares in TOML:
+    // `[anchors]` and `[[entity]]`. Scenario logic lives in `[script]` (Rhai)
+    // and is browsed through the SCRIPTS panel below.
     renderWorldContentPanel({
       worldState: activeLayer?.toml ?? null,
-      crossRefIndex,
       activeLayerPath: activeLayer?.filename ?? null,
       onSelectEntity: (name) => canvasManager.selectByEntityName(name),
     });
@@ -300,16 +291,6 @@ export function mountScenarioMode({
     renderScriptPanel();
 
     updateUnsavedIndicator();
-
-    renderTriggerableWorlds({
-      layerManager,
-      onLayersChanged: renderAll,
-      readFile: ioDeps.readFile,
-      listDirectory: ioDeps.listDirectory,
-      tomlParse: ioDeps.tomlParse,
-    })?.catch?.((err) => {
-      console.warn('[scenario-mode] triggerable-worlds panel render failed:', err?.message || err);
-    });
 
     // Mirror the active layer into ModeShell + SaveFlow so the toolbar
     // Save buttons (and Ctrl+Z) act on the right file.
@@ -557,7 +538,7 @@ export function mountScenarioMode({
   function setupLayersPanel() {
     // The legacy "+ Add Layer" file-picker fallback has been removed.
     // Opening world TOMLs now goes through the FSA project root via the
-    // triggerable-worlds panel and the + New World dialog.
+    // "Open World…" picker and the + New World dialog.
   }
 
   return {

@@ -9,8 +9,8 @@ updated: 2026-07-27
 # World Data
 
 The TOML-defined layout for a root world or a supporting world layer: anchors,
-entity instances, triggers, comms templates, objectives, and global ambient
-light. The root loads at startup; supporting worlds can be composed at startup
+entity instances, objectives, global ambient light, and the `[script]` block
+carrying its scenario logic. The root loads at startup; supporting worlds can be composed at startup
 or loaded during play.
 
 ## Source schema (`src/world/config.rs`)
@@ -21,7 +21,7 @@ seed = 42
 [global]
 seed = 42                                # optional global block; merged into WorldConfig
 
-[ambient_light]                          # src/world/config.rs:113
+[ambient_light]                          # src/world/config.rs:117
 color = [0.6, 0.55, 0.5]                 # sRGB; default Color::srgb(0.6, 0.55, 0.5)
 brightness = 300.0                       # default 300.0
 
@@ -39,21 +39,21 @@ template = "assets/entities/star_sun.toml"
 transform = { position = [0.0, 50.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
 ```
 
-`[[trigger]]` and `[[comms]]` blocks are documented under [World Plugin](../concepts/world-plugin.md).
+Scenario logic — event registrations, effects and comms dialogue — is authored in `[script]` and documented under [World Plugin](../concepts/world-plugin.md); the declarative `[[trigger]]` / `[[comms]]` blocks that preceded it were deleted in issue #985.
 
 ## Proposed Authoring Contract
 
 PASM records the next world-file design as proposed, not shipped. `name` becomes the unique internal reference key; `display_name` is separate player-facing text. This avoids using UI copy as a lookup key.
 
-Before any root world activates, validation must resolve all templates, entity names, flags, objectives, trigger targets, comms senders, and child-world paths. A duplicate or unresolved reference is a source-located authoring error that prevents the **entire** root composition from loading, with no partial spawn.
+Before any root world activates, validation must resolve all templates, entity names, flags, objectives, scripted trigger and comms-sender references, and child-world paths. A duplicate or unresolved reference is a source-located authoring error that prevents the **entire** root composition from loading, with no partial spawn.
 
 Layered-world resolution is also proposed to grow beyond the current flag-only `parent:` convention: `parent.<name>` addresses the enclosing world (repeatable to climb further) and `child_world.<name>` addresses a named child layer. The validator must detect collisions in every namespace where an unqualified name would be ambiguous. Current code supports `extra_worlds`, `load_world`, `unload_world`, and `parent:` only for flags; general object namespaces are not yet implemented.
 
-World comms retain a sender reference for runtime resolution and carry separate sender display text. Every message still goes to the ship Comms system; world files do not define per-role message visibility.
+A scripted `open_comms` carries a sender reference for runtime resolution and separate sender display text. Every message still goes to the ship Comms system; world files do not define per-role message visibility.
 
 ## TransformConfig (`src/world/config.rs:46`)
 
-Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence (see `TransformConfig::resolve` at `src/world/config.rs:80` and `resolve_entity_position_with` at `src/world/config.rs:1734`):
+Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence (see `TransformConfig::resolve` at `src/world/config.rs:80` and `resolve_entity_position_with` at `src/world/config.rs:1700`):
 
 1. `relative_to = "<id-or-name>" + offset` — resolved against another `[[entity]]` in the **same world file**, named by its `id` or its `name`. Declaration order is irrelevant: `build_named_entity_positions` builds the whole lookup table before anything is positioned, so a target below the reference resolves as readily as one above it. A `name` beats another entity's `id` of the same spelling. The target must not itself use `relative_to` — chains are unsupported — and a reference that resolves to nothing is an `unresolved-relative-to` **error** that blocks activation of the whole world (`validate_relative_to`, issue #969), rather than dropping the one entity
 2. `anchor = "<anchor-name>" + offset` — resolved against a `[[anchor]]`
@@ -64,9 +64,9 @@ Additional fields:
 - `rotation: [f32; 3]` — XYZ Euler radians, applied via `Quat::from_euler(EulerRot::XYZ, x, y, z)`. Default `[0, 0, 0]`.
 - `scale: [f32; 3]` — uniform-per-axis scale; default `[1, 1, 1]`. **Scale lives only on `TransformConfig`**; there is no `EntityConfig.scale` field.
 
-## AmbientLightConfig (`src/world/config.rs:113`)
+## AmbientLightConfig (`src/world/config.rs:117`)
 
-Optional top-level `[ambient_light]` block on the world TOML. Applied by the `spawn_world_ambient_light` system (`src/server/renderer.rs:296`, registered in `PostStartup` at `src/server/renderer.rs:94`) after `insert_world_config_resource` (`src/world/server.rs:391`) has placed the `WorldConfig` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`.
+Optional top-level `[ambient_light]` block on the world TOML. Applied by the `spawn_world_ambient_light` system (`src/server/renderer.rs:296`, registered in `PostStartup` at `src/server/renderer.rs:94`) after `insert_world_config_resource` (`src/world/server.rs:632`) has placed the `WorldConfig` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`.
 
 ## EntityConfig name + lights
 

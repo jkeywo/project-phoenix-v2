@@ -45,13 +45,13 @@ Chromium reports Bevy's WASM app-runner handoff as a bare `unreachable` page err
 
 ### Default scenario stub
 
-`fixtures.js` installs a context-wide route that fulfils every `**/assets/worlds/default.toml` request with `MINIMAL_DEFAULT_WORLD` — an inline TOML with the player ship, "Starbase Alpha", and a single `[[comms]] on_hailed` block. The production `default.toml` references a planet (~36 MB GLB), an asteroid field (12 asteroid templates, ~150 MB of GLBs), a sun, and a nebula region; the [asset-preload](./asset-preload.md) gate waits for every GLB to reach a terminal `LoadState` before allowing game start, and headless Chromium can't realistically fetch + parse all of that within the smoke-test timeouts.
+`fixtures.js` installs a context-wide route that fulfils every `**/assets/worlds/default.toml` request with `MINIMAL_DEFAULT_WORLD` — an inline TOML with the player ship, "Starbase Alpha", and a `[script]` block whose `on_hailed` handler opens a one-response thread. The production `default.toml` references a planet (~36 MB GLB), an asteroid field (12 asteroid templates, ~150 MB of GLBs), a sun, and a nebula region; the [asset-preload](./asset-preload.md) gate waits for every GLB to reach a terminal `LoadState` before allowing game start, and headless Chromium can't realistically fetch + parse all of that within the smoke-test timeouts.
 
 The minimal world keeps only what the smoke suite actually inspects:
 
 - the player ship (no GLB — `player_ship.toml` is icon-only);
 - "Starbase Alpha" (one ~16 MB station GLB) — `comms.spec.js` hails it and `world-bootstrap.spec.js` asserts on its tag;
-- an `[[comms]] on_hailed` block with a response carrying an `add_objective` action — required by `comms.spec.js`.
+- a `[script]` `on_hailed` handler opening a thread whose one response's `on_pick` adds an objective — required by `comms.spec.js`.
 
 Tests that need a different scenario (`tactical-fire-flow.spec.js` with its inline `MINIMAL_TEST_WORLD`, `patrol.spec.js` and `ship-mesh-load.spec.js` with `patrol.toml`) keep routing their own world; Playwright matches the most-recently-added route first, so the per-test override wins.
 

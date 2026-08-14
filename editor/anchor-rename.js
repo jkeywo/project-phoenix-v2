@@ -3,9 +3,11 @@
  *
  * When a user renames an anchor in the [anchors] section, this module:
  *   - Checks the new name doesn't collide with an existing anchor in any layer
- *   - Finds all entities and trigger actions that reference the old name
+ *   - Finds all `[[entity]]` spawns that reference the old name
  *   - Classifies references as in-layer (auto-rewritable) or cross-layer (warning)
  *   - Returns the set of rewrite pairs for layers that own the anchor
+ *
+ * An anchor referenced from a `[script]` body is not tracked (issue #985).
  */
 
 /**
@@ -81,26 +83,6 @@ export function analyzeAnchorRename(oldName, newName, layers) {
             inLayerReferences.push(ref);
           } else {
             crossLayerReferences.push(ref);
-          }
-        }
-      }
-    }
-
-    if (Array.isArray(worldState.trigger)) {
-      for (const trigger of worldState.trigger) {
-        if (!trigger || !Array.isArray(trigger.action)) continue;
-        for (const action of trigger.action) {
-          if (action && typeof action === 'object' && action.anchor === oldName) {
-            const ref = {
-              layerPath: path,
-              entityName: trigger.entity || '(trigger)',
-              field: 'action.anchor',
-            };
-            if (ownerLayers.has(path)) {
-              inLayerReferences.push(ref);
-            } else {
-              crossLayerReferences.push(ref);
-            }
           }
         }
       }

@@ -1,8 +1,10 @@
 /**
  * anchor-delete.js — Pure module for checking anchor delete safety.
  *
- * Scans ALL open layers for entities and trigger actions that reference
- * a given anchor. Returns the set of blockers or confirms safe deletion.
+ * Scans ALL open layers for `[[entity]]` spawns that reference a given
+ * anchor. Returns the set of blockers or confirms safe deletion.
+ *
+ * An anchor referenced from a `[script]` body is not tracked (issue #985).
  */
 
 /**
@@ -39,21 +41,6 @@ export function canDeleteAnchor(anchorName, layers, anchorOwnerLayer) {
             entityName: ent.name || null,
             type: 'entity',
           });
-        }
-      }
-    }
-
-    if (Array.isArray(worldState.trigger)) {
-      for (const trigger of worldState.trigger) {
-        if (!trigger || !Array.isArray(trigger.action)) continue;
-        for (const action of trigger.action) {
-          if (action && typeof action === 'object' && action.anchor === anchorName) {
-            blockers.push({
-              layerPath: path,
-              entityName: trigger.entity || null,
-              type: 'trigger',
-            });
-          }
         }
       }
     }

@@ -135,7 +135,7 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 - Every spawned entity has a server-assigned UUID; an optional human-readable `id` from the instance is also passed through to wire snapshots.
 
 ### World TOML
-- A world TOML (`assets/worlds/*.toml`) is the single content file for a session. It declares the global `seed`, named `[anchors]`, a list of `[[entity]]` instances (anonymous entries are static layout; entries carrying a `name` field are UUID-assigned and trigger/comms-eligible), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries.
+- A world TOML (`assets/worlds/*.toml`) is the single content file for a session. It declares the global `seed`, named `[anchors]`, a list of `[[entity]]` instances (anonymous entries are static layout; entries carrying a `name` field are UUID-assigned and script-referenceable), and a `[script]` block carrying the scenario logic. The declarative `[[trigger]]` / `[[comms]]` arrays were the other authoring front-end; issue #985 deleted them, and a world that still authors either is refused at load.
 - Single-pass parser: `parse_world` in `src/world/config.rs` consumes the whole file in one deserialization and produces a `WorldConfig`. The unified `[[entity]]` block is the only spawn surface; there are no `[[spawn]]`, `[[star]]`, `[[planet]]`, or `[[asteroid_field]]` blocks (PRD #337 closed).
 - Loader: a single JS-facing entry point `wasm_load_world` populates the `WORLD_CONFIG` thread-local; the Bevy startup chain (`insert_world_config_resource → spawn_world_entities → init_world_runtime → load_extra_worlds`) consumes it. Production always loads a world TOML via the WASM bridge; native unit tests without a `WorldConfig` see an empty world.
 - Each `[[entity]]` may declare its position via `position = [x,y,z]`, `anchor = "name"` (resolved from `[anchors]`), or `relative_to = "other_named_entity"` + `offset = [x,y,z]`. Precedence: `relative_to` > `anchor` > `position` > origin. `relative_to` references must point at a named entity that uses anchor/inline position (not another `relative_to`).
@@ -187,19 +187,25 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 
 ### World engine
 - World files are TOMLs in `assets/worlds/`, fetched at runtime by JS and passed into Rust via a single `wasm_load_world(path, toml_str)` call (WASM) or read from disk (native).
-- A world file can spawn entities, react to trigger conditions, fire actions, manage objectives, and script comms exchanges — all the things the old separate "scenario" file used to do, plus the static layout (anchors, entity instances) the old separate "map" file used to do.
+- A world file can spawn entities, react to trigger conditions, fire effects, manage objectives, and script comms exchanges — all the things the old separate "scenario" file used to do, plus the static layout (anchors, entity instances) the old separate "map" file used to do. Everything but the layout is authored in its `[script]` block.
 - **One world per session.** World chaining is removed. The world file loaded at startup is the only world for that session.
 - World triggers fire only the first time their condition is met per session (single-shot).
-- Runtime state is flat: triggers, comms templates, dialogues, inbox messages, and objectives all live for the duration of the session with no per-world ownership tracking (PRD #342).
+- Runtime state is flat: triggers, dialogues, inbox messages, and objectives all live for the duration of the session with no per-world ownership tracking (PRD #342).
 
 ### Trigger conditions
+
+Registered from a world's `[script]` block as `on_<condition>(args…, "handler")`.
+
 - `on_attacked` — fires when the named entity is attacked.
 - `on_destroyed` — fires when the named entity is destroyed (hull reaches 0).
 - `on_hailed` — fires when an entity is hailed by the Comms officer.
 - `on_timer { seconds }` — fires after a duration.
 - `on_entity_attacked { entity }` / `on_entity_destroyed { entity }` — world subscribes to AI/world events on a named entity.
 
-### Trigger actions
+### Effects
+
+Called on `ctx.effects` inside a handler fn. The vocabulary is `TriggerAction`, which survives the declarative front-end that used to author it in `[[trigger.action]]` arrays.
+
 - `add_objective` / `complete_objective` / `fail_objective` — manage the objective list.
 - Inline branching dialogue inside a single world file for short exchanges.
 - `set_ai_state { entity, state, target? }` — forces a named AI entity into a given state; resets `state_entered_at`, optionally overwrites blackboard `target`, leaves `last_attacker` and `waypoint_index` alone.
@@ -216,7 +222,7 @@ Scenario-applied modifiers and flags have `ModifierSource::Scenario { id, tag }`
 - Entity `name` is registered to a stable UUID by `spawn_world_entities`; scripts reference entities via `$param_name`, never raw UUIDs.
 
 ### Default content
-- A canonical default scenario (Starbase Alpha) spawns a raider and a station. The station can be hailed (short inline branching dialogue). When the **raider** is attacked, an `on_attacked` trigger fires a broadcast comms message (no player interaction required) and `load_scenario` chains to the patrol scenario, which spawns reinforcements. The station has a parallel `on_attacked` trigger with its own distress broadcast.
+- A canonical default scenario (Starbase Alpha) spawns a raider and a station. The station can be hailed (a short branching dialogue). When the **raider** is attacked, an `on_attacked` handler broadcasts a comms message (no player interaction required) and `load_world` brings in the reinforcements layer. The station has a parallel `on_attacked` handler with its own distress broadcast.
 - A canonical AI demo scenario (patrol) spawns a Harrow patrol ship (`ship_harrow_patrol`) at named anchors, exercising every state and most conditions.
 - Two default factions ship: Federation (player) and Pirate (enemies = Federation), in `assets/factions/`.
 
@@ -673,9 +679,9 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 ## Configuration & Authoring
 
 ### World TOML (`assets/worlds/*.toml`)
-- `seed` (global) plus `[anchors]`, `[[entity]]` instances (template_path + optional name/anchor/relative_to+offset/position/spawn_on/overrides), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries. Single block type for all spawnables (PRD #337).
-- `[script]` is the Rhai alternative to `[[trigger]]` / `[[comms]]` (issue #984): one block whose top level registers `on_*(…)` handlers and whose fns supply the effects and the comms dialogue trees. **Every shipped world is authored this way.** The declarative front-ends are still parsed — mod packs and hand-authored worlds may use them — but no shipped world does. `assets/worlds/default.toml` is the reference for a converted world carrying a dialogue TREE; `assets/worlds/combat_test.toml` is the reference for a full scenario: a trigger-level `.when("counter(x) >= 8")` guard, per-action guards as ordinary `if` statements, `on_hull_below(entity, flt("0.75"), handler)`, a deferred `schedule.in_seconds(n).game_over(reason, outcome)`, and twelve one-way comms reports.
-- A world's preload set (`entity_template_paths`) walks the inline `[script]` bodies for literal `template_path: "…"` references, so a scripted `spawn_entity` preloads exactly as a declarative one did. A script in a SIBLING `.rhai` file is outside that scan — `parse_world` has no resolver — which is why shipped worlds author `[script]` inline.
+- `seed` (global) plus `[anchors]`, `[[entity]]` instances (template_path + optional name/anchor/relative_to+offset/position/spawn_on/overrides), and a `[script]` block. Single block type for all spawnables (PRD #337).
+- `[script]` is the ONE scenario front-end (issues #984, #985): one block whose top level registers `on_*(…)` handlers and whose fns supply the effects and the comms dialogue trees. Every world is authored this way; the declarative `[[trigger]]` / `[[comms]]` arrays it replaced are no longer parsed at all, and a world that still carries either is refused at load with a message naming the block. `assets/worlds/default.toml` is the reference for a converted world carrying a dialogue TREE; `assets/worlds/combat_test.toml` is the reference for a full scenario: a trigger-level `.when("counter(x) >= 8")` guard, per-action guards as ordinary `if` statements, `on_hull_below(entity, flt("0.75"), handler)`, a deferred `schedule.in_seconds(n).game_over(reason, outcome)`, and twelve one-way comms reports.
+- A world's preload set (`entity_template_paths`) walks the inline `[script]` bodies for literal `template_path: "…"` references — since issue #985 that static scan is the ONLY source of a dynamically spawned entity's template path. A script in a SIBLING `.rhai` file is outside that scan — `parse_world` has no resolver — which is why shipped worlds author `[script]` inline.
 
 ### Entity TOML (`assets/entities/*.toml`)
 - Component-bag: each `[section]` present produces a Bevy component on the spawned entity.
@@ -698,9 +704,8 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 ### World TOML (`assets/worlds/*.toml`)
 - `title`, `description` — lobby display.
 - `preload = [...]` — entity paths to fetch before spawning begins.
-- `[[entity]] template_path, id?, name?, position | anchor | (relative_to + offset), spawn_on (immediate | game_start), [entity.overrides]` — single block type for all world spawnables. Named entries are UUID-assigned and trigger/comms-eligible; anonymous entries are static layout.
-- `[[trigger]] condition, entity?, actions`.
-- `[[comms]] from, message, trigger, [[comms.responses]] text, actions` with inline `follow_up` branching.
+- `[[entity]] template_path, id?, name?, position | anchor | (relative_to + offset), spawn_on (immediate | game_start), [entity.overrides]` — single block type for all world spawnables. Named entries are UUID-assigned and script-referenceable; anonymous entries are static layout.
+- `[script] setup = """…"""` — event registrations, handler fns, comms dialogue node fns.
 - `[[objective]] id, text, optional`.
 
 ### Complexity TOML (`assets/complexity/<console>.toml`)

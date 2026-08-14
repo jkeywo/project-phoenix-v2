@@ -96,29 +96,19 @@ describe('canDeleteAnchor', () => {
     });
   });
 
-  it('trigger action references anchor returns canDelete: false', () => {
+  it('an anchor named only from a [script] body is NOT a blocker (#985)', () => {
+    // A scripted `spawn_entity` names its anchor inside a Rhai map this pass
+    // cannot read, so the guard no longer covers it — deleting is allowed and
+    // the world fails at activation instead.
     const layers = [
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
-        trigger: [
-          {
-            entity: 'raider_alpha',
-            condition: 'on_destroyed',
-            action: [
-              { type: 'spawn', anchor: 'starbase_alpha' },
-            ],
-          },
-        ],
+        script: { setup: 'spawn_entity(#{ anchor: "starbase_alpha" });' },
       }),
     ];
     const result = canDeleteAnchor('starbase_alpha', layers, 'worlds/default.toml');
-    expect(result.canDelete).toBe(false);
-    expect(result.blockers).toHaveLength(1);
-    expect(result.blockers[0]).toEqual({
-      layerPath: 'worlds/default.toml',
-      entityName: 'raider_alpha',
-      type: 'trigger',
-    });
+    expect(result.canDelete).toBe(true);
+    expect(result.blockers).toEqual([]);
   });
 
   it('empty layers returns canDelete: true', () => {

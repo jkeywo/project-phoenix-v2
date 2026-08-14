@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { OverrideEditor } from '../override-editor.js';
-import { CrossReferenceIndex } from '../cross-references.js';
 import { getWorldContentData } from '../world-content-panel.js';
 import { parseWorldToml, stringifyWorldToml } from '../world-toml.js';
 
@@ -12,9 +11,9 @@ import { parseWorldToml, stringifyWorldToml } from '../world-toml.js';
  * setOverride/clearOverride, write back to `spawn.override`, and confirm
  * the world TOML round-trips through smol-toml unchanged.
  *
- * Also confirms CrossReferenceIndex + getWorldContentData remain in sync
- * before and after the mutation — the World Content panel must reflect
- * the same entity at all times.
+ * Also confirms getWorldContentData stays in sync before and after the
+ * mutation — the World Content panel must reflect the same entity at all
+ * times.
  */
 
 // Helpers copied from override-view.js (kept private there to avoid
@@ -42,11 +41,6 @@ function makeWorld() {
       template_path: 'assets/entities/ship_harrow_patrol.toml',
       name: 'raider_alpha',
       transform: { anchor: 'patrol_alpha' },
-    }],
-    trigger: [{
-      condition: 'on_destroyed',
-      entity: 'raider_alpha',
-      action: [{ type: 'add_objective', id: 'win', text: 'destroy them' }],
     }],
   };
 }
@@ -124,36 +118,28 @@ describe('Slice 3 integration: select → override → clear cycle', () => {
     expect(editor.getResolvedView()).toEqual(template);
   });
 
-  it('CrossReferenceIndex + WorldContentData stay coherent across the cycle', () => {
+  it('WorldContentData stays coherent across the cycle', () => {
     const world = makeWorld();
-    const layers = [{ path: 'assets/worlds/test.toml', worldState: world }];
 
-    const index = new CrossReferenceIndex();
-    index.indexLayers(layers);
-
-    // Initial: raider_alpha is referenced once (the on_destroyed trigger).
-    const before = getWorldContentData(world, index, 'assets/worlds/test.toml');
+    const before = getWorldContentData(world);
     expect(before.namedEntities).toEqual([{
       name: 'raider_alpha',
       template_path: 'assets/entities/ship_harrow_patrol.toml',
-      refCount: 1,
     }]);
-    expect(before.objectives).toEqual([{
-      id: 'win', text: 'destroy them', mandatory: undefined, refCount: 1,
-    }]);
+    expect(before.anchors).toEqual([
+      { name: 'patrol_alpha', position: [100, 0, 0], refCount: 1 },
+    ]);
 
-    // Attach an override to the spawn — does not touch references.
+    // Attach an override to the spawn — does not touch the tree's contents.
     const editor = new OverrideEditor(makeTemplate());
     editor.setOverride('hull.max', 80);
     world.entity[0].override = editor.getOverrides();
-    index.indexLayers(layers); // mimic renderAll() rebuild
 
-    const after = getWorldContentData(world, index, 'assets/worlds/test.toml');
-    expect(after.namedEntities[0].refCount).toBe(1);
-    expect(after.objectives[0].refCount).toBe(1);
+    const after = getWorldContentData(world);
     // The named-entity row still resolves to the same entity for click-
     // to-highlight; the World Content tree doesn't show overrides itself.
     expect(after.namedEntities[0].name).toBe('raider_alpha');
+    expect(after.anchors[0].refCount).toBe(1);
   });
 
   it('replaying an existing override on selection produces the same resolved view', () => {

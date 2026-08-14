@@ -1,8 +1,6 @@
 import { validateWorldToml } from './world-toml.js';
 import { validateEntityToml, validateEntitySections } from './entity-toml.js';
 import { validateStations } from './stations-validate.js';
-import { validateWorldReferences } from './world-references.js';
-import { validateWorldReferencesIndexed } from './world-references-indexed.js';
 import { validateEntityMarkers } from './marker-validate.js';
 import { validateBlasterBanks } from './blaster-validate.js';
 import { validateTorpedoTubes } from './torpedo-validate.js';
@@ -237,24 +235,14 @@ export function validateFile(filePath, parsedContent, context = null) {
       results.push({ path, severity: 'error', message: msg });
     }
 
-    // Per-action schema validation of `[[trigger.action]]` /
-    // `[[comms.response.action]]` was removed with the card-based scenario
-    // editor (#983): scenario logic is authored as Rhai now, whose vocabulary
-    // is validated by the WASM diagnostics pass + the Rust cross-reference gate.
-    // The cross-reference checks below (entity references) still run over any
-    // declarative-TOML world so it keeps opening in a degraded but coherent view.
-
-    // Resolve every entity reference in triggers and comms against the
-    // set of `[[entity]] name = "..."` declared in this world.
-    const refResults = validateWorldReferences(parsedContent);
-    results.push(...refResults);
-
-    // Slice 7: emit the same checks again with FULL INDEXED PATHS so
-    // the badge layer can decorate the specific input field that is
-    // broken (`world-references.js` keeps its human-readable context
-    // strings for the messages list).
-    const indexedRefResults = validateWorldReferencesIndexed(parsedContent);
-    results.push(...indexedRefResults);
+    // A world file gets its `[global]` / `[anchors]` shape checked here and
+    // nothing else. The cross-reference pass that used to run alongside it
+    // resolved entity names authored in `[[trigger]]` / `[[comms]]`, and both
+    // arrays went with the declarative scenario front-end (issue #985) — a
+    // scripted world names its entities inside its `[script]` Rhai body, which
+    // this TOML walk cannot read. Those references are checked by the WASM
+    // script diagnostics and, at activation, by the Rust gate in
+    // `src/world/script/validate.rs`.
   }
 
   return results;

@@ -31,21 +31,10 @@ export class PropertiesPanel {
       return;
     }
 
-    // Scenario logic (triggers, comms dialogues) is authored as Rhai script
-    // since #983 — the card-based `trigger` / `comms` property editors were
-    // removed. A declarative-TOML world still opens (canvas + world-content
-    // tree), but its triggers/comms are shown read-only there rather than
-    // edited here, so a stale selection of that shape degrades to the
-    // placeholder instead of routing to a deleted view.
-    if (selection.type === 'trigger' || selection.type === 'comms') {
-      this.currentSpawn = null;
-      this.currentLayer = null;
-      this.container.innerHTML =
-        '<p class="placeholder">Scenario logic is authored in the Script editor.</p>';
-      return;
-    }
-
     // selection.type === 'spawn' — existing V1 form + override panel.
+    // There is no 'trigger' / 'comms' selection to route: the World Content
+    // tree stopped listing them with the declarative scenario front-end
+    // (issue #985), and scenario logic is edited in the Script editor.
     this._renderSpawn(selection.spawn, selection.layer);
   }
 

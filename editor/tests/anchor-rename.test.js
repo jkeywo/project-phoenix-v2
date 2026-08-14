@@ -119,29 +119,23 @@ describe('analyzeAnchorRename', () => {
     expect(result.crossLayerReferences[0].entityName).toBe('raider_alpha');
   });
 
-  it('detects anchor references in trigger action parameters', () => {
+  it('does NOT see an anchor named from a [script] body (#985)', () => {
+    // A scripted `spawn_entity` names its anchor inside a Rhai map this pass
+    // cannot read, so the rename reports no reference and rewrites nothing in
+    // the script source.
     const layers = [
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
-        trigger: [
-          {
-            entity: 'raider_alpha',
-            condition: 'on_destroyed',
-            action: [
-              { type: 'spawn', anchor: 'starbase_alpha' },
-            ],
-          },
-        ],
+        script: { setup: 'spawn_entity(#{ anchor: "starbase_alpha" });' },
       }),
     ];
     const result = analyzeAnchorRename('starbase_alpha', 'starbase_beta', layers);
     expect(result.allowed).toBe(true);
-    expect(result.inLayerReferences).toHaveLength(1);
-    expect(result.inLayerReferences[0]).toEqual({
-      layerPath: 'worlds/default.toml',
-      entityName: 'raider_alpha',
-      field: 'action.anchor',
-    });
+    expect(result.inLayerReferences).toEqual([]);
+    expect(result.crossLayerReferences).toEqual([]);
+    expect(result.rewritePairs).toEqual([
+      { layerPath: 'worlds/default.toml', newAnchorValue: 'starbase_beta' },
+    ]);
   });
 
   it('returns safe result for empty layers array', () => {

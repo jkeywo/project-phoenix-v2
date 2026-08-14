@@ -39,10 +39,10 @@ export class LayerManager {
   }
 
   /**
-   * Add a layer whose TOML has already been parsed in-memory (e.g. a
-   * session-only "triggerable world" loaded via the side panel, with no
-   * dedicated `FileSystemFileHandle`). The layer is appended and becomes
-   * the active layer, matching `addLayer` behaviour.
+   * Add a layer whose TOML has already been parsed in-memory (e.g. a world
+   * opened through the "Open World…" picker, with no dedicated
+   * `FileSystemFileHandle`). The layer is appended and becomes the active
+   * layer, matching `addLayer` behaviour.
    *
    * @param {string} filename — root-relative path used as the layer's id.
    * @param {object} parsedToml — already-parsed TOML object.

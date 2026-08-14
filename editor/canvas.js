@@ -369,22 +369,15 @@ export class CanvasManager {
     this.renderAll();
   }
 
+  // An anchor referenced from a `[script]` body is not tracked (issue #985) —
+  // a scripted `spawn_entity` names its anchor inside a Rhai map this pass
+  // cannot read, so only `[[entity]]` references are rewritten.
   rewriteAnchorRefsInLayer(toml, oldName, newName) {
     if (!toml || typeof toml !== 'object') return;
     if (Array.isArray(toml.entity)) {
       for (const ent of toml.entity) {
         if (ent && ent.transform && ent.transform.anchor === oldName) {
           ent.transform.anchor = newName;
-        }
-      }
-    }
-    if (Array.isArray(toml.trigger)) {
-      for (const trig of toml.trigger) {
-        if (!trig || !Array.isArray(trig.action)) continue;
-        for (const action of trig.action) {
-          if (action && typeof action === 'object' && action.anchor === oldName) {
-            action.anchor = newName;
-          }
         }
       }
     }

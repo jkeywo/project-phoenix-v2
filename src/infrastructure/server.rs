@@ -248,11 +248,13 @@ mod tests {
             condition_max: 100.0,
             decay_per_sec,
             capacities: vec![CapacityConfig {
+                label: None,
                 id: "depot_transfer_throughput".to_string(),
                 amount: 40,
                 ceiling: None,
             }],
             thresholds: vec![ThresholdConfig {
+                label: None,
                 flag: FLAG.to_string(),
                 fails_below: 0.4,
                 restores_above: None,

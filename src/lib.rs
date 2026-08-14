@@ -104,6 +104,11 @@ pub mod content_ledger;
 /// world both a native test and the browser drive, under deliberately
 /// different frame pacing, folding the canonical digest at shared ticks.
 pub mod cross_target_probe;
+/// Dossiers (issue #1030): the pure per-subject projection of what a crew
+/// knows, and the adapter that publishes it on the local ship's intelligence
+/// channel. Holds no state of its own — every fact is a fold of something
+/// another subsystem already owns.
+pub mod dossier;
 /// Infrastructure condition + capacity on authored world furniture (issue
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;

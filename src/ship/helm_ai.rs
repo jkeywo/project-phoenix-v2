@@ -8687,6 +8687,7 @@ mod tests {
         let own_faction = uuid::Uuid::new_v4();
         let mut registry = crate::faction::FactionRegistry::new();
         registry.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: own_faction,
             name: "Own".into(),
             enemies: vec![hostile_faction],

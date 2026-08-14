@@ -1463,12 +1463,14 @@ mod tests {
         let harrow_uuid = uuid::Uuid::new_v4();
         let mut reg = crate::faction::FactionRegistry::new();
         reg.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: fed_uuid,
             name: "Federation".into(),
             enemies: vec![harrow_uuid],
             compliance: None,
         });
         reg.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: harrow_uuid,
             name: "Harrow".into(),
             enemies: vec![fed_uuid],
@@ -2350,12 +2352,14 @@ mod tests {
         let harrow = uuid::Uuid::new_v4();
         let mut reg = crate::faction::FactionRegistry::new();
         reg.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: fed,
             name: "Federation".into(),
             enemies: vec![harrow],
             compliance: None,
         });
         reg.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: harrow,
             name: "Harrow".into(),
             enemies: vec![fed],

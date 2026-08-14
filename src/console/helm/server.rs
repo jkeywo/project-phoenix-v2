@@ -375,12 +375,14 @@ mod tests {
 
         let mut registry = crate::faction::FactionRegistry::new();
         registry.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: OWN_FACTION,
             name: "Own".into(),
             enemies: vec![ENEMY_FACTION],
             compliance: None,
         });
         registry.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: ENEMY_FACTION,
             name: "Enemy".into(),
             enemies: vec![OWN_FACTION],

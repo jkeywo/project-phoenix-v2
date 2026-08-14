@@ -703,6 +703,7 @@ mod tests {
         let faction_uuid = uuid::Uuid::from_u128(7);
         let mut registry = crate::ai::faction::FactionRegistry::new();
         registry.insert(crate::ai::faction::FactionConfig {
+            display_name: None,
             uuid: faction_uuid,
             name: "Kestrel Combine".into(),
             enemies: Vec::new(),

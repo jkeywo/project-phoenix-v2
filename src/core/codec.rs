@@ -1765,6 +1765,125 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    /// The dossier blackboard (issue #1030), and the hidden-truth guarantee
+    /// stated where the payload is actually made: **as the payload's whole key
+    /// set**.
+    ///
+    /// This is the wire half of `dossier::projection`'s own tests. In a language
+    /// with no reflection, "structurally absent, not filtered at render time"
+    /// means the serialised dossier has exactly these five keys and a fact
+    /// exactly two — so a field a secret could ride in would have to be added
+    /// here, in a diff, moving this test. A render-time filter would not satisfy
+    /// it: the assertion is over the type's whole surface.
+    #[test]
+    fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
+        use crate::messages::{
+            DossierBlackboard, DossierEvidenceSnapshot, DossierFactSnapshot, DossierSnapshot,
+            DossierValue,
+        };
+        use std::collections::BTreeSet;
+
+        let dossier = DossierSnapshot {
+            uuid: "00000000-0000-8000-8000-000000000042".into(),
+            name: "world.entity.skyhook.name".into(),
+            summary: "world.entity.skyhook.description".into(),
+            facts: vec![
+                DossierFactSnapshot {
+                    label: crate::dossier::FACT_FACTION.into(),
+                    value: DossierValue::Text("faction.federation.display_name".into()),
+                },
+                DossierFactSnapshot {
+                    label: crate::dossier::FACT_COMMS.into(),
+                    value: DossierValue::Flag(true),
+                },
+                DossierFactSnapshot {
+                    label: crate::dossier::FACT_CONDITION.into(),
+                    value: DossierValue::Fraction(0.5),
+                },
+                DossierFactSnapshot {
+                    label: "world.skyhook.berths.label".into(),
+                    value: DossierValue::Count(4),
+                },
+            ],
+            evidence: Vec::new(),
+        };
+
+        // The key set, read off the type rather than off this instance.
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&dossier).unwrap()).unwrap();
+        let keys: BTreeSet<&str> = value
+            .as_object()
+            .expect("a dossier is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            BTreeSet::from(["uuid", "name", "summary", "facts", "evidence"]),
+            "the dossier's whole surface — there is nowhere for hidden truth to ride"
+        );
+        for fact in value["facts"].as_array().unwrap() {
+            let keys: BTreeSet<&str> = fact
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(
+                keys,
+                BTreeSet::from(["label", "value"]),
+                "a fact is a label and a value; there is no third column"
+            );
+        }
+        assert_eq!(
+            value["facts"][2]["value"],
+            serde_json::json!({"kind": "fraction", "value": 0.5}),
+            "a value is TAGGED, so the panel formats a percentage rather than guessing"
+        );
+
+        let bb = SystemBlackboard::Dossiers(DossierBlackboard {
+            subjects: vec![dossier],
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains(r#""kind":"Dossiers""#), "got: {json}");
+        assert_eq!(serde_json::from_str::<SystemBlackboard>(&json).unwrap(), bb);
+
+        // #1031's seam, pinned from this slice: an entry decodes into the list
+        // that ships empty here, so appending is additive rather than a reshape.
+        let with_evidence = r#"{"kind":"Dossiers","data":{"subjects":[{"uuid":"u","name":"n",
+            "facts":[],"evidence":[{"text":"world.x.evidence","provenance":"scan",
+            "gathered_at_tick":900}]}]}}"#;
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(with_evidence).unwrap(),
+            SystemBlackboard::Dossiers(DossierBlackboard {
+                subjects: vec![DossierSnapshot {
+                    uuid: "u".into(),
+                    name: "n".into(),
+                    summary: String::new(),
+                    facts: Vec::new(),
+                    evidence: vec![DossierEvidenceSnapshot {
+                        text: "world.x.evidence".into(),
+                        provenance: "scan".into(),
+                        gathered_at_tick: 900,
+                    }],
+                }],
+            })
+        );
+
+        // Every field is `#[serde(default)]`, so a payload minted before any one
+        // of them decodes rather than being refused whole.
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Dossiers","data":{}}"#).unwrap(),
+            SystemBlackboard::Dossiers(DossierBlackboard::default())
+        );
+
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     /// The phone settings menu's wire shapes (issue #940), pinned because
     /// `gui/settings-panel.js` hand-builds them: the two messages it sends and
     /// the `DebugState` read-back it folds.

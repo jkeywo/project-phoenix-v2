@@ -151,6 +151,17 @@ pub struct CapacityConfig {
     /// `transfer` operation moves it. `ceiling` below is what it may grow back
     /// to.
     pub amount: i64,
+    /// `strings.csv` id for a crew-facing label, when the scenario wants this
+    /// capacity readable on a dossier (issue #1030).
+    ///
+    /// Optional, and its absence is a decision rather than an oversight: `id`
+    /// above is explicitly a machine name and must never be shown as prose, so a
+    /// capacity reaches a fact sheet only when an author has written down what
+    /// to call it. That is the second of the two gates the dossier projection
+    /// applies — the first is `publish`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+
     /// The most this capacity can ever hold (issue #1027). `None` — the
     /// default, and what every capacity authored before transfers existed
     /// says — means the starting `amount` is also the ceiling, so a depot
@@ -220,6 +231,12 @@ pub struct ThresholdConfig {
     /// to `fails_below + hysteresis`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restores_above: Option<f32>,
+    /// `strings.csv` id for a crew-facing label, when the scenario wants this
+    /// operational flag readable on a dossier (issue #1030). Optional for
+    /// [`CapacityConfig::label`]'s reason: `flag` is a machine name in the
+    /// author's namespace, not display text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl InfrastructureConfig {
@@ -339,6 +356,10 @@ pub struct ResolvedThreshold {
     pub fails_below: f32,
     /// Condition fraction at or above which the flag returns.
     pub restores_above: f32,
+    /// The authored crew-facing label, carried through unchanged — see
+    /// [`ThresholdConfig::label`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// One condition adjustment queued by a scripted repair/damage effect, already
@@ -409,6 +430,7 @@ impl InfrastructureState {
                 restores_above: t
                     .restores_above
                     .unwrap_or_else(|| (t.fails_below + config.hysteresis).min(1.0)),
+                label: t.label.clone(),
             })
             .collect();
         let fraction = fraction_of(current, max);
@@ -680,11 +702,13 @@ mod tests {
         InfrastructureConfig {
             condition_max: 100.0,
             capacities: vec![CapacityConfig {
+                label: None,
                 id: "transfer_throughput".to_string(),
                 amount: 40,
                 ceiling: None,
             }],
             thresholds: vec![ThresholdConfig {
+                label: None,
                 flag: "depot_transfer_capable".to_string(),
                 fails_below: 0.4,
                 restores_above: None,
@@ -1112,6 +1136,7 @@ restores_above = 0.6
             (
                 InfrastructureConfig {
                     thresholds: vec![ThresholdConfig {
+                        label: None,
                         flag: "a".to_string(),
                         fails_below: 40.0,
                         restores_above: None,
@@ -1123,6 +1148,7 @@ restores_above = 0.6
             (
                 InfrastructureConfig {
                     thresholds: vec![ThresholdConfig {
+                        label: None,
                         flag: "a".to_string(),
                         fails_below: 0.5,
                         restores_above: Some(0.2),
@@ -1135,11 +1161,13 @@ restores_above = 0.6
                 InfrastructureConfig {
                     thresholds: vec![
                         ThresholdConfig {
+                            label: None,
                             flag: "a".to_string(),
                             fails_below: 0.5,
                             restores_above: None,
                         },
                         ThresholdConfig {
+                            label: None,
                             flag: "a".to_string(),
                             fails_below: 0.2,
                             restores_above: None,
@@ -1153,11 +1181,13 @@ restores_above = 0.6
                 InfrastructureConfig {
                     capacities: vec![
                         CapacityConfig {
+                            label: None,
                             id: "a".to_string(),
                             amount: 1,
                             ceiling: None,
                         },
                         CapacityConfig {
+                            label: None,
                             id: "a".to_string(),
                             amount: 2,
                             ceiling: None,

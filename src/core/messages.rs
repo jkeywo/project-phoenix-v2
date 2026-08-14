@@ -3193,6 +3193,16 @@ pub enum SystemBlackboard {
     /// carried under is a reserved *channel*, in the same not-a-system-id
     /// bucket as `"helm"` and `"tactical"`.
     Operations(OperationsBlackboard),
+    /// The crew's intelligence picture (issue #1030), keyed by
+    /// `dossier::DOSSIER_BLACKBOARD_KEY`, on the LOCAL ship only — an NPC's own
+    /// dossiers have no console to render them on.
+    ///
+    /// A channel rather than a system id, for `Operations`' reason: a dossier is
+    /// something the crew *knows*, not a thing aboard the ship that can be
+    /// damaged, repaired or commanded. It is also the only blackboard that is
+    /// wholly DERIVED — every field on it is a projection of state some other
+    /// subsystem already owns, which is why nothing behind it is snapshotted.
+    Dossiers(DossierBlackboard),
 }
 
 /// One verb a hull can perform, as the console offers it (issue #1026).
@@ -3272,6 +3282,109 @@ pub struct OperationsBlackboard {
     /// which the crew act on differently from one that opened and stalled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+}
+
+// ── Dossier wire types (issue #1030) ────────────────────────────────────────
+
+/// The crew's intelligence picture: one dossier per subject (issue #1030).
+///
+/// Published on the local ship's blackboard map under
+/// [`DOSSIER_BLACKBOARD_KEY`](crate::dossier::DOSSIER_BLACKBOARD_KEY), which is
+/// a *channel* rather than a system id for the reason `"operations"` is:
+/// nothing aboard the ship owns it, nothing repairs it, and no `ControlSystem`
+/// message may target it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DossierBlackboard {
+    /// Every subject the crew holds a dossier on, in UUID order. Empty for a
+    /// world with no hailable entities and no published structures — which is
+    /// most of them, so those worlds publish exactly the payload they did
+    /// before this existed.
+    #[serde(default)]
+    pub subjects: Vec<DossierSnapshot>,
+}
+
+/// One subject's dossier as the console reads it (issue #1030).
+///
+/// **Everything on this type is something the crew can already read somewhere
+/// else.** The projection that mints it ([`crate::dossier::projection::project`])
+/// has no input for hidden truth and this type has no field for it, so a
+/// scenario's withheld disposition, its unpublished condition track and its
+/// unspawned future cannot reach a console through here even by accident.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DossierSnapshot {
+    /// The subject entity's UUID — the list's stable row key.
+    pub uuid: String,
+    /// `strings.csv` id for the subject's crew-facing name, or empty when it
+    /// has none. The client looks it up; no English crosses the wire.
+    #[serde(default)]
+    pub name: String,
+    /// `strings.csv` id for the one line under the name — the entity's own
+    /// authored `[target] description`, which the target info panel already
+    /// shows. Empty when the entity authored none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+    /// The baseline known facts, in the projection's fixed order. Empty is a
+    /// perfectly good dossier: a subject nobody has anything on still has a
+    /// sheet, which is what "empty, not missing" means.
+    #[serde(default)]
+    pub facts: Vec<DossierFactSnapshot>,
+    /// What this crew has gathered, as distinct from what they started with.
+    ///
+    /// **Always empty in issue #1030** — the append surface is #1031's, and the
+    /// list is carried here from the start so that slice adds entries rather
+    /// than reshaping the payload, the console fold and the panel behind it.
+    #[serde(default)]
+    pub evidence: Vec<DossierEvidenceSnapshot>,
+}
+
+/// One labelled row on a fact sheet (issue #1030).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DossierFactSnapshot {
+    /// `strings.csv` id for the row's label — either one of the projection's
+    /// own ([`SHARED_FACT_LABELS`](crate::dossier::projection::SHARED_FACT_LABELS))
+    /// or one the scenario authored beside the value it labels.
+    pub label: String,
+    /// The value, typed so the panel formats rather than guesses.
+    pub value: DossierValue,
+}
+
+/// A fact's value (issue #1030).
+///
+/// Tagged rather than pre-formatted into a string on the host, because a
+/// percentage, a count and a yes/no read differently on screen and the string
+/// table is the client's to resolve. `Text` carries a `strings.csv` id, never
+/// prose (AGENTS.md rule 11).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum DossierValue {
+    /// A `strings.csv` id the client resolves.
+    Text(String),
+    /// A `0.0..=1.0` fraction, rendered as a percentage.
+    Fraction(f32),
+    /// A whole number — souls held, units per window, berths.
+    Count(i64),
+    /// Held / not held.
+    Flag(bool),
+}
+
+/// One gathered evidence entry (issue #1031's payload, carried from #1030).
+///
+/// Defined here so the dossier payload, the console fold and the panel all have
+/// their shape from the start; nothing writes one until #1031 lands the append
+/// surface and the provenance vocabulary.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DossierEvidenceSnapshot {
+    /// `strings.csv` id for what was learned.
+    pub text: String,
+    /// How this crew learned it — a scan, a dialogue admission, a records
+    /// comparison, a briefing. The point of the Thin Margin arc is that the
+    /// crew can say *how they know*, so this is a field rather than prose baked
+    /// into `text`.
+    #[serde(default)]
+    pub provenance: String,
+    /// The `SimTick` it was gathered on.
+    #[serde(default)]
+    pub gathered_at_tick: u64,
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship

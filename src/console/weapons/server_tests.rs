@@ -6170,12 +6170,14 @@ fn setup_harrow_ship_hostile_to_federation(app: &mut App) {
 
     let mut registry = FactionRegistry::new();
     registry.insert(FactionConfig {
+        display_name: None,
         uuid: harrow_faction(),
         name: "Harrow".into(),
         enemies: vec![federation_faction()],
         compliance: None,
     });
     registry.insert(FactionConfig {
+        display_name: None,
         uuid: federation_faction(),
         name: "Federation".into(),
         enemies: vec![],
@@ -12437,12 +12439,14 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
     // Make shooter hostile to blocker.
     let mut reg = FactionRegistry::new();
     reg.insert(crate::faction::FactionConfig {
+        display_name: None,
         uuid: shooter_faction,
         name: "Federation".into(),
         enemies: vec![enemy_faction],
         compliance: None,
     });
     reg.insert(crate::faction::FactionConfig {
+        display_name: None,
         uuid: enemy_faction,
         name: "Pirate".into(),
         enemies: vec![],
@@ -12511,6 +12515,7 @@ fn los_friendly_blocker_absorbs_beam_with_no_damage() {
     // Empty enemy list → faction is friendly to itself.
     let mut reg = FactionRegistry::new();
     reg.insert(crate::faction::FactionConfig {
+        display_name: None,
         uuid: faction_uuid,
         name: "Federation".into(),
         enemies: vec![],

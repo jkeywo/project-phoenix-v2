@@ -1260,12 +1260,14 @@ mod tests {
         let federation = Uuid::from_u128(2);
         let mut registry = FactionRegistry::new();
         registry.insert(FactionConfig {
+            display_name: None,
             uuid: harrow,
             name: "Harrow".to_string(),
             enemies: vec![],
             compliance: None,
         });
         registry.insert(FactionConfig {
+            display_name: None,
             uuid: federation,
             name: "Federation".to_string(),
             enemies: vec![],

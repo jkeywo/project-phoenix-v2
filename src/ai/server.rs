@@ -2480,6 +2480,7 @@ verb = "fire_blaster"
         //     hull's forward arcs.
         let mut registry = crate::faction::FactionRegistry::new();
         registry.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: own_faction,
             name: "Own".into(),
             enemies: vec![hostile_faction],
@@ -2542,6 +2543,7 @@ verb = "fire_blaster"
 
         let mut registry = crate::faction::FactionRegistry::new();
         registry.insert(crate::faction::FactionConfig {
+            display_name: None,
             uuid: same_faction,
             name: "Own".into(),
             enemies: vec![],

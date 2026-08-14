@@ -555,6 +555,12 @@ impl Plugin for WorldPlugin {
             .add_plugins(crate::infrastructure::InfrastructurePlugin)
             .add_plugins(crate::operations::OperationsPlugin)
             .add_plugins(crate::civilian::CivilianPlugin)
+            // Dossiers (issue #1030) join them for the same reason: the
+            // commitments a fact sheet lists are a field on
+            // `WorldContentRuntime`, the comms standing it reports is
+            // `CommsRuntime`'s, and every subject on its roster came out of a
+            // world file. The plugin registers a publisher and nothing else.
+            .add_plugins(crate::dossier::DossierPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()

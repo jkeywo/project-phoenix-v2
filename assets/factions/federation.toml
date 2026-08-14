@@ -6,6 +6,9 @@
 # choose to provoke.
 uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 name = "Federation"
+# Crew-facing label (issue #1030). `name` above is the reference key world
+# triggers use; this is the only string a player ever sees.
+display_name = "faction.federation.display_name"
 enemies = [
     "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb", # Pirate
 ]

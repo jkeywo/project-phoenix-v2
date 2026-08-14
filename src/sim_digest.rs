@@ -1110,6 +1110,7 @@ mod tests {
             condition_max: 100.0,
             condition: Some(condition),
             thresholds: vec![crate::infrastructure::ThresholdConfig {
+                label: None,
                 flag: "transfer_capable".to_string(),
                 fails_below: 0.4,
                 restores_above: None,

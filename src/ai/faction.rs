@@ -17,8 +17,21 @@ use uuid::Uuid;
 pub struct FactionConfig {
     /// Stable UUID identifying this faction.
     pub uuid: Uuid,
-    /// Human-readable name (e.g. "Federation", "Pirate").
+    /// Reference name (e.g. "Federation", "Pirate") — the id world triggers and
+    /// entity templates name a faction by, and NOT display text: no
+    /// player-facing surface renders it.
     pub name: String,
+    /// `strings.csv` id for the crew-facing label, when the setting wants this
+    /// faction nameable on a player surface (issue #1030's dossier).
+    ///
+    /// Optional, and beside [`name`](Self::name) rather than replacing it,
+    /// because `name` is a reference key shipped world TOML and fragments
+    /// already spell out — turning it into a string id would rewrite every
+    /// `add_faction_enemy` in the repo to say the same thing. A faction that
+    /// authors none has no name the crew can be shown, and the dossier omits
+    /// the row rather than putting English on the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// UUIDs of factions this faction considers enemies.
     #[serde(default)]
     pub enemies: Vec<Uuid>,
@@ -163,12 +176,14 @@ mod tests {
     fn make_registry_fed_hostile_to_pirate() -> FactionRegistry {
         let mut reg = FactionRegistry::new();
         reg.insert(FactionConfig {
+            display_name: None,
             uuid: fed_uuid(),
             name: "Federation".to_string(),
             enemies: vec![pirate_uuid()],
             compliance: None,
         });
         reg.insert(FactionConfig {
+            display_name: None,
             uuid: pirate_uuid(),
             name: "Pirate".to_string(),
             enemies: vec![],
@@ -214,12 +229,14 @@ mod tests {
         let alpha = Uuid::parse_str("cccccccc-0000-0000-0000-000000000003").unwrap();
         let beta = Uuid::parse_str("dddddddd-0000-0000-0000-000000000004").unwrap();
         reg.insert(FactionConfig {
+            display_name: None,
             uuid: alpha,
             name: "Alpha".to_string(),
             enemies: vec![],
             compliance: None,
         });
         reg.insert(FactionConfig {
+            display_name: None,
             uuid: beta,
             name: "Beta".to_string(),
             enemies: vec![],
@@ -365,12 +382,14 @@ name = "Pirate"
         let alpha = Uuid::parse_str("cccccccc-0000-0000-0000-000000000003").unwrap();
         let beta = Uuid::parse_str("dddddddd-0000-0000-0000-000000000004").unwrap();
         reg.insert(FactionConfig {
+            display_name: None,
             uuid: alpha,
             name: "Alpha".to_string(),
             enemies: vec![],
             compliance: None,
         });
         reg.insert(FactionConfig {
+            display_name: None,
             uuid: beta,
             name: "Beta".to_string(),
             enemies: vec![],

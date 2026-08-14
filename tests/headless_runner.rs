@@ -7424,3 +7424,379 @@ fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
     // #1031's seam: carried on every subject, written by nothing in this slice.
     assert!(bb.subjects.iter().all(|d| d.evidence.is_empty()));
 }
+
+// ── Falling Skyway: the skeleton world and Act 1 (issue #1034, parent #852) ──
+
+/// The four civilian craft `falling_skyway.toml` puts on lanes at mission start.
+const SKYWAY_TRAFFIC: [&str; 4] = [
+    "world.falling_skyway.entity.convoy_meridian.name",
+    "world.falling_skyway.entity.hauler_lark.name",
+    "world.falling_skyway.entity.hauler_pell.name",
+    "world.falling_skyway.entity.shuttle_wick.name",
+];
+
+/// The status of the objective with this id, or `None` while the world has yet
+/// to post it. The panicking [`objective_status`] is the right read once a run
+/// is over; a per-tick sample has to survive the ticks before `on_world_loaded`
+/// has been through the trigger pipeline.
+fn objective_status_opt(
+    app: &bevy::prelude::App,
+    id: &str,
+) -> Option<project_phoenix::core::messages::ObjectiveStatus> {
+    app.world()
+        .resource::<project_phoenix::world::server::ObjectiveManagerRes>()
+        .0
+        .sorted_snapshots()
+        .into_iter()
+        .find(|o| o.id == id)
+        .map(|o| o.status)
+}
+
+/// Every named ship's `(x, z)` this tick, keyed by its authored `EntityName`.
+fn ship_positions(app: &mut bevy::prelude::App) -> std::collections::BTreeMap<String, (f32, f32)> {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::ship::state::ShipPhysics,
+        )>()
+        .iter(app.world())
+        .map(|(name, physics)| (name.0.clone(), (physics.x, physics.z)))
+        .collect()
+}
+
+/// **Issue #1034.** The Falling Skyway skeleton, driven past the end of Act 1:
+/// the world loads, its traffic is already flying, its clock is on the captain's
+/// panel, its three objectives resolve, and the run reaches an Act-1-complete
+/// state.
+///
+/// Every reading is taken tick by tick and asserted on ORDER and STATE, never on
+/// frame arithmetic. The mission clock anchors on the first `InProgress` tick
+/// rather than at frame zero, so an assertion pinned to an absolute frame is
+/// really an assertion about how long the lobby took — while the causal order is
+/// what the scenario actually claims. The one number this test does read is the
+/// world's own authored `due_secs`, asserted to fall inside the run, so
+/// lengthening Act 1 in the TOML (the #1044 tuning pass) does not silently turn
+/// this into a test of an act that never finished.
+#[test]
+fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complete() {
+    use project_phoenix::civilian::CivilianTraffic;
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::entities::spawner::EntityName;
+    use project_phoenix::infrastructure::InfrastructureCondition;
+    use project_phoenix::world::config::WorldConfig;
+    use project_phoenix::world::deadlines::DeadlineState;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    const SKYHOOK: &str = "world.falling_skyway.entity.skyhook.name";
+
+    let dt = 1.0 / 30.0;
+    let sim_seconds = 100.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/falling_skyway.toml".into(),
+        // The mission's authored hull, and the one its four stations are the
+        // small-crew set of.
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(sim_seconds, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+
+    // AC1 precondition: the act's own clock fits inside this run. Read from the
+    // authored config rather than restated here.
+    let authored_due: i64 = app
+        .world()
+        .resource::<WorldConfig>()
+        .deadlines
+        .iter()
+        .find(|d| d.id == "skyway_survey_due")
+        .expect("the world authors the act-boundary deadline")
+        .due_secs;
+    assert!(
+        (authored_due as f64) < sim_seconds - 5.0,
+        "Act 1 closes at t={authored_due} s, which this {sim_seconds} s run does not \
+         cover — retune the run, not the assertions below"
+    );
+
+    // `first[…]` is the sim-second at which each reading first went true, so
+    // every ordering claim below is read off one pass rather than sampled at a
+    // hopeful moment.
+    let mut first: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
+    // Where each craft was on the first tick it existed, and whether it has
+    // since moved. "Traffic is moving at mission start" is a claim about the
+    // opening of the run, and it is only checkable while the run is opening.
+    let mut opening: std::collections::BTreeMap<String, (f32, f32)> = Default::default();
+    let mut moved_by: std::collections::BTreeMap<String, f64> = Default::default();
+    let mut lift_capable_seen = false;
+    let mut skyhook_condition_at_close: Option<f32> = None;
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        for (name, position) in ship_positions(&mut app) {
+            let start = *opening.entry(name.clone()).or_insert(position);
+            let travelled = (position.0 - start.0).hypot(position.1 - start.1);
+            if travelled > 40.0 {
+                moved_by.entry(name).or_insert(sim_t);
+            }
+        }
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        let flags = &runtime.flags;
+        // The head is certified to lift on arrival; only once that has genuinely
+        // been up does its fall mean anything (the same not-published-yet guard
+        // the #1025 probe carries).
+        if flags.flag("skyhook_lift_capable") {
+            lift_capable_seen = true;
+            first.entry("lift_capable").or_insert(sim_t);
+        } else if lift_capable_seen {
+            first.entry("lift_lost").or_insert(sim_t);
+        }
+        for (flag, key) in [
+            ("tether_slipped", "tether_slipped"),
+            ("a1_lane_open", "lane_open"),
+            ("a1_priority_set", "priority_set"),
+            ("act1_complete", "act1_complete"),
+        ] {
+            if flags.counter(flag) > 0 {
+                first.entry(key).or_insert(sim_t);
+            }
+        }
+        if objective_status_opt(&app, "obj-a1-corridor") == Some(ObjectiveStatus::Completed) {
+            first.entry("corridor_objective").or_insert(sim_t);
+        }
+        if objective_status_opt(&app, "obj-a1-triage") == Some(ObjectiveStatus::Completed) {
+            first.entry("triage_objective").or_insert(sim_t);
+        }
+        if objective_status_opt(&app, "obj-a1-survey") == Some(ObjectiveStatus::Completed) {
+            first.entry("survey_objective").or_insert(sim_t);
+            if skyhook_condition_at_close.is_none() {
+                skyhook_condition_at_close = app
+                    .world_mut()
+                    .query::<(&EntityName, &InfrastructureCondition)>()
+                    .iter(app.world())
+                    .find(|(name, _)| name.0 == SKYHOOK)
+                    .map(|(_, condition)| condition.0.condition());
+            }
+        }
+    }
+
+    let at = |key: &str| -> f64 {
+        *first
+            .get(key)
+            .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
+    };
+
+    // ── AC3: the corridor was already working when the crew arrived ──
+    // Present from the opening tick, on authored lanes, and under way — not
+    // spawned by a trigger and not waiting to be told.
+    let traffic: Vec<String> = app
+        .world_mut()
+        .query::<(&EntityName, &CivilianTraffic)>()
+        .iter(app.world())
+        .filter(|(_, traffic)| traffic.0.route().is_some())
+        .map(|(name, _)| name.0.clone())
+        .collect();
+    let mut on_lanes = traffic.clone();
+    on_lanes.sort();
+    assert_eq!(
+        on_lanes,
+        SKYWAY_TRAFFIC.map(String::from).to_vec(),
+        "four civilian craft fly this world's authored lanes"
+    );
+    for name in SKYWAY_TRAFFIC {
+        assert!(
+            opening.contains_key(name),
+            "{name} must exist from the opening tick — traffic the mission spawns \
+             later is traffic the crew watched arrive"
+        );
+        let under_way = *moved_by.get(name).unwrap_or_else(|| {
+            panic!("{name} never left its spawn point; the lane is authored but nobody is flying it")
+        });
+        assert!(
+            under_way < at("lane_open"),
+            "{name} must already be under way before anything the crew does resolves \
+             ({under_way:.1} s vs the corridor objective at {:.1} s)",
+            at("lane_open")
+        );
+    }
+
+    // ── AC4: the clock is on the captain's panel ──
+    // Both authored deadlines are visible, and both reach the captain blackboard
+    // with a server-computed countdown. (The panel that renders them is covered
+    // by tests/client/console-state.test.js.)
+    let mut q = app
+        .world_mut()
+        .query::<&project_phoenix::server_app::ShipSystemBlackboards>();
+    let published: Vec<_> = q
+        .iter(app.world())
+        .filter_map(|bbs| {
+            bbs.0
+                .values()
+                .find_map(|bb| match bb {
+                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    _ => None,
+                })
+                .filter(|c| !c.deadlines.is_empty())
+                .map(|c| c.deadlines.clone())
+        })
+        .collect();
+    let published = published
+        .first()
+        .expect("the crew's own ship publishes the mission's visible deadlines");
+    assert_eq!(
+        published.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+        vec!["tether_slip", "skyway_survey_due"],
+        "both act-1 deadlines are authored visible, in authored order"
+    );
+    assert_eq!(
+        published[1].label, "world.falling_skyway.deadline.skyway_survey_due.label",
+        "the crew-facing label is a strings.csv id, never English"
+    );
+
+    // ── AC5, the causal chain: a deadline moves a condition track, the track
+    // crosses an authored threshold, and the threshold resolves an objective ──
+    let slipped = at("tether_slipped");
+    let lost = at("lift_lost");
+    assert!(
+        at("lift_capable") < slipped,
+        "precondition: the head arrives CERTIFIED, so losing that is an event \
+         rather than the opening state ({:.1} s vs {slipped:.1} s)",
+        at("lift_capable")
+    );
+    assert!(
+        lost >= slipped && lost - slipped < 1.0,
+        "the six points the tether slip spends must take the head under its own \
+         45 % lift line promptly — slip at {slipped:.1} s, line crossed at {lost:.1} s"
+    );
+    assert!(
+        at("priority_set") >= lost && at("priority_set") - lost < 0.5,
+        "…and the chained `on_flag_cleared` handler rides the same one-tick \
+         pending_world_events bridge, rather than an open-ended delay"
+    );
+    assert_eq!(
+        at("triage_objective"),
+        at("priority_set"),
+        "the triage objective resolves in the handler that recorded the priority"
+    );
+
+    // ── AC5, the other resolution: the lane proves itself ──
+    assert_eq!(
+        at("corridor_objective"),
+        at("lane_open"),
+        "the corridor objective resolves when the lead hauler clears the gate — \
+         #1028's route machinery, not a timer"
+    );
+
+    // ── AC1/AC5: the act closes, deterministically, on its own deadline ──
+    let closed = at("act1_complete");
+    assert_eq!(
+        at("survey_objective"),
+        closed,
+        "the survey report and the act boundary are the same beat"
+    );
+    for earlier in ["corridor_objective", "triage_objective"] {
+        assert!(
+            at(earlier) < closed,
+            "'{earlier}' resolved at {:.1} s, at or after the act closed at \
+             {closed:.1} s — Act 1 must end with its work already accounted for",
+            at(earlier)
+        );
+    }
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert_eq!(
+        runtime.flags.counter("act1_complete"),
+        1,
+        "the Act-1-complete state is reached exactly once"
+    );
+    assert_eq!(
+        runtime.flags.counter("act"),
+        2,
+        "…and the act counter the later slices hang their content on has advanced"
+    );
+    assert_eq!(
+        runtime.deadlines.get("skyway_survey_due").map(|d| d.state),
+        Some(DeadlineState::Fired),
+        "the act boundary is the authored deadline firing, not a script counting frames"
+    );
+    for id in ["obj-a1-survey", "obj-a1-corridor", "obj-a1-triage"] {
+        assert_eq!(
+            objective_status(&app, id),
+            ObjectiveStatus::Completed,
+            "every Act 1 objective resolves in a clean run; a partial one would read \
+             Failed here rather than staying Pending"
+        );
+    }
+
+    // ── AC2: the structures the act is about, as authored data ──
+    // The skyhook is six points down on where it started and still standing:
+    // this act damages the head, it does not lose it (#1040 owns the collapse).
+    assert_eq!(
+        skyhook_condition_at_close,
+        Some(42.0),
+        "48 authored - 6 spent by the tether slip, in condition points"
+    );
+    let mut structures = app
+        .world_mut()
+        .query::<(&EntityName, &InfrastructureCondition)>();
+    let tracks: std::collections::BTreeMap<String, (f32, Vec<String>)> = structures
+        .iter(app.world())
+        .map(|(name, condition)| {
+            (
+                name.0.clone(),
+                (
+                    condition.0.condition(),
+                    condition
+                        .0
+                        .capacities()
+                        .iter()
+                        .map(|c| c.id.clone())
+                        .collect(),
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(
+        tracks
+            .get("world.falling_skyway.entity.depot_ladder_a.name")
+            .map(|(condition, _)| *condition),
+        Some(62.0),
+        "the working rung of the ladder is authored, published and untouched by Act 1"
+    );
+    assert_eq!(
+        tracks
+            .get("world.falling_skyway.entity.depot_ladder_b.name")
+            .map(|(condition, _)| *condition),
+        Some(34.0)
+    );
+    assert_eq!(
+        tracks
+            .get(SKYHOOK)
+            .map(|(_, capacities)| capacities.clone())
+            .unwrap_or_default(),
+        vec![
+            "skyhook_transfer_berths".to_string(),
+            "skyhook_climber_load".to_string()
+        ],
+        "the head carries its authored capacities, berths first"
+    );
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        flags.counter("skyhook_transfer_berths"),
+        2,
+        "TWO berths, and this world fields three parties who each need one — the \
+         scenario's central pressure is authored data a script predicate can read"
+    );
+    assert!(
+        flags.flag("depot_a_pumping"),
+        "the depot chain's two rungs own SEPARATE flags: A is above its line…"
+    );
+    assert!(
+        !flags.flag("depot_b_pumping"),
+        "…and B is authored below its own, so the triage picture is on the panel \
+         before anybody says a word about it"
+    );
+}

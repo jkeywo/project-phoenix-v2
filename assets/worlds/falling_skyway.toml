@@ -32,8 +32,8 @@
 #   Convoy Meridian     the civilian traffic — sympathetic, and with no
 #                       leverage at all.
 #
-# Their negotiation is #1036's. Nothing here gives any of them a disposition, a
-# strike status or a promise: the skeleton places them and stops.
+# Their negotiation is #1036's, and it is authored now: Act 2 is the two ways the
+# strike ends, either of which the crew can reach without touching the other.
 #
 # ── The traffic ──────────────────────────────────────────────────────────────
 #
@@ -77,10 +77,32 @@
 # boundary, which is what makes partial success readable: the act ends on the
 # clock whatever the crew got done, and the objectives list says which.
 #
-# Acts 2 and 3 exist here as a structural stub and nothing more: `act` counts
-# 1 → 2, and the later slices author their own `[[deadline]]` blocks (the storm
-# sweeps, the transfer window) against it. No Act 2 or Act 3 content is authored
-# in this file.
+# ── Act 2's two endings (issue #1036) ────────────────────────────────────────
+#
+# The survey deadline opens the act on two channels — the committee's and the
+# operator's cutter's — and both are answerable from the destroyer's Tactical
+# seat, which is where this hull's comms overlay lives. Neither ending is behind
+# the other's first pick.
+#
+#   NEGOTIATE  the committee settle for two pieces of ground out of three: the
+#              captain's word that the corridor is clear in the transfer window,
+#              the captain's word that the maintenance file goes to Control, or
+#              the crew showing they have already read the file. Both promises
+#              go onto the commitments ledger with the workers as the party and
+#              stay OPEN — keeping them is #1042's and #1039's business.
+#   FORCE IT   Havelock clear the picket. Faster, and it costs people, a
+#              relationship two campaign flags carry forward, and the worker
+#              corroboration route (#1039) — which fails an objective on the
+#              crew's own list rather than latching in silence.
+#
+# The casualty count is READ, not rolled: script has no RNG and should not, so
+# the number comes off the workers' mirrored disposition at the moment the order
+# is given, with ten minutes' warning as the captain's lever over it. It is
+# deterministic per seed by construction and surfaces on a console four ways.
+#
+# Act 3 is still a structural stub: `act` counts 1 → 2, and the later slices
+# author their own `[[deadline]]` blocks (the storm sweeps, the transfer window)
+# against it.
 #
 # BASELINE (this world is new in #1034, so this is its first recorded digest).
 #
@@ -106,6 +128,21 @@
 # a depot's capacity level — none of which an Act 1 run reaches, because Act 1
 # opens no operations. `probe_strike.toml` is where those numbers move, and its
 # own baseline is where they are written down.
+#
+# STILL 0x14d6dc5dcf05a3c1 AFTER #1036 as well, and for a reason the header can
+# name rather than a coincidence. The slice adds no entity, moves no position and
+# touches no condition, capacity or deadline number; everything it authors is Act
+# 2, and Act 2 opens on a deadline 90 mission-seconds in. The baseline run is 900
+# ticks at the default 60 Hz — fifteen seconds — so it does not reach the act
+# boundary, never opens a thread, and folds none of the dialogue. The five
+# anchors were re-measured on the same clean tree and are unmoved: combat_test
+# 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, and probe_strike
+# (--ticks 1800) 535291289754814419.
+#
+# When a later slice lengthens the baseline run past 90 s, this number WILL move,
+# and the mechanism will be the two comms threads and their objectives rather
+# than anything mysterious.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls

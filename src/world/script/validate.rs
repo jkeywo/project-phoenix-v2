@@ -238,15 +238,22 @@ pub fn validate_toml_script_comms(
 // non-`flags` target such as a local `x += 1`. The walk is deterministic: tokens
 // are emitted in source order and matched left to right.
 
-/// A significant lexical token for the `flags` op-assign scan. Whitespace,
-/// comments, and string/char literals are dropped before these are produced, so a
-/// `+=` inside a comment or string can never be mistaken for code.
+/// A significant lexical token for the script source scans. Whitespace and
+/// comments are dropped before these are produced, and a literal's *contents*
+/// never become code tokens — so a `+=` inside a comment or string can never be
+/// mistaken for code, while an authored string like an `on_pick` fn name is
+/// still readable as data ([`Tok::Str`]).
 #[derive(Debug, PartialEq, Eq)]
 enum Tok {
     /// An identifier run (`flags`, `score`, `ctx`, `increment`, …).
     Ident(String),
+    /// A string or char literal, carrying its contents. Whatever is inside is
+    /// data, never code: `"a += b"` is one `Str`, not an `OpAssign`.
+    Str(String),
     /// `.` member access.
     Dot,
+    /// `:` — the map-entry separator (`#{ on_pick: "fn" }`).
+    Colon,
     /// `[` index open.
     LBracket,
     /// `]` index close.
@@ -255,8 +262,11 @@ enum Tok {
     /// `**=`, `<<=`, `>>=`, `&=`, `|=`, `^=`). Plain `=` and `==` are `Other`.
     OpAssign,
     /// Any other token we do not distinguish (plain `=`, `==`, numbers, `(`, `,`,
-    /// `;`, braces, other operators). A separator only.
-    Other,
+    /// `;`, braces, other operators), carrying its FIRST character. A separator
+    /// for the op-assign scan; the character is what lets the `on_pick` scan tell
+    /// a value that ends (`, } ] ) ;`) from one that continues into an expression
+    /// (`"on_" + kind`).
+    Other(char),
 }
 
 /// A token plus the 1-based source line it starts on (for locating a finding).
@@ -337,44 +347,46 @@ fn lex_significant(source: &str) -> Vec<Token> {
                     }
                 }
             }
-            // `"…"` string literal, `\`-escaped.
-            '"' => {
+            // `"…"` string literal, `\`-escaped, and `'…'` char literal.
+            // Contents are captured as data (a fn name an `on_pick` names), never
+            // lexed as code; a `\`-escape contributes the escaped character.
+            '"' | '\'' => {
+                let quote = c;
+                let start_line = line;
+                let mut body = String::new();
                 i += 1;
                 while i < n {
                     match chars[i] {
-                        '\\' => i += 2,
-                        '"' => {
+                        '\\' => {
+                            if i + 1 < n {
+                                body.push(chars[i + 1]);
+                            }
+                            i += 2;
+                        }
+                        ch if ch == quote => {
                             i += 1;
                             break;
                         }
                         '\n' => {
                             line += 1;
+                            body.push('\n');
                             i += 1;
                         }
-                        _ => i += 1,
+                        ch => {
+                            body.push(ch);
+                            i += 1;
+                        }
                     }
                 }
+                tokens.push(Token {
+                    kind: Tok::Str(body),
+                    line: start_line,
+                });
             }
-            // `'…'` char literal, `\`-escaped.
-            '\'' => {
-                i += 1;
-                while i < n {
-                    match chars[i] {
-                        '\\' => i += 2,
-                        '\'' => {
-                            i += 1;
-                            break;
-                        }
-                        '\n' => {
-                            line += 1;
-                            i += 1;
-                        }
-                        _ => i += 1,
-                    }
-                }
-            }
-            // `` `…` `` verbatim/interpolated string — skip to the closing backtick.
+            // `` `…` `` verbatim/interpolated string — contents captured verbatim.
             '`' => {
+                let start_line = line;
+                let mut body = String::new();
                 i += 1;
                 while i < n {
                     if chars[i] == '`' {
@@ -384,8 +396,13 @@ fn lex_significant(source: &str) -> Vec<Token> {
                     if chars[i] == '\n' {
                         line += 1;
                     }
+                    body.push(chars[i]);
                     i += 1;
                 }
+                tokens.push(Token {
+                    kind: Tok::Str(body),
+                    line: start_line,
+                });
             }
             // `#"…"#` raw string (any number of hashes). NOT `#{ … }` object maps.
             '#' => {
@@ -416,7 +433,7 @@ fn lex_significant(source: &str) -> Vec<Token> {
                 } else {
                     // A lone `#` (e.g. the `#` of a `#{ … }` map) — a separator.
                     tokens.push(Token {
-                        kind: Tok::Other,
+                        kind: Tok::Other('#'),
                         line,
                     });
                     i += 1;
@@ -454,6 +471,13 @@ fn lex_significant(source: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+            ':' => {
+                tokens.push(Token {
+                    kind: Tok::Colon,
+                    line,
+                });
+                i += 1;
+            }
             // Any other operator/punctuation: a compound assignment, or a
             // separator (`Other`) consumed one char at a time.
             _ => {
@@ -465,7 +489,7 @@ fn lex_significant(source: &str) -> Vec<Token> {
                     i += len;
                 } else {
                     tokens.push(Token {
-                        kind: Tok::Other,
+                        kind: Tok::Other(c),
                         line,
                     });
                     i += 1;
@@ -559,6 +583,125 @@ pub fn validate_flag_opassign(sources: &[ScriptSource]) -> Vec<WorldFinding> {
                     file: src.path.clone(),
                     line: Some(line),
                     reference,
+                },
+            });
+        }
+    }
+    findings
+}
+
+// ── dialogue `on_pick` resolution lint (issue #984) ──────────────────────────
+//
+// The comms front-end's branching lives in STRING LITERALS inside the maps a
+// dialogue node fn returns — `#{ text: "Acknowledge", on_pick: "on_ack" }` — and
+// nothing else in the load path can see them. `validate_toml_script_comms`
+// reaches only the ROOT fn a `[[comms]] script = "fn"` block names; every node
+// past the root is named by a literal the loader never reads. A typo therefore
+// survived load and surfaced mid-mission as an unresolvable call the moment a
+// player picked that response.
+//
+// Lexical, not an AST walk, for the reason `validate_flag_opassign` documents
+// above: a true `AST::walk` over `Stmt`/`Expr` needs Rhai's `internals` feature,
+// which this build does not enable, and `vellum_script` exposes no walk helper.
+// So this reuses that pass's tokenizer — which already strips comments and lexes
+// literals as data rather than code — and matches the token shape
+// `on_pick : "<name>"`.
+
+/// Category slug for a dialogue response whose `on_pick` string literal names no
+/// defined function (issue #984).
+pub const UNRESOLVED_ON_PICK_FN: &str = "unresolved-on-pick-fn";
+
+/// Scan one script source for `on_pick: "<name>"` literals, returning
+/// `(name, line)` for each.
+///
+/// Only a literal that is the WHOLE value is a hit — the token after it must
+/// END the map entry (`,`, `}`, `]`, `)`, `;`, or the source). `on_pick: "on_" +
+/// kind` opens with a `Str` too, and reporting `"on_"` as an undefined function
+/// would block a legitimate world for a name the pass cannot compute. An
+/// `on_pick` built any other way (`pick_fn_for(i)`, a ternary, a variable) never
+/// produces a `Str` in that position at all. See [`validate_on_pick_fns`].
+fn scan_on_pick_literals(source: &str) -> Vec<(String, usize)> {
+    /// Characters that terminate a map-entry value.
+    fn ends_the_value(kind: &Tok) -> bool {
+        matches!(kind, Tok::Other(',' | '}' | ']' | ')' | ';'))
+    }
+
+    let tokens = lex_significant(source);
+    let mut hits = Vec::new();
+    for i in 0..tokens.len() {
+        let Tok::Ident(name) = &tokens[i].kind else {
+            continue;
+        };
+        if name != "on_pick" {
+            continue;
+        }
+        if i + 2 >= tokens.len() || tokens[i + 1].kind != Tok::Colon {
+            continue;
+        }
+        let Tok::Str(fn_name) = &tokens[i + 2].kind else {
+            continue;
+        };
+        let whole_value = tokens
+            .get(i + 3)
+            .is_none_or(|next| ends_the_value(&next.kind));
+        if whole_value {
+            hits.push((fn_name.clone(), tokens[i + 2].line));
+        }
+    }
+    hits
+}
+
+/// Prove every literal `on_pick` in every script resolves against `defined_fns`
+/// (issue #984).
+///
+/// A scripted comms response's `on_pick` names the fn that runs when the player
+/// picks it. Unlike a registration or a `[[comms]] script = "fn"`, that name is
+/// authored *inside* a node fn's returned map, so no cross-reference pass could
+/// see it and a typo reached the player instead of the loader: picking the
+/// response called a function that does not exist, which the host answers by
+/// refusing the pick (`EnterError::Unresolved`) — visible, but a dead branch in a
+/// shipped mission all the same. Each unresolved name is a blocking
+/// [`UNRESOLVED_ON_PICK_FN`] error on the same authoring-validation channel as
+/// every other script check, so `world::validate::has_error` refuses to activate
+/// the world.
+///
+/// # What this pass cannot see (deliberate)
+///
+/// The scan is lexical, so it reports only `on_pick: "<literal>"`. A dynamically
+/// built name — `on_pick: pick_for(kind)`, `on_pick: "on_" + verb` — is left
+/// alone rather than guessed at: the alternative is a false positive that blocks
+/// a legitimate world, which for a *load-time* gate is strictly worse than the
+/// missed catch. Those names are still answered at runtime by
+/// [`EnterError::Unresolved`](crate::world::script::comms::EnterError::Unresolved),
+/// which refuses the pick rather than killing the thread.
+///
+/// `defined_fns` is the WHOLE content set's function list, matching every other
+/// cross-reference pass here; a name defined in a different unit from the one
+/// that references it therefore passes this lint, and is caught at runtime
+/// instead (`call_fn` resolves against one unit's AST).
+pub fn validate_on_pick_fns(
+    sources: &[ScriptSource],
+    defined_fns: &BTreeSet<String>,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    for src in sources {
+        for (fn_name, line) in scan_on_pick_literals(&src.source) {
+            if defined_fns.contains(&fn_name) {
+                continue;
+            }
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: UNRESOLVED_ON_PICK_FN,
+                message: format!(
+                    "dialogue response `on_pick: \"{fn_name}\"` in '{}' names no defined \
+                     function; a scripted comms response's on_pick must name a node fn, or \
+                     picking it refuses the response mid-mission",
+                    src.path
+                ),
+                source: SourceLocation {
+                    file: src.path.clone(),
+                    line: Some(line),
+                    reference: fn_name,
                 },
             });
         }
@@ -928,5 +1071,114 @@ mod tests {
         assert_eq!(findings.len(), 2, "{findings:?}");
         assert_eq!(findings[0].source.file, "a");
         assert_eq!(findings[1].source.file, "c");
+    }
+
+    // ── dialogue `on_pick` resolution (issue #984) ────────────────────────────
+
+    const TREE: &str = r#"
+        fn hail_axiom(ctx) {
+            #{ message: "Go ahead.", responses: [
+                #{ text: "Acknowledge", on_pick: "on_ack" },
+                #{ text: "Decline",     on_pick: "on_declien", important: true },
+            ] }
+        }
+        fn on_ack(ctx)     { ctx.effects.complete_objective("reach_axiom"); }
+        fn on_decline(ctx) { ctx.effects.fail_objective("reach_axiom"); }
+    "#;
+
+    #[test]
+    fn a_resolved_on_pick_is_clean() {
+        let sources = vec![src(
+            "w.toml#script.s",
+            r#"
+            fn root(ctx) {
+                #{ message: "Go ahead.", responses: [
+                    #{ text: "Yes", on_pick: "on_yes" },
+                    #{ text: "No",  on_pick: "on_no" },
+                ] }
+            }
+            fn on_yes(ctx) { }
+            fn on_no(ctx) { }
+            "#,
+        )];
+        assert!(validate_on_pick_fns(&sources, &defined(&["root", "on_yes", "on_no"])).is_empty());
+    }
+
+    #[test]
+    fn a_typoed_on_pick_blocks_activation_naming_the_fn_and_file() {
+        let sources = vec![src("w.toml#script.axiom", TREE)];
+        let findings =
+            validate_on_pick_fns(&sources, &defined(&["hail_axiom", "on_ack", "on_decline"]));
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        let f = &findings[0];
+        assert_eq!(f.category, UNRESOLVED_ON_PICK_FN);
+        assert_eq!(f.source.reference, "on_declien", "the finding names the fn");
+        assert_eq!(
+            f.source.file, "w.toml#script.axiom",
+            "and the file it is authored in"
+        );
+        assert!(f.source.line.is_some(), "and the line");
+        assert!(f.message.contains("on_declien"));
+        assert!(crate::world::validate::has_error(&findings));
+    }
+
+    #[test]
+    fn a_dynamically_built_on_pick_is_not_flagged() {
+        // The documented limitation of a lexical pass: only a literal is
+        // visible. A computed name is left to the runtime's `EnterError::
+        // Unresolved` rather than guessed at — a false positive here would block
+        // a legitimate world at load, which is strictly worse.
+        let sources = vec![src(
+            "s",
+            r#"
+            fn root(ctx) {
+                let kind = "ack";
+                #{ message: "Go ahead.", responses: [
+                    #{ text: "Yes", on_pick: pick_for(kind) },
+                    #{ text: "No",  on_pick: "on_" + kind },
+                ] }
+            }
+            "#,
+        )];
+        assert!(validate_on_pick_fns(&sources, &defined(&["root"])).is_empty());
+    }
+
+    #[test]
+    fn an_on_pick_in_a_comment_or_string_is_ignored() {
+        // The tokenizer lexes a literal's contents as DATA, so an `on_pick:` that
+        // is itself inside a comment or a string is not a response.
+        let sources = vec![src(
+            "s",
+            r#"
+            fn root(ctx) {
+                // author responses as on_pick: "handler_name"
+                let doc = "on_pick: \"never_defined\"";
+                #{ message: "x", responses: [] }
+            }
+            "#,
+        )];
+        assert!(validate_on_pick_fns(&sources, &defined(&["root"])).is_empty());
+    }
+
+    #[test]
+    fn every_unresolved_on_pick_across_every_source_reports() {
+        let sources = vec![
+            src(
+                "a",
+                r#"fn a(ctx) { #{ responses: [ #{ on_pick: "gone_a" } ] } }"#,
+            ),
+            src(
+                "b",
+                r#"fn b(ctx) { #{ responses: [ #{ on_pick: "here_b" } ] } }"#,
+            ),
+            src(
+                "c",
+                r#"fn c(ctx) { #{ responses: [ #{ on_pick: "gone_c" } ] } }"#,
+            ),
+        ];
+        let findings = validate_on_pick_fns(&sources, &defined(&["a", "b", "c", "here_b"]));
+        assert_eq!(findings.len(), 2, "{findings:?}");
+        assert_eq!(findings[0].source.reference, "gone_a");
+        assert_eq!(findings[1].source.reference, "gone_c");
     }
 }

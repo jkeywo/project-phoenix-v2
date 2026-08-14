@@ -226,9 +226,10 @@ pub enum EnterError {
     /// An unresolvable `on_pick` reaches here rather than the host's failure
     /// policy (which would panic in dev on the resulting `CallError` and, in
     /// release, return an empty result the caller could not tell from a terminal
-    /// response). A load-time lint is what should stop an authored typo reaching
-    /// here at all; this is the runtime backstop for names a load-time pass
-    /// cannot see.
+    /// response). The load-time lint
+    /// ([`validate_on_pick_fns`](super::validate::validate_on_pick_fns)) is what
+    /// stops an authored typo reaching here at all; this is the runtime backstop
+    /// for the dynamically-built names that lint cannot see.
     Unresolved,
     /// The call was attempted but produced nothing: the tick's [`TickBudget`]
     /// refused it, or it raised and settled decision 10 discarded its buffers

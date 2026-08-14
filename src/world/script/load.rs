@@ -29,7 +29,7 @@ use vellum_script::ScriptSource;
 
 use crate::world::script::engine::{loading_engine, BuilderState, Registration, ScriptTrigger};
 use crate::world::script::validate::{
-    validate_flag_opassign, validate_registrations, validate_script_triggers,
+    validate_flag_opassign, validate_on_pick_fns, validate_registrations, validate_script_triggers,
     validate_toml_script_comms, validate_toml_script_triggers,
 };
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
@@ -315,6 +315,16 @@ pub fn load_world_scripts(
     // increment. Each is a blocking finding, so the atomic activation gate keeps a
     // world that reaches for the old `+=` idiom from spawning (issue #994).
     compiled.findings.extend(validate_flag_opassign(&sources));
+    // And the dialogue tree's OWN cross-reference (issue #984): every
+    // `on_pick: "fn"` literal inside a node fn's returned map, checked against the
+    // same defined-function set. `validate_toml_script_comms` above reaches only
+    // the ROOT fn a `[[comms]] script = "fn"` block names; every node past the
+    // root is named by a string literal nothing else in the load path reads, so
+    // without this a typo three responses deep survived load and surfaced as a
+    // refused pick mid-mission.
+    compiled
+        .findings
+        .extend(validate_on_pick_fns(&sources, &compiled.defined_fns));
     compiled
 }
 
@@ -575,6 +585,107 @@ mod tests {
             r#"
             [script]
             setup = "fn on_x(ctx) { ctx.flags.armed = 1; }"
+            "#,
+        );
+        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
+        assert!(
+            !crate::world::validate::has_error(&compiled.findings),
+            "findings: {:?}",
+            compiled.findings
+        );
+    }
+
+    // ── dialogue `on_pick` resolution lint (issue #984) ───────────────────────
+
+    #[test]
+    fn full_load_blocks_a_dialogue_node_naming_a_missing_on_pick_fn() {
+        // The gap the root-fn check could not reach: `hail_axiom` resolves, but
+        // the response inside the node it returns names a fn that does not
+        // exist. Without this lint the typo survives load and surfaces as a
+        // refused pick mid-mission.
+        let world = toml_of(
+            r#"
+            [[comms]]
+            from = "axiom"
+            trigger = "on_hailed"
+            entity = "axiom"
+            script = "hail_axiom"
+
+            [script]
+            setup = """
+            fn hail_axiom(ctx) {
+                #{ message: "Go ahead.", responses: [
+                    #{ text: "Acknowledge", on_pick: "on_ack" },
+                    #{ text: "Decline",     on_pick: "on_declien" },
+                ] }
+            }
+            fn on_ack(ctx)     { }
+            fn on_decline(ctx) { }
+            """
+            "#,
+        );
+        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
+        assert!(
+            crate::world::validate::has_error(&compiled.findings),
+            "an unresolved on_pick must block activation: {:?}",
+            compiled.findings
+        );
+        let f = compiled
+            .findings
+            .iter()
+            .find(|f| f.category == "unresolved-on-pick-fn")
+            .expect("the on_pick finding");
+        assert_eq!(f.source.reference, "on_declien", "it names the fn");
+        assert_eq!(f.source.file, "w.toml#script.setup", "and the file");
+    }
+
+    #[test]
+    fn full_load_of_a_resolved_dialogue_tree_is_clean() {
+        let world = toml_of(
+            r#"
+            [[comms]]
+            from = "axiom"
+            trigger = "on_hailed"
+            entity = "axiom"
+            script = "hail_axiom"
+
+            [script]
+            setup = """
+            fn hail_axiom(ctx) {
+                #{ message: "Go ahead.", responses: [
+                    #{ text: "Acknowledge", on_pick: "on_ack" },
+                    #{ text: "Decline",     on_pick: "on_decline" },
+                ] }
+            }
+            fn on_ack(ctx)     { #{ message: "Cleared.", responses: [] } }
+            fn on_decline(ctx) { }
+            """
+            "#,
+        );
+        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
+        assert!(
+            !crate::world::validate::has_error(&compiled.findings),
+            "findings: {:?}",
+            compiled.findings
+        );
+    }
+
+    #[test]
+    fn full_load_does_not_flag_a_dynamically_built_on_pick() {
+        // The documented limitation of a lexical pass, pinned at the load
+        // boundary: a computed name is left to the runtime rather than blocking
+        // a legitimate world.
+        let world = toml_of(
+            r#"
+            [script]
+            setup = """
+            fn root(ctx) {
+                let kind = "ack";
+                #{ message: "Go ahead.", responses: [
+                    #{ text: "Yes", on_pick: "on_" + kind },
+                ] }
+            }
+            """
             "#,
         );
         let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());

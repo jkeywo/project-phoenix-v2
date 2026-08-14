@@ -226,7 +226,7 @@ impl ScanConfig {
                 ));
             }
             seen.push(&band.id);
-            if !(band.max_range > 0.0) {
+            if !positive(band.max_range) {
                 return Err(format!(
                     "[[scan.band]] '{}' authors max_range = {} — a band with no reach can never \
                      answer",
@@ -242,7 +242,7 @@ impl ScanConfig {
                 ));
             }
             previous_range = band.max_range;
-            if !(band.condition_step > 0.0) || band.condition_step > 1.0 {
+            if !positive(band.condition_step) || band.condition_step > 1.0 {
                 return Err(format!(
                     "[[scan.band]] '{}' authors condition_step = {} — it is a fraction of the \
                      condition ceiling and must be inside (0, 1]",
@@ -419,10 +419,17 @@ pub struct ScanReading {
 /// functions are NOT safe here).
 pub fn quantise(fraction: f32, step: f32) -> f32 {
     let clamped = fraction.clamp(0.0, 1.0);
-    if !(step > 0.0) {
+    if !positive(step) {
         return clamped;
     }
     ((clamped / step).round() * step).clamp(0.0, 1.0)
+}
+
+// Fail-closed on an incomparable value: a NaN range or step refuses rather
+// than passes, which is why this is spelled via partial_cmp instead of
+// `x > 0.0` under a negation (the lint), matching operations::hold::within.
+fn positive(x: f32) -> bool {
+    matches!(x.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater))
 }
 
 /// Take one reading, or say why there is none.

@@ -1301,6 +1301,63 @@ pub struct EntitySnapshot {
     /// Falls back to the entity `name` when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_description: Option<String>,
+    /// Published infrastructure condition + capacity (issue #1025). `Some` for
+    /// an entity whose TOML declares `[infrastructure]` with `publish = true`;
+    /// `None` for everything else — which is every entity shipped today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub infrastructure: Option<InfrastructureSnapshot>,
+}
+
+/// A structure's published condition, operational flags and capacities
+/// (issue #1025).
+///
+/// Every field here is something the scenario authored and chose to publish.
+/// There is deliberately no "real condition versus reported condition" pair:
+/// what the structure holds IS the truth, and a maintenance dossier that
+/// contradicts it is authored as its own content rather than smuggled in as a
+/// hidden field on this type.
+///
+/// Minted wherever an [`EntitySnapshot`] is — world setup, entity spawn, and
+/// the reconnect `Welcome` — and therefore current as of that report. Live
+/// per-tick republication is a console concern and rides the diffed
+/// `EntityStateSnapshot` path when a console needs it; the authoritative live
+/// surface for a threshold crossing is the world flag store.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct InfrastructureSnapshot {
+    /// Structural condition as a fraction of the authored ceiling, `0.0..=1.0`.
+    /// Distinct from `hull_fraction`, which is the thing weapons destroy.
+    pub condition_fraction: f32,
+    /// Named operational flags and whether each is currently held, in authored
+    /// order. The same names the world flag store carries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flags: Vec<(String, bool)>,
+    /// Named authored capacities, in authored order — what a consumer asks
+    /// instead of restating the number at the call site.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capacities: Vec<(String, i64)>,
+}
+
+impl InfrastructureSnapshot {
+    /// Project a live track onto the wire, or `None` when the scenario asked
+    /// for this structure to stay off it.
+    pub fn from_state(state: &crate::infrastructure::InfrastructureState) -> Option<Self> {
+        if !state.publishes() {
+            return None;
+        }
+        Some(Self {
+            condition_fraction: state.condition_fraction(),
+            flags: state
+                .flags()
+                .into_iter()
+                .map(|(flag, held)| (flag.to_string(), held))
+                .collect(),
+            capacities: state
+                .capacities()
+                .iter()
+                .map(|c| (c.id.clone(), c.amount))
+                .collect(),
+        })
+    }
 }
 
 impl EntitySnapshot {
@@ -1360,6 +1417,7 @@ impl EntitySnapshot {
             target_tags: Vec::new(),
             threat_level: None,
             target_description: None,
+            infrastructure: None,
         }
     }
 }

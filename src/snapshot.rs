@@ -345,6 +345,37 @@ pub struct EntityState {
     /// tick to read — it cannot be rebuilt in time the way `WorldSnapshot` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_surface: Option<crate::ship::helm_ai::HelmPassSurface>,
+    /// The entity's infrastructure condition track (issue #1025), whole.
+    ///
+    /// The second component stored whole rather than projected, and for a
+    /// stronger reason than `pass_surface`'s: the track carries *which
+    /// operational flags are currently down* alongside the number, and the two
+    /// have to come back together. Restore the condition alone and the first
+    /// tick after resume re-detects every crossing the mission already spent —
+    /// re-firing `on_flag_cleared` on a skyhook that failed twenty minutes ago.
+    /// Its `last_hull` is in for the same class of reason: a track that forgot
+    /// it would book the structure's entire remaining hull as fresh damage on
+    /// the tick after resume.
+    ///
+    /// The variant-order hazard does not apply — every field is a scalar, a
+    /// `String`, or a `Vec` of those.
+    ///
+    /// # Why this did not bump [`SNAPSHOT_FORMAT`]
+    ///
+    /// It looks like it should: a save written without this field restores a
+    /// degraded structure as intact, while the world flag store — which IS in
+    /// the payload — comes back still holding the flags that structure dropped.
+    /// That is exactly the "silently wrong, and indistinguishable from correct"
+    /// shape a bump exists for.
+    ///
+    /// It cannot happen. The only saves that lack this field are saves of
+    /// worlds written before it existed, and a world gains a structure by
+    /// gaining an `[infrastructure]` table in its entity TOML — which moves
+    /// `content_digest` and gets the older save refused as content-moved long
+    /// before this field is read. A save that could reach the bad state is not
+    /// loadable for an unrelated and stronger reason, so the format stays at 4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub infrastructure: Option<crate::infrastructure::InfrastructureState>,
     /// `ObjectiveCursors` as `(objective id, waypoint index, settled)`.
     ///
     /// Where a patrolling ship is *around its route*, which is not derivable
@@ -2127,6 +2158,23 @@ fn repair_state(
     }
 }
 
+/// The infrastructure condition tracks, in a query of their own, joined by uuid
+/// — see [`EntityState::infrastructure`]. Only entities that authored
+/// `[infrastructure]` carry one, so most worlds capture an empty list.
+fn capture_infrastructure(
+    world: &World,
+) -> Vec<(String, crate::infrastructure::InfrastructureState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::infrastructure::InfrastructureCondition)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, condition)| (uuid.0.clone(), condition.0.clone()))
+        .collect()
+}
+
 fn capture_entities(world: &World) -> Vec<EntityState> {
     let controls = capture_controls(world);
     let machines = capture_weapons_and_repair(world);
@@ -2134,6 +2182,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let power = capture_power(world);
     let sensor_locks = capture_sensor_locks(world);
     let pass_surfaces = capture_pass_surfaces(world);
+    let infrastructure = capture_infrastructure(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
         Option<&ShipPhysics>,
@@ -2176,6 +2225,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, surface)| *surface),
+            infrastructure: infrastructure
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
             blackboards: machines
                 .iter()
                 .find(|(id, ..)| id == &uuid.0)
@@ -3152,6 +3205,13 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(surface) = row.pass_surface {
             if let Some(mut pass) = entity_mut.get_mut::<crate::ship::helm_ai::HelmPassSurface>() {
                 *pass = surface;
+            }
+        }
+        if let Some(infrastructure) = &row.infrastructure {
+            if let Some(mut condition) =
+                entity_mut.get_mut::<crate::infrastructure::InfrastructureCondition>()
+            {
+                condition.0 = infrastructure.clone();
             }
         }
         if !row.patrol_cursors.is_empty() {

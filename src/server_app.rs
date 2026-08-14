@@ -2513,6 +2513,16 @@ fn snapshot_from_entity_config(
         }
     }
 
+    // Infrastructure condition + capacity (issue #1025). Built from the
+    // authored table because this path mints the snapshot from the config,
+    // before the entity exists — which is also the only moment its condition is
+    // guaranteed to be its authored starting value.
+    if let Some(infrastructure) = &config.infrastructure {
+        snapshot.infrastructure = crate::messages::InfrastructureSnapshot::from_state(
+            &crate::infrastructure::InfrastructureState::from_config(infrastructure),
+        );
+    }
+
     if let Some(target) = &config.target {
         snapshot.target_tags = target.tags.clone();
         snapshot.threat_level = Some(target.threat_level.as_str().to_string());
@@ -2556,6 +2566,7 @@ fn reconcile_runtime_entities(
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&crate::entity_spawner::EntityTarget>,
             Option<&crate::ship::shields::ShipShields>,
+            Option<&crate::infrastructure::InfrastructureCondition>,
         ),
         Without<Asteroid>,
     >,
@@ -2579,7 +2590,7 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -2612,6 +2623,7 @@ fn reconcile_runtime_entities(
                 hull_comp,
                 entity_target,
                 shield_comp,
+                infrastructure,
             )) = query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
@@ -2637,6 +2649,10 @@ fn reconcile_runtime_entities(
                     name: name.as_ref().map(|n| n.0.clone()),
                     hull_fraction,
                     shield_fraction,
+                    // Issue #1025: minted from the LIVE track, so a structure
+                    // reported after it degraded is reported as it now is.
+                    infrastructure: infrastructure
+                        .and_then(|i| crate::messages::InfrastructureSnapshot::from_state(&i.0)),
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,
@@ -2732,6 +2748,7 @@ fn reconcile_runtime_entities(
                 hull_comp,
                 entity_target,
                 shield_comp,
+                infrastructure,
             )) = query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
@@ -2757,6 +2774,10 @@ fn reconcile_runtime_entities(
                     name: name.as_ref().map(|n| n.0.clone()),
                     hull_fraction,
                     shield_fraction,
+                    // Issue #1025: minted from the LIVE track, so a structure
+                    // reported after it degraded is reported as it now is.
+                    infrastructure: infrastructure
+                        .and_then(|i| crate::messages::InfrastructureSnapshot::from_state(&i.0)),
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,

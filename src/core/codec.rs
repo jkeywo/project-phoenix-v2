@@ -207,7 +207,46 @@ mod tests {
             target_tags: Vec::new(),
             threat_level: None,
             target_description: None,
+            infrastructure: None,
         }
+    }
+
+    /// Issue #1025: the published infrastructure block survives the wire.
+    ///
+    /// Its own test rather than a field on `sample_entity_snapshot`, because
+    /// that sample is an asteroid and an asteroid has no infrastructure — a
+    /// populated block on it would pin a shape nothing produces. What matters
+    /// here is that the flag list and the capacity list, both tuple-typed,
+    /// round-trip in order and with their booleans intact.
+    #[test]
+    fn a_published_infrastructure_block_round_trips() {
+        let snapshot = EntitySnapshot {
+            uuid: "550e8400-e29b-41d4-a716-446655440001".into(),
+            tags: vec!["station".into()],
+            infrastructure: Some(crate::messages::InfrastructureSnapshot {
+                condition_fraction: 0.3,
+                flags: vec![
+                    ("depot_transfer_capable".into(), false),
+                    ("depot_docking_capable".into(), true),
+                ],
+                capacities: vec![("depot_transfer_throughput".into(), 40)],
+            }),
+            ..EntitySnapshot::default()
+        };
+        let json = serde_json::to_string(&snapshot).expect("serialises");
+        let back: EntitySnapshot = serde_json::from_str(&json).expect("deserialises");
+        assert_eq!(back, snapshot, "the whole block must survive verbatim");
+
+        let bare = EntitySnapshot {
+            uuid: "550e8400-e29b-41d4-a716-446655440002".into(),
+            ..EntitySnapshot::default()
+        };
+        let json = serde_json::to_string(&bare).expect("serialises");
+        assert!(
+            !json.contains("infrastructure"),
+            "an entity with no infrastructure must not pay for the field on the wire — every \
+             entity shipped today is in this arm, got {json}"
+        );
     }
 
     // ── Table-driven round-trip harness (issue #610) ──────────────────────────

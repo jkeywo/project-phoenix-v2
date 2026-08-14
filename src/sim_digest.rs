@@ -58,6 +58,17 @@
 //! patterns, then `EntitySystemHull` per system in the hull's own stable
 //! insertion order (`SystemId`, current, max), then `ShipRedAlert`.
 //!
+//! **Folded (infrastructure namespace, in `FoldKey` order — issue #1025):**
+//! every entity carrying an `InfrastructureCondition` — its id, its condition
+//! and ceiling as bit patterns, and each authored operational flag with its
+//! current state. A host that disagreed about whether a skyhook can still
+//! transfer disagrees about whether the mission is winnable, so this is
+//! authoritative and folded. Its authored capacities are NOT folded: they never
+//! move, and a divergence in them is a content divergence, which
+//! `snapshot::content_digest` is the thing that catches. See
+//! [`fold_infrastructure_namespace`] for why this one namespace folds *nothing*
+//! when it is empty.
+//!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
 //! id, its `Transform` translation as bit patterns (a rock's position is
 //! authoritative — it is what a collision resolves against), and its
@@ -139,6 +150,7 @@ use crate::balance::BalanceEvent;
 use crate::core::telemetry::RunTelemetry;
 use crate::damage::SystemHull;
 use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
 use crate::lobby::WorldResource;
 use crate::messages::GamePhase;
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
@@ -277,6 +289,7 @@ pub fn world_digest(world: &World) -> u64 {
     let mut acc = FOLD_SEED;
     acc = fold_run_scope(world, acc);
     acc = fold_entity_namespace(world, acc);
+    acc = fold_infrastructure_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -440,6 +453,63 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
             Some(active) => fold_u64(fold_u64(acc, 1), u64::from(active)),
             None => fold_u64(acc, 0),
         };
+    }
+    acc
+}
+
+/// Every entity carrying an infrastructure condition track (issue #1025), in
+/// [`FoldKey`] order, in its own namespace.
+///
+/// # Why this namespace folds nothing when it is empty
+///
+/// Every other walk here folds its row count first, so "no rows" is still a
+/// number in the accumulator. That is the right shape when the population is a
+/// permanent part of the simulation — "no asteroids" is a fact about the world
+/// worth recording. Infrastructure is not yet: no world in the repository
+/// authors `[infrastructure]`, and folding a zero for all of them would have
+/// moved every committed world digest the moment this slice landed, over state
+/// none of those worlds have. A world with no infrastructure entities and a
+/// world built before the feature existed *are the same authoritative state*,
+/// so they fold to the same number.
+///
+/// The moment one structure exists it is folded in full, and from then on the
+/// count is in the accumulator like everyone else's — so this is a one-time
+/// compatibility affordance, not a hole: two hosts that disagree about whether a
+/// structure exists at all disagree about `rows.len()` as soon as either of them
+/// has one.
+fn fold_infrastructure_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &InfrastructureCondition)>()
+    else {
+        // A world that never registered the component has no infrastructure —
+        // the empty case above, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, InfrastructureState)> = query
+        .iter(world)
+        .map(|(entity, uuid, condition)| {
+            (
+                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                entity.index(),
+                condition.0.clone(),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "infrastructure-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, state) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_f32(acc, state.condition());
+        acc = fold_f32(acc, state.condition_max());
+        acc = fold_u64(acc, state.flags().len() as u64);
+        for (flag, held) in state.flags() {
+            acc = fold_str(acc, flag);
+            acc = fold_u64(acc, u64::from(held));
+        }
     }
     acc
 }
@@ -834,6 +904,7 @@ mod tests {
         world.register_component::<ShipRedAlert>();
         world.register_component::<AsteroidUuid>();
         world.register_component::<Transform>();
+        world.register_component::<InfrastructureCondition>();
         world
     }
 
@@ -853,6 +924,85 @@ mod tests {
             AsteroidUuid(uuid.to_string()),
             Transform::from_xyz(x, 0.0, 0.0),
         ));
+    }
+
+    /// A structure with one threshold, at `condition` of 100 points.
+    fn spawn_structure(world: &mut World, uuid: &str, condition: f32) {
+        let config = crate::infrastructure::InfrastructureConfig {
+            condition_max: 100.0,
+            condition: Some(condition),
+            thresholds: vec![crate::infrastructure::ThresholdConfig {
+                flag: "transfer_capable".to_string(),
+                fails_below: 0.4,
+                restores_above: None,
+            }],
+            ..Default::default()
+        };
+        world.spawn((
+            EntityUuid(uuid.to_string()),
+            InfrastructureCondition(InfrastructureState::from_config(&config)),
+        ));
+    }
+
+    /// **Issue #1025.** A world with no infrastructure must fold to exactly the
+    /// number it folded before the namespace existed.
+    ///
+    /// This is what keeps every committed world digest where it is. The
+    /// namespace is a pure addition for worlds that have structures and a
+    /// literal no-op for worlds that do not, and the two claims are the same
+    /// claim: an empty walk and an absent feature are the same world state.
+    #[test]
+    fn the_infrastructure_namespace_is_a_no_op_for_a_world_that_has_none() {
+        let mut world = fold_world();
+        spawn_ship(&mut world, "00000000-0000-8000-8000-000000000001", 1.0);
+        spawn_rock(&mut world, "a1b2c3d4-0000-4000-8000-000000000001", 2.0);
+        assert_eq!(
+            fold_infrastructure_namespace(&world, FOLD_SEED),
+            FOLD_SEED,
+            "an empty infrastructure walk must leave the accumulator untouched — a folded row \
+             count here would have moved every world digest in the repository for state none \
+             of those worlds carry"
+        );
+    }
+
+    /// **Issue #1025.** Two structures that differ only in condition must fold
+    /// to different numbers, and two that agree must not.
+    #[test]
+    fn a_structures_condition_and_flags_move_the_digest() {
+        let mut intact = fold_world();
+        spawn_structure(&mut intact, "00000000-0000-8000-8000-000000000001", 100.0);
+        let mut same = fold_world();
+        spawn_structure(&mut same, "00000000-0000-8000-8000-000000000001", 100.0);
+        let mut degraded = fold_world();
+        spawn_structure(&mut degraded, "00000000-0000-8000-8000-000000000001", 10.0);
+
+        assert_eq!(
+            world_digest(&intact),
+            world_digest(&same),
+            "two hosts holding the same structure in the same condition must agree"
+        );
+        assert_ne!(
+            world_digest(&intact),
+            world_digest(&degraded),
+            "…and a structure degraded past its threshold — a different condition AND a \
+             different operational flag — must not fold to the number an intact one does"
+        );
+    }
+
+    /// **Issue #1025 / AC4.** Structure order must not reach the digest.
+    #[test]
+    fn structures_fold_in_uuid_order_whatever_order_they_spawned_in() {
+        let mut forward = fold_world();
+        spawn_structure(&mut forward, "00000000-0000-8000-8000-000000000001", 90.0);
+        spawn_structure(&mut forward, "00000000-0000-8000-8000-000000000002", 20.0);
+        let mut reverse = fold_world();
+        spawn_structure(&mut reverse, "00000000-0000-8000-8000-000000000002", 20.0);
+        spawn_structure(&mut reverse, "00000000-0000-8000-8000-000000000001", 90.0);
+        assert_eq!(
+            world_digest(&forward),
+            world_digest(&reverse),
+            "the fold is keyed on the minted id, not on archetype order"
+        );
     }
 
     /// **AC4.** The same entities spawned in two different orders must produce

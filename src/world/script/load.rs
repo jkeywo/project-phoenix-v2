@@ -30,7 +30,6 @@ use vellum_script::ScriptSource;
 use crate::world::script::engine::{loading_engine, BuilderState, Registration, ScriptTrigger};
 use crate::world::script::validate::{
     validate_flag_opassign, validate_on_pick_fns, validate_registrations, validate_script_triggers,
-    validate_toml_script_comms, validate_toml_script_triggers,
 };
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
 
@@ -282,31 +281,18 @@ pub fn load_world_scripts(
     }
     // Cross-reference every handler name against the defined-function set: the
     // generic `on(..)` registrations, the Rhai trigger front-end
-    // (`on_destroyed`, …), and the TOML `[[trigger]] script = "fn"` front-end.
-    // Every unresolved name — and any `[[trigger]]` that carries both front-ends
-    // at once — is an error finding, so the atomic activation gate keeps working
-    // (issue #980, M2).
+    // (`on_destroyed`, …). Every unresolved name is an error finding, so the
+    // atomic activation gate keeps working (issue #980, M2).
+    //
+    // The TOML `[[trigger]] script = "fn"` / `[[comms]] script = "fn"` front-ends
+    // had their own cross-reference passes here; issue #985 deleted both blocks,
+    // so a world can no longer name a handler from TOML at all.
     compiled.findings.extend(validate_registrations(
         &compiled.registrations,
         &compiled.defined_fns,
     ));
     compiled.findings.extend(validate_script_triggers(
         &compiled.script_triggers,
-        &compiled.defined_fns,
-    ));
-    compiled.findings.extend(validate_toml_script_triggers(
-        world_path,
-        world_toml,
-        &compiled.defined_fns,
-    ));
-    // And the TOML `[[comms]] script = "fn"` front-end (issue #982, M4): every
-    // unresolved root-node fn — and any `[[comms]]` carrying both a `script` and a
-    // `[[response]]` tree — is an error finding, so the atomic activation gate
-    // blocks a world whose scripted comms threads point at functions never
-    // defined.
-    compiled.findings.extend(validate_toml_script_comms(
-        world_path,
-        world_toml,
         &compiled.defined_fns,
     ));
     // Walk each script body for a compound assignment on the `flags` accessor
@@ -317,11 +303,10 @@ pub fn load_world_scripts(
     compiled.findings.extend(validate_flag_opassign(&sources));
     // And the dialogue tree's OWN cross-reference (issue #984): every
     // `on_pick: "fn"` literal inside a node fn's returned map, checked against the
-    // same defined-function set. `validate_toml_script_comms` above reaches only
-    // the ROOT fn a `[[comms]] script = "fn"` block names; every node past the
-    // root is named by a string literal nothing else in the load path reads, so
-    // without this a typo three responses deep survived load and surfaced as a
-    // refused pick mid-mission.
+    // same defined-function set. Every node past a thread's root is named by a
+    // string literal nothing else in the load path reads, so without this a typo
+    // three responses deep survived load and surfaced as a refused pick
+    // mid-mission.
     compiled
         .findings
         .extend(validate_on_pick_fns(&sources, &compiled.defined_fns));
@@ -479,57 +464,6 @@ mod tests {
             on("flag_set:armed", "handle_armed");
             fn handle_armed(ctx) { }
             """
-            "#,
-        );
-        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
-        assert!(
-            !crate::world::validate::has_error(&compiled.findings),
-            "findings: {:?}",
-            compiled.findings
-        );
-    }
-
-    // ── TOML `[[comms]] script = "fn"` front-end (issue #982, M4) ─────────────
-
-    #[test]
-    fn full_load_flags_an_unresolved_comms_script() {
-        // A `[[comms]] script` naming a root fn no unit defines must block
-        // activation, exactly like an unresolved trigger handler.
-        let world = toml_of(
-            r#"
-            [[comms]]
-            from = "axiom"
-            trigger = "on_hailed"
-            entity = "axiom"
-            script = "hail_axiom"
-
-            [script]
-            setup = "fn other(ctx) { }"
-            "#,
-        );
-        let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());
-        assert!(
-            crate::world::validate::has_error(&compiled.findings),
-            "an unresolved comms root fn must block activation"
-        );
-        assert!(compiled
-            .findings
-            .iter()
-            .any(|f| f.category == "unresolved-script-fn"));
-    }
-
-    #[test]
-    fn full_load_of_a_resolved_comms_script_is_clean() {
-        let world = toml_of(
-            r#"
-            [[comms]]
-            from = "axiom"
-            trigger = "on_hailed"
-            entity = "axiom"
-            script = "hail_axiom"
-
-            [script]
-            setup = "fn hail_axiom(ctx) { #{ message: \"hi\", responses: [] } }"
             "#,
         );
         let compiled = load_world_scripts("w.toml", &world, &FakeResolver::default());

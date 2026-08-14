@@ -353,7 +353,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
 #[cfg(test)]
 mod tests {
-    use crate::world::config::{parse_world, Trigger, TriggerCondition};
+    use crate::world::config::{Trigger, TriggerCondition};
     use crate::world::script::load::compile_scripts;
     use vellum_script::ScriptSource;
 
@@ -372,39 +372,45 @@ mod tests {
         compiled.script_triggers
     }
 
-    /// The single `Trigger` the TOML front-end builds for `trigger_toml`, a
-    /// `[[trigger]]` block body. Uses `script = "h"` so it takes the scripted
-    /// path — the same construction the registration fns take.
-    fn toml_trigger(trigger_toml: &str) -> Trigger {
-        let world = format!("[[trigger]]\n{trigger_toml}\nscript = \"h\"\n");
-        let cfg = parse_world(&world).expect("world parses");
-        assert_eq!(cfg.triggers.len(), 1);
-        cfg.triggers.into_iter().next().unwrap()
+    /// Assert a registration fn builds exactly the expected `Trigger`, and that
+    /// it recorded the handler name.
+    ///
+    /// The expectation used to be computed by parsing the equivalent
+    /// `[[trigger]] script = "h"` block — the "one evaluator, two front-ends"
+    /// structural-equality guarantee. Issue #985 deleted that second front-end,
+    /// so the expectation is written out instead, which is the stronger
+    /// assertion: it pins the condition each registration builds rather than
+    /// comparing two parsers against each other.
+    fn assert_builds(script_call: &str, expected: TriggerCondition) {
+        assert_builds_with(
+            script_call,
+            crate::world::config::scripted_trigger(expected),
+        );
     }
 
-    /// Assert a registration fn and its TOML equivalent build the identical
-    /// `Trigger` (the "one evaluator, two front-ends" structural-equality
-    /// guarantee), and that the registration recorded the handler name.
-    fn assert_parity(script_call: &str, trigger_toml: &str) {
+    /// [`assert_builds`] for a registration that also sets a lifecycle field
+    /// (`.when(…)`, `.repeat()`, …), where the whole `Trigger` is the claim.
+    fn assert_builds_with(script_call: &str, expected: Trigger) {
         let regs = script_triggers(&format!("{script_call};\nfn h(ctx) {{ }}"));
         assert_eq!(regs.len(), 1, "exactly one trigger from `{script_call}`");
         assert_eq!(regs[0].handler, "h");
         assert_eq!(
-            regs[0].trigger,
-            toml_trigger(trigger_toml),
-            "script `{script_call}` must build the same Trigger as TOML `{trigger_toml}`"
+            regs[0].trigger, expected,
+            "script `{script_call}` must build the expected Trigger"
         );
     }
 
     // ── one test per TriggerCondition variant (all 11) ────────────────────────
 
     #[test]
-    fn on_destroyed_matches_toml() {
-        assert_parity(
+    fn on_destroyed_builds_its_condition() {
+        assert_builds(
             r#"on_destroyed("raider", "h")"#,
-            "condition = \"on_destroyed\"\nentity = \"raider\"",
+            TriggerCondition::OnDestroyed {
+                entity_name: "raider".into(),
+            },
         );
-        // Spot-check the condition itself, not just equality-to-TOML.
+        // Spot-check the condition through the public accessor too.
         let regs = script_triggers(r#"on_destroyed("raider", "h"); fn h(ctx) { }"#);
         assert_eq!(
             regs[0].trigger.condition,
@@ -415,18 +421,24 @@ mod tests {
     }
 
     #[test]
-    fn on_all_destroyed_default_gate_matches_toml() {
-        assert_parity(
+    fn on_all_destroyed_default_gate_builds_its_condition() {
+        assert_builds(
             r#"on_all_destroyed("wave_1", "h")"#,
-            "condition = \"on_all_destroyed\"\ngroup = \"wave_1\"",
+            TriggerCondition::OnAllDestroyed {
+                group: "wave_1".into(),
+                after_secs: 0.0,
+            },
         );
     }
 
     #[test]
-    fn on_all_destroyed_with_gate_matches_toml() {
-        assert_parity(
+    fn on_all_destroyed_with_gate_builds_its_condition() {
+        assert_builds(
             r#"on_all_destroyed("wave_1", 5, "h")"#,
-            "condition = \"on_all_destroyed\"\ngroup = \"wave_1\"\nafter_secs = 5.0",
+            TriggerCondition::OnAllDestroyed {
+                group: "wave_1".into(),
+                after_secs: 5.0,
+            },
         );
         let regs = script_triggers(r#"on_all_destroyed("wave_1", 5, "h"); fn h(ctx) { }"#);
         assert_eq!(
@@ -439,18 +451,20 @@ mod tests {
     }
 
     #[test]
-    fn on_attacked_matches_toml() {
-        assert_parity(
+    fn on_attacked_builds_its_condition() {
+        assert_builds(
             r#"on_attacked("escort", "h")"#,
-            "condition = \"on_attacked\"\nentity = \"escort\"",
+            TriggerCondition::OnAttacked {
+                entity_name: "escort".into(),
+            },
         );
     }
 
     #[test]
-    fn on_timer_matches_toml() {
-        assert_parity(
+    fn on_timer_builds_its_condition() {
+        assert_builds(
             r#"on_timer(45, "h")"#,
-            "condition = \"on_timer\"\nafter_secs = 45.0",
+            TriggerCondition::OnTimer { after_secs: 45.0 },
         );
         let regs = script_triggers(r#"on_timer(45, "h"); fn h(ctx) { }"#);
         assert_eq!(
@@ -460,57 +474,70 @@ mod tests {
     }
 
     #[test]
-    fn on_hailed_matches_toml() {
-        assert_parity(
+    fn on_hailed_builds_its_condition() {
+        assert_builds(
             r#"on_hailed("relay", "h")"#,
-            "condition = \"on_hailed\"\nentity = \"relay\"",
+            TriggerCondition::OnHailed {
+                entity_name: "relay".into(),
+            },
         );
     }
 
     #[test]
-    fn on_flag_set_matches_toml() {
-        assert_parity(
+    fn on_flag_set_builds_its_condition() {
+        assert_builds(
             r#"on_flag_set("armed", "h")"#,
-            "condition = \"on_flag_set\"\nname = \"armed\"",
+            TriggerCondition::OnFlagSet {
+                name: "armed".into(),
+            },
         );
     }
 
     #[test]
-    fn on_flag_cleared_matches_toml() {
-        assert_parity(
+    fn on_flag_cleared_builds_its_condition() {
+        assert_builds(
             r#"on_flag_cleared("armed", "h")"#,
-            "condition = \"on_flag_cleared\"\nname = \"armed\"",
+            TriggerCondition::OnFlagCleared {
+                name: "armed".into(),
+            },
         );
     }
 
     #[test]
-    fn on_world_loaded_matches_toml() {
-        assert_parity(r#"on_world_loaded("h")"#, "condition = \"on_world_loaded\"");
+    fn on_world_loaded_builds_its_condition() {
+        assert_builds(r#"on_world_loaded("h")"#, TriggerCondition::OnWorldLoaded);
         let regs = script_triggers(r#"on_world_loaded("h"); fn h(ctx) { }"#);
         assert_eq!(regs[0].trigger.condition, TriggerCondition::OnWorldLoaded);
     }
 
     #[test]
-    fn on_entered_region_matches_toml() {
-        assert_parity(
+    fn on_entered_region_builds_its_condition() {
+        assert_builds(
             r#"on_entered_region("nebula", "h")"#,
-            "condition = \"on_entered_region\"\nentity = \"nebula\"",
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "nebula".into(),
+            },
         );
     }
 
     #[test]
-    fn on_exited_region_matches_toml() {
-        assert_parity(
+    fn on_exited_region_builds_its_condition() {
+        assert_builds(
             r#"on_exited_region("nebula", "h")"#,
-            "condition = \"on_exited_region\"\nentity = \"nebula\"",
+            TriggerCondition::OnExitedRegion {
+                entity_name: "nebula".into(),
+            },
         );
     }
 
     #[test]
-    fn on_waypoint_reached_any_matches_toml() {
-        assert_parity(
+    fn on_waypoint_reached_any_builds_its_condition() {
+        assert_builds(
             r#"on_waypoint_reached("courier", "h")"#,
-            "condition = \"on_waypoint_reached\"\nentity = \"courier\"",
+            TriggerCondition::OnWaypointReached {
+                entity_name: "courier".into(),
+                waypoint: None,
+            },
         );
         let regs = script_triggers(r#"on_waypoint_reached("courier", "h"); fn h(ctx) { }"#);
         assert_eq!(
@@ -523,10 +550,13 @@ mod tests {
     }
 
     #[test]
-    fn on_waypoint_reached_specific_matches_toml() {
-        assert_parity(
+    fn on_waypoint_reached_specific_builds_its_condition() {
+        assert_builds(
             r#"on_waypoint_reached("courier", "beacon_3", "h")"#,
-            "condition = \"on_waypoint_reached\"\nentity = \"courier\"\nwaypoint = \"beacon_3\"",
+            TriggerCondition::OnWaypointReached {
+                entity_name: "courier".into(),
+                waypoint: Some("beacon_3".into()),
+            },
         );
         let regs =
             script_triggers(r#"on_waypoint_reached("courier", "beacon_3", "h"); fn h(ctx) { }"#);
@@ -540,12 +570,15 @@ mod tests {
     }
 
     #[test]
-    fn on_hull_below_matches_toml() {
+    fn on_hull_below_builds_its_condition() {
         // The one condition with a FRACTIONAL field, so the one registration
         // taking a `flt(…)` marker rather than an INT (issue #984).
-        assert_parity(
+        assert_builds(
             r#"on_hull_below("station", flt("0.75"), "h")"#,
-            "condition = \"on_hull_below\"\nentity = \"station\"\nthreshold = 0.75",
+            TriggerCondition::OnHullBelow {
+                entity_name: "station".into(),
+                threshold: 0.75,
+            },
         );
         let regs = script_triggers(r#"on_hull_below("station", flt("0.5"), "h"); fn h(ctx) { }"#);
         assert_eq!(
@@ -577,9 +610,18 @@ mod tests {
 
     #[test]
     fn when_builds_the_same_predicate_the_declarative_field_does() {
-        assert_parity(
+        let mut expected =
+            crate::world::config::scripted_trigger(TriggerCondition::OnAllDestroyed {
+                group: "hostiles".into(),
+                after_secs: 0.0,
+            });
+        expected.when = Some(
+            crate::world::flags::parse_predicate("counter(waves_spawned) >= 8")
+                .expect("the predicate parses"),
+        );
+        assert_builds_with(
             r#"on_all_destroyed("hostiles", "h").when("counter(waves_spawned) >= 8")"#,
-            "condition = \"on_all_destroyed\"\ngroup = \"hostiles\"\nwhen = \"counter(waves_spawned) >= 8\"",
+            expected,
         );
     }
 
@@ -629,12 +671,9 @@ mod tests {
     // ── the front-end also records the handler and defaults the lifecycle ─────
 
     #[test]
-    fn a_scripted_trigger_has_empty_actions_and_default_lifecycle() {
+    fn a_scripted_trigger_defaults_every_lifecycle_field() {
         let regs = script_triggers(r#"on_destroyed("x", "h"); fn h(ctx) { }"#);
         let t = &regs[0].trigger;
-        assert!(t.actions.is_empty(), "the handler supplies the effects");
-        assert!(t.action_predicates.is_empty());
-        assert!(t.action_delays.is_empty());
         assert_eq!(t.when, None);
         assert_eq!(t.id, None);
         assert!(!t.repeat);
@@ -657,19 +696,24 @@ mod tests {
         assert_eq!(handlers, vec!["a", "b", "c"]);
     }
 
-    // ── parity: scripted world == TOML world, same event stream (issue #980) ──
+    // ── a scripted trigger's effects come from its handler (issue #980) ──────
 
-    /// A scripted world (trigger authored in Rhai, effects in a handler fn) and
-    /// its declarative TOML equivalent produce the identical `ActionCmd` sequence
-    /// for the same event stream — the strongest migration guard. The scripted
-    /// path fires the trigger through the existing evaluator, then runs the
-    /// handler on the runtime host; the TOML path fires the same trigger and
-    /// dispatches its declarative actions. Both routes land on the one
-    /// `ActionCmd` boundary, and neither touches `tick_trigger_pipeline`.
+    /// A scripted world fires its trigger through the shared evaluator and then
+    /// runs the handler on the runtime host, landing on the one `ActionCmd`
+    /// boundary. Neither step touches `tick_trigger_pipeline`.
+    ///
+    /// This was the strongest migration guard while there were TWO front-ends: it
+    /// built the same trigger declaratively, dispatched its `[[trigger.action]]`
+    /// array, and asserted the two `ActionCmd` sequences were identical. Issue
+    /// #985 deleted the declarative half — and with it `FiredTrigger::actions`,
+    /// which is why the "a fired trigger carries no action list" assertion below
+    /// is now a statement about the type rather than about a scripted trigger in
+    /// particular. What survives is the concrete expected sequence, which is what
+    /// pinned behaviour rather than equality-to-itself.
     #[test]
-    fn scripted_and_toml_worlds_emit_identical_action_cmds() {
+    fn a_scripted_trigger_fires_and_its_handler_emits_the_action_cmds() {
         use crate::world::content::{evaluate_triggers, TriggerState, WorldEvent};
-        use crate::world::dispatch::{dispatch_action, ActionCmd, DispatchContext};
+        use crate::world::dispatch::ActionCmd;
         use crate::world::flags::FlagStore;
         use crate::world::script::engine::RuntimeHost;
         use rhai::Map;
@@ -682,15 +726,6 @@ mod tests {
             uuid: "uuid-raider".to_string(),
         }];
 
-        let state_of = |trigger: Trigger| TriggerState {
-            trigger,
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: HashSet::new(),
-            last_fired_elapsed: None,
-        };
-
-        // ---- Scripted front-end: trigger + handler authored in Rhai. ----
         let path = "w.toml#script.setup";
         let compiled = compile_scripts(&[ScriptSource {
             path: path.to_string(),
@@ -707,67 +742,22 @@ mod tests {
         assert_eq!(compiled.script_triggers.len(), 1);
         let st = compiled.script_triggers[0].clone();
 
-        let mut states = vec![state_of(st.trigger.clone())];
+        let mut states = vec![TriggerState {
+            trigger: st.trigger.clone(),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
-        assert!(
-            fired[0].actions.is_empty(),
-            "a scripted trigger's effects come from its handler, not an action list"
-        );
+
         let host = RuntimeHost::new();
         let ast = compiled.asts.get(path).expect("compiled ast");
-        let scripted_cmds =
-            host.call_immediate(ast, path, &st.handler, &FlagStore::new(), Map::new());
+        let cmds = host.call_immediate(ast, path, &st.handler, &FlagStore::new(), Map::new());
 
-        // ---- Declarative TOML front-end: the same trigger, actions inline. ----
-        let cfg = parse_world(
-            r#"
-            [[trigger]]
-            condition = "on_destroyed"
-            entity = "raider"
-
-            [[trigger.action]]
-            type = "complete_objective"
-            id = "obj-x"
-
-            [[trigger.action]]
-            type = "fail_objective"
-            id = "obj-y"
-            "#,
-        )
-        .expect("world parses");
-        let mut states = vec![state_of(cfg.triggers[0].clone())];
-        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
-        assert_eq!(fired.len(), 1);
-
-        // A minimal dispatch context — the two objective actions are
-        // context-free, so only the required borrows are populated.
-        let empty_names = HashMap::new();
-        let base_flags = FlagStore::new();
-        let layers = HashMap::new();
-        let anchors = HashMap::new();
-        let uuid = || "uuid".to_string();
-        let ctx = DispatchContext {
-            origin_layer: None,
-            entity_name: None,
-            name_to_uuid: &empty_names,
-            base_flags: &base_flags,
-            layers: &layers,
-            base_anchors: &anchors,
-            factions: None,
-            uuid_source: &uuid,
-            template_loader: &crate::entity_loader::WasmTemplateLoader,
-        };
-        let toml_cmds: Vec<ActionCmd> = fired[0]
-            .actions
-            .iter()
-            .flat_map(|a| dispatch_action(a, &ctx).commands)
-            .collect();
-
-        // Identical, and the expected sequence.
-        assert_eq!(scripted_cmds, toml_cmds);
         assert_eq!(
-            scripted_cmds,
+            cmds,
             vec![
                 ActionCmd::CompleteObjective {
                     id: "obj-x".to_string()

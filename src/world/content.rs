@@ -9,7 +9,6 @@
 //   * `evaluate_triggers` — single-shot trigger evaluator.
 //   * `condition_matches` — the shared trigger-condition vocabulary
 //     matcher (also consumed by the comms evaluators in `comms::content`).
-//   * `trigger_states_from_world` — factory that derives runtime states
 //     from a parsed `WorldConfig`.
 //
 // The comms half (`CommsTemplateState`, `evaluate_comms_templates`,
@@ -106,9 +105,6 @@ pub struct TriggerState {
 /// Result of evaluating triggers against a batch of world events.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiredTrigger {
-    pub actions: Vec<TriggerAction>,
-    /// Per-action delays, parallel to `actions`. `0.0` means immediate dispatch.
-    pub action_delays: Vec<f32>,
     /// Origin sub-world layer path (or `None` for base-world triggers).
     /// Used by `spawn_entity` action dispatch (issue #417) to attach the
     /// new entity to the right `WorldLayerMap` entry.
@@ -241,33 +237,9 @@ pub fn evaluate_triggers_with_flags(
         if !cooldown_elapsed(state, current_elapsed) {
             continue;
         }
-        let filtered: Vec<(usize, TriggerAction)> = state
-            .trigger
-            .actions
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| {
-                state
-                    .trigger
-                    .action_predicates
-                    .get(*i)
-                    .and_then(|p| p.as_ref())
-                    .map(|p| p.evaluate(flag_chain))
-                    .unwrap_or(true)
-            })
-            .map(|(i, a)| (i, a.clone()))
-            .collect();
-        let filtered_actions: Vec<TriggerAction> =
-            filtered.iter().map(|(_, a)| a.clone()).collect();
-        let filtered_delays: Vec<f32> = filtered
-            .iter()
-            .map(|(i, _)| state.trigger.action_delays.get(*i).copied().unwrap_or(0.0))
-            .collect();
         state.fired = true;
         state.last_fired_elapsed = Some(current_elapsed);
         results.push(FiredTrigger {
-            actions: filtered_actions,
-            action_delays: filtered_delays,
             origin_layer: state.origin_layer.clone(),
             entity_name: entity_name_from_condition(&state.trigger.condition),
         });
@@ -326,32 +298,9 @@ pub fn evaluate_single_trigger(
     if !cooldown_elapsed(state, current_elapsed) {
         return None;
     }
-    let filtered: Vec<(usize, TriggerAction)> = state
-        .trigger
-        .actions
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| {
-            state
-                .trigger
-                .action_predicates
-                .get(*i)
-                .and_then(|p| p.as_ref())
-                .map(|p| p.evaluate(flag_chain))
-                .unwrap_or(true)
-        })
-        .map(|(i, a)| (i, a.clone()))
-        .collect();
-    let filtered_actions: Vec<TriggerAction> = filtered.iter().map(|(_, a)| a.clone()).collect();
-    let filtered_delays: Vec<f32> = filtered
-        .iter()
-        .map(|(i, _)| state.trigger.action_delays.get(*i).copied().unwrap_or(0.0))
-        .collect();
     state.fired = true;
     state.last_fired_elapsed = Some(current_elapsed);
     Some(FiredTrigger {
-        actions: filtered_actions,
-        action_delays: filtered_delays,
         origin_layer: state.origin_layer.clone(),
         entity_name: entity_name_from_condition(&state.trigger.condition),
     })
@@ -544,56 +493,25 @@ pub(crate) fn condition_matches(
     }
 }
 
-// ── Factories from WorldConfig ────────────────────────────────────────────
-
-/// Create a `Vec<TriggerState>` from a parsed `WorldConfig` (PRD #341).
-///
-/// All triggers start unfired.
-pub fn trigger_states_from_world(world: &crate::world::config::WorldConfig) -> Vec<TriggerState> {
-    world
-        .triggers
-        .iter()
-        .map(|t| TriggerState {
-            trigger: t.clone(),
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: HashSet::new(),
-            last_fired_elapsed: None,
-        })
-        .collect()
-}
-
 // ── Unit Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::config::WorldConfig;
-
-    fn dest_trigger(name: &str, action: TriggerAction) -> Trigger {
+    /// A single-shot `on_destroyed` trigger for `name`.
+    ///
+    /// It took the `TriggerAction` the trigger would dispatch until issue #985
+    /// deleted `Trigger::actions`; a fire runs the trigger's SCRIPT HANDLER now,
+    /// so what these tests observe is the latch, not an effect.
+    fn dest_trigger(name: &str) -> Trigger {
         Trigger {
             condition: TriggerCondition::OnDestroyed {
                 entity_name: name.into(),
             },
-            actions: vec![action],
             when: None,
-            action_predicates: vec![],
-            action_delays: vec![],
             id: None,
             repeat: false,
             cooldown_secs: None,
-        }
-    }
-
-    fn add_obj(id: &str) -> TriggerAction {
-        TriggerAction::AddObjective {
-            id: id.into(),
-            text: format!("Objective {id}"),
-            mandatory: false,
-            targets: vec![],
-            directive: crate::messages::AiDirective::None,
-            utility: crate::objectives::UtilityConfig::default(),
-            source: crate::messages::ObjectiveSource::default(),
         }
     }
 
@@ -602,7 +520,7 @@ mod tests {
     #[test]
     fn on_destroyed_fires_when_entity_destroyed() {
         let mut states = vec![TriggerState {
-            trigger: dest_trigger("raider", add_obj("obj-1")),
+            trigger: dest_trigger("raider"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -615,14 +533,13 @@ mod tests {
         }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
-        assert_eq!(fired[0].actions.len(), 1);
         assert!(states[0].fired);
     }
 
     #[test]
     fn on_destroyed_does_not_fire_for_different_entity() {
         let mut states = vec![TriggerState {
-            trigger: dest_trigger("raider", add_obj("obj-1")),
+            trigger: dest_trigger("raider"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -642,7 +559,7 @@ mod tests {
     #[test]
     fn trigger_fires_only_once_single_shot() {
         let mut states = vec![TriggerState {
-            trigger: dest_trigger("raider", add_obj("obj-1")),
+            trigger: dest_trigger("raider"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -665,10 +582,7 @@ mod tests {
     fn repeat_timer_trigger(cooldown_secs: Option<f32>) -> Trigger {
         Trigger {
             condition: TriggerCondition::OnTimer { after_secs: 0.0 },
-            actions: vec![add_obj("obj-repeat")],
             when: None,
-            action_predicates: vec![],
-            action_delays: vec![],
             id: Some("pulse".into()),
             repeat: true,
             cooldown_secs,
@@ -763,10 +677,7 @@ mod tests {
                 condition: TriggerCondition::OnDestroyed {
                     entity_name: "raider".into(),
                 },
-                actions: vec![add_obj("obj-1")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: Some("kill_watch".into()),
                 repeat: false,
                 cooldown_secs: None,
@@ -802,7 +713,7 @@ mod tests {
     #[test]
     fn reset_unknown_id_is_a_noop() {
         let mut states = vec![TriggerState {
-            trigger: dest_trigger("raider", add_obj("obj-1")),
+            trigger: dest_trigger("raider"),
             fired: true,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -815,16 +726,13 @@ mod tests {
 
     // ── OnAllDestroyed ─────────────────────────────────────────────────────
 
-    fn all_destroyed_trigger(name: &str, action: TriggerAction) -> Trigger {
+    fn all_destroyed_trigger(name: &str) -> Trigger {
         Trigger {
             condition: TriggerCondition::OnAllDestroyed {
                 group: name.into(),
                 after_secs: 0.0,
             },
-            actions: vec![action],
             when: None,
-            action_predicates: vec![],
-            action_delays: vec![],
             id: None,
             repeat: false,
             cooldown_secs: None,
@@ -834,7 +742,7 @@ mod tests {
     #[test]
     fn on_all_destroyed_fires_only_after_last_named_entity_dies() {
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger("a", add_obj("obj-cleared")),
+            trigger: all_destroyed_trigger("a"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -889,7 +797,7 @@ mod tests {
     #[test]
     fn on_all_destroyed_is_single_shot() {
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger("a", add_obj("obj-cleared")),
+            trigger: all_destroyed_trigger("a"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -912,7 +820,7 @@ mod tests {
     #[test]
     fn on_all_destroyed_never_fires_for_unspawned_entity() {
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger("a", add_obj("obj-x")),
+            trigger: all_destroyed_trigger("a"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -959,7 +867,7 @@ mod tests {
         // For proper multi-entity testing, use evaluate_triggers_with_flags
         // with entity_groups = {"a" => {"a", "b", "c"}}.
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger("a", add_obj("obj-cleared")),
+            trigger: all_destroyed_trigger("a"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -989,7 +897,7 @@ mod tests {
     #[test]
     fn on_all_destroyed_ignores_destruction_events_for_other_entities() {
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger("a", add_obj("obj-x")),
+            trigger: all_destroyed_trigger("a"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -1025,10 +933,7 @@ mod tests {
                     group: "a".into(),
                     after_secs: 0.0,
                 },
-                actions: vec![add_obj("obj-cleared")],
                 when: Some(predicate),
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1101,10 +1006,7 @@ mod tests {
                     group: "waves".into(),
                     after_secs: 10.0,
                 },
-                actions: vec![add_obj("obj-waves-cleared")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1162,10 +1064,7 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: Trigger {
                 condition: TriggerCondition::OnTimer { after_secs: 30.0 },
-                actions: vec![add_obj("obj-timer")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1191,10 +1090,7 @@ mod tests {
                 condition: TriggerCondition::OnAttacked {
                     entity_name: "raider".into(),
                 },
-                actions: vec![add_obj("obj-atk")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1221,10 +1117,7 @@ mod tests {
                 condition: TriggerCondition::OnHailed {
                     entity_name: "starbase".into(),
                 },
-                actions: vec![add_obj("obj-hail")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1247,14 +1140,14 @@ mod tests {
     fn only_matching_trigger_fires() {
         let mut states = vec![
             TriggerState {
-                trigger: dest_trigger("raider", add_obj("obj-r")),
+                trigger: dest_trigger("raider"),
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
                 last_fired_elapsed: None,
             },
             TriggerState {
-                trigger: dest_trigger("station", add_obj("obj-s")),
+                trigger: dest_trigger("station"),
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
@@ -1274,105 +1167,9 @@ mod tests {
     }
 
     #[test]
-    fn action_predicates_filter_individual_actions() {
-        use crate::world::flags::{parse_predicate, FlagStore};
-
-        let pred_armed = parse_predicate("flag(armed)").expect("parse");
-        let mut states = vec![TriggerState {
-            trigger: Trigger {
-                condition: TriggerCondition::OnDestroyed {
-                    entity_name: "raider".into(),
-                },
-                actions: vec![add_obj("always"), add_obj("only-when-armed")],
-                when: None,
-                action_predicates: vec![None, Some(pred_armed)],
-                action_delays: vec![],
-                id: None,
-                repeat: false,
-                cooldown_secs: None,
-            },
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: HashSet::new(),
-            last_fired_elapsed: None,
-        }];
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("raider".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Destroyed {
-            uuid: "uuid-r".into(),
-        }];
-
-        // With flag unset, second action's predicate is false → second action filtered.
-        let flag_store = FlagStore::default();
-        let chain: [&FlagStore; 1] = [&flag_store];
-        let fired = evaluate_triggers_with_flags(
-            &mut states,
-            &events,
-            &name_to_uuid,
-            &chain,
-            &HashMap::new(),
-            0.0,
-        );
-        assert_eq!(fired.len(), 1);
-        assert_eq!(fired[0].actions.len(), 1);
-        assert!(matches!(
-            fired[0].actions[0],
-            TriggerAction::AddObjective { ref id, .. } if id == "always"
-        ));
-
-        // Reset state and set the flag; now second action should be included.
-        states[0].fired = false;
-        states[0].seen_destroyed.clear();
-        let mut flag_store_armed = FlagStore::default();
-        flag_store_armed.set_flag("armed");
-        let chain_armed: [&FlagStore; 1] = [&flag_store_armed];
-        let fired2 = evaluate_triggers_with_flags(
-            &mut states,
-            &events,
-            &name_to_uuid,
-            &chain_armed,
-            &HashMap::new(),
-            0.0,
-        );
-        assert_eq!(fired2.len(), 1);
-        assert_eq!(fired2[0].actions.len(), 2);
-    }
-
-    #[test]
-    fn action_delays_passed_through_to_fired_trigger() {
-        let mut states = vec![TriggerState {
-            trigger: Trigger {
-                condition: TriggerCondition::OnDestroyed {
-                    entity_name: "raider".into(),
-                },
-                actions: vec![add_obj("immediate"), add_obj("delayed")],
-                when: None,
-                action_predicates: vec![],
-                action_delays: vec![0.0, 10.0],
-                id: None,
-                repeat: false,
-                cooldown_secs: None,
-            },
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: HashSet::new(),
-            last_fired_elapsed: None,
-        }];
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("raider".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Destroyed {
-            uuid: "uuid-r".into(),
-        }];
-        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
-        assert_eq!(fired.len(), 1);
-        assert_eq!(fired[0].actions.len(), 2);
-        assert_eq!(fired[0].action_delays, vec![0.0, 10.0]);
-    }
-
-    #[test]
     fn on_destroyed_does_not_fire_if_entity_name_unknown() {
         let mut states = vec![TriggerState {
-            trigger: dest_trigger("ghost", add_obj("obj-ghost")),
+            trigger: dest_trigger("ghost"),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -1388,51 +1185,6 @@ mod tests {
 
     // ── trigger_states_from_world ─────────────────────────────────────────
 
-    #[test]
-    fn trigger_states_from_world_creates_unfired_states_for_every_trigger() {
-        let mut world = WorldConfig::default();
-        world.triggers.push(dest_trigger("a", add_obj("oa")));
-        world.triggers.push(dest_trigger("b", add_obj("ob")));
-        let states = trigger_states_from_world(&world);
-        assert_eq!(states.len(), 2);
-        assert!(states.iter().all(|s| !s.fired));
-    }
-
-    // ── Declarative world-TOML integration ────────────────────────────────
-    //
-    // Formerly pinned against the shipped patrol.toml, which is now
-    // [script]-authored (issue #984) and parses ZERO declarative triggers — its
-    // behaviour is pinned by the scripted-trigger tests + digest parity. This
-    // inline literal keeps the DECLARATIVE parse→evaluate→AddObjective path
-    // covered until M7 removes the declarative evaluator (this test goes with it).
-
-    #[test]
-    fn patrol_world_on_destroyed_trigger_fires_add_objective() {
-        let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "world.entity.raider_alpha.name"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-raider-down"
-  text = "test.declarative.objective"
-"#;
-        let world = crate::world::config::parse_world(toml).expect("literal must parse");
-        let mut states = trigger_states_from_world(&world);
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("world.entity.raider_alpha.name".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Destroyed {
-            uuid: "uuid-r".into(),
-        }];
-        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
-        assert_eq!(fired.len(), 1);
-        assert!(fired[0]
-            .actions
-            .iter()
-            .any(|a| matches!(a, TriggerAction::AddObjective { .. })));
-    }
-
     // ── on_world_loaded (issue #415) ──────────────────────────────────────
 
     #[test]
@@ -1440,10 +1192,7 @@ entity    = "world.entity.raider_alpha.name"
         let mut states = vec![TriggerState {
             trigger: Trigger {
                 condition: TriggerCondition::OnWorldLoaded,
-                actions: vec![add_obj("obj-loaded")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1465,10 +1214,7 @@ entity    = "world.entity.raider_alpha.name"
         let mut states = vec![TriggerState {
             trigger: Trigger {
                 condition: TriggerCondition::OnWorldLoaded,
-                actions: vec![add_obj("obj-loaded")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1497,10 +1243,7 @@ entity    = "world.entity.raider_alpha.name"
         let mut states = vec![TriggerState {
             trigger: Trigger {
                 condition: TriggerCondition::OnWorldLoaded,
-                actions: vec![add_obj("obj-loaded")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1527,10 +1270,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnEnteredRegion {
                     entity_name: "nebula".into(),
                 },
-                actions: vec![add_obj("obj-nebula")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1557,10 +1297,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnEnteredRegion {
                     entity_name: "nebula".into(),
                 },
-                actions: vec![add_obj("obj-nebula")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1587,10 +1324,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnEnteredRegion {
                     entity_name: "nebula".into(),
                 },
-                actions: vec![add_obj("x")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1616,10 +1350,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnExitedRegion {
                     entity_name: "nebula".into(),
                 },
-                actions: vec![add_obj("obj-left-nebula")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1645,10 +1376,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnEnteredRegion {
                     entity_name: "unknown".into(),
                 },
-                actions: vec![add_obj("x")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1678,10 +1406,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnFlagSet {
                     name: "parent:armed".into(),
                 },
-                actions: vec![add_obj("obj-parent")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1721,10 +1446,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnFlagSet {
                     name: "armed".into(),
                 },
-                actions: vec![add_obj("obj-self")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1765,10 +1487,7 @@ entity    = "world.entity.raider_alpha.name"
                 condition: TriggerCondition::OnFlagSet {
                     name: "parent:armed".into(),
                 },
-                actions: vec![add_obj("x")],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -1869,11 +1588,7 @@ entity    = "world.entity.raider_alpha.name"
 
         const WORLD: &str = "assets/worlds/combat_test.toml";
         let toml = include_str!("../../assets/worlds/combat_test.toml");
-        let cfg = crate::world::config::parse_world(toml).expect("combat_test.toml must parse");
-        assert!(
-            cfg.triggers.is_empty(),
-            "combat_test's triggers are [script]-authored (#984)"
-        );
+        crate::world::config::parse_world(toml).expect("combat_test.toml must parse");
         let world = ScriptedWorld::compile(WORLD, toml);
 
         let mut states: Vec<TriggerState> = world

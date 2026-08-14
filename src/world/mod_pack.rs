@@ -1272,10 +1272,16 @@ mod tests {
             .any(|f| f.category == "unparseable-content"));
     }
 
+    /// A pack shipping a world that still authors the retired declarative
+    /// front-end is refused WHOLE, not partially loaded.
+    ///
+    /// This used to author a `complete_objective` naming an undeclared id and
+    /// assert the `unresolved-objective-reference` finding blocked the pack.
+    /// Issue #985 deleted the `[[trigger]]` parser, and `parse_world` now
+    /// refuses such a world by name — which is the stronger claim, and the one a
+    /// pack author is actually going to hit while converting.
     #[test]
-    fn unresolved_composition_reference_rejects_whole_pack() {
-        // A world whose objective transition references an undeclared id is a
-        // definite composition error (validate.rs), blocking the whole pack.
+    fn a_pack_authoring_the_retired_declarative_front_end_is_rejected_whole() {
         let bad_world = r#"
 [global]
 title = "world.bad.title"
@@ -1297,10 +1303,16 @@ entity = "raider"
         ]);
         let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
         assert!(!result.is_accepted());
-        assert!(result
+        let finding = result
             .findings
             .iter()
-            .any(|f| f.category == "unresolved-objective-reference"));
+            .find(|f| f.category == "unparseable-scenario-world")
+            .unwrap_or_else(|| panic!("expected a parse refusal: {:?}", result.findings));
+        assert!(
+            finding.message.contains("[[trigger]]"),
+            "the refusal must name the retired block: {}",
+            finding.message
+        );
     }
 
     #[test]

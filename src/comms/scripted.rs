@@ -72,7 +72,8 @@ pub(crate) struct ScriptedCommsAux<'w> {
 /// Per request, in queue order:
 ///
 /// 1. resolve the sender UUID from `name_to_uuid` by the SAME rule
-///    `inject_comms_templates` uses, including the synthetic-sender escape (an
+///    the deleted `inject_comms_templates` used, including the synthetic-sender
+///    escape (an
 ///    unresolvable `from` falls through to itself, which
 ///    [`current_sender_in_range`] treats as always-readable);
 /// 2. enter the root node under the tick's SHARED [`TickBudget`], gated on a
@@ -206,8 +207,9 @@ pub(crate) fn open_scripted_comms_threads(
             break;
         }
 
-        // Sender identity, by `inject_comms_templates`' rule: `_self` is the
-        // reserved synthetic internal sender and renders as "Internal Report";
+        // Sender identity, by the rule the deleted `inject_comms_templates` used:
+        // `_self` is the reserved synthetic internal sender and renders as
+        // "Internal Report";
         // the player-facing display name resolves independently of the reference
         // id; and the UUID is keyed on the RAW `from`, so a synthetic sender
         // deliberately falls through to the name itself.
@@ -299,10 +301,9 @@ pub(crate) fn open_scripted_comms_threads(
         };
 
         // Effects first, message second: a root fn that both sets a flag and
-        // returns a node has its flag applied before the message is delivered,
-        // matching the declarative order (a template's trigger actions fire in
-        // `tick_trigger_pipeline` before `inject_comms_templates`' delivery is
-        // consumed in `SimSet::Broadcast`).
+        // returns a node has its flag applied before the message is delivered —
+        // this system runs in `SimSet::Physics`, the channel-2 delivery it writes
+        // is consumed in `SimSet::Broadcast`.
         let mut out_events: Vec<WorldEvent> = Vec::new();
         apply_script_commands(
             effects.commands,
@@ -789,7 +790,8 @@ pub(crate) mod tests {
             .is_empty());
     }
 
-    /// The synthetic-sender escape, mirroring `inject_comms_templates`: an
+    /// The synthetic-sender escape, carried over from the deleted
+    /// `inject_comms_templates`: an
     /// unresolvable `from` falls through to itself and stays readable, and the
     /// reserved `_self` renders as the internal-report channel.
     #[test]

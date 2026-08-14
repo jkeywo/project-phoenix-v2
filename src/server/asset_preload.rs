@@ -28,7 +28,7 @@ use crate::entity_config::EntityConfig;
 use crate::lobby::server::LobbyOutbox;
 use crate::lobby::Target;
 use crate::model_rig::sidecar_path;
-use crate::world::config::{parse_world, TriggerAction, WorldConfig};
+use crate::world::config::{parse_world, WorldConfig};
 
 // ── AssetManifest ──────────────────────────────────────────────────────────
 
@@ -72,23 +72,6 @@ pub fn icon_asset_path(icon_name: &str) -> String {
 }
 
 // ── Recursive discovery (pure, no Bevy deps) ──────────────────────────────
-
-/// Walk every `TriggerAction` that references file paths and collect them.
-fn collect_action_paths(
-    actions: &[TriggerAction],
-    out_entities: &mut Vec<String>,
-    out_worlds: &mut Vec<String>,
-) {
-    for action in actions {
-        match action {
-            TriggerAction::LoadWorld { path } => out_worlds.push(path.clone()),
-            TriggerAction::SpawnEntity { template_path, .. } => {
-                out_entities.push(template_path.clone());
-            }
-            _ => {}
-        }
-    }
-}
 
 /// Extract GLB model, radar icon, and sidecar paths from one entity config.
 fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetManifest) {
@@ -330,33 +313,13 @@ fn discover_world_assets(
         // statically — they'd only be resolved at runtime. Acceptable gap.
     }
 
-    // Walk triggers for LoadWorld / SpawnEntity actions
-    let mut entity_paths_from_triggers = Vec::new();
-    let mut world_paths_from_triggers = Vec::new();
-    for trigger in &world.triggers {
-        collect_action_paths(
-            &trigger.actions,
-            &mut entity_paths_from_triggers,
-            &mut world_paths_from_triggers,
-        );
-    }
-
-    // Process discovered entity paths
-    for path in entity_paths_from_triggers {
-        walk_entity(&path, config_cache, seen_entities, manifest);
-    }
-
-    // Track sub-world paths for the caller to fetch & recurse.
-    // Deduplicate here: two triggers can reference the same load_world path
-    // (e.g. on_hailed + on_entered_region both loading the same branch world).
-    // A duplicate in pending_sub_worlds causes pop_pending_world_toml to consume
-    // the TOML on the first pop, leaving the second copy waiting forever since
-    // request_world_fetch won't re-fire (already in WORLD_FETCH_REQUESTED).
-    for path in world_paths_from_triggers {
-        if !extra_worlds_out.contains(&path) {
-            extra_worlds_out.push(path);
-        }
-    }
+    // The `[[trigger.action]]` / `[[comms.response.action]]` walks that used to
+    // discover `spawn_entity` templates and `load_world` sub-worlds went with
+    // those front-ends (issue #985). A SCRIPTED spawn's `template_path` is
+    // discovered instead by `world::config::entity_template_paths`' static scan
+    // of the `[script]` bodies; a scripted `load_world` is not discoverable at
+    // all before the handler runs, and is fetched on demand by the layer applier
+    // (`LayerLoadOutcome::TomlUnavailable` re-queues until the fetch lands).
     for path in &world.extra_worlds {
         if !extra_worlds_out.contains(path) {
             extra_worlds_out.push(path.clone());
@@ -1708,58 +1671,43 @@ shape = "sphere"
         assert_eq!(sidecar_distance.get(&sc).copied(), Some(10.0));
     }
 
-    /// Regression: two triggers referencing the same load_world path (e.g.
-    /// on_hailed + on_entered_region both loading btf_path_a.toml) must not
-    /// produce duplicate entries in the pending_sub_worlds list.
-    /// A duplicate causes pop_pending_world_toml to consume the TOML on the
-    /// first pop; the second copy then waits forever (request_world_fetch
-    /// deduplicates), blocking preload completion.
+    /// `extra_worlds` entries are de-duplicated before they reach the fetch
+    /// queue.
+    ///
+    /// The duplicate used to come from two `[[trigger]]` blocks naming the same
+    /// `load_world` path; issue #985 deleted that walk with the front-end that
+    /// fed it, and a scripted `load_world` is not discoverable before its handler
+    /// runs (the layer applier fetches on demand instead). `extra_worlds` is the
+    /// surviving static source, and a duplicate there is the same hang: the first
+    /// `pop_pending_world_toml` consumes the TOML and the second copy waits
+    /// forever, because `request_world_fetch` will not re-fire.
     #[test]
-    fn discover_base_assets_deduplicates_load_world_paths() {
+    fn discover_base_assets_deduplicates_extra_world_paths() {
         use crate::world::config::parse_world;
 
         let toml = r#"
+extra_worlds = [
+  "assets/worlds/branch_a.toml",
+  "assets/worlds/branch_a.toml",
+  "assets/worlds/branch_b.toml",
+]
+
 [global]
 seed = 1
 title = "Test"
-
-[[trigger]]
-condition = "on_hailed"
-entity = "Station"
-
-  [[trigger.action]]
-  type = "load_world"
-  path = "assets/worlds/branch_a.toml"
-
-[[trigger]]
-condition = "on_entered_region"
-entity = "Station Dock"
-
-  [[trigger.action]]
-  type = "load_world"
-  path = "assets/worlds/branch_a.toml"
-
-[[trigger]]
-condition = "on_hailed"
-entity = "Outpost"
-
-  [[trigger.action]]
-  type = "load_world"
-  path = "assets/worlds/branch_b.toml"
 "#;
 
         let world = parse_world(toml).expect("parse must succeed");
         let config_cache = HashMap::new();
         let (_manifest, pending_worlds, _, _, _) = discover_base_assets(&world, &config_cache);
 
-        // branch_a.toml must appear exactly once despite two triggers referencing it
         let branch_a_count = pending_worlds
             .iter()
             .filter(|p| p.as_str() == "assets/worlds/branch_a.toml")
             .count();
         assert_eq!(
             branch_a_count, 1,
-            "duplicate load_world path causes permanent preload hang; got {branch_a_count} copies"
+            "duplicate sub-world path causes permanent preload hang; got {branch_a_count} copies"
         );
         assert_eq!(pending_worlds.len(), 2, "expected branch_a + branch_b only");
     }

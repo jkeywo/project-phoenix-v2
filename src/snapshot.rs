@@ -2412,7 +2412,7 @@ pub enum RestoreGap {
     /// Reported rather than written in by position, and the distinction is the
     /// whole reason an index is usable as a key here at all: the table is
     /// rebuilt by a deterministic replay of the same load — the declarative
-    /// states in `trigger_states_from_world` order, then the scripted ones
+    /// states in `the order `init_world_runtime` builds them in
     /// appended by `merge_script_triggers` in compile order — so two runs of the
     /// same content produce the same table. A table of a *different* length is
     /// therefore not a table whose rows shifted; it is a world that loaded a
@@ -2676,7 +2676,7 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
 /// `merge_script_triggers` immediately after, which rebuilds `handlers` from
 /// scratch: `None` for each declarative index, then one `Some` per compiled
 /// `ScriptTrigger` appended in compile order — the same two deterministic walks
-/// (`trigger_states_from_world` over the parsed TOML, then the load's
+/// (`merge_script_triggers` over the compiled script set, then the load's
 /// registration order) that produced the captured table. So the resumed world's
 /// index *i* names the same trigger and the same handler the capture's did,
 /// before this function writes a single byte, and the only thing left to check

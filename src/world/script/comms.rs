@@ -42,17 +42,17 @@
 //! sequence for the same player choices — the migration guard the tests below
 //! assert (mirroring the M2 trigger parity test).
 //!
-//! # Dormant in M4 (the collapse is deferred to M7)
+//! # The one front-end (M4 dormant, M6 wired, M7 alone)
 //!
-//! Nothing wires this into the live `handle_hail` / `handle_respond_to_message`
-//! path yet: a `[[comms]] script = "fn"` block parses into a metadata-only
-//! [`ScriptedCommsTemplate`](crate::world::config::ScriptedCommsTemplate) held
-//! apart from `WorldConfig::comms`, and the root fn name is cross-reference
-//! validated at load ([`validate_toml_script_comms`](super::validate::validate_toml_script_comms)).
-//! Unifying the two response-dispatch paths — routing both TOML and script comms
-//! responses through one shared applier — is the M7 (teardown) collapse. Landing
-//! this front-end dormant, front-end + validation + parity test, matches how M2
-//! landed the scripted-trigger front-end without touching the trigger evaluator.
+//! This landed dormant in M4 — front-end, validation and parity test — beside a
+//! live declarative path, the way M2 landed scripted triggers without touching
+//! the trigger evaluator. M6 (#984) wired it into `handle_respond_to_message`
+//! beside the declarative arm; M7 (#985) deleted that arm and the `[[comms]]`
+//! parser behind it. A thread is opened by a script calling
+//! `ctx.effects.open_comms(#{...})`, materialised by
+//! [`open_scripted_comms_threads`](crate::comms::scripted::open_scripted_comms_threads),
+//! and every node fn name it reaches is cross-reference validated at load
+//! ([`validate_on_pick_fns`](super::validate::validate_on_pick_fns)).
 
 use rhai::{Dynamic, Map};
 

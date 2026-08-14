@@ -1297,11 +1297,11 @@ fn a_save_whose_script_content_changed_is_refused_on_content() {
 }
 
 /// The script-free fixture (see the file's own header for why it is a fixture).
-const DECLARATIVE: &str = "tests/fixtures/worlds/declarative_resume.toml";
+const SCRIPT_FREE: &str = "tests/fixtures/worlds/declarative_resume.toml";
 
-fn declarative_args() -> HeadlessArgs {
+fn script_free_args() -> HeadlessArgs {
     HeadlessArgs {
-        world_path: DECLARATIVE.into(),
+        world_path: SCRIPT_FREE.into(),
         ship_path: "assets/entities/alliance_destroyer.toml".into(),
         max_ticks: 4_000,
         seed: Some(SEED),
@@ -1310,23 +1310,23 @@ fn declarative_args() -> HeadlessArgs {
     }
 }
 
-/// A **script-free** world's payload carries the scenario's declarative
-/// progression and nothing script-shaped — the compatibility half of this
-/// issue, stated rather than assumed.
+/// A **script-free** world's payload is well-formed and carries nothing
+/// script-shaped — the compatibility half of this issue, stated rather than
+/// assumed.
 ///
 /// A world with no `[script]` block compiles no `WorldScriptRuntime` at all. Its
-/// capture must still carry trigger latches and a mission clock (those are not a
-/// scripting feature), and must leave the script-only field empty so the payload
-/// is shaped exactly as it was before this issue.
+/// capture must still carry a mission clock (not a scripting feature) and leave
+/// the script-only fields empty, so a world with nothing to progress produces a
+/// payload that still round-trips.
 ///
 /// The subject was `combat_test` until issue #984 converted it — the last
 /// shipped world to convert — leaving no script-free shipped world to point at.
-/// It is `declarative_resume.toml` now: the declarative front-end is still live
-/// for mod packs and hand-authored worlds, so the claim is still worth pinning,
-/// and a fixture keeps it pinned without the subject being a content decision.
+/// It has been `declarative_resume.toml` since. The trigger-latch half of the
+/// claim went with issue #985: a script-free world has no triggers to latch,
+/// because the `[[trigger]]` front-end that was its only source is gone.
 #[test]
 fn a_script_free_world_captures_scenario_state_without_a_script_runtime() {
-    let mut live = boot(&declarative_args());
+    let mut live = boot(&script_free_args());
     step(&mut live, 120);
     assert!(
         live.world()
@@ -1342,8 +1342,8 @@ fn a_script_free_world_captures_scenario_state_without_a_script_runtime() {
         "a script-free world queues no callbacks"
     );
     assert!(
-        !scenario.triggers.is_empty(),
-        "the fixture's declarative triggers should still be captured"
+        scenario.triggers.is_empty(),
+        "a script-free world has no triggers at all: the `[[trigger]]` front-end          that was their only source went in issue #985"
     );
     assert!(
         scenario.mission_elapsed_secs.is_some(),
@@ -1355,12 +1355,12 @@ fn a_script_free_world_captures_scenario_state_without_a_script_runtime() {
         payload.clone(),
         world_digest(live.world()),
         SEED,
-        DECLARATIVE,
-        current_versions(DECLARATIVE),
+        SCRIPT_FREE,
+        current_versions(SCRIPT_FREE),
     );
     let store = FileStore::new(scratch("script-free"));
     save_to(&store, "autosave", &run).expect("the save is written");
-    let reloaded = load_from(&store, "autosave", &current_versions(DECLARATIVE))
+    let reloaded = load_from(&store, "autosave", &current_versions(SCRIPT_FREE))
         .expect("the save reloads")
         .snapshot
         .expect("a saved game carries a snapshot");

@@ -110,7 +110,7 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "HelmImpulseAiPolicy", "INTENT_NARRATION_SPAWN_SITES", "ImpulseCommand", "ImpulsePhase",
     "ImpulseState", "LastHelmInput", "LateralThrustInput", "LodBubble", "Manifest", "MergeStep",
     "ModelMarkers", "ModelRig", "NavigationWaypoint", "ObjectiveManager",
-    "PendingArcBearingRequest", "PendingFollowUp", "PendingWorldLayerChanges", "PhaserCooldown",
+    "PendingArcBearingRequest", "PendingWorldLayerChanges", "PhaserCooldown",
     "Player", "PowerBlackboard", "Provenance", "QualifiedRef", "RecentCombatActivity",
     "RegionEffectKind", "RepairBlackboard", "RepairTeams", "ResolvedTemplate", "ScenarioCatalog",
     "ScenarioCatalogWire", "ScoredObjective", "SensorRadarSelection", "SessionManager",

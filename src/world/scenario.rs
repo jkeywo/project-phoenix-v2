@@ -10,21 +10,18 @@
 // into `PendingScenarioLoad` (see the resource's doc comment in
 // `world::server`); it is retained as the merge-side plumbing.
 //
-// The parse + trigger-state derivation core is shared with the layer-load path
-// via `world::layers::parse_world_triggers`.
+// Since issue #985 a merged scenario contributes NOTHING but the record that it
+// was loaded: the `[[trigger]]` and `[[comms]]` blocks it used to merge no
+// longer parse (a world that still authors either is refused by `parse_world`),
+// and a layer's `[[entity]]` blocks travel through `world::layers`, not here.
+// The dedup / requeue / parse-failure decisions are kept because they are the
+// merge-side plumbing script-in-layers (#1045) plugs into.
 
-use crate::world::config::WorldConfig;
-use crate::world::content::TriggerState;
-use crate::world::layers::parse_world_triggers;
+use crate::world::config::parse_world;
 
 /// Decision produced by [`evaluate_scenario_load`] for one queued path.
 #[derive(Debug, Default)]
 pub struct ScenarioLoadResult {
-    /// Trigger states parsed from the scenario TOML for the applier to merge
-    /// into the live runtime (empty on any non-success branch).
-    pub new_trigger_states: Vec<TriggerState>,
-    /// Parsed config for the impure comms merge (`merge_world_comms`).
-    pub scenario_config: Option<Box<WorldConfig>>,
     /// TOML not yet available (WASM fetch in flight) — re-queue the path for
     /// the next frame.
     pub requeue: bool,
@@ -55,15 +52,13 @@ pub fn evaluate_scenario_load(
             ..Default::default()
         };
     };
-    match parse_world_triggers(toml_str) {
+    match parse_world(toml_str) {
         Err(e) => ScenarioLoadResult {
             mark_loaded: true,
             warnings: vec![format!("failed to parse {path}: {e}")],
             ..Default::default()
         },
-        Ok((scenario_config, new_trigger_states)) => ScenarioLoadResult {
-            new_trigger_states,
-            scenario_config: Some(Box::new(scenario_config)),
+        Ok(_) => ScenarioLoadResult {
             mark_loaded: true,
             requeue: false,
             warnings: Vec::new(),
@@ -78,20 +73,11 @@ mod tests {
     const SCENARIO_TOML: &str = r#"
 [global]
 seed = 7
-
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "set_flag"
-  name = "scenario_armed"
 "#;
 
     #[test]
     fn duplicate_path_is_skipped_without_marking() {
         let result = evaluate_scenario_load("worlds/s1.toml", true, Some(SCENARIO_TOML));
-        assert!(result.new_trigger_states.is_empty());
-        assert!(result.scenario_config.is_none());
         assert!(!result.requeue);
         assert!(!result.mark_loaded, "a skipped duplicate is already marked");
         assert!(result.warnings.is_empty());
@@ -102,7 +88,6 @@ condition = "on_world_loaded"
         let result = evaluate_scenario_load("worlds/s1.toml", false, None);
         assert!(result.requeue);
         assert!(!result.mark_loaded);
-        assert!(result.new_trigger_states.is_empty());
         assert!(result.warnings.is_empty());
     }
 
@@ -112,17 +97,13 @@ condition = "on_world_loaded"
         let result = evaluate_scenario_load("worlds/broken.toml", false, Some("nope ["));
         assert!(result.mark_loaded);
         assert!(!result.requeue);
-        assert!(result.new_trigger_states.is_empty());
-        assert!(result.scenario_config.is_none());
         assert_eq!(result.warnings.len(), 1);
         assert!(result.warnings[0].starts_with("failed to parse worlds/broken.toml:"));
     }
 
     #[test]
-    fn successful_parse_yields_triggers_and_config() {
+    fn successful_parse_marks_loaded_without_warnings() {
         let result = evaluate_scenario_load("worlds/s1.toml", false, Some(SCENARIO_TOML));
-        assert_eq!(result.new_trigger_states.len(), 1);
-        assert!(result.scenario_config.is_some());
         assert!(result.mark_loaded);
         assert!(!result.requeue);
         assert!(result.warnings.is_empty());

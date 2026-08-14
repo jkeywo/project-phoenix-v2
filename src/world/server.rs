@@ -10,13 +10,13 @@ use crate::objectives::ObjectiveManager;
 use crate::simulation::SimOutbox;
 #[cfg(test)]
 use crate::world::content::TriggerAction;
-use crate::world::content::{trigger_states_from_world, TriggerState, WorldEvent};
+use crate::world::content::{TriggerState, WorldEvent};
 use crate::world::delayed::{partition_delayed_actions, DelayedAction};
 use crate::world::dispatch::{
     dispatch_action, ActionCmd, DispatchContext, DispatchResult, LayerView,
     WORLD_MODIFIER_SOURCE_ID,
 };
-use crate::world::layers::{evaluate_layer_load, evaluate_layer_unload, LayerLoadOutcome};
+use crate::world::layers::{evaluate_layer_load, LayerLoadOutcome};
 use crate::world::scenario::evaluate_scenario_load;
 use crate::world::script::effects::BufferedEffect;
 use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
@@ -97,14 +97,17 @@ pub struct PendingScenarioLoad(pub Vec<String>);
 
 /// Serialisable runtime snapshot for one additively-loaded sub-world.
 ///
-/// Keyed by world TOML path in `WorldLayerMap`. Holds the trigger states that
-/// were derived from the sub-world's `WorldConfig` at load time, enabling them
-/// to be cleanly removed when `UnloadWorld` fires.
-/// Also tracks ECS entity handles spawned from the sub-world's `[[entity]]`
-/// blocks so they can be despawned when `UnloadWorld` fires.
+/// Keyed by world TOML path in `WorldLayerMap`. Tracks the ECS entity handles
+/// spawned from the sub-world's `[[entity]]` blocks so they can be despawned
+/// when `UnloadWorld` fires, plus the anchors and flag store those entities
+/// resolve against.
+///
+/// It also snapshotted the trigger states the layer contributed, so `UnloadWorld`
+/// could take exactly them back out. Issue #985 deleted the `[[trigger]]` parser
+/// — the only way a layer could author one — so there is nothing to snapshot
+/// until script-in-layers (#1045).
 #[derive(Clone, Debug, Default)]
 pub struct WorldRuntime {
-    pub trigger_states: Vec<TriggerState>,
     /// ECS entity handles spawned when this layer was loaded.
     pub spawned_entities: Vec<Entity>,
     /// Anchor table from the layer's `WorldConfig`. Used by `spawn_entity`
@@ -275,13 +278,14 @@ pub enum WorldLayerChange {
 ///
 /// Producer: `collect_world_events` (drains the `AiEventReaders` messages and
 /// `WorldContentRuntime::pending_world_events`, and synthesises the per-tick
-/// `TimerElapsed` event). Consumers: `inject_comms_templates` (comms-template
-/// evaluation) and `tick_trigger_pipeline` (seeds its trigger-chaining loop).
+/// `TimerElapsed` event). Consumer: `tick_trigger_pipeline`, which seeds its
+/// trigger-chaining loop from it. `inject_comms_templates` was the second
+/// consumer until issue #985 deleted the `[[comms]]` front-end it fired.
 ///
 /// The chaining loop's internally-produced events (`FlagSet`, `FlagCleared`,
 /// `Destroyed` from a `DestroyEntity` action) stay LOCAL to the pipeline and
-/// are never written here, preserving the contract that comms templates fire
-/// only from external events. Contents are valid for one tick:
+/// are never written here, so the buffer stays what its name says: the
+/// EXTERNALLY-sourced events of this tick. Contents are valid for one tick:
 /// `collect_world_events` rebuilds the buffer every run, so stale events
 /// never leak into the next tick.
 #[derive(Resource, Default)]
@@ -447,10 +451,10 @@ impl Plugin for WorldPlugin {
         // `CommsWorldPlugin`. Added here so every app that installs the
         // world also gets comms, and so the cross-plugin ordering
         // constraints (`init_comms_runtime` after `init_world_runtime`;
-        // the Physics-set `tick_pending_follow_ups → collect_world_events
-        // → inject_comms_templates → tick_trigger_pipeline` chain;
-        // `broadcast_objective_summary` after `broadcast_comms_state`)
-        // all resolve against systems guaranteed to be registered.
+        // `open_scripted_comms_threads` between `tick_script_callbacks` and
+        // `tick_delayed_actions`; `broadcast_objective_summary` after
+        // `broadcast_comms_state`) all resolve against systems guaranteed to be
+        // registered.
         app.add_plugins(crate::comms::CommsWorldPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
@@ -481,12 +485,12 @@ impl Plugin for WorldPlugin {
                     .in_set(crate::sim_sets::SimSet::Broadcast)
                     .after(crate::comms::server::broadcast_comms_state),
             )
-            // Explicit trigger-pipeline ordering (#718/#719): the comms
-            // halves of the chain (`tick_pending_follow_ups`,
-            // `inject_comms_templates`) are registered by
-            // `CommsWorldPlugin` with `.before`/`.after` constraints
-            // against these two systems, reproducing the original
-            // four-system `.chain()` exactly.
+            // The comms half of the Physics set is registered by
+            // `CommsWorldPlugin`, ordered against these systems from that side.
+            // It was a four-system `.chain()` (#718/#719) until issue #985
+            // deleted `tick_pending_follow_ups` and `inject_comms_templates`;
+            // `open_scripted_comms_threads` is what remains, and it sits after
+            // the callback drain rather than around the event collector.
             // The mission clock (#960). `SimSet::Physics` is gated on
             // `GamePhase::InProgress`, so the first run of
             // `anchor_mission_clock` is the first simulation tick of the
@@ -1141,15 +1145,14 @@ pub(crate) fn init_world_runtime(
             .or_insert_with(|| uuid.clone());
     }
 
-    // Derive trigger runtime states straight from the parsed world.
-    runtime.trigger_states = trigger_states_from_world(&world_config);
+    // The trigger table starts EMPTY. It used to be derived from the parsed
+    // world's `[[trigger]]` blocks and the scripted states were appended after
+    // them; issue #985 deleted that parser, so scripts are the only source and
+    // `WorldScriptRuntime.handlers` is parallel to a table it fills alone. A
+    // script-free world keeps an empty table, exactly as before.
+    runtime.trigger_states.clear();
 
-    // Merge script-authored triggers (issue #984, Rhai M6 phase 2a). Appended
-    // AFTER the declarative states so declarative indices/order are unchanged;
-    // `WorldScriptRuntime.handlers` is built parallel to `trigger_states` (None
-    // for every declarative index, Some for each appended scripted one). When no
-    // world authored scripts, `WorldScriptRuntime` is absent and this is a no-op,
-    // so `trigger_states` is byte-identical to the declarative-only build.
+    // Merge script-authored triggers (issue #984, Rhai M6 phase 2a).
     if let Some(script_runtime) = script_runtime.as_deref_mut() {
         merge_script_triggers(&mut runtime.trigger_states, script_runtime);
     }
@@ -1162,16 +1165,21 @@ pub(crate) fn init_world_runtime(
     runtime.pending_world_events.push(WorldEvent::WorldLoaded);
 }
 
-/// Append one [`TriggerState`] per compiled [`ScriptTrigger`] to `trigger_states`
-/// (AFTER the declarative states), and build `script_runtime.handlers` parallel
-/// to it: `None` for every pre-existing declarative index, `Some` for each
-/// appended scripted one (issue #984, Rhai M6 phase 2a).
+/// Append one [`TriggerState`] per compiled [`ScriptTrigger`] to `trigger_states`,
+/// and build `script_runtime.handlers` parallel to it — one `Some` per appended
+/// state (issue #984, Rhai M6 phase 2a).
 ///
-/// A scripted trigger's `.trigger` is byte-identical to its TOML equivalent (the
-/// shared `scripted_trigger` constructor + the `scripted_and_toml` parity test),
-/// so an appended state feeds `evaluate_single_trigger` exactly as a declarative
-/// one does; its (empty) action list means the handler — resolved via the
-/// parallel `handlers` entry — supplies the effects at dispatch.
+/// It appended AFTER a table `init_world_runtime` had already filled from the
+/// world's `[[trigger]]` blocks, and `handlers` carried a `None` for each of
+/// those declarative indices. Issue #985 deleted that front-end, so the table
+/// starts empty and every index is a scripted one; the `handlers` vec is
+/// built parallel rather than assumed dense so the two stay index-aligned by
+/// construction.
+///
+/// An appended state feeds `evaluate_single_trigger` like any other — the
+/// evaluator never knew where a trigger came from — and the handler resolved
+/// through the parallel `handlers` entry is what supplies the effects when it
+/// fires.
 pub(crate) fn merge_script_triggers(
     trigger_states: &mut Vec<TriggerState>,
     script_runtime: &mut WorldScriptRuntime,
@@ -1362,10 +1370,10 @@ pub(crate) fn anchor_mission_clock(
 ///    `Time` is optional so test apps without `TimePlugin` continue to work
 ///    (they just never see `TimerElapsed`).
 ///
-/// Ordering: chained after `tick_pending_follow_ups` (which snapshots
-/// `pending_world_events` before this system drains them) and before
-/// `inject_comms_templates` and `tick_trigger_pipeline` (which consume the
-/// buffer for comms-template injection and trigger evaluation respectively).
+/// Ordering: chained before `tick_trigger_pipeline`, which consumes the buffer
+/// for trigger evaluation. It also ran after `tick_pending_follow_ups` and
+/// before `inject_comms_templates` — the comms halves of the #718/#719 chain,
+/// both deleted with the `[[comms]]` front-end in issue #985.
 ///
 /// Change detection: `runtime` is only mutably dereferenced when
 /// `pending_world_events` has entries to drain, and the buffer is only
@@ -1570,9 +1578,6 @@ pub(crate) fn tick_trigger_pipeline(
         .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
         .collect();
 
-    // Comms-template injection happens in `inject_comms_templates`, chained
-    // immediately before this system (#719).
-
     // Loop to support within-tick chaining: a trigger that fires a
     // `set_flag` action emits a `FlagSet` event which a downstream
     // `on_flag_set` trigger can react to in the same Bevy frame. Bounded
@@ -1626,18 +1631,6 @@ pub(crate) fn tick_trigger_pipeline(
             .map(|s| s.origin_layer.clone())
             .collect();
         let entity_groups = runtime.entity_groups.clone();
-        // Issue #710: ONE name -> uuid map for *action dispatch*, rebuilt at
-        // the top of every chaining pass — the same per-pass freshness rule
-        // `entity_groups` above already follows. Previously the six modifier
-        // arms read the tick-level `name_to_uuid` clone while `DestroyEntity`
-        // read the live `runtime.name_to_uuid`; unifying on per-pass makes the
-        // modifier arms slightly fresher and `DestroyEntity` slightly staler,
-        // and lets an action resolve a name that a `SpawnEntity` in an earlier
-        // pass of this same tick registered.
-        //
-        // Trigger *condition* evaluation deliberately keeps using the
-        // tick-level `name_to_uuid` clone above: only the dispatch arms change.
-        let dispatch_names = runtime.name_to_uuid.clone();
         for (idx, origin) in trigger_origins.iter().enumerate() {
             // Build the flag-store and layer-path chains for this trigger.
             // The store half is the ONE shared layered walk
@@ -1670,80 +1663,14 @@ pub(crate) fn tick_trigger_pipeline(
 
         let mut next_events: Vec<WorldEvent> = Vec::new();
         for (idx, ft) in fired {
-            for (i, action) in ft.actions.iter().enumerate() {
-                let delay = ft.action_delays.get(i).copied().unwrap_or(0.0);
-                if delay > 0.0 {
-                    if let Some(es) = elapsed_secs {
-                        runtime.pending_delayed_actions.push(DelayedAction {
-                            action: action.clone(),
-                            origin_layer: ft.origin_layer.clone(),
-                            entity_name: ft.entity_name.clone(),
-                            fire_at_elapsed: es + delay,
-                        });
-                    }
-                    continue;
-                }
-                // Issue #710: the action-dispatch table lives in the pure
-                // `world::dispatch` module. Decide first, then apply.
-                //
-                // The flag stores handed to the context MUST be the LIVE ones
-                // — `runtime.flags` plus `layer_map`'s per-layer stores,
-                // re-projected for every action, never a stale copy.
-                // `dispatch_action` computes each flag mutation's
-                // before/after against these stores to decide whether a
-                // transition event fires at all, so two triggers that both
-                // `set_flag` the same flag must see 0 -> 1 and then 1 -> 1
-                // (one `FlagSet` total), not 0 -> 1 twice.
-                let layers = project_layer_views(world_layers.layer_map.as_deref());
-                let result = {
-                    let ctx = DispatchContext {
-                        origin_layer: ft.origin_layer.clone(),
-                        entity_name: ft.entity_name.clone(),
-                        name_to_uuid: &dispatch_names,
-                        base_flags: &runtime.flags,
-                        layers: &layers,
-                        base_anchors: world_layers
-                            .base_world_config
-                            .as_ref()
-                            .map(|wc| &wc.anchors)
-                            .unwrap_or(&empty_anchors),
-                        factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
-                        uuid_source: &uuid_source,
-                        template_loader: &template_loader,
-                    };
-                    dispatch_action(action, &ctx)
-                };
-
-                // Applied before the next action is dispatched, so the next
-                // `DispatchContext` observes this action's writes. `new_events`
-                // route into this pass's `next_events` — i.e. the next chaining
-                // pass of the SAME tick (`tick_delayed_actions` instead queues
-                // them onto `runtime.pending_world_events` for the next tick).
-                apply_dispatch_result(
-                    result,
-                    "tick_trigger_pipeline",
-                    &mut next_events,
-                    &uuid_to_entity,
-                    runtime,
-                    &mut objectives,
-                    &mut commands,
-                    &mut ship_modifiers,
-                    world_layers.pending_layers.as_deref_mut(),
-                    world_layers.layer_map.as_deref_mut(),
-                    next_state.as_deref_mut(),
-                    game_over_reason.as_deref_mut(),
-                    &mut faction_dispatch,
-                    &mut ai_query,
-                    balance_events.as_deref_mut(),
-                );
-            }
-
-            // Scripted handler for this trigger (IP-2, issue #984, Rhai M6 phase
-            // 2a). A scripted trigger fires with an EMPTY action list, so the
-            // loop above dispatched nothing — its effects come from running the
-            // handler on the runtime host and feeding the result through the SAME
-            // apply path, so a scripted flag write chains into the next pass
-            // exactly as a declarative `set_flag` does (`apply_script_commands`).
+            // The handler for this trigger (IP-2, issue #984, Rhai M6 phase 2a).
+            // A per-action dispatch loop for the fired trigger's own
+            // `[[trigger.action]]` array used to run first; issue #985 deleted
+            // the parser that filled it, so this is the whole of a fire. The
+            // handler runs on the runtime host and its result goes through the
+            // SAME apply path, so a scripted flag write chains into the next
+            // pass exactly as a declarative `set_flag` used to
+            // (`apply_script_commands`).
             if let Some(sr) = script.runtime.as_deref_mut() {
                 let handler = sr.handlers.get(idx).and_then(|h| h.clone());
                 if let Some(h) = handler {
@@ -3007,8 +2934,6 @@ fn apply_pending_scenario_loads(
             pending.0.push(path);
             continue;
         }
-        // Merge trigger states (don't overwrite existing ones).
-        runtime.trigger_states.extend(result.new_trigger_states);
         if result.mark_loaded {
             runtime.loaded_scenario_paths.insert(path);
         }
@@ -3159,15 +3084,13 @@ fn apply_world_layer_changes(
                         layer_map.0.insert(path, WorldRuntime::default());
                     }
                     LayerLoadOutcome::Loaded {
-                        trigger_states,
                         name_to_uuid_inserts,
                         scenario_config,
                         emit_world_loaded,
                     } => {
-                        // Merge the origin-tagged trigger states (issue #417)
-                        // into the live runtime and register the layer's
-                        // named entities in the live name_to_uuid map.
-                        runtime.trigger_states.extend(trigger_states.clone());
+                        // Register the layer's named entities in the live
+                        // name_to_uuid map. A layer contributes ENTITIES and
+                        // nothing else since issue #985 — see `world::layers`.
                         for (name, uuid) in name_to_uuid_inserts {
                             runtime.name_to_uuid.insert(name, uuid);
                         }
@@ -3211,7 +3134,6 @@ fn apply_world_layer_changes(
                         layer_map.0.insert(
                             path,
                             WorldRuntime {
-                                trigger_states,
                                 spawned_entities,
                                 anchors: scenario_config.anchors.clone(),
                                 flags: crate::world::flags::FlagStore::new(),
@@ -3234,16 +3156,10 @@ fn apply_world_layer_changes(
                     commands.entity(*entity).try_despawn();
                 }
 
-                // Remove trigger states belonging to this layer. Which live
-                // indices belong to it is a pure decision (`world::layers`),
-                // matched by trigger equality against the load-time snapshot.
-                let unload = evaluate_layer_unload(&layer.trigger_states, &runtime.trigger_states);
-                let mut ti = 0usize;
-                runtime.trigger_states.retain(|_| {
-                    let keep = !unload.triggers_to_remove.contains(&ti);
-                    ti += 1;
-                    keep
-                });
+                // No trigger states to remove: a layer has contributed none
+                // since issue #985 deleted the `[[trigger]]` parser, which was
+                // the only way one could. Script-in-layers (#1045) is where the
+                // removal set comes back.
 
                 // Remove objectives this layer's triggers added (issue #751)
                 // and prune the runtime state that referenced them (issue #752):
@@ -3471,90 +3387,94 @@ pub(crate) mod tests {
         app
     }
 
-    /// Issue #710: the `DispatchContext` flag stores must be the LIVE ones,
-    /// never a per-pass copy taken before dispatch began (condition
-    /// evaluation reads the stores before any dispatch, which is safe;
-    /// dispatch itself must not). `dispatch_action` computes before/after
-    /// against them to decide whether a transition event fires at all, so a
-    /// snapshot silently drops transitions.
+    /// Queue `actions` on the delayed-action queue, due immediately, and step
+    /// one tick so `tick_delayed_actions` dispatches them in queue order.
     ///
-    /// Set-then-clear in a single pass is the discriminating case: against the
-    /// live store the clear reads before = 1 and emits `FlagCleared`; against a
-    /// snapshot it reads before = 0, sees no change, and emits nothing. The
-    /// sibling case — two triggers both `set_flag` the same flag
-    /// (`assets/worlds/before_the_fire.toml:276`) — is not observable here,
-    /// because a duplicated `FlagSet` is masked by single-shot trigger firing.
-    #[test]
-    fn flag_stores_handed_to_dispatch_are_live_within_a_pass() {
-        let mut app = ai_trigger_test_app();
-        let npc_uuid = "src-uuid-001";
+    /// This is where the action-dispatch tests below are driven from. Issue #985
+    /// deleted the `[[trigger]]` action array, so a fired trigger dispatches
+    /// nothing of its own any more and the delayed-action queue is the surviving
+    /// [`TriggerAction`] consumer. `origin_layer` and `entity_name` are the two
+    /// context fields a firing trigger used to supply; they now travel on the
+    /// [`DelayedAction`] itself and are read straight back out by
+    /// `tick_delayed_actions` when it builds each `DispatchContext`.
+    fn dispatch_delayed_actions(
+        app: &mut App,
+        origin_layer: Option<&str>,
+        entity_name: Option<&str>,
+        actions: Vec<TriggerAction>,
+    ) {
+        app.add_systems(Update, tick_delayed_actions.after(tick_trigger_pipeline));
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("source".into(), npc_uuid.into());
-            let mk = |condition, actions| TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition,
-                    actions,
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            };
-            runtime.trigger_states = vec![
-                mk(
-                    TriggerCondition::OnDestroyed {
-                        entity_name: "source".into(),
-                    },
-                    vec![TriggerAction::SetWorldFlag { name: "a".into() }],
-                ),
-                mk(
-                    TriggerCondition::OnDestroyed {
-                        entity_name: "source".into(),
-                    },
-                    vec![TriggerAction::ClearWorldFlag { name: "a".into() }],
-                ),
-                mk(
-                    TriggerCondition::OnFlagCleared { name: "a".into() },
-                    vec![TriggerAction::AddObjective {
-                        id: "obj-cleared".into(),
-                        text: "Reacted to flag cleared".into(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
-                ),
-            ];
+            runtime.mission_clock_anchor_secs = Some(0.0);
+            for action in actions {
+                runtime.pending_delayed_actions.push(DelayedAction {
+                    action,
+                    origin_layer: origin_layer.map(str::to_string),
+                    entity_name: entity_name.map(str::to_string),
+                    fire_at_elapsed: 0.0,
+                });
+            }
         }
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed {
-                entity_uuid: npc_uuid.into(),
-            });
         app.update();
+    }
 
-        // Both setter and clearer fire in the same pass. Against the LIVE store
-        // the clear sees before = 1 and emits FlagCleared, so the downstream
-        // on_flag_cleared trigger fires. Against a per-pass snapshot the clear
-        // would see before = 0, emit nothing, and this objective would never
-        // appear.
-        let objectives = app.world().resource::<ObjectiveManagerRes>();
-        assert!(
-            objectives
-                .0
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-cleared"),
+    /// The [`dispatch_delayed_actions`] shape for a test that needs nothing from
+    /// the app before the dispatch: builds the fixture app, dispatches, and hands
+    /// the stepped app back so the test can read the mutated resources.
+    fn dispatch_delayed_actions_in_new_app(actions: Vec<TriggerAction>) -> App {
+        let mut app = ai_trigger_test_app();
+        dispatch_delayed_actions(&mut app, None, None, actions);
+        app
+    }
+
+    /// Issue #710: the `DispatchContext` flag stores must be the LIVE ones,
+    /// never a copy taken before dispatch began. `dispatch_action` computes
+    /// before/after against them to decide whether a transition event fires at
+    /// all, so a snapshot silently drops transitions.
+    ///
+    /// Set-then-clear within one drain is the discriminating case: against the
+    /// live store the clear reads before = 1 and emits `FlagCleared`; against a
+    /// snapshot it reads before = 0, sees no change, and emits nothing.
+    ///
+    /// The pair used to be two triggers firing in a single `tick_trigger_pipeline`
+    /// pass; issue #985 deleted the `[[trigger]]` action array they dispatched
+    /// through, so they are queued on the delayed-action path instead — which
+    /// re-projects the same live stores once per action, for the same reason.
+    #[test]
+    fn flag_stores_handed_to_dispatch_are_live_within_one_drain() {
+        let mut app = ai_trigger_test_app();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![
+                TriggerAction::SetWorldFlag { name: "a".into() },
+                TriggerAction::ClearWorldFlag { name: "a".into() },
+            ],
+        );
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("a"),
+            0,
+            "set-then-clear must end with the flag cleared"
+        );
+        // Both transitions, in order. Against a per-action snapshot the clear
+        // would read before = 0, emit nothing, and only the `FlagSet` would be
+        // here.
+        assert_eq!(
+            runtime.pending_world_events,
+            vec![
+                WorldEvent::FlagSet {
+                    name: "a".into(),
+                    origin_layer: None,
+                },
+                WorldEvent::FlagCleared {
+                    name: "a".into(),
+                    origin_layer: None,
+                },
+            ],
             "clear_flag must emit FlagCleared against the live store"
         );
     }
@@ -3846,7 +3766,12 @@ setup = 'on_destroyed("raider", "hail"); fn hail(ctx) { ctx.effects.open_comms(#
     /// restores the transition event by previewing the write against the live
     /// store, so a downstream declarative `on_flag_set` trigger chains in the
     /// next pass. Without the preview the write would apply silently and the
-    /// chained objective would never appear.
+    /// watcher would never fire.
+    ///
+    /// The watcher is observed through its own `fired` latch: issue #985 deleted
+    /// the `[[trigger]]` action array this used to read a chained objective out
+    /// of, and a trigger's latch is now the whole of what a declarative-shaped
+    /// trigger records when it fires.
     #[test]
     fn scripted_flag_write_chains_a_declarative_on_flag_set() {
         let mut sr = compile_fixture_scripts(
@@ -3862,25 +3787,15 @@ setup = 'on_destroyed("raider", "arm"); fn arm(ctx) { ctx.flags.armed = 1; }'
             runtime
                 .name_to_uuid
                 .insert("raider".to_string(), raider_uuid.to_string());
-            // Declarative on_flag_set("armed") -> AddObjective("chained"); the
-            // scripted on_destroyed trigger is appended AFTER it by the merge.
+            // Declarative watcher on_flag_set("armed"); the scripted
+            // on_destroyed trigger is appended AFTER it by the merge, so the
+            // watcher keeps index 0.
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnFlagSet {
                         name: "armed".to_string(),
                     },
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "chained".to_string(),
-                        text: "armed via script".to_string(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -3901,21 +3816,14 @@ setup = 'on_destroyed("raider", "arm"); fn arm(ctx) { ctx.flags.armed = 1; }'
             });
         app.update();
 
-        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
-            objectives
-                .0
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "chained"),
+            runtime.trigger_states[0].fired,
             "a scripted flag write must emit FlagSet so the declarative on_flag_set \
              trigger chains in the next pass (the apply_script_commands preview)"
         );
         assert_eq!(
-            app.world()
-                .resource::<WorldContentRuntime>()
-                .flags
-                .counter("armed"),
+            runtime.flags.counter("armed"),
             1,
             "the scripted flag write itself must land on the live store"
         );
@@ -3927,8 +3835,10 @@ setup = 'on_destroyed("raider", "arm"); fn arm(ctx) { ctx.flags.armed = 1; }'
     /// previews that against the live store — before 1, after 0 — so
     /// `push_flag_transition`'s boolean flip emits `FlagCleared`, and a downstream
     /// declarative `on_flag_cleared` trigger chains in the next pass. Without the
-    /// preview the write would apply silently and the chained objective would never
-    /// appear.
+    /// preview the write would apply silently and the watcher would never fire.
+    ///
+    /// Observed through the watcher's own `fired` latch — issue #985 deleted the
+    /// `[[trigger]]` action array the chained objective used to come from.
     #[test]
     fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
         let mut sr = compile_fixture_scripts(
@@ -3946,25 +3856,15 @@ setup = 'on_destroyed("raider", "disarm"); fn disarm(ctx) { ctx.flags.shields_up
             runtime
                 .name_to_uuid
                 .insert("raider".to_string(), raider_uuid.to_string());
-            // Declarative on_flag_cleared("shields_up") -> AddObjective("disarmed");
-            // the scripted on_destroyed trigger is appended AFTER it by the merge.
+            // Declarative watcher on_flag_cleared("shields_up"); the scripted
+            // on_destroyed trigger is appended AFTER it by the merge, so the
+            // watcher keeps index 0.
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnFlagCleared {
                         name: "shields_up".to_string(),
                     },
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "disarmed".to_string(),
-                        text: "shields dropped via script".to_string(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -3985,22 +3885,15 @@ setup = 'on_destroyed("raider", "disarm"); fn disarm(ctx) { ctx.flags.shields_up
             });
         app.update();
 
-        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
-            objectives
-                .0
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "disarmed"),
+            runtime.trigger_states[0].fired,
             "a scripted flag clear must emit FlagCleared so the declarative \
              on_flag_cleared trigger chains in the next pass (the \
              apply_script_commands preview)"
         );
         assert_eq!(
-            app.world()
-                .resource::<WorldContentRuntime>()
-                .flags
-                .counter("shields_up"),
+            runtime.flags.counter("shields_up"),
             0,
             "the scripted flag clear itself must land on the live store"
         );
@@ -4012,8 +3905,11 @@ setup = 'on_destroyed("raider", "disarm"); fn disarm(ctx) { ctx.flags.shields_up
     /// `apply_script_commands` previews that against the live store — before 0,
     /// after 1 — so `push_flag_transition`'s boolean flip emits `FlagSet`, and a
     /// downstream declarative `on_flag_set` trigger chains in the next pass.
-    /// Without the preview the increment would apply silently and the chained
-    /// objective would never appear.
+    /// Without the preview the increment would apply silently and the watcher
+    /// would never fire.
+    ///
+    /// Observed through the watcher's own `fired` latch — issue #985 deleted the
+    /// `[[trigger]]` action array the chained objective used to come from.
     #[test]
     fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
         let mut sr = compile_fixture_scripts(
@@ -4031,25 +3927,15 @@ setup = 'on_destroyed("raider", "bump"); fn bump(ctx) { ctx.flags.increment("wav
             runtime
                 .name_to_uuid
                 .insert("raider".to_string(), raider_uuid.to_string());
-            // Declarative on_flag_set("wave") -> AddObjective("escalated"); the
-            // scripted on_destroyed trigger is appended AFTER it by the merge.
+            // Declarative watcher on_flag_set("wave"); the scripted on_destroyed
+            // trigger is appended AFTER it by the merge, so the watcher keeps
+            // index 0.
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnFlagSet {
                         name: "wave".to_string(),
                     },
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "escalated".to_string(),
-                        text: "wave incremented via script".to_string(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -4070,38 +3956,37 @@ setup = 'on_destroyed("raider", "bump"); fn bump(ctx) { ctx.flags.increment("wav
             });
         app.update();
 
-        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
-            objectives
-                .0
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "escalated"),
+            runtime.trigger_states[0].fired,
             "a scripted flag increment from 0 must emit FlagSet so the declarative \
              on_flag_set trigger chains in the next pass (the apply_script_commands \
              preview)"
         );
         assert_eq!(
-            app.world()
-                .resource::<WorldContentRuntime>()
-                .flags
-                .counter("wave"),
+            runtime.flags.counter("wave"),
             1,
             "the scripted flag increment itself must land on the live store"
         );
     }
 
     /// Issue #984 (Rhai M6), the DIGEST-CRITICAL guard: a scripted `spawn_entity`
-    /// and its declarative twin, fired through the LIVE `tick_trigger_pipeline`
-    /// with a fresh, identically-seeded `WorldIdMint`, mint the IDENTICAL
+    /// and the same `TriggerAction::SpawnEntity` dispatched through the host, each
+    /// driven with a fresh, identically-seeded `WorldIdMint`, mint the IDENTICAL
     /// `EntityUuid`. This is what a converted world's authoritative digest (#894)
     /// rides on, and it catches the P2a-class divergence risks: minting at the
     /// effects.rs boundary or via the process-global fallback (R1), a stubbed uuid
     /// source rather than the real one (R2), or dropping the name→uuid insert by
     /// applying only `.commands` instead of the whole `DispatchResult` (R3) would
     /// each break the equality below.
+    ///
+    /// The non-scripted half used to be an authored `[[trigger.action]]` twin;
+    /// issue #985 deleted that front-end, so it is dispatched through
+    /// `tick_delayed_actions` instead — which binds the SAME `uuid_source` closure
+    /// over the same `WorldIdMint`, so it is still the mint path a declarative
+    /// action took.
     #[test]
-    fn scripted_and_declarative_spawn_mint_the_same_entity_uuid() {
+    fn scripted_and_dispatched_spawn_mint_the_same_entity_uuid() {
         use crate::entity_config::EntityConfig;
 
         // A trivial template both paths spawn, served from the native config cache
@@ -4147,50 +4032,26 @@ setup = 'on_destroyed("raider", "spawn_wave"); fn spawn_wave(ctx) { ctx.effects.
                 .cloned()
         };
 
-        // ---- Declarative twin: the SAME spawn authored as a trigger action. ----
-        let declarative_uuid = {
+        // ---- Dispatched twin: the SAME spawn as a `TriggerAction`. ----
+        let dispatched_uuid = {
             let mut app = ai_trigger_test_app();
             app.world_mut()
                 .insert_resource(crate::world_id::WorldIdMint::default());
-            {
-                let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-                runtime
-                    .name_to_uuid
-                    .insert("raider".to_string(), raider_uuid.to_string());
-                runtime.trigger_states = vec![TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnDestroyed {
-                            entity_name: "raider".to_string(),
-                        },
-                        actions: vec![TriggerAction::SpawnEntity {
-                            template_path: "fixture/harrow_mint.toml".to_string(),
-                            name: "wave".to_string(),
-                            anchor: None,
-                            position: Some([100.0, 0.0, 0.0]),
-                            rotation: None,
-                            scale: None,
-                            groups: vec!["hostiles".to_string()],
-                            overrides: None,
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
-                }];
-            }
-            app.world_mut()
-                .resource_mut::<Messages<AiEntityDestroyed>>()
-                .write(AiEntityDestroyed {
-                    entity_uuid: raider_uuid.into(),
-                });
-            app.update();
+            dispatch_delayed_actions(
+                &mut app,
+                None,
+                Some("raider"),
+                vec![TriggerAction::SpawnEntity {
+                    template_path: "fixture/harrow_mint.toml".to_string(),
+                    name: "wave".to_string(),
+                    anchor: None,
+                    position: Some([100.0, 0.0, 0.0]),
+                    rotation: None,
+                    scale: None,
+                    groups: vec!["hostiles".to_string()],
+                    overrides: None,
+                }],
+            );
             app.world()
                 .resource::<WorldContentRuntime>()
                 .name_to_uuid
@@ -4204,27 +4065,26 @@ setup = 'on_destroyed("raider", "spawn_wave"); fn spawn_wave(ctx) { ctx.effects.
              DispatchResult (with its inserts) was applied, not just .commands (R3)"
         );
         assert_eq!(
-            scripted_uuid, declarative_uuid,
-            "a scripted spawn must mint the SAME EntityUuid as its declarative twin — \
-             the digest-critical mint-order parity (R1/R2/R3)"
+            scripted_uuid, dispatched_uuid,
+            "a scripted spawn must mint the SAME EntityUuid as the dispatched \
+             TriggerAction — the digest-critical mint-order parity (R1/R2/R3)"
         );
     }
 
     /// Issue #984 (Rhai M6 phase 2a), Startup-wiring proof: `compile_world_scripts`
-    /// inserts `WorldScriptRuntime`, and `init_world_runtime` appends the scripted
-    /// trigger AFTER the declarative ones and builds `handlers` parallel to
-    /// `trigger_states` — the same `Startup` chain production runs (minus the
-    /// spawn), driven here without a full headless app.
+    /// inserts `WorldScriptRuntime`, and `init_world_runtime` merges the scripted
+    /// trigger into `trigger_states` and builds `handlers` parallel to it — the
+    /// same `Startup` chain production runs (minus the spawn), driven here without
+    /// a full headless app.
+    ///
+    /// The fixture carried a `[[trigger]]` block as well, to pin that the scripted
+    /// state was APPENDED after the declarative ones. Issue #985 deleted that
+    /// parser (a world authoring one now fails to parse at all), so scripts are the
+    /// only source and the parallel `handlers` table has no `None` entries left to
+    /// check.
     #[test]
     fn compile_and_init_wire_a_scripted_trigger_into_the_runtime() {
         let world_toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-[[trigger.action]]
-type = "complete_objective"
-id = "declarative"
-
 [script]
 setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.complete_objective("obj"); }'
 "#;
@@ -4251,29 +4111,19 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.complete_objective
             sr.triggers.is_empty(),
             "merge_script_triggers drains the retained triggers"
         );
-        // handlers are parallel to trigger_states: the 1 declarative trigger maps
-        // to None, the appended scripted one to Some(handler "k").
-        assert_eq!(sr.handlers.len(), 2, "one declarative + one scripted");
-        assert!(
-            sr.handlers[0].is_none(),
-            "the declarative index carries no handler"
-        );
+        // handlers stay parallel to trigger_states — one entry, carrying the
+        // compiled handler fn.
+        assert_eq!(sr.handlers.len(), 1, "one scripted trigger");
         assert_eq!(
-            sr.handlers[1].as_ref().map(|h| h.fn_name.as_str()),
+            sr.handlers[0].as_ref().map(|h| h.fn_name.as_str()),
             Some("k"),
-            "the appended scripted index carries its handler fn"
+            "the scripted index carries its handler fn"
         );
 
-        // trigger_states: declarative first (index/order unchanged), scripted
-        // appended after.
         let runtime = app.world().resource::<WorldContentRuntime>();
-        assert_eq!(runtime.trigger_states.len(), 2);
+        assert_eq!(runtime.trigger_states.len(), 1);
         assert_eq!(
             runtime.trigger_states[0].trigger.condition,
-            TriggerCondition::OnWorldLoaded
-        );
-        assert_eq!(
-            runtime.trigger_states[1].trigger.condition,
             TriggerCondition::OnDestroyed {
                 entity_name: "raider".to_string()
             }
@@ -4540,11 +4390,20 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         );
     }
 
+    /// Whether the trigger at `index` has latched `fired`.
+    ///
+    /// The trigger latch is what a condition test reads since issue #985 deleted
+    /// the `[[trigger]]` action array: a fire used to be observed through an
+    /// action's side effect, and a trigger that fires now records nothing else.
+    fn trigger_fired(app: &App, index: usize) -> bool {
+        app.world().resource::<WorldContentRuntime>().trigger_states[index].fired
+    }
+
     /// A scenario trigger fires when the named ship reaches the named
     /// waypoint — the `AiWaypointReached` message the cursor evaluator emits
     /// is bridged into a `WorldEvent::WaypointReached` and matched here.
     #[test]
-    fn on_waypoint_reached_trigger_fires_add_objective_action() {
+    fn on_waypoint_reached_trigger_fires() {
         let mut app = ai_trigger_test_app();
 
         let npc_uuid = "patrol-npc-uuid-001";
@@ -4558,18 +4417,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     entity_name: "harrow_patrol".to_string(),
                     waypoint: Some("wp_border".to_string()),
                 },
-                actions: vec![TriggerAction::AddObjective {
-                    id: "obj-border".to_string(),
-                    text: "Patrol reached the border".to_string(),
-                    mandatory: false,
-                    targets: vec![],
-                    directive: crate::messages::AiDirective::None,
-                    utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -4590,13 +4438,9 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-border"),
-            "reaching wp_border must fire the trigger's AddObjective action"
+            trigger_fired(&app, 0),
+            "reaching wp_border must fire the trigger"
         );
     }
 
@@ -4617,18 +4461,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     entity_name: "harrow_patrol".to_string(),
                     waypoint: Some("wp_border".to_string()),
                 },
-                actions: vec![TriggerAction::AddObjective {
-                    id: "obj-border".to_string(),
-                    text: "Patrol reached the border".to_string(),
-                    mandatory: false,
-                    targets: vec![],
-                    directive: crate::messages::AiDirective::None,
-                    utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -4649,12 +4482,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            !objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-border"),
+            !trigger_fired(&app, 0),
             "arriving at wp_home must not fire a trigger scoped to wp_border"
         );
     }
@@ -4676,18 +4505,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     entity_name: "harrow_patrol".to_string(),
                     waypoint: None,
                 },
-                actions: vec![TriggerAction::AddObjective {
-                    id: "obj-any".to_string(),
-                    text: "Patrol reached a waypoint".to_string(),
-                    mandatory: false,
-                    targets: vec![],
-                    directive: crate::messages::AiDirective::None,
-                    utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -4708,12 +4526,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-any"),
+            trigger_fired(&app, 0),
             "an unscoped on_waypoint_reached trigger must fire on any arrival"
         );
     }
@@ -4736,18 +4550,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     entity_name: "harrow_patrol".to_string(),
                     waypoint: None,
                 },
-                actions: vec![TriggerAction::AddObjective {
-                    id: "obj-harrow".to_string(),
-                    text: "Harrow arrived".to_string(),
-                    mandatory: false,
-                    targets: vec![],
-                    directive: crate::messages::AiDirective::None,
-                    utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -4768,18 +4571,16 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            !objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-harrow"),
+            !trigger_fired(&app, 0),
             "another ship's arrival must not fire a trigger scoped to harrow_patrol"
         );
     }
 
+    /// The `AiEntityDestroyed` message is bridged into a `WorldEvent::Destroyed`
+    /// and matched against the trigger's named entity.
     #[test]
-    fn on_entity_destroyed_trigger_fires_add_objective_action() {
+    fn on_entity_destroyed_trigger_fires() {
         let mut app = ai_trigger_test_app();
 
         let npc_uuid = "dead-npc-uuid-001";
@@ -4792,18 +4593,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 condition: TriggerCondition::OnDestroyed {
                     entity_name: "station_alpha".to_string(),
                 },
-                actions: vec![TriggerAction::AddObjective {
-                    id: "obj-001".to_string(),
-                    text: "Station destroyed".to_string(),
-                    mandatory: false,
-                    targets: vec![],
-                    directive: crate::messages::AiDirective::None,
-                    utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -4823,27 +4613,27 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-001"),
-            "AddObjective action must have fired"
+            trigger_fired(&app, 0),
+            "the named entity's destruction must fire the trigger"
         );
     }
 
-    // -- AI-event ApplyModifier / per-entity target regression tests -------
+    // -- ApplyModifier / per-entity target regression tests -----------------
     //
-    // The following six tests exercise `tick_trigger_pipeline` dispatch of the
-    // per-entity trigger actions (`ApplyModifier`, `RemoveModifier`,
-    // `ApplyFlag`, `RemoveFlag`, `ApplyIntModifier`, `RemoveIntModifier`)
-    // and prove that the action lands on the target entity's per-entity
-    // `ShipModifiers` Component â€” not the legacy global Resource â€” and
-    // that non-target entities (e.g. the player ship) remain unaffected.
-    // These are the regression tests for the audit-report bug where world
-    // triggers silently misrouted every named-entity write to whichever
-    // ship happened to own the global Resource.
+    // The following six tests exercise dispatch of the per-entity trigger
+    // actions (`ApplyModifier`, `RemoveModifier`, `ApplyFlag`, `RemoveFlag`,
+    // `ApplyIntModifier`, `RemoveIntModifier`) and prove that the action lands
+    // on the target entity's per-entity `ShipModifiers` Component â€” not the
+    // legacy global Resource â€” and that non-target entities (e.g. the player
+    // ship) remain unaffected. These are the regression tests for the
+    // audit-report bug where world triggers silently misrouted every
+    // named-entity write to whichever ship happened to own the global Resource.
+    //
+    // They fired the actions off an `on_destroyed` trigger until issue #985
+    // deleted the `[[trigger]]` action array; the actions are dispatched through
+    // the delayed-action queue now, which reaches the SAME `world::dispatch`
+    // table and the same `apply_dispatch_result` applier.
 
     /// Spawns two entities (an NPC and a "player" ship) with distinct
     /// UUIDs and per-entity `ShipModifiers` components. Registers name
@@ -4873,42 +4663,18 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         (npc, player)
     }
 
-    /// Installs a single `OnDestroyed { raider_alpha }` trigger whose
-    /// action list is `actions`, emits `AiEntityDestroyed { npc-target-uuid }`,
-    /// and ticks once so `tick_trigger_pipeline` dispatches the actions.
-    fn fire_ai_event_trigger(app: &mut App, actions: Vec<TriggerAction>) {
-        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.trigger_states = vec![TriggerState {
-            trigger: crate::world::content::Trigger {
-                condition: TriggerCondition::OnDestroyed {
-                    entity_name: "raider_alpha".to_string(),
-                },
-                actions,
-                when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
-                id: None,
-                repeat: false,
-                cooldown_secs: None,
-            },
-            fired: false,
-            origin_layer: None,
-            seen_destroyed: HashSet::new(),
-            last_fired_elapsed: None,
-        }];
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed {
-                entity_uuid: "npc-target-uuid".to_string(),
-            });
-        app.update();
+    /// Dispatches `actions`, in list order, naming `raider_alpha` as the
+    /// resolving entity — the name a fired `OnDestroyed { raider_alpha }`
+    /// trigger used to stamp onto the dispatch context before issue #985.
+    fn dispatch_actions_for_npc_target(app: &mut App, actions: Vec<TriggerAction>) {
+        dispatch_delayed_actions(app, None, Some("raider_alpha"), actions);
     }
 
     #[test]
     fn ai_events_apply_modifier_lands_on_target_entity_not_player() {
         let mut app = ai_trigger_test_app();
         let (npc, player) = spawn_two_modifier_targets(&mut app);
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![TriggerAction::ApplyModifier {
                 entity: "raider_alpha".into(),
@@ -4943,7 +4709,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn ai_events_remove_modifier_undoes_only_the_target_entity() {
         let mut app = ai_trigger_test_app();
         let (npc, _player) = spawn_two_modifier_targets(&mut app);
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![
                 TriggerAction::ApplyModifier {
@@ -4975,7 +4741,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn ai_events_apply_flag_lands_on_target_entity_not_player() {
         let mut app = ai_trigger_test_app();
         let (npc, player) = spawn_two_modifier_targets(&mut app);
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![TriggerAction::ApplyFlag {
                 entity: "raider_alpha".into(),
@@ -5007,7 +4773,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn ai_events_remove_flag_undoes_only_the_target_entity() {
         let mut app = ai_trigger_test_app();
         let (npc, _player) = spawn_two_modifier_targets(&mut app);
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![
                 TriggerAction::ApplyFlag {
@@ -5037,7 +4803,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn ai_events_apply_int_modifier_lands_on_target_entity_not_player() {
         let mut app = ai_trigger_test_app();
         let (npc, player) = spawn_two_modifier_targets(&mut app);
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![TriggerAction::ApplyIntModifier {
                 entity: "raider_alpha".into(),
@@ -5072,7 +4838,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn ai_events_remove_int_modifier_undoes_only_the_target_entity() {
         let mut app = ai_trigger_test_app();
         let (npc, _player) = spawn_two_modifier_targets(&mut app);
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![
                 TriggerAction::ApplyIntModifier {
@@ -5104,7 +4870,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn ai_events_apply_modifier_unknown_entity_name_is_ignored() {
         let mut app = ai_trigger_test_app();
         let (npc, player) = spawn_two_modifier_targets(&mut app);
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![TriggerAction::ApplyModifier {
                 entity: "does_not_exist".into(),
@@ -5144,7 +4910,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 .name_to_uuid
                 .insert("phantom".into(), "phantom-uuid".into());
         }
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![TriggerAction::ApplyModifier {
                 entity: "phantom".into(),
@@ -5180,7 +4946,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 .name_to_uuid
                 .insert("componentless".into(), "componentless-uuid".into());
         }
-        fire_ai_event_trigger(
+        dispatch_actions_for_npc_target(
             &mut app,
             vec![TriggerAction::ApplyModifier {
                 entity: "componentless".into(),
@@ -5205,9 +4971,9 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn on_all_destroyed_trigger_fires_after_all_named_entities_die_across_ticks() {
         // End-to-end Bevy runtime check: an `OnAllDestroyed` trigger over two
         // named entities must accumulate `seen_destroyed` across separate
-        // `app.update()` calls and fire its action only when the last entity
-        // dies. Mirrors `on_entity_destroyed_trigger_fires_add_objective_action`
-        // but uses two separate destruction ticks. (#470)
+        // `app.update()` calls and fire only when the last entity dies. Mirrors
+        // `on_entity_destroyed_trigger_fires` but uses two separate destruction
+        // ticks. (#470)
         let mut app = ai_trigger_test_app();
 
         let uuid_a = "wave-a-uuid";
@@ -5231,18 +4997,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     group: "waves".into(),
                     after_secs: 0.0,
                 },
-                actions: vec![TriggerAction::AddObjective {
-                    id: "obj-victory".to_string(),
-                    text: "All waves cleared".to_string(),
-                    mandatory: false,
-                    targets: vec![],
-                    directive: crate::messages::AiDirective::None,
-                    utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
                 when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -5261,13 +5016,9 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             });
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            !objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-victory"),
-            "AddObjective must not fire after only first wave dies"
+            !trigger_fired(&app, 0),
+            "the trigger must not fire after only the first wave dies"
         );
 
         // Tick 2: wave_b dies. Trigger must NOW fire.
@@ -5278,23 +5029,25 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             });
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-victory"),
-            "AddObjective must fire after the last named entity dies"
+            trigger_fired(&app, 0),
+            "the trigger must fire after the last named entity dies"
         );
     }
 
     // -- Flag-system integration tests (issue #412) ---------------------------
 
+    /// A `when` that reads false suppresses the firing WITHOUT consuming the
+    /// trigger, so the same trigger still fires on a later matching event once
+    /// the flag is set. That distinction is the whole point of a trigger-level
+    /// gate — an in-handler `if` cannot express it, because by then the
+    /// condition has fired and the trigger is spent.
+    ///
+    /// The suppression used to be read off a gated `add_objective`; issue #985
+    /// deleted the `[[trigger]]` action array, so the observable is the
+    /// trigger's own `fired` latch.
     #[test]
-    fn when_predicate_suppresses_action_dispatch_when_false() {
-        // on_destroyed with when="flag(green_light)" must not fire its actions
-        // while the flag is unset, but the trigger MUST remain live so it can
-        // fire on a subsequent matching event once the flag is set.
+    fn when_predicate_suppresses_the_fire_but_keeps_the_trigger_live() {
         let mut app = ai_trigger_test_app();
         let npc_uuid = "uuid-destroyed-target";
         {
@@ -5307,18 +5060,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     condition: TriggerCondition::OnDestroyed {
                         entity_name: "target".into(),
                     },
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "obj-gated".into(),
-                        text: "Should only fire after flag is set".into(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: Some(crate::world::flags::parse_predicate("flag(green_light)").unwrap()),
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -5336,15 +5078,10 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 entity_uuid: npc_uuid.into(),
             });
         app.update();
-        {
-            let runtime = app.world().resource::<WorldContentRuntime>();
-            assert!(!runtime.trigger_states[0].fired, "trigger must remain live");
-            let objs = &app.world().resource::<ObjectiveManagerRes>().0;
-            assert!(
-                !objs.sorted_snapshots().iter().any(|o| o.id == "obj-gated"),
-                "gated action must NOT have fired"
-            );
-        }
+        assert!(
+            !trigger_fired(&app, 0),
+            "a false `when` must suppress the fire and leave the trigger live"
+        );
         // Set the flag and re-fire.
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
@@ -5356,243 +5093,164 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 entity_uuid: npc_uuid.into(),
             });
         app.update();
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objs.sorted_snapshots().iter().any(|o| o.id == "obj-gated"),
-            "gated action must fire once the flag is set"
+            trigger_fired(&app, 0),
+            "the still-live trigger must fire once the flag is set"
         );
     }
 
+    /// A `set_flag` action's `FlagSet` transition event chains a downstream
+    /// `on_flag_set` trigger.
+    ///
+    /// It used to chain within a single tick, because the setter was an action on
+    /// a trigger and the pipeline loops its chaining passes inside one tick. Issue
+    /// #985 deleted that action array, so the setter is dispatched from the
+    /// delayed-action queue instead — and `tick_delayed_actions` runs AFTER the
+    /// pipeline has drained this tick's events, so its `FlagSet` queues onto
+    /// `pending_world_events` and the watcher fires on the NEXT tick.
     #[test]
-    fn set_flag_action_fires_on_flag_set_trigger_within_same_tick() {
-        // Trigger A: on_destroyed ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ set_flag a
-        // Trigger B: on_flag_set { name="a" } ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ add_objective B
-        // A and B must both fire in a single tick.
+    fn delayed_set_flag_action_fires_on_flag_set_trigger_on_the_next_tick() {
         let mut app = ai_trigger_test_app();
-        let npc_uuid = "uuid-chain-source";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("source".into(), npc_uuid.into());
-            runtime.trigger_states = vec![
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnDestroyed {
-                            entity_name: "source".into(),
-                        },
-                        actions: vec![TriggerAction::SetWorldFlag { name: "a".into() }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagSet { name: "a".into() },
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagSet { name: "a".into() },
-                        actions: vec![TriggerAction::AddObjective {
-                            id: "obj-chain".into(),
-                            text: "Reacted to flag set".into(),
-                            mandatory: false,
-                            targets: vec![],
-                            directive: crate::messages::AiDirective::None,
-                            utility: crate::objectives::UtilityConfig::default(),
-                            source: crate::messages::ObjectiveSource::default(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
-                },
-            ];
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
         }
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed {
-                entity_uuid: npc_uuid.into(),
-            });
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::SetWorldFlag { name: "a".into() }],
+        );
 
-        let runtime = app.world().resource::<WorldContentRuntime>();
+        {
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert!(
+                runtime.flags.flag("a"),
+                "set_flag action must have mutated the store"
+            );
+            assert!(
+                !trigger_fired(&app, 0),
+                "the transition is queued for the next tick, so nothing has \
+                 chained yet"
+            );
+        }
+
+        // Next tick: `collect_world_events` drains the queued `FlagSet` into the
+        // buffer and the watcher fires.
+        app.update();
         assert!(
-            runtime.flags.flag("a"),
-            "set_flag action must have mutated the store"
-        );
-        assert!(
-            runtime.trigger_states[1].fired,
-            "on_flag_set trigger must have fired"
-        );
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
-        assert!(
-            objs.sorted_snapshots().iter().any(|o| o.id == "obj-chain"),
-            "chained AddObjective must have fired in the same tick"
+            trigger_fired(&app, 0),
+            "on_flag_set trigger must fire on the queued FlagSet transition"
         );
     }
 
+    /// Flag "a" starts set, so a `set_flag a` is a no-op (the counter stays 1)
+    /// and emits no transition at all — an `on_flag_set` watcher must stay
+    /// unfired, because the condition matches transitions, not values.
+    ///
+    /// The setter is dispatched from the delayed-action queue: issue #985 deleted
+    /// the `[[trigger]]` action array it used to ride on.
     #[test]
     fn no_op_reset_of_already_set_flag_does_not_emit_transition() {
-        // Flag "a" starts set. A trigger fires set_flag a (no-op, value stays 1).
-        // An on_flag_set trigger for "a" must NOT fire (transitions only).
         let mut app = ai_trigger_test_app();
-        let npc_uuid = "uuid-noop-source";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime.flags.set_flag("a"); // pre-set
-            runtime
-                .name_to_uuid
-                .insert("source".into(), npc_uuid.into());
-            runtime.trigger_states = vec![
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnDestroyed {
-                            entity_name: "source".into(),
-                        },
-                        actions: vec![TriggerAction::SetWorldFlag { name: "a".into() }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagSet { name: "a".into() },
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagSet { name: "a".into() },
-                        actions: vec![TriggerAction::AddObjective {
-                            id: "obj-no-op".into(),
-                            text: "Should not fire on no-op re-set".into(),
-                            mandatory: false,
-                            targets: vec![],
-                            directive: crate::messages::AiDirective::None,
-                            utility: crate::objectives::UtilityConfig::default(),
-                            source: crate::messages::ObjectiveSource::default(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
-                },
-            ];
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
         }
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed {
-                entity_uuid: npc_uuid.into(),
-            });
-        app.update();
-
-        let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(
-            !runtime.trigger_states[1].fired,
-            "on_flag_set must not fire when the flag was already set (no transition)"
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::SetWorldFlag { name: "a".into() }],
         );
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+
         assert!(
-            !objs.sorted_snapshots().iter().any(|o| o.id == "obj-no-op"),
-            "no objective expected from a no-op flag re-set"
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .pending_world_events
+                .is_empty(),
+            "a no-op re-set must emit no transition event at all"
+        );
+
+        // Step the tick that would have drained a transition, had one been
+        // emitted.
+        app.update();
+        assert!(
+            !trigger_fired(&app, 0),
+            "on_flag_set must not fire when the flag was already set (no transition)"
         );
     }
 
+    /// The mirror of the `set_flag` chain: a `clear_flag` over a set flag is a
+    /// true → false transition, so it emits `FlagCleared` and an
+    /// `on_flag_cleared` watcher fires on the next tick (the delayed-action
+    /// queue's event lag — see the `set_flag` twin above).
     #[test]
-    fn clear_flag_action_fires_on_flag_cleared_trigger() {
+    fn delayed_clear_flag_action_fires_on_flag_cleared_trigger_on_the_next_tick() {
         let mut app = ai_trigger_test_app();
-        let npc_uuid = "uuid-clear-source";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.flags.set_flag("shields_up"); // pre-set so we transition trueÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢false
-            runtime
-                .name_to_uuid
-                .insert("source".into(), npc_uuid.into());
-            runtime.trigger_states = vec![
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnDestroyed {
-                            entity_name: "source".into(),
-                        },
-                        actions: vec![TriggerAction::ClearWorldFlag {
-                            name: "shields_up".into(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
+            // Pre-set so the clear is a real true → false transition.
+            runtime.flags.set_flag("shields_up");
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagCleared {
+                        name: "shields_up".into(),
                     },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagCleared {
-                            name: "shields_up".into(),
-                        },
-                        actions: vec![TriggerAction::AddObjective {
-                            id: "obj-shields-down".into(),
-                            text: "Shields are down".into(),
-                            mandatory: true,
-                            targets: vec![],
-                            directive: crate::messages::AiDirective::None,
-                            utility: crate::objectives::UtilityConfig::default(),
-                            source: crate::messages::ObjectiveSource::default(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
-                },
-            ];
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
         }
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed {
-                entity_uuid: npc_uuid.into(),
-            });
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::ClearWorldFlag {
+                name: "shields_up".into(),
+            }],
+        );
         app.update();
 
-        let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(!runtime.flags.flag("shields_up"));
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(!app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .flag("shields_up"));
         assert!(
-            objs.sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-shields-down"),
-            "on_flag_cleared trigger must fire on trueÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢false transition"
+            trigger_fired(&app, 0),
+            "on_flag_cleared trigger must fire on the true → false transition"
         );
     }
 
@@ -5632,18 +5290,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     condition: TriggerCondition::OnDestroyed {
                         entity_name: "source".into(),
                     },
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "obj-parent-when".into(),
-                        text: "parent flag was set".into(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: Some(crate::world::flags::parse_predicate("flag(parent:armed)").unwrap()),
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -5661,17 +5308,21 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             });
         app.update();
 
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objs.sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-parent-when"),
+            trigger_fired(&app, 0),
             "sub-world trigger gated on parent:armed must fire when base flag is set"
         );
     }
 
-    /// Per-layer flag scoping: a flag set inside a sub-world must NOT
-    /// fire a base-world trigger that watches the same name.
+    /// Per-layer flag scoping: a flag set inside a sub-world must NOT fire a
+    /// base-world trigger that watches the same name. The mutation lands in the
+    /// layer's own store and its `FlagSet` carries that layer path, which the
+    /// base-world watcher's layer chain does not match.
+    ///
+    /// The sub-world `set_flag` came off a layer-origin trigger's action array
+    /// until issue #985 deleted it; the same mutation is queued as a delayed
+    /// action stamped with that layer as its `origin_layer`, which is the field
+    /// `dispatch_action` reads to pick the target store either way.
     #[test]
     fn same_named_flag_in_sub_world_does_not_fire_base_world_on_flag_set() {
         let mut app = ai_trigger_test_app();
@@ -5689,68 +5340,35 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 },
             );
         }
-        let npc_uuid = "uuid-scoped-source";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("source".into(), npc_uuid.into());
-            runtime.trigger_states = vec![
-                // Sub-world trigger: setting `armed` in the sub-world layer.
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnDestroyed {
-                            entity_name: "source".into(),
-                        },
-                        actions: vec![TriggerAction::SetWorldFlag {
-                            name: "armed".into(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
+            // Base-world watcher: on_flag_set armed.
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagSet {
+                        name: "armed".into(),
                     },
-                    fired: false,
-                    origin_layer: Some(layer_path.clone()),
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
-                // Base-world watcher: on_flag_set armed.
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagSet {
-                            name: "armed".into(),
-                        },
-                        actions: vec![TriggerAction::AddObjective {
-                            id: "obj-base-armed".into(),
-                            text: "should NOT fire Ã¢输了¬â€� different layer".into(),
-                            mandatory: false,
-                            targets: vec![],
-                            directive: crate::messages::AiDirective::None,
-                            utility: crate::objectives::UtilityConfig::default(),
-                            source: crate::messages::ObjectiveSource::default(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
-                },
-            ];
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
         }
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed {
-                entity_uuid: npc_uuid.into(),
-            });
+        dispatch_delayed_actions(
+            &mut app,
+            Some(&layer_path),
+            None,
+            vec![TriggerAction::SetWorldFlag {
+                name: "armed".into(),
+            }],
+        );
+        // Second tick: the queued FlagSet reaches the pipeline, so the base
+        // watcher gets its chance to (wrongly) match.
         app.update();
 
         // Sub-world layer's flag store got the mutation; base store did not.
@@ -5762,58 +5380,34 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         );
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(!runtime.flags.flag("armed"), "base store must remain empty");
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            !objs
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-base-armed"),
+            !runtime.trigger_states[0].fired,
             "base trigger must not cross-fire on sub-world flag"
         );
     }
 
-    /// `parent:flag` mutation from the base world walks past root Ã¢â€ â€™ no-op +
-    /// warn; the predicate read also resolves as unset.
+    /// A `parent:flag` mutation from the BASE world walks past the root of the
+    /// layer chain: no store to write, so it is a warned no-op — and in
+    /// particular it must not fall back to writing the base store, nor write the
+    /// literal prefixed name as if it were an ordinary flag.
+    ///
+    /// Driven from the delayed-action queue since issue #985 deleted the
+    /// `[[trigger]]` action array the mutation used to be authored on.
     #[test]
     fn parent_walk_past_root_from_base_is_noop_for_mutation_and_reads_unset() {
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>();
         app.init_resource::<PendingWorldLayerChanges>();
-        let npc_uuid = "uuid-past-root";
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("source".into(), npc_uuid.into());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnDestroyed {
-                        entity_name: "source".into(),
-                    },
-                    // Base-world trigger (origin_layer=None) tries to mutate
-                    // `parent:armed` Ã¯Â¿Â½ must be a no-op.
-                    actions: vec![TriggerAction::SetWorldFlag {
-                        name: "parent:armed".into(),
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed {
-                entity_uuid: npc_uuid.into(),
-            });
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            // Base world: the chain is one entry long, so one `parent:` step
+            // already walks off the end.
+            None,
+            None,
+            vec![TriggerAction::SetWorldFlag {
+                name: "parent:armed".into(),
+            }],
+        );
 
         // Neither the base `armed` nor `parent:armed` should be set.
         let runtime = app.world().resource::<WorldContentRuntime>();
@@ -5827,8 +5421,10 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         );
     }
 
+    /// The `AiEntityAttacked` message is bridged into a `WorldEvent::Attacked`
+    /// and matched against the trigger's named entity.
     #[test]
-    fn on_entity_attacked_trigger_fires_add_objective_action() {
+    fn on_entity_attacked_trigger_fires() {
         let mut app = ai_trigger_test_app();
 
         let npc_uuid = "attacked-npc-uuid-002";
@@ -5843,18 +5439,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                     condition: TriggerCondition::OnAttacked {
                         entity_name: "enemy_ship".to_string(),
                     },
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "obj-002".to_string(),
-                        text: "Enemy attacked".to_string(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -5875,28 +5460,25 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-002"),
-            "AddObjective action from on_entity_attacked must have fired"
+            trigger_fired(&app, 0),
+            "an attack on the named entity must fire the trigger"
         );
     }
 
+    /// Issue #572: `SetAiState` survives as a `TriggerAction` variant but is a
+    /// no-op — doctrine-based AI has no FSM state slot to write. Dispatching one
+    /// must neither panic nor disturb the target entity.
+    ///
+    /// Dispatched through the delayed-action queue: issue #985 deleted the
+    /// `[[trigger]]` action array it used to be authored on.
     #[test]
     fn set_ai_state_action_is_noop_in_doctrine_based_ai() {
-        // Issue #572: SetAiState is kept in TriggerAction for TOML backward compat
-        // but is now a no-op â€” doctrine-based AI has no FSM state slots. Verify
-        // the system doesn't crash and the AI entity is unmodified.
         use crate::entity_config::BehaviourConfig;
 
         let mut app = ai_trigger_test_app();
 
         let npc_uuid = "npc-state-change-uuid-003";
-        let attacker_uuid = uuid::Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap();
-
         let entity = app
             .world_mut()
             .spawn((
@@ -5907,46 +5489,24 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .id();
         app.update(); // register AI tokens
 
-        // Set up trigger: on attacked â†’ SetAiState (now a no-op).
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime
                 .name_to_uuid
                 .insert("npc_alpha".to_string(), npc_uuid.to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "npc_alpha".to_string(),
-                    },
-                    actions: vec![TriggerAction::SetAiState {
-                        entity: "npc_alpha".to_string(),
-                        state: "chase".to_string(),
-                        target: None,
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
         }
 
-        // Fire the attacked event.
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityAttacked>>()
-            .write(AiEntityAttacked {
-                entity_uuid: npc_uuid.to_string(),
-                attacker_uuid,
-            });
-
-        // Must not panic â€” SetAiState is silently ignored.
-        app.update();
+        // Must not panic — SetAiState is silently ignored.
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::SetAiState {
+                entity: "npc_alpha".to_string(),
+                state: "chase".to_string(),
+                target: None,
+            }],
+        );
 
         // The entity must still be AI-controlled (no FSM state to mutate).
         assert!(
@@ -5957,35 +5517,10 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
     // -- add_faction_enemy / remove_faction_enemy dispatch tests --------------
 
-    /// Helper: fire a single trigger with the given action via
-    /// `tick_trigger_pipeline`. Uses `on_world_loaded` so we only need a
-    /// `WorldLoaded` event to fire it. Returns the post-update App so
-    /// tests can inspect mutated resources.
-    fn fire_world_loaded_action(actions: Vec<TriggerAction>) -> App {
-        let mut app = ai_trigger_test_app();
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnWorldLoaded,
-                    actions,
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-        }
-        app.update();
-        app
-    }
+    // These fired their actions off an `on_world_loaded` trigger until issue
+    // #985 deleted the `[[trigger]]` action array; they go through
+    // `dispatch_delayed_actions_in_new_app`, which reaches the same
+    // `world::dispatch` table with the same `FactionRegistry` in the context.
 
     /// Convenience: faction UUIDs from the bundled TOML asset files
     /// (loaded by `get_faction_registry`). Centralises the literal UUIDs
@@ -6024,8 +5559,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             );
         }
 
-        // Fire a trigger that flips both directions hostile.
-        let app = fire_world_loaded_action(vec![
+        // Dispatch the pair that flips both directions hostile.
+        let app = dispatch_delayed_actions_in_new_app(vec![
             TriggerAction::AddFactionEnemy {
                 faction: "Harrow".into(),
                 enemy: "Federation".into(),
@@ -6054,7 +5589,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     fn add_faction_enemy_action_with_unknown_faction_name_is_noop() {
         // The Federation registry stays unchanged when the named faction
         // is missing. Verifies the warn-and-skip dispatch path.
-        let app = fire_world_loaded_action(vec![TriggerAction::AddFactionEnemy {
+        let app = dispatch_delayed_actions_in_new_app(vec![TriggerAction::AddFactionEnemy {
             faction: "Klingon".into(), // not a registered faction
             enemy: "Federation".into(),
         }]);
@@ -6077,7 +5612,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     #[test]
     fn remove_faction_enemy_action_removes_relationship() {
         // First add the relationship, then verify remove undoes it.
-        let app = fire_world_loaded_action(vec![
+        let app = dispatch_delayed_actions_in_new_app(vec![
             TriggerAction::AddFactionEnemy {
                 faction: "Harrow".into(),
                 enemy: "Federation".into(),
@@ -6098,18 +5633,22 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         );
     }
 
+    /// Scenario:
+    ///   1. Spawn a Harrow-factioned NPC that has locked a Federation player
+    ///      ship (the lock is seeded by hand to stand in for a prior
+    ///      `enemy_in_range` engagement).
+    ///   2. Make the two sides mutually hostile via `add_faction_enemy`, so the
+    ///      precondition holds.
+    ///   3. Dispatch `remove_faction_enemy` for Harrow → Federation.
+    ///   4. Assert the NPC's lock is cleared — the revalidation kicked in
+    ///      because the target's faction is no longer hostile to its own.
+    ///
+    /// The three actions rode on two `on_world_loaded` / `on_flag_set` triggers
+    /// until issue #985 deleted the `[[trigger]]` action array; they are queued
+    /// on the delayed-action queue in the same order now, and
+    /// `tick_delayed_actions` carries the `ai_query` the revalidation needs.
     #[test]
     fn remove_faction_enemy_action_clears_blackboard_target_when_target_becomes_friendly() {
-        // Scenario:
-        //   1. Spawn a Harrow-factioned NPC that targets a Federation
-        //      player ship (set blackboard.target manually to simulate a
-        //      prior `enemy_in_range` engagement).
-        //   2. Make Federation hostile to Harrow via add_faction_enemy
-        //      so the precondition is mutually hostile.
-        //   3. Fire remove_faction_enemy for Harrow Ã¢â€ â€™ Federation.
-        //   4. Assert: the NPC's blackboard.target is now None (the
-        //      revalidation kicked in because target_faction is no
-        //      longer hostile to self_faction).
         use crate::entity_config::BehaviourConfig;
 
         let mut app = ai_trigger_test_app();
@@ -6152,67 +5691,25 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             lock.0 = Some(player_uuid.to_string());
         }
 
-        // Bring both sides into mutual hostility, then fire
-        // remove_faction_enemy on Harrow's side. Two trigger states Ã¢â€¡â€™ the
-        // first establishes the relationship that the second tears down.
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.trigger_states = vec![
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnWorldLoaded,
-                        actions: vec![
-                            TriggerAction::AddFactionEnemy {
-                                faction: "Harrow".into(),
-                                enemy: "Federation".into(),
-                            },
-                            TriggerAction::AddFactionEnemy {
-                                faction: "Federation".into(),
-                                enemy: "Harrow".into(),
-                            },
-                        ],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![
+                TriggerAction::AddFactionEnemy {
+                    faction: "Harrow".into(),
+                    enemy: "Federation".into(),
                 },
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagSet {
-                            name: "peace".into(),
-                        },
-                        actions: vec![TriggerAction::RemoveFactionEnemy {
-                            faction: "Harrow".into(),
-                            enemy: "Federation".into(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+                TriggerAction::AddFactionEnemy {
+                    faction: "Federation".into(),
+                    enemy: "Harrow".into(),
                 },
-            ];
-            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-            runtime.pending_world_events.push(WorldEvent::FlagSet {
-                name: "peace".into(),
-                origin_layer: None,
-            });
-        }
-
-        app.update();
+                TriggerAction::RemoveFactionEnemy {
+                    faction: "Harrow".into(),
+                    enemy: "Federation".into(),
+                },
+            ],
+        );
 
         // The NPC's lock must be cleared because Harrow no longer considers
         // Federation hostile. `ai_target_selection`'s retention tier would
@@ -7225,7 +6722,7 @@ base_priority = 35.0
         let mut world_cfg = crate::world::config::WorldConfig::default();
         world_cfg
             .extra_worlds
-            .push("tests/fixtures/layer_declarative_triggers.toml".into());
+            .push("tests/fixtures/layer_entities.toml".into());
         world_cfg
             .extra_worlds
             .push("assets/worlds/side.toml".into());
@@ -7241,127 +6738,91 @@ base_priority = 35.0
             "one Load command per extra_worlds entry"
         );
         assert!(
-            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "tests/fixtures/layer_declarative_triggers.toml")
+            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "tests/fixtures/layer_entities.toml")
         );
         assert!(
             matches!(&pending.0[1], WorldLayerChange::Load { path: p, .. } if p == "assets/worlds/side.toml")
         );
     }
 
-    /// `LoadWorld` action via trigger queues a `Load` command into `PendingWorldLayerChanges`.
+    /// A `LoadWorld` action queues a `Load` command into
+    /// `PendingWorldLayerChanges` rather than loading inline, so the one
+    /// `apply_world_layer_changes` applier owns every load.
+    ///
+    /// Dispatched through the delayed-action queue since issue #985 deleted the
+    /// `[[trigger]]` action array it used to be authored on.
     #[test]
-    fn load_world_trigger_action_queues_pending_layer_change() {
+    fn load_world_action_queues_pending_layer_change() {
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>();
 
-        let npc_uuid = "trigger-load-world-npc-001";
-        let attacker_uuid = uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000001").unwrap();
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("raider".into(), npc_uuid.into());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "raider".into(),
-                    },
-                    actions: vec![TriggerAction::LoadWorld {
-                        path: "tests/fixtures/layer_declarative_triggers.toml".into(),
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityAttacked>>()
-            .write(AiEntityAttacked {
-                entity_uuid: npc_uuid.into(),
-                attacker_uuid,
-            });
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::LoadWorld {
+                path: "tests/fixtures/layer_entities.toml".into(),
+            }],
+        );
 
         let pending = app.world().resource::<PendingWorldLayerChanges>();
         assert_eq!(pending.0.len(), 1, "one Load must be queued");
         assert!(
-            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "tests/fixtures/layer_declarative_triggers.toml")
+            matches!(&pending.0[0], WorldLayerChange::Load { path: p, .. } if p == "tests/fixtures/layer_entities.toml")
         );
     }
 
-    /// `UnloadWorld` action via trigger queues an `Unload` command.
+    /// The `UnloadWorld` mirror of `load_world_action_queues_pending_layer_change`.
     #[test]
-    fn unload_world_trigger_action_queues_pending_layer_change() {
+    fn unload_world_action_queues_pending_layer_change() {
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>();
 
-        let npc_uuid = "trigger-unload-world-npc-002";
-        let attacker_uuid = uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000002").unwrap();
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("raider".into(), npc_uuid.into());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "raider".into(),
-                    },
-                    actions: vec![TriggerAction::UnloadWorld {
-                        path: "tests/fixtures/layer_declarative_triggers.toml".into(),
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityAttacked>>()
-            .write(AiEntityAttacked {
-                entity_uuid: npc_uuid.into(),
-                attacker_uuid,
-            });
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::UnloadWorld {
+                path: "tests/fixtures/layer_entities.toml".into(),
+            }],
+        );
 
         let pending = app.world().resource::<PendingWorldLayerChanges>();
         assert_eq!(pending.0.len(), 1, "one Unload must be queued");
         assert!(
-            matches!(&pending.0[0], WorldLayerChange::Unload(p) if p == "tests/fixtures/layer_declarative_triggers.toml")
+            matches!(&pending.0[0], WorldLayerChange::Unload(p) if p == "tests/fixtures/layer_entities.toml")
         );
     }
 
-    /// `apply_world_layer_changes` with `LoadWorld(patrol.toml)` reads the TOML
-    /// on native, merges triggers into `WorldContentRuntime`, and registers the
-    /// layer in `WorldLayerMap`.
+    /// How many ECS entities were spawned by the layer at `path`.
+    ///
+    /// The layer contract's one observable: a loaded layer contributes ENTITIES
+    /// and — until script-in-layers (#1045) — nothing else, because issue #985
+    /// deleted the `[[trigger]]` parser that was a layer's only way to author
+    /// scenario logic. See `tests/fixtures/layer_entities.toml`.
+    fn layer_entity_count(app: &App, path: &str) -> usize {
+        app.world()
+            .resource::<WorldLayerMap>()
+            .0
+            .get(path)
+            .map(|layer| layer.spawned_entities.len())
+            .unwrap_or(0)
+    }
+
+    /// `apply_world_layer_changes` with a `Load` reads the TOML on native,
+    /// registers the layer in `WorldLayerMap`, spawns its `[[entity]]` blocks and
+    /// registers their names in the live runtime.
     #[test]
-    fn load_world_action_merges_triggers_into_runtime() {
+    fn load_world_action_registers_the_layers_entities() {
         let mut app = layer_test_app();
 
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
+                path: "tests/fixtures/layer_entities.toml".into(),
                 loader_path: None,
             });
 
@@ -7371,14 +6832,21 @@ base_priority = 35.0
         assert!(
             layer_map
                 .0
-                .contains_key("tests/fixtures/layer_declarative_triggers.toml"),
+                .contains_key("tests/fixtures/layer_entities.toml"),
             "WorldLayerMap must contain the loaded path"
+        );
+        assert_eq!(
+            layer_entity_count(&app, "tests/fixtures/layer_entities.toml"),
+            1,
+            "the layer's one [[entity]] block must spawn"
         );
 
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
-            !runtime.trigger_states.is_empty(),
-            "trigger states must be merged into runtime"
+            runtime
+                .name_to_uuid
+                .contains_key("test.layer_fixture.raider"),
+            "the layer's named entity must be registered for name lookups"
         );
     }
 
@@ -7392,62 +6860,61 @@ base_priority = 35.0
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
+                path: "tests/fixtures/layer_entities.toml".into(),
                 loader_path: None,
             });
         app.update();
 
-        let trigger_count_after_first = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len();
+        let after_first = layer_entity_count(&app, "tests/fixtures/layer_entities.toml");
+        assert_eq!(after_first, 1, "the first load spawns the layer's entity");
 
-        // Load again ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â must not double-add.
+        // Load again — must not double-spawn.
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
+                path: "tests/fixtures/layer_entities.toml".into(),
                 loader_path: None,
             });
         app.update();
 
-        let trigger_count_after_second = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len();
-
         assert_eq!(
-            trigger_count_after_first, trigger_count_after_second,
-            "duplicate LoadWorld must not add duplicate trigger states"
+            after_first,
+            layer_entity_count(&app, "tests/fixtures/layer_entities.toml"),
+            "duplicate LoadWorld must not spawn the layer's entities twice"
         );
     }
 
-    /// `UnloadWorld` removes the triggers that were added by the matching `LoadWorld`.
+    /// `UnloadWorld` despawns exactly the entities the matching `LoadWorld`
+    /// spawned, and drops the layer from `WorldLayerMap`.
+    ///
+    /// It asserted on the layer's trigger states until issue #985 deleted the
+    /// `[[trigger]]` parser; a layer now contributes only entities, so those are
+    /// what the unload cascade has to take back out.
     #[test]
-    fn unload_world_removes_triggers_added_by_load_world() {
+    fn unload_world_despawns_entities_added_by_load_world() {
         let mut app = layer_test_app();
 
-        // Load patrol.toml.
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Load {
-                path: "tests/fixtures/layer_declarative_triggers.toml".into(),
+                path: "tests/fixtures/layer_entities.toml".into(),
                 loader_path: None,
             });
         app.update();
 
-        let trigger_count_loaded = app
+        let spawned: Vec<Entity> = app
             .world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len();
+            .resource::<WorldLayerMap>()
+            .0
+            .get("tests/fixtures/layer_entities.toml")
+            .expect("layer present")
+            .spawned_entities
+            .clone();
         assert!(
-            trigger_count_loaded > 0,
-            "patrol.toml must add at least one trigger"
+            !spawned.is_empty(),
+            "the fixture layer must spawn at least one entity"
         );
 
         // Unload it.
@@ -7455,26 +6922,22 @@ base_priority = 35.0
             .resource_mut::<PendingWorldLayerChanges>()
             .0
             .push(WorldLayerChange::Unload(
-                "tests/fixtures/layer_declarative_triggers.toml".into(),
+                "tests/fixtures/layer_entities.toml".into(),
             ));
         app.update();
 
-        let trigger_count_unloaded = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len();
-
-        assert_eq!(
-            trigger_count_unloaded, 0,
-            "UnloadWorld must remove all triggers that were added by the LoadWorld"
-        );
+        for entity in spawned {
+            assert!(
+                app.world().get_entity(entity).is_err(),
+                "UnloadWorld must despawn every entity the load spawned"
+            );
+        }
 
         let layer_map = app.world().resource::<WorldLayerMap>();
         assert!(
             !layer_map
                 .0
-                .contains_key("tests/fixtures/layer_declarative_triggers.toml"),
+                .contains_key("tests/fixtures/layer_entities.toml"),
             "WorldLayerMap must no longer contain the unloaded path"
         );
     }
@@ -7840,6 +7303,10 @@ size_max = 2.0
 
         let template_path_str = template_path.to_string_lossy().replace('\\', "/");
 
+        // Entities only: the world carried an `on_destroyed` `[[trigger]]` block
+        // as well, but issue #985 deleted that parser and a world still
+        // authoring one no longer parses at all — which would leave these
+        // fixtures loading nothing.
         let world_toml = format!(
             r#"
 [global]
@@ -7849,16 +7316,6 @@ seed = 1
 template_path = "{template_path_str}"
 name = "layer_npc"
 position = [1.0, 0.0, 0.0]
-
-[[trigger]]
-condition = "on_destroyed"
-entity = "layer_npc"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-layer-npc"
-  text = "Destroyed."
-  mandatory = false
 "#,
         );
 
@@ -8075,40 +7532,36 @@ entity = "layer_npc"
     /// so the observable cut is: `chain_1..=chain_MAX` set (that much
     /// dispatch work happened), `chain_{MAX+1}` never set (the cap broke the
     /// loop before pass MAX+1), and the corresponding trigger never consumed.
+    ///
+    /// Each link is a SCRIPTED trigger. It was a declarative `[[trigger]]` chain
+    /// until issue #985 deleted the action array, and a scripted handler's
+    /// `ctx.flags` write is what still chains within a tick — `apply_script_commands`
+    /// previews the transition and pushes the `FlagSet` into the pass's
+    /// `next_events`, exactly where a declarative `set_flag` used to put it.
     #[test]
     fn trigger_chain_exceeding_max_passes_stops_at_the_cap() {
-        let mut app = ai_trigger_test_app();
         let chain_len = (MAX_CHAIN_PASSES + 2) as usize;
+        // Seed link plus one link per chain step: link i fires on chain_i and
+        // sets chain_{i+1}.
+        let mut setup =
+            String::from(r#"on_world_loaded("h0"); fn h0(ctx) { ctx.flags.chain_1 = 1; }"#);
+        for i in 1..chain_len {
+            setup.push_str(&format!(
+                r#" on_flag_set("chain_{i}", "h{i}"); fn h{i}(ctx) {{ ctx.flags.chain_{next} = 1; }}"#,
+                next = i + 1
+            ));
+        }
+        let mut sr = compile_fixture_scripts(&format!("[script]\nsetup = '{setup}'\n"));
+        assert_eq!(sr.triggers.len(), chain_len, "one trigger per chain link");
+
+        let mut app = ai_trigger_test_app();
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            let mk = |condition, flag_to_set: String| TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition,
-                    actions: vec![TriggerAction::SetWorldFlag { name: flag_to_set }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            };
-            let mut states = vec![mk(TriggerCondition::OnWorldLoaded, "chain_1".to_string())];
-            for i in 1..chain_len {
-                states.push(mk(
-                    TriggerCondition::OnFlagSet {
-                        name: format!("chain_{i}"),
-                    },
-                    format!("chain_{}", i + 1),
-                ));
-            }
-            runtime.trigger_states = states;
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
+        app.world_mut().insert_resource(sr);
 
         // A single update must terminate — the cap is what guarantees it.
         app.update();
@@ -8166,18 +7619,7 @@ entity = "layer_npc"
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnWorldLoaded,
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "obj-ghost-layer".into(),
-                        text: "Fired despite the missing layer".into(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -8194,21 +7636,17 @@ entity = "layer_npc"
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-ghost-layer"),
+            trigger_fired(&app, 0),
             "a missing origin layer must fall back to the base flag store, \
              so the base-store `armed` flag must satisfy the when predicate"
         );
     }
 
-    /// (#717) One trigger whose action list carries every `TriggerAction`
-    /// variant (all 21) must dispatch them in LIST ORDER, each result applied
-    /// before the next action is dispatched. Order is observed through
-    /// order-sensitive pairs rather than instrumentation:
+    /// (#717) A queue carrying every `TriggerAction` variant (all 21) must
+    /// dispatch them in QUEUE ORDER, each result applied before the next action
+    /// is dispatched. Order is observed through order-sensitive pairs rather
+    /// than instrumentation:
     ///
     /// * `AddObjective` → `CompleteObjective`/`FailObjective`: complete/fail
     ///   only transition Active objectives, so the final statuses prove the
@@ -8228,8 +7666,15 @@ entity = "layer_npc"
     ///   push order positionally.
     /// * `SpawnEntity` / `DestroyEntity` / `SetAiState` (warn no-op) and the
     ///   trailing `GameOver` are asserted by their individual effects.
+    ///
+    /// The list was one trigger's `[[trigger.action]]` array until issue #985
+    /// deleted it; the delayed-action queue is the surviving ordered consumer,
+    /// and `partition_delayed_actions` is what now has to preserve the order.
+    /// One consequence shows in the chained witness: a delayed action's events
+    /// queue onto `pending_world_events` for the NEXT tick, so the
+    /// `on_flag_cleared` witness fires a tick later than it used to.
     #[test]
-    fn single_trigger_dispatches_every_action_variant_in_list_order() {
+    fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
         let template_path = write_spawn_template_fixture();
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
@@ -8253,7 +7698,7 @@ entity = "layer_npc"
             ))
             .id();
 
-        {
+        let all_variants = {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime
                 .name_to_uuid
@@ -8369,56 +7814,29 @@ entity = "layer_npc"
                     outcome: None,
                 },
             ];
-            runtime.trigger_states = vec![
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnWorldLoaded,
-                        actions: all_variants,
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
+            // Chained witness: fires only if the queue emitted FlagSet("ordered")
+            // followed by FlagCleared("ordered").
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnFlagCleared {
+                        name: "ordered".into(),
                     },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
-                // Chained witness: fires only if the pipeline emitted
-                // FlagSet("ordered") followed by FlagCleared("ordered").
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagCleared {
-                            name: "ordered".into(),
-                        },
-                        actions: vec![TriggerAction::AddObjective {
-                            id: "obj-chained-cleared".into(),
-                            text: "Observed set-then-clear".into(),
-                            mandatory: false,
-                            targets: vec![],
-                            directive: crate::messages::AiDirective::None,
-                            utility: crate::objectives::UtilityConfig::default(),
-                            source: crate::messages::ObjectiveSource::default(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
-                },
-            ];
-            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-        }
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+            all_variants
+        };
 
-        app.update();
+        dispatch_delayed_actions(&mut app, None, None, all_variants);
+        // Second update: the queued transitions reach the pipeline (so the
+        // witness can fire) and the `GameOver` state transition lands.
         app.update();
 
         // Objectives: add-before-complete / add-before-fail.
@@ -8440,11 +7858,10 @@ entity = "layer_npc"
             Some(ObjectiveStatus::Failed),
             "AddObjective must dispatch before FailObjective"
         );
-        assert_eq!(
-            snapshot_status("obj-chained-cleared"),
-            Some(ObjectiveStatus::Active),
-            "SetWorldFlag must dispatch before ClearWorldFlag (chained \
-             on_flag_cleared trigger must observe the transition)"
+        assert!(
+            app.world().resource::<WorldContentRuntime>().trigger_states[0].fired,
+            "SetWorldFlag must dispatch before ClearWorldFlag (the chained \
+             on_flag_cleared witness must observe the transition)"
         );
 
         // Per-entity modifiers: apply-before-remove nets out to baselines.
@@ -8541,9 +7958,10 @@ entity = "layer_npc"
 
     // -- on_world_loaded (issue #415) ----------------------------------------
 
-    /// `tick_trigger_pipeline` drains `pending_world_events` and dispatches their
-    /// matching triggers' actions. Seeds a `WorldLoaded` event directly into
-    /// the queue and asserts the `add_objective` action fires.
+    /// `collect_world_events` drains `pending_world_events` into the per-tick
+    /// buffer and `tick_trigger_pipeline` matches the triggers against it. Seeds
+    /// a `WorldLoaded` event directly into the queue and asserts the trigger
+    /// latches.
     #[test]
     fn pending_world_loaded_event_fires_on_world_loaded_trigger() {
         let mut app = ai_trigger_test_app();
@@ -8552,18 +7970,7 @@ entity = "layer_npc"
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnWorldLoaded,
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "obj-loaded".into(),
-                        text: "World loaded.".into(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
                     when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -8578,23 +7985,15 @@ entity = "layer_npc"
 
         app.update();
 
-        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
-            objectives
-                .sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-loaded"),
-            "on_world_loaded trigger must have fired its add_objective action"
+            runtime.trigger_states[0].fired,
+            "on_world_loaded trigger must have fired"
         );
         // Queue must be drained.
-        let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
             runtime.pending_world_events.is_empty(),
             "pending_world_events must be drained by collect_world_events"
-        );
-        assert!(
-            runtime.trigger_states[0].fired,
-            "trigger must be marked fired"
         );
     }
 
@@ -8631,8 +8030,14 @@ entity = "layer_npc"
     }
 
     /// Base-world Startup: `init_world_runtime` must push a `WorldLoaded`
-    /// event onto `pending_world_events` so any `on_world_loaded` triggers
-    /// declared in the base world fire on the first Update tick.
+    /// event onto `pending_world_events` so any `on_world_loaded` trigger the
+    /// base world authored fires on the first Update tick.
+    ///
+    /// The `WorldConfig` used to carry the world's parsed `[[trigger]]` blocks
+    /// and this asserted they reached `trigger_states`; issue #985 deleted both
+    /// the field and the parser, so the table starts EMPTY for a script-free
+    /// world and only `merge_script_triggers` can fill it — which is what the
+    /// second assertion now pins.
     #[test]
     fn init_world_runtime_queues_world_loaded_event() {
         let mut app = App::new();
@@ -8643,26 +8048,7 @@ entity = "layer_npc"
             .add_plugins(WorldPlugin);
 
         // Insert a WorldConfig so init_world_runtime takes its non-no-op path.
-        let mut cfg = crate::world::config::WorldConfig::default();
-        cfg.triggers.push(crate::world::content::Trigger {
-            condition: TriggerCondition::OnWorldLoaded,
-            actions: vec![TriggerAction::AddObjective {
-                id: "obj-startup".into(),
-                text: "Startup objective.".into(),
-                mandatory: false,
-                targets: vec![],
-                directive: crate::messages::AiDirective::None,
-                utility: crate::objectives::UtilityConfig::default(),
-                source: crate::messages::ObjectiveSource::default(),
-            }],
-            when: None,
-            action_predicates: vec![],
-            action_delays: vec![],
-            id: None,
-            repeat: false,
-            cooldown_secs: None,
-        });
-        app.insert_resource(cfg);
+        app.insert_resource(crate::world::config::WorldConfig::default());
 
         app.world_mut().run_schedule(Startup);
 
@@ -8674,19 +8060,17 @@ entity = "layer_npc"
                 .any(|e| matches!(e, WorldEvent::WorldLoaded)),
             "init_world_runtime must queue a WorldLoaded event during Startup"
         );
-        assert_eq!(
-            runtime.trigger_states.len(),
-            1,
-            "trigger states must be populated"
+        assert!(
+            runtime.trigger_states.is_empty(),
+            "a script-free world contributes no trigger states"
         );
     }
 
-    /// Sub-world `LoadWorld` must push a `WorldLoaded` event so any
-    /// `on_world_loaded` triggers declared in the loaded sub-world fire
-    /// after the load merges.
+    /// Sub-world `LoadWorld` must push a `WorldLoaded` event so a base-world
+    /// `on_world_loaded` handler can react to the layer arriving.
     #[test]
     fn apply_world_layer_changes_queues_world_loaded_event_on_load() {
-        let world_path = write_on_world_loaded_layer_fixture();
+        let world_path = write_entity_layer_fixture();
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
@@ -8715,18 +8099,48 @@ entity = "layer_npc"
         );
     }
 
-    /// End-to-end: load a sub-world with an `on_world_loaded` trigger,
-    /// unload it, then re-load it. The trigger must fire on both load
-    /// cycles (proves `fired` is reset because the trigger state is
-    /// recreated fresh on re-load).
+    /// End-to-end: load a sub-world, unload it, then re-load it. Each load cycle
+    /// must emit its own `WorldLoaded`, so a base-world `on_world_loaded` handler
+    /// reacts to the layer arriving BOTH times — a single event on the first load
+    /// would leave a re-loaded layer silently unannounced.
+    ///
+    /// This used to place the `on_world_loaded` trigger INSIDE the layer and read
+    /// the second fire off a freshly-created `TriggerState`. Issue #985 deleted
+    /// the `[[trigger]]` parser, which was a layer's only way to author scenario
+    /// logic (scripts compile on the base-world path only, until #1045), so the
+    /// handler is a base-world trigger that survives both cycles — hence `repeat`,
+    /// and hence `last_fired_elapsed` rather than `fired` as the "it fired again"
+    /// observable.
     #[test]
     fn on_world_loaded_fires_again_after_unload_and_reload() {
-        let world_path = write_on_world_loaded_layer_fixture();
+        let world_path = write_entity_layer_fixture();
 
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
+            // A fixed step makes the mission clock advance by a readable amount
+            // per tick, so the two fires are distinguishable by their stamps.
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_secs(1),
+            ))
             .add_systems(Update, apply_world_layer_changes);
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.mission_clock_anchor_secs = Some(0.0);
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnWorldLoaded,
+                    when: None,
+                    id: None,
+                    repeat: true,
+                    cooldown_secs: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
+        }
 
         // -- First load cycle --
         app.world_mut()
@@ -8739,22 +8153,10 @@ entity = "layer_npc"
         app.update(); // applies load + queues WorldLoaded
         app.update(); // collect_world_events drains pending event; pipeline fires trigger
 
-        {
-            let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
-            assert!(
-                objectives
-                    .sorted_snapshots()
-                    .iter()
-                    .any(|o| o.id == "obj-on-load"),
-                "on_world_loaded trigger must fire on first load"
-            );
-        }
+        let first_fire = app.world().resource::<WorldContentRuntime>().trigger_states[0]
+            .last_fired_elapsed
+            .expect("on_world_loaded trigger must fire on first load");
 
-        // Complete the objective so we can detect the second add as a
-        // distinct event (ObjectiveManager dedupes by id; re-adding the
-        // same id leaves the existing objective in place which is fine ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
-        // we instead assert the trigger's `fired` flag flips back to true
-        // after re-load).
         // -- Unload --
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
@@ -8763,16 +8165,11 @@ entity = "layer_npc"
         app.update();
         app.update();
 
-        {
-            let runtime = app.world().resource::<WorldContentRuntime>();
-            assert!(
-                !runtime
-                    .trigger_states
-                    .iter()
-                    .any(|s| matches!(s.trigger.condition, TriggerCondition::OnWorldLoaded)),
-                "Unload must remove the on_world_loaded trigger state"
-            );
-        }
+        assert_eq!(
+            app.world().resource::<WorldContentRuntime>().trigger_states[0].last_fired_elapsed,
+            Some(first_fire),
+            "an unload emits no WorldLoaded, so the handler must not fire again"
+        );
 
         // -- Second load cycle --
         app.world_mut()
@@ -8785,23 +8182,23 @@ entity = "layer_npc"
         app.update(); // applies load + queues WorldLoaded
         app.update(); // drain + dispatch
 
-        let runtime = app.world().resource::<WorldContentRuntime>();
-        let reloaded_trigger = runtime
-            .trigger_states
-            .iter()
-            .find(|s| matches!(s.trigger.condition, TriggerCondition::OnWorldLoaded))
-            .expect("on_world_loaded trigger must be re-registered on re-load");
+        let second_fire = app.world().resource::<WorldContentRuntime>().trigger_states[0]
+            .last_fired_elapsed
+            .expect("the trigger has fired at least once");
         assert!(
-            reloaded_trigger.fired,
-            "on_world_loaded trigger must fire again on re-load \
-             (proves fired flag is reset via fresh TriggerState on Load)"
+            second_fire > first_fire,
+            "a re-loaded layer must emit its own WorldLoaded, so the handler fires \
+             again at a later mission time ({second_fire} vs {first_fire})"
         );
     }
 
-    /// Writes a tiny world TOML containing exactly one `on_world_loaded`
-    /// trigger to a temp file. Returns the path. Each call uses a unique
-    /// path so parallel test runs do not collide.
-    fn write_on_world_loaded_layer_fixture() -> String {
+    /// Writes a tiny loadable world TOML to a temp file and returns the path.
+    /// Each call uses a unique path so parallel test runs do not collide.
+    ///
+    /// It carried one `on_world_loaded` `[[trigger]]`; issue #985 deleted that
+    /// parser, and a world that still authors the block now fails to parse
+    /// outright — so the fixture is the minimum a layer can be.
+    fn write_entity_layer_fixture() -> String {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let tmp = std::env::temp_dir();
@@ -8810,15 +8207,6 @@ entity = "layer_npc"
         let toml = r#"
 [global]
 seed = 1
-
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-on-load"
-  text = "Loaded."
-  mandatory = false
 "#;
         std::fs::write(&world_path, toml).expect("failed to write fixture world TOML");
         world_path.to_string_lossy().into_owned()
@@ -8960,30 +8348,36 @@ condition = "on_world_loaded"
         }
     }
 
+    /// Register `name` → `uuid` and append a region trigger for `condition`,
+    /// returning its index in `trigger_states` so the caller can read its latch
+    /// through [`trigger_fired`].
+    ///
+    /// The trigger carried an `add_objective` the region tests read as their
+    /// "it fired" signal; issue #985 deleted the `[[trigger]]` action array, so
+    /// the latch is the signal and the objective id is gone with it.
     fn install_region_trigger(
         app: &mut App,
         name: &str,
         uuid: &str,
         condition: TriggerCondition,
-        obj_id: &str,
-    ) {
+    ) -> usize {
+        install_region_trigger_gated(app, name, uuid, condition, None)
+    }
+
+    /// [`install_region_trigger`] with an optional trigger-level `when` gate.
+    fn install_region_trigger_gated(
+        app: &mut App,
+        name: &str,
+        uuid: &str,
+        condition: TriggerCondition,
+        when: Option<crate::world::flags::Predicate>,
+    ) -> usize {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.name_to_uuid.insert(name.into(), uuid.into());
         runtime.trigger_states.push(TriggerState {
             trigger: crate::world::content::Trigger {
                 condition,
-                actions: vec![TriggerAction::AddObjective {
-                    id: obj_id.into(),
-                    text: "region trigger objective".into(),
-                    mandatory: false,
-                    targets: vec![],
-                    directive: crate::messages::AiDirective::None,
-                    utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
-                when: None,
-                action_predicates: vec![],
-                action_delays: vec![],
+                when,
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
@@ -8993,15 +8387,7 @@ condition = "on_world_loaded"
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         });
-    }
-
-    fn objective_present(app: &App, id: &str) -> bool {
-        app.world()
-            .resource::<ObjectiveManagerRes>()
-            .0
-            .sorted_snapshots()
-            .iter()
-            .any(|o| o.id == id)
+        runtime.trigger_states.len() - 1
     }
 
     #[test]
@@ -9009,20 +8395,19 @@ condition = "on_world_loaded"
         let mut app = region_trigger_test_app();
         let uuid = "uuid-nebula";
         spawn_region_with_uuid(&mut app, 100.0, 0.0, 50.0, uuid);
-        install_region_trigger(
+        let idx = install_region_trigger(
             &mut app,
             "nebula",
             uuid,
             TriggerCondition::OnEnteredRegion {
                 entity_name: "nebula".into(),
             },
-            "obj-entered",
         );
 
         // Tick 1: ship outside (at origin), no enter ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no fire.
         app.update();
         assert!(
-            !objective_present(&app, "obj-entered"),
+            !trigger_fired(&app, idx),
             "trigger must not fire while outside"
         );
 
@@ -9033,10 +8418,7 @@ condition = "on_world_loaded"
         set_ship_pos(&mut app, 110.0, 0.0);
         app.update(); // queues EnteredRegion
         app.update(); // collect_world_events drains; tick_trigger_pipeline fires
-        assert!(
-            objective_present(&app, "obj-entered"),
-            "trigger must fire on entry"
-        );
+        assert!(trigger_fired(&app, idx), "trigger must fire on entry");
 
         // Confirm single-shot: trigger is marked fired, queue is drained.
         let runtime = app.world().resource::<WorldContentRuntime>();
@@ -9065,14 +8447,13 @@ condition = "on_world_loaded"
         let mut app = region_trigger_test_app();
         let uuid = "uuid-nebula";
         spawn_region_with_uuid(&mut app, 0.0, 0.0, 50.0, uuid);
-        install_region_trigger(
+        let idx = install_region_trigger(
             &mut app,
             "nebula",
             uuid,
             TriggerCondition::OnExitedRegion {
                 entity_name: "nebula".into(),
             },
-            "obj-exited",
         );
 
         // Move inside first so we enter cleanly.
@@ -9080,7 +8461,7 @@ condition = "on_world_loaded"
         app.update();
         app.update();
         assert!(
-            !objective_present(&app, "obj-exited"),
+            !trigger_fired(&app, idx),
             "exit trigger must not fire on entry"
         );
 
@@ -9089,7 +8470,7 @@ condition = "on_world_loaded"
         app.update();
         app.update();
         assert!(
-            objective_present(&app, "obj-exited"),
+            trigger_fired(&app, idx),
             "exit trigger must fire when ship moves outside the region"
         );
     }
@@ -9099,21 +8480,20 @@ condition = "on_world_loaded"
         let mut app = region_trigger_test_app();
         let uuid = "uuid-fragile";
         let region_entity = spawn_region_with_uuid(&mut app, 0.0, 0.0, 50.0, uuid);
-        install_region_trigger(
+        let idx = install_region_trigger(
             &mut app,
             "fragile",
             uuid,
             TriggerCondition::OnExitedRegion {
                 entity_name: "fragile".into(),
             },
-            "obj-imploded",
         );
 
         // Enter the region.
         set_ship_pos(&mut app, 10.0, 0.0);
         app.update();
         app.update();
-        assert!(!objective_present(&app, "obj-imploded"));
+        assert!(!trigger_fired(&app, idx));
 
         // Despawn the region while ship is inside ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â membership system
         // emits an implicit RegionExited.
@@ -9122,7 +8502,7 @@ condition = "on_world_loaded"
         app.update(); // drains + fires
 
         assert!(
-            objective_present(&app, "obj-imploded"),
+            trigger_fired(&app, idx),
             "exit trigger must fire when the region is despawned while ship is inside"
         );
     }
@@ -9135,23 +8515,21 @@ condition = "on_world_loaded"
         // Both regions cover the origin.
         spawn_region_with_uuid(&mut app, 0.0, 0.0, 80.0, uuid_a);
         spawn_region_with_uuid(&mut app, 20.0, 0.0, 80.0, uuid_b);
-        install_region_trigger(
+        let idx_a = install_region_trigger(
             &mut app,
             "region_a",
             uuid_a,
             TriggerCondition::OnEnteredRegion {
                 entity_name: "region_a".into(),
             },
-            "obj-a",
         );
-        install_region_trigger(
+        let idx_b = install_region_trigger(
             &mut app,
             "region_b",
             uuid_b,
             TriggerCondition::OnEnteredRegion {
                 entity_name: "region_b".into(),
             },
-            "obj-b",
         );
 
         // Ship at origin is inside both regions. First tick queues both
@@ -9161,11 +8539,11 @@ condition = "on_world_loaded"
         app.update();
 
         assert!(
-            objective_present(&app, "obj-a"),
+            trigger_fired(&app, idx_a),
             "region A enter trigger must fire"
         );
         assert!(
-            objective_present(&app, "obj-b"),
+            trigger_fired(&app, idx_b),
             "region B enter trigger must fire"
         );
     }
@@ -9185,14 +8563,13 @@ condition = "on_world_loaded"
         let uuid = "uuid-quarantine";
         // Region at (100, 0); player ship stays at origin (outside).
         spawn_region_with_uuid(&mut app, 100.0, 0.0, 50.0, uuid);
-        install_region_trigger(
+        let idx = install_region_trigger(
             &mut app,
             "quarantine",
             uuid,
             TriggerCondition::OnEnteredRegion {
                 entity_name: "quarantine".into(),
             },
-            "obj-ship-quarantined",
         );
 
         // Spawn an "NPC" entity inside the region by placing a generic
@@ -9255,81 +8632,60 @@ condition = "on_world_loaded"
         app.update();
 
         assert!(
-            !objective_present(&app, "obj-ship-quarantined"),
-            "NPC entering the region must not fire the player-ship trigger"
-        );
-        let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(
-            !runtime.trigger_states[0].fired,
+            !trigger_fired(&app, idx),
             "trigger must remain unfired when only an NPC is inside"
         );
     }
 
+    /// A region trigger's `when` gate behaves like every other trigger's: a
+    /// false predicate suppresses the entry without consuming the trigger, so a
+    /// later entry with the flag set still fires it.
+    ///
+    /// The gate was authored as `when: None` here, which meant the first half of
+    /// the test could only ever pass on the region pipeline's one-tick event lag.
+    /// Both halves are real now: each crossing is stepped twice (queue, then
+    /// drain), so the suppressed entry is genuinely evaluated against the unset
+    /// flag.
     #[test]
     fn on_entered_region_trigger_with_when_filter_obeys_predicate() {
         let mut app = region_trigger_test_app();
         let uuid = "uuid-zone";
         spawn_region_with_uuid(&mut app, 0.0, 0.0, 50.0, uuid);
 
-        // Install a trigger gated by `flag(armed)`.
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("zone".into(), uuid.into());
-            runtime.trigger_states.push(TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnEnteredRegion {
-                        entity_name: "zone".into(),
-                    },
-                    actions: vec![TriggerAction::AddObjective {
-                        id: "obj-armed-entry".into(),
-                        text: "Armed entry.".into(),
-                        mandatory: false,
-                        targets: vec![],
-                        directive: crate::messages::AiDirective::None,
-                        utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            });
-        }
-
-        // First entry: flag unset ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ predicate false ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no objective.
-        set_ship_pos(&mut app, 10.0, 0.0);
-        app.update();
-        assert!(
-            !objective_present(&app, "obj-armed-entry"),
-            "gated trigger must not fire while flag is unset"
+        let idx = install_region_trigger_gated(
+            &mut app,
+            "zone",
+            uuid,
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "zone".into(),
+            },
+            Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
         );
-        {
-            let runtime = app.world().resource::<WorldContentRuntime>();
-            assert!(
-                !runtime.trigger_states[0].fired,
-                "predicate-false firings must NOT consume the trigger"
-            );
-        }
 
-        // Set the flag, leave the region, re-enter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â trigger should fire now.
+        // First entry: the crossing queues an EnteredRegion, the next tick
+        // drains it into the pipeline — where the unset flag suppresses it.
+        set_ship_pos(&mut app, 10.0, 0.0);
+        app.update(); // queues EnteredRegion
+        app.update(); // drains it; the predicate reads false
+        assert!(
+            !trigger_fired(&app, idx),
+            "predicate-false firings must NOT consume the trigger"
+        );
+
+        // Set the flag, leave the region, re-enter — the trigger fires now.
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime.flags.set_flag("armed");
         }
         set_ship_pos(&mut app, 200.0, 0.0); // exit
         app.update();
+        app.update();
         set_ship_pos(&mut app, 10.0, 0.0); // re-enter
+        app.update();
         app.update();
 
         assert!(
-            objective_present(&app, "obj-armed-entry"),
+            trigger_fired(&app, idx),
             "gated trigger must fire once the flag is set and ship re-enters"
         );
     }
@@ -9358,8 +8714,11 @@ size_max = 2.0
     }
 
     /// SpawnEntity action with an explicit `position` spawns a new entity into
-    /// the ECS, registers it in `name_to_uuid`, and a follow-up DestroyEntity
-    /// removes it again.
+    /// the ECS at those coordinates and registers it in `name_to_uuid`.
+    ///
+    /// This section's actions were authored on `[[trigger.action]]` arrays until
+    /// issue #985 deleted them; they are dispatched from the delayed-action
+    /// queue, which reaches the same `world::dispatch` table.
     #[test]
     fn spawn_entity_action_with_position_spawns_and_registers_uuid() {
         use crate::entities::spawner::EntityUuid;
@@ -9367,51 +8726,22 @@ size_max = 2.0
         let template_path = write_spawn_template_fixture();
         let mut app = ai_trigger_test_app();
 
-        // Trigger fires on attack of a pre-registered marker.
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("marker".to_string(), "marker-uuid".to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "marker".to_string(),
-                    },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "spawned_one".to_string(),
-                        anchor: None,
-                        position: Some([7.0, 0.0, 3.0]),
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
-            .write(crate::ai_plugin::AiEntityAttacked {
-                entity_uuid: "marker-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000001")
-                    .unwrap(),
-            });
-
-        app.update();
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::SpawnEntity {
+                template_path: template_path.clone(),
+                name: "spawned_one".to_string(),
+                anchor: None,
+                position: Some([7.0, 0.0, 3.0]),
+                rotation: None,
+                scale: None,
+                groups: vec![],
+                overrides: None,
+            }],
+        );
+        app.update(); // flush the queued spawn Commands
 
         // name_to_uuid must contain the new entity.
         let uuid = app
@@ -9452,48 +8782,22 @@ size_max = 2.0
         wc.anchors.insert("alpha".to_string(), [42.0, 0.0, -5.0]);
         app.world_mut().insert_resource(wc);
 
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("trigger_src".to_string(), "src-uuid".to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnDestroyed {
-                        entity_name: "trigger_src".to_string(),
-                    },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "anchor_spawn".to_string(),
-                        anchor: Some("alpha".to_string()),
-                        position: None,
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
-            .write(crate::ai_plugin::AiEntityDestroyed {
-                entity_uuid: "src-uuid".into(),
-            });
-
-        app.update();
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::SpawnEntity {
+                template_path: template_path.clone(),
+                name: "anchor_spawn".to_string(),
+                anchor: Some("alpha".to_string()),
+                position: None,
+                rotation: None,
+                scale: None,
+                groups: vec![],
+                overrides: None,
+            }],
+        );
+        app.update(); // flush the queued spawn Commands
 
         let uuid = app
             .world()
@@ -9544,50 +8848,22 @@ size_max = 2.0
             .insert("docking_bay".to_string(), [-99.0, 0.0, -99.0]);
         app.world_mut().insert_resource(wc);
 
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("layer_trigger".to_string(), "lt-uuid".to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "layer_trigger".to_string(),
-                    },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "layer_spawn".to_string(),
-                        anchor: Some("docking_bay".to_string()),
-                        position: None,
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: Some(layer_path.clone()),
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
-            .write(crate::ai_plugin::AiEntityAttacked {
-                entity_uuid: "lt-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000001")
-                    .unwrap(),
-            });
-
-        app.update();
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            Some(&layer_path),
+            None,
+            vec![TriggerAction::SpawnEntity {
+                template_path: template_path.clone(),
+                name: "layer_spawn".to_string(),
+                anchor: Some("docking_bay".to_string()),
+                position: None,
+                rotation: None,
+                scale: None,
+                groups: vec![],
+                overrides: None,
+            }],
+        );
+        app.update(); // flush the queued spawn Commands
 
         // The layer's spawned_entities list must now have the new entity, and
         // that entity must be at the layer-local anchor.
@@ -9629,8 +8905,13 @@ size_max = 2.0
         assert!(found);
     }
 
-    /// DestroyEntity action despawns the target entity and emits a destroyed
-    /// world event that subsequent triggers can chain on.
+    /// DestroyEntity action despawns the target entity and emits a `Destroyed`
+    /// world event that a downstream `on_destroyed` trigger chains on.
+    ///
+    /// The chain is a tick longer than it used to be: the action rode on a
+    /// trigger's own array before issue #985 deleted it, and a delayed action's
+    /// events queue onto `pending_world_events` for the NEXT tick rather than
+    /// into the current pass.
     #[test]
     fn destroy_entity_action_despawns_and_emits_chained_event() {
         use crate::entities::spawner::EntityUuid;
@@ -9652,71 +8933,33 @@ size_max = 2.0
             runtime
                 .name_to_uuid
                 .insert("doomed".to_string(), target_uuid.into());
-            runtime
-                .name_to_uuid
-                .insert("witness".to_string(), "src-uuid".to_string());
-            // First trigger: on attack ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ destroy.
-            // Second trigger: on destroyed of "doomed" ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ add objective (proves chaining).
-            runtime.trigger_states = vec![
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnAttacked {
-                            entity_name: "witness".into(),
-                        },
-                        actions: vec![TriggerAction::DestroyEntity {
-                            entity: "doomed".into(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
+            // Witness: on destroyed of "doomed" — proves the chaining.
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnDestroyed {
+                        entity_name: "doomed".into(),
                     },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
+                    when: None,
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
-                TriggerState {
-                    trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnDestroyed {
-                            entity_name: "doomed".into(),
-                        },
-                        actions: vec![TriggerAction::AddObjective {
-                            id: "obj-chained".into(),
-                            text: "chained".into(),
-                            mandatory: false,
-                            targets: vec![],
-                            directive: crate::messages::AiDirective::None,
-                            utility: crate::objectives::UtilityConfig::default(),
-                            source: crate::messages::ObjectiveSource::default(),
-                        }],
-                        when: None,
-                        action_predicates: vec![],
-                        action_delays: vec![],
-                        id: None,
-                        repeat: false,
-                        cooldown_secs: None,
-                    },
-                    fired: false,
-                    origin_layer: None,
-                    seen_destroyed: HashSet::new(),
-                    last_fired_elapsed: None,
-                },
-            ];
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
+            }];
         }
 
-        app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
-            .write(crate::ai_plugin::AiEntityAttacked {
-                entity_uuid: "src-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str("eeeeeeee-0000-0000-0000-000000000001")
-                    .unwrap(),
-            });
-
-        app.update();
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::DestroyEntity {
+                entity: "doomed".into(),
+            }],
+        );
+        app.update(); // the queued Destroyed event reaches the pipeline
 
         // Target entity must be gone.
         assert!(
@@ -9724,13 +8967,10 @@ size_max = 2.0
             "DestroyEntity must despawn the target entity"
         );
 
-        // Chained on_destroyed trigger must have fired (objective added).
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        // Chained on_destroyed trigger must have fired.
         assert!(
-            objs.sorted_snapshots()
-                .iter()
-                .any(|o| o.id == "obj-chained"),
-            "chained on_destroyed trigger must fire from DestroyEntity action"
+            trigger_fired(&app, 0),
+            "chained on_destroyed trigger must fire from the DestroyEntity action"
         );
 
         // External consumers must also see the message: DestroyEntity action
@@ -9747,48 +8987,27 @@ size_max = 2.0
         );
     }
 
-    /// DestroyEntity with an unknown entity name is a warned no-op (no panic,
-    /// no objective from a chained trigger).
+    /// DestroyEntity with an unknown entity name is a warned no-op: it must not
+    /// panic, and it must emit no `Destroyed` event for a chained trigger to
+    /// react to.
     #[test]
     fn destroy_entity_action_with_unknown_name_is_noop() {
         let mut app = ai_trigger_test_app();
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("src".to_string(), "src-uuid".to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "src".into(),
-                    },
-                    actions: vec![TriggerAction::DestroyEntity {
-                        entity: "does_not_exist".into(),
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-        app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
-            .write(crate::ai_plugin::AiEntityAttacked {
-                entity_uuid: "src-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str("ffffffff-0000-0000-0000-000000000001")
-                    .unwrap(),
-            });
-        app.update();
-        // No assertion needed beyond "does not panic". Verify objectives empty.
-        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
-        assert!(objs.sorted_snapshots().is_empty());
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::DestroyEntity {
+                entity: "no_such_entity".into(),
+            }],
+        );
+        assert!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .pending_world_events
+                .is_empty(),
+            "an unresolvable DestroyEntity must emit nothing at all"
+        );
     }
 
     /// UnloadWorld cascades through entities spawned by a layer-origin
@@ -9807,50 +9026,22 @@ size_max = 2.0
             lm.0.insert(layer_path.clone(), WorldRuntime::default());
         }
 
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("src".to_string(), "src-uuid".to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "src".into(),
-                    },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "cascade_me".into(),
-                        anchor: None,
-                        position: Some([1.0, 0.0, 1.0]),
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: Some(layer_path.clone()),
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
-            .write(crate::ai_plugin::AiEntityAttacked {
-                entity_uuid: "src-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str("10101010-0000-0000-0000-000000000001")
-                    .unwrap(),
-            });
-
-        app.update();
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            Some(&layer_path),
+            None,
+            vec![TriggerAction::SpawnEntity {
+                template_path: template_path.clone(),
+                name: "cascade_me".into(),
+                anchor: None,
+                position: Some([1.0, 0.0, 1.0]),
+                rotation: None,
+                scale: None,
+                groups: vec![],
+                overrides: None,
+            }],
+        );
+        app.update(); // flush the queued spawn Commands
 
         let spawned: Vec<bevy::prelude::Entity> = app
             .world()
@@ -9881,47 +9072,38 @@ size_max = 2.0
         let _ = std::any::type_name::<EntityUuid>(); // touch import
     }
 
-    /// `when` predicate gates SpawnEntity just like every other action.
+    /// A trigger-level `when` gate suppresses the whole firing, so the scripted
+    /// handler hanging off it never runs and its `spawn_entity` never happens.
+    ///
+    /// The gate used to be tested against a `[[trigger.action]]` spawn. Issue
+    /// #985 deleted that array, so the spawn lives in a scripted handler — which
+    /// is the arrangement the gate has to protect now, and the interesting one:
+    /// the effect is skipped because the trigger never fired at all, not because
+    /// anything inside the handler checked.
     #[test]
-    fn spawn_entity_action_respects_when_predicate() {
+    fn when_predicate_suppresses_a_scripted_spawn() {
         let template_path = write_spawn_template_fixture();
-        let mut app = ai_trigger_test_app();
+        let mut sr = compile_fixture_scripts(&format!(
+            r#"[script]
+setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{ ctx.effects.spawn_entity(#{{ template_path: "{template_path}", name: "blocked", position: [0, 0, 0] }}); }}'
+"#,
+            template_path = template_path.replace('\\', "/")
+        ));
+        assert!(
+            sr.triggers[0].trigger.when.is_some(),
+            "the scripted `.when(..)` must reach the compiled trigger"
+        );
 
+        let mut app = ai_trigger_test_app();
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime
                 .name_to_uuid
                 .insert("src".to_string(), "src-uuid".to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "src".into(),
-                    },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "blocked".into(),
-                        anchor: None,
-                        position: Some([0.0, 0.0, 0.0]),
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
-                    when: Some(crate::world::flags::Predicate::Flag {
-                        name: "ready".into(),
-                    }),
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
+            runtime.trigger_states = Vec::new();
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
         }
+        app.world_mut().insert_resource(sr);
 
         app.world_mut()
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
@@ -9933,15 +9115,17 @@ size_max = 2.0
         app.update();
         app.update();
 
-        // Flag was NOT set ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no registration should appear.
-        let has = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .name_to_uuid
-            .contains_key("blocked");
+        // Flag was NOT set, so the trigger never fired and nothing spawned.
         assert!(
-            !has,
-            "SpawnEntity must not run while `when` predicate is false"
+            !trigger_fired(&app, 0),
+            "a false `when` must suppress the firing without consuming the trigger"
+        );
+        assert!(
+            !app.world()
+                .resource::<WorldContentRuntime>()
+                .name_to_uuid
+                .contains_key("blocked"),
+            "the handler's spawn_entity must not run while `when` reads false"
         );
     }
 
@@ -9955,50 +9139,22 @@ size_max = 2.0
         let template_path = write_spawn_template_fixture();
         let mut app = ai_trigger_test_app();
 
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("marker".to_string(), "marker-uuid".to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked {
-                        entity_name: "marker".to_string(),
-                    },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "rotated_scaled".to_string(),
-                        anchor: None,
-                        position: Some([1.0, 2.0, 3.0]),
-                        rotation: Some([0.0, std::f32::consts::FRAC_PI_2, 0.0]),
-                        scale: Some([2.0, 2.0, 2.0]),
-                        groups: vec![],
-                        overrides: None,
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
-            .write(crate::ai_plugin::AiEntityAttacked {
-                entity_uuid: "marker-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000002")
-                    .unwrap(),
-            });
-
-        app.update();
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::SpawnEntity {
+                template_path: template_path.clone(),
+                name: "rotated_scaled".to_string(),
+                anchor: None,
+                position: Some([1.0, 2.0, 3.0]),
+                rotation: Some([0.0, std::f32::consts::FRAC_PI_2, 0.0]),
+                scale: Some([2.0, 2.0, 2.0]),
+                groups: vec![],
+                overrides: None,
+            }],
+        );
+        app.update(); // flush the queued spawn Commands
 
         let uuid = app
             .world()
@@ -10114,15 +9270,15 @@ size_max = 2.0
     }
 
     /// (#475) `on_timer` triggers fire when `time.elapsed_secs() -
-    /// runtime.mission_clock_anchor_secs >= after_secs`. Verify the producer
-    /// in `tick_trigger_pipeline` emits `TimerElapsed` events against the
-    /// mission-clock anchor, and that an `on_timer` trigger correctly fires
-    /// a `spawn_entity` action.
+    /// runtime.mission_clock_anchor_secs >= after_secs`. Pins the producer in
+    /// `tick_trigger_pipeline`: it must emit `TimerElapsed` events against the
+    /// mission-clock anchor, or an `after_secs = 0` trigger would never fire.
+    ///
+    /// The fire used to be read off the trigger's `spawn_entity` action; issue
+    /// #985 deleted the `[[trigger]]` action array, so the latch and its
+    /// mission-clock stamp are the observable.
     #[test]
-    fn on_timer_trigger_fires_spawn_entity_action() {
-        use crate::entities::spawner::EntityUuid;
-
-        let template_path = write_spawn_template_fixture();
+    fn on_timer_trigger_fires() {
         let mut app = ai_trigger_test_app();
 
         // Stamp world load time to `now` and install an on_timer trigger
@@ -10133,19 +9289,7 @@ size_max = 2.0
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnTimer { after_secs: 0.0 },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "wave_now".to_string(),
-                        anchor: None,
-                        position: Some([1.0, 0.0, 1.0]),
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
                     when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -10157,63 +9301,33 @@ size_max = 2.0
             }];
         }
 
-        // Tick twice: first runs tick_trigger_pipeline which fires the trigger
-        // and queues the spawn via Commands; second flushes Commands.
-        app.update();
         app.update();
 
-        let uuid = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .name_to_uuid
-            .get("wave_now")
-            .cloned();
+        let state = &app.world().resource::<WorldContentRuntime>().trigger_states[0];
         assert!(
-            uuid.is_some(),
-            "on_timer after_secs=0 must have fired its SpawnEntity action Ã¢â‚¬â€ \
-             tick_trigger_pipeline must emit TimerElapsed events when \
-             mission_clock_anchor_secs is set"
+            state.fired,
+            "on_timer after_secs=0 must fire — tick_trigger_pipeline must emit \
+             TimerElapsed events when mission_clock_anchor_secs is set"
         );
-
-        // And the trigger must be marked fired (single-shot).
-        let fired = app.world().resource::<WorldContentRuntime>().trigger_states[0].fired;
-        assert!(fired, "on_timer trigger must latch fired=true after firing");
-
-        // ECS must contain the spawned entity.
-        let uuid_val = uuid.unwrap();
-        let mut q = app.world_mut().query::<&EntityUuid>();
-        let found = q.iter(app.world()).any(|eu| eu.0 == uuid_val);
-        assert!(found, "spawned entity must exist in ECS");
+        assert!(
+            state.last_fired_elapsed.is_some(),
+            "the fire must be stamped against the mission clock"
+        );
     }
 
     /// (#475) `on_timer` triggers with `after_secs > now - world_loaded_at`
     /// must NOT fire yet. Pin the elapsed-secs comparison.
     #[test]
     fn on_timer_trigger_does_not_fire_before_after_secs_elapses() {
-        let template_path = write_spawn_template_fixture();
         let mut app = ai_trigger_test_app();
 
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            // World loaded "in the future" so elapsed will be negative,
-            // clamped to 0, never satisfying after_secs = 100.
             runtime.mission_clock_anchor_secs = Some(0.0);
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnTimer { after_secs: 100.0 },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "wave_future".to_string(),
-                        anchor: None,
-                        position: Some([0.0, 0.0, 0.0]),
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
                     when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
                     id: None,
                     repeat: false,
                     cooldown_secs: None,
@@ -10228,65 +9342,48 @@ size_max = 2.0
         app.update();
         app.update();
 
-        let uuid = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .name_to_uuid
-            .get("wave_future")
-            .cloned();
+        let state = &app.world().resource::<WorldContentRuntime>().trigger_states[0];
         assert!(
-            uuid.is_none(),
+            !state.fired,
             "on_timer after_secs=100 must not fire when only a few ms have elapsed"
         );
-        let fired = app.world().resource::<WorldContentRuntime>().trigger_states[0].fired;
-        assert!(!fired, "trigger must not be marked fired");
+        assert!(state.last_fired_elapsed.is_none());
     }
 
-    /// SpawnEntity action stamps the trigger `name` onto the spawned entity as
-    /// its `EntityName` component.  This is required for `resolve_objective_target`
-    /// to match a `AiDirective::Destroy { target: "wave_1" }` against
-    /// `AiWorldEntity::name` in `WorldSnapshot` â€” if the component kept the
+    /// SpawnEntity action stamps its own `name` onto the spawned entity as the
+    /// `EntityName` component. This is required for `resolve_objective_target`
+    /// to match an `AiDirective::Destroy { target: "wave_1" }` against
+    /// `AiWorldEntity::name` in `WorldSnapshot` — if the component kept the
     /// template display name ("Harrow Destroyer") the Backfill AI would never
     /// resolve the Destroy target and the ship would stay on its Patrol forever.
+    ///
+    /// The name travels on the action itself; the *resolving* context name (the
+    /// one an `add_objective` links its target by) is the `DelayedAction`'s own
+    /// `entity_name` field since issue #985, rather than being re-derived from
+    /// the condition of the trigger that dispatched it.
     #[test]
-    fn spawn_entity_action_stamps_trigger_name_as_entity_name() {
+    fn spawn_entity_action_stamps_its_name_as_entity_name() {
         use crate::entities::spawner::{EntityName, EntityUuid};
 
         let template_path = write_spawn_template_fixture();
         let mut app = ai_trigger_test_app();
 
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.mission_clock_anchor_secs = Some(0.0);
-            runtime.trigger_states = vec![TriggerState {
-                trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnTimer { after_secs: 0.0 },
-                    actions: vec![TriggerAction::SpawnEntity {
-                        template_path: template_path.clone(),
-                        name: "wave_1".to_string(),
-                        anchor: None,
-                        position: Some([50.0, 0.0, 50.0]),
-                        rotation: None,
-                        scale: None,
-                        groups: vec![],
-                        overrides: None,
-                    }],
-                    when: None,
-                    action_predicates: vec![],
-                    action_delays: vec![],
-                    id: None,
-                    repeat: false,
-                    cooldown_secs: None,
-                },
-                fired: false,
-                origin_layer: None,
-                seen_destroyed: std::collections::HashSet::new(),
-                last_fired_elapsed: None,
-            }];
-        }
-
-        app.update();
-        app.update();
+        dispatch_delayed_actions(
+            &mut app,
+            None,
+            None,
+            vec![TriggerAction::SpawnEntity {
+                template_path: template_path.clone(),
+                name: "wave_1".to_string(),
+                anchor: None,
+                position: Some([50.0, 0.0, 50.0]),
+                rotation: None,
+                scale: None,
+                groups: vec![],
+                overrides: None,
+            }],
+        );
+        app.update(); // flush the queued spawn Commands
 
         // Find the spawned entity by UUID and confirm its EntityName is "wave_1".
         let uuid = app
@@ -10311,7 +9408,7 @@ size_max = 2.0
         assert_eq!(
             entity_name.unwrap().as_deref(),
             Some("wave_1"),
-            "EntityName must be the trigger name 'wave_1', not the template display name"
+            "EntityName must be the action's name 'wave_1', not the template display name"
         );
     }
 

@@ -661,7 +661,6 @@ fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::config::parse_world;
     use crate::world::script::engine::runtime_engine;
     use crate::world::script::flags::Flags;
     use rhai::{Dynamic, Map};
@@ -733,16 +732,19 @@ mod tests {
         (sink.take(), sink.take_opens("t.rhai"))
     }
 
-    /// The single `TriggerAction` the declarative front-end parses for one
-    /// `[[trigger.action]]` body, wrapped in a minimal world so serde produces
-    /// the `RawActionEntry` independently of this module's map extraction — the
-    /// independent source of truth for the M6 structural-parity assertions.
+    /// The single `TriggerAction` serde produces for one action table, built
+    /// independently of this module's map extraction — the independent source of
+    /// truth for the M6 structural-parity assertions.
+    ///
+    /// It went through `parse_world` and a `[[trigger]]` wrapper until issue #985
+    /// deleted that container. The TABLE is what mattered and the table survives:
+    /// `RawActionEntry` is the same struct the script host populates, and
+    /// `parse_action_entry` the same shared rule, so this still reaches the
+    /// parity target by the route that is not the one under test.
     fn toml_action(action_body: &str) -> TriggerAction {
-        let world = format!(
-            "[[trigger]]\ncondition = \"on_world_loaded\"\n\n[[trigger.action]]\n{action_body}\n"
-        );
-        let cfg = parse_world(&world).expect("world parses");
-        cfg.triggers[0].actions[0].clone()
+        let raw: crate::world::config::RawActionEntry =
+            toml::from_str(action_body).expect("the action table parses");
+        crate::world::config::parse_action_entry(&raw).expect("the action parses")
     }
 
     #[test]

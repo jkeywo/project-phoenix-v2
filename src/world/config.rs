@@ -1,14 +1,17 @@
 // Unified world parser — single-pass deserialization for the merged
 // map/scenario world TOML (PRD #337/#341).
 //
-// This module owns the entire world TOML schema: anchors, `[[entity]]`
-// instances, `[[trigger]]` blocks, and `[[comms]]` templates. `parse_world`
-// produces a `WorldConfig` in one parse pass.
+// This module owns the entire world TOML schema: anchors and `[[entity]]`
+// instances. `parse_world` produces a `WorldConfig` in one parse pass. It owned
+// the `[[trigger]]` and `[[comms]]` schemas too until issue #985 deleted both —
+// scenario logic is authored in the `[script]` block now, lifted and compiled by
+// `world::script`, and a world that still carries a declarative block is refused
+// by name.
 //
 // Pure module — no Bevy systems, only the `Resource` derive for the
-// `WorldConfig` type. Runtime types (`TriggerState`, `CommsTemplateState`,
-// `ActiveDialogue`, `WorldEvent`, etc.) live in `world::content` and import
-// the pure config types from here.
+// `WorldConfig` type. Runtime types (`TriggerState`, `ActiveDialogue`,
+// `WorldEvent`, etc.) live in `world::content` / `comms::content` and import the
+// pure config types from here.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -330,49 +333,6 @@ pub struct WorldEntity {
 
 // -- TOML-facing raw types --------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-struct RawTriggerEntry {
-    condition: String,
-    #[serde(default)]
-    entity: Option<String>,
-    /// Optional anchor name for `on_waypoint_reached`; ignored by every
-    /// other condition. Omit to fire on any waypoint of the route.
-    #[serde(default)]
-    waypoint: Option<String>,
-    /// Required by `on_all_destroyed`; ignored by every other condition.
-    #[serde(default)]
-    group: Option<String>,
-    #[serde(default)]
-    after_secs: Option<f32>,
-    #[serde(default)]
-    threshold: Option<f32>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    when: Option<String>,
-    /// Optional authored trigger id (issue #751), targetable by
-    /// `reset_trigger` actions.
-    #[serde(default)]
-    id: Option<String>,
-    /// Trigger lifecycle policy (issue #751): `true` = repeatable, `false`
-    /// (default) = once-only single-shot.
-    #[serde(default)]
-    repeat: bool,
-    /// Minimum seconds between repeatable-trigger fires (issue #751).
-    #[serde(default)]
-    cooldown_secs: Option<f32>,
-    /// Rhai front-end (issue #980, milestone M2): the name of a script function
-    /// that supplies this trigger's effects, as an ALTERNATIVE to the declarative
-    /// `[[trigger.action]]` array. When present the trigger is built with an empty
-    /// action list (the handler produces the `ActionCmd`s at runtime); the
-    /// script-side cross-reference pass resolves the name and rejects a trigger
-    /// that lists both `script` and an action array.
-    #[serde(default)]
-    script: Option<String>,
-    #[serde(default, rename = "action")]
-    actions: Vec<RawActionEntry>,
-}
-
 /// A single condition-weighted modifier inside an `add_objective` TOML action.
 ///
 /// `pub(crate)` (with `pub(crate)` fields) so it may appear in [`RawActionEntry`]'s
@@ -515,15 +475,6 @@ pub(crate) struct RawActionEntry {
     /// as the static `[[entity]] overrides` field.
     #[serde(default)]
     pub(crate) overrides: Option<toml::Value>,
-    /// Per-action predicate gate. When `Some`, the action only fires if the
-    /// predicate evaluates to true at dispatch time.
-    #[serde(default)]
-    pub(crate) when: Option<String>,
-    /// Delay in seconds before this action fires (relative to trigger fire time).
-    /// Actions with `delay_secs > 0.0` are queued and dispatched after the
-    /// delay period expires.
-    #[serde(default)]
-    pub(crate) delay_secs: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -552,8 +503,15 @@ pub struct RawWorld {
     pub anchors: HashMap<String, Vec<f32>>,
     #[serde(default, rename = "entity")]
     pub entities: Vec<WorldEntity>,
+    /// Retired front-ends, kept as opaque values ONLY so `parse_world` can
+    /// refuse them by name (issue #985). Without the fields serde would drop a
+    /// `[[trigger]]` / `[[comms]]` block on the floor — no `deny_unknown_fields`
+    /// here — and a hand-authored world would load with its scenario logic
+    /// silently absent. Both are `Vec<toml::Value>`: nothing reads inside them.
     #[serde(default, rename = "trigger")]
-    triggers: Vec<RawTriggerEntry>,
+    retired_triggers: Vec<toml::Value>,
+    #[serde(default, rename = "comms")]
+    retired_comms: Vec<toml::Value>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -815,22 +773,26 @@ pub enum TriggerAction {
     },
 }
 
-/// A single trigger: a condition plus an ordered list of actions.
+/// A single trigger: a condition, its lifecycle policy, and an optional
+/// predicate gate.
+///
+/// It carried the ordered `actions` a fire dispatched, plus the parallel
+/// `action_predicates` and `action_delays` that gated and deferred them
+/// per-action. All three were written by the `[[trigger.action]]` parser and
+/// nothing else — a scripted trigger has always been built with them empty
+/// (`scripted_trigger`), because its effects come from running its handler fn.
+/// Issue #985 deleted that parser, so the three fields had no writer left and
+/// the pipeline's per-action dispatch loop had nothing to dispatch. A scripted
+/// handler defers with `ctx.schedule.in_seconds(..)` and gates with ordinary
+/// Rhai control flow.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Trigger {
     pub condition: TriggerCondition,
-    pub actions: Vec<TriggerAction>,
     /// Optional predicate gate. When `Some`, the predicate is evaluated
     /// against the world flag store before each firing; a `false` result
     /// suppresses actions for that firing but does NOT consume the trigger
     /// lifecycle (the `fired` flag stays unset).
     pub when: Option<crate::world::flags::Predicate>,
-    /// Per-action predicate gates, parallel to `actions`. `None` means no gate
-    /// (action always fires). `Some(pred)` filters the action at dispatch time.
-    pub action_predicates: Vec<Option<crate::world::flags::Predicate>>,
-    /// Per-action delays in seconds, parallel to `actions`. `0.0` means
-    /// immediate dispatch. `> 0.0` queues the action for deferred dispatch.
-    pub action_delays: Vec<f32>,
     /// Optional authored id (issue #751). Anonymous triggers leave this
     /// `None`; a named trigger can be re-armed by a `ResetTrigger { id }`
     /// action referencing this id.
@@ -1330,115 +1292,20 @@ pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerA
     Ok(action)
 }
 
-fn parse_raw_actions(
-    raw_actions: &[RawActionEntry],
-) -> Result<(Vec<TriggerAction>, Vec<Option<String>>, Vec<f32>), String> {
-    let mut actions = Vec::new();
-    let mut raw_predicates: Vec<Option<String>> = Vec::new();
-    let mut delay_secs: Vec<f32> = Vec::new();
-    for raw_action in raw_actions {
-        let action = parse_action_entry(raw_action)?;
-        actions.push(action);
-        raw_predicates.push(raw_action.when.clone());
-        delay_secs.push(raw_action.delay_secs.unwrap_or(0.0));
-    }
-    Ok((actions, raw_predicates, delay_secs))
-}
-
-fn parse_trigger_condition_from_string(
-    name: &str,
-    entity: Option<String>,
-    group: Option<String>,
-    after_secs: Option<f32>,
-    threshold: Option<f32>,
-    flag_name: Option<String>,
-    waypoint: Option<String>,
-    ctx: &str,
-) -> Result<TriggerCondition, String> {
-    match name {
-        "on_destroyed" => Ok(TriggerCondition::OnDestroyed {
-            entity_name: entity
-                .ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
-        }),
-        "on_all_destroyed" => {
-            let group = group
-                .ok_or_else(|| format!("{ctx} 'on_all_destroyed' requires a 'group' field"))?;
-            Ok(TriggerCondition::OnAllDestroyed {
-                group,
-                after_secs: after_secs.unwrap_or(0.0),
-            })
-        }
-        "on_attacked" => Ok(TriggerCondition::OnAttacked {
-            entity_name: entity
-                .ok_or_else(|| format!("{ctx} 'on_attacked' requires an 'entity' field"))?,
-        }),
-        "on_hull_below" => {
-            let threshold = threshold
-                .ok_or_else(|| format!("{ctx} 'on_hull_below' requires a 'threshold' field"))?;
-            if !(0.0 < threshold && threshold <= 1.0) {
-                return Err(format!(
-                    "{ctx} 'on_hull_below' threshold must be in (0, 1], got {threshold}"
-                ));
-            }
-            Ok(TriggerCondition::OnHullBelow {
-                entity_name: entity
-                    .ok_or_else(|| format!("{ctx} 'on_hull_below' requires an 'entity' field"))?,
-                threshold,
-            })
-        }
-        "on_timer" => Ok(TriggerCondition::OnTimer {
-            after_secs: after_secs
-                .ok_or_else(|| format!("{ctx} 'on_timer' requires an 'after_secs' field"))?,
-        }),
-        "on_hailed" => Ok(TriggerCondition::OnHailed {
-            entity_name: entity
-                .ok_or_else(|| format!("{ctx} 'on_hailed' requires an 'entity' field"))?,
-        }),
-        "on_flag_set" => Ok(TriggerCondition::OnFlagSet {
-            name: flag_name
-                .ok_or_else(|| format!("{ctx} 'on_flag_set' requires a 'name' field"))?,
-        }),
-        "on_flag_cleared" => Ok(TriggerCondition::OnFlagCleared {
-            name: flag_name
-                .ok_or_else(|| format!("{ctx} 'on_flag_cleared' requires a 'name' field"))?,
-        }),
-        "on_world_loaded" => Ok(TriggerCondition::OnWorldLoaded),
-        "on_entered_region" => Ok(TriggerCondition::OnEnteredRegion {
-            entity_name: entity
-                .ok_or_else(|| format!("{ctx} 'on_entered_region' requires an 'entity' field"))?,
-        }),
-        "on_exited_region" => Ok(TriggerCondition::OnExitedRegion {
-            entity_name: entity
-                .ok_or_else(|| format!("{ctx} 'on_exited_region' requires an 'entity' field"))?,
-        }),
-        "on_waypoint_reached" => Ok(TriggerCondition::OnWaypointReached {
-            entity_name: entity
-                .ok_or_else(|| format!("{ctx} 'on_waypoint_reached' requires an 'entity' field"))?,
-            // `waypoint` is optional: omit it to fire on any waypoint.
-            waypoint,
-        }),
-        other => Err(format!("Unknown {ctx} condition '{}'", other)),
-    }
-}
-
-/// Build the [`Trigger`] a *scripted* front-end produces (issue #980, M2): the
-/// given `condition` with an EMPTY declarative action list — the runtime handler
-/// fn supplies the effects — and every lifecycle field at its default.
+/// Build the [`Trigger`] a scripted front-end produces (issue #980, M2): the
+/// given `condition` with every lifecycle field at its default. The handler fn
+/// supplies the effects.
 ///
-/// This is the single canonical constructor the two scripted front-ends share:
-/// the TOML `[[trigger]] script = "fn"` path (in [`parse_world`]) and the Rhai
-/// registration fns (`on_destroyed`, … in [`crate::world::script::triggers`]).
-/// Routing both through it is what makes "one evaluator, two front-ends" hold by
-/// construction — a scripted trigger is byte-for-byte the same struct whichever
-/// front-end authored it. The TOML path additionally carries over any authored
-/// `when` / `id` / `repeat` / `cooldown_secs`; the Rhai path leaves the defaults.
+/// It was the single canonical constructor the two scripted front-ends shared —
+/// the TOML `[[trigger]] script = "fn"` path and the Rhai registration fns — so
+/// a scripted trigger was byte-for-byte the same struct whichever authored it.
+/// Issue #985 deleted the TOML half; the Rhai registration fns
+/// (`crate::world::script::triggers`) are the only caller now, and they leave
+/// every lifecycle field at its default.
 pub(crate) fn scripted_trigger(condition: TriggerCondition) -> Trigger {
     Trigger {
         condition,
-        actions: Vec::new(),
         when: None,
-        action_predicates: Vec::new(),
-        action_delays: Vec::new(),
         id: None,
         repeat: false,
         cooldown_secs: None,
@@ -1458,8 +1325,6 @@ pub struct WorldConfig {
     pub global: GlobalConfig,
     pub anchors: HashMap<String, [f32; 3]>,
     pub entities: Vec<WorldEntity>,
-    /// Ordered list of triggers declared in the world.
-    pub triggers: Vec<Trigger>,
     /// Map of `name ? uuid` for entities spawned via `[[entity]] name = "..."`.
     /// Populated by `spawn_world_entities` (PRD #337/#339 slice 2); read by
     /// trigger and comms lookup paths that resolve a name to a live UUID.
@@ -1671,66 +1536,30 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         anchors.insert(name, normalised);
     }
 
-    // Triggers.
-    let mut triggers = Vec::with_capacity(raw.triggers.len());
-    for raw_trigger in raw.triggers {
-        let condition = parse_trigger_condition_from_string(
-            &raw_trigger.condition,
-            raw_trigger.entity,
-            raw_trigger.group,
-            raw_trigger.after_secs,
-            raw_trigger.threshold,
-            raw_trigger.name,
-            raw_trigger.waypoint,
-            "Trigger",
-        )?;
-        let when = match raw_trigger.when {
-            Some(src) => Some(
-                crate::world::flags::parse_predicate(&src)
-                    .map_err(|e| format!("Trigger 'when' predicate parse error: {e}"))?,
-            ),
-            None => None,
-        };
-        if let Some(pred) = when.as_ref() {
-            reject_world_history(pred, "Trigger 'when' predicate")?;
-        }
-
-        if raw_trigger.script.is_some() {
-            // Rhai front-end (issue #980, M2): the named handler supplies the
-            // effects, so the declarative action list is empty. Built through the
-            // shared `scripted_trigger` constructor so it is identical to the same
-            // trigger authored via a Rhai registration fn. The declarative action
-            // array is deliberately ignored here — a trigger that specifies both
-            // is rejected as a `WorldFinding` by the script cross-reference pass
-            // (`crate::world::script::validate`), which is what blocks activation.
-            let mut trigger = scripted_trigger(condition);
-            trigger.when = when;
-            trigger.id = raw_trigger.id;
-            trigger.repeat = raw_trigger.repeat;
-            trigger.cooldown_secs = raw_trigger.cooldown_secs;
-            triggers.push(trigger);
-            continue;
-        }
-
-        let (actions, raw_predicates, delay_secs) = parse_raw_actions(&raw_trigger.actions)?;
-        let action_predicates: Vec<Option<crate::world::flags::Predicate>> = raw_predicates
-            .into_iter()
-            .map(|s| s.and_then(|src| crate::world::flags::parse_predicate(&src).ok()))
-            .collect();
-        for pred in action_predicates.iter().flatten() {
-            reject_world_history(pred, "Trigger action 'when' predicate")?;
-        }
-        let action_delays: Vec<f32> = delay_secs;
-        triggers.push(Trigger {
-            condition,
-            actions,
-            when,
-            action_predicates,
-            action_delays,
-            id: raw_trigger.id,
-            repeat: raw_trigger.repeat,
-            cooldown_secs: raw_trigger.cooldown_secs,
-        });
+    // The retired declarative front-ends (issue #985). Refused BY NAME rather
+    // than ignored: `RawWorld` sets no `deny_unknown_fields`, so without these
+    // two checks a world that still authors `[[trigger]]` or `[[comms]]` would
+    // parse clean and load with its scenario logic simply absent — the silent
+    // failure this teardown exists to avoid, and the one a hand-authored or
+    // mod-pack world is most likely to hit.
+    if !raw.retired_triggers.is_empty() {
+        return Err(format!(
+            "this world authors {} [[trigger]] block(s), which are no longer parsed \
+             (issue #985). Scenario logic is authored in the [script] block: register \
+             the condition (`on_destroyed(\"name\", \"handler\")`, `on_timer(30, \"handler\")`, \
+             …) and write the handler fn. See docs/toml-authoring-guide.md",
+            raw.retired_triggers.len()
+        ));
+    }
+    if !raw.retired_comms.is_empty() {
+        return Err(format!(
+            "this world authors {} [[comms]] block(s), which are no longer parsed \
+             (issue #985). A comms thread is opened from a script handler with \
+             `ctx.effects.open_comms(#{{ from: \"sender\", node_fn: \"root\" }})`, and its \
+             dialogue tree is one fn per node. A hailable contact now opts in on the \
+             ENTITY with `[comms] hailable = true`. See docs/toml-authoring-guide.md",
+            raw.retired_comms.len()
+        ));
     }
 
     // Validate extra_worlds: every entry must be a non-empty string.
@@ -1777,7 +1606,6 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         global: raw.global,
         anchors,
         entities,
-        triggers,
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
         delayed_unload_policy,
@@ -1901,21 +1729,10 @@ pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> V
         }
     }
 
-    // 3. `[[trigger.action]]` spawn_entity references.
-    for trigger in &world.triggers {
-        for action in &trigger.actions {
-            if let TriggerAction::SpawnEntity { template_path, .. } = action {
-                if seen.insert(template_path.clone()) {
-                    out.push(template_path.clone());
-                }
-            }
-        }
-    }
-
-    // 4. Scripted `spawn_entity` references (issue #984). Since issue #985 this
+    // 3. Scripted `spawn_entity` references (issue #984). Since issue #985 this
     //    is the only source of a *dynamic* spawn's template path: the
-    //    `[[comms.response.action]]` tree that step 4 used to walk no longer
-    //    parses.
+    //    `[[trigger.action]]` and `[[comms.response.action]]` arrays steps 3
+    //    and 4 used to walk no longer parse.
     for source in &world.script_sources {
         for path in script_spawn_template_paths(source) {
             if seen.insert(path.clone()) {
@@ -2206,6 +2023,26 @@ where
 mod tests {
     use super::*;
     use crate::world::config::WorldEntitySpawnOn;
+
+    /// Parse a document of `[[action]]` tables into their [`TriggerAction`]s.
+    ///
+    /// The tables below were `[[trigger.action]]` arrays until issue #985 deleted
+    /// the `[[trigger]]` container. Their SHAPE outlived it: [`RawActionEntry`] is
+    /// what the Rhai effect host populates from a `#{ ... }` script map before
+    /// running the shared [`parse_action_entry`], so every rule these tests pin —
+    /// the directive field ownership, the anchor/position XOR, the required
+    /// fields, the unknown-type refusal — is still live. It is reached from a
+    /// script now instead of from a trigger's action array, which is why the
+    /// container is what went and the table is what stayed.
+    fn actions(tables: &str) -> Result<Vec<TriggerAction>, String> {
+        #[derive(Deserialize)]
+        struct Doc {
+            #[serde(default)]
+            action: Vec<RawActionEntry>,
+        }
+        let doc: Doc = toml::from_str(tables).map_err(|e| e.to_string())?;
+        doc.action.iter().map(parse_action_entry).collect()
+    }
 
     #[test]
     fn parse_world_empty_string_returns_empty_config() {
@@ -3414,119 +3251,19 @@ spawn_on = "game_start"
 
     // -- Triggers & comms (PRD #341) ---------------------------------------
 
-    #[test]
-    fn parse_world_reads_on_destroyed_trigger_with_actions() {
-        let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider_alpha"
-
-  [[trigger.action]]
-  type      = "add_objective"
-  id        = "obj-raider-destroyed"
-  text      = "Pirate raider eliminated."
-  mandatory = false
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers.len(), 1);
-        assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnDestroyed {
-                entity_name: "raider_alpha".to_string()
-            }
-        );
-        assert_eq!(cfg.triggers[0].actions.len(), 1);
-        match &cfg.triggers[0].actions[0] {
-            TriggerAction::AddObjective {
-                id,
-                text,
-                mandatory,
-                ..
-            } => {
-                assert_eq!(id, "obj-raider-destroyed");
-                assert_eq!(text, "Pirate raider eliminated.");
-                assert!(!(*mandatory));
-            }
-            other => panic!("expected AddObjective, got {other:?}"),
-        }
-    }
-
     // ── on_all_destroyed parser ────────────────────────────────────────────
 
     #[test]
-    fn parse_world_reads_on_all_destroyed_trigger_with_group() {
+    fn add_objective_reads_targets() {
         let toml = r#"
-[[trigger]]
-condition = "on_all_destroyed"
-group      = "waves"
-
-  [[trigger.action]]
-  type    = "game_over"
-  message = "Victory."
+[[action]]
+type      = "add_objective"
+id        = "obj-hail-briefing"
+text      = "Hail Axiom Station or Research Outpost."
+targets   = ["Axiom Station", "Research Outpost"]
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers.len(), 1);
-        match &cfg.triggers[0].condition {
-            TriggerCondition::OnAllDestroyed { group, after_secs } => {
-                assert_eq!(group, "waves");
-                assert_eq!(*after_secs, 0.0);
-            }
-            other => panic!("expected OnAllDestroyed, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_world_rejects_on_all_destroyed_without_entities_field() {
-        let toml = r#"
-[[trigger]]
-condition = "on_all_destroyed"
-
-  [[trigger.action]]
-  type    = "game_over"
-  message = "Victory."
-"#;
-        let err = parse_world(toml).expect_err("missing group must error");
-        assert!(
-            err.contains("on_all_destroyed") && err.contains("group"),
-            "error must mention condition + group field: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_world_accepts_on_all_destroyed_with_empty_group() {
-        let toml = r#"
-[[trigger]]
-condition = "on_all_destroyed"
-group     = ""
-
-  [[trigger.action]]
-  type    = "game_over"
-  message = "Victory."
-"#;
-        let cfg = parse_world(toml).expect("empty group should parse");
-        match &cfg.triggers[0].condition {
-            TriggerCondition::OnAllDestroyed { group, after_secs } => {
-                assert_eq!(group, "");
-                assert_eq!(*after_secs, 0.0);
-            }
-            other => panic!("expected OnAllDestroyed, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_world_reads_add_objective_targets() {
-        let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type      = "add_objective"
-  id        = "obj-hail-briefing"
-  text      = "Hail Axiom Station or Research Outpost."
-  targets   = ["Axiom Station", "Research Outpost"]
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::AddObjective { targets, .. } => {
                 assert_eq!(
                     targets,
@@ -3538,18 +3275,15 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_add_objective_targets_default_empty() {
+    fn add_objective_targets_default_empty() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-x"
-  text = "Do the thing."
+[[action]]
+type = "add_objective"
+id   = "obj-x"
+text = "Do the thing."
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::AddObjective { targets, .. } => assert!(targets.is_empty()),
             other => panic!("expected AddObjective, got {other:?}"),
         }
@@ -3559,20 +3293,17 @@ condition = "on_world_loaded"
     /// `directive_kind = "Retreat"`), so a mission objective must be able to
     /// author it too — same shape as `Reach`: a required `directive_anchor`.
     #[test]
-    fn parse_world_reads_add_objective_retreat_directive() {
+    fn add_objective_reads_a_retreat_directive() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type             = "add_objective"
-  id               = "obj-retreat"
-  text             = "Fall back to the haven."
-  directive_kind   = "Retreat"
-  directive_anchor = "pirate_haven"
+[[action]]
+type             = "add_objective"
+id               = "obj-retreat"
+text             = "Fall back to the haven."
+directive_kind   = "Retreat"
+directive_anchor = "pirate_haven"
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::AddObjective { directive, .. } => {
                 assert_eq!(
                     *directive,
@@ -3586,18 +3317,15 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_retreat_directive_requires_directive_anchor() {
+    fn retreat_directive_requires_directive_anchor() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type           = "add_objective"
-  id             = "obj-retreat"
-  text           = "Fall back."
-  directive_kind = "Retreat"
+[[action]]
+type           = "add_objective"
+id             = "obj-retreat"
+text           = "Fall back."
+directive_kind = "Retreat"
 "#;
-        let err = parse_world(toml).expect_err("Retreat without an anchor must be rejected");
+        let err = actions(toml).expect_err("Retreat without an anchor must be rejected");
         assert!(
             err.contains("Retreat") && err.contains("directive_anchor"),
             "error must name the directive and the missing field, got: {err}"
@@ -3611,19 +3339,16 @@ condition = "on_world_loaded"
     /// all and says nothing about it. Rejected at parse rather than activating
     /// an objective that can never fire.
     #[test]
-    fn parse_world_rejects_patrol_anchors_on_a_reach_objective() {
+    fn patrol_anchors_on_a_reach_objective_are_rejected() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type              = "add_objective"
-  id                = "obj-reach"
-  text              = "Make the rendezvous."
-  directive_kind    = "Reach"
-  directive_anchors = ["rendezvous"]
+[[action]]
+type              = "add_objective"
+id                = "obj-reach"
+text              = "Make the rendezvous."
+directive_kind    = "Reach"
+directive_anchors = ["rendezvous"]
 "#;
-        let err = parse_world(toml).expect_err("the Patrol field on a Reach must be rejected");
+        let err = actions(toml).expect_err("the Patrol field on a Reach must be rejected");
         assert!(
             err.contains("directive_anchors")
                 && err.contains("Patrol")
@@ -3636,36 +3361,30 @@ condition = "on_world_loaded"
     /// The reverse direction, and the shared `target` field: a Patrol reads
     /// neither `directive_anchor` nor `target`.
     #[test]
-    fn parse_world_rejects_reach_and_destroy_fields_on_a_patrol_objective() {
+    fn reach_and_destroy_fields_on_a_patrol_objective_are_rejected() {
         let anchor_on_patrol = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type             = "add_objective"
-  id               = "obj-patrol"
-  text             = "Walk the line."
-  directive_kind   = "Patrol"
-  directive_anchor = "somewhere"
+[[action]]
+type             = "add_objective"
+id               = "obj-patrol"
+text             = "Walk the line."
+directive_kind   = "Patrol"
+directive_anchor = "somewhere"
 "#;
-        let err = parse_world(anchor_on_patrol).expect_err("Reach's field on a Patrol");
+        let err = actions(anchor_on_patrol).expect_err("Reach's field on a Patrol");
         assert!(
             err.contains("directive_anchor") && err.contains("Reach"),
             "error must name the misplaced field and its owner, got: {err}"
         );
 
         let target_on_patrol = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type           = "add_objective"
-  id             = "obj-patrol"
-  text           = "Walk the line."
-  directive_kind = "Patrol"
-  target         = "wave_1"
+[[action]]
+type           = "add_objective"
+id             = "obj-patrol"
+text           = "Walk the line."
+directive_kind = "Patrol"
+target         = "wave_1"
 "#;
-        let err = parse_world(target_on_patrol).expect_err("Destroy's field on a Patrol");
+        let err = actions(target_on_patrol).expect_err("Destroy's field on a Patrol");
         assert!(
             err.contains("`target`") && err.contains("Destroy"),
             "error must name the misplaced field and its owner, got: {err}"
@@ -3675,18 +3394,15 @@ condition = "on_world_loaded"
     /// A directive field with no `directive_kind` at all reads as nothing too,
     /// and gets its own message rather than the "which kind reads what" one.
     #[test]
-    fn parse_world_rejects_a_directive_field_with_no_directive_kind() {
+    fn a_directive_field_with_no_directive_kind_is_rejected() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type             = "add_objective"
-  id               = "obj-plain"
-  text             = "Do the thing."
-  directive_anchor = "somewhere"
+[[action]]
+type             = "add_objective"
+id               = "obj-plain"
+text             = "Do the thing."
+directive_anchor = "somewhere"
 "#;
-        let err = parse_world(toml).expect_err("a directive field with no kind must be rejected");
+        let err = actions(toml).expect_err("a directive field with no kind must be rejected");
         assert!(
             err.contains("directive_anchor") && err.contains("no directive_kind"),
             "error must say nothing reads the field, got: {err}"
@@ -3699,22 +3415,19 @@ condition = "on_world_loaded"
     /// carries no authorial intent — the same absent-vs-default limit the entity
     /// side documents.
     #[test]
-    fn parse_world_allows_targets_and_defaulted_fields_beside_any_directive() {
+    fn targets_and_defaulted_fields_are_allowed_beside_any_directive() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type             = "add_objective"
-  id               = "obj-reach"
-  text             = "Make the rendezvous."
-  targets          = ["Rendezvous Beacon"]
-  directive_kind   = "Reach"
-  directive_anchor = "rendezvous"
-  directive_loop   = false
+[[action]]
+type             = "add_objective"
+id               = "obj-reach"
+text             = "Make the rendezvous."
+targets          = ["Rendezvous Beacon"]
+directive_kind   = "Reach"
+directive_anchor = "rendezvous"
+directive_loop   = false
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::AddObjective {
                 directive, targets, ..
             } => {
@@ -3730,463 +3443,86 @@ condition = "on_world_loaded"
         }
     }
 
-    #[test]
-    fn parse_world_unknown_trigger_condition_errors() {
-        let toml = r#"
-[[trigger]]
-condition = "on_zombie"
-"#;
-        let err = parse_world(toml).expect_err("unknown trigger condition must error");
-        assert!(
-            err.contains("on_zombie"),
-            "error must mention the bad condition: {err}"
-        );
-    }
-
     // -- Flag-system triggers (issue #412) ---------------------------------
-
-    #[test]
-    fn parse_world_reads_when_predicate_on_trigger() {
-        let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider_alpha"
-when      = "flag(phase_one_done)"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-cleanup"
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers.len(), 1);
-        let when = cfg.triggers[0].when.as_ref().expect("when must be parsed");
-        assert_eq!(
-            *when,
-            crate::world::flags::Predicate::Flag {
-                name: "phase_one_done".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn parse_world_rejects_malformed_when_predicate() {
-        let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider_alpha"
-when      = "flag(a) &&"
-"#;
-        let err = parse_world(toml).expect_err("malformed predicate must error");
-        assert!(
-            err.contains("when") || err.contains("predicate"),
-            "error must mention predicate/when: {err}"
-        );
-    }
 
     /// Issue #890: the bounded-window operator belongs to an AI fine system's
     /// policy, which has a host to advance it once per shared AI tick. World
     /// expressions evaluate against flags alone, so an atom authored here would
     /// load and then read false for the whole scenario — the trap #779/#891
     /// closed on two other surfaces, refused on this one before it opens.
+    ///
+    /// It covered a `[[trigger]]`'s own `when` and a `[[trigger.action]]`'s
+    /// per-action `when` too; issue #985 deleted both, leaving the `[[entity]]`
+    /// spawn gate as the one world expression a TOML author can still write. A
+    /// SCRIPT's guard is ordinary Rhai and never reaches `parse_predicate`, so
+    /// this rule now guards exactly one surface — and `reject_world_history` is
+    /// still the shared refusal behind it.
     #[test]
-    fn parse_world_rejects_a_history_atom_in_every_world_expression() {
-        let trigger_when = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider_alpha"
-when      = "history(min, range_to_target, 30) > 0"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-cleanup"
-"#;
-        let action_when = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider_alpha"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-cleanup"
-  when = "history(max, hull_pct, 12) < 1"
-"#;
-        let entity_when = r#"
+    fn a_history_atom_is_rejected_in_an_entity_when_predicate() {
+        let toml = r#"
 [[entity]]
 template_path = "assets/entities/ship_harrow_destroyer.toml"
 when          = "history(net_change, hull_pct, 5) < 0"
 "#;
-        for (label, toml) in [
-            ("trigger `when`", trigger_when),
-            ("trigger action `when`", action_when),
-            ("entity `when`", entity_when),
-        ] {
-            let err = parse_world(toml)
-                .expect_err(&format!("a history atom in a {label} must fail the load"));
-            assert!(
-                err.contains("history(") && err.contains("AI fine system"),
-                "{label}: the error must quote the atom and say where windows live; \
-                 got: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_world_reads_on_flag_set_condition() {
-        let toml = r#"
-[[trigger]]
-condition = "on_flag_set"
-name      = "phase_one_done"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-phase-two"
-  text = "Begin phase two."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnFlagSet {
-                name: "phase_one_done".into()
-            }
-        );
-    }
-
-    #[test]
-    fn parse_world_reads_on_flag_cleared_condition() {
-        let toml = r#"
-[[trigger]]
-condition = "on_flag_cleared"
-name      = "shields_up"
-
-  [[trigger.action]]
-  type = "fail_objective"
-  id   = "obj-defend"
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnFlagCleared {
-                name: "shields_up".into()
-            }
-        );
-    }
-
-    // -- Rhai front-end: `[[trigger]] script = "fn"` (issue #980, M2) --------
-
-    #[test]
-    fn parse_world_reads_a_scripted_trigger_as_an_empty_action_trigger() {
-        // `script = "fn"` is the alternative to the declarative action array:
-        // the trigger keeps its condition but carries no actions (the runtime
-        // handler supplies the effects). Cross-reference validation lives in the
-        // script module; parsing just builds the struct.
-        let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider"
-script    = "on_raider_dead"
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let t = &cfg.triggers[0];
-        assert_eq!(
-            t.condition,
-            TriggerCondition::OnDestroyed {
-                entity_name: "raider".into()
-            }
-        );
-        assert!(t.actions.is_empty(), "the handler supplies the effects");
-        assert!(t.action_predicates.is_empty());
-        assert!(t.action_delays.is_empty());
-        // Built through the shared `scripted_trigger` constructor, so it is
-        // byte-for-byte a bare scripted trigger of this condition.
-        assert_eq!(
-            *t,
-            scripted_trigger(TriggerCondition::OnDestroyed {
-                entity_name: "raider".into()
-            })
-        );
-    }
-
-    #[test]
-    fn parse_world_scripted_trigger_keeps_lifecycle_fields() {
-        let toml = r#"
-[[trigger]]
-condition     = "on_timer"
-after_secs    = 30.0
-script        = "tick"
-id            = "hb"
-repeat        = true
-cooldown_secs = 5.0
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let t = &cfg.triggers[0];
-        assert_eq!(t.condition, TriggerCondition::OnTimer { after_secs: 30.0 });
-        assert!(t.actions.is_empty());
-        assert_eq!(t.id.as_deref(), Some("hb"));
-        assert!(t.repeat);
-        assert_eq!(t.cooldown_secs, Some(5.0));
-    }
-
-    // -- on_world_loaded (issue #415) ------------------------------------
-
-    #[test]
-    fn parse_world_reads_on_world_loaded_condition() {
-        let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-intro"
-  text = "Welcome aboard."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers[0].condition, TriggerCondition::OnWorldLoaded);
-        assert_eq!(cfg.triggers[0].actions.len(), 1);
-    }
-
-    #[test]
-    fn parse_world_reads_on_world_loaded_with_when_predicate() {
-        let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-when      = "flag(intro_done)"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-replay"
-  text = "Replay objective."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers[0].condition, TriggerCondition::OnWorldLoaded);
+        let err = parse_world(toml).expect_err("a history atom must fail the load");
         assert!(
-            cfg.triggers[0].when.is_some(),
-            "when predicate must round-trip"
+            err.contains("history(") && err.contains("AI fine system"),
+            "the error must quote the atom and say where windows live; got: {err}"
         );
     }
 
-    // -- on_entered_region / on_exited_region (issue #416) ------------------
+    // -- Trigger action vocabulary ------------------------------------------
+    //
+    // The condition half of these sections (`on_world_loaded`, the region pair,
+    // `on_waypoint_reached`, the flag conditions, the `[[trigger]] script = "fn"`
+    // front-end) went with `parse_trigger_condition_from_string` in issue #985.
+    // The scripted registrations that replaced them are covered in
+    // `world::script::triggers`.
 
     #[test]
-    fn parse_world_reads_on_entered_region_condition() {
+    fn flag_mutation_actions_parse() {
         let toml = r#"
-[[trigger]]
-condition = "on_entered_region"
-entity    = "nebula_alpha"
+[[action]]
+type = "set_flag"
+name = "raider_down"
 
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-nebula"
-  text = "Entered the nebula."
+[[action]]
+type = "clear_flag"
+name = "danger"
+
+[[action]]
+type = "increment_flag"
+name = "kills"
+by   = 2
+
+[[action]]
+type  = "set_flag_value"
+name  = "wave"
+value = 3
 "#;
-        let cfg = parse_world(toml).expect("must parse");
+        let parsed = actions(toml).expect("must parse");
+        assert_eq!(parsed.len(), 4);
         assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnEnteredRegion {
-                entity_name: "nebula_alpha".into()
-            }
-        );
-        assert_eq!(cfg.triggers[0].actions.len(), 1);
-    }
-
-    #[test]
-    fn parse_world_reads_on_exited_region_condition() {
-        let toml = r#"
-[[trigger]]
-condition = "on_exited_region"
-entity    = "nebula_alpha"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-nebula"
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnExitedRegion {
-                entity_name: "nebula_alpha".into()
-            }
-        );
-    }
-
-    #[test]
-    fn parse_world_reads_on_entered_region_with_when_predicate() {
-        let toml = r#"
-[[trigger]]
-condition = "on_entered_region"
-entity    = "nebula_alpha"
-when      = "flag(stealth_mode)"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-stealth"
-  text = "Stealth ingress."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnEnteredRegion {
-                entity_name: "nebula_alpha".into()
-            }
-        );
-        assert!(
-            cfg.triggers[0].when.is_some(),
-            "when predicate must round-trip"
-        );
-    }
-
-    #[test]
-    fn parse_world_rejects_on_entered_region_without_entity() {
-        let toml = r#"
-[[trigger]]
-condition = "on_entered_region"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "x"
-  text = "x"
-"#;
-        let err = parse_world(toml).expect_err("missing entity must error");
-        assert!(
-            err.contains("on_entered_region") && err.contains("entity"),
-            "error must mention condition + entity field: {err}"
-        );
-    }
-
-    // -- on_waypoint_reached (issue #696) ----------------------------------
-
-    #[test]
-    fn parse_world_reads_on_waypoint_reached_condition() {
-        let toml = r#"
-[[trigger]]
-condition = "on_waypoint_reached"
-entity    = "harrow_patrol"
-waypoint  = "wp_border"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-border"
-  text = "The Harrow patrol reached the border."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnWaypointReached {
-                entity_name: "harrow_patrol".into(),
-                waypoint: Some("wp_border".into()),
-            }
-        );
-        assert_eq!(cfg.triggers[0].actions.len(), 1);
-    }
-
-    #[test]
-    fn parse_world_reads_on_waypoint_reached_without_waypoint_as_any() {
-        let toml = r#"
-[[trigger]]
-condition = "on_waypoint_reached"
-entity    = "harrow_patrol"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-any"
-  text = "The Harrow patrol reached a waypoint."
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(
-            cfg.triggers[0].condition,
-            TriggerCondition::OnWaypointReached {
-                entity_name: "harrow_patrol".into(),
-                waypoint: None,
-            },
-            "an omitted 'waypoint' field means any waypoint on the route"
-        );
-    }
-
-    #[test]
-    fn parse_world_rejects_on_waypoint_reached_without_entity() {
-        let toml = r#"
-[[trigger]]
-condition = "on_waypoint_reached"
-waypoint  = "wp_border"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "x"
-  text = "x"
-"#;
-        let err = parse_world(toml).expect_err("missing entity must error");
-        assert!(
-            err.contains("on_waypoint_reached") && err.contains("entity"),
-            "error must mention condition + entity field: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_world_rejects_on_exited_region_without_entity() {
-        let toml = r#"
-[[trigger]]
-condition = "on_exited_region"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "x"
-  text = "x"
-"#;
-        let err = parse_world(toml).expect_err("missing entity must error");
-        assert!(
-            err.contains("on_exited_region") && err.contains("entity"),
-            "error must mention condition + entity field: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_world_reads_flag_mutation_actions() {
-        let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider_alpha"
-
-  [[trigger.action]]
-  type = "set_flag"
-  name = "raider_down"
-
-  [[trigger.action]]
-  type = "clear_flag"
-  name = "danger"
-
-  [[trigger.action]]
-  type = "increment_flag"
-  name = "kills"
-  by   = 2
-
-  [[trigger.action]]
-  type  = "set_flag_value"
-  name  = "wave"
-  value = 3
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let actions = &cfg.triggers[0].actions;
-        assert_eq!(actions.len(), 4);
-        assert_eq!(
-            actions[0],
+            parsed[0],
             TriggerAction::SetWorldFlag {
                 name: "raider_down".into()
             }
         );
         assert_eq!(
-            actions[1],
+            parsed[1],
             TriggerAction::ClearWorldFlag {
                 name: "danger".into()
             }
         );
         assert_eq!(
-            actions[2],
+            parsed[2],
             TriggerAction::IncrementWorldFlag {
                 name: "kills".into(),
                 by: 2
             }
         );
         assert_eq!(
-            actions[3],
+            parsed[3],
             TriggerAction::SetWorldFlagValue {
                 name: "wave".into(),
                 value: 3
@@ -4195,49 +3531,42 @@ entity    = "raider_alpha"
     }
 
     #[test]
-    fn parse_world_set_flag_requires_name() {
+    fn set_flag_requires_name() {
         let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider"
-
-  [[trigger.action]]
-  type = "set_flag"
+[[action]]
+type = "set_flag"
 "#;
-        let err = parse_world(toml).expect_err("set_flag without name must error");
+        let err = actions(toml).expect_err("set_flag without name must error");
         assert!(err.contains("name"), "error must mention name: {err}");
     }
 
     #[test]
-    fn parse_world_increment_flag_requires_by() {
+    fn increment_flag_requires_by() {
         let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider"
-
-  [[trigger.action]]
-  type = "increment_flag"
-  name = "kills"
+[[action]]
+type = "increment_flag"
+name = "kills"
 "#;
-        let err = parse_world(toml).expect_err("increment_flag without by must error");
+        let err = actions(toml).expect_err("increment_flag without by must error");
         assert!(err.contains("by"), "error must mention by: {err}");
     }
 
     #[test]
     fn parse_world_default_toml_is_script_authored_with_no_declarative_content() {
         let toml = include_str!("../../assets/worlds/default.toml");
-        let cfg = parse_world(toml).expect("default.toml must parse");
         // (#984) default.toml is the first world whose COMMS converted to
         // `[script]`, not just its triggers: its two `[[trigger]]` blocks and
         // its three `[[comms]]` templates are all Rhai now. Since issue #985
-        // deleted both declarative front-ends there is no other shape a world
-        // could be in, but the assertion still earns its place: it is the check
-        // that this world's scenario logic is REACHABLE, i.e. that it did not
-        // lose its `[script]` block in an edit.
+        // `parse_world` REFUSES either block by name, so parsing clean is
+        // itself the "no declarative content" half of this test — there is no
+        // list left to read empty.
         //
-        // The scripted behaviour is pinned by the dialogue-tree parity test in
-        // `comms::scripted` and by the conversion's digest parity.
-        assert!(cfg.triggers.is_empty());
+        // The `[script]` half still earns its place: it is the check that this
+        // world's scenario logic is REACHABLE, i.e. that it did not lose its
+        // block in an edit. The scripted behaviour is pinned by the
+        // dialogue-tree parity test in `comms::scripted` and by the
+        // conversion's digest parity.
+        parse_world(toml).expect("default.toml must parse");
         assert!(
             toml.contains("[script]"),
             "default.toml must carry its [script] block"
@@ -4247,13 +3576,14 @@ entity    = "raider"
     #[test]
     fn parse_world_patrol_toml_loads_triggers_with_no_comms() {
         let toml = include_str!("../../assets/worlds/patrol.toml");
-        let cfg = parse_world(toml).expect("patrol.toml must parse");
         // patrol.toml is [script]-authored (issue #984): its on_world_loaded +
         // on_destroyed triggers live in the Rhai block, registered at activation
-        // by compile_world_scripts/merge_script_triggers — so the DECLARATIVE
-        // trigger list parses empty. The scripted behaviour is pinned by the
-        // world::server scripted-trigger tests and the conversion's digest parity.
-        assert!(cfg.triggers.is_empty());
+        // by compile_world_scripts/merge_script_triggers. Since issue #985 a
+        // `[[trigger]]` block is refused by name, so a clean parse is the proof
+        // that none survived the conversion. The scripted behaviour is pinned by
+        // the world::server scripted-trigger tests and the conversion's digest
+        // parity.
+        parse_world(toml).expect("patrol.toml must parse");
         assert!(
             toml.contains("[script]"),
             "patrol.toml must carry its [script] block"
@@ -4288,10 +3618,11 @@ entity    = "raider"
     ///   - 12 comms announcements (1 on world-load + 8 on the clock + 3 hull
     ///     bands), all from Starbase Alpha
     ///
-    /// # Why this reads the script rather than `cfg.triggers`
+    /// # Why this reads the script rather than a parsed trigger list
     ///
-    /// Issue #984 moved all of it into `[script]`, so the declarative lists parse
-    /// EMPTY and there is nothing to read there. The facts above did not become
+    /// Issue #984 moved all of it into `[script]` and issue #985 deleted the
+    /// declarative parser behind it, so there is no `WorldConfig` trigger list
+    /// left to read. The facts above did not become
     /// unobservable, they moved: a registration's condition is on the
     /// `ScriptTrigger` the front-end built (byte-identical to its TOML twin), and
     /// its effects are what running its handler buffers. Both are read here
@@ -4312,11 +3643,10 @@ entity    = "raider"
 
         const WORLD: &str = "assets/worlds/combat_test.toml";
         let toml = include_str!("../../assets/worlds/combat_test.toml");
+        // A clean parse is the "fully converted" half (#985 refuses a surviving
+        // `[[trigger]]` / `[[comms]]` block by name); the script read below is
+        // the "and this is what it does instead" half.
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
-        assert!(
-            cfg.triggers.is_empty(),
-            "combat_test is [script]-authored (#984): its declarative trigger list is empty"
-        );
         let world = ScriptedWorld::compile(WORLD, toml);
 
         /// The player tier a run is read at. The DEMO tier (destroyer,
@@ -5062,32 +4392,6 @@ transform = { position = [0.0, 0.0, 0.0] }
 
     // -- entity_template_paths: trigger / comms walks (#475) ----------------
 
-    #[test]
-    fn entity_template_paths_includes_trigger_spawn_entity_templates() {
-        // (#475) Regression: SpawnEntity actions inside `[[trigger.action]]`
-        // blocks reference entity templates that must be preloaded into the
-        // EntityConfig cache before the trigger fires. Without this walk,
-        // timer-driven wave spawns silently fail on WASM (cache miss →
-        // `continue` in tick_trigger_pipeline).
-        let toml = r#"
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/wave_destroyer.toml"
-  name          = "wave_1"
-  position      = [0.0, 0.0, 0.0]
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg, &[]);
-        assert!(
-            paths.contains(&"assets/entities/wave_destroyer.toml".to_string()),
-            "trigger spawn_entity template must be discovered for preload, got {paths:?}"
-        );
-    }
-
     /// (#984) The scripted surface. A Rhai handler's `spawn_entity` map names
     /// its template as a literal and the handler does not RUN until long after
     /// preload, so the only thing available before the fetch is the source text.
@@ -5125,48 +4429,6 @@ fn wave(ctx) {
         let sibling = parse_world("script = \"combat.rhai\"\n").expect("must parse");
         assert!(sibling.script_sources.is_empty());
         assert!(entity_template_paths(&sibling, &[]).is_empty());
-    }
-
-    #[test]
-    fn entity_template_paths_dedups_across_entity_trigger_and_comms_walks() {
-        // (#475) Same template referenced from a static [[entity]] block, a
-        // trigger spawn_entity action, and a comms response must appear
-        // exactly once in the output.
-        let toml = r#"
-[[entity]]
-template_path = "assets/entities/ship.toml"
-transform = { position = [0.0, 0.0, 0.0] }
-
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/ship.toml"
-  name          = "wave_1"
-  position      = [10.0, 0.0, 0.0]
-
-[[comms]]
-from    = "Cmd"
-trigger = "on_world_loaded"
-message = "."
-
-  [[comms.response]]
-  text = "OK"
-    [[comms.response.action]]
-    type          = "spawn_entity"
-    template_path = "assets/entities/ship.toml"
-    name          = "wave_2"
-    position      = [20.0, 0.0, 0.0]
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg, &[]);
-        let ship_count = paths
-            .iter()
-            .filter(|p| p.as_str() == "assets/entities/ship.toml")
-            .count();
-        assert_eq!(ship_count, 1, "must dedup across all three walks");
     }
 
     #[test]
@@ -5323,20 +4585,15 @@ extra_worlds = ["assets/worlds/patrol.toml"]
     // -- LoadWorld / UnloadWorld trigger actions (issue #352) -------------
 
     #[test]
-    fn parse_world_load_world_action_parses() {
+    fn load_world_action_parses() {
         let toml = r#"
-[[trigger]]
-condition = "on_timer"
-after_secs = 10.0
-
-  [[trigger.action]]
-  type = "load_world"
-  path = "assets/worlds/patrol.toml"
+[[action]]
+type = "load_world"
+path = "assets/worlds/patrol.toml"
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers.len(), 1);
-        assert_eq!(cfg.triggers[0].actions.len(), 1);
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        assert_eq!(parsed.len(), 1);
+        match &parsed[0] {
             TriggerAction::LoadWorld { path } => {
                 assert_eq!(path, "assets/worlds/patrol.toml");
             }
@@ -5345,19 +4602,14 @@ after_secs = 10.0
     }
 
     #[test]
-    fn parse_world_unload_world_action_parses() {
+    fn unload_world_action_parses() {
         let toml = r#"
-[[trigger]]
-condition = "on_timer"
-after_secs = 20.0
-
-  [[trigger.action]]
-  type = "unload_world"
-  path = "assets/worlds/patrol.toml"
+[[action]]
+type = "unload_world"
+path = "assets/worlds/patrol.toml"
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers.len(), 1);
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::UnloadWorld { path } => {
                 assert_eq!(path, "assets/worlds/patrol.toml");
             }
@@ -5366,16 +4618,12 @@ after_secs = 20.0
     }
 
     #[test]
-    fn parse_world_load_world_action_requires_path_field() {
+    fn load_world_action_requires_path_field() {
         let toml = r#"
-[[trigger]]
-condition = "on_timer"
-after_secs = 10.0
-
-  [[trigger.action]]
-  type = "load_world"
+[[action]]
+type = "load_world"
 "#;
-        let err = parse_world(toml).expect_err("load_world without path must error");
+        let err = actions(toml).expect_err("load_world without path must error");
         assert!(
             err.contains("load_world") && err.contains("path"),
             "error must mention load_world and path: {err}"
@@ -5383,16 +4631,12 @@ after_secs = 10.0
     }
 
     #[test]
-    fn parse_world_unload_world_action_requires_path_field() {
+    fn unload_world_action_requires_path_field() {
         let toml = r#"
-[[trigger]]
-condition = "on_timer"
-after_secs = 10.0
-
-  [[trigger.action]]
-  type = "unload_world"
+[[action]]
+type = "unload_world"
 "#;
-        let err = parse_world(toml).expect_err("unload_world without path must error");
+        let err = actions(toml).expect_err("unload_world without path must error");
         assert!(
             err.contains("unload_world") && err.contains("path"),
             "error must mention unload_world and path: {err}"
@@ -5400,20 +4644,16 @@ after_secs = 10.0
     }
 
     #[test]
-    fn parse_world_rejects_load_scenario_action_as_unknown() {
+    fn load_scenario_action_is_rejected_as_unknown() {
         // PRD #341 removed the `load_scenario` action; `load_world` is the
         // replacement. Any lingering `load_scenario` in a world TOML must be
         // rejected as an unknown action rather than silently parsed.
         let toml = r#"
-[[trigger]]
-condition = "on_timer"
-after_secs = 10.0
-
-  [[trigger.action]]
-  type = "load_scenario"
-  load_scenario = "assets/worlds/patrol.toml"
+[[action]]
+type = "load_scenario"
+load_scenario = "assets/worlds/patrol.toml"
 "#;
-        let err = parse_world(toml).expect_err("load_scenario must be rejected as unknown action");
+        let err = actions(toml).expect_err("load_scenario must be rejected as unknown action");
         assert!(
             err.contains("Unknown trigger action") && err.contains("load_scenario"),
             "error must flag load_scenario as unknown: {err}"
@@ -5659,22 +4899,19 @@ music_volume = 0.35
     // ── spawn_entity / destroy_entity actions (issue #417) ────────────────
 
     #[test]
-    fn parse_world_reads_spawn_entity_action_with_position() {
+    fn spawn_entity_action_reads_a_position() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_destroyer.toml"
-  name          = "raider_beta"
-  position      = [100.0, 0.0, -50.0]
-  rotation      = [0.0, 1.5707963, 0.0]
-  scale         = [2.0, 2.0, 2.0]
+[[action]]
+type          = "spawn_entity"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
+name          = "raider_beta"
+position      = [100.0, 0.0, -50.0]
+rotation      = [0.0, 1.5707963, 0.0]
+scale         = [2.0, 2.0, 2.0]
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.triggers.len(), 1);
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        assert_eq!(parsed.len(), 1);
+        match &parsed[0] {
             TriggerAction::SpawnEntity {
                 template_path,
                 name,
@@ -5700,19 +4937,16 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_reads_spawn_entity_action_with_anchor() {
+    fn spawn_entity_action_reads_an_anchor() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_destroyer.toml"
-  name          = "raider_at_anchor"
-  anchor        = "patrol_alpha"
+[[action]]
+type          = "spawn_entity"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
+name          = "raider_at_anchor"
+anchor        = "patrol_alpha"
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::SpawnEntity {
                 anchor,
                 position,
@@ -5730,17 +4964,14 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_spawn_entity_rejects_missing_template_path() {
+    fn spawn_entity_rejects_a_missing_template_path() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type     = "spawn_entity"
-  name     = "x"
-  position = [0.0, 0.0, 0.0]
+[[action]]
+type     = "spawn_entity"
+name     = "x"
+position = [0.0, 0.0, 0.0]
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(
             err.contains("template_path"),
             "error must mention template_path: {err}"
@@ -5748,34 +4979,28 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_spawn_entity_rejects_missing_name() {
+    fn spawn_entity_rejects_a_missing_name() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "t.toml"
-  position      = [0.0, 0.0, 0.0]
+[[action]]
+type          = "spawn_entity"
+template_path = "t.toml"
+position      = [0.0, 0.0, 0.0]
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(err.contains("name"), "error must mention name: {err}");
     }
 
     #[test]
-    fn parse_world_spawn_entity_rejects_both_anchor_and_position() {
+    fn spawn_entity_rejects_both_anchor_and_position() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "t.toml"
-  name          = "x"
-  anchor        = "a"
-  position      = [0.0, 0.0, 0.0]
+[[action]]
+type          = "spawn_entity"
+template_path = "t.toml"
+name          = "x"
+anchor        = "a"
+position      = [0.0, 0.0, 0.0]
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(
             err.contains("anchor") && err.contains("position"),
             "error must mention both: {err}"
@@ -5783,17 +5008,14 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_spawn_entity_rejects_neither_anchor_nor_position() {
+    fn spawn_entity_rejects_neither_anchor_nor_position() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "t.toml"
-  name          = "x"
+[[action]]
+type          = "spawn_entity"
+template_path = "t.toml"
+name          = "x"
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(
             err.contains("anchor") || err.contains("position"),
             "error must mention anchor/position: {err}"
@@ -5801,17 +5023,14 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_reads_destroy_entity_action() {
+    fn destroy_entity_action_parses() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type   = "destroy_entity"
-  entity = "raider_beta"
+[[action]]
+type   = "destroy_entity"
+entity = "raider_beta"
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::DestroyEntity { entity } => {
                 assert_eq!(entity, "raider_beta");
             }
@@ -5820,31 +5039,25 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_destroy_entity_rejects_missing_entity() {
+    fn destroy_entity_rejects_a_missing_entity() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "destroy_entity"
+[[action]]
+type = "destroy_entity"
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(err.contains("entity"), "error must mention entity: {err}");
     }
 
     #[test]
-    fn parse_world_reads_add_faction_enemy_action() {
+    fn add_faction_enemy_action_parses() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Harrow"
-  enemy   = "Federation"
+[[action]]
+type    = "add_faction_enemy"
+faction = "Harrow"
+enemy   = "Federation"
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::AddFactionEnemy { faction, enemy } => {
                 assert_eq!(faction, "Harrow");
                 assert_eq!(enemy, "Federation");
@@ -5854,18 +5067,15 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_reads_remove_faction_enemy_action() {
+    fn remove_faction_enemy_action_parses() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type    = "remove_faction_enemy"
-  faction = "Harrow"
-  enemy   = "Federation"
+[[action]]
+type    = "remove_faction_enemy"
+faction = "Harrow"
+enemy   = "Federation"
 "#;
-        let cfg = parse_world(toml).expect("must parse");
-        match &cfg.triggers[0].actions[0] {
+        let parsed = actions(toml).expect("must parse");
+        match &parsed[0] {
             TriggerAction::RemoveFactionEnemy { faction, enemy } => {
                 assert_eq!(faction, "Harrow");
                 assert_eq!(enemy, "Federation");
@@ -5875,58 +5085,46 @@ condition = "on_world_loaded"
     }
 
     #[test]
-    fn parse_world_add_faction_enemy_rejects_missing_faction() {
+    fn add_faction_enemy_rejects_a_missing_faction() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type  = "add_faction_enemy"
-  enemy = "Federation"
+[[action]]
+type  = "add_faction_enemy"
+enemy = "Federation"
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(err.contains("faction"), "error must mention faction: {err}");
     }
 
     #[test]
-    fn parse_world_add_faction_enemy_rejects_missing_enemy() {
+    fn add_faction_enemy_rejects_a_missing_enemy() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type    = "add_faction_enemy"
-  faction = "Harrow"
+[[action]]
+type    = "add_faction_enemy"
+faction = "Harrow"
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(err.contains("enemy"), "error must mention enemy: {err}");
     }
 
     #[test]
-    fn parse_world_remove_faction_enemy_rejects_missing_faction() {
+    fn remove_faction_enemy_rejects_a_missing_faction() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type  = "remove_faction_enemy"
-  enemy = "Federation"
+[[action]]
+type  = "remove_faction_enemy"
+enemy = "Federation"
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(err.contains("faction"), "error must mention faction: {err}");
     }
 
     #[test]
-    fn parse_world_remove_faction_enemy_rejects_missing_enemy() {
+    fn remove_faction_enemy_rejects_a_missing_enemy() {
         let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type    = "remove_faction_enemy"
-  faction = "Harrow"
+[[action]]
+type    = "remove_faction_enemy"
+faction = "Harrow"
 "#;
-        let err = parse_world(toml).expect_err("must reject");
+        let err = actions(toml).expect_err("must reject");
         assert!(err.contains("enemy"), "error must mention enemy: {err}");
     }
 }

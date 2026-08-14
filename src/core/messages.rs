@@ -773,13 +773,13 @@ impl CommsMessage {
 
     /// Build a freshly-injected inbox message.
     ///
-    /// The ONE constructor behind every server-side injection — the hail root
-    /// (`console::comms::server::handle_hail`), the immediate and the triggered
-    /// follow-up (`handle_respond_to_message`, including its `...` placeholder),
-    /// the queued follow-up (`comms::server::tick_pending_follow_ups`) and the
-    /// fired template (`inject_comms_templates`). Each was an identical
-    /// twelve-field literal differing only in these arguments, which is how a
-    /// wire field could be added to the struct and missed at one site.
+    /// The ONE constructor behind every server-side injection — a thread's root
+    /// (`comms::scripted::open_scripted_comms_threads`) and the follow-up node an
+    /// `on_pick` returns (`console::comms::server::handle_respond_to_message`).
+    /// Each was an identical twelve-field literal differing only in these
+    /// arguments, which is how a wire field could be added to the struct and
+    /// missed at one site. There were five such sites before issue #985 deleted
+    /// the declarative front-end's three.
     ///
     /// The four derived fields are the injection invariants: `subject` is the
     /// first [`SUBJECT_CHARS`](Self::SUBJECT_CHARS) characters of `body` (chars,

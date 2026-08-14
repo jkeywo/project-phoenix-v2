@@ -35,7 +35,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::entity_includes::FragmentSource;
 use crate::entity_loader::TemplateLoader;
-use crate::world::config::{TriggerAction, TriggerCondition, WorldConfig, WorldEntity};
+use crate::world::config::{TriggerAction, WorldConfig, WorldEntity};
 
 /// Severity of a [`WorldFinding`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,27 +222,28 @@ pub fn parse_qualified_reference(reference: &str, child_aliases: &[String]) -> Q
     QualifiedRef::Bare(reference.to_string())
 }
 
-/// Collect the set of entity reference ids declared by a world config: static
-/// `[[entity]]` names plus names introduced by `SpawnEntity` trigger actions
-/// (which register into `name_to_uuid` at runtime).
+/// Collect the set of entity reference ids declared by a world config: the
+/// static `[[entity]]` names.
+///
+/// It also walked `SpawnEntity` trigger actions (which register into
+/// `name_to_uuid` at runtime) until issue #985 deleted the `[[trigger]]`
+/// front-end that authored them. A SCRIPTED `spawn_entity` names its entity in
+/// a Rhai map this pass cannot read; `world::script::validate` is where a
+/// scripted world's cross-references are checked.
 fn declared_names(config: &WorldConfig) -> Vec<String> {
-    let mut names: Vec<String> = config
+    config
         .entities
         .iter()
         .filter_map(|e| e.name.clone())
-        .collect();
-    for trigger in &config.triggers {
-        for action in &trigger.actions {
-            if let TriggerAction::SpawnEntity { name, .. } = action {
-                names.push(name.clone());
-            }
-        }
-    }
-    names
+        .collect()
 }
 
 /// A single authored entity reference and a human-readable description of where
 /// it came from (for finding messages).
+///
+/// Nothing constructs one since issue #985 — see [`collect_entity_references`]
+/// for why the source went and why the shape is kept rather than unpicked.
+#[allow(dead_code)]
 struct EntityRef {
     reference: String,
     kind: &'static str,
@@ -250,53 +251,18 @@ struct EntityRef {
 
 /// Collect every authored entity-name reference in a world config.
 ///
-/// Covers trigger conditions (destroy/attack/hail/region), objective targets,
-/// and AI-state entity + target references. Comms *sender* identity is
-/// deliberately out of scope here (issue #751 disambiguates whether a comms
-/// `from` names an entity or is a plain display key); the objective *contract*
-/// is #752. This only resolves references we can classify unambiguously today.
-fn collect_entity_references(config: &WorldConfig) -> Vec<EntityRef> {
-    let mut refs = Vec::new();
-    let mut push = |reference: &str, kind: &'static str| {
-        if !reference.is_empty() {
-            refs.push(EntityRef {
-                reference: reference.to_string(),
-                kind,
-            });
-        }
-    };
-
-    for trigger in &config.triggers {
-        match &trigger.condition {
-            TriggerCondition::OnDestroyed { entity_name }
-            | TriggerCondition::OnAttacked { entity_name }
-            | TriggerCondition::OnHailed { entity_name }
-            | TriggerCondition::OnEnteredRegion { entity_name }
-            | TriggerCondition::OnExitedRegion { entity_name } => {
-                push(entity_name, "trigger target")
-            }
-            _ => {}
-        }
-        for action in &trigger.actions {
-            match action {
-                TriggerAction::AddObjective { targets, .. } => {
-                    for t in targets {
-                        push(t, "objective target");
-                    }
-                }
-                TriggerAction::SetAiState { entity, target, .. } => {
-                    push(entity, "ai-state entity");
-                    if let Some(t) = target {
-                        push(t, "ai-state target");
-                    }
-                }
-                TriggerAction::DestroyEntity { entity } => push(entity, "destroy target"),
-                _ => {}
-            }
-        }
-    }
-
-    refs
+/// It covered trigger conditions (destroy/attack/hail/region), objective
+/// targets, and AI-state entity + target references — all of them reached
+/// through `config.triggers`, which issue #985 deleted with the `[[trigger]]`
+/// front-end. Nothing declarative is left to walk, so this returns empty and the
+/// checks built on it are vacuous for every world; a scripted world's
+/// cross-references are resolved by `world::script::validate` instead.
+///
+/// Kept rather than unpicked because the CHECKS it feeds — unresolved-reference
+/// findings with their severities and messages — are the seam script-in-layers
+/// (#1045) and any future authored-reference source plug into.
+fn collect_entity_references(_config: &WorldConfig) -> Vec<EntityRef> {
+    Vec::new()
 }
 
 /// Validate entity identity for one world: duplicate reference names in a single
@@ -398,17 +364,15 @@ pub fn validate_entity_identity(
     findings
 }
 
-/// Every action list authored in a world config, in a stable order: each
-/// trigger's action list.
+/// Every action list authored in a world config, in a stable order.
 ///
-/// It also walked every comms dialogue node's response action lists until issue
-/// #985 deleted the `[[comms]]` front-end that authored them.
-fn collect_action_lists(config: &WorldConfig) -> Vec<&[TriggerAction]> {
-    let mut lists: Vec<&[TriggerAction]> = Vec::new();
-    for trigger in &config.triggers {
-        lists.push(&trigger.actions);
-    }
-    lists
+/// It walked each `[[trigger]]`'s action array and every comms dialogue node's
+/// response action lists; issue #985 deleted both front-ends, so there is
+/// nothing authored left to walk and the objective/reference checks built on it
+/// are vacuous for every world. Kept for [`collect_entity_references`]' reason:
+/// the CHECKS are the seam a future authored-action source plugs into.
+fn collect_action_lists(_config: &WorldConfig) -> Vec<&[TriggerAction]> {
+    Vec::new()
 }
 
 /// Collect every objective id declared via `add_objective` across all of a
@@ -448,6 +412,18 @@ fn collect_objective_declarations(config: &WorldConfig) -> HashSet<&str> {
 /// resolved (as warnings for unresolved bare names) by `collect_entity_references`
 /// and are deliberately not escalated to errors here — shipped worlds legitimately
 /// target localization-key names and runtime-spawned entities.
+///
+/// # Vacuous since issue #985
+///
+/// Both rules read [`collect_action_lists`], whose only source was the
+/// `[[trigger.action]]` and `[[comms.response.action]]` arrays. With those
+/// parsers deleted it returns empty, so this finds nothing for any world — an
+/// objective is declared by a script calling `ctx.effects.add_objective`, in a
+/// Rhai map this pass cannot read. It is kept rather than unpicked for
+/// [`collect_entity_references`]' reason: the RULES, their severities and their
+/// messages are the seam a future authored-action source plugs into, and
+/// `world::script::validate` is where a scripted world's cross-references are
+/// checked today.
 pub fn validate_objectives_in(
     path: &str,
     source_text: &str,
@@ -1555,300 +1531,13 @@ name = "outpost"
     // is itself an error now, on any host whose loader is authoritative, and
     // `validate_composition`'s default loader is authoritative on native.
 
-    #[test]
-    fn parent_reference_resolves_to_root_entity() {
-        let root = cfg(r#"
-[[entity]]
-template_path = "assets/entities/planet_earth.toml"
-name = "axiom"
-"#);
-        // Child references parent.axiom in a trigger target — resolves to root.
-        let child = cfg(r#"
-[[entity]]
-template_path = "assets/entities/moon_luna.toml"
-name = "child_ship"
-
-[[trigger]]
-condition = "on_destroyed"
-entity = "parent.axiom"
-"#);
-        let root_src = WorldSource::new("root.toml", "", &root);
-        let child_toml = "entity = \"parent.axiom\"";
-        let child_src = WorldSource::new("assets/worlds/child.toml", child_toml, &child);
-        let findings = validate_composition(&root_src, &[child_src]);
-        assert!(
-            !has_error(&findings),
-            "parent.axiom resolves to root: {findings:?}"
-        );
-    }
-
-    #[test]
-    fn parent_reference_past_root_is_unresolved_error() {
-        let root = cfg("");
-        let child = cfg(r#"
-[[trigger]]
-condition = "on_destroyed"
-entity = "parent.parent.axiom"
-"#);
-        let root_src = WorldSource::new("root.toml", "", &root);
-        let child_toml = "entity = \"parent.parent.axiom\"";
-        let child_src = WorldSource::new("child.toml", child_toml, &child);
-        let findings = validate_composition(&root_src, &[child_src]);
-        let err = findings
-            .iter()
-            .find(|f| f.is_error())
-            .expect("climbing past root errors");
-        assert_eq!(err.category, "unresolved-reference");
-        assert_eq!(err.source.reference, "parent.parent.axiom");
-        assert_eq!(err.source.line, Some(1));
-    }
-
     // ── child_world.<name> resolution (AC3) ──────────────────────────────────
-
-    #[test]
-    fn child_world_reference_resolves_and_detects_unknown() {
-        let root = cfg(r#"
-[[entity]]
-template_path = "assets/entities/planet_earth.toml"
-name = "flagship"
-
-[[trigger]]
-condition = "on_destroyed"
-entity = "child_a.ironveil"
-
-[[trigger]]
-condition = "on_destroyed"
-entity = "child_a.ghost"
-"#);
-        let child = cfg(r#"
-[[entity]]
-template_path = "assets/entities/moon_luna.toml"
-name = "ironveil"
-"#);
-        let root_toml = "entity = \"child_a.ironveil\"\nentity = \"child_a.ghost\"".to_string();
-        let root_src = WorldSource::new("assets/worlds/root.toml", &root_toml, &root);
-        let child_src = WorldSource::new("assets/worlds/child_a.toml", "", &child);
-        let findings = validate_composition(&root_src, &[child_src]);
-        // ironveil resolves; ghost does not.
-        let errs: Vec<_> = findings.iter().filter(|f| f.is_error()).collect();
-        assert_eq!(
-            errs.len(),
-            1,
-            "only child_a.ghost is unresolved: {findings:?}"
-        );
-        assert_eq!(errs[0].source.reference, "child_a.ghost");
-        assert_eq!(errs[0].category, "unresolved-reference");
-    }
 
     // ── ambiguous reference (AC2) ────────────────────────────────────────────
 
-    #[test]
-    fn bare_reference_in_two_children_is_ambiguous() {
-        let root = cfg(r#"
-[[trigger]]
-condition = "on_destroyed"
-entity = "raider"
-"#);
-        let a = cfg(r#"
-[[entity]]
-template_path = "assets/entities/planet_earth.toml"
-name = "raider"
-"#);
-        let b = cfg(r#"
-[[entity]]
-template_path = "assets/entities/moon_luna.toml"
-name = "raider"
-"#);
-        let root_src = WorldSource::new("root.toml", "entity = \"raider\"", &root);
-        let a_src = WorldSource::new("child_a.toml", "", &a);
-        let b_src = WorldSource::new("child_b.toml", "", &b);
-        let findings = validate_composition(&root_src, &[a_src, b_src]);
-        let err = findings
-            .iter()
-            .find(|f| f.category == "ambiguous-reference")
-            .expect("raider is ambiguous across children");
-        assert!(err.is_error());
-        assert_eq!(err.source.reference, "raider");
-    }
-
     // ── unresolved bare reference is a non-blocking warning ──────────────────
 
-    #[test]
-    fn unresolved_bare_reference_is_warning_not_error() {
-        let root = cfg(r#"
-[[trigger]]
-condition = "on_destroyed"
-entity = "phantom"
-"#);
-        let root_src = WorldSource::new("root.toml", "entity = \"phantom\"", &root);
-        let findings = validate_composition(&root_src, &[]);
-        assert!(!has_error(&findings), "bare unresolved must not block");
-        assert!(findings
-            .iter()
-            .any(|f| f.severity == Severity::Warning && f.source.reference == "phantom"));
-    }
-
     // ── objective authoring validation (AC2, issue #752) ─────────────────────
-
-    #[test]
-    fn duplicate_objective_id_in_one_action_list_is_error() {
-        let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-dup"
-  text = "First"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-dup"
-  text = "Second"
-"#;
-        let c = cfg(toml);
-        let findings = validate_objectives("root.toml", toml, &c);
-        let err = findings
-            .iter()
-            .find(|f| f.category == "duplicate-objective-id")
-            .expect("duplicate id in one action list must error");
-        assert!(err.is_error());
-        assert_eq!(err.source.reference, "obj-dup");
-    }
-
-    #[test]
-    fn same_objective_id_across_separate_triggers_is_allowed() {
-        // Mutually-exclusive branches re-declaring the same id (the shipped
-        // `btf_path_a` pattern) must NOT be flagged.
-        let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-rescue"
-  text = "Case A"
-
-[[trigger]]
-condition = "on_flag_set"
-name      = "ready"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-rescue"
-  text = "Case B"
-"#;
-        let c = cfg(toml);
-        let findings = validate_objectives("root.toml", toml, &c);
-        assert!(
-            !has_error(&findings),
-            "cross-branch id reuse must not error: {findings:?}"
-        );
-    }
-
-    #[test]
-    fn complete_objective_referencing_undeclared_id_is_error() {
-        let toml = r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-ghost"
-"#;
-        let c = cfg(toml);
-        let findings = validate_objectives("root.toml", toml, &c);
-        let err = findings
-            .iter()
-            .find(|f| f.category == "unresolved-objective-reference")
-            .expect("complete of an undeclared objective must error");
-        assert!(err.is_error());
-        assert_eq!(err.source.reference, "obj-ghost");
-    }
-
-    #[test]
-    fn complete_objective_referencing_declared_id_resolves() {
-        let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-1"
-  text = "Do it"
-
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-1"
-"#;
-        let c = cfg(toml);
-        let findings = validate_objectives("root.toml", toml, &c);
-        assert!(
-            !has_error(&findings),
-            "complete of a declared objective must resolve: {findings:?}"
-        );
-    }
-
-    #[test]
-    fn objective_declared_in_root_resolves_a_child_reference() {
-        // Composition-wide resolution: a child's complete_objective resolves
-        // against an objective the root declares (one shared ObjectiveManager).
-        let root = cfg(r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "obj-shared"
-  text = "Shared"
-"#);
-        let child = cfg(r#"
-[[trigger]]
-condition = "on_destroyed"
-entity    = "raider"
-
-  [[trigger.action]]
-  type = "complete_objective"
-  id   = "obj-shared"
-"#);
-        let root_src = WorldSource::new("root.toml", "", &root);
-        let child_src = WorldSource::new("assets/worlds/child.toml", "", &child);
-        let findings = validate_composition(&root_src, &[child_src]);
-        assert!(
-            !has_error(&findings),
-            "child complete resolves against root declaration: {findings:?}"
-        );
-    }
-
-    #[test]
-    fn duplicate_objective_id_blocks_composition_activation() {
-        let toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "dup"
-  text = "One"
-
-  [[trigger.action]]
-  type = "add_objective"
-  id   = "dup"
-  text = "Two"
-"#;
-        let c = cfg(toml);
-        let src = WorldSource::new("root.toml", toml, &c);
-        let findings = validate_composition(&src, &[]);
-        assert!(
-            has_error(&findings),
-            "a duplicate objective declaration must block activation"
-        );
-    }
 
     // ── doctrine anchor references (issue #888) ──────────────────────────────
 
@@ -2058,31 +1747,6 @@ name = "reinforcement"
             !has_error(&findings),
             "a layer inherits its base world's anchors: {findings:?}"
         );
-    }
-
-    #[test]
-    fn spawn_entity_trigger_doctrine_anchors_are_validated() {
-        // The `combat_test.toml` / `probe_artillery_standoff.toml` shape: the
-        // hull never appears in an `[[entity]]` block at all.
-        let root = cfg(r#"
-[[trigger]]
-condition = "on_timer"
-after_secs = 0.0
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/patroller.toml"
-  name          = "wave_1"
-  position      = [0.0, 0.0, 0.0]
-"#);
-        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
-        let findings = validate_composition_with(&src, &[], &patroller_templates());
-        let err = findings
-            .iter()
-            .find(|f| f.category == "unresolved-anchor")
-            .expect("a spawn_entity trigger spawns an entity too");
-        assert!(err.is_error());
-        assert!(err.message.contains("wave_1"), "{}", err.message);
     }
 
     /// The lever the shipped worlds use to say "this hull has no patrol here"
@@ -2717,30 +2381,6 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
         assert!(!has_error(&findings), "{findings:?}");
     }
 
-    /// A template a `spawn_entity` TRIGGER names is checked too — it reaches
-    /// the same spawn path, through `dispatch`, and fails the same silent way.
-    #[test]
-    fn a_trigger_spawned_template_is_checked_as_well() {
-        let world_toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/nowhere.toml"
-  name          = "ambusher"
-  position      = [0.0, 0.0, 0.0]
-"#;
-        let config = cfg(world_toml);
-        let src = WorldSource::new("assets/worlds/w.toml", world_toml, &config);
-        let findings = validate_composition_with(&src, &[], &patroller_templates());
-        let err = findings
-            .iter()
-            .find(|f| f.category == "unresolvable-template")
-            .unwrap_or_else(|| panic!("expected an unresolvable-template finding: {findings:?}"));
-        assert!(err.message.contains("ambusher"), "{}", err.message);
-    }
-
     /// One hull, spelled two ways, is one finding — the same canonicalisation
     /// `two_spellings_of_one_template_are_reported_once` pins for composition.
     #[test]
@@ -2919,39 +2559,6 @@ name = "ghost"
                 .any(|f| f.category == "unresolvable-template"),
             "{findings:?}"
         );
-    }
-
-    /// A `spawn_entity` TRIGGER's override is checked too — and this is the one
-    /// place the finding is stricter than the runtime, so it is pinned rather
-    /// than assumed.
-    ///
-    /// `world::dispatch::dispatch_spawn_entity` reaches the same verdict by the
-    /// same merge, but answers a failure by keeping the template and warning, so
-    /// the entity spawns wearing none of its override instead of not spawning at
-    /// all. Blocking activation is still right: the defect and the
-    /// only-a-log-line signal are identical, and no host can make the merge
-    /// succeed later. See the note on `validate_template_resolution_in`.
-    #[test]
-    fn a_trigger_spawns_override_is_checked_as_well() {
-        let world_toml = r#"
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type          = "spawn_entity"
-  template_path = "assets/entities/patroller.toml"
-  name          = "ambusher"
-  position      = [0.0, 0.0, 0.0]
-  overrides     = { tags = "not-an-array" }
-"#;
-        let config = cfg(world_toml);
-        let src = WorldSource::new("assets/worlds/w.toml", world_toml, &config);
-        let findings = validate_composition_with(&src, &[], &patroller_templates());
-        let err = findings
-            .iter()
-            .find(|f| f.category == "unmergeable-override")
-            .unwrap_or_else(|| panic!("expected an unmergeable-override finding: {findings:?}"));
-        assert!(err.message.contains("ambusher"), "{}", err.message);
     }
 
     /// A failed merge is a property of the INSTANCE, not the hull, so two

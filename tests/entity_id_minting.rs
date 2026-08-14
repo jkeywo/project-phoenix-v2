@@ -247,3 +247,115 @@ fn a_built_app_mints_against_its_own_tick() {
          holds the index of the last step that ran"
     );
 }
+
+// ── Issue #1033: a scripted removal is deterministic, and mints nothing ──────
+
+/// The destroy probe: a skyhook collapsed by script on a named deadline.
+const DESTROY_WORLD: &str = "assets/worlds/probe_destroy.toml";
+/// The structure that collapses, by its authored `[[entity]]` name.
+const DESTROY_SKYHOOK: &str = "world.probe_destroy.entity.skyhook.name";
+
+/// What one destroy-probe instance produced, sampled every tick.
+struct DestroyRun {
+    /// The tick the skyhook stopped being in the world.
+    removed_at: u64,
+    /// `(tick, digest)` for every tick of the run.
+    digests: Vec<(u64, u64)>,
+    /// The Entity-namespace mint counter on the tick before the removal and on
+    /// the removal tick itself.
+    minted_before: u64,
+    minted_at: u64,
+}
+
+fn run_destroy_probe(seed: u64) -> DestroyRun {
+    use project_phoenix::entities::spawner::EntityName;
+
+    let args = HeadlessArgs {
+        world_path: DESTROY_WORLD.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 480,
+        seed: Some(seed),
+        deterministic: true,
+        ..Default::default()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    let mut removed_at = None;
+    let mut digests = Vec::new();
+    let mut minted_before = 0;
+    let mut minted_at = 0;
+    let mut previous_minted = 0;
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        let tick = app
+            .world()
+            .resource::<project_phoenix::sim_tick::SimTick>()
+            .0;
+        digests.push((tick, world_digest(app.world())));
+
+        let minted = app
+            .world()
+            .resource::<WorldIdMint>()
+            .minted_so_far(IdNamespace::Entity);
+        let present = {
+            let mut q = app.world_mut().query::<&EntityName>();
+            q.iter(app.world()).any(|name| name.0 == DESTROY_SKYHOOK)
+        };
+        if !present && removed_at.is_none() {
+            removed_at = Some(tick);
+            minted_before = previous_minted;
+            minted_at = minted;
+        }
+        previous_minted = minted;
+    }
+
+    DestroyRun {
+        removed_at: removed_at.expect("the probe world must destroy its skyhook"),
+        digests,
+        minted_before,
+        minted_at,
+    }
+}
+
+/// **Issue #1033.** Two instances remove the same entity on the same tick, and
+/// fold to the same digest on every tick of the run — the removal included.
+///
+/// "Deterministic across peers" for a removal is not the same claim as for a
+/// spawn, and is worth its own run: a spawn is deterministic when the MINT
+/// agrees, whereas a removal mints nothing and is deterministic when the tick it
+/// lands on agrees. The digest is what makes that observable — a despawned
+/// entity simply stops being folded, so two peers that removed on different
+/// ticks disagree on the tick between them, and this walks every tick rather
+/// than comparing the two ends.
+#[test]
+fn two_instances_destroy_on_the_same_tick_and_agree_throughout() {
+    let a = run_destroy_probe(9_072_033);
+    let b = run_destroy_probe(9_072_033);
+
+    assert!(
+        a.removed_at > 0,
+        "precondition: the removal must land inside the run, not on tick zero"
+    );
+    assert_eq!(
+        a.removed_at, b.removed_at,
+        "two instances must destroy on the same tick — a scripted removal fires \
+         from a deadline measured in ticks, so a peer that removed a frame later \
+         would be a divergence a player could see"
+    );
+    assert_eq!(
+        a.digests, b.digests,
+        "…and fold identically on every tick of the run, the removal tick included"
+    );
+
+    // The claim the digest cannot make on its own: a destroy does not advance the
+    // Entity namespace's counter. It matters because the counter is folded — and
+    // because the NEXT spawn's id is drawn from it, so a removal that consumed a
+    // sequence number would hand two peers different ids for everything spawned
+    // afterwards, long after the removal itself looked fine.
+    assert_eq!(
+        a.minted_before, a.minted_at,
+        "a destroy must mint nothing: the Entity counter stood at {} before the \
+         removal and {} on the removal tick",
+        a.minted_before, a.minted_at
+    );
+}

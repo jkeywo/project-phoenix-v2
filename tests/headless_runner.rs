@@ -1291,6 +1291,236 @@ fn a_destroyed_entity_emits_entity_despawned_exactly_once() {
     );
 }
 
+// ── Scripted entity removal (issue #1033, parent #851) ───────────────────────
+
+/// The two names `probe_destroy.toml` addresses by their authored `[[entity]]`
+/// name; the storm bands are script-spawned and carry plain identifiers.
+const DESTROY_TENDER: &str = "world.probe_destroy.entity.tender.name";
+const DESTROY_SKYHOOK: &str = "world.probe_destroy.entity.skyhook.name";
+
+/// Whether an entity with this `EntityName` is still in the world.
+fn named_entity_present(app: &mut bevy::prelude::App, name: &str) -> bool {
+    app.world_mut()
+        .query::<&project_phoenix::entities::spawner::EntityName>()
+        .iter(app.world())
+        .any(|entity_name| entity_name.0 == name)
+}
+
+/// The status of the objective with this id, which must exist.
+fn objective_status(
+    app: &bevy::prelude::App,
+    id: &str,
+) -> project_phoenix::core::messages::ObjectiveStatus {
+    app.world()
+        .resource::<project_phoenix::world::server::ObjectiveManagerRes>()
+        .0
+        .sorted_snapshots()
+        .into_iter()
+        .find(|o| o.id == id)
+        .unwrap_or_else(|| panic!("the world never posted objective '{id}'"))
+        .status
+}
+
+/// **Issue #1033.** `probe_destroy.toml` driven for twelve mission seconds: a
+/// script destroys a structure at a named deadline, and every consequence a
+/// combat kill would have follows from it.
+///
+/// This is the whole slice on one real run — the effect, the chaining
+/// `WorldEvent::Destroyed`, the `on_destroyed` that rides it, the group
+/// `on_all_destroyed` that needs the LAST member to go, the deferred
+/// `ctx.schedule.in_seconds(n).destroy_entity(…)` form, and an operation whose
+/// target is destroyed out from under it. The probe world's own header carries
+/// the authored timeline this is asserted against.
+///
+/// Nothing in this world shoots at anything: the tender and the player share a
+/// faction and the storm bands are regions. So every destruction observed here
+/// is a scripted one, which is what makes the assertions mean what they say.
+#[test]
+fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_destroy.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(12.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // Everything is read tick by tick and asserted on ORDER, not on frame
+    // arithmetic. The mission clock anchors on the first `InProgress` tick rather
+    // than at frame zero, so an assertion pinned to an absolute frame is really an
+    // assertion about how long the lobby took — while the causal order is what the
+    // slice actually claims. `first[…]` is the sim-second each reading first went
+    // true.
+    let mut first: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
+    // Was the tender ever genuinely mid-operation? A hold that never opened would
+    // "fail on target gone" for free.
+    let mut held_before_collapse = false;
+    // Was there a window where exactly one band was down and the group had not
+    // fired? Without it, "fires at the end" is satisfied by "fires on the first".
+    let mut group_silent_at_one_down = false;
+    // The bands are SPAWNED at t=0 rather than authored as `[[entity]]` blocks, so
+    // "absent" reads true for the first few frames too. A removal is only counted
+    // once the band has genuinely been there — the same not-published-yet guard
+    // `an_infrastructure_threshold_flips_its_flag_in_both_directions_in_a_real_run`
+    // carries, and for the same reason: without it every band reads retired on
+    // frame one and the ordering assertions below pass vacuously.
+    let (mut band_a_seen, mut band_b_seen) = (false, false);
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        let skyhook = named_entity_present(&mut app, DESTROY_SKYHOOK);
+        let band_a = named_entity_present(&mut app, "storm_band_a");
+        let band_b = named_entity_present(&mut app, "storm_band_b");
+        let state = operations_named(&mut app, DESTROY_TENDER)
+            .and_then(|ops| ops.active)
+            .map(|hold| hold.state());
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        let cleared = flags.counter("band_cleared");
+
+        if skyhook {
+            if state == Some(HoldState::Holding) {
+                held_before_collapse = true;
+            }
+        } else {
+            first.entry("skyhook_gone").or_insert(sim_t);
+        }
+        if flags.counter("skyhook_lost") > 0 {
+            first.entry("skyhook_lost_hook").or_insert(sim_t);
+        }
+        if state == Some(HoldState::Failed(Ineligibility::TargetGone)) {
+            first.entry("hold_failed_target_gone").or_insert(sim_t);
+        }
+        band_a_seen |= band_a;
+        band_b_seen |= band_b;
+        if band_a_seen && !band_a {
+            first.entry("band_a_gone").or_insert(sim_t);
+        }
+        if band_b_seen && !band_b {
+            first.entry("band_b_gone").or_insert(sim_t);
+        }
+        if cleared > 0 {
+            first.entry("band_cleared").or_insert(sim_t);
+        }
+        if band_a_seen && !band_a && band_b && cleared == 0 {
+            group_silent_at_one_down = true;
+        }
+    }
+
+    let at = |key: &str| -> f64 {
+        *first
+            .get(key)
+            .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
+    };
+
+    // ── The scripted destruction happened, and the operation was live for it ──
+    assert!(
+        held_before_collapse,
+        "precondition: the tender must be MID-operation while the skyhook still \
+         stands — otherwise the TargetGone below is free. Seen: {first:?}"
+    );
+    let gone_at = at("skyhook_gone");
+
+    // ── It chained. This is the acceptance the whole slice turns on ──
+    let hook_at = at("skyhook_lost_hook");
+    assert!(
+        hook_at - gone_at < 0.2,
+        "the chained `on_destroyed` must fire off the scripted removal essentially \
+         at once — its Destroyed event rides `new_events` into the SAME tick's next \
+         chaining pass. Destroyed at {gone_at:.2} s, hook at {hook_at:.2} s"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("skyhook_lost"),
+        1,
+        "exactly once — a destroy must not chain its event twice"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-hold-skyhook"),
+        ObjectiveStatus::Failed,
+        "the chained handler's effect landed: a scripted destruction drives mission \
+         state exactly as a kill does"
+    );
+
+    // ── The operation settled on its own reason ──
+    // `TargetGone`, not `OutOfRange`: the tender never moved, and waiting cannot
+    // bring a skyhook back.
+    let failed_at = at("hold_failed_target_gone");
+    assert!(
+        failed_at >= gone_at && failed_at - gone_at < 0.5,
+        "an operation whose target is destroyed mid-flight must end promptly, \
+         through the SAME eligibility spine a hull shot out from under a tug goes \
+         through — with nothing in the destroy path knowing an operation was \
+         running. Destroyed at {gone_at:.2} s, settled at {failed_at:.2} s"
+    );
+    assert_eq!(
+        hold_of(&mut app, DESTROY_TENDER).state(),
+        HoldState::Failed(Ineligibility::TargetGone),
+        "…and it STAYS failed: a settled operation does not quietly resume"
+    );
+    assert_eq!(
+        hold_of(&mut app, DESTROY_TENDER).verb(),
+        OperationVerb::Stabilise
+    );
+
+    // ── The group fired on the LAST member, not the first ──
+    let band_a_at = at("band_a_gone");
+    let band_b_at = at("band_b_gone");
+    let cleared_at = at("band_cleared");
+    assert!(
+        band_a_at < band_b_at,
+        "precondition: the bands must be retired one at a time ({band_a_at:.2} s, \
+         {band_b_at:.2} s)"
+    );
+    assert!(
+        group_silent_at_one_down,
+        "one of two members down is not the whole group: there must be a window \
+         where band A is gone, band B is up, and `on_all_destroyed` has NOT fired. \
+         Without it, a group that fired on the first kill would pass the assertion \
+         below just as well. Seen: {first:?}"
+    );
+    assert!(
+        cleared_at >= band_b_at && cleared_at - band_b_at < 0.2,
+        "the group fires when the LAST member goes — the storm-band teardown this \
+         effect exists for. Last band at {band_b_at:.2} s, group at {cleared_at:.2} s"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("band_cleared"),
+        1,
+        "exactly once"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-clear-band"),
+        ObjectiveStatus::Completed,
+        "…and its handler's effect landed"
+    );
+
+    // ── The deferred form did the first band's work ──
+    // Authored as `on_timer(6)` scheduling two seconds out, so band A goes at
+    // t≈8 — after the t=5 collapse and before the t=10 immediate destroy. Had the
+    // deferred call been dropped, `band_a_gone` would never have happened at all
+    // and `at()` would have failed above.
+    assert!(
+        band_a_at > gone_at,
+        "the DEFERRED `in_seconds(2).destroy_entity` fires after the collapse it \
+         was scheduled behind — same action, same queue, no new machinery \
+         ({band_a_at:.2} s vs {gone_at:.2} s)"
+    );
+}
+
 /// Issue #839 wiring guard: the production player game-start spawn path
 /// (`spawn_game_start_entities`) must inject the `player` tag and the
 /// `playerShip` radar icon onto the LocalShip — the hull the local player

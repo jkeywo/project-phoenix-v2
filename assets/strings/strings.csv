@@ -983,3 +983,8 @@ world.probe_dossier.capacity.berths.label,"Crew-facing label for the berths capa
 world.probe_dossier.threshold.transfer_capable.label,"Crew-facing label for the transfer-arm operational flag in the #1030 probe world","[Transfer arm serviceable]"
 world.probe_dossier.commitment.safe_passage.terms,"Terms of the safe-passage promise in the #1030 probe world","[Safe passage for the committee's people]"
 world.probe_dossier.commitment.safe_passage.resolves,"What counts as keeping the safe-passage promise in the #1030 probe world","[They are clear of the skyway]"
+world.probe_destroy.entity.tender.name,assets/worlds/probe_destroy.toml -> [[entity]] name,[Tender]
+world.probe_destroy.entity.skyhook.name,assets/worlds/probe_destroy.toml -> [[entity]] name,[Skyhook]
+world.probe_destroy.deadline.skyhook_collapse.label,assets/worlds/probe_destroy.toml -> [[deadline]] label,[Skyhook collapse]
+world.probe_destroy.objective.hold_skyhook.text,"Objective text — the skyhook the crew is meant to keep standing, in the #1033 probe world","[Hold the skyhook.]"
+world.probe_destroy.objective.clear_band.text,"Objective text — the storm bands the sweep retires, in the #1033 probe world","[Clear the storm band.]"

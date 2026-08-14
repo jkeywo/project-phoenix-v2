@@ -2821,3 +2821,111 @@ fn a_save_written_before_commitment_state_is_refused_on_format() {
         "the refusal names the dimension that moved: {refusal}"
     );
 }
+
+// ── Issue #1033: an entity destroyed before the save stays destroyed ─────────
+
+/// The destroy probe: a skyhook collapsed by script, two storm bands retired.
+const DESTROY: &str = "assets/worlds/probe_destroy.toml";
+
+/// Frames to run before the destroy capture.
+///
+/// The probe collapses the skyhook on a t=5 s deadline, so this has to land
+/// after it — a capture taken before would round-trip a world where nothing had
+/// been destroyed at all, which is the one payload that cannot fail this test.
+/// The precondition below asserts the crossing rather than trusting the number.
+const DESTROY_CAPTURE_AT: u64 = 420;
+
+fn destroy_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: DESTROY.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+/// **Issue #1033.** An entity a script destroyed before the save does not come
+/// back when the save is resumed.
+///
+/// This is the sharpest thing a resume can get wrong about a removal, and it is
+/// sharp precisely because a fresh app does not start from the save — it boots
+/// the same world file first, which SPAWNS the skyhook again, and then has the
+/// capture laid over it. So the resumed world genuinely contains the destroyed
+/// structure at the moment `restore` is called, and something has to take it
+/// away again. That something is `restore_entities`' surplus sweep: it despawns
+/// every uuid the bootstrap produced that the capture does not name.
+///
+/// The control below reads the freshly booted world BEFORE the restore, so a
+/// restore that did nothing at all would be visible here rather than hidden
+/// behind a world that happened to look right. Getting this wrong resurrects a
+/// collapsed skyhook mid-mission, with the objective it failed still failed —
+/// a world that contradicts its own scenario state.
+#[test]
+fn an_entity_destroyed_before_the_save_does_not_come_back_after_a_resume() {
+    const SKYHOOK: &str = "world.probe_destroy.entity.skyhook.name";
+
+    let mut live = boot(&destroy_args());
+    step(&mut live, DESTROY_CAPTURE_AT);
+
+    let skyhook_uuid = live
+        .world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::entities::spawner::EntityUuid,
+        )>()
+        .iter(live.world())
+        .find(|(name, _)| name.0 == SKYHOOK)
+        .map(|(_, uuid)| uuid.0.clone());
+    assert!(
+        skyhook_uuid.is_none(),
+        "precondition: the capture must be taken AFTER the scripted collapse — a \
+         capture of an intact world is the one payload this test cannot fail"
+    );
+
+    let payload = capture(live.world());
+    let captured_uuids: std::collections::BTreeSet<&String> =
+        payload.entities.iter().map(|e| &e.uuid).collect();
+
+    // A fresh app, booted from the same world file — which spawns the skyhook.
+    let mut resumed = boot_to_restore_point(&destroy_args(), &payload);
+    let before_restore = resumed
+        .world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::entities::spawner::EntityUuid,
+        )>()
+        .iter(resumed.world())
+        .find(|(name, _)| name.0 == SKYHOOK)
+        .map(|(_, uuid)| uuid.0.clone());
+    let bootstrapped = before_restore.expect(
+        "control: the fresh world must spawn the skyhook from its `[[entity]]` \
+         block, or this test proves nothing — the removal would be an artifact of \
+         the bootstrap rather than of the restore",
+    );
+    assert!(
+        !captured_uuids.contains(&bootstrapped),
+        "control: and the capture must NOT name it, so the surplus sweep is the \
+         only thing that can take it away"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(
+        report.despawned >= 1,
+        "the restore must report the surplus it removed, not silently leave it: \
+         {report:?}"
+    );
+
+    let after = resumed
+        .world_mut()
+        .query::<&project_phoenix::entities::spawner::EntityName>()
+        .iter(resumed.world())
+        .any(|name| name.0 == SKYHOOK);
+    assert!(
+        !after,
+        "a structure destroyed before the save must stay destroyed through the \
+         resume — a resurrected skyhook would contradict the objective its \
+         collapse already failed"
+    );
+}

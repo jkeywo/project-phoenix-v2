@@ -701,11 +701,29 @@ pub(crate) fn update_comms_range_flags(
     }
 }
 
-/// Broadcast `CommsState` to the Comms console holder when the inbox is dirty
-/// or `CommsRuntime::needs_broadcast` is set.
+/// Broadcast `CommsState` to whoever is currently hosting the Comms system
+/// when the inbox is dirty or `CommsRuntime::needs_broadcast` is set.
+///
+/// The address is resolved through `command_admission::station_for_system`
+/// (issue #984), which is the human-seeking host when one has been sought and
+/// the `[[system]] id = "comms"` block's authored station otherwise. It used to
+/// be a literal `StationId("comms")`, and that was a BUG on two shipped hulls:
+/// the destroyer homes the comms SYSTEM on its `tactical` station and the
+/// courier on `captain`, and neither hull declares a `comms` STATION at all —
+/// so the lookup found no holder, took the early return, and those two hulls
+/// never received a single `CommsState`. Their consoles ran purely off the
+/// `Target::All` blackboard from `publish_comms_blackboard`. `SystemId` and
+/// `StationId` coincide here on the cruiser and battleship by accident, which
+/// is exactly what hid it — never cast one to the other.
 pub(crate) fn broadcast_comms_state(
     sessions: Res<Sessions>,
-    ship_query: Query<(), With<crate::simulation::LocalShip>>,
+    ship_query: Query<
+        (
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship_plugin::HumanSeekingHosts>,
+        ),
+        With<crate::simulation::LocalShip>,
+    >,
     mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
@@ -716,10 +734,21 @@ pub(crate) fn broadcast_comms_state(
         return;
     }
 
-    let Some(()) = ship_query.iter().next() else {
+    let Some((ship_config, seeking_hosts)) = ship_query.iter().next() else {
         return;
     };
-    let Some(comms_token) = sessions.0.holder_for_station(&StationId("comms".into())) else {
+    // A fixture whose LocalShip carries no `ShipConfigComponent`, or a hull
+    // that declares no comms system, keeps the historical literal.
+    let comms_station = ship_config
+        .and_then(|c| {
+            crate::command_admission::station_for_system(
+                &c.0,
+                seeking_hosts,
+                &crate::system_registry::comms_system_id(),
+            )
+        })
+        .unwrap_or_else(|| StationId(crate::system_registry::COMMS_SYSTEM_ID.into()));
+    let Some(comms_token) = sessions.0.holder_for_station(&comms_station) else {
         inbox.0.mark_clean();
         comms.needs_broadcast = false;
         return;
@@ -996,6 +1025,68 @@ pub(crate) mod tests {
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
         msgs
+    }
+
+    /// Issue #984 — the destroyer/courier `CommsState` bug, pinned on all four
+    /// shipped hulls.
+    ///
+    /// The address is resolved through `station_for_system` for the comms
+    /// SYSTEM. It used to be a literal `StationId("comms")`, which coincides
+    /// with the right answer on the battleship and cruiser and names NO STATION
+    /// AT ALL on the destroyer (comms lives on `tactical`) and the courier
+    /// (`captain`) — so those two hulls hit the no-holder early return every
+    /// tick and never received a single `CommsState` in their lives. The two
+    /// hulls that already worked are in the loop so a future "simplification"
+    /// back to the literal fails on the two that never did.
+    #[test]
+    fn comms_state_reaches_the_seat_that_hosts_comms_on_every_shipped_hull() {
+        for (stem, station) in [
+            ("alliance_battleship", "comms"),
+            ("alliance_cruiser", "comms"),
+            ("alliance_destroyer", "tactical"),
+            ("alliance_courier", "captain"),
+        ] {
+            let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/entities")
+                .join(format!("{stem}.toml"));
+            let key = path.to_string_lossy().replace('\\', "/");
+            let config = crate::entity_includes::load_entity_config(&key)
+                .unwrap_or_else(|e| panic!("{stem} must parse: {e}"))
+                .ship_config
+                .unwrap_or_else(|| panic!("{stem} must declare a ShipConfig"));
+
+            let mut app = comms_test_app();
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .single(app.world())
+                .expect("the fixture spawns a LocalShip");
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(crate::ship_plugin::ShipConfigComponent(config));
+            {
+                let mut sessions = app.world_mut().resource_mut::<Sessions>();
+                sessions
+                    .0
+                    .register("officer".into(), "Nova".into())
+                    .expect("a fresh token registers");
+                sessions
+                    .0
+                    .set_station("officer", Some(StationId(station.into())));
+            }
+            app.world_mut()
+                .resource_mut::<CommsRuntime>()
+                .needs_broadcast = true;
+
+            let out = tick(&mut app);
+            assert!(
+                out.iter()
+                    .any(|m| matches!(m.msg, ServerMessage::CommsState { .. })
+                        && m.target == Target::Token("officer".into())),
+                "{stem}: CommsState must reach the {station:?} seat that hosts the \
+                 comms system — a literal StationId(\"comms\") resolves to nobody here"
+            );
+        }
     }
 
     /// Set up a game in InProgress phase with a comms player and captain.

@@ -3402,7 +3402,9 @@ station = "sensors"
                 .get::<crate::ship_plugin::ShipConfigComponent>()
                 .expect("the shipped hull spawned with its own ShipConfig")
                 .0;
-            crate::command_admission::station_for_system(config, &reactor)
+            // No human-seeking map: the reactor is not a `human_seeking`
+            // system on any hull, so the authored station is the answer.
+            crate::command_admission::station_for_system(config, None, &reactor)
                 .expect("the hull's reactor belongs to one of its stations")
         };
 

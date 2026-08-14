@@ -20,6 +20,10 @@ use crate::messages::{StationId, SystemControlPayload};
 /// caller.
 ///
 /// Lookup order:
+///   0. The live human-seeking host map (issue #984), when the caller has one.
+///      A `human_seeking` system is authoritative wherever this tick's seek put
+///      it, which is NOT necessarily the station its `[[system]]` block
+///      authors — the destroyer's Comms officer may be sitting on `captain`.
 ///   1. Shield-arc prefix match — arcs are not auto-generated into
 ///      `ShipConfig.systems` (they're synthesised at the entity-config layer),
 ///      so they must be matched by prefix.
@@ -30,10 +34,24 @@ use crate::messages::{StationId, SystemControlPayload};
 /// The former station-name fallback (target string matches a station id) was
 /// removed in issue #832: since #801/#822 every wire `target` a client emits
 /// names a declared `[[system]]` id, so it always resolves at step 1 or 2.
+///
+/// `hosts` is `Option` because most callers have no ship entity in hand — and
+/// because a ship that authors no `human_seeking` system never grows the
+/// component. `None` is exactly the pre-#984 behaviour.
+///
+/// NEVER shortcut this with `StationId(system_id.0)`. `SystemId("comms")` and
+/// `StationId("comms")` are different types naming different things that merely
+/// coincide on the cruiser and battleship; that coincidence is what hid the
+/// destroyer/courier `CommsState` bug for as long as it did.
 pub fn station_for_system(
     config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
     target: &crate::messages::SystemId,
 ) -> Option<StationId> {
+    // Step 0: the live seek result wins over the authored station.
+    if let Some(host) = hosts.and_then(|h| h.host_for(target)) {
+        return Some(host.clone());
+    }
     // Step 1: shield-arc prefix. Arcs are synthesised into `config.systems`
     // by the entity-config layer (`EntityConfig::from_toml_in_mode`, which
     // appends a `kind = "shield_arc"` entry per `[[shield_arc]]`) carrying
@@ -64,6 +82,7 @@ pub fn is_command_authorized(
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
     config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
 ) -> bool {
     // Viewscreen SetView: authority derives from the view mode's source system.
     let effective_target = if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID {
@@ -105,8 +124,9 @@ pub fn is_command_authorized(
         return true;
     }
 
-    // Human network token: must hold the station for the target system.
-    match station_for_system(config, &effective_target) {
+    // Human network token: must hold the station for the target system — the
+    // station the seek put it on, when it is human-seeking (issue #984).
+    match station_for_system(config, hosts, &effective_target) {
         Some(station) => sessions.0.holder_for_station(&station) == Some(token),
         None => {
             // Plain fn, no `LogFilterConfig` in scope — a bare targeted `warn!`
@@ -184,6 +204,7 @@ station = "repair"
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -198,6 +219,7 @@ station = "repair"
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -213,6 +235,7 @@ station = "repair"
             &sources,
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
         assert!(!is_command_authorized(
             "ai:backfill",
@@ -221,6 +244,7 @@ station = "repair"
             &sources,
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -235,6 +259,7 @@ station = "repair"
             &sources(ControlSource::Human, true),
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -250,6 +275,7 @@ station = "repair"
             &sources,
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
         assert!(is_command_authorized(
             "ai:backfill",
@@ -258,6 +284,7 @@ station = "repair"
             &sources,
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -320,6 +347,7 @@ ai_only = true
         assert_eq!(
             station_for_system(
                 &config_with_shields_on_engineering(),
+                None,
                 &SystemId("shield-arc-fore".into()),
             ),
             Some(StationId("engineering".into())),
@@ -328,6 +356,7 @@ ai_only = true
         assert_eq!(
             station_for_system(
                 &config_with_shields_on_engineering(),
+                None,
                 &SystemId("shield-arc-aft".into()),
             ),
             Some(StationId("engineering".into())),
@@ -339,6 +368,7 @@ ai_only = true
         assert_eq!(
             station_for_system(
                 &config_with_ownerless_arcs(),
+                None,
                 &SystemId("shield-arc-all".into())
             ),
             None,
@@ -365,7 +395,7 @@ station = "shields"
         )
         .unwrap();
         assert_eq!(
-            station_for_system(&empty, &SystemId("shield-arc-fore".into())),
+            station_for_system(&empty, None, &SystemId("shield-arc-fore".into())),
             Some(StationId("shields".into())),
             "legacy fixtures with no synthesised arcs keep the historical shields-station mapping"
         );
@@ -381,6 +411,7 @@ station = "shields"
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -411,6 +442,7 @@ station = "shields"
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -431,6 +463,7 @@ station = "shields"
                 &sources(ControlSource::Human, false),
                 &sessions_with_repair_holder("t1"),
                 &config(),
+                None,
             ),
             !crate::build_flags::is_demo_cfg(),
         );
@@ -449,6 +482,7 @@ station = "shields"
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 
@@ -473,6 +507,7 @@ station = "shields"
                 crate::lobby::Sessions(sm)
             },
             &config(),
+            None,
         ));
     }
 
@@ -487,6 +522,7 @@ station = "shields"
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
             &config(),
+            None,
         ));
     }
 }

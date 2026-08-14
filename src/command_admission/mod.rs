@@ -165,6 +165,14 @@ pub(crate) fn clear_inter_system_queue(mut queue: ResMut<crate::messages::InterS
 /// target system; a human token requires `accept_human_input` plus station
 /// tenure. On success the command is pushed with its source identity reduced
 /// to `response_token` (reply routing only — never behavioural).
+///
+/// This overload carries no human-seeking host map (issue #984) and does not
+/// need one: its only production caller is [`ai_emit::emit_ai_command`], and an
+/// `ai:` token is decided on `operate_ai` alone — it returns from
+/// [`is_command_authorized`] several branches before station tenure is looked
+/// up at all. The network path, which does reach tenure, goes through
+/// [`validate_command`] from [`admit_system_commands`] with the routed ship's
+/// map in hand.
 pub fn validate_and_admit(
     token: &str,
     target: crate::messages::SystemId,
@@ -174,7 +182,15 @@ pub fn validate_and_admit(
     config: &crate::ship::config::ShipConfig,
     admitted: &mut crate::messages::AdmittedCommands,
 ) -> bool {
-    match validate_command(token, target, payload, control_sources, sessions, config) {
+    match validate_command(
+        token,
+        target,
+        payload,
+        control_sources,
+        sessions,
+        config,
+        None,
+    ) {
         Some(command) => {
             admitted.0.push(command);
             true
@@ -201,8 +217,17 @@ pub fn validate_command(
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &Sessions,
     config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
 ) -> Option<crate::messages::AdmittedCommand> {
-    if !is_command_authorized(token, &target, &payload, control_sources, sessions, config) {
+    if !is_command_authorized(
+        token,
+        &target,
+        &payload,
+        control_sources,
+        sessions,
+        config,
+        hosts,
+    ) {
         return None;
     }
     Some(crate::messages::AdmittedCommand {
@@ -264,6 +289,10 @@ pub fn admit_system_commands(
         &crate::ship_plugin::ShipConfigComponent,
         Has<LocalShip>,
         Option<&crate::entity_spawner::EntityUuid>,
+        // The human-seeking host map (issue #984), absent on a hull that
+        // authors no `human_seeking` system and on any ship before
+        // `resolve_human_seeking_hosts` has run once.
+        Option<&crate::ship_plugin::HumanSeekingHosts>,
     )>,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
@@ -280,7 +309,7 @@ pub fn admit_system_commands(
     // Clear every ship's admitted commands: the AI decide systems refill
     // their own ship's queue later in the same tick via `validate_and_admit`.
     let mut local_ship: Option<Entity> = None;
-    for (entity, _, mut admitted, _, is_local, _) in ship_query.iter_mut() {
+    for (entity, _, mut admitted, _, is_local, _, _) in ship_query.iter_mut() {
         admitted.0.clear();
         if is_local {
             local_ship = Some(entity);
@@ -303,7 +332,7 @@ pub fn admit_system_commands(
         };
         // Read-only: the accepted command is queued for its apply tick rather
         // than pushed here, so this borrow never needs to be mutable.
-        let Ok((ship_entity, control_sources, _, ship_config, _, ship_uuid)) =
+        let Ok((ship_entity, control_sources, _, ship_config, _, ship_uuid, seeking_hosts)) =
             ship_query.get(route)
         else {
             continue;
@@ -320,6 +349,7 @@ pub fn admit_system_commands(
             control_sources,
             &sessions,
             &ship_config.0,
+            seeking_hosts,
         ) {
             Some(command) => {
                 // Accepted: stamped, queued and recorded together. A refused
@@ -361,7 +391,7 @@ pub fn admit_system_commands(
     // Everything stamped for this tick (or, defensively, an earlier one) lands
     // now, in `(tick, arrival)` order — the order the log records.
     for due in pending.drain_due(now) {
-        let Ok((_, _, mut admitted, _, _, _)) = ship_query.get_mut(due.route) else {
+        let Ok((_, _, mut admitted, _, _, _, _)) = ship_query.get_mut(due.route) else {
             crate::pwarn!(
                 log,
                 LogCat::Admit,

@@ -1,8 +1,7 @@
 pub use crate::messages::CoordinationPayload;
 use crate::messages::{StationId, SystemId};
-#[cfg(test)]
-use crate::ship::control_source::ControlSourceResolver;
-use crate::ship::control_source::{ControlSource, ControlTickPolicy};
+use crate::ship::control_source::{ControlSource, ControlSourceResolver, ControlTickPolicy};
+use std::collections::HashMap;
 
 // ── Coordination sender-label ids (issue #975) ────────────────────────────────
 //
@@ -197,6 +196,84 @@ pub fn seek_human_host<'a>(
         .iter()
         .filter(|seat| owner != Some(&seat.station))
         .find(|seat| is_human_and_connected(seat))
+}
+
+/// Build the seat list every [`seek_human_host`] call on one ship runs over
+/// (issue #984).
+///
+/// Same shape as the channel-3 broadcast adapter's `ship_seats` — one entry per
+/// authored station, in AUTHORED order, each station's fine systems reduced by
+/// [`seat_control_source`] and paired with its connected holder — with two
+/// deliberate differences, both load-bearing.
+///
+/// **1. Every `human_seeking` system is dropped from every reduction**, not
+/// just the one being resolved. `seek_human_host` requires at least the seeking
+/// system's own exclusion: it writes that system's `ControlSource`, so folding
+/// last tick's answer back into this tick's input is a fixpoint over the seek's
+/// own output. Concretely, the destroyer homes `comms` on `tactical`; a seek
+/// that landed `comms` on the Captain would write `comms = Human`, and next
+/// tick the *Tactical* seat would read that write as evidence of a human and
+/// take the console back — a latch driven by nothing but the seek itself.
+/// Excluding the whole class rather than the single system costs nothing extra
+/// and buys order-independence: one seat list serves every seeking system on
+/// the hull, so the answer cannot depend on which one is resolved first (the
+/// cruiser homes BOTH `comms` and `navigation` on its `comms` station, so the
+/// two would otherwise read each other's writes).
+///
+/// **2. A station left with no systems at all by that filter is decided by its
+/// active rating and its holder**, not by the empty list's `Offline`. There is
+/// no rating evidence left to reduce, so the seat takes the source
+/// [`crate::ship::rating::apply_rating`] would have written for a hypothetical
+/// non-seeking system on that station: an explicit
+/// [`crate::ship::rating::BACKFILL_RATING`] is `Ai`; anything else — including
+/// no recorded rating — is `Human` while the station has a connected holder and
+/// `Offline` while it does not. This is not a corner case: the battleship's
+/// `comms` and `navigation` stations own EXACTLY ONE system each and it is the
+/// seeking one, so without this rule both would reduce to `Offline` and the
+/// hull's own Comms and Navigation officers could never host their own consoles
+/// — precisely the outcome `seek_human_host`'s owner-first order exists to
+/// prevent. Only an explicit `Backfill` reads as automation, because that is the
+/// only positive statement the ratings map ever makes about a seat; an officer
+/// who asks the AI to run their station does not get the console pushed back at
+/// them, and an officer whose station simply has no rating recorded is still a
+/// person sitting at a console.
+pub fn seeking_seats(
+    config: &crate::ship::config::ShipConfig,
+    resolver: &ControlSourceResolver,
+    ratings: &HashMap<StationId, String>,
+    holder_for: impl Fn(&StationId) -> Option<String>,
+) -> Vec<ShipSeat> {
+    config
+        .stations
+        .iter()
+        .map(|station| {
+            let policies: Vec<ControlTickPolicy> = config
+                .systems
+                .iter()
+                .filter(|s| s.station.as_ref() == Some(&station.id))
+                .filter(|s| !s.human_seeking)
+                .map(|s| resolver.policy_for(&s.id))
+                .collect();
+            let holder = holder_for(&station.id);
+            let control = if policies.is_empty() {
+                let automated = ratings
+                    .get(&station.id)
+                    .is_some_and(|name| name == crate::ship::rating::BACKFILL_RATING);
+                match (automated, holder.is_some()) {
+                    (true, _) => ControlSource::Ai,
+                    (false, true) => ControlSource::Human,
+                    (false, false) => ControlSource::Offline,
+                }
+            } else {
+                seat_control_source(&policies)
+            };
+            ShipSeat {
+                station: station.id.clone(),
+                control,
+                holder,
+            }
+        })
+        .collect()
 }
 
 /// A coordination message queued for lagged delivery.
@@ -526,6 +603,171 @@ mod tests {
 
         assert_eq!(found.station, StationId("captain".into()));
         assert_eq!(found.holder.as_deref(), Some("alice"));
+    }
+
+    // ── seeking_seats (issue #984) ────────────────────────────────────────
+
+    /// A hull shaped like the destroyer's Tactical seat: one station owning a
+    /// mixed roster, plus a bare station whose ONLY system is human-seeking
+    /// (the battleship's `comms`/`navigation` shape).
+    fn seeking_config() -> crate::ship::config::ShipConfig {
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command."
+rank = "Cpt."
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Guns."
+rank = "Ltn."
+
+[[station]]
+id = "comms"
+name = "Comms"
+description = "Chatter."
+rank = "Ens."
+
+[[system]]
+id = "captain"
+kind = "captain"
+station = "captain"
+
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "tactical"
+human_seeking = true
+
+[[system]]
+id = "comms"
+kind = "comms"
+station = "comms"
+human_seeking = true
+"#,
+            &["captain", "tactical_radar", "navigation", "comms"],
+        )
+        .unwrap()
+    }
+
+    fn ratings(pairs: &[(&str, &str)]) -> HashMap<StationId, String> {
+        pairs
+            .iter()
+            .map(|(s, r)| (StationId((*s).into()), (*r).to_string()))
+            .collect()
+    }
+
+    /// The fixpoint guard: a seeking system's own `ControlSource` — which this
+    /// very resolution WROTE last tick — must not be readable as evidence that
+    /// its host station is crewed. Here `navigation` lives on Tactical and is
+    /// `Human` because the seek put it there; Tactical's real roster is
+    /// backfilled, so the seat must still read `Ai`.
+    #[test]
+    fn a_seeking_systems_own_source_is_not_evidence_about_its_host_seat() {
+        let config = seeking_config();
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(SystemId("tactical-radar".into()), ControlSource::Ai);
+        resolver.set(SystemId("navigation".into()), ControlSource::Human);
+        resolver.set(SystemId("comms".into()), ControlSource::Human);
+
+        let seats = seeking_seats(&config, &resolver, &ratings(&[]), |_| {
+            Some("someone".to_string())
+        });
+
+        let tactical = seats
+            .iter()
+            .find(|s| s.station == StationId("tactical".into()))
+            .unwrap();
+        assert_eq!(
+            tactical.control,
+            ControlSource::Ai,
+            "only `tactical-radar` counts toward the Tactical seat; folding the \
+             seek's own write back in would latch the console to itself"
+        );
+    }
+
+    /// A station whose entire roster is human-seeking has no rating evidence
+    /// left to reduce, so the seat is decided by its ACTIVE RATING. This is the
+    /// battleship's `comms` and `navigation` stations exactly.
+    #[test]
+    fn a_station_owning_only_seeking_systems_is_decided_by_its_rating() {
+        let config = seeking_config();
+        let resolver = ControlSourceResolver::new();
+        let comms = StationId("comms".into());
+
+        let manned = seeking_seats(
+            &config,
+            &resolver,
+            &ratings(&[("comms", "Standard")]),
+            |_| Some("bob".to_string()),
+        );
+        assert_eq!(
+            manned.iter().find(|s| s.station == comms).unwrap().control,
+            ControlSource::Human,
+            "a rated, connected Comms officer must be able to host their own console"
+        );
+
+        let backfilled = seeking_seats(
+            &config,
+            &resolver,
+            &ratings(&[("comms", crate::ship::rating::BACKFILL_RATING)]),
+            |_| Some("bob".to_string()),
+        );
+        assert_eq!(
+            backfilled
+                .iter()
+                .find(|s| s.station == comms)
+                .unwrap()
+                .control,
+            ControlSource::Ai,
+            "an officer who asked the AI to run their station does not get the \
+             console pushed back at them"
+        );
+
+        let unrated = seeking_seats(&config, &resolver, &ratings(&[]), |_| {
+            Some("bob".to_string())
+        });
+        assert_eq!(
+            unrated.iter().find(|s| s.station == comms).unwrap().control,
+            ControlSource::Human,
+            "an explicit Backfill is the ONLY thing that reads as automation — a \
+             station with no rating recorded and a person sitting at it is a human seat"
+        );
+
+        let empty_seat = seeking_seats(&config, &resolver, &ratings(&[]), |_| None);
+        assert_eq!(
+            empty_seat
+                .iter()
+                .find(|s| s.station == comms)
+                .unwrap()
+                .control,
+            ControlSource::Offline,
+            "…and with nobody connected it is nobody's seat at all"
+        );
+    }
+
+    /// Seats come back in AUTHORED station order — the property `seek_human_host`
+    /// and two lockstep peers both depend on.
+    #[test]
+    fn seeking_seats_are_returned_in_authored_station_order() {
+        let config = seeking_config();
+        let resolver = ControlSourceResolver::new();
+        let seats = seeking_seats(&config, &resolver, &ratings(&[]), |_| None);
+        assert_eq!(
+            seats
+                .iter()
+                .map(|s| s.station.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["captain", "tactical", "comms"],
+        );
     }
 
     // ── Lag queue ─────────────────────────────────────────────────────────

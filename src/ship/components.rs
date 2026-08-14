@@ -38,6 +38,31 @@ pub struct ShipConfigComponent(pub ShipConfig);
 #[derive(Component, Clone, Debug, Default)]
 pub struct ActiveStationRatings(pub HashMap<StationId, String>);
 
+/// Where each `human_seeking` `[[system]]` on this ship is currently hosted
+/// (issue #984): the station whose holder is authoritative for it RIGHT NOW,
+/// which is not necessarily the station its `[[system]]` block authors.
+///
+/// Rewritten every tick by `ship::coordination_systems::resolve_human_seeking_hosts`
+/// from the pure [`crate::ship::coordination::seek_human_host`], and read by
+/// `command_admission::station_for_system` — so admission, the `CommsState`
+/// address, and the comms rejection channel all resolve the same seat from the
+/// same map instead of each re-deriving one.
+///
+/// A `BTreeMap` rather than a `HashMap` because the map is a per-ship snapshot
+/// that a save (#864) and a lockstep peer both have to agree on byte for byte;
+/// iterating it must not depend on hash seeding.
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct HumanSeekingHosts(pub std::collections::BTreeMap<SystemId, StationId>);
+
+impl HumanSeekingHosts {
+    /// The station currently hosting `system`, or `None` when it is not a
+    /// human-seeking system or the seek found no human anywhere on the ship
+    /// (in which case the system is AI-operated and has no human host).
+    pub fn host_for(&self, system: &SystemId) -> Option<&StationId> {
+        self.0.get(system)
+    }
+}
+
 /// Channel-3 coordination lag queue. Holds pending coordination messages
 /// until their due time, at which point they are routed by the delivery-time
 /// matrix (issue #494).

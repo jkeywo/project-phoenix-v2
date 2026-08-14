@@ -6,13 +6,14 @@ pub(crate) use crate::ai::cadence::ai_tick_ready;
 pub(crate) use crate::ship::components::load_ship_config_from_disk;
 pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
-    CoordinationQueue, DockingMotionIntent, HelmWaypointClearance, ImpulseConfigResource,
-    LastHelmInput, LastSystemTiers, PendingArcBearingRequest, PendingShipConfig,
-    PendingTacticalFrequencyHint, RepairHumanAlerted, ShipConfigComponent,
+    CoordinationQueue, DockingMotionIntent, HelmWaypointClearance, HumanSeekingHosts,
+    ImpulseConfigResource, LastHelmInput, LastSystemTiers, PendingArcBearingRequest,
+    PendingShipConfig, PendingTacticalFrequencyHint, RepairHumanAlerted, ShipConfigComponent,
     ShipPhysicsConfigResource, ShipSystemControlSources, BANK_LERP_RATE,
 };
 pub use crate::ship::coordination_systems::{
     handle_coordination_enqueue, handle_coordination_messages, process_coordination_lag,
+    resolve_human_seeking_hosts,
 };
 pub use crate::ship::damage_sync::{detect_damage_tier_crossings, sync_console_damage_tiers};
 pub(crate) use crate::ship::helm_admission::{
@@ -233,6 +234,34 @@ impl Plugin for ShipPlugin {
                 )
                     .after(crate::lobby::LobbySystemSet),
             );
+
+        // Human-seeking hosts (issue #984). Registered separately from the
+        // tuple above because that tuple is at Bevy's 20-element limit.
+        //
+        // `SimSet::Input`, before the comms console's own Input handlers: the
+        // `Hail` a sought human submits is admitted against the control source
+        // and host map this system writes, so it has to have written them
+        // before `handle_hail` drains the tick's admitted comms commands.
+        // Ordering against a system another plugin registers is the shape
+        // `CommsConsolePlugin` already uses for the same handler; in an app
+        // that has `ShipPlugin` but no comms plugin the set is empty and the
+        // edge is vacuous.
+        //
+        // `.after(handle_station_rating_change)` is a write/write hazard, not a
+        // preference: both systems take `&mut ShipSystemControlSources` on the
+        // same entity, and `apply_rating` rewrites every system its station
+        // owns — a sought one included. Unordered, whether a rating change or
+        // this tick's seek won would be an executor coin-flip. The seek reads
+        // the settled rating and re-asserts on top of it, which is also why it
+        // is idempotent and runs every tick rather than on change.
+        app.add_systems(
+            FixedUpdate,
+            resolve_human_seeking_hosts
+                .in_set(crate::sim_sets::SimSet::Input)
+                .after(crate::lobby::LobbySystemSet)
+                .after(handle_station_rating_change)
+                .before(crate::console::comms::server::handle_hail),
+        );
 
         // Intent narration (issue #879). Registered separately from the tuple
         // above because that tuple is at Bevy's 20-element limit.

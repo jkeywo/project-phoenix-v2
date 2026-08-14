@@ -365,7 +365,18 @@ pub(crate) struct CommsRespondAux<'w> {
 /// Records the chosen response on the inbox message, fires any associated
 /// trigger actions, and advances the dialogue to the follow-up node if present.
 pub(crate) fn handle_respond_to_message(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
+    ship_query: Query<
+        (
+            &crate::messages::AdmittedCommands,
+            // The comms rejection channel is addressed to whoever is HOSTING
+            // the comms system (issue #984), which on the destroyer is the
+            // Tactical seat and on the courier the Captain's — resolved, never
+            // string-cast from the system id.
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship_plugin::HumanSeekingHosts>,
+        ),
+        With<crate::simulation::LocalShip>,
+    >,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
@@ -392,15 +403,29 @@ pub(crate) fn handle_respond_to_message(
     // submitting Comms holder.
     mut aux: CommsRespondAux,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
+    let Some((admitted, ship_config, seeking_hosts)) = ship_query.iter().next() else {
         return;
     };
     // Resolve the submitting comms token once per tick: the rejection channel
-    // (issue #761) targets whoever currently holds the Comms console.
+    // (issue #761) targets whoever currently holds the Comms console — the
+    // station `station_for_system` resolves for the comms SYSTEM, which is the
+    // sought human-seeking host when there is one and the hull's authored
+    // station otherwise.
+    let comms_station = ship_config
+        .and_then(|c| {
+            crate::command_admission::station_for_system(
+                &c.0,
+                seeking_hosts,
+                &crate::system_registry::comms_system_id(),
+            )
+        })
+        .unwrap_or_else(|| {
+            crate::messages::StationId(crate::system_registry::COMMS_SYSTEM_ID.into())
+        });
     let comms_token = aux
         .sessions
         .0
-        .holder_for_station(&crate::messages::StationId("comms".into()))
+        .holder_for_station(&comms_station)
         .map(|t| t.to_string());
     // Helper: push a `CommsResponseRejected` for the attempted control so the
     // client can flash it red. A no-op when no comms holder is seated.

@@ -2974,7 +2974,7 @@ fn a_human_can_take_an_npc_hull_tactical_seat() {
          regressed to the all-Ai seed and never applied a station rating at all"
     );
     assert!(
-        is_command_authorized("ai:npc", &radar, &payload, &sources, &sessions, &config.0),
+        is_command_authorized("ai:npc", &radar, &payload, &sources, &sessions, &config.0, None),
         "the backfilled seat's AI must hold the radar before the human sits down"
     );
     assert!(
@@ -2984,7 +2984,8 @@ fn a_human_can_take_an_npc_hull_tactical_seat() {
             &payload,
             &sources,
             &sessions,
-            &config.0
+            &config.0,
+            None
         ),
         "a backfilled seat must refuse human input — that is what claiming it changes"
     );
@@ -2999,12 +3000,13 @@ fn a_human_can_take_an_npc_hull_tactical_seat() {
             &payload,
             &sources,
             &sessions,
-            &config.0
+            &config.0,
+            None
         ),
         "a human holding the NPC hull's Tactical seat must be admitted to its radar"
     );
     assert!(
-        !is_command_authorized("ai:npc", &radar, &payload, &sources, &sessions, &config.0),
+        !is_command_authorized("ai:npc", &radar, &payload, &sources, &sessions, &config.0, None),
         "the AI must stand down from a seat a human has taken"
     );
 
@@ -3017,7 +3019,8 @@ fn a_human_can_take_an_npc_hull_tactical_seat() {
             &payload,
             &sources,
             &sessions,
-            &config.0
+            &config.0,
+            None
         ),
         "only the seat's holder may drive its systems"
     );

@@ -4772,7 +4772,7 @@ station = "tactical"
         )
         .unwrap();
         assert_eq!(
-            station_for_system(&crewed, &SystemId("tactical-radar".into())),
+            station_for_system(&crewed, None, &SystemId("tactical-radar".into())),
             Some(StationId("tactical".into())),
             "crewed hulls resolve tactical-radar to their tactical station"
         );
@@ -4780,7 +4780,7 @@ station = "tactical"
         // step-3 station-name fallback was removed and `"tactical"` is not a
         // declared system.
         assert_eq!(
-            station_for_system(&crewed, &SystemId("tactical".into())),
+            station_for_system(&crewed, None, &SystemId("tactical".into())),
             None,
         );
 
@@ -4806,12 +4806,12 @@ station = "pilot"
         )
         .unwrap();
         assert_eq!(
-            station_for_system(&courier, &SystemId("pilot-radar".into())),
+            station_for_system(&courier, None, &SystemId("pilot-radar".into())),
             Some(StationId("pilot".into())),
             "the Courier's radar lives on pilot, so SetTarget resolves there"
         );
         assert_eq!(
-            station_for_system(&courier, &SystemId("tactical".into())),
+            station_for_system(&courier, None, &SystemId("tactical".into())),
             None,
             "no tactical station and no tactical system: the deleted step-2.5 \
              weapons-owner special case must not resurrect this lookup"

@@ -6,9 +6,9 @@ use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{ClientMessage, CoordinationPayload};
 use crate::server_app::LocalShip;
 use crate::ship::components::{
-    CoordinationEnqueue, CoordinationQueue, HelmWaypointClearance, PendingArcBearingRequest,
-    PendingTacticalFrequencyHint, RepairHumanAlerted, ShipConfigComponent,
-    ShipSystemControlSources,
+    ActiveStationRatings, CoordinationEnqueue, CoordinationQueue, HelmWaypointClearance,
+    HumanSeekingHosts, PendingArcBearingRequest, PendingTacticalFrequencyHint, RepairHumanAlerted,
+    ShipConfigComponent, ShipSystemControlSources,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
@@ -156,6 +156,115 @@ fn ship_seats(
             }
         })
         .collect()
+}
+
+// ── Human-seeking hosts (issue #984) ──────────────────────────────────────────
+
+/// Re-resolve, EVERY tick, which station is hosting each `human_seeking`
+/// `[[system]]` on the player's ship, and put that system's `ControlSource`
+/// where the answer says it belongs.
+///
+/// Comms and Navigation "always try to be under human control" (pasm decision
+/// `console-complexity-human-seeking-systems`). The decision itself is the pure
+/// [`coordination::seek_human_host`] over the pure
+/// [`coordination::seeking_seats`]; this adapter only supplies the ship's
+/// authored config, its live control sources, its active ratings and the lobby
+/// session map, then writes the two things the rest of the host reads:
+///
+/// * `ControlSource::Human` on a hit, `ControlSource::Ai` on a miss, for the
+///   seeking system ALONE. This is not cosmetic:
+///   `command_admission::is_command_authorized` tests `accept_human_input`
+///   BEFORE station tenure, so a sought human whose comms system was still
+///   `Ai` (because its owning station is backfilled) would be refused at the
+///   gate with no other symptom. No other system's source is touched — a
+///   station's rating is the player's to set, and inflating the systems around
+///   the sought one would silently promote a Backfill console.
+/// * [`HumanSeekingHosts`], the system→station map
+///   `command_admission::station_for_system` consults, so tenure is checked
+///   against the seat the seek actually chose.
+///
+/// **Every tick, idempotently, never on-change.** `apply_rating` fires on lobby
+/// events (a claim, a disconnect, a `SetStationRating`) and rewrites every
+/// system its station owns — including a sought one. A resolver that only ran
+/// on a change of its own inputs would be silently undone by the next rating
+/// event. Writing unconditionally but only *dereferencing* when a value
+/// actually differs keeps that re-assertion free of spurious change-detection
+/// ticks.
+///
+/// Scoped to the `LocalShip`, which is where `ship_seats` above is already
+/// scoped for the same reason: `Sessions` describes the local crew and nothing
+/// else, so resolving an NPC hull against it would let a human seated on the
+/// player's bridge switch an enemy alliance hull's comms off AI.
+///
+/// Determinism (issue #984 §2.4): the iteration order is the authored
+/// `ShipConfig.systems` and `ShipConfig.stations` vectors — never a map — and
+/// the only non-config inputs are `Sessions` and the control sources, neither
+/// of which is folded into `state_digest`. A headless or replayed run has an
+/// EMPTY `Sessions` (`headless/app.rs`), so no seat ever has a holder, every
+/// seek returns `None`, and this system writes the `Ai` that
+/// `seed_boot_ratings` already set. The digest is unchanged by construction,
+/// not by measurement.
+pub fn resolve_human_seeking_hosts(
+    mut commands: Commands,
+    mut ships: Query<
+        (
+            Entity,
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            Option<&ActiveStationRatings>,
+            Option<&mut HumanSeekingHosts>,
+        ),
+        With<LocalShip>,
+    >,
+    sessions: Res<Sessions>,
+) {
+    let no_ratings = std::collections::HashMap::new();
+    for (entity, ship_config, mut control_sources, ratings, hosts) in ships.iter_mut() {
+        let config = &ship_config.0;
+        if !config.systems.iter().any(|s| s.human_seeking) {
+            continue;
+        }
+        let seats = coordination::seeking_seats(
+            config,
+            &control_sources.0,
+            ratings.map(|r| &r.0).unwrap_or(&no_ratings),
+            |station| sessions.0.holder_for_station(station).map(str::to_string),
+        );
+
+        let mut resolved: std::collections::BTreeMap<
+            crate::messages::SystemId,
+            crate::messages::StationId,
+        > = std::collections::BTreeMap::new();
+        let mut decisions: Vec<(crate::messages::SystemId, ControlSource)> = Vec::new();
+        for system in config.systems.iter().filter(|s| s.human_seeking) {
+            match coordination::seek_human_host(system.station.as_ref(), &seats) {
+                Some(seat) => {
+                    resolved.insert(system.id.clone(), seat.station.clone());
+                    decisions.push((system.id.clone(), ControlSource::Human));
+                }
+                None => decisions.push((system.id.clone(), ControlSource::Ai)),
+            }
+        }
+
+        if decisions
+            .iter()
+            .any(|(id, source)| control_sources.0.source_for(id) != *source)
+        {
+            for (id, source) in &decisions {
+                control_sources.0.set(id.clone(), *source);
+            }
+        }
+        match hosts {
+            Some(mut existing) => {
+                if existing.0 != resolved {
+                    existing.0 = resolved;
+                }
+            }
+            None => {
+                commands.entity(entity).insert(HumanSeekingHosts(resolved));
+            }
+        }
+    }
 }
 
 pub fn process_coordination_lag(
@@ -1960,6 +2069,320 @@ mod tests {
         assert!(
             !payloads.is_empty(),
             "precondition: something was delivered"
+        );
+    }
+
+    // ── Human-seeking hosts (issue #984) ─────────────────────────────────────
+
+    /// The four shipped alliance hulls, and the station each one AUTHORS as the
+    /// home of its comms and navigation systems.
+    ///
+    /// THREE OF FOUR disagree with the naive `StationId(system_id.0)` string
+    /// match, and that coincidence on the remaining one is exactly what hid the
+    /// `CommsState` bug: the destroyer and courier declare no `comms` STATION at
+    /// all, so a literal `StationId("comms")` found no holder and those two
+    /// hulls silently never received a `CommsState`. Every resolution goes
+    /// through `station_for_system`; nothing casts a `SystemId` to a
+    /// `StationId`.
+    const SEEKING_HULLS: &[(&str, &str, &str)] = &[
+        // hull, comms system's station, navigation system's station
+        ("alliance_battleship", "comms", "navigation"),
+        ("alliance_cruiser", "comms", "comms"),
+        ("alliance_destroyer", "tactical", "tactical"),
+        ("alliance_courier", "captain", "captain"),
+    ];
+
+    fn hull_ship_config(stem: &str) -> crate::ship::config::ShipConfig {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets/entities")
+            .join(format!("{stem}.toml"));
+        let key = path.to_string_lossy().replace('\\', "/");
+        crate::entity_includes::load_entity_config(&key)
+            .unwrap_or_else(|e| panic!("{stem} must parse: {e}"))
+            .ship_config
+            .unwrap_or_else(|| panic!("{stem} must declare a ShipConfig"))
+    }
+
+    /// A `ShipPlugin` app whose LocalShip wears a REAL shipped hull, booted the
+    /// way production boots one — `seed_boot_ratings` with everything on
+    /// Backfill — and then crewed at `manned`: each named station gets a
+    /// connected holder, a non-Backfill active rating, and its own systems set
+    /// Human, which is what a seated officer looks like from here.
+    fn seeking_app(stem: &str, manned: &[&str]) -> App {
+        let mut app = test_app();
+        let ship = find_ship_entity(&mut app);
+        let config = hull_ship_config(stem);
+        let (mut resolver, mut active) = crate::ship::rating::seed_boot_ratings(&config, |_| {
+            crate::ship::rating::BACKFILL_RATING.to_string()
+        });
+        for (idx, station) in manned.iter().enumerate() {
+            let sid = crate::messages::StationId((*station).into());
+            for system in config.systems_for_station(&sid) {
+                resolver.set(system.id.clone(), ControlSource::Human);
+            }
+            active.insert(sid.clone(), "Manual".to_string());
+            let token = format!("officer-{station}");
+            let mut sessions = app.world_mut().resource_mut::<Sessions>();
+            sessions
+                .0
+                .register(token.clone(), format!("Officer {idx}"))
+                .expect("a fresh token registers");
+            sessions.0.set_station(&token, Some(sid));
+        }
+        app.world_mut().entity_mut(ship).insert((
+            ShipConfigComponent(config),
+            ShipSystemControlSources(resolver),
+            ActiveStationRatings(active),
+        ));
+        app
+    }
+
+    fn host_of(app: &mut App, system: &crate::messages::SystemId) -> Option<String> {
+        let ship = find_ship_entity(app);
+        app.world()
+            .entity(ship)
+            .get::<HumanSeekingHosts>()
+            .and_then(|h| h.host_for(system))
+            .map(|s| s.0.clone())
+    }
+
+    fn source_of(app: &mut App, system: &crate::messages::SystemId) -> ControlSource {
+        let ship = find_ship_entity(app);
+        app.world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .expect("the ship carries control sources")
+            .0
+            .source_for(system)
+    }
+
+    /// The `SystemId`-vs-`StationId` regression, pinned on every shipped hull.
+    /// Nothing here goes near the live seek: it asserts what the four hulls
+    /// AUTHOR, and that the literal the addressing used to hardcode names no
+    /// station at all on two of them.
+    #[test]
+    fn every_shipped_hull_authors_seeking_comms_and_navigation_on_the_station_it_declares() {
+        for (stem, comms_station, nav_station) in SEEKING_HULLS {
+            let config = hull_ship_config(stem);
+            for (system_id, expected) in [
+                (crate::system_registry::comms_system_id(), comms_station),
+                (crate::system_registry::navigation_system_id(), nav_station),
+            ] {
+                let system = config
+                    .system(&system_id)
+                    .unwrap_or_else(|| panic!("{stem} must declare {:?}", system_id.0));
+                assert!(
+                    system.human_seeking,
+                    "{stem}: {:?} must be authored human_seeking — the flag and the \
+                     addressing that reads it ship together",
+                    system_id.0
+                );
+                assert_eq!(
+                    crate::command_admission::station_for_system(&config, None, &system_id),
+                    Some(crate::messages::StationId((*expected).into())),
+                    "{stem}: {:?} must resolve to its authored station",
+                    system_id.0
+                );
+            }
+            let naive = crate::messages::StationId(crate::system_registry::COMMS_SYSTEM_ID.into());
+            if *comms_station != crate::system_registry::COMMS_SYSTEM_ID {
+                assert!(
+                    config.station(&naive).is_none(),
+                    "{stem}: this hull homes comms on {comms_station:?} and declares NO \
+                     comms station — the old StationId(\"comms\") literal resolved to \
+                     nobody here, which is why CommsState never arrived"
+                );
+            }
+        }
+    }
+
+    /// Owner-first, on real hulls: with the seeking system's OWN station crewed,
+    /// that is where it hosts — the hull's Comms officer keeps their console
+    /// even though `comms` is the LAST authored station on two of these hulls.
+    #[test]
+    fn a_seeking_system_hosts_on_its_own_station_when_that_seat_is_crewed() {
+        for (stem, comms_station, nav_station) in SEEKING_HULLS {
+            for (system_id, owner) in [
+                (crate::system_registry::comms_system_id(), comms_station),
+                (crate::system_registry::navigation_system_id(), nav_station),
+            ] {
+                let mut app = seeking_app(stem, &[owner]);
+                tick(&mut app);
+                assert_eq!(
+                    host_of(&mut app, &system_id).as_deref(),
+                    Some(*owner),
+                    "{stem}: {:?} must host on its own crewed station",
+                    system_id.0
+                );
+                assert_eq!(
+                    source_of(&mut app, &system_id),
+                    ControlSource::Human,
+                    "{stem}: {:?} must accept human input once a human hosts it",
+                    system_id.0
+                );
+            }
+        }
+    }
+
+    /// The whole point of the mechanism: with nobody at the comms or navigation
+    /// seats but a human on the bridge, both consoles follow the human. The
+    /// battleship is the sharpest case — its `comms` and `navigation` stations
+    /// each own exactly one system, and it is the seeking one.
+    #[test]
+    fn seeking_systems_follow_the_only_human_on_the_bridge() {
+        let mut app = seeking_app("alliance_battleship", &["captain"]);
+        tick(&mut app);
+        for system_id in [
+            crate::system_registry::comms_system_id(),
+            crate::system_registry::navigation_system_id(),
+        ] {
+            assert_eq!(
+                host_of(&mut app, &system_id).as_deref(),
+                Some("captain"),
+                "{:?} must follow the seated Captain",
+                system_id.0
+            );
+            assert_eq!(source_of(&mut app, &system_id), ControlSource::Human);
+        }
+    }
+
+    /// ...and it must not STEAL the console: with both seats crewed, owner-first
+    /// leaves comms with the Comms officer even though `captain` is authored
+    /// first and `comms` last.
+    #[test]
+    fn an_earlier_authored_human_does_not_take_the_console_off_its_own_officer() {
+        let mut app = seeking_app("alliance_battleship", &["captain", "comms"]);
+        tick(&mut app);
+        assert_eq!(
+            host_of(&mut app, &crate::system_registry::comms_system_id()).as_deref(),
+            Some("comms"),
+        );
+        assert_eq!(
+            host_of(&mut app, &crate::system_registry::navigation_system_id()).as_deref(),
+            Some("captain"),
+            "navigation's own station is empty, so it falls through to the Captain"
+        );
+    }
+
+    /// Determinism (issue #984 §2.4). A headless or replayed run has an EMPTY
+    /// `Sessions`, so no seat ever has a holder, every seek returns `None`, and
+    /// the resolver writes the `Ai` `seed_boot_ratings` already set. No host map
+    /// entry is minted. Nothing on any determinism-suite path changes — proved
+    /// here mechanically rather than argued.
+    #[test]
+    fn an_empty_session_map_leaves_every_shipped_hull_exactly_as_booted() {
+        for (stem, _, _) in SEEKING_HULLS {
+            let mut app = seeking_app(stem, &[]);
+            let before = {
+                let ship = find_ship_entity(&mut app);
+                app.world()
+                    .entity(ship)
+                    .get::<ShipSystemControlSources>()
+                    .unwrap()
+                    .clone()
+            };
+            tick(&mut app);
+            tick(&mut app);
+            let ship = find_ship_entity(&mut app);
+            assert_eq!(
+                app.world()
+                    .entity(ship)
+                    .get::<ShipSystemControlSources>()
+                    .unwrap(),
+                &before,
+                "{stem}: with nobody connected the resolver must be a no-op"
+            );
+            for system_id in [
+                crate::system_registry::comms_system_id(),
+                crate::system_registry::navigation_system_id(),
+            ] {
+                assert_eq!(
+                    source_of(&mut app, &system_id),
+                    ControlSource::Ai,
+                    "{stem}: {:?} stays AI-operated with no human anywhere",
+                    system_id.0
+                );
+                assert_eq!(
+                    host_of(&mut app, &system_id),
+                    None,
+                    "{stem}: no human host is recorded when there is no human"
+                );
+            }
+        }
+    }
+
+    /// The resolver re-asserts EVERY tick. `apply_rating` rewrites every system
+    /// its station owns whenever a lobby event fires — including a sought one —
+    /// so a resolver that only ran on a change of its own inputs would be
+    /// silently undone.
+    #[test]
+    fn a_rating_event_that_backfills_the_host_station_is_re_asserted_next_tick() {
+        let mut app = seeking_app("alliance_destroyer", &["captain"]);
+        tick(&mut app);
+        let comms = crate::system_registry::comms_system_id();
+        assert_eq!(host_of(&mut app, &comms).as_deref(), Some("captain"));
+
+        // What `handle_station_rating_change` does on a lobby event: re-apply
+        // the Captain's rating, which sets every captain-owned system — comms
+        // among them, since the seek put it there — back to that rating's answer.
+        {
+            let ship = find_ship_entity(&mut app);
+            let mut entity = app.world_mut().entity_mut(ship);
+            let mut sources = entity.get_mut::<ShipSystemControlSources>().unwrap();
+            sources.0.set(comms.clone(), ControlSource::Ai);
+        }
+        tick(&mut app);
+        assert_eq!(
+            source_of(&mut app, &comms),
+            ControlSource::Human,
+            "the seek must re-assert its answer, not latch on first resolution"
+        );
+    }
+
+    /// The admission consequence, end to end on the hull that needs it most:
+    /// the destroyer homes comms on `tactical`, nobody is sitting there, and the
+    /// Captain — who holds no station the comms system authors — is nonetheless
+    /// the admitted operator, because the seek made them its host.
+    #[test]
+    fn the_sought_host_is_the_token_admission_accepts_for_the_comms_system() {
+        let mut app = seeking_app("alliance_destroyer", &["captain"]);
+        tick(&mut app);
+        let ship = find_ship_entity(&mut app);
+        let world = app.world();
+        let config = world.entity(ship).get::<ShipConfigComponent>().unwrap();
+        let sources = world
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let hosts = world.entity(ship).get::<HumanSeekingHosts>();
+        let sessions = world.resource::<Sessions>();
+        let payload = crate::messages::SystemControlPayload::ClearComms;
+        let comms = crate::system_registry::comms_system_id();
+
+        assert!(
+            crate::command_admission::is_command_authorized(
+                "officer-captain",
+                &comms,
+                &payload,
+                sources,
+                sessions,
+                &config.0,
+                hosts,
+            ),
+            "the sought host's token must be admitted to the system it now hosts"
+        );
+        assert!(
+            !crate::command_admission::is_command_authorized(
+                "officer-captain",
+                &comms,
+                &payload,
+                sources,
+                sessions,
+                &config.0,
+                None,
+            ),
+            "and without the host map it must NOT be — otherwise this test would \
+             pass on the authored station alone and prove nothing"
         );
     }
 }

@@ -1,0 +1,476 @@
+# Falling Skyway — the skeleton world and Act 1 (issue #1034, parent #852).
+#
+# This is the spine every later slice of the scenario hangs content on: the
+# PLACE, the TRAFFIC that was already moving before the crew arrived, the CLOCK
+# they are working against, and Act 1's triage. It is deliberately a skeleton —
+# the strike (#1035), the negotiation (#1036), the storm and the rescue (#1037),
+# the scan-versus-dossier evidence (#1038/#1039), the collapse (#1040), the
+# restraint lever (#1041) and the transfer window itself (#1042) are all later
+# slices, and none of their content is authored here.
+#
+# ── The place ────────────────────────────────────────────────────────────────
+#
+# A city world with a skyhook over it and a fuel-depot ladder strung out along
+# the corridor beside it. Everything the crew can act on is an entity carrying
+# authored data:
+#
+#   Skyhook Meridian    48/100 condition. Certified to lift above 45 %, so it
+#                       is ALREADY three points from being uncertified when the
+#                       crew arrive. Two transfer berths.
+#   Ladder Depot A      62/100. Pumping. The one that still works.
+#   Ladder Depot B      34/100, below its own 40 % line, so it reads as OFF from
+#                       the first tick — the triage picture is data, not prose.
+#   Skyway Control      the authority. Hailable, Federation, and where the
+#                       survey report goes.
+#
+# THREE CLAIMANTS, TWO BERTHS. That ratio is the whole scenario, and all three
+# parties are in the world from the start because they are part of the place:
+#
+#   Strike Committee    the workers, moored off Depot B. They know what the
+#                       maintenance record actually says (#1038/#1039).
+#   Havelock Cutter     the operator's security, sitting on the same depot.
+#   Convoy Meridian     the civilian traffic — sympathetic, and with no
+#                       leverage at all.
+#
+# Their negotiation is #1036's. Nothing here gives any of them a disposition, a
+# strike status or a promise: the skeleton places them and stops.
+#
+# ── The traffic ──────────────────────────────────────────────────────────────
+#
+# Four civilian craft are on authored lanes at mission start, flying. Not
+# spawned by a trigger, not waiting for the player to arrive — the corridor was
+# working before the crew got here and it keeps working while they read the
+# place, which is the pressure Act 1 is actually made of.
+#
+# ── The clock ────────────────────────────────────────────────────────────────
+#
+# Two named deadlines, both visible on the captain's countdown:
+#
+#   t=40 s  `tether_slip`        the head loses six condition points. 48 → 42
+#                                takes it under its authored 45 % lift line, the
+#                                `skyhook_lift_capable` flag falls, and the
+#                                triage priority names itself.
+#   t=90 s  `skyway_survey_due`  Control wants the assessment. Whatever the crew
+#                                have by then is what they send, the act closes,
+#                                and Act 2 opens.
+#
+# Act 1 is short on purpose. The act boundary is authored DATA — two `due_secs`
+# numbers — so the tuning pass (#1044) lengthens the act by editing them and
+# nothing in Rust or in the headless test knows the difference: the test derives
+# its run length from the authored deadline rather than from a hardcoded span.
+#
+# ── Act 1's three objectives, and how each one resolves ──────────────────────
+#
+#   obj-a1-survey    resolves when `skyway_survey_due` fires. It carries the
+#                    Reach directive that takes the ship to its station-keeping
+#                    point, so an AI-backfilled crew flies the mission's shape.
+#   obj-a1-corridor  resolves when the lead hauler clears `corridor_gate` — the
+#                    lane proving itself, through #1028's route machinery.
+#   obj-a1-triage    resolves when the head drops out of lift tolerance, through
+#                    #1025's threshold. [ai] IN THE SKELETON THE STRUCTURE NAMES
+#                    THE PRIORITY FOR THE CREW. That is a placeholder: once the
+#                    strike (#1035) puts a second claim on the repair teams, the
+#                    captain makes this call and this handler becomes the beat
+#                    that records their choice rather than the one that makes it.
+#
+# Anything still pending when the survey falls due is FAILED at the act
+# boundary, which is what makes partial success readable: the act ends on the
+# clock whatever the crew got done, and the objectives list says which.
+#
+# Acts 2 and 3 exist here as a structural stub and nothing more: `act` counts
+# 1 → 2, and the later slices author their own `[[deadline]]` blocks (the storm
+# sweeps, the transfer window) against it. No Act 2 or Act 3 content is authored
+# in this file.
+#
+# BASELINE (this world is new in #1034, so this is its first recorded digest).
+#
+#   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
+#     --seed 42 --ticks 900 --record target/t1_falling_skyway.ron --digest-every 0
+#
+# gives final digest 0x14d6dc5dcf05a3c1 (1501629821237961665), and
+# 8541878955160725293 at tick 0. Measured on a clean tree at the commit that
+# added this line. It is a NEW number, not a preserved one — nothing to compare
+# it against yet — so it is written down here to be the thing a later change is
+# A/B'd against, the way the shipped worlds' digests already are.
+#
+# What legitimately moves it: any edit to this file's entity list, positions,
+# routes, condition/capacity numbers or deadline times; any change to the hulls
+# it fields; and any engine change to what the authoritative digest folds. What
+# must NOT move with it are the two shipped worlds — combat_test
+# 14942520827746055774 and patrol 11531679067393217131 — because a world that
+# adds entities of its own has no business touching a simulation it never
+# enters.
+
+[global]
+seed = 1034
+title = "world.falling_skyway.global.title"
+description = "world.falling_skyway.global.description"
+
+# ── Anchors ──────────────────────────────────────────────────────────────────
+#
+# The corridor runs north-south past the skyhook; the depot ladder runs out to
+# the east of it. Everything a hull steers to is declared here — a doctrine or a
+# route leg naming an anchor the composition does not declare is a load error,
+# and rightly: an anchor has no runtime source, so a lookup that misses at load
+# misses forever.
+
+[anchors]
+# The head of the tether, and the origin everything else is placed around.
+skyway_head = [0.0, 0.0, 0.0]
+
+# Where the destroyer holds station to work the skyway: off the head, out of the
+# lane, close enough to hail everything in the corridor.
+station_keeping = [180.0, 0.0, 170.0]
+
+# The corridor, north to south. `corridor_gate` is the throat beside the head —
+# the point every craft in the lane has to pass, which is why it is the one the
+# scenario asks a question about.
+corridor_north = [0.0, 0.0, -1100.0]
+corridor_gate = [0.0, 0.0, -260.0]
+corridor_south = [0.0, 0.0, 1000.0]
+
+# The fuel-depot ladder, and the transit leg between its two rungs.
+depot_a_berth = [620.0, 0.0, -180.0]
+ladder_transit = [900.0, 0.0, 40.0]
+depot_b_berth = [1180.0, 0.0, 240.0]
+
+# Where the two parties sitting on Depot B are moored. Separate anchors rather
+# than one, because "they are both at the depot" is the situation and "they are
+# alongside each other" is not.
+worker_mooring = [1110.0, 0.0, 350.0]
+corporate_mooring = [1260.0, 0.0, 360.0]
+
+# Where traffic gets held when the corridor cannot take it. Nothing in Act 1
+# sends anyone here; the storm slice (#1037) will.
+holding_arc = [-640.0, 0.0, 520.0]
+
+# ── Lanes ────────────────────────────────────────────────────────────────────
+
+# The corridor run. Loops, so a craft left alone flies it for the whole mission
+# — which is what makes "the lane stopped" an observable event later rather than
+# the end of a script.
+#
+# `corridor_gate` is leg 0 deliberately: it is the waypoint the scenario asks
+# about, and a lane that made the crew wait a full circuit before anything
+# reached it would be authoring a countdown, not traffic.
+[[route]]
+id = "skyway_lane"
+on_complete = "loop"
+
+[[route.leg]]
+anchor = "corridor_gate"
+speed = 0.9
+# They slow through the throat and hold briefly for clearance. Texture, and a
+# reason for the gate to be a place rather than a coordinate.
+hold_secs = 4
+
+[[route.leg]]
+anchor = "corridor_south"
+speed = 0.9
+
+[[route.leg]]
+anchor = "corridor_north"
+speed = 0.9
+
+# The ladder run: the shuttle working between the two depot rungs. It keeps
+# calling at Depot B even though Depot B is not pumping, which is exactly the
+# kind of thing a crew notices and asks about.
+[[route]]
+id = "ladder_run"
+on_complete = "loop"
+
+[[route.leg]]
+anchor = "depot_a_berth"
+speed = 0.7
+hold_secs = 6
+
+[[route.leg]]
+anchor = "ladder_transit"
+speed = 0.8
+
+[[route.leg]]
+anchor = "depot_b_berth"
+speed = 0.7
+hold_secs = 6
+
+# ── The player ship ──────────────────────────────────────────────────────────
+#
+# One hull: the Alliance Destroyer, which is the band-A crew hull and the one
+# whose four stations (Captain, Helm, Tactical, Engineering) are the small-crew
+# set this mission is tuned for. The `[[entity]]` row below is not replaced by
+# this list — `spawn_game_start_entities` still needs a game-start "ship" entity
+# to anchor position, uuid and tags on, and takes its loadout from the lobby
+# selection — so its `template_path` is kept in step with `available_ships[0]`,
+# the same rule `combat_test.toml` records at length.
+
+[[available_ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+label = "world.falling_skyway.available_ships.0.label"
+
+[player_spawn]
+position = [300.0, 0.0, 420.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [300.0, 0.0, 420.0] }
+spawn_on = "game_start"
+
+# ── The world below ──────────────────────────────────────────────────────────
+#
+# Anonymous scenery: the city the tether is anchored to, and the star it turns
+# under. Neither is script-referenceable, because neither is something the
+# mission asks a question about.
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [-4200.0, 0.0, -3400.0] }
+
+[[entity]]
+template_path = "assets/entities/planet_ecumenopolis.toml"
+transform = { position = [0.0, -900.0, 0.0] }
+
+# ── The structures ───────────────────────────────────────────────────────────
+
+# The skyhook head. 48 of 100 points on arrival: above its 45 % lift line, but
+# only just, which is what makes Act 1 triage rather than repair. Everything
+# else about it — the ladder of thresholds, the two berths, the labels the
+# dossier reads — is on the template.
+[[entity]]
+template_path = "assets/entities/skyhook.toml"
+id = "skyhook"
+name = "world.falling_skyway.entity.skyhook.name"
+transform = { anchor = "skyway_head" }
+
+[entity.overrides.infrastructure]
+condition = 48.0
+
+# Ladder Depot A — the rung that still works. Its capacity and threshold tables
+# are replaced wholesale by this instance (arrays replace at the instance
+# layer), because a flag name and a capacity id are the SCENARIO's namespace:
+# two depots sharing `depot_transfer_capable` would be declaring one flag
+# between them, and the second would overwrite the first's answer every tick.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "depot_ladder_a"
+name = "world.falling_skyway.entity.depot_ladder_a.name"
+transform = { anchor = "depot_a_berth" }
+
+[entity.overrides.infrastructure]
+condition = 62.0
+
+[[entity.overrides.infrastructure.capacity]]
+id = "depot_a_fuel_lift"
+amount = 40
+label = "world.falling_skyway.capacity.fuel_lift.label"
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "depot_a_pumping"
+fails_below = 0.4
+label = "world.falling_skyway.threshold.pumping.label"
+
+# Ladder Depot B — 34 of 100, under its own 40 % line, so `depot_b_pumping` is
+# DOWN from the depot's first tick and stays there. The crew do not have to be
+# told the ladder is broken; the panel says so before anyone speaks. This is
+# also the depot the strike sits on (#1035) and the one whose transfers get
+# refused, so it is authored with the same shape as A and a worse number.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "depot_ladder_b"
+name = "world.falling_skyway.entity.depot_ladder_b.name"
+transform = { anchor = "depot_b_berth" }
+
+[entity.overrides.infrastructure]
+condition = 34.0
+
+[[entity.overrides.infrastructure.capacity]]
+id = "depot_b_fuel_lift"
+amount = 12
+label = "world.falling_skyway.capacity.fuel_lift.label"
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "depot_b_pumping"
+fails_below = 0.4
+label = "world.falling_skyway.threshold.pumping.label"
+
+# Skyway Control. Federation, hailable at the template level, and the party the
+# survey report goes to. It is a `station_axiom.toml` because that is the
+# shipped authority station; its point defence is beside the point in a world
+# with nothing hostile in it.
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "skyway_control"
+name = "world.falling_skyway.entity.skyway_control.name"
+transform = { position = [-320.0, 0.0, -120.0] }
+
+# ── The three claimants ──────────────────────────────────────────────────────
+#
+# Present, hailable, and inert. Each one is a dossier subject the moment the
+# crew can reach it (#1030's hail door), which is how Act 1's survey work has
+# somewhere to land — but nothing here gives any of them a position on anything.
+# The strike is #1035's, the negotiation #1036's, the corroboration #1039's.
+
+# The workers. A hauler hull because that is what they crew, moored off Depot B
+# rather than on a lane: they have stopped working, and the world should look
+# like it.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "strike_committee"
+name = "world.falling_skyway.entity.strike_committee.name"
+transform = { anchor = "worker_mooring" }
+overrides = { comms = { hailable = true } }
+
+# The operator's security cutter. The Requiem courier hull, with its one
+# `reach-destination` doctrine entry re-pointed at the mooring it is already
+# sitting on — a per-id doctrine edit, which keeps every other entry the
+# template authors. Left pointed at the template's own
+# `requiem_courier_destination`, this world would have to declare an anchor
+# named after a probe world to spawn a corporate cutter.
+[[entity]]
+template_path = "assets/entities/ship_requiem_courier.toml"
+id = "havelock_cutter"
+name = "world.falling_skyway.entity.havelock_cutter.name"
+transform = { anchor = "corporate_mooring" }
+overrides = { comms = { hailable = true }, behaviour = { doctrine = [
+  { id = "reach-destination", directive_kind = "Reach", directive_anchor = "corporate_mooring" },
+] } }
+
+# The civilian convoy's lead hauler. Hailable like the other two, and unlike
+# them it is ON the lane and moving: the party with no leverage is the one still
+# doing its job.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "convoy_meridian"
+name = "world.falling_skyway.entity.convoy_meridian.name"
+transform = { position = [-90.0, 0.0, 760.0] }
+overrides = { comms = { hailable = true }, civilian = { route = "skyway_lane" } }
+
+# ── The traffic ──────────────────────────────────────────────────────────────
+#
+# Three more craft, all on lanes, all flying from the first tick. `hauler_lark`
+# is the near one: it is the craft the corridor objective watches through the
+# gate, so it starts inside the lane's first leg rather than at the far end of
+# a circuit.
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "hauler_lark"
+name = "world.falling_skyway.entity.hauler_lark.name"
+transform = { position = [0.0, 0.0, -520.0] }
+overrides = { civilian = { route = "skyway_lane" } }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "hauler_pell"
+name = "world.falling_skyway.entity.hauler_pell.name"
+transform = { position = [70.0, 0.0, -880.0] }
+overrides = { civilian = { route = "skyway_lane" } }
+
+# The ladder shuttle, on the other lane entirely.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "shuttle_wick"
+name = "world.falling_skyway.entity.shuttle_wick.name"
+transform = { position = [700.0, 0.0, -120.0] }
+overrides = { civilian = { route = "ladder_run" } }
+
+# ── Act 1's clock ────────────────────────────────────────────────────────────
+#
+# Both visible: the crew are meant to be able to see how long they have. Every
+# `due_secs` is measured from the mission's first tick, not from app start, so a
+# long lobby costs this mission none of its clock.
+
+[[deadline]]
+id = "tether_slip"
+label = "world.falling_skyway.deadline.tether_slip.label"
+due_secs = 40
+visible = true
+
+[[deadline]]
+id = "skyway_survey_due"
+label = "world.falling_skyway.deadline.skyway_survey_due.label"
+due_secs = 90
+visible = true
+
+# ── Act 1 ────────────────────────────────────────────────────────────────────
+
+[script]
+setup = """
+on_world_loaded("on_arrival");
+
+on_deadline("tether_slip", "on_tether_slip");
+on_deadline("skyway_survey_due", "on_survey_due");
+
+// The two events the crew's own objectives resolve on. Neither is a timer: one
+// is a structure crossing an authored line, the other is a hull arriving at an
+// authored place, and both are single-shot.
+on_flag_cleared("skyhook_lift_capable", "on_lift_tolerance_lost");
+on_waypoint_reached("world.falling_skyway.entity.hauler_lark.name", "corridor_gate", "on_lane_open");
+
+// Posted at world load rather than on a timer, so the objectives list is
+// populated before the crew are out of the lobby.
+fn on_arrival(ctx) {
+    ctx.flags.act = 1;
+
+    // The survey carries the ship's own directive: Reach the station-keeping
+    // point off the head. It is what an AI-backfilled crew flies, and what a
+    // human helm is being asked for.
+    ctx.effects.add_objective(#{
+        id: "obj-a1-survey",
+        text: "world.falling_skyway.objective.survey.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 45,
+        directive_kind: "Reach",
+        directive_anchor: "station_keeping",
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a1-corridor",
+        text: "world.falling_skyway.objective.corridor.text",
+        mandatory: true,
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a1-triage",
+        text: "world.falling_skyway.objective.triage.text",
+        mandatory: true,
+        targets: ["world.falling_skyway.entity.skyhook.name"],
+    });
+}
+
+// The slip. Six points off a head sitting at 48 takes it to 42 — under the 45 %
+// lift line the template authors — so this one call reaches the objectives list
+// through the condition track and its threshold rather than by touching it.
+fn on_tether_slip(ctx) {
+    ctx.effects.damage_infrastructure("world.falling_skyway.entity.skyhook.name", 6);
+    ctx.flags.increment("tether_slipped", 1);
+}
+
+// Chained off the crossing, one tick later. [ai] Placeholder: in the skeleton
+// the structure names the priority. #1035 gives the captain a competing claim
+// and this becomes the beat that RECORDS their decision.
+fn on_lift_tolerance_lost(ctx) {
+    ctx.flags.increment("a1_priority_set", 1);
+    ctx.effects.complete_objective("obj-a1-triage");
+}
+
+// The lane, proving itself: the lead hauler clears the throat.
+fn on_lane_open(ctx) {
+    ctx.flags.increment("a1_lane_open", 1);
+    ctx.effects.complete_objective("obj-a1-corridor");
+}
+
+// The act boundary. The report goes to Control with whatever the crew have, and
+// anything still open is failed rather than left pending — an act that ends on
+// the clock has to say what it ended with.
+fn on_survey_due(ctx) {
+    ctx.effects.complete_objective("obj-a1-survey");
+    if ctx.flags.a1_lane_open == 0 {
+        ctx.effects.fail_objective("obj-a1-corridor");
+    }
+    if ctx.flags.a1_priority_set == 0 {
+        ctx.effects.fail_objective("obj-a1-triage");
+    }
+    ctx.flags.act1_complete = 1;
+    ctx.flags.act = 2;
+}
+"""

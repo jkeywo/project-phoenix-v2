@@ -581,7 +581,14 @@ fn ai_power_allocation(
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship::power::ShipPowerSystem,
             Option<&crate::ship_state::ShipRedAlert>,
-            Option<&crate::ship_plugin::LastHelmInput>,
+            // The ACTUAL actuator throttle, written for every ship (NPC and
+            // player alike) by `process_helm_inputs`. Deliberately NOT
+            // `LastHelmInput`, which is only a LocalShip HUD mirror and stays
+            // at its spawn default (0) on every NPC — so seeding the power
+            // `thrust` fact from it pinned every NPC's helm channel below its
+            // elevate guard, letting only the human-piloted player ever reach
+            // the top power rung.
+            Option<&crate::ship::helm::ThrustInput>,
             Option<&crate::ship::power::PowerConfigResource>,
             Option<&crate::ship::power::PowerAiPolicy>,
             Option<&crate::ship::power::PowerAiCadence>,
@@ -617,7 +624,7 @@ fn ai_power_allocation(
         control_sources,
         power,
         red_alert_comp,
-        last_helm_comp,
+        thrust_comp,
         cfg_comp,
         policy_comp,
         cadence_comp,
@@ -679,7 +686,7 @@ fn ai_power_allocation(
         );
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
-        let thrust = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
+        let thrust = thrust_comp.map(|t| t.0).unwrap_or(0.0);
         let battery_pct = if cfg.0.capacity > 0.0 {
             (power.0.battery_charge / cfg.0.capacity) * 100.0
         } else {
@@ -2645,7 +2652,7 @@ station = "sensors"
                 crate::modifiers::power_system::PowerSystem::default(),
             ),
             crate::ship_state::ShipRedAlert::default(),
-            crate::ship_plugin::LastHelmInput::default(),
+            crate::ship::helm::ThrustInput::default(),
             default_power_policy(),
             crate::messages::AdmittedCommands::default(),
             AiHighFidelity,
@@ -2790,10 +2797,7 @@ station = "sensors"
                 ),
                 power_config,
                 crate::ship_state::ShipRedAlert(true),
-                crate::ship_plugin::LastHelmInput {
-                    thrust: 0.9,
-                    ..Default::default()
-                },
+                crate::ship::helm::ThrustInput(0.9),
                 policy,
                 // The hull's OWN `[[station]]`/`[[system]]` roster. Present so
                 // the group `max_level` ceilings are read off the file like
@@ -2849,9 +2853,9 @@ station = "sensors"
         let e = power_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .get_mut::<crate::ship::helm::ThrustInput>()
             .unwrap()
-            .thrust = 0.9;
+            .0 = 0.9;
         app.world_mut()
             .entity_mut(e)
             .get_mut::<crate::ship_state::ShipRedAlert>()
@@ -2877,9 +2881,9 @@ station = "sensors"
         let e = power_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .get_mut::<crate::ship::helm::ThrustInput>()
             .unwrap()
-            .thrust = 0.9;
+            .0 = 0.9;
 
         power_tick_with_dt(&mut app, 0.1);
 
@@ -2905,9 +2909,9 @@ station = "sensors"
         let e = power_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .get_mut::<crate::ship::helm::ThrustInput>()
             .unwrap()
-            .thrust = 0.9;
+            .0 = 0.9;
         app.world_mut()
             .entity_mut(e)
             .get_mut::<crate::ship_state::ShipRedAlert>()
@@ -2958,9 +2962,9 @@ station = "sensors"
         let e = power_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .get_mut::<crate::ship::helm::ThrustInput>()
             .unwrap()
-            .thrust = 0.9;
+            .0 = 0.9;
         app.world_mut()
             .entity_mut(e)
             .get_mut::<crate::ship_state::ShipRedAlert>()
@@ -4287,10 +4291,7 @@ default_level = 2
                         ),
                     ),
                     crate::ship_state::ShipRedAlert::default(),
-                    crate::ship_plugin::LastHelmInput {
-                        thrust: 0.9,
-                        ..Default::default()
-                    },
+                    crate::ship::helm::ThrustInput(0.9),
                     policy,
                     crate::messages::AdmittedCommands::default(),
                     AiHighFidelity,
@@ -4592,9 +4593,9 @@ default_level = 2
             .0 = true;
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .get_mut::<crate::ship::helm::ThrustInput>()
             .unwrap()
-            .thrust = 0.9;
+            .0 = 0.9;
 
         power_tick_with_dt(&mut app, 0.1);
         assert_eq!(

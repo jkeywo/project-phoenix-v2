@@ -7,9 +7,12 @@
 //!
 //! # Where the inputs come from
 //!
-//! * **Proximity** — the ship's own [`ShipPhysics`] against the target's
-//!   `Transform`. Both are current by `SimSet::Modifiers`: `sync_ship_position`
-//!   has already mirrored physics into transforms back in `SimSet::Physics`.
+//! * **Proximity** — both ends read off `Transform`, the way the comms range
+//!   check does. Current by `SimSet::Modifiers` even for a ship, because
+//!   `sync_ship_position` has already mirrored `ShipPhysics` into the transform
+//!   back in `SimSet::Physics`. Reading the transform rather than `ShipPhysics`
+//!   is what lets something that is not a ship — a platform, a tender that never
+//!   moves — perform an operation, and the target end has never had a choice.
 //! * **Capability** — the hull's authored `[operations]` table, carried on
 //!   [`ShipOperations::capabilities`] since spawn.
 //! * **Power** — the ship's own [`ShipPowerSystem`], read as the capability's
@@ -48,7 +51,6 @@ use crate::operations::hold::{
     OperationsConfig, Settlement,
 };
 use crate::ship::power::ShipPowerSystem;
-use crate::ship::state::ShipPhysics;
 use crate::world::server::WorldContentRuntime;
 
 /// The blackboard channel key operations are published under.
@@ -326,7 +328,7 @@ pub fn tick_operations(
     mut ships: Query<(
         Entity,
         &EntityUuid,
-        &ShipPhysics,
+        &Transform,
         Option<&ShipPowerSystem>,
         &mut ShipOperations,
     )>,
@@ -342,7 +344,14 @@ pub fn tick_operations(
         return;
     }
     let tick_hz = tick_hz_of(world_config.as_deref());
-    let queued = std::mem::take(&mut runtime.pending_operation_starts);
+    // Draining through `DerefMut` would mark `WorldContentRuntime` changed on
+    // every quiet tick, and every world in the repository carries that resource.
+    // The emptiness check above is a `Deref` read, so it costs nothing.
+    let queued = if runtime.pending_operation_starts.is_empty() {
+        Vec::new()
+    } else {
+        std::mem::take(&mut runtime.pending_operation_starts)
+    };
 
     let mut rows: Vec<(String, Entity)> = ships
         .iter()
@@ -351,7 +360,7 @@ pub fn tick_operations(
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (uuid, entity) in rows {
-        let Ok((_, _, physics, power, mut ops)) = ships.get_mut(entity) else {
+        let Ok((_, _, transform, power, mut ops)) = ships.get_mut(entity) else {
             continue;
         };
 
@@ -383,7 +392,7 @@ pub fn tick_operations(
             continue;
         };
         let target = targets.iter().find(|(uuid, _, _)| uuid.0 == target_uuid);
-        let ship_pos = Vec3::new(physics.x, physics.y, physics.z);
+        let ship_pos = transform.translation;
         let conditions = OperationConditions {
             target_present: target.is_some(),
             // `stabilise` means something only on an entity that carries a
@@ -543,10 +552,6 @@ mod tests {
             .world_mut()
             .spawn((
                 EntityUuid(SHIP.to_string()),
-                ShipPhysics {
-                    x: ship_x,
-                    ..Default::default()
-                },
                 Transform::from_xyz(ship_x, 0.0, 0.0),
                 ops,
             ))
@@ -807,7 +812,7 @@ mod tests {
             .world_mut()
             .spawn((
                 EntityUuid(SHIP.to_string()),
-                ShipPhysics::default(),
+                Transform::default(),
                 capable(),
             ))
             .id();
@@ -919,7 +924,11 @@ mod tests {
         let banked = ops_of(&app, ship).active.unwrap().elapsed_ticks();
         assert_eq!(banked, 60, "precondition: one second of eligible hold");
 
-        app.world_mut().get_mut::<ShipPhysics>(ship).unwrap().x = 5_000.0;
+        app.world_mut()
+            .get_mut::<Transform>(ship)
+            .unwrap()
+            .translation
+            .x = 5_000.0;
         for _ in 0..60 {
             app.update();
         }
@@ -936,7 +945,11 @@ mod tests {
             "and banks nothing while away"
         );
 
-        app.world_mut().get_mut::<ShipPhysics>(ship).unwrap().x = 100.0;
+        app.world_mut()
+            .get_mut::<Transform>(ship)
+            .unwrap()
+            .translation
+            .x = 100.0;
         for _ in 0..60 {
             app.update();
         }
@@ -968,6 +981,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_ship_with_nothing_to_do_leaves_the_runtime_unmarked() {
+        let (mut app, _, _) = app_with(capable(), 100.0);
+        app.update();
+        app.update();
+        let changed = app
+            .world()
+            .resource_ref::<WorldContentRuntime>()
+            .is_changed();
+        assert!(
+            !changed,
+            "a capable ship running nothing must not mark WorldContentRuntime changed — every \
+             world in the repo carries that resource, and a needless mark is a needless wake-up \
+             for everything that watches it"
+        );
+    }
+
     // ── Determinism ──
 
     #[test]
@@ -986,7 +1016,7 @@ mod tests {
             for uuid in order {
                 app.world_mut().spawn((
                     EntityUuid(uuid.to_string()),
-                    ShipPhysics::default(),
+                    Transform::default(),
                     capable(),
                 ));
                 app.world_mut()
@@ -1029,7 +1059,7 @@ mod tests {
             .world_mut()
             .spawn((
                 EntityUuid(SHIP.to_string()),
-                ShipPhysics::default(),
+                Transform::default(),
                 capable(),
                 crate::server_app::ShipSystemBlackboards::default(),
             ))
@@ -1095,10 +1125,7 @@ mod tests {
             .world_mut()
             .spawn((
                 EntityUuid(SHIP.to_string()),
-                ShipPhysics {
-                    x: 5_000.0,
-                    ..Default::default()
-                },
+                Transform::from_xyz(5_000.0, 0.0, 0.0),
                 capable(),
                 crate::server_app::ShipSystemBlackboards::default(),
             ))

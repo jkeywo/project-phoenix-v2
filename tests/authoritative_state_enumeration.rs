@@ -111,6 +111,7 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "ImpulseState", "InfrastructureCondition", "InfrastructureState",
     "LastHelmInput", "LateralThrustInput", "LodBubble", "Manifest", "MergeStep",
     "ModelMarkers", "ModelRig", "NavigationWaypoint", "ObjectiveManager",
+    "OperationHold", "OperationsSaveState", "ShipOperations",
     "PendingArcBearingRequest", "PendingWorldLayerChanges", "PhaserCooldown",
     "Player", "PowerBlackboard", "Provenance", "QualifiedRef", "RecentCombatActivity",
     "RegionEffectKind", "RepairBlackboard", "RepairTeams", "ResolvedTemplate", "ScenarioCatalog",

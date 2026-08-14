@@ -175,6 +175,102 @@ entities:
       symbols: [InfrastructureSnapshot]
       tests: [cargo test]
 
+
+  - component: external-operation-runner
+    core:
+      status: implemented
+      confidence: confirmed
+      title: External Operation Runner
+      summary: Runs the external operations a crewed ship performs on things outside its own hull - stabilise first, with tow/escort/transfer/field-repair to follow on the same spine. Decides eligibility from proximity, the hull's authored capability and available power; advances a timed hold while eligibility holds; and pays a completed operation into the infrastructure condition queue.
+      rationale:
+        - "[ai] NO MINIGAMES, per PRD #851. An operation is eligibility plus a timed hold the crew maintain through the consoles they already have - helm holds station inside the authored range, engineering keeps the power group allocated. Nothing new is asked of the crew; the operation counts the ticks during which they managed it."
+        - "[ai] Ops slices split by VERB, not by layer. Stabilise ships through every layer - entity TOML vocabulary, pure module, ECS adapter, script effect, admitted player command, wire, console, probe world - so the verbs after it are authoring rather than architecture. A new verb is one enum variant, one script host fn and one capability block."
+        - "[ai] The eligibility verdict and the progress arithmetic are PURE and Bevy-free; the adapter gathers the live inputs and applies what comes back, and decides nothing itself. Proximity reads Transform on both ends rather than ShipPhysics, so something that is not a ship can perform an operation and so the target end never had a choice."
+        - "[ai] STALL versus FAIL, decided rather than left implicit. Losing eligibility freezes progress rather than ending or decaying it, so a helm that drifts out of range and comes back resumes where it left off. Only an UNRECOVERABLE loss (target gone, capability absent) ends a hold on the tick it is seen, or an authored stall budget counted CUMULATIVELY across the whole hold - a budget that reset on recovery would let a crew stall indefinitely in bursts one tick short of the limit."
+        - "[ai] A completed operation pays its authored condition points into WorldContentRuntime::pending_condition_adjustments rather than onto the target's component, and the tick is ordered BEFORE tick_infrastructure_condition so the payoff lands on the tick it was earned. Writing the component directly would bring a skyhook back over its operational threshold with nobody listening - the same one-write-site rule the condition tracker is built on."
+        - "[ai] Points are paid ONCE, on completion, off the single settlement the pure hold reports. A half-finished operation leaving half the points behind would make abandoning one a strategy; the per-tick slice is field-repair's shape, in its own slice."
+        - "[ai] Three ways in, one path through. A script effect names both ends and the applier resolves them; a player start/abort targets the real, station-owned captain system so it takes the ordinary station-tenure admission path; an AI emission is indistinguishable from either, because admission strips source identity before anything here sees it. A start is refused only for a capability the hull lacks - range and power are re-tested every tick, so a start from out of position opens STALLED and the crew fly to it."
+        - "[ai] Ships are walked in UUID order, never archetype order, so two hosts that spawned the same ships in different orders queue their condition adjustments in the same sequence."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [external-operation-state]
+      reads: [infrastructure-condition-state, world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/operations/hold.rs
+        - src/operations/server.rs
+      symbols:
+        - OperationsConfig
+        - CapabilityConfig
+        - OperationVerb
+        - OperationConditions
+        - Ineligibility
+        - eligibility
+        - OperationHold
+        - HoldState
+        - Settlement
+        - ShipOperations
+        - OperationsPlugin
+        - tick_operations
+        - handle_operation_commands
+        - publish_operations_blackboard
+        - PendingOperationStart
+      tests: [cargo test]
+
+  - state: external-operation-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: External Operation State
+      summary: "Per-ship: the verbs the hull authored, the operation it is running (or the last one it ran, retained so a console can still report how it ended), why the last start was refused, and the id counter. Authoritative - a host that thought a skyhook had been stabilised, or was two seconds from it, disagrees about whether the mission is winnable."
+      rationale:
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own, keyed on the minted entity id: the operation's id, verb and target, its banked and required tick counts, its spent stall budget, and its state with the reason attached. Progress folds as the tick COUNTS rather than the 0-1 fraction, because the counts are what the simulation advances and the fraction is a projection of them."
+        - "[ai] A ship that merely CAN operate and never has folds NOTHING - not even a row. That is a stronger version of the infrastructure namespace's empty-walk affordance and it does real work: it is what lets a shipped hull gain an [operations] table later without moving any committed world's digest. The authored capability table is content, which content_digest is answerable for; next_id is not independent state, being the count of operations that have run, and two hosts that disagreed about that already disagree about the folded hold's id."
+        - "[ai] Snapshotted as a PROJECTION rather than whole, which is where this differs from the condition track. The hull's authored capability table rides on the same component and is re-derived from the template on spawn; writing it into a save would put content into the one artefact content_digest is answerable for. The three fields that are carried travel together: restore the hold without next_id and the next operation reuses an id the console has already shown; restore next_id without the hold and a resumed mission forgets it was two-thirds through stabilising a skyhook."
+        - "[ai] The refusal and the hold's own stall reason are separate fields on purpose. A refusal means no operation was opened at all, which the crew act on differently from one that opened and is not advancing."
+    architecture:
+      classification: authoritative
+      owner: external-operation-runner
+      writers: [external-operation-runner]
+      replicas: [external-operation-published-state]
+    implementation:
+      status: declared
+      paths:
+        - src/operations/hold.rs
+        - src/operations/server.rs
+      symbols:
+        - OperationHold
+        - HoldState
+        - ShipOperations
+        - OperationsSaveState
+      tests: [cargo test]
+
+  - state: external-operation-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Published External Operation State
+      summary: The client-visible projection of a ship's external operations - the verbs its hull offers, the live or last-settled hold with its progress, state and reason, and why the last start was refused. Published every tick under a reserved blackboard channel key by ships that authored an [operations] table, and by nobody else.
+      rationale:
+        - "[ai] A SystemBlackboard variant of its own, not a field on an existing per-system blackboard, because an operation is not a ship system: nothing owns it, nothing repairs it, and it outlives the console that ordered it. The key it is carried under is a reserved CHANNEL id in the same not-a-system-id bucket as the helm and tactical station keys - no [[system]] block declares it, no ControlSource is registered for it, and no ControlSystem message may target it."
+        - "[ai] Progress is computed server-side off ELIGIBLE ticks and republished every tick. A client interpolating its own bar would drift off the tick the operation completes on, and a stalled operation's bar is meant to sit visibly still - that stillness is how the crew notice they have drifted out of range - which an interpolating client could not render at all."
+        - "[ai] No English crosses the wire: the verb, the target name and every stall or refusal reason are strings.csv ids the console resolves. The state is a machine code the component maps through a literal table rather than by string concatenation, because a composed id is invisible to the string checker."
+        - "[ai] Additive on the wire in both directions - the adjacently-tagged enum's other variants are untouched by the new one, and every field on the payload is serde-default, so a payload predating any of them decodes rather than being refused whole."
+    architecture:
+      classification: client-projection
+      owner: external-operation-runner
+      writers: [external-operation-runner]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs]
+      symbols:
+        - OperationsBlackboard
+        - ActiveOperationSnapshot
+        - CapabilityOffer
+      tests: [cargo test, npx vitest run]
   - component: world-trigger-evaluator
     core:
       status: implemented

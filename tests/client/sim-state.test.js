@@ -248,6 +248,22 @@ describe('BlackboardUpdate mirror', () => {
     expect(s.blackboards['helm']).toBeUndefined();
   });
 
+  it('stores a blackboard kind it has never heard of without breaking (issue #1026)', () => {
+    // The additive-on-the-wire claim, from the client's side. This fold never
+    // matches `kind` against a known set, so a server that adds a variant — as
+    // #1026 added `Operations` — reaches an older client as an inert entry it
+    // simply carries, rather than as a decode failure that takes the whole
+    // update with it. A client that switched on `kind` would have had to ship in
+    // lockstep with every server that grew one.
+    const s = new ClientSimState();
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['helm', { kind: 'Helm', data: { yaw: 1.0 } }],
+      ['some-future-channel', { kind: 'SomethingNewEntirely', data: { anything: 1 } }],
+    ] } });
+    expect(s.blackboards['some-future-channel']).toEqual({ anything: 1 });
+    expect(s.blackboards['helm'].yaw).toBeCloseTo(1.0);
+  });
+
   it('resets blackboards on Welcome', () => {
     const s = new ClientSimState();
     s.blackboards['helm'] = { yaw: 1.0 };

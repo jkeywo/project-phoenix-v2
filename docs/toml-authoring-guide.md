@@ -597,6 +597,52 @@ of the entity transform; multiple lights are spawned as children.
 | `intensity` | f32 | **required** | Candela (point) or lux (directional). |
 | `range` | f32 | `50.0` | Effective falloff range. Point lights only; ignored for `directional`. |
 
+### 2.1.6 `[operations]` — external operations (issue #1026)
+
+Which **external operations** this hull can perform: the verbs it applies to
+things outside its own hull. The mirror image of `[infrastructure]` — that table
+says what can be done *to* an entity, this one says what an entity can do.
+
+Omitting the table changes nothing. A hull that authors none can start no
+operation and is refused by name if asked to.
+
+```toml
+[[operations.capability]]
+verb                  = "stabilise"   # the only verb today
+range                 = 400.0         # world units, centre to centre
+duration_secs         = 20            # whole seconds of ELIGIBLE hold
+power_group           = "helm"        # which group the operation draws on
+min_power_level       = 2             # …and the level it needs held
+condition_on_complete = 30.0          # condition points paid to the target
+stall_limit_secs      = 45            # optional cumulative stall budget
+```
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `verb` | `"stabilise"` | **required** | The operation this block authorises. |
+| `range` | f32 | `400.0` | How far from the target the ship may be and still count the tick. |
+| `duration_secs` | i64 | `20` | Whole seconds of *eligible* hold. Stalled ticks do not count towards it — that is the point of the hold. |
+| `power_group` | string | `"helm"` | The power group the operation draws on. |
+| `min_power_level` | u8 | `2` | The level that group must hold. `2` is where every group is seeded, so a ship that has stripped helm loses the operation. |
+| `condition_on_complete` | f32 | `0.0` | Infrastructure condition points the target gains **on completion**, paid once. `0.0` authors an operation whose payoff is entirely scripted. |
+| `stall_limit_secs` | i64 | *(none)* | Whole seconds of **cumulative** stalled time tolerated before the operation fails. Omit to let it stall indefinitely. |
+
+A hold **stalls** rather than ending when eligibility lapses for something the
+crew can fix — out of range, under-powered — and progress freezes where it stood
+rather than decaying, so flying back resumes it. It **fails** when eligibility
+is lost for something they cannot fix (the target is gone; the hull never had
+the capability), or when the stall budget runs out.
+
+A zero range, a non-positive `duration_secs`, an empty `power_group`, a negative
+payoff, a negative stall budget or two blocks claiming the same verb are all
+refused at load, by field name.
+
+Starting one: `ctx.effects.stabilise(ship, target)` from a script (**§1.5**), or
+a `StartOperation` / `AbortOperation` console command at the `captain` system.
+Progress reaches the crew on the operations blackboard, rendered by
+`<ph-operation-panel>`. `assets/worlds/probe_stabilise.toml` is a worked
+example of the whole chain.
+
 ### 2.2 Ships
 
 A "ship" is an entity with a `[collider]`, `[hull]`, and one or more

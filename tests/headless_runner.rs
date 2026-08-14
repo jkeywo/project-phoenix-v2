@@ -5906,3 +5906,278 @@ fn a_slipped_deadline_fires_at_its_new_tick_and_a_cancelled_one_never_fires() {
         "a cancelled deadline reports no countdown rather than a stale one"
     );
 }
+
+// ── Issue #1026: the stabilise operation, end to end in a real run ──────────
+
+/// Read the operating ship's operations record out of a live app.
+///
+/// Found by the component rather than by name: exactly one entity in
+/// `probe_stabilise.toml` authors an `[operations]` table, and a lookup that
+/// went through `EntityName` would be testing name resolution rather than the
+/// operation.
+fn live_operations(
+    app: &mut bevy::prelude::App,
+) -> Option<project_phoenix::operations::ShipOperations> {
+    app.world_mut()
+        .query::<&project_phoenix::operations::ShipOperations>()
+        .iter(app.world())
+        .next()
+        .cloned()
+}
+
+/// Move the operating ship to `x` by writing its `ShipPhysics`, which is what
+/// helm moves. Writing the `Transform` directly would be undone by
+/// `sync_ship_position` on the next tick.
+fn move_operator_to(app: &mut bevy::prelude::App, x: f32) {
+    let entity = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<project_phoenix::operations::ShipOperations>>()
+        .iter(app.world())
+        .next()
+        .expect("the probe world spawns one operating ship");
+    app.world_mut()
+        .get_mut::<project_phoenix::ship::state::ShipPhysics>(entity)
+        .expect("the operating ship is a ship")
+        .x = x;
+}
+
+fn stabilise_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_stabilise.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// **Issue #1026.** A scripted stabilise operation opens, holds, completes, and
+/// the completion lifts the depot back over its own operational threshold —
+/// every link asserted separately, because "the depot ended up capable" would
+/// pass with the operation never having run at all.
+#[test]
+fn a_scripted_stabilise_operation_runs_to_completion_and_restores_the_depot() {
+    use project_phoenix::infrastructure::InfrastructureCondition;
+    use project_phoenix::operations::HoldState;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let args = stabilise_args(dt, 6.0);
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    let mut first_seen: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
+    let mut max_progress: f32 = 0.0;
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+        if let Some(ops) = live_operations(&mut app) {
+            if let Some(hold) = ops.active.as_ref() {
+                max_progress = max_progress.max(hold.progress());
+                match hold.state() {
+                    HoldState::Holding => {
+                        first_seen.entry("holding").or_insert(sim_t);
+                    }
+                    HoldState::Completed => {
+                        first_seen.entry("completed").or_insert(sim_t);
+                    }
+                    other => panic!(
+                        "the operation ended as {other:?} at {sim_t:.2} s — nothing in this \
+                         world interrupts it"
+                    ),
+                }
+            }
+        }
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        if flags.flag("depot_transfer_capable") {
+            first_seen.entry("capable").or_insert(sim_t);
+        }
+        if flags.flag("depot_restored") {
+            first_seen.entry("restored_hook").or_insert(sim_t);
+        }
+    }
+
+    // ── The script effect opened the hold ──
+    let opened_at = *first_seen.get("holding").unwrap_or_else(|| {
+        panic!("the scripted `stabilise` effect never opened a hold at all: {first_seen:?}")
+    });
+    assert!(
+        (1.0..1.5).contains(&opened_at),
+        "the hold must open just after the t=1 s `on_timer`, not before it and not much after — \
+         opened at {opened_at:.2} s"
+    );
+
+    // ── It completed after its authored duration of ELIGIBLE ticks ──
+    let completed_at = *first_seen.get("completed").unwrap_or_else(|| {
+        panic!(
+            "the hold never completed: three authored seconds at 60 Hz is 180 eligible ticks, \
+             and nothing in this world interrupts it. Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        (completed_at - opened_at - 3.0).abs() < 0.2,
+        "it must complete three seconds after it opened — the authored duration, counted in \
+         eligible ticks ({opened_at:.2} s to {completed_at:.2} s)"
+    );
+    assert_eq!(
+        max_progress, 1.0,
+        "and the published progress reaches the top"
+    );
+
+    // ── The completion moved the target's condition, through #1025's queue ──
+    let condition = app
+        .world_mut()
+        .query::<&InfrastructureCondition>()
+        .iter(app.world())
+        .next()
+        .map(|c| c.0.condition())
+        .expect("the depot carries its condition track");
+    assert_eq!(
+        condition, 55.0,
+        "30 authored points plus the operation's authored 25 — paid ONCE, on completion, into \
+         the queue tick_infrastructure_condition drains"
+    );
+
+    // ── …which crossed the depot's threshold and flipped its flag ──
+    let capable_at = *first_seen.get("capable").unwrap_or_else(|| {
+        panic!(
+            "`depot_transfer_capable` never came back: 55/100 is above the depot's 45 % restore \
+             point, and the operation is what took it there. Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        (capable_at - completed_at).abs() < 0.1,
+        "the flag flips on the tick the operation completes, not a tick later: tick_operations \
+         is ordered BEFORE tick_infrastructure_condition precisely so the payoff lands on the \
+         tick it was earned ({completed_at:.2} s vs {capable_at:.2} s)"
+    );
+    assert!(
+        capable_at > opened_at,
+        "…and the depot spawned BELOW its threshold, so this is the operation's crossing rather \
+         than a flag that was up all along"
+    );
+
+    // ── A scenario hook reacted to the crossing ──
+    let hook_at = *first_seen.get("restored_hook").unwrap_or_else(|| {
+        panic!(
+            "the world's `on_flag_set` handler never ran — the crossing wrote the flag store but \
+             never reached the trigger pipeline. Seen: {first_seen:?}"
+        )
+    });
+    assert!(
+        hook_at >= capable_at && hook_at - capable_at < 0.5,
+        "the hook fires promptly after the crossing, on the same one-tick pending_world_events \
+         bridge #1025's rides ({capable_at:.2} s vs {hook_at:.2} s)"
+    );
+}
+
+/// **Issue #1026.** Flying the operating ship off station stalls the hold and
+/// banks nothing; flying it back resumes it from where it stood, and it still
+/// completes.
+///
+/// The interruption arrives through the ship's REAL position — the same input
+/// helm moves — rather than through a flag something else set, which is the
+/// whole claim the ECS adapter makes.
+#[test]
+fn flying_the_operator_off_station_stalls_the_hold_and_returning_resumes_it() {
+    use project_phoenix::operations::{HoldState, Ineligibility};
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&stabilise_args(dt, 12.0)).expect("app should build");
+
+    // Past the t=1 s start, with eligible hold banked.
+    run(&mut app, 130);
+    let opened = live_operations(&mut app)
+        .and_then(|o| o.active)
+        .unwrap_or_else(|| panic!("precondition: the scripted effect opens the hold by 130 ticks"));
+    assert_eq!(opened.state(), HoldState::Holding);
+    let banked = opened.elapsed_ticks();
+    assert!(banked > 0, "precondition: it has banked eligible ticks");
+
+    // ── Off station ──
+    move_operator_to(&mut app, 60_000.0);
+    run(&mut app, 120);
+    let stalled = live_operations(&mut app)
+        .and_then(|o| o.active)
+        .expect("the hold survives");
+    assert_eq!(
+        stalled.state(),
+        HoldState::Stalled(Ineligibility::OutOfRange),
+        "leaving the authored range stalls the operation rather than ending it — it is exactly \
+         the thing helm is there to fix"
+    );
+    assert_eq!(
+        stalled.elapsed_ticks(),
+        banked,
+        "…and the ticks already held are not lost. Progress that decayed would make a brief \
+         drift as expensive as never having started."
+    );
+    assert!(
+        stalled.stalled_ticks() > 0,
+        "the stall is counted, so a later slice can budget it"
+    );
+
+    // ── Back on station ──
+    move_operator_to(&mut app, 200.0);
+    run(&mut app, 240);
+    let resumed = live_operations(&mut app)
+        .and_then(|o| o.active)
+        .expect("the hold survives");
+    assert_eq!(
+        resumed.state(),
+        HoldState::Completed,
+        "flying back resumes the hold from where it stood: the operation needs its authored \
+         seconds of ELIGIBLE time, not of wall clock"
+    );
+}
+
+/// **Issue #1026.** The operating ship publishes its hold on the wire, under
+/// the operations blackboard channel rather than onto an existing system's.
+#[test]
+fn the_operating_ship_publishes_its_hold_under_the_operations_blackboard_key() {
+    use project_phoenix::messages::SystemBlackboard;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&stabilise_args(dt, 3.0)).expect("app should build");
+    run(&mut app, 130);
+
+    let key = project_phoenix::messages::SystemId(
+        project_phoenix::operations::OPERATIONS_BLACKBOARD_KEY.to_string(),
+    );
+    let published: Vec<_> = app
+        .world_mut()
+        .query::<&project_phoenix::server_app::ShipSystemBlackboards>()
+        .iter(app.world())
+        .filter_map(|boards| match boards.0.get(&key) {
+            Some(SystemBlackboard::Operations(bb)) => Some(bb.clone()),
+            _ => None,
+        })
+        .collect();
+    let bb = published
+        .first()
+        .expect("the operating ship publishes an operations blackboard");
+    assert_eq!(
+        bb.capabilities
+            .iter()
+            .map(|c| c.verb.as_str())
+            .collect::<Vec<_>>(),
+        vec!["stabilise"],
+        "the hull's authored verbs reach the console"
+    );
+    let active = bb.active.as_ref().expect("the live hold is published");
+    assert_eq!(active.state, "holding");
+    assert!(
+        active.progress > 0.0 && active.progress < 1.0,
+        "progress is published mid-hold, not only at the ends: {}",
+        active.progress
+    );
+    assert_eq!(
+        active.verb_label, "operation.verb.stabilise",
+        "no English crosses the wire — the console resolves this id"
+    );
+    assert_eq!(
+        active.target_name.as_deref(),
+        Some("world.probe_stabilise.entity.skyhook.name"),
+        "and the target is named by its own string id"
+    );
+}

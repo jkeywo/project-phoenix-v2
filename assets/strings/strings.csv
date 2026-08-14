@@ -899,3 +899,5 @@ operation.refused.target_gone,"External-operation refusal — the target is no l
 operation.refused.target_not_applicable,"External-operation refusal — the target is there but the verb means nothing on it (issue #1026)","[Nothing to work on there.]"
 operation.refused.out_of_range,"External-operation refusal — the ship is outside the operation's authored range (issue #1026)","[Out of range — close on the target.]"
 operation.refused.insufficient_power,"External-operation refusal — the operation's power group is below its authored level (issue #1026)","[Insufficient power allocated.]"
+world.probe_stabilise.entity.tender.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Tender]
+world.probe_stabilise.entity.skyhook.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Skyhook]

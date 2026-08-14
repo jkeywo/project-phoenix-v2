@@ -2198,3 +2198,140 @@ fn the_resumed_world_keeps_a_structures_condition_and_its_operational_flags() {
          track was last damaged against must all come back exactly as captured"
     );
 }
+
+// ── Issue #1026: an in-flight operation survives a resume ───────────────────
+
+/// The stabilise probe: one tender, one degraded depot, one scripted operation.
+const STABILISE: &str = "assets/worlds/probe_stabilise.toml";
+
+/// Frames to run before the stabilise capture.
+///
+/// The probe starts the operation at t=1 s (tick 60) and completes it three
+/// authored seconds later (tick 240), so this has to land strictly between the
+/// two: a capture taken before the start would round-trip a ship running
+/// nothing, which is exactly the payload a restore that dropped the whole field
+/// would also produce, and one taken after the finish would round-trip a
+/// settled hold that no longer advances. The assertions below make both halves
+/// of that precondition explicit rather than trusting the number.
+const STABILISE_CAPTURE_AT: u64 = 150;
+
+fn stabilise_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: STABILISE.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+/// **Issue #1026.** A mission interrupted mid-operation comes back mid-operation
+/// — the banked eligible ticks, the spent stall budget, the state and the id
+/// counter together.
+///
+/// Restoring the hold's progress alone would be worse than dropping it: a
+/// resumed crew would be shown a bar that no longer matched what the simulation
+/// thought it owed them, and the next operation would reuse an id the console
+/// had already displayed. The control below reads the freshly booted ship first,
+/// so an inert restore is visible rather than hidden behind a value that
+/// happened to match.
+#[test]
+fn the_resumed_world_keeps_a_ship_mid_operation() {
+    let mut live = boot(&stabilise_args());
+    step(&mut live, STABILISE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.operations.as_ref().map(|o| (&e.uuid, o)))
+        .collect();
+    assert_eq!(
+        captured.len(),
+        1,
+        "the probe world carries exactly one ship with an operations record"
+    );
+    let (uuid, record) = captured[0];
+    let hold = record
+        .active
+        .as_ref()
+        .expect("precondition: the capture must be taken after the scripted start");
+    assert!(
+        hold.elapsed_ticks() > 0 && !hold.is_settled(),
+        "precondition: and strictly BEFORE the completion — a capture of a ship running nothing, \
+         or of a settled hold, would round-trip identically even if restore dropped the field \
+         entirely ({} of {} ticks, {:?})",
+        hold.elapsed_ticks(),
+        hold.required_ticks(),
+        hold.state()
+    );
+    assert_eq!(
+        record.next_id, 1,
+        "precondition: one operation has been handed an id"
+    );
+
+    let mut resumed = boot_to_restore_point(&stabilise_args(), &payload);
+    let before_restore = resumed
+        .world_mut()
+        .query::<&project_phoenix::operations::ShipOperations>()
+        .iter(resumed.world())
+        .next()
+        .cloned()
+        .expect("the fresh world spawned the tender from its template");
+    assert!(
+        before_restore.active.is_none(),
+        "control: a freshly booted tender is running nothing, so an inert restore would be \
+         visible here rather than hidden behind a value that happened to match"
+    );
+    assert_eq!(
+        before_restore
+            .capabilities
+            .capability(project_phoenix::operations::OperationVerb::Stabilise)
+            .map(|c| c.duration_secs),
+        Some(3),
+        "…and it carries its authored capability, which the save deliberately does NOT: that is \
+         content, re-derived from the template on spawn"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let after = capture(resumed.world());
+    let restored = after
+        .entities
+        .iter()
+        .find(|e| &e.uuid == uuid)
+        .and_then(|e| e.operations.as_ref())
+        .unwrap_or_else(|| panic!("ship {uuid} came back without its operations record"));
+    assert_eq!(
+        restored, record,
+        "ship {uuid}: the hold's banked ticks, its required ticks, its spent stall budget, its \
+         state and the id counter must all come back exactly as captured"
+    );
+
+    let live_capabilities = resumed
+        .world_mut()
+        .query::<&project_phoenix::operations::ShipOperations>()
+        .iter(resumed.world())
+        .next()
+        .map(|ops| ops.capabilities.clone())
+        .expect("the record is still attached");
+    assert_eq!(
+        live_capabilities, before_restore.capabilities,
+        "and the restore left the spawned capability table alone — it restores the mutable half \
+         of the record, not the content half"
+    );
+}
+
+/// **Issue #1026.** A world that runs no operations writes nothing
+/// operation-shaped into its save.
+#[test]
+fn a_world_with_no_operations_writes_no_operation_state() {
+    let mut live = duel();
+    step(&mut live, 120);
+    let payload = capture(live.world());
+    assert!(
+        payload.entities.iter().all(|e| e.operations.is_none()),
+        "every world in the repository but the probe is in this arm, and none of them should pay \
+         a byte for a feature they do not use"
+    );
+}

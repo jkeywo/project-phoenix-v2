@@ -1,0 +1,117 @@
+# Probe world for issue #1026 — the stabilise operation, end to end.
+#
+# One ship, one degraded depot, and the whole chain the issue asks for run on a
+# script clock: entity TOML declares the capability → a script effect starts the
+# operation → the timed hold advances while the crew hold the conditions → the
+# completion pays into #1025's condition queue → that crossing flips the depot's
+# operational flag back up → an `on_flag_set` hook reacts.
+#
+# No combat, and nothing hostile in the world at all. Every move here is
+# authored, so the run is a deterministic tripwire for the chain rather than a
+# fight that happens to stabilise something.
+#
+# THE OPERATING SHIP IS A NAMED WORLD ENTITY, not the player-ship row, and that
+# is forced rather than chosen. `spawn_game_start_entities` mints the player
+# ship a FRESH uuid and takes its whole loadout from the lobby-selected template
+# — so a `name` on that row resolves to a uuid nothing carries, and an
+# `overrides` block on it is discarded along with the rest of the placeholder's
+# config. A scripted operation addresses both ends by authored NAME, so the
+# operator has to be an entity whose name and uuid actually meet.
+#
+# THE CAPABILITY IS AUTHORED THROUGH `[[entity]].overrides`, which is the other
+# half of the "both authoring paths accept it" claim #1025 pinned for
+# `[infrastructure]`. No shipped hull carries an `[operations]` table yet, and
+# putting one on the cruiser would have given every world that flies it a
+# capability record — so the probe authors it on this instance instead. The
+# template path is covered by a spawner unit test.
+#
+# Range is deliberately generous (2000 world units against a depot 400 away).
+# The tender is on AI backfill in a headless run and may drift; the probe is a
+# test of the operation chain, not of station-keeping, so the drift must not be
+# able to reach the range gate. The headless test that DOES exercise the range
+# gate moves the tender by hand, which is the honest analogue of helm flying off
+# station.
+#
+# `min_power_level = 2` is the level every power group is seeded at, so a ship
+# that has not touched its grid is eligible and one that has stripped helm is
+# not — the check is live, not vacuous.
+#
+# Timeline (60 Hz):
+#
+#   tick   0   the depot spawns at 30/100 = 30 %, below its authored 40 %
+#              failure point, so `depot_transfer_capable` starts DOWN
+#   tick  60   `on_begin_stabilise` fires the scripted effect; the hold opens
+#              and advances the same tick
+#   tick 240   180 eligible ticks (3 authored seconds) later the hold COMPLETES
+#              and queues +25 condition points
+#   tick 240   `tick_operations` runs before `tick_infrastructure_condition`, so
+#              the points land the same tick: 30 → 55/100 = 55 %, at or above
+#              the 45 % restore point, and the flag SETS
+#   tick ~241  `on_depot_restored` fires off the queued FlagSet
+#
+# The intermediate value is chosen, not arbitrary: 30 → 55 crosses the 40 %
+# failure point on the way up but the flag only returns at 45 %, so the run also
+# proves the restore point is the one being honoured rather than the failure
+# point read backwards.
+#
+# BASELINE (this world is new in #1026, so this is its first recorded digest):
+# `--seed 42 --ticks 900` gives final digest 0x03239642ba6f2710
+# (226189619638511376), and 12858075515466911134 at tick 0. Measured on a clean
+# tree at the commit that added this line. It is a NEW number, not a preserved
+# one — nothing to compare it against yet — so it is written down here to be the
+# thing a later change is A/B'd against, the way the shipped worlds' digests
+# already are.
+
+[global]
+seed = 1026
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship, present because a world needs one. It does no work here.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The operating ship. Named, because a scripted effect addresses both ends of an
+# operation by the world's authored entity names; same faction as the player, so
+# nothing in this world shoots at anything.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_stabilise.entity.tender.name"
+transform = { position = [200.0, 0.0, 0.0] }
+overrides = { operations = { capability = [{ verb = "stabilise", range = 2000.0, duration_secs = 3, power_group = "helm", min_power_level = 2, condition_on_complete = 25.0 }] } }
+
+# The structure under test, spawned already degraded past its own threshold.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_stabilise.entity.skyhook.name"
+transform = { position = [400.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 30.0 } }
+
+[script]
+setup = """
+on_timer(1, "on_begin_stabilise");
+
+// The restore direction. The depot spawns BELOW its threshold, so the flag is
+// down from tick zero and there is exactly one crossing in this run — but the
+// guard is carried anyway, for `probe_infrastructure`'s reason: it is what makes
+// the watcher's arming independent of whether the depot happens to publish the
+// flag up on its first tick.
+on_flag_set("depot_transfer_capable", "on_depot_restored").when("counter(op_started) > 0");
+
+fn on_begin_stabilise(ctx) {
+    ctx.effects.stabilise(
+        "world.probe_stabilise.entity.tender.name",
+        "world.probe_stabilise.entity.skyhook.name",
+    );
+    ctx.flags.op_started = 1;
+}
+
+fn on_depot_restored(ctx) {
+    ctx.flags.depot_restored = 1;
+}
+"""

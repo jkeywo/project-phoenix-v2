@@ -7851,10 +7851,31 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
     let published = published
         .first()
         .expect("the crew's own ship publishes the mission's visible deadlines");
+    // Every deadline the world authors `visible`, in authored order — read from
+    // the config rather than restated here, so a later act adding its own clock
+    // (the storm sweep, #1037) extends the panel without rewriting this
+    // assertion into a list of ids nobody maintains.
+    let authored_visible: Vec<String> = app
+        .world()
+        .resource::<WorldConfig>()
+        .deadlines
+        .iter()
+        .filter(|d| d.visible)
+        .map(|d| d.id.clone())
+        .collect();
     assert_eq!(
-        published.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+        published.iter().map(|d| d.id.clone()).collect::<Vec<_>>(),
+        authored_visible,
+        "the captain's countdown carries exactly the deadlines the world authored \
+         visible, in authored order"
+    );
+    assert_eq!(
+        published[..2]
+            .iter()
+            .map(|d| d.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["tether_slip", "skyway_survey_due"],
-        "both act-1 deadlines are authored visible, in authored order"
+        "…and Act 1's two lead it"
     );
     assert_eq!(
         published[1].label, "world.falling_skyway.deadline.skyway_survey_due.label",
@@ -9339,5 +9360,868 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
             .iter()
             .any(|m| m.body == "world.falling_skyway.comms.force_report_one"),
         "one casualty is its own report, not the same one with a number in it"
+    );
+}
+
+// ── The radiation storm and the Act-2 rescue (issue #1037, parent #852) ──────
+
+/// `probe_storm.toml` — the world's own header carries the authored timeline
+/// every assertion below is read against.
+const STORM_WORLD: &str = "assets/worlds/probe_storm.toml";
+const STORM_TUG: &str = "world.probe_storm.entity.tug_storm.name";
+const STORM_HULK: &str = "world.probe_storm.entity.hulk_storm.name";
+const CLEAR_TUG: &str = "world.probe_storm.entity.tug_clear.name";
+const CLEAR_HULK: &str = "world.probe_storm.entity.hulk_clear.name";
+const STORM_LOITERER: &str = "world.probe_storm.entity.loiterer.name";
+const STORM_CROSSER: &str = "world.probe_storm.entity.crosser.name";
+const STORM_BYSTANDER: &str = "world.probe_storm.entity.bystander.name";
+
+fn storm_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: STORM_WORLD.into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// How many region entities are in the world right now, counted by the shape
+/// section every authored region carries — the same component region membership
+/// is computed from. A retired band that left one behind would go on jamming,
+/// slowing and burning hulls with nothing on radar to explain it.
+fn region_entity_count(app: &mut bevy::prelude::App) -> usize {
+    app.world_mut()
+        .query::<&project_phoenix::entities::spawner::RegionShapeSection>()
+        .iter(app.world())
+        .count()
+}
+
+/// The named ship's live modifier cache — what a band actually does to a crew's
+/// instruments, read off the ship rather than off the region.
+fn modifiers_of(
+    app: &mut bevy::prelude::App,
+    name: &str,
+) -> project_phoenix::modifiers::ShipModifiers {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::modifiers::ShipModifiers,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, modifiers)| modifiers.clone())
+        .unwrap_or_else(|| panic!("{name} carries no modifier cache"))
+}
+
+/// The named ship's remaining hull as a fraction of its maximum.
+fn hull_fraction_of(app: &mut bevy::prelude::App, name: &str) -> f32 {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::entities::spawner::EntitySystemHull,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, hull)| {
+            let max = hull.0.total_max();
+            if max <= 0.0 {
+                0.0
+            } else {
+                hull.0.total_current() / max
+            }
+        })
+        .unwrap_or_else(|| panic!("{name} carries no hull"))
+}
+
+/// **Issue #1037, AC1–AC3 and AC7.** A radiation band spawned on a named
+/// deadline degrades the crew's instruments, stretches a tow to half rate, and
+/// retires — all of it an authored region template plus an authored schedule,
+/// with no hazard system anywhere.
+///
+/// The comparison is the point: `tug_storm` and `tug_clear` carry the same hull,
+/// the same capability, the same duration, the same payout and the same
+/// interrupt rule, and differ only in which side of a band they are parked on.
+/// A single tow would pass whatever the rate did.
+#[test]
+fn a_storm_band_degrades_instruments_and_halves_a_tow_until_it_is_retired() {
+    use project_phoenix::messages::{FlagKind, ModifierSlot};
+    use project_phoenix::operations::{HoldState, OperationVerb, ProgressRate};
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let args = storm_args(dt, 34.0);
+    let mut app = build_headless_app(&args).expect("the probe world must load and build");
+
+    // AC2's precondition, and it can only be checked before the deadline fires:
+    // the band is NOT authored into the world, it arrives.
+    run(&mut app, 30);
+    assert_eq!(
+        region_entity_count(&mut app),
+        0,
+        "the storm is spawned by the schedule, not placed by the file — a band that was \
+         already in the world at half a second has nothing to do with a deadline"
+    );
+
+    // Everything below is read tick by tick and asserted on ORDER and STATE,
+    // never on frame arithmetic. `first[…]` is the sim-second each reading first
+    // went true.
+    let mut first: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
+    // Was the storm tow ever genuinely running at the band's rate? Without this,
+    // the "returns to full" reading below is satisfied by a tow that was never
+    // slowed at all.
+    let mut storm_tow_seen_slowed = false;
+    // Did the clear tow ever leave full rate? It is the control, and a control
+    // that wobbled would explain the difference by itself.
+    let mut clear_tow_ever_slowed = false;
+    let mut band_seen = false;
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        // The TOW band by its own spawned name, not the region count: the dwell
+        // band is up for the whole of this run, so a count would never fall to
+        // zero and the retirement below would never be observed at all.
+        let tow_band = named_entity_present(&mut app, "storm_band_tow");
+        if tow_band {
+            band_seen = true;
+            first.entry("band_present").or_insert(sim_t);
+        } else if band_seen {
+            first.entry("tow_band_retired").or_insert(sim_t);
+        }
+
+        let storm = operations_named(&mut app, STORM_TUG).and_then(|ops| ops.active);
+        let clear = operations_named(&mut app, CLEAR_TUG).and_then(|ops| ops.active);
+        if let Some(hold) = &storm {
+            if hold.rate() == ProgressRate::percent(50) {
+                storm_tow_seen_slowed = true;
+                first.entry("storm_tow_slowed").or_insert(sim_t);
+            }
+            if storm_tow_seen_slowed && hold.rate() == ProgressRate::FULL {
+                first.entry("storm_tow_back_to_full").or_insert(sim_t);
+            }
+            if hold.state() == HoldState::Completed {
+                first.entry("storm_tow_done").or_insert(sim_t);
+            }
+        }
+        if let Some(hold) = &clear {
+            if hold.rate() != ProgressRate::FULL {
+                clear_tow_ever_slowed = true;
+            }
+            if hold.state() == HoldState::Completed {
+                first.entry("clear_tow_done").or_insert(sim_t);
+            }
+        }
+
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        if flags.counter("storm_hulk_recovered") > 0 {
+            first.entry("storm_hulk_recovered").or_insert(sim_t);
+        }
+        if flags.counter("clear_hulk_recovered") > 0 {
+            first.entry("clear_hulk_recovered").or_insert(sim_t);
+        }
+
+        // AC3's other half, the instruments — sampled while the band is up, off
+        // the OPERATOR's own cache, so this is what a console would render
+        // rather than what the region file says.
+        if tow_band && !first.contains_key("degraded_readings") {
+            let inside = modifiers_of(&mut app, STORM_TUG);
+            if inside.get(&ModifierSlot::RadarRange) < 1.0
+                && inside.has_flag(&FlagKind::CommsJammed)
+                && inside.has_flag(&FlagKind::SensorBlind)
+            {
+                first.entry("degraded_readings").or_insert(sim_t);
+            }
+        }
+    }
+
+    let at = |key: &str| -> f64 {
+        *first
+            .get(key)
+            .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
+    };
+
+    // ── AC1/AC2: the band arrived on its named deadline ──
+    let arrived = at("band_present");
+    assert!(
+        (1.5..3.5).contains(&arrived),
+        "the band arrives on the authored `storm_front` deadline (t=2 s), not whenever a \
+         spawner felt like it — got {arrived:.2} s"
+    );
+
+    // ── AC3: inside a band, the crew's picture is worse ──
+    let degraded = at("degraded_readings");
+    assert!(
+        degraded >= arrived && degraded - arrived < 0.5,
+        "radar range, comms and sensors all degrade essentially as the band arrives \
+         ({arrived:.2} s vs {degraded:.2} s)"
+    );
+    let clear_side = modifiers_of(&mut app, CLEAR_TUG);
+    assert!(
+        (clear_side.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6
+            && !clear_side.has_flag(&FlagKind::CommsJammed)
+            && !clear_side.has_flag(&FlagKind::SensorBlind),
+        "…and the control three kilometres away sees perfectly well, which is what makes \
+         the degradation a fact about the BAND"
+    );
+
+    // ── AC3: the tow is stretched, not stopped ──
+    assert!(
+        storm_tow_seen_slowed,
+        "the tow inside the band must run at the 50 % its capability authors for a slow \
+         zone. Seen: {first:?}"
+    );
+    assert!(
+        !clear_tow_ever_slowed,
+        "…and the identical tow in clear space must never leave full rate. If both \
+         wobbled, the difference below is about something else."
+    );
+    let clear_done = at("clear_tow_done");
+    let storm_done = at("storm_tow_done");
+    assert!(
+        storm_done > clear_done + 4.0,
+        "the storm tow finishes MEASURABLY later than its control off the same 12-second \
+         capability: {storm_done:.2} s against {clear_done:.2} s. If these matched, \
+         working in a storm would be free."
+    );
+
+    // ── AC2: retirement, and its live consequence ──
+    let retired = at("tow_band_retired");
+    let back_to_full = at("storm_tow_back_to_full");
+    assert!(
+        retired > arrived,
+        "precondition: the band has to have been there before it can go"
+    );
+    assert!(
+        back_to_full >= retired && back_to_full - retired < 0.5,
+        "when the band is retired the tow returns to full rate at once — with nothing in \
+         the destroy path knowing an operation was running. Retired at {retired:.2} s, \
+         full rate at {back_to_full:.2} s"
+    );
+    assert!(
+        storm_done > retired,
+        "precondition for the reading above: the tow was still running when its band was \
+         retired ({storm_done:.2} s vs {retired:.2} s)"
+    );
+
+    // ── The completion SIGNAL: the payout crosses the authored threshold ──
+    // This is the whole mechanism the Falling Skyway rescue is read through.
+    for (flag, done) in [
+        ("clear_hulk_recovered", "clear_tow_done"),
+        ("storm_hulk_recovered", "storm_tow_done"),
+    ] {
+        let (raised, completed) = (at(flag), at(done));
+        assert!(
+            raised >= completed && raised - completed < 0.2,
+            "a completed tow pays its `condition_on_complete` into the towed craft, the \
+             payout is queued for the one system that owns condition edges, and the craft's \
+             own threshold flag comes up a tick later — which is what a scenario hangs a \
+             handler off, there being no 'operation completed' trigger to use instead. \
+             {done} at {completed:.3} s, {flag} at {raised:.3} s"
+        );
+    }
+    let (storm_condition, clear_condition) = (
+        condition_of(&mut app, STORM_HULK),
+        condition_of(&mut app, CLEAR_HULK),
+    );
+    assert!(
+        storm_condition > 70.0 && clear_condition > 70.0,
+        "both hulks are carried from 30 of 100 to 75 by the authored 45-point payout — got \
+         {storm_condition} and {clear_condition}"
+    );
+
+    // ── The group is SILENT while the other band is still up ──
+    // One of two is not the whole storm, and a group that fired here would
+    // satisfy a fires-at-the-end assertion just as well as the real thing.
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("sweep_complete"),
+        0,
+        "the tow band has been retired and the dwell band has not — the sweep is not over, \
+         and `on_all_destroyed` must not have fired"
+    );
+    assert_eq!(
+        region_entity_count(&mut app),
+        1,
+        "exactly the one band that has not reached its own retirement is left"
+    );
+    assert_eq!(hold_of(&mut app, STORM_TUG).verb(), OperationVerb::Tow);
+}
+
+/// **Issue #1037, AC2 and AC3's tuning target.** A band is survivable to cross
+/// and fatal to live in, and when the last one retires the corridor is clear
+/// with nothing left behind.
+///
+/// Three identical Alliance Couriers, one band, and the only difference between
+/// them is dwell: the crosser is flown out at the authored crossing time (the
+/// honest analogue of helm taking a ship through), the loiterer stays, and the
+/// bystander is three kilometres away and proves nothing else in this world
+/// hurts anybody.
+#[test]
+fn a_storm_band_is_survivable_to_cross_and_fatal_to_live_in() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    // The dwell band retires at t=100; the run gives it eight seconds' grace.
+    let args = storm_args(dt, 108.0);
+    let mut app = build_headless_app(&args).expect("the probe world must load and build");
+
+    // A 520-unit band crossed at a destroyer's 18 units a second is 29 seconds
+    // inside it. The band arrives at t=3, so the crossing ends at t=32.
+    const CROSSING_ENDS_AT: f64 = 32.0;
+    let mut crosser_hull_on_exit = 1.0f32;
+    let mut loiterer_gone_at: Option<f64> = None;
+    let mut sweep_complete_at: Option<f64> = None;
+    let mut regions_after_sweep: Option<usize> = None;
+    let mut flown_out = false;
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        if !flown_out && sim_t >= CROSSING_ENDS_AT {
+            crosser_hull_on_exit = hull_fraction_of(&mut app, STORM_CROSSER);
+            move_named_to(
+                &mut app,
+                STORM_CROSSER,
+                bevy::prelude::Vec3::new(0.0, 0.0, -6600.0),
+            );
+            flown_out = true;
+        }
+        if loiterer_gone_at.is_none() && !named_entity_present(&mut app, STORM_LOITERER) {
+            loiterer_gone_at = Some(sim_t);
+        }
+        let swept = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("sweep_complete");
+        if swept > 0 && sweep_complete_at.is_none() {
+            sweep_complete_at = Some(sim_t);
+            regions_after_sweep = Some(region_entity_count(&mut app));
+        }
+    }
+
+    // ── The tuning target, both halves, on one hull ──
+    let died_at = loiterer_gone_at.expect(
+        "the hull that never left the band must be destroyed by it — if it survived, \
+         'lingering is dangerous' is not true of these numbers",
+    );
+    assert!(
+        died_at > CROSSING_ENDS_AT,
+        "precondition: it must outlive a crossing, or the crosser's survival is luck \
+         rather than tuning (died at {died_at:.1} s, a crossing ends at \
+         {CROSSING_ENDS_AT:.1} s)"
+    );
+    assert!(
+        named_entity_present(&mut app, STORM_CROSSER),
+        "the SAME hull, flown out after a crossing's worth of exposure, is alive at the end \
+         of the run. Being caught by a band is not death; living in one is."
+    );
+    assert!(
+        (0.5..0.85).contains(&crosser_hull_on_exit),
+        "a crossing has to COST something and not nearly everything: the crosser came out \
+         on {:.0}% hull, and the band is tuned for somewhere between a half and four \
+         fifths",
+        crosser_hull_on_exit * 100.0
+    );
+    assert!(
+        (hull_fraction_of(&mut app, STORM_BYSTANDER) - 1.0).abs() < 1e-3,
+        "the bystander three kilometres clear is untouched — without it, 'the band killed \
+         the loiterer' is satisfied by 'something in this world kills couriers'"
+    );
+
+    // ── AC2: the sweep completes and leaves nothing behind ──
+    let swept_at =
+        sweep_complete_at.expect("`on_all_destroyed` must fire when the LAST band retires");
+    assert!(
+        swept_at > died_at,
+        "precondition: the last band outlived the hull it killed, so the death above is the \
+         band's work and not the retirement's ({swept_at:.1} s vs {died_at:.1} s)"
+    );
+    assert_eq!(
+        regions_after_sweep,
+        Some(0),
+        "when the group fires, every band is gone: a sweep that leaked a region entity would \
+         go on jamming and burning hulls with nothing on radar to explain it"
+    );
+    assert_eq!(region_entity_count(&mut app), 0, "…and stays gone");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("sweep_complete"),
+        1,
+        "exactly once"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-sweep-clear"),
+        ObjectiveStatus::Completed
+    );
+}
+
+// ── Falling Skyway, Act 2: the storm and the rescue (issue #1037) ────────────
+
+const SKYWAY_WORLD: &str = "assets/worlds/falling_skyway.toml";
+const SKYWAY_LYRA: &str = "world.falling_skyway.entity.lyra_ascending.name";
+/// The three craft the sweep schedule actually moves. `shuttle_wick` works the
+/// depot ladder east of the corridor and is deliberately left alone.
+const SKYWAY_CORRIDOR_TRAFFIC: [&str; 3] = [
+    "world.falling_skyway.entity.convoy_meridian.name",
+    "world.falling_skyway.entity.hauler_lark.name",
+    "world.falling_skyway.entity.hauler_pell.name",
+];
+const SKYWAY_LADDER_SHUTTLE: &str = "world.falling_skyway.entity.shuttle_wick.name";
+/// The three bands, by the names the Act-2 script spawns them under.
+const SKYWAY_BANDS: [&str; 3] = ["storm_band_one", "storm_band_two", "storm_band_three"];
+
+fn skyway_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: SKYWAY_WORLD.into(),
+        // The mission's authored hull, and the one that carries the `tow`
+        // capability the rescue is made of.
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// The authored `due_secs` of one of this world's deadlines, read from the
+/// config rather than restated in the test — the tuning pass (#1044) moves
+/// these numbers and nothing here should have to be edited with them.
+fn skyway_deadline_secs(app: &bevy::prelude::App, id: &str) -> i64 {
+    app.world()
+        .resource::<project_phoenix::world::config::WorldConfig>()
+        .deadlines
+        .iter()
+        .find(|d| d.id == id)
+        .unwrap_or_else(|| panic!("the world authors the '{id}' deadline"))
+        .due_secs
+}
+
+/// The named civilian's traffic state — the route it is currently flying and
+/// how far through the compliance machine its standing order has got.
+fn civilian_state_of(
+    app: &mut bevy::prelude::App,
+    name: &str,
+) -> project_phoenix::civilian::CivilianState {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::civilian::CivilianTraffic,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, traffic)| traffic.0.clone())
+        .unwrap_or_else(|| panic!("{name} is not civilian traffic in this world"))
+}
+
+/// **Issue #1037, AC1/AC2/AC4/AC6.** Act 2 driven end to end with nobody at the
+/// consoles: the storm sweeps the corridor in three bands and clears, the
+/// traffic gets out of its way and survives, and the rescue that nobody ran
+/// FAILS — loudly, with an on-screen consequence and campaign state written.
+///
+/// The failure branch is the one an unattended run produces, and that is the
+/// honest default: opening an operation is a crew verb, so a backfilled bridge
+/// never tows anybody. The companion test below drives the same act with a crew
+/// that does.
+#[test]
+fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
+    use project_phoenix::civilian::ComplianceState;
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 30.0;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    // The act's own clock decides the run length. Six seconds past the close, so
+    // lengthening Act 2 in the TOML does not silently turn this into a test of an
+    // act that never finished.
+    let closes_at = skyway_deadline_secs(&probe, "storm_passed_due") as f64;
+    drop(probe);
+
+    let args = skyway_args(dt, closes_at + 6.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+
+    let mut first: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+    let mut seen: std::collections::BTreeSet<String> = Default::default();
+    // How far every diverted craft was from each band on the tick that band
+    // arrived. The claim is that they RESPOND to the schedule, and that is a
+    // fact about where they were when the weather turned up.
+    let mut clearance: std::collections::BTreeMap<String, f32> = Default::default();
+    let mut compliance_reached: std::collections::BTreeMap<String, bool> = Default::default();
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        for band in SKYWAY_BANDS {
+            if named_entity_present(&mut app, band) {
+                // On the FIRST tick a band exists, measure how far every craft
+                // the forecast moved is from it. That is the moment the claim is
+                // about: a schedule the traffic responded to is one where nobody
+                // is standing under the weather when it turns up.
+                if seen.insert(band.to_string()) {
+                    let centre = position_of(&mut app, band);
+                    for name in SKYWAY_CORRIDOR_TRAFFIC {
+                        let craft = position_of(&mut app, name);
+                        let range =
+                            ((craft.x - centre.x).powi(2) + (craft.z - centre.z).powi(2)).sqrt();
+                        clearance.insert(format!("{band} :: {name}"), range);
+                    }
+                }
+                first.entry(format!("{band}_up")).or_insert(sim_t);
+            } else if seen.contains(band) {
+                first.entry(format!("{band}_gone")).or_insert(sim_t);
+            }
+        }
+        if !named_entity_present(&mut app, SKYWAY_LYRA) {
+            first.entry("lyra_gone".to_string()).or_insert(sim_t);
+        }
+
+        for name in SKYWAY_CORRIDOR_TRAFFIC {
+            let state = civilian_state_of(&mut app, name);
+            if state.compliance() == ComplianceState::Complying {
+                compliance_reached.insert(name.to_string(), true);
+                first.entry(format!("{name}_complying")).or_insert(sim_t);
+            }
+        }
+
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        for flag in [
+            "a2_front_warned",
+            "a2_rescue_resolved",
+            "a2_lyra_lost",
+            "act2_complete",
+        ] {
+            if flags.counter(flag) > 0 {
+                first.entry(flag.to_string()).or_insert(sim_t);
+            }
+        }
+    }
+
+    let at = |key: &str| -> f64 {
+        *first
+            .get(key)
+            .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
+    };
+
+    // ── AC1/AC2: three bands, each on its own deadline, each retired ──
+    // Read against the world's authored `due_secs` rather than against numbers
+    // restated here.
+    for (band, deadline) in SKYWAY_BANDS.iter().zip([
+        "storm_band_one_due",
+        "storm_band_two_due",
+        "storm_band_three_due",
+    ]) {
+        let due = skyway_deadline_secs(&app, deadline) as f64;
+        let up = at(&format!("{band}_up"));
+        assert!(
+            (up - due).abs() < 2.0,
+            "{band} arrives on its authored deadline ({due} s), not on a timer this test \
+             knows about — got {up:.1} s"
+        );
+        let gone = at(&format!("{band}_gone"));
+        assert!(
+            gone > up,
+            "{band} is RETIRED, which is what makes this a sweep rather than a wall \
+             (up at {up:.1} s, gone at {gone:.1} s)"
+        );
+    }
+    assert!(
+        at("storm_band_one_up") < at("storm_band_two_up")
+            && at("storm_band_two_up") < at("storm_band_three_up"),
+        "the bands arrive in order, stepping down the corridor: {first:?}"
+    );
+    assert_eq!(
+        region_entity_count(&mut app),
+        0,
+        "the corridor is CLEAR when the sweep is over — a leaked region entity would go \
+         on jamming, slowing and burning hulls with nothing on radar to explain it"
+    );
+
+    // ── AC4: the traffic responded to the schedule ──
+    for name in SKYWAY_CORRIDOR_TRAFFIC {
+        assert!(
+            compliance_reached.get(name).copied().unwrap_or(false),
+            "{name} must take the divert order the forecast issues — the sweep is \
+             announced through #1028's ordinary compliance machine, and a craft that \
+             never answered would be flying the lane into a band"
+        );
+        assert!(
+            at(&format!("{name}_complying")) < at("storm_band_one_up"),
+            "…and be under way BEFORE the first band, which is what the 45 seconds of \
+             forecast are for"
+        );
+        assert!(
+            named_entity_present(&mut app, name),
+            "{name} survives the storm, which is the whole point of moving it"
+        );
+    }
+    // Every craft against every band, on the tick that band arrived. 260 units
+    // is `region_radiation_band.toml`'s own authored radius.
+    for (pair, range) in &clearance {
+        assert!(
+            *range > 260.0,
+            "{pair}: the craft was {range:.0} units from the band's centre when it \
+             arrived, which is inside its authored 260-unit radius. Traffic is routed \
+             AROUND a sweep; it does not fly into one and hope."
+        );
+    }
+    assert_eq!(
+        clearance.len(),
+        SKYWAY_BANDS.len() * SKYWAY_CORRIDOR_TRAFFIC.len(),
+        "every craft was sampled against every band"
+    );
+    assert_eq!(
+        civilian_state_of(&mut app, SKYWAY_LADDER_SHUTTLE)
+            .route()
+            .map(str::to_string),
+        Some("ladder_run".to_string()),
+        "the ladder shuttle is never diverted: it works east of the corridor and no band \
+         comes near it. Ordering it off a lane it was safe on would be theatre."
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("a2_traffic_lost"),
+        0,
+        "no civilian craft is lost to the storm"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-shelter"),
+        ObjectiveStatus::Completed
+    );
+
+    // ── AC5/AC6: the rescue nobody ran fails, and says so ──
+    let resolved = at("a2_rescue_resolved");
+    let lost = at("lyra_gone");
+    assert!(
+        (resolved - skyway_deadline_secs(&app, "lyra_clear_due") as f64).abs() < 2.0,
+        "the rescue resolves on its own visible deadline"
+    );
+    assert!(
+        lost >= resolved - 0.2 && lost - resolved < 1.0,
+        "…and with nobody having towed her, the band has her at that beat (resolved at \
+         {resolved:.1} s, gone at {lost:.1} s)"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-rescue"),
+        ObjectiveStatus::Failed,
+        "a rescue nobody ran is a FAILED objective, not a quietly missing one"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-loss-report"),
+        ObjectiveStatus::Active,
+        "…and the consequence is on the panel: somebody has to tell Control, and it sits \
+         there until they do"
+    );
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        (
+            flags.counter("skyway_lyra_lost"),
+            flags.counter("skyway_lyra_recovered"),
+            flags.counter("skyway_storm_passed"),
+        ),
+        (1, 0, 1),
+        "the campaign state is WRITTEN. Exactly one of lost/recovered is always set, so \
+         a later act reads a fact rather than an absence."
+    );
+    assert_eq!(
+        (flags.counter("act"), flags.counter("act2_complete")),
+        (3, 1),
+        "and the act closes on its own clock whatever the crew got done"
+    );
+}
+
+/// **Issue #1037, AC3/AC5.** The same act with a crew that starts the tow before
+/// the weather arrives: the rescue is COMPLETABLE, the storm makes it cost more,
+/// and the craft is still there when the band that would have taken her passes.
+///
+/// The tow is opened through the same queue a console's `StartOperation` and a
+/// scripted `ctx.effects.tow(…)` both land in — the applier resolves the names
+/// and `tick_operations` decides, which is the only place range, power and
+/// capability are tested.
+#[test]
+fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::operations::{
+        HoldState, OperationVerb, PendingOperationStart, ProgressRate, ShipOperations,
+    };
+    use project_phoenix::ship::state::ShipPhysics;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 30.0;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let front_at = skyway_deadline_secs(&probe, "storm_front_due") as f64;
+    let band_at = skyway_deadline_secs(&probe, "storm_band_one_due") as f64;
+    let clear_by = skyway_deadline_secs(&probe, "lyra_clear_due") as f64;
+    drop(probe);
+
+    // Six seconds past the rescue's own deadline: long enough to see the Lyra
+    // survive the beat that would otherwise have taken her.
+    let args = skyway_args(dt, clear_by + 6.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+
+    // The crew's hull, found by its capability table: the player row carries no
+    // authored name, because its config comes from the lobby-selected template
+    // wholesale.
+    let (ship, ship_uuid) = app
+        .world_mut()
+        .query::<(
+            bevy::prelude::Entity,
+            &project_phoenix::entities::spawner::EntityUuid,
+            &ShipOperations,
+        )>()
+        .iter(app.world())
+        .map(|(entity, uuid, _)| (entity, uuid.0.clone()))
+        .next()
+        .expect("the destroyer authors an [operations] table");
+    let lyra_uuid = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .name_to_uuid
+        .get(SKYWAY_LYRA)
+        .cloned()
+        .expect("the Lyra is an authored entity of this world");
+
+    // The crew set off with ten seconds to spare before the first band — early
+    // enough to bank real progress in clear air, late enough that the weather
+    // catches the tow mid-flight, which is the case the act is actually about.
+    // A crew who waited for the band could not finish at all: 24 authored
+    // seconds at half rate is 48, and by then the deadline is 47 away.
+    let start_at = band_at - 10.0;
+    assert!(
+        start_at > front_at,
+        "precondition: the crew cannot start before the forecast tells them she is there \
+         ({front_at} s, {start_at} s)"
+    );
+    let mut opened = false;
+    let mut rate_before_band: Option<ProgressRate> = None;
+    let mut rate_under_band: Option<ProgressRate> = None;
+    let mut completed_at: Option<f64> = None;
+    let mut recovered_at: Option<f64> = None;
+
+    for tick in 0..args.max_ticks {
+        let sim_t = tick as f64 * dt;
+        if !opened && sim_t >= start_at {
+            // Alongside. Helm's job, done by hand here for the reason every
+            // operations test in this file moves a ship by hand: this is a test
+            // of the rescue, not of station-keeping.
+            let drift = position_of(&mut app, SKYWAY_LYRA);
+            let mut physics = app
+                .world_mut()
+                .get_mut::<ShipPhysics>(ship)
+                .expect("the crew's hull is a ship");
+            physics.x = drift.x + 40.0;
+            physics.y = drift.y;
+            physics.z = drift.z + 40.0;
+            app.world_mut()
+                .resource_mut::<WorldContentRuntime>()
+                .pending_operation_starts
+                .push(PendingOperationStart {
+                    ship_uuid: ship_uuid.clone(),
+                    verb: OperationVerb::Tow,
+                    target_uuid: lyra_uuid.clone(),
+                });
+            opened = true;
+        }
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        if let Some(hold) = app
+            .world()
+            .get::<ShipOperations>(ship)
+            .and_then(|ops| ops.active.clone())
+        {
+            if sim_t > start_at + 1.0 && sim_t < band_at - 1.0 {
+                rate_before_band = Some(hold.rate());
+            }
+            if sim_t > band_at + 1.0 && !hold.is_settled() {
+                rate_under_band = Some(hold.rate());
+            }
+            if hold.state() == HoldState::Completed && completed_at.is_none() {
+                completed_at = Some(sim_t);
+            }
+        }
+        if recovered_at.is_none()
+            && app
+                .world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter("a2_lyra_recovered")
+                > 0
+        {
+            recovered_at = Some(sim_t);
+        }
+    }
+
+    // ── AC3: the storm made the work cost more, without stopping it ──
+    assert_eq!(
+        rate_before_band,
+        Some(ProgressRate::FULL),
+        "a tow run in clear air runs at full rate — the crew who set off early are the \
+         crew the weather has not reached yet"
+    );
+    assert_eq!(
+        rate_under_band,
+        Some(ProgressRate::percent(50)),
+        "…and once the band is on top of them the SAME tow runs at the 50 % the hull's \
+         capability authors for a slow zone. Stretched, not stopped."
+    );
+
+    // ── AC5: it completes, and the completion is what the mission reads ──
+    let done = completed_at.expect(
+        "a tow started twenty-five seconds before the first band must COMPLETE inside \
+         the rescue's deadline — if it cannot, the act is unwinnable rather than hard",
+    );
+    let recovered = recovered_at.expect("…and its payout must raise the craft's own flag");
+    assert!(
+        done < clear_by,
+        "the rescue lands before its visible deadline ({done:.1} s against {clear_by} s)"
+    );
+    assert!(
+        recovered >= done && recovered - done < 0.5,
+        "the flag comes up off the completion's payout, a tick behind it ({done:.1} s, \
+         {recovered:.1} s)"
+    );
+    assert!(
+        condition_of(&mut app, SKYWAY_LYRA) > 50.0,
+        "…because the authored 45-point payout carried her over her own half-way line \
+         from 30, which is what `skyway_lyra_under_control` means"
+    );
+
+    // ── AC5/AC6: she is still there, and the record says so ──
+    assert!(
+        named_entity_present(&mut app, SKYWAY_LYRA),
+        "the deadline that takes her when nobody tows has passed, and she is still in the \
+         world: the failure branch is guarded on the recovery, not on the clock alone"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-rescue"),
+        ObjectiveStatus::Completed
+    );
+    assert!(
+        objective_status_opt(&app, "obj-a2-loss-report").is_none(),
+        "and the consequence objective is never posted at all"
+    );
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        (
+            flags.counter("skyway_lyra_recovered"),
+            flags.counter("skyway_lyra_lost"),
+        ),
+        (1, 0),
+        "exactly one of the two campaign flags is written, and it is the other one this \
+         time"
     );
 }

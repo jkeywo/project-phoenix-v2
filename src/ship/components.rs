@@ -199,11 +199,15 @@ pub struct DockingMotionIntent(pub Option<uuid::Uuid>);
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct HelmWaypointClearance(pub Option<u64>);
 
-/// Tracks the last-seen `DamageTier` per system per ship for detecting
-/// crossings to worse tiers (issue #682). Initialised during ship spawn;
-/// each tick of the tier-crossing detector updates entries for every system.
+/// Tracks the last-seen `DamageTier` and HP per system per ship for detecting
+/// tier crossings (issue #682) and, out of red alert, any fresh damage at
+/// all. Initialised during ship spawn; each tick of the tier-crossing
+/// detector updates entries for every system.
 #[derive(Component, Clone, Debug, Default)]
-pub struct LastSystemTiers(pub std::collections::HashMap<SystemId, DamageTier>);
+pub struct LastSystemTiers {
+    pub tiers: std::collections::HashMap<SystemId, DamageTier>,
+    pub hp: std::collections::HashMap<SystemId, f32>,
+}
 
 /// Tracks which stations have already been flagged for human repair popups
 /// (issue #682). Key: station_id. Value: the worst tier already alerted for.

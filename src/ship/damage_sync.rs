@@ -103,6 +103,11 @@ pub fn detect_damage_tier_crossings(
         // Issue #893: the ship's own standing Tactical target lock. `Option`
         // because not every bare-`App` fixture in this crate spawns one.
         Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+        // Out of red alert, ANY fresh damage is reported (not just a tier
+        // crossing) — see the `current_tier == prev_tier` branch below.
+        // `Option` because not every bare-`App` fixture spawns one; absent
+        // reads as "not at red alert" (report freely).
+        Option<&crate::ship_state::ShipRedAlert>,
     )>,
     mut coord_writer: MessageWriter<CoordinationEnqueue>,
     // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
@@ -118,16 +123,19 @@ pub fn detect_damage_tier_crossings(
         mut alerted,
         ship_uuid,
         mut tactical_lock,
+        red_alert,
     ) in &mut ships
     {
+        let red_alert = red_alert.map(|ra| ra.0).unwrap_or(false);
         let hull = &hull_comp.0;
-        for (system_id, _cur, _max) in hull.entries() {
+        for (system_id, cur, _max) in hull.entries() {
             let current_tier = hull.tier_for(system_id);
             let prev_tier = last_tiers
-                .0
+                .tiers
                 .get(system_id)
                 .copied()
                 .unwrap_or(DamageTier::Operational);
+            let prev_hp = last_tiers.hp.get(system_id).copied();
 
             // Balance tracer: report every tier crossing (either direction),
             // on every ship. A crossing to Disabled/Destroyed is the knockout
@@ -145,8 +153,16 @@ pub fn detect_damage_tier_crossings(
                 }
             }
 
-            if current_tier > prev_tier {
-                if current_tier == DamageTier::Destroyed {
+            let worsened_tier = current_tier > prev_tier;
+            // Out of red alert, any fresh damage is worth a report even
+            // within the same tier — combat noise justified batching by tier
+            // crossing, but a scratch taken at peace should never sit
+            // unreported just because it didn't cross a threshold.
+            let any_damage_off_alert =
+                !worsened_tier && !red_alert && prev_hp.is_some_and(|p| cur < p);
+
+            if worsened_tier || any_damage_off_alert {
+                if worsened_tier && current_tier == DamageTier::Destroyed {
                     // Issue #893: a tactical radar reaching Destroyed clears
                     // the ship's standing target lock. Keyed on the SYSTEM
                     // crossing tiers, not on who set the lock, so a human's
@@ -269,7 +285,7 @@ pub fn detect_damage_tier_crossings(
                 let prev_disarmed = emitters.iter().all(|sid| {
                     nonoperational(
                         last_tiers
-                            .0
+                            .tiers
                             .get(sid)
                             .copied()
                             .unwrap_or(DamageTier::Operational),
@@ -283,10 +299,11 @@ pub fn detect_damage_tier_crossings(
             }
         }
 
-        for (system_id, _cur, _max) in hull.entries() {
+        for (system_id, cur, _max) in hull.entries() {
             last_tiers
-                .0
+                .tiers
                 .insert(system_id.clone(), hull.tier_for(system_id));
+            last_tiers.hp.insert(system_id.clone(), cur);
         }
     }
 }

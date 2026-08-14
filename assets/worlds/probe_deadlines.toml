@@ -22,6 +22,13 @@
 # Every handler increments a counter flag, so the headless test reads fire ORDER
 # and fire COUNT out of the flag store rather than out of a log line, and
 # `window_remaining_at_adjust` records what script read back mid-run.
+#
+# BASELINE (this world is new in #1024, so this is its first recorded digest):
+# `--seed 42 --ticks 900` gives final digest 0xc419b89426b6013c
+# (14130528252295774524). Measured on a clean tree at the commit that added this
+# line. It is a NEW number, not a preserved one — nothing to compare it against
+# yet — so it is written down here to be the thing a later change is A/B'd
+# against, the way the shipped worlds' digests already are.
 
 [global]
 seed = 1024

@@ -57,6 +57,7 @@ A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/render
 - `handle_respond_to_message` — player picks a response; runs its `on_pick` fn and injects the follow-up node the fn returned (also in `src/console/comms/server.rs`)
 - `handle_clear_comms` — drops orphaned and read messages (also in `src/console/comms/server.rs`)
 - `broadcast_comms_state` (`src/comms/server.rs`) / `broadcast_objective_summary` — push deltas on change
+- `tick_infrastructure_condition` (`src/infrastructure/server.rs`, added by `InfrastructurePlugin`, `SimSet::Modifiers`, issue #1025) — advances the condition track on every entity that authored `[infrastructure]`, folding in authored decay, the hull it lost since the previous tick, and any condition adjustment a script queued this tick. Each threshold crossing writes the base-world `FlagStore` and queues a `FlagSet`/`FlagCleared` on `pending_world_events`, so an `on_flag_set` / `on_flag_cleared` handler fires one tick later — the same bridge `WaypointReached` rides, because `collect_world_events` has already run for the tick by the time this does. Authored capacities are mirrored once, on the structure's first tick, as plain counters a `when` predicate can read; they fire no flag event.
 - Trigger pipeline (issues #707–#719), chained in `SimSet::Physics`: `collect_world_events` (`src/world/server.rs`, drains queued `WorldEvent`s — attacked, destroyed, hull-threshold crossings, hailed, timer, region, flag — into the per-tick `WorldEventBuffer` resource) → `tick_trigger_pipeline` (`src/world/server.rs`, evaluates trigger conditions and runs each fired trigger's script handler) → `tick_script_callbacks` → `open_scripted_comms_threads` (`src/comms/scripted.rs`, materialises queued `open_comms` requests into live threads) → `tick_delayed_actions`, which fires queued delayed actions through the same dispatch table. Comms systems live in `CommsWorldPlugin` (`src/comms/server.rs`), added by `WorldPlugin` (#816)
 
 ## Trigger conditions
@@ -95,6 +96,7 @@ Authoring shape per action variant:
 | `set_flag` / `clear_flag` / `increment_flag` / `set_flag_value` | `name`, plus `by` / `value` | World-flag mutators with `parent:` prefix walking for sub-world layers. |
 | `spawn_entity` | `template_path`, `name`, one of `anchor` / `position`, optional `rotation` / `scale` | Ad-hoc spawn, registered in `name_to_uuid`; layer-tracked for `unload_world` cleanup. |
 | `destroy_entity` | `entity` | Despawn by name; emits `AiEntityDestroyed` so chained `on_destroyed` triggers fire. |
+| `repair_infrastructure` / `damage_infrastructure` | `entity`, `points` | Move the named structure's `[infrastructure]` condition (issue #1025). Whole points, or a `flt("…")` slice for the fractional per-tick step a timed operation applies. The applier resolves the name and QUEUES the delta on `WorldContentRuntime::pending_condition_adjustments` rather than writing the component, so every condition move goes through the one system that owns threshold edges. No delay-builder twin. |
 | `add_faction_enemy` / `remove_faction_enemy` | `faction`, `enemy` | Mutate the live `FactionRegistry` by faction `name` (resolved via `FactionRegistry::uuid_by_name`, `src/ai/faction.rs:68`). Idempotent. `is_enemy` is asymmetric — flipping a relationship in both directions requires two actions. `remove_faction_enemy` additionally re-validates every AI controller's remembered target (via `revalidate_ai_targets_after_faction_change`, `src/world/server.rs:2352`) so an in-progress engagement does not stick on a now-friendly target. |
 
 The editor used to mirror this catalogue in `editor/action-schema.js`, which existed to drive its card-based trigger editor. Both went with the declarative front-end (issues #983, #985): scenario logic is authored in the editor's script panel now, and the catalogue has one home again.
@@ -114,7 +116,7 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 
 ## Resources
 
-`WorldContentRuntime`, `ObjectiveManagerRes`, `WorldConfig` (when loaded). Comms state lives in `CommsRuntime` + `CommsInboxRes` (`src/comms/server.rs`, split out in #816).
+`WorldContentRuntime`, `ObjectiveManagerRes`, `WorldConfig` (when loaded). Since #1025 `WorldContentRuntime` also carries `pending_condition_adjustments`, drained every tick by the infrastructure system and therefore empty at every tick boundary. Comms state lives in `CommsRuntime` + `CommsInboxRes` (`src/comms/server.rs`, split out in #816).
 
 ## Modules
 

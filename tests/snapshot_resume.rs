@@ -1916,7 +1916,6 @@ fn infrastructure_args() -> HeadlessArgs {
     }
 }
 
-<<<<<<< HEAD
 fn live_deadlines(app: &bevy::prelude::App) -> &project_phoenix::world::deadlines::DeadlineTable {
     &app.world()
         .resource::<project_phoenix::world::server::WorldContentRuntime>()
@@ -2129,7 +2128,9 @@ fn a_save_written_before_deadline_state_is_refused_on_format() {
     assert!(
         matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
         "the refusal names the dimension that moved: {refusal}"
-=======
+    );
+}
+
 /// **Issue #1025.** A degraded structure comes back degraded — its condition
 /// *and* which of its operational flags are currently down.
 ///
@@ -2195,6 +2196,5 @@ fn the_resumed_world_keeps_a_structures_condition_and_its_operational_flags() {
         restored, track,
         "structure {uuid}: condition, ceiling, every operational flag and the hull reading the \
          track was last damaged against must all come back exactly as captured"
->>>>>>> a4f58614 (feat(#1025): a probe world walks a depot through a threshold and back)
     );
 }

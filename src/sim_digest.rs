@@ -69,6 +69,15 @@
 //! [`fold_infrastructure_namespace`] for why this one namespace folds *nothing*
 //! when it is empty.
 //!
+//! **Folded (operations namespace, in `FoldKey` order — issue #1026):** every
+//! ship running or having run an external operation — its id, the operation's
+//! id, verb and target, its banked and required tick counts, its spent stall
+//! budget, and its state with the reason attached to it. A host that thought a
+//! skyhook had been stabilised, or was two seconds from it, disagrees about
+//! whether the mission is winnable. A ship that merely *can* run one and never
+//! has folds nothing, and the authored capability table is not folded at all:
+//! see [`fold_operations_namespace`].
+//!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
 //! id, its `Transform` translation as bit patterns (a rock's position is
 //! authoritative — it is what a collision resolves against), and its
@@ -153,6 +162,7 @@ use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
 use crate::lobby::WorldResource;
 use crate::messages::GamePhase;
+use crate::operations::{OperationHold, ShipOperations};
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
 use crate::ship::state::{ShipPhysics, ShipRedAlert};
 use crate::sim_rng::SimRng;
@@ -290,6 +300,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_run_scope(world, acc);
     acc = fold_entity_namespace(world, acc);
     acc = fold_infrastructure_namespace(world, acc);
+    acc = fold_operations_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -510,6 +521,68 @@ fn fold_infrastructure_namespace(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, flag);
             acc = fold_u64(acc, u64::from(held));
         }
+    }
+    acc
+}
+
+/// Every ship running (or having run) an external operation (issue #1026), in
+/// [`FoldKey`] order, in its own namespace.
+///
+/// # What is folded, and what deliberately is not
+///
+/// A ship carrying `ShipOperations` but **no hold** folds nothing. Its authored
+/// capability table is content, which `snapshot::content_digest` is the thing
+/// answerable for; its `next_id` is not independent state — it is the count of
+/// operations that have run, and two hosts that disagreed about that already
+/// disagree about the hold whose id is folded below. So a hull that *can*
+/// stabilise and never has is the same authoritative state as a hull built
+/// before operations existed, which is what lets a shipped hull gain an
+/// `[operations]` table without moving any committed world's digest.
+///
+/// The hold itself is folded whole: a host that thought a skyhook had been
+/// stabilised, or was two seconds from it, disagrees about whether the mission
+/// is winnable. Progress is folded as the tick COUNTS rather than as the 0–1
+/// fraction, because the counts are what the simulation advances and the
+/// fraction is a projection of them.
+///
+/// The empty-walk affordance is #1025's, for the same reason and with the same
+/// limit: the moment one operation exists the row count is in the accumulator
+/// like everyone else's.
+fn fold_operations_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ShipOperations)>() else {
+        // A world that never registered the component runs no operations — the
+        // empty case above, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, OperationHold)> = query
+        .iter(world)
+        .filter_map(|(entity, uuid, ops)| {
+            ops.active.as_ref().map(|hold| {
+                (
+                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                    entity.index(),
+                    hold.clone(),
+                )
+            })
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "operations-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, hold) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_u64(acc, hold.id());
+        acc = fold_str(acc, hold.verb().as_str());
+        acc = fold_str(acc, hold.target_uuid());
+        acc = fold_u64(acc, hold.elapsed_ticks());
+        acc = fold_u64(acc, hold.required_ticks());
+        acc = fold_u64(acc, hold.stalled_ticks());
+        acc = fold_str(acc, hold.state().as_str());
+        acc = fold_str(acc, hold.state().reason().map(|r| r.as_str()).unwrap_or(""));
     }
     acc
 }
@@ -905,6 +978,7 @@ mod tests {
         world.register_component::<AsteroidUuid>();
         world.register_component::<Transform>();
         world.register_component::<InfrastructureCondition>();
+        world.register_component::<ShipOperations>();
         world
     }
 
@@ -942,6 +1016,118 @@ mod tests {
             EntityUuid(uuid.to_string()),
             InfrastructureCondition(InfrastructureState::from_config(&config)),
         ));
+    }
+
+    /// A ship whose hull can stabilise, optionally part-way through doing so.
+    fn spawn_operator(world: &mut World, uuid: &str, held_ticks: Option<u64>) {
+        let capability = crate::operations::CapabilityConfig {
+            verb: crate::operations::OperationVerb::Stabilise,
+            duration_secs: 10,
+            ..Default::default()
+        };
+        let mut ops = ShipOperations {
+            capabilities: crate::operations::OperationsConfig {
+                capabilities: vec![capability.clone()],
+            },
+            ..Default::default()
+        };
+        if let Some(ticks) = held_ticks {
+            let mut hold = OperationHold::start(0, "depot-1", &capability, 60.0);
+            for _ in 0..ticks {
+                hold.advance(Ok(()));
+            }
+            ops.active = Some(hold);
+            ops.next_id = 1;
+        }
+        world.spawn((EntityUuid(uuid.to_string()), ops));
+    }
+
+    /// **Issue #1026.** A world running no operations must fold to exactly the
+    /// number it folded before the namespace existed — and so must a world whose
+    /// hulls *can* run one and never have.
+    ///
+    /// The second half is what lets a shipped hull gain an `[operations]` table
+    /// without moving any committed world's digest. A capability nobody has
+    /// exercised is content, and content has its own digest.
+    #[test]
+    fn the_operations_namespace_is_a_no_op_until_an_operation_actually_runs() {
+        let mut none = fold_world();
+        spawn_ship(&mut none, "00000000-0000-8000-8000-000000000001", 1.0);
+        assert_eq!(
+            fold_operations_namespace(&none, FOLD_SEED),
+            FOLD_SEED,
+            "an empty operations walk must leave the accumulator untouched — a folded row count \
+             here would have moved every world digest in the repository for state none of those \
+             worlds carry"
+        );
+
+        let mut capable = fold_world();
+        spawn_operator(&mut capable, "00000000-0000-8000-8000-000000000001", None);
+        assert_eq!(
+            fold_operations_namespace(&capable, FOLD_SEED),
+            FOLD_SEED,
+            "…and a hull that CAN stabilise but never has folds nothing either: its capability \
+             table is content, which content_digest is answerable for, and its id counter is not \
+             independent state"
+        );
+    }
+
+    /// **Issue #1026.** Two ships part-way through the same operation must fold
+    /// to different numbers when their progress differs, and to the same number
+    /// when it does not.
+    #[test]
+    fn an_operations_progress_and_state_move_the_digest() {
+        let id = "00000000-0000-8000-8000-000000000001";
+        let mut early = fold_world();
+        spawn_operator(&mut early, id, Some(60));
+        let mut same = fold_world();
+        spawn_operator(&mut same, id, Some(60));
+        let mut late = fold_world();
+        spawn_operator(&mut late, id, Some(300));
+
+        assert_eq!(
+            world_digest(&early),
+            world_digest(&same),
+            "two hosts holding the same operation at the same point must agree"
+        );
+        assert_ne!(
+            world_digest(&early),
+            world_digest(&late),
+            "…and a host that thinks the crew are four seconds further through stabilising a \
+             skyhook than they are must not fold to the same number"
+        );
+    }
+
+    /// **Issue #1026 / AC4.** Ship order must not reach the digest.
+    #[test]
+    fn operations_fold_in_uuid_order_whatever_order_they_spawned_in() {
+        let mut forward = fold_world();
+        spawn_operator(
+            &mut forward,
+            "00000000-0000-8000-8000-000000000001",
+            Some(30),
+        );
+        spawn_operator(
+            &mut forward,
+            "00000000-0000-8000-8000-000000000002",
+            Some(90),
+        );
+        let mut reverse = fold_world();
+        spawn_operator(
+            &mut reverse,
+            "00000000-0000-8000-8000-000000000002",
+            Some(90),
+        );
+        spawn_operator(
+            &mut reverse,
+            "00000000-0000-8000-8000-000000000001",
+            Some(30),
+        );
+        assert_eq!(
+            world_digest(&forward),
+            world_digest(&reverse),
+            "the fold is keyed on the minted id, not on archetype order"
+        );
     }
 
     /// **Issue #1025.** A world with no infrastructure must fold to exactly the

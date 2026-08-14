@@ -29,6 +29,6 @@ pub use hold::{
 };
 pub use server::{
     handle_operation_commands, operations_blackboard_key, publish_operations_blackboard,
-    tick_operations, verb_label, OperationsPlugin, PendingOperationStart, ShipOperations,
-    OPERATIONS_BLACKBOARD_KEY,
+    tick_operations, verb_label, OperationsPlugin, OperationsSaveState, PendingOperationStart,
+    ShipOperations, OPERATIONS_BLACKBOARD_KEY,
 };

@@ -376,6 +376,37 @@ pub struct EntityState {
     /// loadable for an unrelated and stronger reason, so the format stays at 4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub infrastructure: Option<crate::infrastructure::InfrastructureState>,
+    /// The ship's external-operation record (issue #1026) — the live or
+    /// last-settled hold, why the last start was refused, and the id counter.
+    ///
+    /// A **projection**, not the whole component, which is the one place this
+    /// differs from `infrastructure` above: the hull's authored capability table
+    /// rides on the component too, and it is re-derived from the template on the
+    /// tick the ship spawns. Writing it here would put content into a save that
+    /// `content_digest` is the thing answerable for.
+    ///
+    /// The three fields that ARE here travel together, for `infrastructure`'s
+    /// class of reason. Restore the hold without `next_id` and the next
+    /// operation reuses an id the console has already shown; restore `next_id`
+    /// without the hold and a resumed mission forgets it was two-thirds of the
+    /// way through stabilising a skyhook — banked ticks, spent stall budget and
+    /// all — and starts the crew again from nothing.
+    ///
+    /// The variant-order hazard does not apply: `HoldState` and `Ineligibility`
+    /// serialise by NAME (`#[serde(rename_all = "snake_case")]`), not by index,
+    /// so reordering their variants cannot silently misread an old save.
+    ///
+    /// # Why this did not bump [`SNAPSHOT_FORMAT`]
+    ///
+    /// #1025's argument, unchanged and for the same shape of field. A save
+    /// written without it would restore a ship as running nothing when the
+    /// mission had it mid-operation — silently wrong, and indistinguishable from
+    /// a ship that genuinely was idle. It cannot happen: a world gains an
+    /// operating ship by its hull TOML gaining an `[operations]` table, which
+    /// moves `content_digest` and gets the older save refused as content-moved
+    /// long before this field is read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operations: Option<crate::operations::OperationsSaveState>,
     /// `ObjectiveCursors` as `(objective id, waypoint index, settled)`.
     ///
     /// Where a patrolling ship is *around its route*, which is not derivable
@@ -2175,6 +2206,20 @@ fn capture_infrastructure(
         .collect()
 }
 
+/// The external-operation records, in a query of their own, joined by uuid —
+/// see [`EntityState::operations`]. Only hulls that authored `[operations]`
+/// carry one, so most worlds capture an empty list.
+fn capture_operations(world: &World) -> Vec<(String, crate::operations::OperationsSaveState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::operations::ShipOperations)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, ops)| (uuid.0.clone(), ops.save_state()))
+        .collect()
+}
+
 fn capture_entities(world: &World) -> Vec<EntityState> {
     let controls = capture_controls(world);
     let machines = capture_weapons_and_repair(world);
@@ -2183,6 +2228,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let sensor_locks = capture_sensor_locks(world);
     let pass_surfaces = capture_pass_surfaces(world);
     let infrastructure = capture_infrastructure(world);
+    let operations = capture_operations(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
         Option<&ShipPhysics>,
@@ -2226,6 +2272,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, surface)| *surface),
             infrastructure: infrastructure
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            operations: operations
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
@@ -3212,6 +3262,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
                 entity_mut.get_mut::<crate::infrastructure::InfrastructureCondition>()
             {
                 condition.0 = infrastructure.clone();
+            }
+        }
+        if let Some(operations) = &row.operations {
+            if let Some(mut ops) = entity_mut.get_mut::<crate::operations::ShipOperations>() {
+                ops.restore(operations);
             }
         }
         if !row.patrol_cursors.is_empty() {

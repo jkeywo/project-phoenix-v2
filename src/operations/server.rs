@@ -96,6 +96,51 @@ pub struct ShipOperations {
     pub next_id: u64,
 }
 
+/// The mutable part of a ship's operations record, as a save carries it
+/// (issue #1026).
+///
+/// The authored `capabilities` are deliberately **not** in here. They are
+/// re-derived from the hull's template on the tick the ship spawns, and a save
+/// whose hull's `[operations]` table has since changed is refused as
+/// content-moved long before this is read — so writing them would put content
+/// into a save that `content_digest` is the thing answerable for.
+///
+/// What is here has to come back **together**. Restore the hold without
+/// `next_id` and the next operation reuses an id the console has already shown;
+/// restore `next_id` without the hold and a resumed mission forgets it was
+/// halfway through stabilising a skyhook.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct OperationsSaveState {
+    /// The live or last-settled hold, whole — its banked ticks, its spent stall
+    /// budget and its current state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<OperationHold>,
+    /// Why the last start was refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_refusal: Option<Ineligibility>,
+    /// The next id to hand out.
+    #[serde(default)]
+    pub next_id: u64,
+}
+
+impl ShipOperations {
+    /// Project the record onto what a save carries.
+    pub fn save_state(&self) -> OperationsSaveState {
+        OperationsSaveState {
+            active: self.active.clone(),
+            last_refusal: self.last_refusal,
+            next_id: self.next_id,
+        }
+    }
+
+    /// Take a save's state back, leaving the spawned capability table alone.
+    pub fn restore(&mut self, state: &OperationsSaveState) {
+        self.active = state.active.clone();
+        self.last_refusal = state.last_refusal;
+        self.next_id = state.next_id;
+    }
+}
+
 /// One operation start queued by a script effect, already resolved to UUIDs.
 ///
 /// Queued rather than applied where it is authored for the reason #1025's

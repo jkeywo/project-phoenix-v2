@@ -423,13 +423,28 @@ pub fn tick_power_system(
             &mut ShipPowerSystem,
             Option<&PowerConfigResource>,
             Option<&mut PowerBrownoutState>,
+            Has<crate::ai::server::AiHighFidelity>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let dt = time.delta_secs();
     let mut ticked_any = false;
-    for (mut power, config_comp, brownout_state) in ships.iter_mut() {
+    for (mut power, config_comp, brownout_state, high_fidelity) in ships.iter_mut() {
+        ticked_any = true;
+        if !high_fidelity {
+            // Demoted (dead-reckoned) NPC: `ai_power_allocation` is gated on
+            // `AiHighFidelity` and stops shedding the moment a ship demotes, so
+            // ticking the battery here regardless would drain it — unmanaged,
+            // possibly for the rest of the mission — straight through the
+            // exhaustion lock #1003's shed floors exist to keep unreachable.
+            // Freezing the battery alongside the AI decider that would
+            // otherwise manage it is the same dead-reckoning treatment demoted
+            // ships already get for helm (see `AiHighFidelityComponents`'s
+            // doc comment): nothing about a demoted ship's power state changes
+            // until it is promoted back and the AI resumes deciding for it.
+            continue;
+        }
         let cfg_default;
         let cfg: &PowerConfigResource = match config_comp {
             Some(c) => c,
@@ -569,6 +584,25 @@ pub fn tick_power_brownout_advisory(
                             sender_label: crate::ship::coordination::CHATTER_SENDER_POWER
                                 .to_string(),
                         });
+
+                        // A Helm brownout also goes to Tactical (in addition to
+                        // Helm itself): losing manoeuvre is combat-relevant to
+                        // whoever is on the guns, and Tactical has no other way
+                        // to learn why the ship suddenly can't turn.
+                        if group_id.0 == HELM_POWER_GROUP {
+                            writer.write(CoordinationEnqueue {
+                                source_entity: entity,
+                                sender_origin,
+                                target: crate::system_registry::tactical_station_key(),
+                                payload: CoordinationPayload::PowerBrownout {
+                                    group: group_id.0.clone(),
+                                    label: power_group_label(&group_id.0).to_string(),
+                                    allocated_level: level,
+                                },
+                                sender_label: crate::ship::coordination::CHATTER_SENDER_POWER
+                                    .to_string(),
+                            });
+                        }
                     }
                 }
             }
@@ -1782,8 +1816,9 @@ mod tests {
         let emitted = drain_coord(&mut app);
         assert_eq!(
             emitted.len(),
-            3,
-            "three PowerBrownout advisories (one per group) when draining at total=7"
+            4,
+            "three PowerBrownout advisories (one per group), plus a fourth \
+             helm-brownout copy to Tactical, when draining at total=7"
         );
         for e in &emitted {
             assert!(
@@ -1813,8 +1848,9 @@ mod tests {
         let emitted = drain_coord(&mut app);
         assert_eq!(
             emitted.len(),
-            3,
-            "re-fire: three advisories re-emitted after clear-and-return"
+            4,
+            "re-fire: three advisories plus the helm-to-Tactical copy \
+             re-emitted after clear-and-return"
         );
 
         // Clear again, then set sensors=1 (level 1, idle) alongside
@@ -1829,8 +1865,9 @@ mod tests {
         let emitted = drain_coord(&mut app);
         assert_eq!(
             emitted.len(),
-            2,
-            "two advisories: weapons and helm (level 3), sensors at 1 should not fire"
+            3,
+            "three advisories: weapons, helm (level 3) and helm's Tactical \
+             copy — sensors at 1 should not fire"
         );
         for e in &emitted {
             match &e.payload {

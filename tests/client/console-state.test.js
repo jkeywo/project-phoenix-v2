@@ -754,6 +754,47 @@ describe('buildCaptainConsoleState', () => {
     expect(parse(buildCaptainConsoleState(state)).deadlines).toEqual([]);
   });
 
+  // ── External operations (issue #1026) ────────────────────────────────────
+
+  it('forwards the operations blackboard, which is its own blackboard', () => {
+    // Operations are not a ship system, so they publish under their own channel
+    // key rather than as a field on the captain's — the console reads them from
+    // there and this layer only carries them.
+    const operations = {
+      capabilities: [{ verb: 'stabilise', label: 'operation.verb.stabilise' }],
+      active: {
+        id: 1,
+        verb: 'stabilise',
+        verb_label: 'operation.verb.stabilise',
+        target_uuid: 'depot-1',
+        progress: 0.5,
+        state: 'holding',
+      },
+      refusal: null,
+    };
+    const state = { blackboards: { captain: { objectives: [] }, operations } };
+    expect(parse(buildCaptainConsoleState(state)).operations).toEqual(operations);
+  });
+
+  it('carries the operations blackboard even when the captain one has not arrived', () => {
+    // The legacy fallback exists because the CAPTAIN blackboard is missing,
+    // which says nothing about whether the operations one is. Blanking it here
+    // would make the panel flicker empty for a tick on every reconnect.
+    const operations = {
+      capabilities: [],
+      active: null,
+      refusal: 'operation.refused.not_capable',
+    };
+    expect(parse(buildCaptainConsoleState({ blackboards: { operations } })).operations)
+      .toEqual(operations);
+  });
+
+  it('operations default to an empty readout when no ship publishes them', () => {
+    // Every hull shipped today is in this arm.
+    expect(parse(buildCaptainConsoleState({ blackboards: {} })).operations)
+      .toEqual({ capabilities: [], active: null, refusal: null });
+  });
+
   it('deadlines are empty in the legacy fallback (no blackboard)', () => {
     // The fallback has no wire source for them, and an empty list renders the
     // panel's own empty state rather than an undefined the component must guard.

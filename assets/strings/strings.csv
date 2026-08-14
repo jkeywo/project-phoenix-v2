@@ -883,3 +883,19 @@ system_hull.power_reactor.display_name,Shared hull component display name — th
 system_hull.power_battery.display_name,Shared hull component display name — the ship's battery. Shared by every hull carrying that component,Power Battery
 system_hull.core.display_name,Shared hull component display name — the ship's core. Shared by every hull carrying that component,Core
 entity.asteroid.name,Shared entity name for every asteroid variant (assets/entities/asteroid_*.toml),Asteroid
+component.operations.heading,"External-operation panel — heading above the ship's current operation (issue #1026)","[EXTERNAL OPS]"
+component.operations.none,"External-operation panel when the hull can perform no operations at all (issue #1026)","[NO OPS CAPABILITY]"
+component.operations.idle,"External-operation panel when the hull is capable and running nothing (issue #1026)","[NO OPERATION RUNNING]"
+component.operations.start,"External-operation panel — button that orders the operation against the selected target (issue #1026)","[BEGIN OPERATION]"
+component.operations.abort,"External-operation panel — button that stands the running operation down (issue #1026)","[STAND DOWN]"
+component.operations.state.holding,"External-operation panel — state word while the crew are holding the conditions and progress is advancing (issue #1026)","[HOLDING]"
+component.operations.state.stalled,"External-operation panel — state word while eligibility has lapsed and progress is frozen (issue #1026)","[STALLED]"
+component.operations.state.completed,"External-operation panel — state word once the operation has run to term (issue #1026)","[COMPLETE]"
+component.operations.state.aborted,"External-operation panel — state word once a console has stood the operation down (issue #1026)","[STOOD DOWN]"
+component.operations.state.failed,"External-operation panel — state word once the operation has ended without completing (issue #1026)","[FAILED]"
+operation.verb.stabilise,"Crew-facing name of the stabilise operation verb (issue #1026)","[Stabilise]"
+operation.refused.not_capable,"External-operation refusal — this hull authored no capability for the verb (issue #1026)","[This hull cannot perform that operation.]"
+operation.refused.target_gone,"External-operation refusal — the target is no longer there (issue #1026)","[Target lost.]"
+operation.refused.target_not_applicable,"External-operation refusal — the target is there but the verb means nothing on it (issue #1026)","[Nothing to work on there.]"
+operation.refused.out_of_range,"External-operation refusal — the ship is outside the operation's authored range (issue #1026)","[Out of range — close on the target.]"
+operation.refused.insufficient_power,"External-operation refusal — the operation's power group is below its authored level (issue #1026)","[Insufficient power allocated.]"

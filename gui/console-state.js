@@ -711,10 +711,31 @@ export function buildWeaponsConsoleState(state) {
  *             viewscreen_auto: boolean, view_direction: string,
  *             camera_views: Array, view_mode: string, objectives: Array,
  *             boosted_objective_id: string|null, deadlines: Array,
+ *             operations: {capabilities: Array, active: object|null,
+ *                          refusal: string|null},
  *             hull_integrity_pct: number, game_status: string,
  *             blips: RadarBlip[],
  *             own_hull: StationHullAggregate }} CaptainConsolePayload
  */
+
+/**
+ * The ship's external-operation readout (issue #1026).
+ *
+ * Its own blackboard under its own channel key, not a field on the captain's:
+ * an operation is something the ship does rather than a system aboard it. A
+ * hull that authored no `[operations]` publishes none at all, which is the empty
+ * shape returned here — the panel renders its own "no capability" state off it
+ * rather than the console guessing.
+ * @param {{ blackboards }} state
+ */
+function operationsPayload(state) {
+  const bb = (state.blackboards && state.blackboards['operations']) || {};
+  return {
+    capabilities: bb.capabilities ?? [],
+    active:       bb.active       ?? null,
+    refusal:      bb.refusal      ?? null,
+  };
+}
 
 /**
  * CaptainChair console. Returns JSON of {@link CaptainConsolePayload}.
@@ -738,6 +759,9 @@ export function buildCaptainConsoleState(state) {
       // Visible mission deadlines, already counted down server-side against the
       // authoritative SimTick (issue #1024) — the client formats, never clocks.
       deadlines:             bb.deadlines              ?? [],
+      // The external-operation readout (issue #1026) — a blackboard of its own,
+      // so it is read from its own key rather than off the captain's.
+      operations:            operationsPayload(state),
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
@@ -764,6 +788,10 @@ export function buildCaptainConsoleState(state) {
     // No blackboard, no deadlines: the legacy fallback has no wire source for
     // them, and an empty list renders the panel's own empty state.
     deadlines:             [],
+    // Operations ride their own blackboard, so the legacy fallback carries them
+    // unchanged rather than blanking them: a captain blackboard that has not
+    // arrived says nothing about whether an operations one has.
+    operations:            operationsPayload(state),
     hull_integrity_pct:    state.hullPct     || 100,
     game_status:           state.redAlert
                              ? 'RED ALERT — All hands to battlestations.'

@@ -1806,19 +1806,31 @@ mod tests {
             .count()
     }
 
-    /// Push total allocation past the supply ceiling so the battery drains and
-    /// the rising edge fires. Same lever `ship::power`'s own brownout tests use.
+    /// Force the reactor into the exhaustion-LOCK state and raise the
+    /// lock-changed edge the advisory now fires on. This fixture registers only
+    /// `tick_power_brownout_advisory` (not the `tick_power_system` integration
+    /// that would drive a flat battery to the lock over many ticks), and these
+    /// are ROUTING tests, so the lock state is set directly rather than reached.
     fn drive_ship_into_brownout(app: &mut App) {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&mut crate::ship::power::ShipPowerSystem, With<Ship>>();
-        for mut ps in q.iter_mut(app.world_mut()) {
-            let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(
-                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
-                ),
-                3,
+        use crate::messages::PowerGroupId;
+        use crate::modifiers::power_system::{
+            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        };
+        let mut q = app.world_mut().query_filtered::<(
+            &mut crate::ship::power::ShipPowerSystem,
+            &mut crate::ship::power::PowerBrownoutState,
+        ), With<Ship>>();
+        for (mut ps, mut brownout) in q.iter_mut(app.world_mut()) {
+            ps.0.restore(
+                &[
+                    (PowerGroupId(HELM_POWER_GROUP.into()), 1),
+                    (PowerGroupId(WEAPONS_POWER_GROUP.into()), 1),
+                    (PowerGroupId(SHIELDS_POWER_GROUP.into()), 1),
+                ],
+                0.0,
+                true,
             );
+            brownout.locked_changed = true;
         }
     }
 

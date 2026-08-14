@@ -479,24 +479,25 @@ fn system_id_for_power_group(group: &str) -> Option<SystemId> {
     }
 }
 
-/// Emit power brownout coordination advisories for groups with active demand
-/// that cannot be satisfied (total allocation > 6 → battery draining).
+/// Emit power brownout coordination advisories when the reactor EXHAUSTS —
+/// battery charge hits zero and [`PowerSystem::tick`] slams every group to
+/// [`GROUP_LEVEL_MIN`] and locks the reactor.
 ///
-/// An advisory fires **only** when:
-/// - The reactor is net-negative at the current draw
-///   (`PowerSystem::is_draining`)
-/// - The group's allocation level > 1 (system is actively drawing, not idle)
+/// This is the brownout, and the only one: the ship actually lost power and
+/// every system reset to 1. It is emphatically NOT a "reserve running low"
+/// warning — a draining-but-managed reactor (the AI shed ladder doing its job
+/// on the way down, which is the normal state of any ship holding elevated
+/// power in combat) is expected and says nothing. Firing on mere drain
+/// spammed every red-alert fight, loudest on the player's own ship, for a
+/// condition that never reached the lock the ladder exists to avoid.
 ///
-/// This warns Helm or Tactical while the reserve is still emptying — before the
-/// reactor bottoms out and locks every group to 1. Once locked there is nothing
-/// drawing the extra, so the advisory falls silent; the lock transition itself
-/// re-arms the debounce (below) so a fresh drain after recovery re-announces.
-///
-/// Debounced via [`PowerBrownoutState`]: fires once on transition into
-/// brownout and clears when the condition resolves, allowing re-fire. The
-/// debounce is additionally re-armed by
-/// [`PowerBrownoutState::locked_changed`] — the lock-changed edge
-/// [`tick_power_system`] forwards from [`PowerSystem::tick`].
+/// Driven by [`PowerBrownoutState::locked_changed`] — the lock-changed edge
+/// [`tick_power_system`] forwards from [`PowerSystem::tick`]. The edge fires on
+/// BOTH lock and unlock; only the INTO-locked direction (`power.0.locked()`) is
+/// a brownout. On lock every group's owning station is told (helm → Helm,
+/// weapons → Tactical, shields → Shields) and the announced set is recorded in
+/// `notified_groups` for the intent narration to read while the lock persists;
+/// on recovery the set is cleared so a later exhaustion re-announces.
 ///
 /// # `sender_origin`
 ///
@@ -516,67 +517,45 @@ pub fn tick_power_brownout_advisory(
             Entity,
             &ShipPowerSystem,
             &mut PowerBrownoutState,
-            Option<&PowerConfigResource>,
             &crate::ship_plugin::ShipSystemControlSources,
         ),
         With<crate::server_app::Ship>,
     >,
-    config_res: Option<Res<PowerConfigResource>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    for (entity, power, mut brownout_state, config_comp, control_sources) in ships.iter_mut() {
+    for (entity, power, mut brownout_state, control_sources) in ships.iter_mut() {
+        // Consume this tick's lock-changed edge. Only a transition INTO the
+        // locked state is a brownout; an unlock (recovery) consumes the edge and
+        // clears the announced set so the next exhaustion re-announces.
+        if !std::mem::take(&mut brownout_state.locked_changed) {
+            continue;
+        }
+        if !power.0.locked() {
+            brownout_state.notified_groups.clear();
+            continue;
+        }
+
         let sender_origin = control_sources
             .0
             .source_for(&crate::system_registry::power_reactor_system_id());
-        let cfg_default;
-        let cfg: &PowerConfigResource = match config_comp {
-            Some(c) => c,
-            None => match config_res.as_deref() {
-                Some(c) => c,
-                None => {
-                    cfg_default = PowerConfigResource::default();
-                    &cfg_default
-                }
-            },
-        };
-        let is_draining = power.0.is_draining(&cfg.0);
 
-        // Consume this tick's lock-changed edge. A reactor that has just locked
-        // out (or just recovered) is a genuine transition, so clear the debounce
-        // and let the groups still in brownout re-announce below.
-        if std::mem::take(&mut brownout_state.locked_changed) {
-            brownout_state.notified_groups.clear();
-        }
-
-        let mut still_brownouting = std::collections::HashSet::new();
-
+        brownout_state.notified_groups.clear();
         for (group_id, level) in power.0.iter() {
-            if is_draining && level > 1 {
-                still_brownouting.insert(group_id.0.clone());
-
-                // Rising edge: group was not previously notified → emit advisory.
-                if !brownout_state.notified_groups.contains(&group_id.0) {
-                    if let Some(sys_id) = system_id_for_power_group(&group_id.0) {
-                        writer.write(CoordinationEnqueue {
-                            source_entity: entity,
-                            sender_origin,
-                            target: sys_id,
-                            payload: CoordinationPayload::PowerBrownout {
-                                group: group_id.0.clone(),
-                                label: power_group_label(&group_id.0).to_string(),
-                                allocated_level: level,
-                            },
-                            sender_label: crate::ship::coordination::CHATTER_SENDER_POWER
-                                .to_string(),
-                        });
-                    }
-                }
+            brownout_state.notified_groups.insert(group_id.0.clone());
+            if let Some(sys_id) = system_id_for_power_group(&group_id.0) {
+                writer.write(CoordinationEnqueue {
+                    source_entity: entity,
+                    sender_origin,
+                    target: sys_id,
+                    payload: CoordinationPayload::PowerBrownout {
+                        group: group_id.0.clone(),
+                        label: power_group_label(&group_id.0).to_string(),
+                        allocated_level: level,
+                    },
+                    sender_label: crate::ship::coordination::CHATTER_SENDER_POWER.to_string(),
+                });
             }
         }
-
-        // Update notified set: groups still in brownout stay notified;
-        // groups that cleared are removed (can re-fire on next cycle).
-        brownout_state.notified_groups = still_brownouting;
     }
 }
 
@@ -1748,42 +1727,64 @@ mod tests {
         app
     }
 
+    /// Force the LocalShip's reactor into an exact `(allocations, charge,
+    /// locked)` state, so a following `tick()` exercises the exhaustion lock
+    /// deterministically rather than integrating toward it over many ticks.
+    fn set_reactor(app: &mut App, alloc: &[(&str, u8)], charge: f32, locked: bool) {
+        let allocs: Vec<(PowerGroupId, u8)> = alloc
+            .iter()
+            .map(|(g, l)| (PowerGroupId((*g).into()), *l))
+            .collect();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
+        if let Ok(mut ps) = q.single_mut(app.world_mut()) {
+            ps.0.restore(&allocs, charge, locked);
+        }
+    }
+
     #[test]
-    fn tick_power_brownout_advisory_emits_on_drain_and_debounces() {
+    fn tick_power_brownout_advisory_fires_only_on_reactor_lock() {
         let mut app = brownout_test_app();
         start_game(&mut app);
 
-        // Helper: mutate the per-entity ShipPowerSystem component (the
-        // advisory system reads from the component, not the resource).
-        fn set_ship_power(app: &mut App, group: &str, level: u8) {
-            let mut q = app
-                .world_mut()
-                .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
-            if let Ok(mut ps) = q.single_mut(app.world_mut()) {
-                let _ =
-                    ps.0.set_group_allocation(&PowerGroupId(group.into()), level);
-            }
-        }
-
-        // Tick 1: default total=6, not draining (rate=2.0 > 0) → no advisory.
+        // A DRAINING but un-exhausted reactor (total 7, healthy battery) is the
+        // shed ladder's ordinary combat state, NOT a brownout. No advisory.
+        set_reactor(
+            &mut app,
+            &[
+                (HELM_POWER_GROUP, 3),
+                (WEAPONS_POWER_GROUP, 2),
+                (SHIELDS_POWER_GROUP, 2),
+            ],
+            80.0,
+            false,
+        );
         let _ = tick(&mut app);
-        let emitted = drain_coord(&mut app);
         assert!(
-            emitted.is_empty(),
-            "no advisory when total=6 (not draining): got {}",
-            emitted.len()
+            drain_coord(&mut app).is_empty(),
+            "a draining-but-managed reactor is not a brownout"
         );
 
-        // Set total=7 (helm up to 3, weapons=2, sensors=2).
-        // With default rates [6,5,4,2,-2,-6], total=7 → rate=-2.0 → draining.
-        // All three groups have level > 1 → all three emit advisories.
-        set_ship_power(&mut app, HELM_POWER_GROUP, 3);
+        // EXHAUST it: a flat battery at a draining total. `tick_power_system`
+        // clamps the charge at zero, slams every group to GROUP_LEVEL_MIN and
+        // locks — the brownout. One advisory per (mapped) group.
+        set_reactor(
+            &mut app,
+            &[
+                (HELM_POWER_GROUP, 3),
+                (WEAPONS_POWER_GROUP, 3),
+                (SHIELDS_POWER_GROUP, 2),
+            ],
+            0.0,
+            false,
+        );
         let _ = tick(&mut app);
         let emitted = drain_coord(&mut app);
         assert_eq!(
             emitted.len(),
             3,
-            "three PowerBrownout advisories (one per group) when draining at total=7"
+            "reactor exhaustion browns out all three groups"
         );
         for e in &emitted {
             assert!(
@@ -1793,57 +1794,49 @@ mod tests {
             );
         }
 
-        // Tick 2: still draining → debounce holds → no re-emission.
+        // Still locked next tick, no fresh lock edge → no re-emission.
         let _ = tick(&mut app);
-        let emitted = drain_coord(&mut app);
         assert!(
-            emitted.is_empty(),
-            "debounce: no re-emission while condition persists"
+            drain_coord(&mut app).is_empty(),
+            "no re-emission while the reactor stays locked"
         );
 
-        // Reset helm to 2 → total=6, condition clears.
-        set_ship_power(&mut app, HELM_POWER_GROUP, 2);
+        // Recovery: the reserve climbs back over emergency_threshold and the
+        // reactor unlocks. The unlock edge is consumed silently — coming back
+        // is not a brownout.
+        set_reactor(
+            &mut app,
+            &[
+                (HELM_POWER_GROUP, 2),
+                (WEAPONS_POWER_GROUP, 2),
+                (SHIELDS_POWER_GROUP, 2),
+            ],
+            50.0,
+            true,
+        );
         let _ = tick(&mut app);
-        let emitted = drain_coord(&mut app);
-        assert!(emitted.is_empty(), "no advisory when condition clears");
+        assert!(
+            drain_coord(&mut app).is_empty(),
+            "recovery from a lock is not a brownout"
+        );
 
-        // Re-enter drain (total=7 again) → re-fire allowed (debounce cleared).
-        set_ship_power(&mut app, HELM_POWER_GROUP, 3);
+        // A fresh exhaustion re-announces.
+        set_reactor(
+            &mut app,
+            &[
+                (HELM_POWER_GROUP, 3),
+                (WEAPONS_POWER_GROUP, 3),
+                (SHIELDS_POWER_GROUP, 2),
+            ],
+            0.0,
+            false,
+        );
         let _ = tick(&mut app);
-        let emitted = drain_coord(&mut app);
         assert_eq!(
-            emitted.len(),
+            drain_coord(&mut app).len(),
             3,
-            "re-fire: three advisories re-emitted after clear-and-return"
+            "a later exhaustion re-announces the brownout"
         );
-
-        // Clear again, then set sensors=1 (level 1, idle) alongside
-        // weapons=3 and helm=3 → only weapons and helm should fire.
-        set_ship_power(&mut app, HELM_POWER_GROUP, 2);
-        let _ = tick(&mut app);
-        let _ = drain_coord(&mut app); // flush any stale events
-        set_ship_power(&mut app, HELM_POWER_GROUP, 3);
-        set_ship_power(&mut app, WEAPONS_POWER_GROUP, 3);
-        set_ship_power(&mut app, SHIELDS_POWER_GROUP, 1);
-        let _ = tick(&mut app);
-        let emitted = drain_coord(&mut app);
-        assert_eq!(
-            emitted.len(),
-            2,
-            "two advisories: weapons and helm (level 3), sensors at 1 should not fire"
-        );
-        for e in &emitted {
-            match &e.payload {
-                CoordinationPayload::PowerBrownout { group, .. } => {
-                    assert_ne!(
-                        group.as_str(),
-                        SHIELDS_POWER_GROUP,
-                        "sensors at level 1 must not get a brownout advisory"
-                    );
-                }
-                _ => panic!("unexpected payload type"),
-            }
-        }
     }
 
     /// Issue #873. The brownout advisory's `sender_origin` must report the
@@ -1873,16 +1866,18 @@ mod tests {
             let _ = tick(&mut app);
             let _ = drain_coord(&mut app);
 
-            // total=7 → draining → every group above idle emits.
-            {
-                let mut q = app
-                    .world_mut()
-                    .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
-                if let Ok(mut ps) = q.single_mut(app.world_mut()) {
-                    let _ =
-                        ps.0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
-                }
-            }
+            // Exhaust the reactor (flat battery at a draining total) so the
+            // lock fires the advisory.
+            set_reactor(
+                &mut app,
+                &[
+                    (HELM_POWER_GROUP, 3),
+                    (WEAPONS_POWER_GROUP, 3),
+                    (SHIELDS_POWER_GROUP, 2),
+                ],
+                0.0,
+                false,
+            );
             let _ = tick(&mut app);
             let emitted = drain_coord(&mut app);
             assert!(

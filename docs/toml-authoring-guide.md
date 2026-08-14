@@ -646,6 +646,61 @@ that `add_faction_enemy` and entity templates use; `display_name` is a
 See `assets/worlds/probe_dossier.toml` for all of the above in one world,
 including the structure whose condition is withheld.
 
+### 1.11 Evidence: what the crew found out, and how
+
+Everything in §1.10 is background — a restatement of what the world already
+implies. **Evidence** is the other half: what this crew *learned*, written down
+at the beat where they learned it, with the source attached.
+
+```rhai
+fn on_survey_complete(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.fs.entity.skyway_hook.name",   // the [[entity]] name
+        text:       "world.fs.evidence.stress_fracture",  // a strings.csv id
+        provenance: "scan",
+    });
+}
+```
+
+Three fields, all required:
+
+| Field | What it is |
+| --- | --- |
+| `subject` | the `[[entity]] name` of the thing this was learned **about** — not who said it |
+| `text` | a `strings.csv` id for what was learned. Never English |
+| `provenance` | **how** they learned it: `scan`, `dialogue`, `records` or `briefing` |
+
+The entry is stamped with the tick the handler ran on and appears in the Intel
+overlay's **GATHERED** block, below the baseline facts and visibly apart from
+them — because "we were told this" and "we went and found this out" are
+different claims, and the mission is about being able to tell them apart. That
+is also why `provenance` is its own field rather than a phrase at the front of
+`text`: a mistyped one is an error you see, and a translated one still sorts.
+
+Things worth knowing before authoring one:
+
+* **There is no `[[evidence]]` block**, exactly as there is no `[[commitment]]`
+  one. What the crew know depends on what they did, so a world file cannot
+  declare it — it can only declare the beat that produces it: a `[[deadline]]`
+  for a survey coming back, a dialogue `on_pick` for something a witness said.
+* **Appending the same finding twice does nothing.** The identity is
+  `subject` + `provenance` + `text`, and the *first* tick is kept, so a re-scan
+  confirms without rewriting when the crew found out. Corroboration from a
+  *different* source is a second entry, which is the point.
+* **An unknown `subject` is a warning in the log, not a crash** — the entry is
+  dropped and the rest of your handler still runs. A mistyped `provenance` is
+  stricter: it raises, which discards that whole handler call.
+* **Appending does not make something a dossier subject.** The entry is filed
+  either way, but it is only ever *shown* on a sheet §1.10 already gives that
+  entity — so append to something hailable or publishing.
+* **This is how a mission reveals its secret.** `publish = false` keeps a
+  structure's real condition off every sheet, permanently and by construction;
+  the way the crew ever come to know it is that they earn an evidence entry
+  saying so.
+
+See `assets/worlds/probe_evidence.toml` for both routes in one world — a survey
+deadline and a dialogue the ship's own Comms officer answers.
+
 ### Example — a world, end to end
 
 ```toml

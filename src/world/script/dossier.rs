@@ -183,7 +183,9 @@ mod tests {
             "dossier".into(),
             Dynamic::from(Dossier::new(sink.clone(), TICK)),
         );
-        vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx).expect("runs");
+        // This vocabulary communicates entirely through the effect buffer, so a
+        // handler's return value is nothing to read — unlike a dialogue node fn.
+        let _ = vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx).expect("runs");
         sink.take()
             .into_iter()
             .map(|e| match e {

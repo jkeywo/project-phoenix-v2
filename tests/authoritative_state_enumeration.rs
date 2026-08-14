@@ -369,6 +369,24 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // `#[derive(Component)]`/`#[derive(Resource)]`, so like `EntitySnapshot` they
     // can never appear in the registry this guard scans. See
     // pasm/spec/architecture/world-files.yaml's `dossier-published-state` entity.
+    //
+    // Issue #1031's gathered evidence is the exception that sharpens the
+    // paragraph above rather than contradicting it. It DOES add state — an
+    // `EvidenceLog` of what the crew found out, which no fold can recover
+    // because it exists only where a scenario said the crew went and did
+    // something — and that state is snapshotted (`ScenarioState::evidence`,
+    // `SNAPSHOT_FORMAT` 7) precisely because it is not derived. It still adds
+    // nothing to this list, and for the ledger's reason: `EvidenceLog` (with its
+    // `EvidenceEntry` and `EvidenceProvenance`) is a FIELD on
+    // `WorldContentRuntime` above, sitting beside the commitments ledger, so the
+    // slice registers no `#[derive(Resource)]` and no `#[derive(Component)]` and
+    // nothing new appears in the registry this guard scans. The one script verb
+    // that writes it (`ctx.dossier.append`) buffers an ordinary `ActionCmd` on
+    // the existing effect sink and adds no `WorldScriptRuntime` field either:
+    // there is no `[[evidence]]` block, so there is no load-time declaration
+    // table to hold. See `src/dossier/evidence.rs`, and
+    // pasm/spec/architecture/world-files.yaml's `dossier-evidence-state` entity
+    // for the `implementation.symbols` naming those Rust types.
     "RawWorldSource", "WorldScriptRuntime",
 ];
 

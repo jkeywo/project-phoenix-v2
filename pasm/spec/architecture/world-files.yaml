@@ -313,9 +313,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Dossier Projection
-      summary: Folds what a crew knows about one subject - its identity and authored description, its faction's crew-facing label, its standing on the hail roster, its PUBLISHED infrastructure condition, and the promises made to it - into a per-subject view, fresh every tick, and publishes the whole set on the local ship's intelligence channel. Owns no state; every fact is a projection of state some other subsystem already holds.
+      summary: Folds what a crew knows about one subject - its identity and authored description, its faction's crew-facing label, its standing on the hail roster, its PUBLISHED infrastructure condition, the promises made to it, and the evidence they gathered on it - into a per-subject view, fresh every tick, and publishes the whole set on the local ship's intelligence channel. Owns no state of its own; five of the six inputs are projections of state another subsystem already holds, and the sixth is the evidence log.
       rationale:
-        - "[ai] HIDDEN TRUTH IS EXCLUDED STRUCTURALLY, not filtered. The mission this exists for turns on an official record that contradicts the structure it describes, so a leak here is not a cosmetic bug. The pure input port (DossierSubject) has a field for each of the five surfaces above and no field for anything else, so a withheld disposition, an unrevealed spawn, or a flag mirrored nowhere the crew can see has nowhere to go; adding one is a visible diff next to the paragraph forbidding it. The condition input arrives as InfrastructureSnapshot, which #1025's from_state returns None for when publish = false, so a structure kept off the wire is one the projection never HOLDS the condition of."
+        - "[ai] HIDDEN TRUTH IS EXCLUDED STRUCTURALLY, not filtered. The mission this exists for turns on an official record that contradicts the structure it describes, so a leak here is not a cosmetic bug. The pure input port (DossierSubject) has a field for each of the six surfaces above and no field for anything else, so a withheld disposition, an unrevealed spawn, or a flag mirrored nowhere the crew can see has nowhere to go; adding one is a visible diff next to the paragraph forbidding it. The condition input arrives as InfrastructureSnapshot, which #1025's from_state returns None for when publish = false, so a structure kept off the wire is one the projection never HOLDS the condition of."
         - "[ai] The claim is tested from both ends. The pure module asserts the fact list; codec.rs asserts the serialised payload's WHOLE KEY SET, which is what 'structurally absent rather than filtered at render time' can mean in a language with no reflection - a field a secret could ride in would have to be added there, moving that test. The probe world then walks every fact of every subject on the PUBLISHED payload looking for the withheld number."
         - "[ai] LABELS ARE THE SECOND GATE. A published operational flag or capacity is a machine name in the author's namespace - #1025 says exactly that on both fields - so it becomes a fact-sheet row only where the scenario also authored a strings.csv label beside it. Published DATA that is not published PROSE stays a number a script predicate reads and a console never shows. Optional label fields on CapacityConfig and ThresholdConfig are the whole mechanism, and check-strings already enforces that an authored label is an id rather than English."
         - "[ai] THE SUBJECT ROSTER IS DERIVED, not authored: an entity is a subject when the crew ALREADY has an authoritative surface on it - it is hailable (#985) or it publishes a condition track (#1025). A third, dossier-only opt-in was rejected: it would be a way to declare that the crew hold a file on something they have no other means of observing, which is the exact shape of leak this component exists to prevent. It also means no new component, no save field and no census entry."
@@ -323,11 +323,15 @@ entities:
         - "[ai] A promise lands on the sheet of the party it was made to, matched on the world's [[entity]] id - the way #1029 records a party. Not a UUID, which that module refuses because a promise outlives the hull it was made to; not a display name, which is a string id for a translator. A promise made to a party that is not an entity in this world lands on no dossier, which is honest: there is no sheet to put it on."
         - "[ai] Subjects are walked in UUID order, never archetype order, so two hosts publish the same list and the rows do not move under an operator's finger."
         - "[ai] The comms standing is read off CommsRuntime's live roster rather than recomputed from transforms: two readouts of the same range check on two cadences is how a contact list and a dossier come to disagree about whether somebody can be called."
+        - "[ai] EVIDENCE (#1031) IS THE SIXTH FIELD AND DOES NOT WEAKEN THE RULE, and the argument is stated rather than assumed: an entry exists ONLY because a scenario said the crew did something. Its one writer is ctx.dossier.append, authored at the beat where a scan returns or a witness talks; nothing in the projection or the adapter derives an entry from world state, reads one out of a withheld field, or synthesises one when a secret becomes true. The invariant is unchanged in substance - everything on a sheet is something the crew already have access to - and widened only in HOW: five fields are surfaces the crew can consult, and the sixth is the record of what they went and got. A unit test appends a finding to a subject whose condition track is withheld and asserts the withheld number is still on nothing."
+        - "[ai] Evidence stays in its OWN list rather than folding into the fact rows, in gather order, never re-sorted by provenance. The separation between what the crew were handed and what they earned is the readout, and the order is the story of what they did."
+        - "[ai] Evidence is not a third door onto the subject roster. An entry is keyed by uuid whatever it was written about and reaches a sheet only where that uuid is already hailable or publishing; a finding appended to a rock is recorded honestly and has nowhere to be shown - the same answer #1029 gives a promise made to a party that is not an entity in this world."
+        - "[ai] A finding is matched to its subject by UUID where a promise is matched by NAME, and the asymmetry is the two records meaning different things: a promise is made to a party that outlives the hull it was given to, while a finding is about the specific thing that was examined. Script still writes a name; the applier resolves it once, where name_to_uuid lives."
     architecture:
       kind: subsystem
       authority: derived
       owns: [dossier-published-state]
-      reads: [infrastructure-condition-state, world-configuration-state]
+      reads: [infrastructure-condition-state, world-configuration-state, dossier-evidence-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
@@ -354,7 +358,7 @@ entities:
         - "[ai] NOT FOLDED, and nothing to snapshot. Every field is a projection of state another subsystem owns and already folds, or already declines to: the condition track, the commitments ledger, the comms roster, the faction registry, the entity's own name. Folding the projection would fold those numbers twice, and persisting it would let a save disagree with the state it was derived from. This slice therefore adds no snapshot fields and no census entries - a dossier is a view, and the answer to 'what does #863 persist here' is 'nothing, on purpose'."
         - "[ai] A SystemBlackboard variant under a reserved CHANNEL key, in the same not-a-system-id bucket as operations: nothing aboard the ship owns a dossier, nothing repairs it, and no ControlSystem message may target it. Local ship only - an NPC's dossiers would be a second copy of the same world picture with no console to render it on."
         - "[ai] A fact's value is TAGGED (text / fraction / count / flag) rather than pre-formatted on the host, because a percentage, a count and a yes/no read differently on screen and the string table is the client's to resolve. A kind the client does not know renders as nothing rather than as garbage - the failure a pre-formatted string would have hidden."
-        - "[ai] The evidence list ships EMPTY and is issue #1031's to append to. It is carried from this slice so that one adds entries rather than reshaping the payload, the console fold and the panel behind it; the panel already renders the block, separated from the baseline facts and ABSENT rather than empty until something is in it."
+        - "[ai] The evidence list was carried EMPTY by #1030 so that #1031 could add entries rather than reshape the payload, the console fold and the panel behind it. That held exactly: #1031 filled it without moving the forward-compat literal in codec.rs by a character, and the panel needed no structural change. Each entry has three columns - text, provenance, tick - and no fourth: no actual-value-beside-reported and no confidence score, so a scenario that misleads the crew authors the misleading finding and the contradiction as two entries they can compare."
         - "[ai] Empty is a valid dossier and a DIFFERENT thing from a missing one. A crew who open a file and find nothing on it have learned something; a subject that silently never appears in the list has told them nothing. The panel says so in as many words rather than showing a bare name."
         - "[ai] Empty for every world that ships no hailable entity and no published structure, which is most of them. The two worlds that DO field one (combat_test and default both spawn the hailable Starbase Alpha) gain a one-subject list - a real payload change, and a deliberate one. It moves no digest, because a blackboard is not folded; the anchors were measured to confirm that rather than assumed."
     architecture:
@@ -371,6 +375,41 @@ entities:
         - DossierValue
         - DossierEvidenceSnapshot
       tests: [cargo test, npx vitest run]
+
+  - state: dossier-evidence-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Gathered Evidence State
+      summary: The append-only log of what a run's crew FOUND OUT - one entry per finding, carrying the subject uuid it is about, a strings.csv id for what was learned, a typed provenance saying how, and the sim tick it was learned on. A field on WorldContentRuntime beside the commitments ledger; written only by ctx.dossier.append; read only by the dossier projection.
+      rationale:
+        - "[ai] THIS IS STATE AND THE REST OF THE DOSSIER IS NOT, which is the whole distinction src/dossier/ is built on. Every fact on a sheet is a restatement of something the crew already had access to and is re-folded each tick; a finding exists because the crew DID something, and no amount of re-folding the world recovers which run you are in. So it is stored, snapshotted (ScenarioState::evidence, SNAPSHOT_FORMAT 7) and accounted for in the census - and it is the one dossier input the fold does not recompute."
+        - "[ai] PROVENANCE IS A TYPED FIELD, NOT PROSE. The whole Thin Margin arc turns on the crew being able to say how they know, and a briefing and a sensor return are different kinds of claim: text that merely began 'Scan reports...' could not be sorted, filtered or contradicted, and would be beyond translation besides (AGENTS.md rule 11). EvidenceProvenance is closed at scan / dialogue / records / briefing because each needs a strings.csv label the client resolves, and an open string would let a scenario invent 'hearsay' and have it render as nothing. An unknown name RAISES at the script boundary rather than defaulting onto one of the four."
+        - "[ai] DUPLICATES ARE A SILENT NO-OP keyed on (subject, provenance, text), keeping the FIRST tick. The asymmetry with the commitments ledger's raise is deliberate: a duplicate promise is an authoring mistake, since two beats claiming one id mean different terms, whereas scanning the same thing twice is an ordinary player action that must not cost the scenario its call. Excluding the tick from the identity is what makes a confirming re-scan leave 'when they found out' alone."
+        - "[ai] APPEND-ONLY: no forget, no retract, no mutable accessor. A crew's account of what they learned is the run's history, and a scenario that wants to contradict an earlier finding appends the contradiction - which is what a later debrief needs to see, and what keeps the ordering claim true."
+        - "[ai] A Vec in append order rather than a map keyed by subject, for the ledger's reason: gather order is already a deterministic function of the run - appends ride the ordered per-call effect buffer inside a tick loop every peer reproduces - so two clients render the same sheet without anything here sorting, and a per-subject view is a stable subsequence. A bucket map would make 'which of these came first' depend on which bucket they landed in, and that is the readout."
+        - "[ai] AUTHORITATIVE BUT NOT FOLDED, the same bucket as the deadline table and the commitments ledger and for their reason: it moves no hull, no shield and no reactor. Its probe world's baseline digest is recorded to make that testable rather than assumed - if a later change moves it without moving the entity population or a condition track, something started folding scenario state."
+        - "[ai] An unresolvable subject name is a WARNED NO-OP at the applier rather than a panic or a raise: the name is resolved a tick after the beat that wrote it, against a world that may have moved on, and a scenario appending to a hull that has been destroyed should lose the entry rather than the run."
+    architecture:
+      classification: authoritative
+      owner: dossier-projection
+      writers: [world-script-runtime, dossier-projection]
+    implementation:
+      status: declared
+      paths:
+        - src/dossier/evidence.rs
+        - src/world/script/dossier.rs
+        - src/world/server.rs
+        - src/snapshot.rs
+      symbols:
+        - EvidenceLog
+        - EvidenceEntry
+        - EvidenceProvenance
+        - UnknownProvenance
+        - Dossier
+        - register_dossier
+        - RecordDossierEvidence
+      tests: [cargo test]
 
   - component: world-trigger-evaluator
     core:

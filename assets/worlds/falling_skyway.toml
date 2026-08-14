@@ -226,6 +226,41 @@
 # 5001167740764356580, probe_scan 7851858877582205234, probe_strike
 # (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
 # 11434311098359716284, and probe_scandiff 2488189563210329022.
+
+# MOVED AGAIN IN #1041, to 0x03600b8a8e8a4b1d (243186184528244893), with
+# 12668488597728974822 (0xafcf1b9a9c0d9d66) at tick 0. The mechanism is #1037's
+# and #1039's, by the same one line of authored content: the restraint slice adds
+# Havelock's hired picket as an `[[entity]]`, so this world spawns one more hull
+# than it used to, and that hull takes a uuid out of the mint sequence and folds
+# its own transform and hull every tick.
+#
+# BOTH HALVES OF THE A/B ARE RECORDED, because the attribution is the point and
+# not the conclusion. The `corporate_picket` anchor moves nothing on its own —
+# an anchor nothing spawns at is a lookup table, exactly as #1039 found for
+# `rigger_mooring` — and neither does the whole #1041 script block: the two
+# outcome handlers, the provocation, the mirror-flag reaction and the four
+# campaign flags fold NOTHING, which puts them in the same
+# authoritative-but-unfolded bucket as the deadline table and the flag store.
+# The picket's `[[infrastructure.threshold]]` DOES fold, as #1038's did, and it
+# is part of the entity this note attributes.
+#
+# THE ENGINE HALF OF THIS SLICE MOVES NOTHING AT ALL, and that is the acceptance
+# criterion rather than a nicety: `fold_weapons_hold_namespace` folds nothing
+# while no ship is holding, and a released hold seeds the fire hosts exactly the
+# 1.0/0.0 they always seeded. Two things had to be fixed for that to be true
+# rather than merely intended — the mirror now reads the flag store before it
+# writes, so a spawning ship no longer marks `WorldContentRuntime` changed, and
+# the new component rides the ship spawn bundle nested rather than as a second
+# `insert`, so no extra command or archetype move reorders what spawns after it.
+# `probe_storm.toml` is what caught both: its committed 11434311098359716284 came
+# back only when the second one was fixed too.
+#
+# The anchors were re-measured on the same clean tree and are UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, probe_strike
+# (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
+# 11434311098359716284, probe_scandiff 2488189563210329022, and
+# probe_corroborate 6231558379626882143.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls
@@ -303,6 +338,11 @@ depot_b_berth = [1180.0, 0.0, 240.0]
 # alongside each other" is not.
 worker_mooring = [1110.0, 0.0, 350.0]
 corporate_mooring = [1260.0, 0.0, 360.0]
+
+# Where Havelock's hired picket sits (#1041). Its own anchor rather than the
+# mooring beside it, because a picket parked on top of the boat it is guarding
+# is not a picket.
+corporate_picket = [1330.0, 0.0, 250.0]
 
 # Where traffic gets held when the corridor cannot take it. Nothing in Act 1
 # sends anyone here; the storm slice (#1037) does.
@@ -649,6 +689,42 @@ id = "rigger_tacket"
 name = "world.falling_skyway.entity.rigger_tacket.name"
 transform = { anchor = "rigger_mooring" }
 overrides = { comms = { hailable = true } }
+
+# ── THE RESTRAINT INTERACTION (#1041) ────────────────────────────────────────
+#
+# Havelock's hired picket, and the one place in this mission where the crew can
+# choose how much force to use.
+#
+# A Harrow patrol boat, for three reasons and not for flavour. It is ARMED,
+# which the Requiem cutter beside it is not — "out of the fight" means nothing
+# said of a hull with no guns. Its faction is NEUTRAL by default, so it sits
+# there doing nothing until somebody starts something: the fleet's own faction
+# files call the Harrow "a non-engaging neighbour the player must choose to
+# provoke", which is the premise a restraint lever needs. And its gun line
+# authors `min_alert_to_fire = 0`, so it is the hull a weapons hold has to beat
+# the hard way.
+#
+# The `[infrastructure]` on a warship is a composition, not a new combat state.
+# A condition track already falls with hull damage and already owns named
+# operational flags with hysteresis (#1025), so crossing one downward is what
+# DISABLED means here: the mount is off, the ship is not, and the crossing is an
+# event the script can hear. `guns_online` starts up, because the picket arrives
+# whole.
+#
+# Its one doctrine entry is re-pointed at its own anchor, the per-id edit the
+# Havelock cutter above uses and for the same reason — left on the template's
+# Ironveil patrol anchors, this world would have to declare two anchors named
+# after somebody else's border.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+id = "havelock_enforcer"
+name = "world.falling_skyway.entity.havelock_enforcer.name"
+transform = { anchor = "corporate_picket" }
+overrides = { comms = { hailable = true }, infrastructure = { publish = false, condition = 100.0, condition_max = 100.0, threshold = [
+  { flag = "havelock_enforcer_guns_online", fails_below = 0.35 },
+] }, behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "corporate_picket" },
+] } }
 
 # ── Act 1's clock ────────────────────────────────────────────────────────────
 #
@@ -1961,5 +2037,73 @@ fn on_corroboration_filed(ctx) {
         base_priority: 20,
         targets: ["world.falling_skyway.entity.havelock_cutter.name"],
     });
+}
+
+// ── THE RESTRAINT INTERACTION (#1041) ────────────────────────────────────────
+//
+// One target, two ways to take it out of the fight, and a different set of
+// campaign flags for each. Nothing below starts a fight: the picket is neutral
+// until the crew shoot at it, and a run where nobody does reaches none of these
+// handlers.
+
+// Provocation. Until this fires the Harrow and the Federation are not enemies
+// and the picket does nothing at all — which is what makes what follows a
+// CHOICE the crew made rather than an ambush the mission sprang.
+on_attacked("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_attacked");
+
+// The two outcomes. Both are real chains rather than timers: a condition
+// crossing raises and drops its own flag through the infrastructure tick, and a
+// kill emits `Destroyed` whether it came from a beam or from a script.
+on_flag_cleared("havelock_enforcer_guns_online", "on_picket_disabled");
+on_destroyed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_destroyed");
+
+// Havelock's operations staff watching the corridor notice that the destroyer
+// has not gone weapons-free. Read off the MIRROR flag, exactly as a condition
+// reads `workforce.<id>.on_strike` — the scenario never touches ship state.
+on_flag_set("weapons_hold.own_ship", "on_crew_holds_fire");
+
+fn on_picket_attacked(ctx) {
+    if ctx.flags.picket_engaged == 1 {
+        return;
+    }
+    ctx.flags.picket_engaged = 1;
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    // [ai] Unratified: shooting at the operator's security is worth twelve
+    // points of their goodwill. It is a number for #1036's negotiation to argue
+    // with, not a balance claim.
+    ctx.effects.set_workforce_disposition("havelock_operations", 43);
+}
+
+// DISABLED. The mount is gone, the boat is not: the picket is held to its own
+// weapons hold — this issue's own lever, applied to an NPC through the same
+// state a captain's console writes — and everyone aboard it lives. Repairable,
+// in principle, which is the difference the flags are recording.
+fn on_picket_disabled(ctx) {
+    ctx.effects.hold_fire("world.falling_skyway.entity.havelock_enforcer.name");
+    ctx.flags.havelock_enforcer_disabled = 1;
+    ctx.flags.restraint_shown = 1;
+    // [ai] Unratified: an operator whose people came home is an operator with
+    // something left to lose, and the negotiation reads this number.
+    ctx.effects.set_workforce_disposition("havelock_operations", 50);
+}
+
+// DESTROYED. The same threat removed, and a crew who removed it the other way.
+// `restraint_shown` is written by BOTH handlers because it is one question with
+// two answers, not two unrelated facts — and killing a picket that had already
+// been disabled is still a kill, which is why this handler assigns rather than
+// checking what the other one wrote.
+fn on_picket_destroyed(ctx) {
+    ctx.flags.havelock_enforcer_destroyed = 1;
+    ctx.flags.restraint_shown = 0;
+    // [ai] Unratified.
+    ctx.effects.set_workforce_disposition("havelock_operations", 10);
+}
+
+fn on_crew_holds_fire(ctx) {
+    ctx.flags.havelock_saw_restraint = 1;
+    // [ai] Unratified: a destroyer that came to the depot with its guns cold is
+    // worth five points of the operator's goodwill.
+    ctx.effects.set_workforce_disposition("havelock_operations", 60);
 }
 """

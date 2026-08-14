@@ -417,6 +417,26 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // table to hold. See `src/dossier/evidence.rs`, and
     // pasm/spec/architecture/world-files.yaml's `dossier-evidence-state` entity
     // for the `implementation.symbols` naming those Rust types.
+    //
+    // Issue #1038's scan-versus-dossier diff registers nothing at all, which is
+    // the whole reason it was built the way it was. It adds ONE bit — "this crew
+    // have read that structure" — and that bit is written into the base-world
+    // `FlagStore`, which is a FIELD on `WorldContentRuntime` above and has been
+    // authoritative, snapshotted and accounted for here since long before this
+    // slice. `science::scan::scanned_flag` is a free function composing the key;
+    // `science::server::tick_scans` is an existing system that gained a
+    // `ResMut<WorldContentRuntime>` parameter. No `#[derive(Resource)]`, no
+    // `#[derive(Component)]`, no `WorldScriptRuntime` field, and no new
+    // `ActionCmd`: the comparison itself lives in world script and its output is
+    // an ordinary `ctx.dossier.append` onto the #1031 log two paragraphs up.
+    //
+    // The alternative — a `ScannedSubjects` resource, or a component on the
+    // structure — was rejected for exactly the reason this list exists: it would
+    // have been a second authoritative record of something the flag store can
+    // already hold, needing its own classification, its own snapshot field and
+    // its own fold decision, to answer a question a counter answers. See
+    // `src/science/scan.rs`'s `scanned_flag` docs for the mirror argument, and
+    // #1035's `FlagMirror` two paragraphs up for the precedent.
     "RawWorldSource", "WorldScriptRuntime",
 ];
 

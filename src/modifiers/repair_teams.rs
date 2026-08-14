@@ -106,6 +106,42 @@ impl RepairTeams {
         self.slots.iter().position(|s| matches!(s, TeamSlot::Idle))
     }
 
+    /// Which teams may be given new internal work, ascending, with `committed`
+    /// of them held back for an external operation (issue #1027).
+    ///
+    /// **The one place "which teams are available" is answered.** The AI
+    /// dispatcher and a human at the repair console both read it, so a
+    /// field-repair's commitment cannot be undercut by whichever path happened
+    /// not to know about it.
+    ///
+    /// The commitment eats from the **top** of the idle list, so the teams that
+    /// remain are still the lowest-numbered ones: the AI's deterministic visit
+    /// order is unchanged, and a ship with spare capacity behaves exactly as it
+    /// did before commitments existed. Held back rather than dispatched — a
+    /// committed team is still `Idle` in every readout, because it has not gone
+    /// anywhere. It is simply spoken for.
+    pub fn free_team_indices(&self, committed: u8) -> Vec<usize> {
+        let mut idle: Vec<usize> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| matches!(slot, TeamSlot::Idle).then_some(i))
+            .collect();
+        idle.truncate(idle.len().saturating_sub(usize::from(committed)));
+        idle
+    }
+
+    /// Whether `team_idx` is one of the `committed` teams held back for an
+    /// external operation (issue #1027), and so may not be given new work.
+    ///
+    /// Only ever true of an idle team: a team already out on an internal job was
+    /// never part of the commitment, and recalling or redirecting it stays the
+    /// console's business.
+    pub fn is_committed_to_operation(&self, team_idx: usize, committed: u8) -> bool {
+        matches!(self.slots.get(team_idx), Some(TeamSlot::Idle))
+            && !self.free_team_indices(committed).contains(&team_idx)
+    }
+
     /// Dispatch the team at `team_idx` to the given system.
     ///
     /// `display_name` is the human-readable label for the target used to
@@ -2359,6 +2395,71 @@ mod tests {
             ),
             "team 0 must be Repairing with display_name preserved as \
              Some(\"Helm\"), got {slot:?}"
+        );
+    }
+
+    // ── Issue #1027: teams committed to an external field-repair ──
+
+    #[test]
+    fn a_commitment_holds_back_teams_from_the_top_of_the_idle_list() {
+        let teams = RepairTeams::new(4);
+        assert_eq!(
+            teams.free_team_indices(0),
+            vec![0, 1, 2, 3],
+            "a ship committing nothing behaves exactly as it did before commitments existed"
+        );
+        assert_eq!(
+            teams.free_team_indices(2),
+            vec![0, 1],
+            "a commitment eats from the TOP, so what remains is still the lowest-numbered teams              and the AI's deterministic visit order is untouched"
+        );
+        assert!(
+            teams.free_team_indices(4).is_empty(),
+            "a ship that has committed every team has none left for its own damage — that is the              capacity-as-cost trade, not a bug"
+        );
+        assert!(
+            teams.free_team_indices(9).is_empty(),
+            "…and over-committing saturates rather than underflowing"
+        );
+    }
+
+    #[test]
+    fn a_commitment_only_ever_holds_back_idle_teams() {
+        let mut teams = RepairTeams::new(3);
+        teams.dispatch(0, sid("helm"), "Helm".into());
+        assert_eq!(
+            teams.free_team_indices(1),
+            vec![1],
+            "team 0 is out on an internal job and was never part of the commitment, so the              commitment comes out of the two that are still idle"
+        );
+        assert!(
+            !teams.is_committed_to_operation(0, 1),
+            "a team already travelling is not held by the operation — recalling or redirecting it              stays the console's business"
+        );
+        assert!(!teams.is_committed_to_operation(1, 1));
+        assert!(
+            teams.is_committed_to_operation(2, 1),
+            "the highest-numbered idle team is the one spoken for"
+        );
+    }
+
+    #[test]
+    fn a_committed_team_is_still_idle_in_every_readout() {
+        // The teams never leave the hull. Nothing is dispatched, nothing
+        // travels, and the console goes on showing three idle teams — they are
+        // simply not available to be sent anywhere.
+        let teams = RepairTeams::new(3);
+        assert!(
+            teams
+                .slots()
+                .iter()
+                .all(|slot| matches!(slot, TeamSlot::Idle)),
+            "precondition"
+        );
+        assert_eq!(teams.free_team_indices(3).len(), 0);
+        assert!(
+            teams.slots().iter().all(|slot| matches!(slot, TeamSlot::Idle)),
+            "asking which teams are free must not MOVE any of them: the commitment is a              reservation the readers honour, not a dispatch, which is what lets it be derived              fresh from the live hold every tick and released by the hold simply settling"
         );
     }
 }

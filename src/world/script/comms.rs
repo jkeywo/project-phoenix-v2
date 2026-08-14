@@ -56,6 +56,7 @@
 
 use rhai::{Dynamic, Map};
 
+use crate::world::config::{CommsDialogueNode, CommsResponse};
 use crate::world::flags::FlagStore;
 use crate::world::script::engine::RuntimeHost;
 use crate::world::script::schedule::{CallEffects, SchedClock, TickBudget};
@@ -147,6 +148,51 @@ fn read_response(value: Dynamic, index: usize) -> Result<ScriptDialogueResponse,
         on_pick,
         important,
     })
+}
+
+/// Project a materialized script node onto the wire dialogue shape, returning
+/// the [`CommsDialogueNode`] to show and the parallel `on_pick` fn names
+/// (issue #984).
+///
+/// The ONE place a script node meets the comms wire vocabulary, and pure —
+/// no Bevy, no host, no clock (AGENTS.md rule 10) — so both the open path
+/// (`comms::scripted::open_scripted_comms_threads`) and the response path
+/// (`console::comms::server::handle_respond_to_message`) project identically.
+///
+/// The projected node carries `actions: []` and `follow_up: None` **by
+/// construction**: a scripted response's effects and its follow-up both come
+/// from calling `on_pick`, never from the node. That is what keeps every
+/// existing reader of `ActiveDialogue::current_node` — the wire projection
+/// ([`response_views`](crate::comms::content::response_views)), the AI
+/// response policy's `responses.len()` / `.important` inputs, the handler's
+/// bounds check — working unchanged on a scripted thread. `speaker` is `None`
+/// for the same reason a scripted node has no `trigger`: who is calling is
+/// metadata on the OPEN (`OpenCommsRequest::display_name`), not on the node.
+///
+/// The returned `Vec<String>` is index-parallel to the node's `responses`, so
+/// the index a player submits addresses both the button they pressed and the fn
+/// that answers it.
+pub fn project_node(node: &ScriptDialogueNode) -> (CommsDialogueNode, Vec<String>) {
+    let mut responses = Vec::with_capacity(node.responses.len());
+    let mut on_pick = Vec::with_capacity(node.responses.len());
+    for r in &node.responses {
+        responses.push(CommsResponse {
+            text: r.text.clone(),
+            important: r.important,
+            actions: Vec::new(),
+            follow_up: None,
+        });
+        on_pick.push(r.on_pick.clone());
+    }
+    (
+        CommsDialogueNode {
+            body: node.message.clone(),
+            responses,
+            speaker: None,
+            trigger: None,
+        },
+        on_pick,
+    )
 }
 
 /// Enter a dialogue node: run the fn named `fn_name` and materialize both

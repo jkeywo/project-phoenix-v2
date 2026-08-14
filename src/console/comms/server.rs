@@ -301,6 +301,7 @@ pub(crate) fn handle_hail(
                 ActiveDialogue {
                     current_node: f.node.clone(),
                     thread_id: thread_id.clone(),
+                    script: None,
                 },
             );
 
@@ -625,6 +626,7 @@ pub(crate) fn handle_respond_to_message(
                     ActiveDialogue {
                         current_node: follow_up.clone(),
                         thread_id,
+                        script: None,
                     },
                 );
             }
@@ -3633,6 +3635,7 @@ mod tests {
                         trigger: None,
                     },
                     thread_id: id.clone(),
+                    script: None,
                 },
             );
         (id, sender_uuid.to_string())

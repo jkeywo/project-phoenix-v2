@@ -208,6 +208,12 @@ impl Plugin for CommsWorldPlugin {
                     inject_comms_templates
                         .after(crate::world::server::collect_world_events)
                         .before(crate::world::server::tick_trigger_pipeline),
+                    // The scripted-thread drain (issue #984): after BOTH script
+                    // call sites have queued their opens, before the delayed
+                    // queue a dialogue fn's own `in_seconds` effect joins.
+                    crate::comms::scripted::open_scripted_comms_threads
+                        .after(crate::world::server::tick_script_callbacks)
+                        .before(crate::world::server::tick_delayed_actions),
                 )
                     .in_set(crate::sim_sets::SimSet::Physics),
             );
@@ -486,6 +492,7 @@ pub(crate) fn tick_pending_follow_ups(
             ActiveDialogue {
                 current_node: pfu.node.clone(),
                 thread_id: pfu.thread_id.clone(),
+                script: None,
             },
         );
     }
@@ -861,6 +868,7 @@ pub(crate) fn inject_comms_templates(
             ActiveDialogue {
                 current_node: fc.node.clone(),
                 thread_id: thread_id.clone(),
+                script: None,
             },
         );
 

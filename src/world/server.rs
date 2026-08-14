@@ -2496,7 +2496,7 @@ pub(crate) fn apply_dispatch_result(
 ///
 /// Registered after `tick_trigger_pipeline` in `SimSet::Physics` so that it sees
 /// the same tick's `mission_clock_anchor_secs` anchor.
-fn tick_delayed_actions(
+pub(crate) fn tick_delayed_actions(
     mut runtime: ResMut<WorldContentRuntime>,
     time: Option<Res<bevy::time::Time>>,
     mut objectives: ResMut<ObjectiveManagerRes>,
@@ -2643,7 +2643,7 @@ fn tick_delayed_actions(
 /// script-free digest to stay byte-identical. `drain_due` returns due calls in
 /// authored order and every peer drains the same calls on the same tick (`fire_tick`
 /// is a deterministic function of the tick a callback was scheduled on).
-fn tick_script_callbacks(
+pub(crate) fn tick_script_callbacks(
     mut script: ScriptRuntimeParams,
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,

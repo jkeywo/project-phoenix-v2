@@ -5,11 +5,17 @@
 //! declare a `[comms]` block in their TOML, plus the pure hail-roster
 //! derivation (`roster`) that unions entity-derived contacts into the
 //! declarative `[[comms]]` roster (issue #985).
+//!
+//! `scripted` is the Rhai front-end's half of the applier (issue #984): it
+//! materialises `ctx.effects.open_comms(#{…})` requests into live threads. It
+//! is kept apart from `server` because the M7 collapse deletes the declarative
+//! front-end and this module is what survives it.
 
 pub mod component;
 pub mod content;
 pub mod range;
 pub mod roster;
+pub mod scripted;
 pub mod server;
 
 pub use component::{CommsHailable, CommsRange};

@@ -13,6 +13,7 @@
 //   * `CommsTemplateState` — per-template fired flag.
 //   * `FiredCommsTemplate` — evaluation result for one fired template.
 //   * `ActiveDialogue` — dialogue state machine entry.
+//   * `ScriptedDialogue` — the script half of one, for a Rhai-driven thread.
 //   * `PendingFollowUp` — a queued follow-up message awaiting its trigger.
 //   * `OpenCommsRequest` — a scripted request to open a thread.
 //   * `evaluate_comms_templates` — single-shot template evaluator.
@@ -86,10 +87,48 @@ pub struct FiredCommsTemplate {
 #[derive(Clone, Debug)]
 pub struct ActiveDialogue {
     /// The current dialogue node being presented.
+    ///
+    /// A SCRIPTED thread stores the *projected* node here
+    /// ([`project_node`](crate::world::script::comms::project_node)): the
+    /// authored body and response texts, with `actions: []` and
+    /// `follow_up: None`, because a scripted response's effects and follow-up
+    /// come from calling its `on_pick` fn, not from the node. Every existing
+    /// reader — the wire projection, the AI's `responses.len()` /
+    /// `.important` policy inputs, the bounds check — therefore sees exactly
+    /// the shape it saw before scripted threads existed.
     pub current_node: CommsDialogueNode,
     /// Thread identifier shared by all messages in this dialogue tree.
     /// Set when the first message is injected; follow-ups inherit the same id.
     pub thread_id: String,
+    /// `Some` when this thread is driven by a Rhai dialogue tree (issue #984),
+    /// `None` for a declarative `[[comms]]` thread. The two stores are disjoint:
+    /// nothing declarative reads this field, and the scripted arm of
+    /// `handle_respond_to_message` is the only thing that writes through it.
+    pub script: Option<ScriptedDialogue>,
+}
+
+/// The script half of an [`ActiveDialogue`] — what a scripted thread needs to
+/// answer the next `RespondToMessage` (issue #984).
+///
+/// Strings only, so the dialogue state round-trips through a save (issue #864)
+/// exactly as [`OpenCommsRequest`] does: no `AST`, no closure, no `Entity`. A
+/// restore binds against `WorldScriptRuntime::content_hash`, so a save whose
+/// scripts changed refuses rather than resolving `node_fn` against a different
+/// tree.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptedDialogue {
+    /// Content-relative path of the unit defining this thread's node fns — the
+    /// same `(script_path, fn_name)` key a
+    /// [`ScheduledCall`](crate::world::script::schedule::ScheduledCall) carries,
+    /// and for the same reason (short and anonymous fn names are not unique
+    /// across units).
+    pub script_path: String,
+    /// The fn that produced the node currently shown.
+    pub node_fn: String,
+    /// The `on_pick` fn name for each response, PARALLEL to
+    /// [`ActiveDialogue::current_node`]'s `responses` — so the index the player
+    /// submits addresses both the shown button and the fn that answers it.
+    pub on_pick: Vec<String>,
 }
 
 /// A script's request to open a comms thread — what

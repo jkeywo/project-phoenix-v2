@@ -74,7 +74,7 @@ deleted the declarative `[[comms]]` front-end this page used to document at
 length — the root template, `[[comms.response]]`, the recursive
 `[comms.response.follow_up]` tree, the auto-chained `[comms.follow_up]`, and the
 per-follow-up `trigger` that gated injection behind a world condition. See
-`docs/toml-authoring-guide.md` §1.6 for the current form; in outline:
+`docs/toml-authoring-guide.md` §1.7 for the current form; in outline:
 
 ```rhai
 on_hailed("Research Outpost", "on_outpost_hailed");

@@ -288,7 +288,7 @@ pub(crate) fn open_scripted_comms_threads(
                     req.root_fn,
                     req.script_path
                 );
-                (effects, None, true)
+                (*effects, None, true)
             }
             Err(err @ (EnterError::Unresolved | EnterError::Refused)) => {
                 bevy::log::warn!(

@@ -1866,3 +1866,241 @@ fn a_save_written_before_comms_state_is_refused_on_format() {
 // that reported them — went with it. `SNAPSHOT_FORMAT` moved to 4 for exactly
 // that reason: a format-3 payload could still contain them, and reading one
 // here would silently drop state this build has nowhere to put.
+
+// ── Named mission deadlines across a resume (issue #1024) ────────────────────
+
+const DEADLINES: &str = "tests/fixtures/worlds/deadline_resume.toml";
+
+/// Frames the deadline world runs before its capture: past the ~tick-60 timer
+/// that slips one deadline and cancels the other, and short of every fire tick.
+const DEADLINE_CAPTURE_AT: u64 = 150;
+
+/// Frames both worlds are stepped after the restore — enough to carry them
+/// across the slipped deadline's fire tick (~tick 480) and out the other side.
+const DEADLINE_CONTINUE_FOR: u64 = 400;
+
+fn deadline_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: DEADLINES.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+fn live_deadlines(app: &bevy::prelude::App) -> &project_phoenix::world::deadlines::DeadlineTable {
+    &app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .deadlines
+}
+
+/// A slipped deadline and a cancelled one both survive a resume, and the
+/// resumed world fires exactly what the live one fires, on the same tick.
+///
+/// The capture sits between the mutations and every fire tick. What makes the
+/// measurement discriminating is that the fresh app restored into has run its
+/// OWN arming — so before the restore it holds `window_opens` at its authored
+/// 5 s and `stand_down` still pending, with two calls queued where the capture
+/// has one. Every claim below is therefore about what the payload carried, not
+/// about what the bootstrap happened to redo.
+#[test]
+fn a_slipped_and_a_cancelled_deadline_both_survive_a_resume() {
+    use project_phoenix::world::deadlines::DeadlineState;
+
+    let mut live = boot(&deadline_args());
+    step(&mut live, DEADLINE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+    let scenario = scenario_of(&payload);
+
+    // The capture is genuinely mid-flight: the slip has happened, the cancel has
+    // happened, and nothing has fired.
+    let captured_window = scenario
+        .deadlines
+        .get("window_opens")
+        .expect("the slipped deadline is captured")
+        .clone();
+    assert_eq!(captured_window.state, DeadlineState::Pending);
+    assert!(
+        captured_window.due_tick > payload.tick,
+        "the captured deadline is still owed: due {} vs capture tick {}",
+        captured_window.due_tick,
+        payload.tick
+    );
+    assert_eq!(
+        scenario.deadlines.get("stand_down").map(|d| d.state),
+        Some(DeadlineState::Cancelled),
+        "and the cancelled one is captured as cancelled"
+    );
+    assert_eq!(
+        scenario.script_callbacks.len(),
+        1,
+        "one queued call — the cancelled deadline's was retracted, not merely marked"
+    );
+    assert_eq!(
+        world_counter(&live, "window_fired"),
+        0,
+        "nothing has fired before the capture"
+    );
+
+    let mut resumed = boot_to_restore_point(&deadline_args(), &payload);
+
+    // The bootstrap's own state, before the restore overwrites it. The restore
+    // point is reached while the world exists but the mission has not started,
+    // so the fresh app has armed NOTHING — every claim below is therefore about
+    // what the payload carried, with no bootstrap value for it to agree with by
+    // accident.
+    assert!(
+        live_deadlines(&resumed).records.is_empty()
+            && !live_deadlines(&resumed).armed,
+        "precondition: the fresh app is short of the mission's first tick, so it          has armed no deadline of its own"
+    );
+    assert_eq!(
+        queued_callbacks(&resumed),
+        0,
+        "precondition: and has queued no call of its own"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        live_deadlines(&resumed).get("window_opens"),
+        Some(&captured_window),
+        "the restore takes the captured record whole — slipped due tick, state, \
+         and the queued call it is waiting on"
+    );
+    assert_eq!(
+        live_deadlines(&resumed).get("stand_down").map(|d| d.state),
+        Some(DeadlineState::Cancelled),
+        "a cancelled deadline stays cancelled rather than coming back armed"
+    );
+    assert!(
+        live_deadlines(&resumed).armed,
+        "the armed latch travels too, so the arming system does not re-arm over it"
+    );
+    assert_eq!(
+        queued_callbacks(&resumed),
+        1,
+        "the capture's single queued call is what the resumed world is waiting on"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did"
+    );
+
+    // Both worlds now step across the slipped deadline's fire tick together.
+    // `arm_mission_deadlines` runs again on the resumed world's way through —
+    // the mission's first tick is still ahead of it — and the restored `armed`
+    // latch is the only thing stopping it arming a second, authored-time copy
+    // over the top of the capture's.
+    step(&mut live, DEADLINE_CONTINUE_FOR);
+    step(&mut resumed, DEADLINE_CONTINUE_FOR);
+
+    assert_eq!(
+        live_deadlines(&resumed).records.len(),
+        2,
+        "the arming system did not re-arm over the restored table"
+    );
+
+    assert_eq!(
+        world_counter(&live, "window_fired"),
+        1,
+        "precondition: the live world's slipped deadline fired inside the window"
+    );
+    assert_eq!(
+        world_counter(&resumed, "window_fired"),
+        1,
+        "and the resumed world fires it exactly once — not twice, not never"
+    );
+    assert_eq!(world_counter(&live, "stand_down_fired"), 0);
+    assert_eq!(
+        world_counter(&resumed, "stand_down_fired"),
+        0,
+        "the cancelled deadline never fires on either side of the resume"
+    );
+    assert_eq!(
+        phase_of(&resumed),
+        phase_of(&live),
+        "the deadline's own effect — a declared victory — lands on both"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        world_digest(live.world()),
+        "and the two worlds are still standing in the same place afterwards"
+    );
+}
+
+/// The deadline table round-trips through the save's RON, and a world that
+/// authors no deadline writes nothing deadline-shaped at all.
+#[test]
+fn the_deadline_table_round_trips_and_a_deadline_free_world_writes_none() {
+    let mut live = boot(&deadline_args());
+    step(&mut live, DEADLINE_CAPTURE_AT);
+    let payload = capture(live.world());
+
+    let run = run_for(
+        payload.clone(),
+        world_digest(live.world()),
+        SEED,
+        DEADLINES,
+        current_versions(DEADLINES),
+    );
+    let store = FileStore::new(scratch("deadline-roundtrip"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let reloaded = load_from(&store, "autosave", &current_versions(DEADLINES))
+        .expect("the save reloads")
+        .snapshot
+        .expect("a saved game carries a snapshot");
+    assert_eq!(
+        scenario_of(&reloaded.state).deadlines,
+        scenario_of(&payload).deadlines,
+        "every field a run moves — due tick, state, and the queued call — \
+         round-trips through RON"
+    );
+
+    // The compatibility half: the duel authors no `[[deadline]]`, so its payload
+    // is shaped exactly as it was before this slice (the field skips when empty).
+    let mut quiet = duel();
+    step(&mut quiet, 120);
+    let quiet_payload = capture(quiet.world());
+    assert!(
+        scenario_of(&quiet_payload).deadlines.is_empty(),
+        "a world with no authored deadlines captures no deadline state"
+    );
+}
+
+/// A save written before deadline state was recorded is refused on **format**.
+///
+/// Every field [`ScenarioState::deadlines`] added carries `#[serde(default)]`,
+/// so the older payload still parses — which is exactly why the constant had to
+/// move. The payload cannot tell "this world authored no deadlines" from "this
+/// save predates deadlines being recorded", and restoring the second one re-arms
+/// every deadline the run had cancelled and rewinds every slip. `Versions::check`
+/// is what refuses it, and it names the dimension.
+#[test]
+fn a_save_written_before_deadline_state_is_refused_on_format() {
+    let mut live = boot(&deadline_args());
+    step(&mut live, DEADLINE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(DEADLINES);
+
+    // Recorded under the PREVIOUS format, everything else untouched, so the only
+    // reason to refuse is the one being tested.
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, DEADLINES, previous);
+    let store = FileStore::new(scratch("deadline-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}

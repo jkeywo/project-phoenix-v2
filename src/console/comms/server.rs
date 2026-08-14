@@ -559,7 +559,7 @@ pub(crate) fn handle_respond_to_message(
             Some(Ok(pair)) => pair,
             Some(Err(crate::world::script::comms::EnterError::Shape { effects, message })) => {
                 malformed = Some(message);
-                (effects, None)
+                (*effects, None)
             }
             Some(Err(err)) => {
                 bevy::log::warn!("handle_respond_to_message: on_pick '{on_pick_fn}' {err}");

@@ -65,7 +65,8 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | `[global]` | table | `{ seed = 42 }` | Global generation params. |
 | `[anchors]` | table | `{}` | Named `[x,y,z]` waypoints referenced by `[[entity]] anchor = "..."` and AI patrols. |
 | `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Single block type for all spawnables; named entries (with `name = "..."`) are the ones a script can reference. |
-| `[script]` | table | none | Scenario logic — event registrations, handler fns and comms dialogue nodes (see §1.5, §1.6). |
+| `[script]` | table | none | Scenario logic — event registrations, handler fns and comms dialogue nodes (see §1.5, §1.7). |
+| `[[deadline]]` | array of tables | `[]` | Named mission deadlines the crew can be shown and script can slip or cancel (see §1.6). |
 | `[ambient_light]` | table | none | World ambient light override; omitted sub-fields fall back to renderer constants. |
 | `[dust]` | table | none | Ambient dust / velocity-mote effect (see §1.3). |
 
@@ -322,6 +323,8 @@ A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedu
 | `ctx.flags.name = n` / `ctx.flags.increment(name, by)` | World flags. Never `+=` on a `flags` member — the loader rejects it. |
 | `ctx.schedule.in_seconds(n, effect)` | Defers ONE effect by `n` world-elapsed seconds (the old per-action `delay_secs`). |
 | `ctx.schedule.after(n, \|ctx\| { … })` | Defers a whole closure. |
+| `ctx.deadlines.remaining(id)` / `state(id)` | Read a named mission deadline — see §1.6. |
+| `ctx.deadlines.slip(id, secs)` / `cancel(id)` | Move a deadline out (or in), or call it off. |
 
 Conditional effects are ordinary Rhai control flow — an `if` on a flag read —
 rather than a per-action `when` predicate. A trigger-level gate is still a
@@ -330,7 +333,58 @@ rather than a per-action `when` predicate. A trigger-level gate is still a
 **Removed actions** (no longer supported): `load_scenario`, `unload_scenario`.
 Use `load_world` and `unload_world` for runtime composition.
 
-### 1.6 Comms threads
+### 1.6 Named mission deadlines
+
+A deadline is a *named thing in the world* — `transfer_window_opens`,
+`stabiliser_failure` — rather than an anonymous timer. Declare the data in
+`[[deadline]]` blocks and name the fn each one runs from `[script]`:
+
+```toml
+[[deadline]]
+id = "transfer_window_opens"      # unique in the world; script names it by this
+label = "world.fs.deadline.transfer_window.label"   # a strings.csv id, never English
+due_secs = 600                    # whole seconds from the mission's FIRST tick
+visible = true                    # default false — the crew never sees it otherwise
+
+[script]
+setup = """
+on_deadline("transfer_window_opens", "on_transfer_window");
+
+fn on_transfer_window(ctx) { … }
+
+fn on_strike_settled(ctx) {
+    if ctx.deadlines.remaining("transfer_window_opens") < 60 {
+        ctx.deadlines.slip("transfer_window_opens", 120);   // buy two minutes
+    }
+    if ctx.deadlines.state("stabiliser_failure") == "pending" {
+        ctx.deadlines.cancel("stabiliser_failure");         // call it off entirely
+    }
+}
+"""
+```
+
+* `due_secs` is measured from the first simulation tick of the **mission**, not
+  from app start, so a long lobby costs a mission none of its deadlines.
+* **Every `[[deadline]]` needs exactly one `on_deadline`, and vice versa.** Both
+  mismatches are load-time errors that block the world, because a deadline with
+  no handler cannot be armed at all — its failure would otherwise be a countdown
+  reaching zero and nothing happening. A deadline you want purely as a countdown
+  still gets a handler; write an empty one.
+* A duplicate `id` is a load-time error naming both entries.
+* `remaining(id)` is whole seconds, rounded up: `0` once it has fired, `-1` once
+  cancelled or for an id no block declares. `state(id)` is `"pending"` /
+  `"fired"` / `"cancelled"` / `"unknown"` and is the unambiguous read.
+* `slip` is measured from the deadline's own due time, so slips accumulate; a
+  negative `secs` pulls a deadline IN, never past the present tick. A slipped
+  deadline does **not** also fire at its old time, and a cancelled one never
+  fires. Slipping or cancelling one that has already fired or been cancelled is
+  a no-op.
+* Reads inside one handler see that handler's own writes.
+* `visible = true` deadlines appear as a countdown on the destroyer captain
+  console, counted down server-side. Everything else stays the mission's
+  business.
+
+### 1.7 Comms threads
 
 A comms thread is opened by a handler and authored as one fn per dialogue node:
 

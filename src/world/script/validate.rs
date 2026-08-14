@@ -992,4 +992,102 @@ mod tests {
         assert_eq!(findings[0].source.reference, "gone_a");
         assert_eq!(findings[1].source.reference, "gone_c");
     }
+
+    // ── Named-deadline pairing (issue #1024) ─────────────────────────────────
+
+    fn deadline_world(ids: &[&str]) -> toml::Value {
+        let blocks: String = ids
+            .iter()
+            .map(|id| format!("[[deadline]]\nid = \"{id}\"\ndue_secs = 60\n\n"))
+            .collect();
+        toml::from_str(&blocks).expect("the fixture world parses")
+    }
+
+    fn handler(deadline_id: &str, handler: &str) -> crate::world::deadlines::DeadlineHandler {
+        crate::world::deadlines::DeadlineHandler {
+            deadline_id: deadline_id.to_string(),
+            handler: handler.to_string(),
+            source_path: "w.toml#script.setup".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_paired_deadline_and_handler_produce_no_finding() {
+        let defined: BTreeSet<String> = ["on_window".to_string()].into_iter().collect();
+        let findings = validate_deadline_handlers(
+            "w.toml",
+            &deadline_world(&["window"]),
+            &[handler("window", "on_window")],
+            &defined,
+        );
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn an_on_deadline_naming_an_undefined_fn_is_an_error() {
+        // The same cross-reference every other handler name gets.
+        let findings = validate_deadline_handlers(
+            "w.toml",
+            &deadline_world(&["window"]),
+            &[handler("window", "gone")],
+            &BTreeSet::new(),
+        );
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].category, UNRESOLVED_SCRIPT_FN);
+        assert_eq!(findings[0].source.reference, "gone");
+        assert!(findings[0].is_error());
+    }
+
+    #[test]
+    fn an_on_deadline_naming_an_unauthored_deadline_is_an_error() {
+        let defined: BTreeSet<String> = ["on_window".to_string()].into_iter().collect();
+        let findings = validate_deadline_handlers(
+            "w.toml",
+            &deadline_world(&["window"]),
+            &[handler("windwo", "on_window")],
+            &defined,
+        );
+        // Two: the typo names no block, AND the real block is left unclaimed.
+        // Both are reported, because a designer reading only the first would fix
+        // half of a two-sided mistake.
+        assert_eq!(findings.len(), 2, "{findings:?}");
+        assert!(findings.iter().all(|f| f.category == DEADLINE_NOT_PAIRED));
+        assert_eq!(findings[0].source.reference, "windwo");
+        assert_eq!(findings[1].source.reference, "window");
+    }
+
+    #[test]
+    fn an_authored_deadline_with_no_handler_is_an_error() {
+        // Not "a deadline that does nothing" — a deadline that cannot be ARMED,
+        // because arming it means queuing the call it runs. Left as a warning it
+        // would surface mid-mission as a countdown reaching zero and nothing
+        // happening, which no runtime check can report.
+        let defined: BTreeSet<String> = ["on_window".to_string()].into_iter().collect();
+        let findings = validate_deadline_handlers(
+            "w.toml",
+            &deadline_world(&["window", "collapse"]),
+            &[handler("window", "on_window")],
+            &defined,
+        );
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].category, DEADLINE_NOT_PAIRED);
+        assert_eq!(findings[0].source.reference, "collapse");
+        assert!(
+            findings[0].message.contains("on_deadline"),
+            "the message says how to fix it"
+        );
+        assert!(findings[0].is_error());
+    }
+
+    #[test]
+    fn a_world_with_neither_deadlines_nor_registrations_is_silent() {
+        // Every shipped world today. The pass must be a no-op for them.
+        let findings = validate_deadline_handlers(
+            "w.toml",
+            &toml::Value::Table(toml::map::Map::new()),
+            &[],
+            &BTreeSet::new(),
+        );
+        assert!(findings.is_empty(), "{findings:?}");
+    }
 }

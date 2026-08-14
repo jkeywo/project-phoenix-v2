@@ -307,6 +307,22 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // covers it. Registered in the census run even for a script-free world (the
     // systems reference them via `Option<Res>` / `Option<ResMut>`), but never
     // instantiated there.
+    //
+    // Issue #1024's named mission deadlines are covered by these same two lines
+    // and by `WorldContentRuntime` above, and register NOTHING of their own —
+    // which is the whole reason the state was put where it was. The live table
+    // (`DeadlineTable`, with its `DeadlineRecord`/`DeadlineState`) is a FIELD on
+    // `WorldContentRuntime`; the `on_deadline` declarations
+    // (`Vec<DeadlineHandler>`) are a FIELD on `WorldScriptRuntime`; and a
+    // deadline's deferred firing is an ordinary `ScheduledCall` on the
+    // `PendingCallbacks` this comment already accounts for. So the slice adds no
+    // `#[derive(Resource)]` and no `#[derive(Component)]`, nothing new appears in
+    // the registry this guard scans, and both baseline entries keep covering
+    // exactly what they did before — with more state behind them. See
+    // `src/world/deadlines.rs` for why a deadline is a record over the existing
+    // queue rather than a scheduler (and a resource) of its own, and
+    // pasm/spec/architecture/scenario-scripting.yaml's `mission-deadline-state`
+    // entity for the `implementation.symbols` naming those Rust types.
     "RawWorldSource", "WorldScriptRuntime",
 ];
 

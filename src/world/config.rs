@@ -5169,4 +5169,85 @@ faction = "Harrow"
         let err = actions(toml).expect_err("must reject");
         assert!(err.contains("enemy"), "error must mention enemy: {err}");
     }
+
+    // ── Named mission deadlines (issue #1024) ────────────────────────────────
+
+    #[test]
+    fn parse_world_reads_the_deadline_table_in_authored_order() {
+        let toml = r#"
+[[deadline]]
+id = "transfer_window_opens"
+label = "world.fs.deadline.transfer_window.label"
+due_secs = 600
+visible = true
+
+[[deadline]]
+id = "stabiliser_failure"
+due_secs = 900
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.deadlines.len(), 2);
+        assert_eq!(cfg.deadlines[0].id, "transfer_window_opens");
+        assert_eq!(cfg.deadlines[0].due_secs, 600);
+        assert!(cfg.deadlines[0].visible);
+        // Both optional fields default: a deadline the crew never sees needs no
+        // label, and `visible` is false until a mission says otherwise.
+        assert_eq!(cfg.deadlines[1].id, "stabiliser_failure");
+        assert!(cfg.deadlines[1].label.is_empty());
+        assert!(
+            !cfg.deadlines[1].visible,
+            "a deadline is the mission's business until it says otherwise"
+        );
+    }
+
+    #[test]
+    fn parse_world_refuses_a_duplicate_deadline_id_naming_both_entries() {
+        // The id is the ONLY handle script has on a deadline
+        // (`ctx.deadlines.slip("id", …)`), so a duplicate is not a cosmetic
+        // clash — it is two records competing for every mutation. The refusal
+        // names both entries so a designer sees which two lines to reconcile
+        // rather than which one silently won.
+        let toml = r#"
+[[deadline]]
+id = "window"
+due_secs = 600
+
+[[deadline]]
+id = "other"
+due_secs = 700
+
+[[deadline]]
+id = "window"
+due_secs = 900
+"#;
+        let err = parse_world(toml).expect_err("a duplicate deadline id must be refused");
+        assert!(err.contains("window"), "names the id: {err}");
+        assert!(
+            err.contains("#0") && err.contains("#2"),
+            "names BOTH entries: {err}"
+        );
+        assert!(
+            err.contains("600") && err.contains("900"),
+            "and carries each one's due time so they can be told apart: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_refuses_an_empty_deadline_id() {
+        let toml = r#"
+[[deadline]]
+id = "  "
+due_secs = 600
+"#;
+        let err = parse_world(toml).expect_err("an unaddressable deadline must be refused");
+        assert!(err.contains("empty id"), "{err}");
+    }
+
+    #[test]
+    fn a_world_with_no_deadline_table_has_none() {
+        // The compatibility half: every shipped world today authors no
+        // `[[deadline]]`, and must parse to exactly what it did before.
+        let cfg = parse_world("[global]\nseed = 1\n").expect("must parse");
+        assert!(cfg.deadlines.is_empty());
+    }
 }

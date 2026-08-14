@@ -271,3 +271,102 @@ entities:
         - src/entities/config_cache.rs
         - src/content_ledger.rs
       symbols: [load_world_scripts, OverlayScriptResolver]
+
+  - component: mission-deadline-vocabulary
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Named Mission Deadlines — Authoring, Script API and Readout
+      summary: "Issue #1024 (parent #851, Falling Skyway). A scenario declares deadlines that are NAMED THINGS IN THE WORLD rather than anonymous timers: a `[[deadline]]` block carries `id` / `label` (a strings.csv id) / `due_secs` / `visible`, and a `[script]` block names the fn each one runs with a loading-engine `on_deadline(\"id\", \"handler\")` — the same declaration shape `on_timer` uses, following M7's direction that TOML declares DATA and script registers BEHAVIOUR. At runtime `ctx.deadlines` is the first genuinely read/write `ctx` handle: `remaining(id)` returns whole seconds (`0` once fired, `-1` once cancelled or unknown), `state(id)` returns `pending`/`fired`/`cancelled`/`unknown`, and `slip(id, secs)` / `cancel(id)` mutate. Visible deadlines reach `CaptainBlackboard.deadlines` with `remaining_secs` computed SERVER-SIDE against `SimTick`, and `<ph-deadline-list>` on the destroyer captain console formats that number without running a clock of its own."
+      rationale:
+        - "A deadline is authored in TOML but NAMED by script, so the two halves can disagree in two directions. Both are load-time errors on the existing authoring-validation channel, so the atomic activation gate blocks the world: `on_deadline` naming a block that does not exist, and a `[[deadline]]` block no `on_deadline` claims. The second is an error rather than a shrug because a deadline without a handler cannot be ARMED — arming it means queuing the call it runs — and the failure would otherwise surface mid-mission as a countdown reaching zero and nothing happening, which no runtime check can report. An author who wants a pure countdown writes an empty handler, which says so."
+        - "Duplicate ids are refused by `parse_world` itself, naming both entries with their due times. The id is the only handle script has on a deadline, so a duplicate is not a cosmetic clash — it is two records competing for every `slip`/`cancel`."
+        - "`Deadlines` follows `Flags`' snapshot-plus-overlay shape rather than inventing one: a per-call snapshot of the live table, mutated in place so a `remaining` read AFTER a `slip` in the same call sees the new time, with the mutations recorded separately for the host to apply for real. Read verbs are plain fns rather than an indexer because a deadline has two readable properties (remaining and state) that answer different questions, and an indexer could only serve one."
+        - "Mutations drain as a FIFTH `CallEffects` field for the reason `comms_opens` is a fourth: a deadline mutation edits `WorldScriptRuntime::pending_callbacks`, a queue the generic action applier holds no handle on. Buffered, never deferred — the four sites that consume a call's effects (trigger pipeline, callback drain, and both comms answer paths) replay them in the same tick at the same point as the call's other effects, and the buffer is dropped whole on the failure path so a raising handler slips nothing."
+        - "Arming happens on the first simulation tick of the MISSION, chained straight after `anchor_mission_clock` — #960's fix applied to this vocabulary from the outset. A ninety-second lobby must not retire a mission's deadlines before the crew has the con."
+        - "The countdown is computed server-side and re-published every tick rather than interpolated by the client. A client-side clock would drift away from the tick the deadline actually fires on, and would show two players different numbers off the same mission."
+    architecture:
+      kind: domain-model
+      authority: authoritative
+      owns: [mission-deadline-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/deadlines.rs
+        - src/world/script/deadlines.rs
+        - src/world/config.rs
+        - src/world/script/validate.rs
+        - src/world/server.rs
+        - src/console/captain/server.rs
+        - src/core/messages.rs
+        - gui/components/ph-deadline-list.js
+        - gui/destroyer/captain.html
+        - assets/worlds/probe_deadlines.toml
+      symbols:
+        - Deadline
+        - DeadlineHandler
+        - Deadlines
+        - register_deadlines
+        - register_deadline_builders
+        - arm_mission_deadlines
+        - apply_deadline_changes
+        - validate_deadline_handlers
+        - DEADLINE_NOT_PAIRED
+        - DeadlineSnapshot
+      tests: [cargo test, "cargo test --features headless --test headless_runner a_slipped_deadline"]
+    evidence:
+      - kind: test
+        reference: "tests/headless_runner.rs::a_slipped_deadline_fires_at_its_new_tick_and_a_cancelled_one_never_fires"
+        summary: "`probe_deadlines.toml` driven for twenty mission seconds: script reads 8 s left two seconds into a ten-second deadline, slips it by five, and cancels another. The slipped deadline is PENDING and unfired across every tick of the span its original due tick falls in, then fires exactly once on its new tick; the cancelled one never fires though its authored tick passes; the untouched control fires on its authored tick; and `pending_callbacks` is EMPTY at the end, which is what proves the retraction was real rather than merely recorded."
+
+  - state: mission-deadline-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Mission Deadline State
+      summary: "The live state of every `[[deadline]]` a world authored: id, crew-facing label id, visibility, the MUTABLE absolute due `SimTick`, pending/fired/cancelled, and the exact `ScheduledCall` currently queued for it. Held as a `DeadlineTable` FIELD on `WorldContentRuntime`, with the `on_deadline` declarations as a `Vec<DeadlineHandler>` field on `WorldScriptRuntime`. Neither is a resource of its own, so the slice registers no new component or resource — see the `RawWorldSource`/`WorldScriptRuntime` baseline note in tests/authoritative_state_enumeration.rs, which accounts for it."
+      rationale:
+        - "IT IS A RECORD, NOT A SCHEDULER. Issue #1024 forbids a second deferred-work queue, and this is how that is honoured: arming a deadline pushes ONE ordinary `ScheduledCall` onto `WorldScriptRuntime::pending_callbacks` — the existing `SimTick`-keyed queue `tick_script_callbacks` already drains — and remembers it on the record. Firing IS that drain. No system this slice adds walks the table looking for due work; `arm_mission_deadlines` runs its body exactly once per mission, and `note_fired` is a lookup inside a drain that already happens. The record exists to give that queued call the name, label, visibility and mutable due tick the raw `(fire_tick, script_path, fn_name)` key cannot carry."
+        - "Slip and cancel are therefore EDITS to that queue, not a second source of truth reconciled against it later. `DeadlineTable::apply` returns a `QueueEdit` naming the exact call to retract and the exact one to push in its place, and `PendingCallbacks::retract` takes the first equal entry out. A slipped deadline is not queued at its old tick at all, so there is nothing left to suppress. `retract` takes the FIRST equal entry rather than all of them because two deadlines may legitimately share a handler fn and a fire tick, producing equal keys."
+        - "`note_fired` runs BEFORE dispatch, so a deadline's own handler reads its state as `fired` while it runs — the honest answer at that moment."
+        - "Records are an ordered `Vec` rather than a map, for the reason `PendingCallbacks` is: the order is a deterministic function of the world file, it is what the panel renders top to bottom, and a `HashMap`'s iteration order must never reach a payload or a fold."
+        - "The table sits on `WorldContentRuntime` rather than becoming its own resource so every site that already borrows the content runtime to apply a call's effects can apply its deadline mutations too — four call sites, one line each, no new `SystemParam` anywhere."
+        - "Firing is keyed on `SimTick`, never on `elapsed_secs`: `due_tick` is the arm tick plus `seconds_to_ticks(due_secs, sim_tick_hz)` over values two peers both read from the world file, so both peers fire the same deadline on the same tick. Authoring stays in whole seconds to match the integer-only (`no_float`) script surface; the conversion happens once, at arm/slip time, through the same `seconds_to_ticks` the callback queue uses."
+        - "AUTHORITATIVE BUT NOT FOLDED, exactly like `FlagStore` and `ObjectiveManager`: `state_digest` does not walk it. Adding it would move every existing world's digest (an absent-resource marker folds even for a deadline-free world), which is a separate commitment from this slice."
+    architecture:
+      classification: authoritative
+      owner: mission-deadline-vocabulary
+      writers: [mission-deadline-vocabulary]
+    implementation:
+      status: observed
+      # `src/snapshot.rs` is deliberately NOT listed. It carries this state's
+      # persistence (`ScenarioState::deadlines`, and the 4 → 5 `SNAPSHOT_FORMAT`
+      # bump the evidence below records), but it is a whole-payload module whose
+      # own imports the scanner would attribute wholesale to this entity — see
+      # the `dependencies` note. The persistence is traced through the evidence
+      # and the test reference instead.
+      paths:
+        - src/world/deadlines.rs
+        - src/world/server.rs
+      symbols:
+        - DeadlineTable
+        - DeadlineRecord
+        - DeadlineState
+        - DeadlineChange
+        - DeadlineMutation
+        - QueueEdit
+        - NO_DEADLINE
+        - WorldContentRuntime
+        - WorldScriptRuntime
+        # Named for traceability, defined in src/world/script/schedule.rs rather
+        # than here: they are what this state is BUILT OVER, and a reader who
+        # follows `mission-deadline-state` must land on the queue it reuses
+        # rather than have to discover it.
+        - PendingCallbacks
+        - ScheduledCall
+      tests: [cargo test, "cargo test --test snapshot_resume deadline"]
+    evidence:
+      - kind: test
+        reference: "src/world/deadlines.rs tests; tests/snapshot_resume.rs"
+        summary: "The pure table's arm/slip/cancel/note_fired behaviour, including the two-deadlines-sharing-a-call-key case and the stale-firing refusal, plus the save round-trip. `SNAPSHOT_FORMAT` moved 4 → 5: a format-4 payload carries no deadline record, so restoring one into a deadline-authoring world would re-arm every cancelled deadline, rewind every slip and un-fire the spent ones — the same silent re-arming that moved the constant to 2 for trigger latches."

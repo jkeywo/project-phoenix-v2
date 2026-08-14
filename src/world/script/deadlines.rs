@@ -328,7 +328,7 @@ mod tests {
         let deadlines = Deadlines::new(&live, 0, HZ);
         let mut ctx = Map::new();
         ctx.insert("deadlines".into(), Dynamic::from(deadlines.clone()));
-        vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx).expect("runs");
+        let _ = vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx).expect("runs");
         assert_eq!(
             live.get("window").expect("still there").state,
             DeadlineState::Pending,

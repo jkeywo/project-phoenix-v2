@@ -213,7 +213,14 @@ pub enum EnterError {
     /// would silently un-apply work the script really did.
     Shape {
         /// Everything the call produced before its malformed return.
-        effects: CallEffects,
+        ///
+        /// Boxed so this variant does not make `enter_node`'s whole `Result`
+        /// large for every caller on the success path (clippy's
+        /// `result_large_err`). `CallEffects` is five `Vec`s and grows a field
+        /// each time script gains a new kind of buffered work — it grew a fifth
+        /// for `deadline_changes` in issue #1024 — so the box is what stops that
+        /// growth being paid by the path that never errors.
+        effects: Box<CallEffects>,
         /// The authoring-facing shape complaint.
         message: String,
     },
@@ -301,7 +308,10 @@ pub fn enter_node(
     };
     match read_dialogue_node(value) {
         Ok(node) => Ok((effects, node)),
-        Err(message) => Err(EnterError::Shape { effects, message }),
+        Err(message) => Err(EnterError::Shape {
+            effects: Box::new(effects),
+            message,
+        }),
     }
 }
 

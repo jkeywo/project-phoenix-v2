@@ -1,0 +1,79 @@
+# Fixture world for issue #1024 — named mission deadlines across a resume.
+#
+# A test fixture rather than a shipped `assets/worlds/` probe, for the reason
+# `scripted_resume.toml` is one: nothing plays this. It exists to be booted by
+# `tests/snapshot_resume.rs`, and its whole shape is chosen to make one
+# measurement discriminating.
+#
+# ── What the timings are for ─────────────────────────────────────────────────
+#
+# One player cruiser, no hostiles, two deadlines and one timer. At the default
+# 60 Hz `sim_tick_hz`, measured from the first simulation tick of the mission:
+#
+#   * `window_opens` is authored due at 5 s (~tick 300) and is SLIPPED by 3 s at
+#     t=1 s, so it becomes due at 8 s (~tick 480).
+#   * `stand_down` is authored due at 4 s (~tick 240) and is CANCELLED at the
+#     same moment, so it never becomes due at all.
+#
+# The capture is taken at ~2.5 s: past the slip and the cancel, short of every
+# fire tick. That is the only window in which the state this slice adds is
+# observable at all.
+#
+# THE LOAD-BEARING DETAIL is that both mutations happen from a TIMER handler
+# rather than at world load. A fresh app restored into has run its own
+# `arm_mission_deadlines` (arming is unconditional on the mission's first tick),
+# so it holds `window_opens` at its AUTHORED 5 s and `stand_down` still pending —
+# a table that is genuinely different from the capture's, and two queued calls
+# where the capture has one. Mutating at load instead would have both apps agree
+# by accident, and the test would pass with the payload's deadline table deleted.
+#
+# `message` is omitted from `game_over` (it is optional) and no deadline is
+# `visible`, so this world needs no strings.csv entry — the same reason
+# `assets/worlds/probe_victory.toml` gives.
+
+[global]
+seed = 1024
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[deadline]]
+id = "window_opens"
+due_secs = 5
+
+[[deadline]]
+id = "stand_down"
+due_secs = 4
+
+[script]
+setup = """
+on_timer(1, "adjust");
+
+on_deadline("window_opens", "on_window_opens");
+on_deadline("stand_down", "on_stand_down");
+
+fn adjust(ctx) {
+    ctx.deadlines.slip("window_opens", 3);
+    ctx.deadlines.cancel("stand_down");
+}
+
+// Ends the run in a declared victory, which moves `GamePhase` — a value
+// `world_digest` folds — so a resumed world that lost the deadline parts from
+// the live one measurably rather than only in a field nothing compares.
+fn on_window_opens(ctx) {
+    ctx.flags.increment("window_fired", 1);
+    ctx.effects.game_over("", "victory");
+}
+
+fn on_stand_down(ctx) {
+    ctx.flags.increment("stand_down_fired", 1);
+}
+"""

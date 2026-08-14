@@ -735,6 +735,30 @@ describe('buildCaptainConsoleState', () => {
     const state = { objectives: ['obj-A'] };
     expect(parse(buildCaptainConsoleState(state)).boosted_objective_id).toBeNull();
   });
+
+  // ── Named mission deadlines (issue #1024) ────────────────────────────────
+
+  it('forwards the visible deadlines from the captain blackboard', () => {
+    // The server has already filtered to `visible = true` and already counted
+    // down against the authoritative SimTick — this layer only carries them.
+    const deadlines = [
+      { id: 'window_opens', label: 'world.fs.window.label', remaining_secs: 92, state: 'pending' },
+      { id: 'stand_down', label: 'world.fs.stand_down.label', remaining_secs: -1, state: 'cancelled' },
+    ];
+    const state = { blackboards: { captain: { deadlines } } };
+    expect(parse(buildCaptainConsoleState(state)).deadlines).toEqual(deadlines);
+  });
+
+  it('deadlines default to an empty list with a blackboard that carries none', () => {
+    const state = { blackboards: { captain: { objectives: [] } } };
+    expect(parse(buildCaptainConsoleState(state)).deadlines).toEqual([]);
+  });
+
+  it('deadlines are empty in the legacy fallback (no blackboard)', () => {
+    // The fallback has no wire source for them, and an empty list renders the
+    // panel's own empty state rather than an undefined the component must guard.
+    expect(parse(buildCaptainConsoleState({ objectives: ['obj-A'] })).deadlines).toEqual([]);
+  });
 });
 
 describe('buildHelmConsoleState', () => {

@@ -18,7 +18,7 @@ pub mod condition;
 pub mod server;
 
 pub use condition::{
-    CapacityConfig, ConditionAdjustment, FlagChange, InfrastructureConfig, InfrastructureState,
-    ResolvedThreshold, ThresholdConfig,
+    CapacityAdjustment, CapacityConfig, ConditionAdjustment, FlagChange, InfrastructureConfig,
+    InfrastructureState, ResolvedCapacity, ResolvedThreshold, ThresholdConfig,
 };
 pub use server::{tick_infrastructure_condition, InfrastructureCondition, InfrastructurePlugin};

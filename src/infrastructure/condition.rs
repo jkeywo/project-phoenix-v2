@@ -146,7 +146,64 @@ pub struct CapacityConfig {
     /// world flag store the adapter mirrors it onto is an `i64` counter store.
     /// A float here would either round on the way out or give scripts a
     /// second, lossier answer than the wire's.
+    ///
+    /// Since #1027 this is the **starting level** rather than a fixed number: a
+    /// `transfer` operation moves it. `ceiling` below is what it may grow back
+    /// to.
     pub amount: i64,
+    /// The most this capacity can ever hold (issue #1027). `None` — the
+    /// default, and what every capacity authored before transfers existed
+    /// says — means the starting `amount` is also the ceiling, so a depot
+    /// authored full can be emptied and refilled to exactly where it began and
+    /// no further.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ceiling: Option<i64>,
+}
+
+/// One capacity as the **live** track carries it (issue #1027).
+///
+/// The resolved sibling of [`CapacityConfig`], for the reason
+/// [`ResolvedThreshold`] is [`ThresholdConfig`]'s: the authored table says what
+/// a structure starts with, and the live one has to say what it has now and
+/// what it could hold. Keeping the ceiling resolved here rather than as an
+/// `Option` means a level that has moved cannot be mistaken for the ceiling it
+/// was authored at.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ResolvedCapacity {
+    /// The authored id — the scenario's namespace, and the world-flag counter
+    /// name this capacity is mirrored onto.
+    pub id: String,
+    /// How much is there now.
+    pub level: i64,
+    /// The most it can hold.
+    pub ceiling: i64,
+}
+
+impl ResolvedCapacity {
+    /// How much more the ceiling would still admit. Never negative, so a
+    /// structure authored above its own ceiling reads as simply full rather
+    /// than as owing capacity.
+    pub fn headroom(&self) -> i64 {
+        self.ceiling.saturating_sub(self.level).max(0)
+    }
+}
+
+/// One queued move of a named capacity (issue #1027).
+///
+/// Queued rather than applied where it is decided, for the reason
+/// [`ConditionAdjustment`] is: every move of a structure's published numbers
+/// goes through [`crate::infrastructure::tick_infrastructure_condition`], which
+/// is the one place that re-publishes the counter a scenario predicate reads.
+/// A transfer writing the component directly would move the goods and leave the
+/// script store saying they were still where they started.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapacityAdjustment {
+    /// The structure's `EntityUuid`.
+    pub uuid: String,
+    /// The `[[infrastructure.capacity]]` id being moved.
+    pub capacity: String,
+    /// How much to add. Negative takes it away.
+    pub delta: i64,
 }
 
 /// One `[[infrastructure.threshold]]` block: an operational flag and the
@@ -212,6 +269,15 @@ impl InfrastructureConfig {
                     "[[infrastructure.capacity]] {} amount must be a non-negative whole number, got {}",
                     capacity.id, capacity.amount
                 ));
+            }
+            if let Some(ceiling) = capacity.ceiling {
+                if ceiling < capacity.amount {
+                    return Err(format!(
+                        "[[infrastructure.capacity]] {} has ceiling {ceiling} below its starting \
+                         amount {} — a structure cannot begin holding more than it can hold",
+                        capacity.id, capacity.amount
+                    ));
+                }
             }
             if self.capacities[..index].iter().any(|c| c.id == capacity.id) {
                 return Err(format!(
@@ -316,7 +382,7 @@ pub struct InfrastructureState {
     thresholds: Vec<ResolvedThreshold>,
     /// Held state per threshold, parallel to `thresholds`.
     held: Vec<bool>,
-    capacities: Vec<CapacityConfig>,
+    capacities: Vec<ResolvedCapacity>,
     /// The entity's aggregate hull total as of the last [`Self::observe_hull`]
     /// call. Kept here rather than in a side table so it snapshots and resumes
     /// with the rest of the track — a resumed structure that forgot it would
@@ -358,7 +424,19 @@ impl InfrastructureState {
             publish: config.publish,
             thresholds,
             held,
-            capacities: config.capacities.clone(),
+            capacities: config
+                .capacities
+                .iter()
+                .map(|c| ResolvedCapacity {
+                    id: c.id.clone(),
+                    level: c.amount,
+                    // An unauthored ceiling is the starting amount: every
+                    // capacity written before transfers existed means "this is
+                    // what the depot holds", and that reading has to keep
+                    // working unchanged.
+                    ceiling: c.ceiling.unwrap_or(c.amount).max(c.amount),
+                })
+                .collect(),
             last_hull: None,
         }
     }
@@ -402,18 +480,45 @@ impl InfrastructureState {
         self.last_hull
     }
 
-    /// The authored amount for a named capacity, or `None` when the structure
+    /// The current level of a named capacity, or `None` when the structure
     /// never declared one by that name.
     pub fn capacity(&self, id: &str) -> Option<i64> {
-        self.capacities
-            .iter()
-            .find(|c| c.id == id)
-            .map(|c| c.amount)
+        self.capacities.iter().find(|c| c.id == id).map(|c| c.level)
     }
 
-    /// Every authored capacity, in authored order.
-    pub fn capacities(&self) -> &[CapacityConfig] {
+    /// A named capacity whole — its level and its ceiling (issue #1027), which
+    /// is what a `transfer` needs in order to ask whether this end can take
+    /// part.
+    pub fn capacity_reading(&self, id: &str) -> Option<&ResolvedCapacity> {
+        self.capacities.iter().find(|c| c.id == id)
+    }
+
+    /// Every capacity, in authored order.
+    pub fn capacities(&self) -> &[ResolvedCapacity] {
         &self.capacities
+    }
+
+    /// Move a named capacity by `delta`, clamped to `0..=ceiling`
+    /// (issue #1027).
+    ///
+    /// Returns the level it actually landed on, or `None` when this structure
+    /// declares no such capacity. Clamping rather than refusing, because the
+    /// caller has already asked whether the move fits — [`transfer_possible`]
+    /// in the operations module — and this is the backstop that keeps a
+    /// depot's published number honest if two moves ever land in one tick.
+    ///
+    /// Unlike a condition move this returns no [`FlagChange`]s: a capacity is a
+    /// published quantity rather than an operational state, and "the depot has
+    /// twelve fewer berths" is not an event a threshold can be crossed by.
+    ///
+    /// [`transfer_possible`]: crate::operations
+    pub fn adjust_capacity(&mut self, id: &str, delta: i64) -> Option<i64> {
+        let capacity = self.capacities.iter_mut().find(|c| c.id == id)?;
+        capacity.level = capacity
+            .level
+            .saturating_add(delta)
+            .clamp(0, capacity.ceiling);
+        Some(capacity.level)
     }
 
     /// The resolved thresholds, in authored order.
@@ -577,6 +682,7 @@ mod tests {
             capacities: vec![CapacityConfig {
                 id: "transfer_throughput".to_string(),
                 amount: 40,
+                ceiling: None,
             }],
             thresholds: vec![ThresholdConfig {
                 flag: "depot_transfer_capable".to_string(),
@@ -1049,10 +1155,12 @@ restores_above = 0.6
                         CapacityConfig {
                             id: "a".to_string(),
                             amount: 1,
+                            ceiling: None,
                         },
                         CapacityConfig {
                             id: "a".to_string(),
                             amount: 2,
+                            ceiling: None,
                         },
                     ],
                     ..Default::default()

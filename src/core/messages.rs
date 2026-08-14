@@ -1331,8 +1331,12 @@ pub struct InfrastructureSnapshot {
     /// order. The same names the world flag store carries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flags: Vec<(String, bool)>,
-    /// Named authored capacities, in authored order — what a consumer asks
-    /// instead of restating the number at the call site.
+    /// Named capacities and their **current levels**, in authored order — what
+    /// a consumer asks instead of restating the number at the call site.
+    ///
+    /// A live level rather than the authored amount since #1027, because a
+    /// `transfer` operation moves it: a console reading the authored figure
+    /// would go on showing a depot full while the crew emptied it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capacities: Vec<(String, i64)>,
 }
@@ -1354,7 +1358,7 @@ impl InfrastructureSnapshot {
             capacities: state
                 .capacities()
                 .iter()
-                .map(|c| (c.id.clone(), c.amount))
+                .map(|c| (c.id.clone(), c.level))
                 .collect(),
         })
     }
@@ -3232,6 +3236,22 @@ pub struct ActiveOperationSnapshot {
     /// — those states are their own explanation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The rate the hold is banking at, as whole percent of normal
+    /// (issue #1027). `100` unless an authored `slow` interrupt is firing — a
+    /// hazard band stretching the work rather than stopping it.
+    ///
+    /// Published because a bar that crawls with no number beside it reads as a
+    /// bug rather than as the storm. Defaulted rather than optional so a
+    /// payload written before this existed decodes as "normal speed", which is
+    /// what it meant.
+    #[serde(default = "full_progress_rate")]
+    pub rate_percent: u16,
+}
+
+/// Serde default for [`ActiveOperationSnapshot::rate_percent`]: the normal,
+/// uninterrupted rate.
+fn full_progress_rate() -> u16 {
+    crate::operations::ProgressRate::FULL.as_percent()
 }
 
 /// Raw sim truth for a ship's external operations, published each tick

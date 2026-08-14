@@ -1689,6 +1689,8 @@ mod tests {
                 progress: 0.25,
                 state: "stalled".into(),
                 reason: Some("operation.refused.out_of_range".into()),
+                // Issue #1027: a hazard band stretching the work.
+                rate_percent: 40,
             }),
             refusal: None,
         });
@@ -1732,6 +1734,25 @@ mod tests {
             SystemBlackboard::Operations(crate::messages::OperationsBlackboard::default()),
             "every field on the blackboard is `#[serde(default)]`, so a payload that predates \
              any one of them decodes rather than being refused whole"
+        );
+
+        // Issue #1027 added `rate_percent` to the live hold. A payload minted
+        // before it existed has to decode as the NORMAL rate rather than as
+        // zero — a hold that a stale host reported as stopped would read to the
+        // crew as an operation that had died.
+        let pre_1027 = r#"{"kind":"Operations","data":{"capabilities":[],"active":{
+            "id":1,"verb":"stabilise","verb_label":"operation.verb.stabilise",
+            "target_uuid":"depot-1","progress":0.5,"state":"holding"}}}"#;
+        let SystemBlackboard::Operations(decoded) =
+            serde_json::from_str::<SystemBlackboard>(pre_1027).unwrap()
+        else {
+            panic!("an operations payload decodes as one");
+        };
+        assert_eq!(
+            decoded.active.expect("the hold decodes").rate_percent,
+            100,
+            "an absent rate is full speed, which is what every payload written before hazard \
+             bands existed meant"
         );
 
         let msg = ServerMessage::BlackboardUpdate {

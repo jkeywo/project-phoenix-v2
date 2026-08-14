@@ -61,8 +61,15 @@ impl Plugin for InfrastructurePlugin {
 ///
 /// Per structure, in UUID order: publish its capacities and starting flags on
 /// the first tick it exists, fold in any hull it lost, apply authored decay,
-/// then apply this tick's queued script adjustments. Every operational flag
-/// that changed along the way is mirrored into the base-world flag store.
+/// then apply this tick's queued script adjustments and capacity moves. Every
+/// operational flag that changed along the way is mirrored into the base-world
+/// flag store, and every capacity that moved is re-published onto its counter.
+///
+/// Capacity moves (issue #1027) queue here rather than being written onto the
+/// component by whoever decided them, for exactly the reason condition moves
+/// do: this is the one system that mirrors a structure's published numbers into
+/// the scenario's flag store. A `transfer` writing the component directly would
+/// move the goods and leave every script predicate reading the old count.
 ///
 /// UUID order, not query order: Bevy's archetype iteration order is not part of
 /// the simulation's contract, and two structures sharing a flag name would
@@ -84,10 +91,20 @@ pub fn tick_infrastructure_condition(
     };
     // A read, so a world with no infrastructure and no queued work never marks
     // `WorldContentRuntime` changed.
-    if structures.is_empty() && runtime.pending_condition_adjustments.is_empty() {
+    if structures.is_empty()
+        && runtime.pending_condition_adjustments.is_empty()
+        && runtime.pending_capacity_adjustments.is_empty()
+    {
         return;
     }
     let queued = std::mem::take(&mut runtime.pending_condition_adjustments);
+    // Taken through `DerefMut` only when there is something in it, so a world
+    // whose structures never trade does not mark the runtime changed each tick.
+    let queued_capacity = if runtime.pending_capacity_adjustments.is_empty() {
+        Vec::new()
+    } else {
+        std::mem::take(&mut runtime.pending_capacity_adjustments)
+    };
     let delta_secs = time.map(|t| t.delta_secs()).unwrap_or(0.0);
 
     let mut rows: Vec<(String, Entity)> = structures
@@ -111,20 +128,46 @@ pub fn tick_infrastructure_condition(
             .filter(|a| a.uuid == uuid)
             .map(|a| a.delta)
             .collect();
-        if !first_tick && !hull_moved && decay <= 0.0 && adjustments.is_empty() {
+        let capacity_moves: Vec<(&str, i64)> = queued_capacity
+            .iter()
+            .filter(|a| a.uuid == uuid)
+            .map(|a| (a.capacity.as_str(), a.delta))
+            .collect();
+        if !first_tick
+            && !hull_moved
+            && decay <= 0.0
+            && adjustments.is_empty()
+            && capacity_moves.is_empty()
+        {
             continue;
         }
 
         let mut changes: Vec<FlagChange> = Vec::new();
-        let mut capacities: Vec<(String, i64)> = Vec::new();
+        let capacities: Vec<(String, i64)>;
         {
             let state = &mut condition.0;
+            for (id, delta) in capacity_moves {
+                if state.adjust_capacity(id, delta).is_none() {
+                    crate::pwarn!(
+                        log,
+                        crate::logging::LogCat::World,
+                        entity = entity,
+                        "capacity move for '{id}' on {uuid}: this structure declares no such \
+                         capacity — ignoring"
+                    );
+                }
+            }
+            // Re-published whenever anything about this structure moved, not
+            // only on its first tick: since #1027 the level is live, and a
+            // counter that only ever carried the authored number would tell a
+            // scenario predicate the depot was still full after it had been
+            // emptied.
+            capacities = state
+                .capacities()
+                .iter()
+                .map(|c| (c.id.clone(), c.level))
+                .collect();
             if first_tick {
-                capacities = state
-                    .capacities()
-                    .iter()
-                    .map(|c| (c.id.clone(), c.amount))
-                    .collect();
                 changes.extend(state.initial_flags());
             }
             if let Some(total) = hull_total {
@@ -140,7 +183,8 @@ pub fn tick_infrastructure_condition(
 
         // A capacity is a published quantity, not an operational flag: its
         // counter is readable from a script predicate, but it deliberately
-        // fires no `on_flag_set`. "This depot has berths" is not an event.
+        // fires no `on_flag_set`. "This depot has berths" is not an event, and
+        // neither is "it now has twelve fewer".
         for (id, amount) in capacities {
             runtime.flags.set_flag_value(&id, amount);
         }
@@ -206,6 +250,7 @@ mod tests {
             capacities: vec![CapacityConfig {
                 id: "depot_transfer_throughput".to_string(),
                 amount: 40,
+                ceiling: None,
             }],
             thresholds: vec![ThresholdConfig {
                 flag: FLAG.to_string(),

@@ -127,6 +127,18 @@ pub struct WorldContentRuntime {
     /// an effect writing the component directly would cross a threshold with
     /// nobody listening, and the world flag store would never hear about it.
     pub pending_condition_adjustments: Vec<crate::infrastructure::ConditionAdjustment>,
+    /// Named infrastructure capacities a completed `transfer` moved this tick
+    /// (issue #1027), already resolved to each end's UUID.
+    ///
+    /// Drained by the same
+    /// [`crate::infrastructure::tick_infrastructure_condition`] on the same
+    /// terms and for the same reason as `pending_condition_adjustments` above:
+    /// that system is the one place a structure's published numbers move, so it
+    /// is the one place that can re-publish the counter a scenario predicate
+    /// reads. A transfer writing the component itself would move the goods and
+    /// leave every `counter(depot_transfer_throughput)` test reading the figure
+    /// the depot was authored with.
+    pub pending_capacity_adjustments: Vec<crate::infrastructure::CapacityAdjustment>,
     /// External operations a scripted effect asked to start this tick (issue
     /// #1026), already resolved to the performing ship's and the target's UUIDs.
     ///

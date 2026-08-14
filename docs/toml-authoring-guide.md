@@ -729,7 +729,7 @@ of the entity transform; multiple lights are spawned as children.
 | `intensity` | f32 | **required** | Candela (point) or lux (directional). |
 | `range` | f32 | `50.0` | Effective falloff range. Point lights only; ignored for `directional`. |
 
-### 2.1.6 `[operations]` — external operations (issue #1026)
+### 2.1.6 `[operations]` — external operations (issues #1026, #1027)
 
 Which **external operations** this hull can perform: the verbs it applies to
 things outside its own hull. The mirror image of `[infrastructure]` — that table
@@ -738,42 +738,110 @@ says what can be done *to* an entity, this one says what an entity can do.
 Omitting the table changes nothing. A hull that authors none can start no
 operation and is refused by name if asked to.
 
+There are five verbs, and they share one implementation. What separates them is
+**what you author**, not what the engine does: a tow and a field-repair run
+through the same eligibility test and the same timed hold, and differ only in
+the fields below that each one fills in.
+
+| Verb | What it does | The fields that make it that verb |
+|---|---|---|
+| `stabilise` | Hold station on a failing structure and arrest its decline. | `condition_on_complete` |
+| `tow` | The target's position becomes the operator's rig for the duration. | `tow_offset` |
+| `escort` | Keep station on something that is *moving*. | `separation_limit` |
+| `transfer` | Move a named capacity between the operator and the target. | `[…capability.transfer]` |
+| `field_repair` | Work a structure's condition continuously, at a cost in repair teams. | `condition_per_second`, `repair_teams` |
+
 ```toml
 [[operations.capability]]
-verb                  = "stabilise"   # the only verb today
+verb                  = "field_repair"
 range                 = 400.0         # world units, centre to centre
 duration_secs         = 20            # whole seconds of ELIGIBLE hold
 power_group           = "helm"        # which group the operation draws on
 min_power_level       = 2             # …and the level it needs held
-condition_on_complete = 30.0          # condition points paid to the target
+condition_per_second  = 2.0           # points paid for every second held
+repair_teams          = 2             # teams unavailable to the ship meanwhile
 stall_limit_secs      = 45            # optional cumulative stall budget
+
+# What interrupts it, and what that does. Authored per capability, because how
+# bad a storm is for a particular job is a judgement about the job.
+[[operations.capability.interrupt]]
+cause         = "attack"
+response      = "fail"
+
+[[operations.capability.interrupt]]
+cause         = "region"
+region_effect = "slow_zone"
+response      = "slow"
+rate_percent  = 50
 ```
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `verb` | `"stabilise"` | **required** | The operation this block authorises. |
+| `verb` | `"stabilise"` \| `"tow"` \| `"escort"` \| `"transfer"` \| `"field_repair"` | **required** | The operation this block authorises. |
 | `range` | f32 | `400.0` | How far from the target the ship may be and still count the tick. |
 | `duration_secs` | i64 | `20` | Whole seconds of *eligible* hold. Stalled ticks do not count towards it — that is the point of the hold. |
 | `power_group` | string | `"helm"` | The power group the operation draws on. |
 | `min_power_level` | u8 | `2` | The level that group must hold. `2` is where every group is seeded, so a ship that has stripped helm loses the operation. |
-| `condition_on_complete` | f32 | `0.0` | Infrastructure condition points the target gains **on completion**, paid once. `0.0` authors an operation whose payoff is entirely scripted. |
+| `condition_on_complete` | f32 | `0.0` | Infrastructure condition points the target gains **on completion**, paid once. |
+| `condition_per_second` | f32 | `0.0` | Condition points paid for every **second held**, scaled by the tick's rate. `field_repair`'s shape. |
+| `repair_teams` | u8 | `0` | How many of the operator's own repair teams are unavailable for internal work while the hold runs. They never leave the hull. |
+| `tow_offset` | `[f32; 3]` | `[0,0,0]` | Where a towed target rides, in the operator's **own frame**: `[starboard, up, forward]`, so `[0, 0, -150]` is 150 units astern. |
+| `separation_limit` | f32 | *(none)* | Distance past which the hold **fails** rather than stalling. Must be at or beyond `range`. `escort`'s shape. |
+| `target_requirement` | `"present"` \| `"condition_track"` \| `"capacity"` | *(the verb's own)* | What the target has to be. Override it to tow only damaged hulks, or to stabilise something unusual. |
 | `stall_limit_secs` | i64 | *(none)* | Whole seconds of **cumulative** stalled time tolerated before the operation fails. Omit to let it stall indefinitely. |
 
+`[operations.capability.transfer]` — required for a `transfer`, and what makes
+the two ends two ends:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `capacity` | string | **required** | The `[[infrastructure.capacity]]` id being moved. Both the operator and the target must carry one under this id. |
+| `amount` | i64 | **required** | How much moves, in the capacity's own units. Paid once, on completion. |
+| `direction` | `"deliver"` \| `"collect"` | **required** | Named from the **operator's** point of view: a tender *delivers* to a depot and *collects* from it. |
+
+`[[operations.capability.interrupt]]` — zero or more. A capability that authors
+none behaves exactly as it did before interrupts existed: only eligibility can
+stop the hold.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `cause` | `"attack"` \| `"region"` | **required** | Recent *landed hits* on the operator (firing your own guns is not being attacked), or membership of a region carrying `region_effect`. |
+| `region_effect` | `"slow_zone"`, `"damage_zone"`, `"comms_jam"`, … | *(none)* | Required for `cause = "region"`, refused for anything else. The names mirror the `[effects]` sub-tables in **§2.5**. |
+| `response` | `"slow"` \| `"pause"` \| `"fail"` | **required** | Keep going more slowly; freeze and spend the stall budget; or end it now. |
+| `rate_percent` | u16 | `50` | For `response = "slow"`: what fraction of normal speed, `1..=100`. Author `pause` for a full stop. |
+
+Two rules that both fire take the **stricter** response, and two `slow` rules
+take the **lower** rate — so a capability carrying both cannot get a different
+answer depending on which line you typed first.
+
+**Power loss is not an interrupt cause**, deliberately. It is already an
+eligibility condition, tested against the live grid every tick, and a second
+spelling would let one capability say two different things about it.
+
 A hold **stalls** rather than ending when eligibility lapses for something the
-crew can fix — out of range, under-powered — and progress freezes where it stood
-rather than decaying, so flying back resumes it. It **fails** when eligibility
-is lost for something they cannot fix (the target is gone; the hull never had
-the capability), or when the stall budget runs out.
+crew can fix — out of range, under-powered, a depot with no room, no free repair
+team — and progress freezes where it stood rather than decaying, so recovering
+resumes it. It **fails** when eligibility is lost for something they cannot fix
+(the target is gone; the escortee is past the separation limit; the hull never
+had the capability), when an authored interrupt says `fail`, or when the stall
+budget runs out. A `slow` interrupt does *not* spend the stall budget, however
+long it lasts: the operation is being held, just badly.
 
-A zero range, a non-positive `duration_secs`, an empty `power_group`, a negative
-payoff, a negative stall budget or two blocks claiming the same verb are all
-refused at load, by field name.
+Refused at load, by field name: a zero range, a non-positive `duration_secs`, an
+empty `power_group`, a negative payoff of either kind, a `separation_limit`
+inside `range`, a `transfer` with no capacity id or a non-positive amount, a
+`transfer` requirement with no transfer block, an interrupt with `cause =
+"region"` and no `region_effect` (or the reverse), a `slow` rate outside
+`1..=100`, a negative stall budget, or two blocks claiming the same verb.
 
-Starting one: `ctx.effects.stabilise(ship, target)` from a script (**§1.5**), or
-a `StartOperation` / `AbortOperation` console command at the `captain` system.
-Progress reaches the crew on the operations blackboard, rendered by
-`<ph-operation-panel>`. `assets/worlds/probe_stabilise.toml` is a worked
-example of the whole chain.
+Starting one: `ctx.effects.stabilise(ship, target)` — or `tow`, `escort`,
+`transfer`, `field_repair` — from a script (**§1.5**), or a `StartOperation` /
+`AbortOperation` console command at the `captain` system. Progress reaches the
+crew on the operations blackboard, rendered by `<ph-operation-panel>`, which
+offers a verb picker when the hull can do more than one.
+`assets/worlds/probe_stabilise.toml` is a worked example of one verb end to end;
+`assets/worlds/probe_operations.toml` runs the other four, plus a storm band
+that slows two of them.
 
 ### 2.2 Ships
 

@@ -113,6 +113,8 @@ entities:
         - "[ai] Damage arrives as a LEVEL observation of the entity's aggregate hull, not as a hook on each damage site. Beam, torpedo and blaster already damage non-ship entities, region zones and collisions are ship-gated today, and further hazards are still to come; watching the level catches all of them without editing any damage site, present or future. It is the same shape collect_world_events already uses to derive HullDroppedBelow."
         - "[ai] Hysteresis is structural, not advisory: a threshold is edge-triggered against the STORED flag, and its restore point defaults to fails_below plus the authored hysteresis band, so a condition parked on the boundary sits in a dead band and reports no transition. Authoring an equal restore point opts out; a restore point BELOW the failure point is refused at load."
         - "[ai] The crossing reaches a script hook one tick later, via the same pending_world_events queue WaypointReached rides: this runs in SimSet::Modifiers, after collect_world_events has already run for the tick."
+        - "[ai] Issue #1027 put CAPACITY moves through the same one-write-site rule, and for a sharper version of the same reason. A capacity is mirrored onto a world-flag counter that a scenario predicate reads, so a transfer writing the component itself would move the goods and leave every counter() test reading the figure the depot was authored with. Moves are queued on the runtime and drained here, and the counter is re-published whenever the structure did any work rather than only on its first tick."
+        - "[ai] A capacity move returns NO flag changes, where a condition move returns the thresholds it crossed. A capacity is a published QUANTITY rather than an operational state: 'this depot has berths' was never an event, and 'it now has twelve fewer' is not one either. The level is clamped to 0..=ceiling as a backstop, not as the check - the operations module has already asked whether both ends can take part."
     architecture:
       kind: subsystem
       authority: authoritative
@@ -130,6 +132,7 @@ entities:
         - InfrastructureCondition
         - InfrastructurePlugin
         - tick_infrastructure_condition
+        - CapacityAdjustment
       tests: [cargo test]
 
   - state: infrastructure-condition-state
@@ -137,9 +140,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Infrastructure Condition And Capacity State
-      summary: "Per-entity structural condition, the authored degradation thresholds over it and the named operational flags they hold (transfer_capable, docking_capable, whatever a scenario declares), plus the entity's named authored capacities. Authoritative: it decides whether a structure can still transfer, dock or hold, so two hosts that disagreed about it would disagree about whether a mission is winnable."
+      summary: "Per-entity structural condition, the authored degradation thresholds over it and the named operational flags they hold (transfer_capable, docking_capable, whatever a scenario declares), plus the entity's named capacities and how much of each it currently holds. Authoritative: it decides whether a structure can still transfer, dock or hold, so two hosts that disagreed about it would disagree about whether a mission is winnable."
       rationale:
-        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own, keyed on the minted entity id. Condition, ceiling and every operational flag are in; the authored capacities are not, because they never move and a divergence in them is a content divergence that content_digest is the thing to catch."
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own, keyed on the minted entity id. Condition, ceiling, every operational flag and - since #1027 - every capacity LEVEL are in. The capacity CEILING is not: it never moves, so a divergence in it is a content divergence that content_digest is the thing to catch. The level was in the same bucket until #1027, when the transfer verb made it movable; leaving it out after that would let two hosts disagree about how many berths a depot has left, which is a disagreement about whether the mission can be finished."
+        - "[ai] A capacity is a LEVEL with a CEILING, resolved at load the way a threshold is - the authored table says what a structure starts with and the live one says what it has now. An unauthored ceiling IS the starting amount, which is what keeps every capacity written before transfers existed meaning exactly what it meant: this is what the depot holds, and it can be emptied and refilled to there and no further."
         - "[ai] That namespace folds NOTHING when it is empty, unlike every other walk in the fold, which folds its row count first. No world authors an infrastructure table today, and folding a zero for all of them would have moved every committed world digest over state none of them carry. A world with no structures and a world built before the feature existed are the same authoritative state, so they fold to the same number; as soon as one structure exists the count is in the accumulator like everyone else's."
         - "[ai] Snapshotted WHOLE rather than as a scalar projection, because the track carries which flags are currently down alongside the number and the two have to come back together - restoring the condition alone would re-detect, and re-fire, every crossing the mission already spent."
         - "[ai] Nothing here is a hidden-truth field. The published condition IS the truth; a maintenance dossier that contradicts it is authored as its own content. The only authored control is publish, which keeps a structure off the wire entirely."
@@ -155,7 +159,9 @@ entities:
         - InfrastructureState
         - ConditionAdjustment
         - ResolvedThreshold
+        - ResolvedCapacity
         - CapacityConfig
+        - CapacityAdjustment
         - ThresholdConfig
       tests: [cargo test]
 
@@ -181,10 +187,21 @@ entities:
       status: implemented
       confidence: confirmed
       title: External Operation Runner
-      summary: Runs the external operations a crewed ship performs on things outside its own hull - stabilise first, with tow/escort/transfer/field-repair to follow on the same spine. Decides eligibility from proximity, the hull's authored capability and available power; advances a timed hold while eligibility holds; and pays a completed operation into the infrastructure condition queue.
+      summary: Runs the external operations a crewed ship performs on things outside its own hull - stabilise, tow, escort, transfer and field-repair, all on one spine. Decides eligibility from proximity, the hull's authored capability, available power, free repair teams and both ends' capacities; applies the authored interrupt rules for fire and hazard-band membership; advances a timed hold at the resulting rate; holds a towed craft on the operator's rig; and pays what the operation earned into the infrastructure condition and capacity queues.
       rationale:
         - "[ai] NO MINIGAMES, per PRD #851. An operation is eligibility plus a timed hold the crew maintain through the consoles they already have - helm holds station inside the authored range, engineering keeps the power group allocated. Nothing new is asked of the crew; the operation counts the ticks during which they managed it."
-        - "[ai] Ops slices split by VERB, not by layer. Stabilise ships through every layer - entity TOML vocabulary, pure module, ECS adapter, script effect, admitted player command, wire, console, probe world - so the verbs after it are authoring rather than architecture. A new verb is one enum variant, one script host fn and one capability block."
+        - "[ai] Ops slices split by VERB, not by layer. Stabilise shipped through every layer - entity TOML vocabulary, pure module, ECS adapter, script effect, admitted player command, wire, console, probe world - so the verbs after it are authoring rather than architecture. #1027 tested that prediction and it held: the four remaining verbs are one enum variant, one script host fn and one capability block each, and the five script effects are registered from a LOOP over the (name, verb) pairs because they differ only in the constant they push."
+        - "[ai] VERBS ARE DATA. There is exactly one match on the verb that decides anything - OperationVerb::default_requirement, which says what a target has to BE for the word to mean anything, and which a capability can override in TOML. Everything else that separates a tow from a field-repair is an authored field on the capability block: what it pays on completion, what it pays per second, how many repair teams it commits, where a towed load rides, how far an escortee may stray, what a transfer moves and which way, and what interrupts it. One eligibility function reads all of them and has no verb-specific arm in it."
+        - "[ai] INTERRUPTS ARE IMPLEMENTED ONCE, for every verb, as authored rules naming a cause (attack, region membership) and a response (slow, pause, fail). TERMINALITY IS AUTHORED, which is the whole point: the same under_attack cause pauses a tow and fails a field-repair on the same hull in the same mission, because whether a crew may keep working through fire is a designer's judgement about the job and not a property of the word 'attack'. Two rules that both fire take the STRICTER response and two slows take the lower rate, so a capability carrying both cannot get a different answer depending on which line the designer typed first."
+        - "[ai] Power loss is deliberately NOT an interrupt cause even though the issue lists it as one. It was already an eligibility condition tested against the live grid every tick, and a second spelling would let one capability author two different answers to the same question. Eligibility is asked BEFORE the interrupts for the same reason a console reports the most actionable refusal first: an operation that is out of range is not running at a reduced rate, and must not be FAILED by a rule it was never close enough to meet."
+        - "[ai] SLOW STRETCHES, IT DOES NOT CANCEL - the storm's shape. The rate is whole percent and the hold banks a sub-tick remainder, so four ticks at 25 per cent are worth exactly one tick of hold with the fraction carrying rather than rounding away. At the full rate the remainder fills and empties within the tick, which is what keeps every pre-#1027 tick-count assertion reading the same number. A slowed tick is not a stalled one, so a slow never spends the authored stall budget however long the band lasts - where a pause does, because a pause IS a stall."
+        - "[ai] FIELD-REPAIR PAYS PER TICK where stabilise pays a lump, and the two are separate authored fields rather than one with a flag so an author cannot get both by accident. A repair party is doing good the whole time they are there and a crew pulled off two thirds through keep two thirds of it; a half-finished STABILISE leaving half the points behind would make abandoning one a strategy. The per-tick payout is scaled by the tick's rate, because a payout that ignored the rate would make parking in a storm a way of farming condition points."
+        - "[ai] CAPACITY AS COST for field-repair (the decided model, reusing #1013's repair teams rather than inventing a second notion of availability). The authored team count is unavailable to the ship's own repair work while the hold runs. Derived from the live hold rather than stored, so 'released on completion or abort' is true by construction - there is no release step to forget and nothing extra for a save to carry. The teams never leave the hull and are still Idle in every readout; they are spoken for, not dispatched. BOTH dispatch paths read it, the AI sweep and the console's manual dispatch, because humans and AI issue the same command and a commitment one path honoured would be a trade a player could opt out of by tapping the console."
+        - "[ai] THE TOW WRITES THE TARGET'S POSITION DIRECTLY, and that is a considered call. Nothing in this codebase attaches one entity to another - no dock, no parent, no carried marker, no orbit mover - and the only sanctioned precedent for overriding a ship's authoritative position is the ShipPhysics writer-policy table: collision de-overlap, blaster recoil, the low-LOD substitute. A tow is that exact shape, a correction layered on top of the helm integration rather than a second integrator, so it is a fifth row in that table and the test that pins the table's size moves with it. The rig is STATELESS - the load sits at the authored offset in the operator's own frame, so a tug that turns swings it round - which is what keeps the tow out of the save and out of the digest beyond the hold that is already there."
+        - "[ai] A TOW IS A PHYSICAL OVERRIDE, NOT AN ORDER. A towed civilian goes on publishing whatever route directive #1028 gave it and goes on complying or refusing exactly as before, because the compliance state machine is about orders. What the tow does take away is the motion - the three speed fields are zeroed - so a craft released from the rig does not shoot off at a velocity its helm accumulated against a position it was never allowed to reach. A tow that STALLS lets go, because only a hold that is actually holding drags anything."
+        - "[ai] ESCORT needed almost nothing, which is the spine working: the distance is already recomputed each tick against wherever the escortee has got to. Its one addition is a separation limit, tested BEFORE the range because it is the TERMINAL one - checking range first would report a recoverable out-of-range for a convoy that has already gone, and the hold would stall forever waiting for it."
+        - "[ai] TRANSFER asks BOTH ends every tick, whichever way the load is going: the source must hold the authored amount and the destination must have room for it. A transfer that checked only the source would overfill the depot; one that checked only the destination would move goods that were never there. A full depot STALLS - a crew waiting for a berth to clear is playing the game - while a target that carries no such capacity at all is INAPPLICABLE, because 'no room' would send them away to wait for a berth that is never coming. Both ends move on completion, source first, so two hosts queue the pair identically."
+        - "[ai] The interrupt signals come from the real world rather than from flags something else set: RecentCombatActivity folded through the same landed-hits reading the doctrine gates take, so firing your own guns is not being interrupted, and RegionMembership, which is recomputed one SimSet earlier. The region-effect vocabulary is a TOTAL match on the live effect kind, so a new hazard band will not compile until it is authorable - a hazard nobody can write a rule for is a hazard operations cannot be told about."
         - "[ai] The eligibility verdict and the progress arithmetic are PURE and Bevy-free; the adapter gathers the live inputs and applies what comes back, and decides nothing itself. Proximity reads Transform on both ends rather than ShipPhysics, so something that is not a ship can perform an operation and so the target end never had a choice."
         - "[ai] STALL versus FAIL, decided rather than left implicit. Losing eligibility freezes progress rather than ending or decaying it, so a helm that drifts out of range and comes back resumes where it left off. Only an UNRECOVERABLE loss (target gone, capability absent) ends a hold on the tick it is seen, or an authored stall budget counted CUMULATIVELY across the whole hold - a budget that reset on recovery would let a crew stall indefinitely in bursts one tick short of the limit."
         - "[ai] A completed operation pays its authored condition points into WorldContentRuntime::pending_condition_adjustments rather than onto the target's component, and the tick is ordered BEFORE tick_infrastructure_condition so the payoff lands on the tick it was earned. Writing the component directly would bring a skyhook back over its operational threshold with nobody listening - the same one-write-site rule the condition tracker is built on."
@@ -209,12 +226,27 @@ entities:
         - OperationConditions
         - Ineligibility
         - eligibility
+        - verdict
+        - interrupt_outcome
+        - TickVerdict
+        - Interruption
+        - ProgressRate
+        - InterruptRule
+        - InterruptCause
+        - InterruptResponse
+        - RegionEffectName
+        - TargetRequirement
+        - TransferTerms
+        - TransferDirection
+        - CapacityReading
         - OperationHold
         - HoldState
         - Settlement
         - ShipOperations
         - OperationsPlugin
         - tick_operations
+        - move_towed_targets
+        - region_effect_name
         - handle_operation_commands
         - publish_operations_blackboard
         - PendingOperationStart
@@ -225,9 +257,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: External Operation State
-      summary: "Per-ship: the verbs the hull authored, the operation it is running (or the last one it ran, retained so a console can still report how it ended), why the last start was refused, and the id counter. Authoritative - a host that thought a skyhook had been stabilised, or was two seconds from it, disagrees about whether the mission is winnable."
+      summary: "Per-ship: the verbs the hull authored, the operation it is running (or the last one it ran, retained so a console can still report how it ended), how far through it is including the fraction of a tick a hazard band left it part-way through, the rate it is being held at, why the last start was refused, and the id counter. Authoritative - a host that thought a skyhook had been stabilised, or was two seconds from it, disagrees about whether the mission is winnable."
       rationale:
-        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own, keyed on the minted entity id: the operation's id, verb and target, its banked and required tick counts, its spent stall budget, and its state with the reason attached. Progress folds as the tick COUNTS rather than the 0-1 fraction, because the counts are what the simulation advances and the fraction is a projection of them."
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own, keyed on the minted entity id: the operation's id, verb and target, its banked and required tick counts, its spent stall budget, the sub-tick fraction a slowed hold has banked, the rate it last banked at, and its state with the reason attached. Progress folds as the tick COUNTS and the integer remainder rather than as the 0-1 fraction, because those are what the simulation advances - and because folding whole ticks alone would hide a divergence smaller than one tick, which is exactly the size a hazard band introduces, one tick at a time, for as long as the storm lasts."
+        - "[ai] The repair-team commitment is NOT here, and that is the design rather than an omission. It is derived from the live hold and the hull's authored capability every time it is asked, so a settled hold commits nothing and 'released on completion or abort' needs no release step and no stored field. Storing it would give a save a second copy of something the hold already determines, and the two could only ever disagree."
         - "[ai] A ship that merely CAN operate and never has folds NOTHING - not even a row. That is a stronger version of the infrastructure namespace's empty-walk affordance and it does real work: it is what lets a shipped hull gain an [operations] table later without moving any committed world's digest. The authored capability table is content, which content_digest is answerable for; next_id is not independent state, being the count of operations that have run, and two hosts that disagreed about that already disagree about the folded hold's id."
         - "[ai] Snapshotted as a PROJECTION rather than whole, which is where this differs from the condition track. The hull's authored capability table rides on the same component and is re-derived from the template on spawn; writing it into a save would put content into the one artefact content_digest is answerable for. The three fields that are carried travel together: restore the hold without next_id and the next operation reuses an id the console has already shown; restore next_id without the hold and a resumed mission forgets it was two-thirds through stabilising a skyhook."
         - "[ai] The refusal and the hold's own stall reason are separate fields on purpose. A refusal means no operation was opened at all, which the crew act on differently from one that opened and is not advancing."
@@ -244,6 +277,7 @@ entities:
       symbols:
         - OperationHold
         - HoldState
+        - ProgressRate
         - ShipOperations
         - OperationsSaveState
       tests: [cargo test]
@@ -253,12 +287,14 @@ entities:
       status: implemented
       confidence: confirmed
       title: Published External Operation State
-      summary: The client-visible projection of a ship's external operations - the verbs its hull offers, the live or last-settled hold with its progress, state and reason, and why the last start was refused. Published every tick under a reserved blackboard channel key by ships that authored an [operations] table, and by nobody else.
+      summary: The client-visible projection of a ship's external operations - the verbs its hull offers, the live or last-settled hold with its progress, state, reason and the rate a hazard band is holding it to, and why the last start was refused. Published every tick under a reserved blackboard channel key by ships that authored an [operations] table, and by nobody else.
       rationale:
         - "[ai] A SystemBlackboard variant of its own, not a field on an existing per-system blackboard, because an operation is not a ship system: nothing owns it, nothing repairs it, and it outlives the console that ordered it. The key it is carried under is a reserved CHANNEL id in the same not-a-system-id bucket as the helm and tactical station keys - no [[system]] block declares it, no ControlSource is registered for it, and no ControlSystem message may target it."
         - "[ai] Progress is computed server-side off ELIGIBLE ticks and republished every tick. A client interpolating its own bar would drift off the tick the operation completes on, and a stalled operation's bar is meant to sit visibly still - that stillness is how the crew notice they have drifted out of range - which an interpolating client could not render at all."
         - "[ai] No English crosses the wire: the verb, the target name and every stall or refusal reason are strings.csv ids the console resolves. The state is a machine code the component maps through a literal table rather than by string concatenation, because a composed id is invisible to the string checker."
-        - "[ai] Additive on the wire in both directions - the adjacently-tagged enum's other variants are untouched by the new one, and every field on the payload is serde-default, so a payload predating any of them decodes rather than being refused whole."
+        - "[ai] Additive on the wire in both directions - the adjacently-tagged enum's other variants are untouched by the new one, and every field on the payload is serde-default, so a payload predating any of them decodes rather than being refused whole. #1027's rate field defaults to the FULL rate rather than to zero, because a payload minted before hazard bands existed meant 'normal speed' and decoding it as 'stopped' would show the crew an operation that had died."
+        - "[ai] The rate is published rather than left implicit because a bar that CRAWLS with nothing beside it reads as a bug rather than as the storm. It is shown only when it is below normal: a bar labelled 100 per cent on every ordinary operation would be noise, and the console drops the label once the hold settles because a finished operation is not being slowed by anything."
+        - "[ai] The console renders the verb list by WALKING it. Nothing in the component knows what a verb is - no per-verb branch, no icon table, no special case for the one that tows - so a sixth verb authored later appears in the picker with no client change, which is the property a vitest case asserts against all five. A hull offering exactly one verb shows no picker at all, so the single-capability console is byte-for-byte the one #1026 shipped."
     architecture:
       classification: client-projection
       owner: external-operation-runner

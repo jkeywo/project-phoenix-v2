@@ -112,7 +112,19 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "ImpulseState", "InfrastructureCondition", "InfrastructureState",
     "LastHelmInput", "LateralThrustInput", "LodBubble", "Manifest", "MergeStep",
     "ModelMarkers", "ModelRig", "NavigationWaypoint", "ObjectiveManager",
-    "OperationHold", "OperationsSaveState", "ShipOperations",
+    "OperationHold", "OperationsSaveState", "ShipOperations", "ProgressRate",
+    // Issue #1027. `ResolvedCapacity` is the live half of a structure's named
+    // capacity (a level and a ceiling, resolved at load the way a threshold is)
+    // and `CapacityAdjustment` is one queued move of it — both transcribed from
+    // `infrastructure-condition-state` and `infrastructure-condition-tracker`.
+    //
+    // This slice registered NO new Bevy component or resource, which is why the
+    // guard's own computed set is unchanged: the four verbs are authored fields
+    // on a component #1026 already registered, and the tow deliberately does
+    // NOT carry an "under tow" marker — the rig is derived from the live hold
+    // every tick, so there was nothing to register and nothing extra to
+    // classify.
+    "ResolvedCapacity", "CapacityAdjustment",
     "PendingArcBearingRequest", "PendingWorldLayerChanges", "PhaserCooldown",
     "Player", "PowerBlackboard", "Provenance", "QualifiedRef", "RecentCombatActivity",
     "RegionEffectKind", "RepairBlackboard", "RepairTeams", "ResolvedTemplate", "ScenarioCatalog",

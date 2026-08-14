@@ -2,11 +2,12 @@
 #
 # This is the spine every later slice of the scenario hangs content on: the
 # PLACE, the TRAFFIC that was already moving before the crew arrived, the CLOCK
-# they are working against, and Act 1's triage. It is deliberately a skeleton —
-# the strike (#1035), the negotiation (#1036), the storm and the rescue (#1037),
-# the scan-versus-dossier evidence (#1038/#1039), the collapse (#1040), the
-# restraint lever (#1041) and the transfer window itself (#1042) are all later
-# slices, and none of their content is authored here.
+# they are working against, and Act 1's triage. It began as a skeleton, and the
+# slices that fill it band their own content in below rather than reflowing this
+# one: the strike (#1035), the negotiation (#1036) and the storm and the rescue
+# (#1037) have landed; the scan-versus-dossier evidence (#1038/#1039), the
+# collapse (#1040), the restraint lever (#1041) and the transfer window itself
+# (#1042) are still to come.
 #
 # ── The place ────────────────────────────────────────────────────────────────
 #
@@ -32,8 +33,8 @@
 #   Convoy Meridian     the civilian traffic — sympathetic, and with no
 #                       leverage at all.
 #
-# Their negotiation is #1036's. Nothing here gives any of them a disposition, a
-# strike status or a promise: the skeleton places them and stops.
+# Their negotiation is #1036's, and it is authored now: Act 2 is the two ways the
+# strike ends, either of which the crew can reach without touching the other.
 #
 # ── The traffic ──────────────────────────────────────────────────────────────
 #
@@ -77,10 +78,41 @@
 # boundary, which is what makes partial success readable: the act ends on the
 # clock whatever the crew got done, and the objectives list says which.
 #
-# Acts 2 and 3 exist here as a structural stub and nothing more: `act` counts
-# 1 → 2, and the later slices author their own `[[deadline]]` blocks (the storm
-# sweeps, the transfer window) against it. No Act 2 or Act 3 content is authored
-# in this file.
+# ── Act 2's two endings (issue #1036) ────────────────────────────────────────
+#
+# The survey deadline opens the act on two channels — the committee's and the
+# operator's cutter's — and both are answerable from the destroyer's Tactical
+# seat, which is where this hull's comms overlay lives. Neither ending is behind
+# the other's first pick.
+#
+#   NEGOTIATE  the committee settle for two pieces of ground out of three: the
+#              captain's word that the corridor is clear in the transfer window,
+#              the captain's word that the maintenance file goes to Control, or
+#              the crew showing they have already read the file. Both promises
+#              go onto the commitments ledger with the workers as the party and
+#              stay OPEN — keeping them is #1042's and #1039's business.
+#   FORCE IT   Havelock clear the picket. Faster, and it costs people, a
+#              relationship two campaign flags carry forward, and the worker
+#              corroboration route (#1039) — which fails an objective on the
+#              crew's own list rather than latching in silence.
+#
+# The casualty count is READ, not rolled: script has no RNG and should not, so
+# the number comes off the workers' mirrored disposition at the moment the order
+# is given, with ten minutes' warning as the captain's lever over it. It is
+# deterministic per seed by construction and surfaces on a console four ways.
+#
+# ── Act 2's weather (issue #1037) ────────────────────────────────────────────
+#
+# The negotiation above opens the act; the RADIATION STORM is its second half,
+# and it arrives whatever the crew decided about the strike. Six more visible
+# deadlines, three authored region bands sweeping the corridor, the civilian
+# traffic ordered off the lane ahead of them, and a stricken hauler in the lane
+# that has to be towed clear before the second band. All of it is authored in
+# its own banded section further down this file, from the anchors it needs to
+# the handlers that run it; `act` now counts 1 → 2 → 3.
+#
+# Act 3 is still a structural stub, and the slices that fill it author their own
+# `[[deadline]]` blocks (the transfer window) against the same counter.
 #
 # BASELINE (this world is new in #1034, so this is its first recorded digest).
 #
@@ -106,6 +138,38 @@
 # a depot's capacity level — none of which an Act 1 run reaches, because Act 1
 # opens no operations. `probe_strike.toml` is where those numbers move, and its
 # own baseline is where they are written down.
+#
+# STILL 0x14d6dc5dcf05a3c1 AFTER #1036 as well, and for a reason the header can
+# name rather than a coincidence. The slice adds no entity, moves no position and
+# touches no condition, capacity or deadline number; everything it authors is Act
+# 2, and Act 2 opens on a deadline 90 mission-seconds in. The baseline run is 900
+# ticks at the default 60 Hz — fifteen seconds — so it does not reach the act
+# boundary, never opens a thread, and folds none of the dialogue. The five
+# anchors were re-measured on the same clean tree and are unmoved: combat_test
+# 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, and probe_strike
+# (--ticks 1800) 535291289754814419.
+#
+# That prediction — "a later slice lengthens the baseline run past 90 s and the
+# number moves" — is not what moved it in the end. #1037 moved it without
+# touching the run length at all; see below.
+#
+# MOVED IN #1037, to 0xf4d793f352cf6c39 (17642732738522868793), with
+# 708284805067334137 (0x09d455470dd861f9) at tick 0. The mechanism is one line
+# of authored content and nothing else: the storm slice adds the Lyra Ascending
+# as an `[[entity]]`, so this world spawns one more hull than it used to. That
+# hull takes a uuid out of the entity namespace's mint sequence and then folds
+# its own transform and hull every tick, which is exactly what the digest is
+# for. Everything else Act 2 adds is invisible to a 900-frame run and would be
+# invisible to it in any case: six `[[deadline]]` blocks and a `[[route]]` are
+# authored content on `WorldContentRuntime`, the three storm bands do not spawn
+# until t=145, and the destroyer's new `tow` capability folds nothing until a
+# tow is actually run (`probe_storm.toml` is where those numbers move).
+#
+# The two shipped worlds are UNMOVED — combat_test 14942520827746055774, patrol
+# 11531679067393217131 — as are probe_operations, probe_destroy, probe_strike,
+# probe_scan and probe_evidence. The destroyer template gained a capability and
+# a hull that can do a thing it never does folds nothing.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls
@@ -185,8 +249,40 @@ worker_mooring = [1110.0, 0.0, 350.0]
 corporate_mooring = [1260.0, 0.0, 360.0]
 
 # Where traffic gets held when the corridor cannot take it. Nothing in Act 1
-# sends anyone here; the storm slice (#1037) will.
+# sends anyone here; the storm slice (#1037) does.
 holding_arc = [-640.0, 0.0, 520.0]
+
+# ── Act 2's places (issue #1037) ─────────────────────────────────────────────
+#
+# Where the radiation storm goes, and where everything that has to get out of
+# its way goes instead. Every one of these was checked against the band radius
+# `region_radiation_band.toml` authors (260 units): the three band centres are
+# ON the corridor, and the three refuges are all more than a radius clear of
+# every one of them. A shelter inside a band would be an authoring bug that
+# nothing in Rust could catch.
+
+# The three band centres, stepping down the corridor from the north end to the
+# skyhook head. 340 units apart against a 260-unit radius, so consecutive bands
+# OVERLAP: the storm reads as one front moving south rather than as three
+# separate weather events.
+storm_band_north = [0.0, 0.0, -760.0]
+storm_band_gate = [0.0, 0.0, -420.0]
+storm_band_head = [0.0, 0.0, -80.0]
+
+# Where the Lyra Ascending is adrift — in the corridor, under the first two
+# bands and clear of the third. She has been there since before the crew
+# arrived, which is why she is an authored `[[entity]]` and not a spawn.
+lyra_drift = [60.0, 0.0, -560.0]
+
+# The lee of the storm: west of the corridor, clear of all three bands, and
+# where the rescue objective points a helm — human or backfilled.
+storm_lee = [-560.0, 0.0, -300.0]
+
+# The traffic's way out. West FIRST, then south to the holding arc: a craft sent
+# straight to the arc from the north end of the corridor would fly diagonally
+# down the lane and through the sweep, which is the exact mistake the shelter
+# run exists to stop.
+shelter_west = [-880.0, 0.0, -300.0]
 
 # ── Lanes ────────────────────────────────────────────────────────────────────
 
@@ -452,6 +548,196 @@ label = "world.falling_skyway.deadline.skyway_survey_due.label"
 due_secs = 90
 visible = true
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ACT 2 — THE RADIATION STORM AND THE RESCUE (issue #1037)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Act 1 was a survey. #1036's negotiation opens Act 2 on the dispute; this is the
+# act's OTHER half, and it arrives whatever the crew decided about the strike.
+# Weather turns a survey into a set of decisions with a clock on them.
+#
+# ── The storm is not a system ────────────────────────────────────────────────
+#
+# It is `region_radiation_band.toml` — an authored region template composing
+# `damage_zone`, `radar_dampening`, `sensor_blind`, `comms_jammed` and
+# `slow_zone` — spawned on the named deadlines below (#1024) and retired with
+# `destroy_entity` (#1033). The retirement is what makes it a SWEEP rather than
+# a wall: each band arrives, dwells for forty seconds and goes, and the next one
+# is 340 units further south. Nothing in Rust knows a storm exists.
+#
+# Inside a band the crew's radar range falls to about a third, sensors go blind,
+# comms jam, and the hull takes light continuous damage. `region_radiation_band`
+# carries the arithmetic; the short form is that the destroyer survives crossing
+# a band and does not survive living in one, and a 60-point civilian hauler
+# cannot cross one at all.
+#
+# ── The sweep's clock, and why the traffic goes first ────────────────────────
+#
+#   t=100  storm_front_due     Control's forecast. The corridor is cleared and
+#                              the Lyra's situation becomes the crew's problem.
+#   t=145  storm_band_one_due  the first band, over the north corridor. Retires
+#                              at t=185, forty seconds later.
+#   t=185  storm_band_two_due  the second, over the upper gate. Retires t=225.
+#   t=192  lyra_clear_due      THE RESCUE'S CLOCK. She is under control by now
+#                              or the band has her.
+#   t=225  storm_band_three_due  the third, over the head. Retires t=265.
+#   t=268  storm_passed_due    the corridor is clear. Traffic goes back on the
+#                              lane and the act closes.
+#
+# FORTY-FIVE SECONDS of warning before the first band, which is not generosity —
+# it is arithmetic. A bulk hauler makes twelve units a second and needs about
+# thirty-five of them to get clear of the lane once its own authored
+# acknowledge-and-decide delay has run. A shorter forecast would put craft in
+# bands however well the crew handled it, and "the traffic died because the
+# schedule was wrong" is not a decision anybody made.
+#
+# ── The rescue, and the two numbers that make it a real decision ─────────────
+#
+# The payload of the act is a TOW: the Lyra Ascending, a bulk hauler with a dead
+# drive, adrift in the corridor with the front coming down on her. The crew's
+# destroyer authors `tow` at 24 seconds with a 50 % slow-zone rule, and the two
+# numbers decide the whole thing between them:
+#
+#   started at t=105, in clear air     24 s of work, done at t=129
+#   started at t=140, band at t=145     5 s clear + 38 s slowed, done at t=183
+#   started at t=150, inside the band  48 s of work, done at t=198 — TOO LATE
+#
+# So the rescue is completable and it is failable, and which one happens is a
+# decision the crew make around t=145 rather than a die the mission rolls. Wait
+# for the picture to improve and the picture is what you lose: inside a band the
+# radar is at a third and the channels are jammed, so the crew who set off early
+# are the crew who could still see.
+#
+# HOW A COMPLETED TOW IS DETECTED. There is no "operation completed" trigger —
+# what a completion leaves behind IS its payoff — so the rescue is read the only
+# honest way there is: the destroyer's tow authors `condition_on_complete = 45`,
+# the Lyra authors a condition threshold at half of her hundred points and
+# starts at thirty, and the payout is what carries her over it. The flag rising
+# IS the tow landing, and `on_flag_set` hangs off it like any other world flag.
+# [ai] This is a judgement call about what a condition track means on a stricken
+# CRAFT: hers is her drive and her rig, not her plating (`hull_damage_share = 0`
+# says so), so "under control" is the reading that moves when somebody takes the
+# strain off her — and never moves because the storm scoured her paint.
+#
+# ── Failing it is a thing that happens, not a thing that vanishes ────────────
+#
+# At `lyra_clear_due`, if she is not under control, the band has her: the
+# objective fails, `destroy_entity` takes her, and the chained `on_destroyed`
+# posts the mandatory report objective and writes the campaign flags. One of
+# `skyway_lyra_recovered` and `skyway_lyra_lost` is ALWAYS written, so a later
+# act — or a later mission — reads a fact rather than an absence.
+
+# ── Act 2's traffic route ────────────────────────────────────────────────────
+#
+# The shelter run. Not a divert-to-anchor, because the anchor a craft is sent to
+# matters less than the way it gets there: a hauler at the north end told to
+# make for the holding arc would fly diagonally down the corridor and straight
+# through the sweep. West first, then south, then hold.
+#
+# It loops so a craft parked on it stays parked — the crew put the corridor back
+# to work at `storm_passed_due` by ordering it back onto `skyway_lane`, which is
+# a decision somebody makes rather than a timer running out on a craft.
+[[route]]
+id = "storm_shelter_run"
+on_complete = "loop"
+
+[[route.leg]]
+anchor = "shelter_west"
+speed = 1.0
+hold_secs = 20
+
+[[route.leg]]
+anchor = "holding_arc"
+speed = 0.9
+hold_secs = 30
+
+# ── The stricken craft ───────────────────────────────────────────────────────
+#
+# Lyra Ascending. Adrift in the corridor from the first tick of the mission,
+# because she has been adrift since before anybody sent a destroyer — an
+# `[[entity]]` rather than a spawn, for the reason the strike is authored rather
+# than scripted on tick one.
+#
+# She carries no `[civilian] route`. A craft under tow is not on a lane, and
+# giving her one would have the traffic adapter and the tow arguing over where
+# she is every tick.
+#
+# THE THREE AUTHORED FACTS THAT MAKE HER A RESCUE:
+#
+#   hull_integrity 400   she is a bulk hull, not a shuttle. At the band's
+#                        effective two and a half points a second she can sit
+#                        through two bands' worth of front without burning up,
+#                        which is what makes the DEADLINE the thing that ends
+#                        her rather than a damage race the crew cannot see.
+#                        [ai] Unratified.
+#   hull_damage_share 0  her condition track is her drive and her rig. At the
+#                        1.0 default the storm would drag it to zero and the
+#                        rescue could not be completed at all — the payout would
+#                        land on a track that had already bottomed out.
+#   condition 30/100     under her own authored half-way line, so
+#                        `skyway_lyra_under_control` is DOWN from her first tick
+#                        and its rise is an event. The crew do not need telling
+#                        she is in trouble; the panel says so.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "lyra_ascending"
+name = "world.falling_skyway.entity.lyra_ascending.name"
+transform = { anchor = "lyra_drift" }
+
+[entity.overrides]
+comms = { hailable = true }
+hull = { hull_integrity = 400.0 }
+
+[entity.overrides.infrastructure]
+condition = 30.0
+hull_damage_share = 0.0
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "skyway_lyra_under_control"
+fails_below = 0.5
+label = "world.falling_skyway.threshold.under_control.label"
+
+# ── Act 2's clock ────────────────────────────────────────────────────────────
+#
+# All six visible. A storm a crew can see coming is weather; one they cannot is
+# an ambush, and this scenario is not about ambushes.
+
+[[deadline]]
+id = "storm_front_due"
+label = "world.falling_skyway.deadline.storm_front.label"
+due_secs = 100
+visible = true
+
+[[deadline]]
+id = "storm_band_one_due"
+label = "world.falling_skyway.deadline.storm_band_one.label"
+due_secs = 145
+visible = true
+
+[[deadline]]
+id = "storm_band_two_due"
+label = "world.falling_skyway.deadline.storm_band_two.label"
+due_secs = 185
+visible = true
+
+[[deadline]]
+id = "lyra_clear_due"
+label = "world.falling_skyway.deadline.lyra_clear.label"
+due_secs = 192
+visible = true
+
+[[deadline]]
+id = "storm_band_three_due"
+label = "world.falling_skyway.deadline.storm_band_three.label"
+due_secs = 225
+visible = true
+
+[[deadline]]
+id = "storm_passed_due"
+label = "world.falling_skyway.deadline.storm_passed.label"
+due_secs = 268
+visible = true
+
 # ── Act 1 ────────────────────────────────────────────────────────────────────
 
 [script]
@@ -526,9 +812,14 @@ fn on_lift_tolerance_lost(ctx) {
 // unassisted rate, on the next tick, with nothing to un-latch. What they make
 // of the crew afterwards is #1036's — the two resolution paths part company
 // exactly there, and this handler deliberately takes no view.
+//
+// #1036 hangs the act-2 objective off it and nothing else: BOTH endings reach
+// this one handler, so "the line is working again" is completed once, in the
+// place the line actually starts moving, whichever way the crew got there.
 fn on_strike_settled(ctx) {
     ctx.effects.settle_strike("skyway_workers");
     ctx.flags.increment("strike_resolved", 1);
+    ctx.effects.complete_objective("obj-a2-line");
 }
 
 // The lane, proving itself: the lead hauler clears the throat.
@@ -550,5 +841,690 @@ fn on_survey_due(ctx) {
     }
     ctx.flags.act1_complete = 1;
     ctx.flags.act = 2;
+
+    // ACT 2 OPENS ON THE DISPUTE (issue #1036). Two objectives and two open
+    // channels, and the crew can take either channel without touching the
+    // other — which is what "separately reachable" means here: neither ending
+    // is behind the other's first pick.
+    //
+    // The line objective carries a Reach directive to the ladder transit leg
+    // rather than to a berth, and that is load-bearing rather than scenic. The
+    // hull's `[comms] range` is 1000; from the act-1 station-keeping point the
+    // committee is just inside it and the operator's cutter is NOT, so a crew
+    // who never close on the ladder can hear one party and not answer the
+    // other. Closing is helm's job, the objective names it, and an
+    // AI-backfilled helm flies it.
+    ctx.effects.add_objective(#{
+        id: "obj-a2-line",
+        text: "world.falling_skyway.objective.line.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 50,
+        directive_kind: "Reach",
+        directive_anchor: "ladder_transit",
+        targets: ["world.falling_skyway.entity.depot_ladder_b.name"],
+    });
+    // Optional, and it is the one the force-open ending FAILS. An objective
+    // that goes red on the list is the loudest way this scenario has of saying
+    // "that route is shut now" without a line of prose about it; the flag
+    // beside it is what a later mission reads.
+    ctx.effects.add_objective(#{
+        id: "obj-a2-corroborate",
+        text: "world.falling_skyway.objective.corroborate.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 25,
+        targets: ["world.falling_skyway.entity.strike_committee.name"],
+    });
+
+    // Both threads open FROM the parties' own hulls, never from `_self`: the
+    // response router range-gates a pick against the sender's live range flag,
+    // so a real, hailable, in-range sender is what makes an answer land. It is
+    // also the more honest scene — somebody called, and the crew answered.
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.strike_committee.name",
+        node_fn: "committee_hails",
+        urgent: true,
+    });
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "havelock_hails",
+    });
+}
+
+// ═══ ACT 2: THE TWO WAYS THE STRIKE ENDS (issue #1036) ══════════════════════
+//
+// Both endings are authored whole, both are playable, and both end at the SAME
+// lever — `skyway_strike_settled`, which #1035's handler above turns into a
+// working rung. What separates them is everything they write on the way there:
+// a ledger of promises and a channel that stays open, or two relationship flags,
+// a failed objective and people in a sick bay.
+//
+// ── What the tree branches on ───────────────────────────────────────────────
+//
+// Nothing here is a fixed script. Every node is a function that reads the world
+// before it decides what the captain may say:
+//
+//   the commitments ledger    `ctx.commitments.state(id)` — an option disappears
+//                             once the promise behind it is on the books, and
+//                             the settlement option appears only when the
+//                             committee have enough to take to the floor.
+//   the crew's own file       `ctx.dossier.holds(#{ text: … })` — the line about
+//                             the maintenance record EXISTS only if the crew
+//                             went and got the record. This reads the evidence
+//                             log itself rather than a flag set beside the
+//                             append, so any route that files the same finding
+//                             — including the ones #1038/#1039 have not written
+//                             yet — opens the same line.
+//   world flags               the force-open latch, and the workers' mirrored
+//                             disposition, which is what the casualty risk is
+//                             measured against.
+//
+// ── PATH A: the negotiation ─────────────────────────────────────────────────
+//
+// The committee want two things and will settle for two pieces of ground out of
+// three: promise the corridor is clear in the final transfer window, promise the
+// maintenance file goes to Control rather than back to the operator, or show
+// them you have already read the file. So a crew who never looked must give BOTH
+// promises; a crew who did the evidence work can settle on one. That is the
+// whole reason the evidence branch is worth authoring — it is not flavour, it is
+// a promise the captain does not have to make.
+//
+// The promises stay OPEN in the ledger. Keeping them is the transfer window's
+// business (#1042) and the report to Control's (#1039); this beat is where they
+// are given.
+
+fn committee_hails(ctx) {
+    // Answered after the picket was cleared over their heads: there is nothing
+    // to negotiate and the tree says so rather than silently offering options
+    // that no longer mean anything.
+    if ctx.flags.skyway_forced_open > 0 {
+        return #{
+            message: "world.falling_skyway.comms.committee_no_longer_talking",
+            responses: [],
+        };
+    }
+    #{
+        message: "world.falling_skyway.comms.committee_hails",
+        responses: [
+            #{ text: "world.falling_skyway.comms.listen", on_pick: "on_committee_listen" },
+            #{ text: "world.falling_skyway.comms.dismiss", on_pick: "on_committee_dismiss" },
+        ],
+    }
+}
+
+// What the workers make of the crew, derived in ONE place from what the crew
+// have actually done, so two beats cannot disagree about it. Absolute rather
+// than incremental for that reason: `set_workforce_disposition` writes a value,
+// and a value computed from the record cannot drift the way a running total of
+// `+10`s can. [ai] Every number here is unratified.
+fn committee_mood(ctx) {
+    let mood = 25;
+    if ctx.commitments.state("skyway_safe_passage") != "unknown" { mood += 10; }
+    if ctx.commitments.state("skyway_surface_records") != "unknown" { mood += 10; }
+    if ctx.flags.skyway_file_shown > 0 { mood += 15; }
+    if ctx.flags.skyway_stonewalled > 0 { mood -= 10; }
+    mood
+}
+
+fn on_committee_listen(ctx) {
+    ctx.flags.increment("skyway_negotiation_opened", 1);
+    committee_terms(ctx)
+}
+
+// Talking down to them costs ten points, and those ten points are not
+// decoration: they are what the casualty arithmetic on the other path reads.
+fn on_committee_dismiss(ctx) {
+    ctx.flags.increment("skyway_stonewalled", 1);
+    ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
+    committee_hails(ctx)
+}
+
+fn committee_terms(ctx) {
+    if ctx.flags.skyway_forced_open > 0 {
+        return #{
+            message: "world.falling_skyway.comms.committee_no_longer_talking",
+            responses: [],
+        };
+    }
+    // Read after write inside one call: a promise made by the `on_pick` that
+    // called this node is already on the books for it, which is why the option
+    // that made it has gone by the time the follow-up node is shown.
+    let promised_passage = ctx.commitments.state("skyway_safe_passage") != "unknown";
+    let promised_records = ctx.commitments.state("skyway_surface_records") != "unknown";
+    let showed_the_file = ctx.flags.skyway_file_shown > 0;
+
+    let ground = 0;
+    if promised_passage { ground += 1; }
+    if promised_records { ground += 1; }
+    if showed_the_file { ground += 1; }
+
+    let responses = [];
+    if !promised_passage {
+        responses.push(#{
+            text: "world.falling_skyway.comms.promise_passage",
+            on_pick: "on_promise_passage",
+            important: true,
+        });
+    }
+    if !promised_records {
+        responses.push(#{
+            text: "world.falling_skyway.comms.promise_records",
+            on_pick: "on_promise_records",
+            important: true,
+        });
+    }
+    // THE EVIDENCE BRANCH. `holds` reads the run's evidence log — what is on the
+    // crew's fact sheet — and not a flag mirroring it, so the line appears for
+    // any route that filed the finding.
+    if !showed_the_file &&
+       ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" }) {
+        responses.push(#{
+            text: "world.falling_skyway.comms.show_file",
+            on_pick: "on_show_file",
+        });
+    }
+    if ground >= 2 {
+        responses.push(#{
+            text: "world.falling_skyway.comms.call_the_vote",
+            on_pick: "on_settle",
+            important: true,
+        });
+    }
+    // Always last, and never terminal: a captain who needs to go and do
+    // something else keeps the channel.
+    responses.push(#{ text: "world.falling_skyway.comms.stall", on_pick: "on_stall" });
+
+    let body = "world.falling_skyway.comms.committee_terms";
+    if ground >= 2 { body = "world.falling_skyway.comms.committee_ready"; }
+    #{ message: body, responses: responses }
+}
+
+fn on_promise_passage(ctx) {
+    ctx.commitments.record(#{
+        id: "skyway_safe_passage",
+        made_to: "world.falling_skyway.entity.strike_committee.name",
+        terms: "world.falling_skyway.commitment.safe_passage.terms",
+        resolves_when: "world.falling_skyway.commitment.safe_passage.resolves",
+    });
+    ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
+    committee_terms(ctx)
+}
+
+fn on_promise_records(ctx) {
+    ctx.commitments.record(#{
+        id: "skyway_surface_records",
+        made_to: "world.falling_skyway.entity.strike_committee.name",
+        terms: "world.falling_skyway.commitment.surface_records.terms",
+        resolves_when: "world.falling_skyway.commitment.surface_records.resolves",
+    });
+    ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
+    committee_terms(ctx)
+}
+
+// The line the crew earned by getting the file. It records nothing on the
+// ledger — the captain is not promising anything, they are showing their work —
+// and it is worth more than either promise, because it is the only thing in this
+// conversation the workers can check.
+fn on_show_file(ctx) {
+    ctx.flags.increment("skyway_file_shown", 1);
+    ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
+    committee_terms(ctx)
+}
+
+fn on_stall(ctx) {
+    committee_hails(ctx)
+}
+
+// The settlement. It does not end the strike on this tick: the committee put it
+// to the floor, and twenty seconds later the rung starts moving. The delay is
+// the whole difference in PACE between the two endings — the operator clears a
+// picket in six.
+fn on_settle(ctx) {
+    ctx.flags.skyway_settled_by_negotiation = 1;
+    ctx.effects.set_workforce_disposition("skyway_workers", 60);
+    ctx.schedule.after(20, |ctx| {
+        ctx.flags.skyway_strike_settled = 1;
+    });
+    #{ message: "world.falling_skyway.comms.committee_settles", responses: [] }
+}
+
+// ── PATH B: the operator clears it ──────────────────────────────────────────
+//
+// Faster, reachable without saying a word to the workers, and it costs three
+// things the negotiation does not: people, a relationship two campaign flags
+// carry forward, and the corroboration route.
+//
+// THE CASUALTY RISK IS RESOLVED FROM STATE, not from a die this engine does not
+// give a script. It is read off the workers' mirrored disposition AT THE MOMENT
+// THE ORDER IS GIVEN — how dug in they are is what decides how badly it goes —
+// and the captain is given one lever over it: ten minutes' warning on the open
+// channel costs time and takes a step off the outcome. Deterministic per seed
+// by construction, and it surfaces in four places rather than in a flag: the
+// cutter reports back on an open channel, the finding lands on the committee's
+// fact sheet, the rung takes real condition damage, and the count is a flag a
+// later mission reads.
+
+fn havelock_hails(ctx) {
+    havelock_offer(ctx, "world.falling_skyway.comms.havelock_hails")
+}
+
+// The offer, under whichever opening line the caller is answering with.
+fn havelock_offer(ctx, body) {
+    // Nothing left to sell once the rung is moving, either way.
+    if ctx.flags.skyway_forced_open > 0 || ctx.flags.skyway_strike_settled > 0 {
+        return #{ message: "world.falling_skyway.comms.havelock_stands_off", responses: [] };
+    }
+    let responses = [];
+    // Two checks, and both are needed: `holds` reads the log as it stood when
+    // this CALL started, so the flag is what hides the option from the very
+    // follow-up node the request returns, and the log is what keeps it hidden
+    // once any other route has filed the same finding.
+    if ctx.flags.skyway_file_requested == 0 &&
+       !ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" }) {
+        responses.push(#{
+            text: "world.falling_skyway.comms.ask_for_file",
+            on_pick: "on_request_file",
+        });
+    }
+    // ORDER IS LOAD-BEARING HERE, for a reason nothing else in this file has to
+    // care about. The destroyer merges `fragments/ai/fleet_baseline.toml`, whose
+    // Comms policy answers an open thread with its FIRST response while Comms is
+    // available and the sender is in range — so on a hull whose Tactical seat is
+    // AI-backfilled rather than held by a person, index 0 is what the ship does
+    // when nobody is listening. Refusing has to be that answer: an officer who
+    // authorised a boarding party because it happened to be listed first would
+    // be the loudest possible authoring accident.
+    //
+    // [ai] The real fix is the console-complexity ladder's human-seeking comms —
+    // a system that WANTS a person and says so, instead of a scenario ordering
+    // its buttons around a backfill policy. Until then this order is the
+    // scenario's own safety catch, and it is the scenario's to hold: a world
+    // CANNOT switch that policy off per-mission, because
+    // `spawn_game_start_entities` takes the player hull's config from the lobby
+    // selection wholesale and an `[entity.overrides.comms_console.ai]` on the
+    // player-ship row is validated and then discarded.
+    responses.push(#{
+        text: "world.falling_skyway.comms.refuse_force",
+        on_pick: "on_refuse_force",
+    });
+    responses.push(#{
+        text: "world.falling_skyway.comms.force_warned",
+        on_pick: "on_force_warned",
+        important: true,
+    });
+    responses.push(#{
+        text: "world.falling_skyway.comms.force_now",
+        on_pick: "on_force_now",
+        important: true,
+    });
+    #{ message: body, responses: responses }
+}
+
+// The operator hands over the file that makes the workers trust the crew, which
+// is the joke this scenario is built on. `records` provenance: it is a document
+// comparison, not a scan and not somebody's word.
+fn on_request_file(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.depot_ladder_b.name",
+        text:       "world.falling_skyway.evidence.ladder_b_maintenance_file",
+        provenance: "records",
+    });
+    ctx.flags.increment("skyway_file_requested", 1);
+    havelock_offer(ctx, "world.falling_skyway.comms.havelock_sends_file")
+}
+
+// Declining does not delete the option — the operator is still sitting on the
+// depot with a costed problem. They ask once more, thirty seconds later, and
+// only once, so a crew who keep saying no are not nagged for the whole mission.
+fn on_refuse_force(ctx) {
+    ctx.flags.increment("skyway_force_declined", 1);
+    if ctx.flags.skyway_force_declined == 1 {
+        ctx.schedule.after(30, |ctx| {
+            ctx.effects.open_comms(#{
+                from: "world.falling_skyway.entity.havelock_cutter.name",
+                node_fn: "havelock_hails",
+            });
+        });
+    }
+    #{ message: "world.falling_skyway.comms.havelock_stands_off", responses: [] }
+}
+
+fn on_force_now(ctx)    { force_the_picket(ctx, false) }
+fn on_force_warned(ctx) { force_the_picket(ctx, true) }
+
+fn force_the_picket(ctx, warned) {
+    // READ THE GROUND BEFORE MOVING IT. Everything below drives the workers'
+    // disposition to the floor, so the risk has to be measured first — it is
+    // what the situation was when the order was given, not what the order made
+    // of it. [ai] Thresholds unratified.
+    //
+    // A crew who negotiated their way up to trust and THEN authorised this get
+    // the lowest count, and that is not a reward: the people on that rung were
+    // not braced, because the captain had just told them they did not need to
+    // be.
+    let mood = ctx.flags["workforce.skyway_workers.disposition"];
+    let hurt = 1;
+    if mood <= 40 { hurt = 2; }
+    if mood <= 20 { hurt = 3; }
+    if warned && hurt > 0 { hurt -= 1; }
+
+    ctx.flags.skyway_forced_open = 1;
+    ctx.flags.skyway_force_casualties = hurt;
+    // The campaign flags. `skyway_worker_corroboration_closed` is the route
+    // this shuts; the two relationship flags are what a later mission reads to
+    // know who the crew are, and they are written as a PAIR because forcing a
+    // picket open does not only lose you the workers.
+    ctx.flags.skyway_worker_corroboration_closed = 1;
+    ctx.flags["relationship.skyway_workers.damaged"] = 1;
+    ctx.flags["relationship.havelock_operations.favoured"] = 1;
+
+    // A promise overrun is a promise broken, and the ledger says so in the
+    // captain's own record rather than in the narration. Guarded on `open` so
+    // a second force-open cannot re-break a settled promise.
+    if ctx.commitments.state("skyway_safe_passage") == "open" {
+        ctx.commitments.break_promise("skyway_safe_passage");
+    }
+    if ctx.commitments.state("skyway_surface_records") == "open" {
+        ctx.commitments.break_promise("skyway_surface_records");
+    }
+
+    ctx.effects.set_workforce_disposition("skyway_workers", 5);
+    ctx.effects.set_workforce_disposition("havelock_operations", 70);
+
+    // THE CLOSURE, MADE LEGIBLE. The objective goes red on the list, and the
+    // workers say why on the channel they will not answer again.
+    ctx.effects.fail_objective("obj-a2-corroborate");
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.strike_committee.name",
+        node_fn: "committee_signs_off",
+        urgent: true,
+    });
+
+    // Ten minutes on the open channel, or now. Both are faster than a vote.
+    if warned {
+        ctx.schedule.after(12, |ctx| { picket_cleared(ctx); });
+    } else {
+        ctx.schedule.after(6, |ctx| { picket_cleared(ctx); });
+    }
+    #{ message: "world.falling_skyway.comms.havelock_acknowledges", responses: [] }
+}
+
+fn committee_signs_off(ctx) {
+    #{ message: "world.falling_skyway.comms.committee_signs_off", responses: [] }
+}
+
+// What it cost, on screen. The count was decided when the order was given and
+// banked on a flag, so this handler only reports it — which is also what makes
+// it survive a save between the order and the outcome.
+fn picket_cleared(ctx) {
+    let hurt = ctx.flags.skyway_force_casualties;
+    // The same lever the negotiation pulls: the rung is working again.
+    ctx.flags.skyway_strike_settled = 1;
+
+    if hurt > 0 {
+        // The rung does not come out of it clean either. Four points a casualty
+        // is a real move on a condition track the operations panel is already
+        // showing, which is the difference between a consequence and a sentence
+        // about one.
+        ctx.effects.damage_infrastructure("world.falling_skyway.entity.depot_ladder_b.name", 4 * hurt);
+        ctx.dossier.append(#{
+            subject:    "world.falling_skyway.entity.strike_committee.name",
+            text:       "world.falling_skyway.evidence.picket_cleared_hurt",
+            provenance: "dialogue",
+        });
+    }
+
+    if hurt >= 2 {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.havelock_cutter.name",
+            node_fn: "force_report_hurt",
+            urgent: true,
+        });
+    } else if hurt == 1 {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.havelock_cutter.name",
+            node_fn: "force_report_one",
+            urgent: true,
+        });
+    } else {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.havelock_cutter.name",
+            node_fn: "force_report_clean",
+            urgent: true,
+        });
+    }
+}
+
+fn force_report_clean(ctx) {
+    #{ message: "world.falling_skyway.comms.force_report_clean", responses: [] }
+}
+
+fn force_report_one(ctx) {
+    #{ message: "world.falling_skyway.comms.force_report_one", responses: [] }
+}
+
+fn force_report_hurt(ctx) {
+    #{ message: "world.falling_skyway.comms.force_report_hurt", responses: [] }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ACT 2 — the radiation storm and the rescue (issue #1037)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The act's data — the band anchors, the shelter route, the Lyra and the six
+// deadlines — is authored above this script. What is here is only the wiring
+// that turns a clock into a storm.
+
+on_deadline("storm_front_due", "on_storm_front");
+on_deadline("storm_band_one_due", "on_storm_band_one");
+on_deadline("storm_band_two_due", "on_storm_band_two");
+on_deadline("storm_band_three_due", "on_storm_band_three");
+on_deadline("lyra_clear_due", "on_lyra_clear_due");
+on_deadline("storm_passed_due", "on_storm_passed");
+
+// THE RESCUE'S COMPLETION SIGNAL. A completed tow pays its authored
+// `condition_on_complete` into the towed craft, and the Lyra authors a
+// threshold the payout is sized to cross. There is no "operation completed"
+// trigger, and this is the honest substitute: what a completion leaves behind
+// is its payoff, so a scenario reads the payoff.
+on_flag_set("skyway_lyra_under_control", "on_lyra_recovered");
+
+// The consequence, chained off the removal rather than written beside it. A
+// scripted destruction chains exactly as a kill does, so whatever takes her —
+// this act's own deadline today, something else tomorrow — lands here.
+on_destroyed("world.falling_skyway.entity.lyra_ascending.name", "on_lyra_lost");
+
+// Every craft on a lane. If one of these ever fires, the sweep schedule and the
+// shelter run did not do their job, and the act says so at its close rather
+// than completing quietly over four wrecks.
+on_destroyed("world.falling_skyway.entity.convoy_meridian.name", "on_traffic_lost");
+on_destroyed("world.falling_skyway.entity.hauler_lark.name", "on_traffic_lost");
+on_destroyed("world.falling_skyway.entity.hauler_pell.name", "on_traffic_lost");
+on_destroyed("world.falling_skyway.entity.shuttle_wick.name", "on_traffic_lost");
+
+// The forecast. Everything the crew get to plan with arrives in one beat, 45
+// seconds before the first band: what is coming, who is in the way, and where
+// the traffic is being sent.
+fn on_storm_front(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-a2-shelter",
+        text: "world.falling_skyway.objective.shelter.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 50,
+    });
+    // TWO OBJECTIVES FOR ONE RESCUE, and the split is forced by what a Reach
+    // directive MEANS: `detect_reached_objective_completion` completes any
+    // objective whose Reach anchor an AI-flown helm arrives at. An objective
+    // carrying the approach therefore cannot also be the one that records the
+    // tow — it would complete the moment the ship got there, whether or not
+    // anybody ever put a line on her.
+    //
+    // The approach, then, carries the directive: what an AI-backfilled helm
+    // flies and what a human helm is being asked for, at the highest priority
+    // in the act.
+    ctx.effects.add_objective(#{
+        id: "obj-a2-approach",
+        text: "world.falling_skyway.objective.approach.text",
+        source: "mission",
+        base_priority: 70,
+        directive_kind: "Reach",
+        directive_anchor: "lyra_drift",
+        targets: ["world.falling_skyway.entity.lyra_ascending.name"],
+    });
+    // …and the rescue itself carries no directive at all. It is resolved by
+    // what the crew DID: the tow's own completion signal, or the deadline.
+    ctx.effects.add_objective(#{
+        id: "obj-a2-rescue",
+        text: "world.falling_skyway.objective.rescue.text",
+        mandatory: true,
+        targets: ["world.falling_skyway.entity.lyra_ascending.name"],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a2-storm",
+        text: "world.falling_skyway.objective.storm.text",
+        mandatory: true,
+    });
+
+    // THE TRAFFIC RESPONDS TO THE SCHEDULE. Three ordinary #1028 divert orders
+    // onto the shelter run, issued off the same deadline that announces the
+    // sweep — no new navigation AI, and no craft that knows what a storm is.
+    // Each one is a REQUEST: the compliance machine still takes its authored
+    // acknowledge-and-decide seconds, and a hull whose disposition refused
+    // diverts would refuse this one. That is why the forecast is 45 seconds
+    // ahead of the first band rather than five.
+    //
+    // THREE, not four. `shuttle_wick` works the depot ladder, which runs east
+    // of the corridor and never comes within 300 units of a band centre — the
+    // storm sweeps the skyway, not the whole sky, and ordering a craft off a
+    // lane it was never in danger on would be theatre. Its `on_destroyed` hook
+    // stays registered below as the canary: if the ladder shuttle ever dies of
+    // weather, this claim was wrong.
+    ctx.effects.order_divert_route("world.falling_skyway.entity.convoy_meridian.name", "storm_shelter_run");
+    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_lark.name", "storm_shelter_run");
+    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_pell.name", "storm_shelter_run");
+
+    ctx.flags.increment("a2_front_warned", 1);
+}
+
+// The three bands. Each one spawns at its own anchor and SCHEDULES ITS OWN
+// RETIREMENT forty seconds out — the deferred `destroy_entity` #1033 proved.
+// The dwell is a property of the band, and a band that spawned without one
+// would be a wall.
+fn on_storm_band_one(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/region_radiation_band.toml",
+        name: "storm_band_one",
+        anchor: "storm_band_north",
+        groups: ["storm_bands"],
+    });
+    ctx.schedule.in_seconds(40).destroy_entity("storm_band_one");
+    ctx.flags.increment("a2_band_one", 1);
+}
+
+fn on_storm_band_two(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/region_radiation_band.toml",
+        name: "storm_band_two",
+        anchor: "storm_band_gate",
+        groups: ["storm_bands"],
+    });
+    ctx.schedule.in_seconds(40).destroy_entity("storm_band_two");
+    ctx.flags.increment("a2_band_two", 1);
+}
+
+fn on_storm_band_three(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/region_radiation_band.toml",
+        name: "storm_band_three",
+        anchor: "storm_band_head",
+        groups: ["storm_bands"],
+    });
+    ctx.schedule.in_seconds(40).destroy_entity("storm_band_three");
+    ctx.flags.increment("a2_band_three", 1);
+}
+
+// The tow landed. The flag rose because the payout carried her condition track
+// over its authored line, which is the only thing a completed tow leaves behind.
+fn on_lyra_recovered(ctx) {
+    ctx.effects.complete_objective("obj-a2-rescue");
+    // Campaign state. One of this and `skyway_lyra_lost` is ALWAYS written, so
+    // a later act reads a fact rather than an absence.
+    ctx.flags.skyway_lyra_recovered = 1;
+    ctx.flags.increment("a2_lyra_recovered", 1);
+}
+
+// The rescue's clock. If she is not under control by now the second band has
+// her, and the act says so out loud: the objective fails and the removal
+// chains its own consequence.
+fn on_lyra_clear_due(ctx) {
+    if ctx.flags.a2_lyra_recovered == 0 {
+        ctx.effects.fail_objective("obj-a2-rescue");
+        ctx.effects.destroy_entity("world.falling_skyway.entity.lyra_ascending.name");
+    }
+    // The approach beat closes with the window it belonged to. Completed rather
+    // than judged: whether the crew got there is not what this act is scoring —
+    // the rescue objective beside it is the one that records what they achieved,
+    // and an approach left Active for the rest of the mission would be a line on
+    // the panel nobody can ever act on.
+    ctx.effects.complete_objective("obj-a2-approach");
+    // Whatever happened, the crew's own job changes here: the work in the
+    // corridor is over and what is left is getting out of the sweep. Posted
+    // above the approach's priority so a backfilled helm leaves rather than
+    // holding station in a radiation band for another two minutes.
+    ctx.effects.add_objective(#{
+        id: "obj-a2-lee",
+        text: "world.falling_skyway.objective.lee.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 75,
+        directive_kind: "Reach",
+        directive_anchor: "storm_lee",
+    });
+    ctx.flags.increment("a2_rescue_resolved", 1);
+}
+
+// Chained off her removal. Guarded on the recovery counter because a craft that
+// was pulled clear and came to grief later is not this act's failure — the
+// record says what the crew did, not what became of her afterwards.
+fn on_lyra_lost(ctx) {
+    if ctx.flags.a2_lyra_recovered == 0 {
+        ctx.flags.skyway_lyra_lost = 1;
+        ctx.flags.increment("a2_lyra_lost", 1);
+        // The on-screen consequence. Somebody has to tell Control, and it is a
+        // MANDATORY objective rather than a line of text so it sits on the
+        // panel until the crew have dealt with it.
+        ctx.effects.add_objective(#{
+            id: "obj-a2-loss-report",
+            text: "world.falling_skyway.objective.loss_report.text",
+            mandatory: true,
+            targets: ["world.falling_skyway.entity.skyway_control.name"],
+        });
+    }
+}
+
+fn on_traffic_lost(ctx) {
+    ctx.flags.increment("a2_traffic_lost", 1);
+}
+
+// The corridor clears. The lane going back to work is an ORDER somebody gives,
+// not a timer expiring on a craft: the same three diverts, pointed home.
+fn on_storm_passed(ctx) {
+    ctx.effects.order_divert_route("world.falling_skyway.entity.convoy_meridian.name", "skyway_lane");
+    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_lark.name", "skyway_lane");
+    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_pell.name", "skyway_lane");
+
+    ctx.effects.complete_objective("obj-a2-storm");
+    ctx.effects.complete_objective("obj-a2-lee");
+    if ctx.flags.a2_traffic_lost == 0 {
+        ctx.effects.complete_objective("obj-a2-shelter");
+    } else {
+        ctx.effects.fail_objective("obj-a2-shelter");
+    }
+
+    ctx.flags.skyway_storm_passed = 1;
+    ctx.flags.act2_complete = 1;
+    ctx.flags.act = 3;
 }
 """

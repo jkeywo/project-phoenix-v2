@@ -88,7 +88,7 @@ entities:
       # The flags are fields on CommsRuntime (range_flags/range_active), not a
       # dedicated type; CommsRange is the per-entity authored range component
       # they are computed from.
-      symbols: [CommsRuntime, CommsRange]
+      symbols: [CommsRuntime, CommsRange, CommsHailable]
 
   - component: comms-hail-roster
     core:

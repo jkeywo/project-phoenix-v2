@@ -100,7 +100,7 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "ActiveBeam", "ActiveDialogue", "ActiveStationRatings", "AiDirective", "AiHistory",
     "AiPolicyMemory", "AiPolicyRuntimeState", "AiWorldEntity", "AssetPreloadResource",
     "AsteroidData", "AsteroidEntityMap", "AsteroidWindow", "BlasterVolleyState", "BoostCommand",
-    "BoostState", "CaptainPriorityBoost", "CommsInbox", "CommsInboxRes", "CommsRange",
+    "BoostState", "CaptainPriorityBoost", "CommsHailable", "CommsInbox", "CommsInboxRes", "CommsRange",
     "CommsRuntime", "ControlSourceResolver", "CoordinationLagQueue", "CoordinationQueue",
     "CurrentPhaserMode", "DamageRecord", "DesiredMotion", "EntityConfig",
     "EntityId", "EntityName", "EntityOriginLayer", "EntityUuid", "FactionConfig",

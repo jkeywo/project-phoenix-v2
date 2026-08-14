@@ -3551,3 +3551,122 @@ fn a_world_with_no_survey_suite_writes_no_scan_state() {
         "a hull with no [scan] table carries no scan record and writes no scan state"
     );
 }
+
+// ── Issue #1041: an order to hold fire survives the save ─────────────────────
+
+const RESTRAINT: &str = "assets/worlds/probe_restraint.toml";
+
+/// Frames to run before the restraint capture.
+///
+/// `probe_restraint.toml` orders its picket to hold at t=4 s and releases it at
+/// t=8 s, so a capture has to land inside that window — 360 frames is t=6 s,
+/// squarely between the two. The precondition below asserts the hold rather than
+/// trusting the number.
+const RESTRAINT_CAPTURE_AT: u64 = 360;
+
+fn restraint_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: RESTRAINT.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+/// The saved weapons-hold state of every ship in a payload, keyed by uuid.
+fn held_ships(payload: &PhoenixSnapshot) -> Vec<(String, bool)> {
+    let mut rows: Vec<(String, bool)> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.weapons_hold.map(|held| (e.uuid.clone(), held)))
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// **Issue #1041.** A ship its captain ordered to hold fire comes back holding
+/// it.
+///
+/// The sharp case, and it is sharp for the reason the strike test above is: the
+/// fresh app does not start from the save. It boots the same world file, which
+/// spawns every hull weapons-free, and only then has the capture laid over it —
+/// so the resumed world genuinely holds the wrong answer at the moment `restore`
+/// is called. Half a firing posture is not a posture: a save that remembered the
+/// alert and forgot the hold would hand the crew back a ship with live guns on
+/// the tick a scenario is weighing what they chose.
+#[test]
+fn an_order_to_hold_fire_survives_a_resume() {
+    let mut live = boot(&restraint_args());
+    step(&mut live, RESTRAINT_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+
+    let held = held_ships(&payload);
+    assert!(
+        held.iter().any(|(_, h)| *h),
+        "precondition: the capture is taken INSIDE the hold window — a capture with \
+         nothing held would round-trip identically even if restore dropped the field"
+    );
+    assert!(
+        held.iter().any(|(_, h)| !*h),
+        "precondition: and something is weapons-free at the same instant, so what \
+         round-trips below is a per-ship answer rather than a constant"
+    );
+
+    let mut resumed = boot_to_restore_point(&restraint_args(), &payload);
+    assert!(
+        held_ships(&capture(resumed.world()))
+            .iter()
+            .all(|(_, h)| !*h),
+        "precondition: the freshly booted world has every hull weapons-free — it is a \
+         fresh read of the same file, not a resumed one, so nothing below can be \
+         satisfied by a bootstrap coincidence"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        held_ships(&capture(resumed.world())),
+        held,
+        "every ship's posture comes back exactly as it was ordered — the held hull \
+         held, the free ones free"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did, weapons-hold \
+         namespace included — a resume that dropped the order would fold a different \
+         number here, because a held ship IS in that namespace"
+    );
+}
+
+/// A save written before the weapons hold was recorded is refused on **format**.
+///
+/// The field carries `#[serde(default)]`, so an older payload still parses —
+/// which is exactly why the constant had to move. Nothing in a format-8 payload
+/// distinguishes a run whose captain had called a hold from one whose captain
+/// had not, and the two are different worlds.
+#[test]
+fn a_save_written_before_the_weapons_hold_is_refused_on_format() {
+    let mut live = boot(&restraint_args());
+    step(&mut live, RESTRAINT_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(RESTRAINT);
+
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, RESTRAINT, previous);
+    let store = FileStore::new(scratch("weapons-hold-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}

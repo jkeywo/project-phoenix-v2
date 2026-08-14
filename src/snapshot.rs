@@ -172,7 +172,7 @@ use crate::ship::helm_ai::{
     HelmBoostAiPolicyState, HelmEnginesAiPolicyState, HelmSteeringAiPolicyState,
 };
 use crate::ship::impulse::ImpulsePhase;
-use crate::ship::state::{ShipPhysics, ShipRedAlert};
+use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
 use crate::sim_rng::{SimRng, SimRngState};
 use crate::sim_tick::SimTick;
 use crate::torpedo::{Torpedo, TubeBurstState, TubeLoadState};
@@ -287,7 +287,19 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// rate. Nothing in the payload distinguishes that save from one whose world
 /// simply declared no sides, so both are refused by `Versions::check`, which
 /// names the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 8;
+///
+/// `9` — issue #1041 added [`EntityState::weapons_hold`], and it is the
+/// simplest of these arguments: the field is on every ship row, so the payload
+/// shape moved, and what it records is an ORDER. A format-8 save of a ship
+/// whose captain had called a weapons hold is byte-indistinguishable from one
+/// whose captain had not; restoring the first into a #1041 build resumes a crew
+/// who had chosen restraint with their guns live, on the very tick the scenario
+/// is weighing what they chose. The alert beside it has been persisted from the
+/// beginning for exactly this reason, and half a firing posture is not a
+/// posture. Nothing in the payload distinguishes that save from one taken with
+/// the lever never pulled, so both are refused by `Versions::check`, which names
+/// the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 9;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -350,6 +362,12 @@ pub struct EntityState {
     pub hull: Option<Vec<(String, f32, f32)>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub red_alert: Option<bool>,
+    /// The captain's weapons hold (issue #1041) — the restraint lever layered
+    /// under the alert above. Stored beside it because the two are one firing
+    /// posture: a save that remembered the alert and forgot the hold would
+    /// resume a ship that had been ordered to hold fire with its guns live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weapons_hold: Option<bool>,
     /// The helm axes as they stood at the capture — see [`ControlState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<ControlState>,
@@ -2476,12 +2494,13 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
         Option<&ShipPhysics>,
         Option<&EntitySystemHull>,
         Option<&ShipRedAlert>,
+        Option<&ShipWeaponsHold>,
     )>() else {
         return Vec::new();
     };
     let mut rows: Vec<EntityState> = query
         .iter(world)
-        .map(|(uuid, physics, hull, alert)| EntityState {
+        .map(|(uuid, physics, hull, alert, hold)| EntityState {
             control: controls
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
@@ -2554,6 +2573,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
             }),
             hull: hull.map(|h| hull_rows(&h.0)),
             red_alert: alert.map(|a| a.0),
+            weapons_hold: hold.map(|h| h.0),
         })
         .collect();
     rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -3413,6 +3433,14 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(active) = row.red_alert {
             if let Some(mut alert) = entity_mut.get_mut::<ShipRedAlert>() {
                 alert.0 = active;
+            }
+        }
+        // Issue #1041. Restored beside the alert, because the two are one
+        // firing posture and a resumed ship that had been ordered to hold fire
+        // must come back holding it.
+        if let Some(held) = row.weapons_hold {
+            if let Some(mut hold) = entity_mut.get_mut::<ShipWeaponsHold>() {
+                hold.0 = held;
             }
         }
         if let Some(control) = &row.control {

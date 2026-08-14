@@ -229,6 +229,23 @@ pub enum ActionCmd {
         entity: String,
         order: crate::civilian::CivilianOrder,
     },
+    /// Write one finding onto a subject's dossier (issue #1031).
+    ///
+    /// `subject` is the world's authored entity NAME, resolved by the applier
+    /// against `WorldContentRuntime::name_to_uuid` for the reason every other
+    /// name-carrying command here is — that map is the applier's, not the script
+    /// boundary's — and a name no entity answers to is a warned no-op there.
+    ///
+    /// `gathered_at_tick` is stamped at the SCRIPT surface rather than filled in
+    /// by the applier: it is the tick the handler ran on, which is what "when
+    /// the crew learned it" means, and the applier drains on whatever tick it
+    /// drains on.
+    RecordDossierEvidence {
+        subject: String,
+        text: String,
+        provenance: crate::dossier::evidence::EvidenceProvenance,
+        gathered_at_tick: u64,
+    },
     /// Add or update a float modifier on the entity with `uuid`.
     ApplyModifier {
         uuid: String,

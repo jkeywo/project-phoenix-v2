@@ -98,6 +98,10 @@ pub mod comms;
 /// The `deadlines` script vocabulary (issue #1024): `on_deadline` on the
 /// loading engine, `ctx.deadlines.remaining/state/slip/cancel` on the runtime one.
 pub mod deadlines;
+/// The `dossier` write vocabulary (issue #1031): `ctx.dossier.append(…)` writes
+/// one finding, with the provenance that says how the crew learned it, onto a
+/// subject's file.
+pub mod dossier;
 pub mod effects;
 pub mod engine;
 /// Test-only harness for driving a `[script]`-authored world's handlers, shared

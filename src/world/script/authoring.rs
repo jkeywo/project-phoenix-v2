@@ -341,6 +341,19 @@ pub const HOST_FNS: &[HostFn] = &[
                   structure. Refusable, and lands in `non_compliant` if the \
                   structure is not there.",
     },
+    // ── ctx.dossier.* (runtime engine, issue #1031) ──────────────────────────
+    HostFn {
+        name: "append",
+        receiver: "dossier",
+        params: &["spec"],
+        category: "effect",
+        summary: "Write one finding onto a subject's dossier: \
+                  `#{ subject, text, provenance }`, where `subject` is an \
+                  `[[entity]] id`, `text` is a strings.csv id and `provenance` is \
+                  one of scan / dialogue / records / briefing. Appending the same \
+                  finding twice keeps the first stamp; an unknown subject is a \
+                  warned no-op.",
+    },
     // ── ctx.flags.* (runtime engine) ─────────────────────────────────────────
     HostFn {
         name: "increment",
@@ -572,6 +585,12 @@ mod tests {
                 _ => format!("ctx.effects.{}(\"x\")", hf.name),
             },
             "delay" => format!("ctx.schedule.in_seconds(0).{}(\"x\")", hf.name),
+            "dossier" => match hf.name {
+                "append" => "ctx.dossier.append(#{ subject: \"x\", text: \"t\", \
+                             provenance: \"scan\" })"
+                    .to_string(),
+                other => panic!("add a probe for the new dossier.{other}"),
+            },
             "flags" => match hf.name {
                 "increment" => "ctx.flags.increment(\"n\", 0)".to_string(),
                 other => panic!("add a probe for the new flags.{other}"),
@@ -724,6 +743,14 @@ mod tests {
             assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
             assert!(!names.contains(&("delay", verb)), "unexpected delay.{verb}");
         }
+        // ctx.dossier.* (dossier.rs, issue #1031). Its own receiver rather than
+        // a fifth `effects` verb because an append is stamped with the call's
+        // tick, which a bare `EffectSink` has no clock for — see that module.
+        // Immediate-only for `open_comms`' reason turned around: a finding is a
+        // record of something that ALREADY happened, so "record it late" is not
+        // a thing a scenario can mean.
+        assert!(names.contains(&("dossier", "append")));
+        assert!(!names.contains(&("delay", "append")));
         // ctx.flags.* (flags.rs) and ctx.schedule.* (schedule.rs).
         assert!(names.contains(&("flags", "increment")));
         assert!(names.contains(&("schedule", "in_seconds")));

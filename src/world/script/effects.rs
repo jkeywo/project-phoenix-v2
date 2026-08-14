@@ -522,10 +522,10 @@ pub fn register_effects(engine: &mut Engine) {
 /// so a malformed `add_objective` / `spawn_entity` map or a bad `game_over`
 /// outcome drops the call rather than emitting a half-built effect.
 ///
-/// `pub(super)` because the sibling `commitments` vocabulary (issue #1029)
-/// raises on the same terms — a malformed record map, a duplicate id — and must
-/// produce the same kind of error: two spellings of "raise" would be two failure
-/// policies.
+/// `pub(super)` because the sibling `commitments` (issue #1029) and `dossier`
+/// (issue #1031) vocabularies raise on the same terms — a malformed map, a
+/// duplicate id, an unknown provenance — and must produce the same kind of
+/// error: two spellings of "raise" would be two failure policies.
 pub(super) fn raise(message: String) -> Box<EvalAltResult> {
     Box::new(EvalAltResult::ErrorRuntime(message.into(), Position::NONE))
 }

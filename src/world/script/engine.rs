@@ -29,6 +29,7 @@ use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
 use crate::world::script::commitments::{register_commitments, Commitments};
 use crate::world::script::deadlines::{register_deadlines, Deadlines};
+use crate::world::script::dossier::{register_dossier, Dossier};
 use crate::world::script::effects::{
     register_effects, register_real_lit, BufferedEffect, EffectSink,
 };
@@ -181,6 +182,8 @@ pub fn runtime_engine() -> Engine {
     register_deadlines(&mut engine);
     // The `commitments` read/write vocabulary (issue #1029).
     register_commitments(&mut engine);
+    // The `dossier` write vocabulary (issue #1031).
+    register_dossier(&mut engine);
     engine
 }
 
@@ -453,6 +456,11 @@ impl RuntimeHost {
         // flag is an ordinary `MutateFlag`, emitted where the author put it
         // rather than appended after the call's other work.
         let commitments = Commitments::new(base_commitments, sink.clone(), clock.tick);
+        // Shares the SAME sink again (issue #1031), so an appended finding keeps
+        // its authored position among the call's flag writes and effects. It
+        // needs no base state: nothing on this vocabulary reads, so there is no
+        // snapshot for a read-after-write to see.
+        let dossier = Dossier::new(sink.clone(), clock.tick);
 
         let mut ctx = extra;
         ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
@@ -463,6 +471,7 @@ impl RuntimeHost {
             "commitments".into(),
             rhai::Dynamic::from(commitments.clone()),
         );
+        ctx.insert("dossier".into(), rhai::Dynamic::from(dossier));
 
         // Reset the op counter, then call. On error we return before draining
         // anything, so the effect buffer and the schedule buffer are dropped

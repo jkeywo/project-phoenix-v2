@@ -2579,6 +2579,45 @@ pub(crate) fn apply_dispatch_result(
                     .push(crate::civilian::PendingCivilianOrder { uuid, order });
             }
 
+            // Issue #1031. Name resolution here for the same reason as the four
+            // above — the applier is where `name_to_uuid` lives — but the write
+            // is IMMEDIATE rather than queued: an evidence entry is a record of
+            // something that already happened, so no system owns an edge, a
+            // threshold or a compliance machine that has to see it first.
+            //
+            // An unresolvable subject is a warned no-op (AC2). The name is
+            // resolved a tick after the beat that wrote it, against a world that
+            // may have moved on, and a scenario appending to a hull that has
+            // been destroyed should lose the entry rather than the run.
+            ActionCmd::RecordDossierEvidence {
+                subject,
+                text,
+                provenance,
+                gathered_at_tick,
+            } => {
+                let Some(uuid) = runtime.name_to_uuid.get(&subject).cloned() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: RecordDossierEvidence: no entity named '{subject}' in \
+                         this world — ignoring"
+                    );
+                    continue;
+                };
+                if !runtime
+                    .evidence
+                    .append(&uuid, &text, provenance, gathered_at_tick)
+                {
+                    // AC3, and a no-op the author is told about rather than one
+                    // that disappears: a scenario reaching the same finding
+                    // twice is legitimate (a re-scan), so this is a debug line
+                    // and not a warning.
+                    bevy::log::debug!(
+                        "{log_ctx}: RecordDossierEvidence: '{text}' ({}) is already on \
+                         '{subject}'s file — keeping the first stamp",
+                        provenance.as_str()
+                    );
+                }
+            }
+
             ActionCmd::LoadWorld { path, loader_path } => {
                 if let Some(lc) = pending_layers.as_deref_mut() {
                     lc.0.push(WorldLayerChange::Load { path, loader_path });

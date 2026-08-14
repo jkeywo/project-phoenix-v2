@@ -44,8 +44,8 @@
 #         a party. Nothing resolves it, so it stays OPEN, which is the state the
 #         fact sheet has to be able to show.
 #
-# BASELINE (release headless, `--ship assets/entities/alliance_destroyer.toml
-# --seed 42 --ticks 900`, clean tree): final digest 0x481af0922239bfd2
+# BASELINE (release headless, `--seed 42 --ticks 900`, no --ship, clean tree):
+# final digest 0x481af0922239bfd2
 # (5195729630555389906). Re-blessed once, from 0x7922703197b58ceb
 # (8728662386098408683): that number was recorded before #1027 landed beneath
 # this world and made capacity LEVELS movable, digest-folded state — the

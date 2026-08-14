@@ -911,6 +911,17 @@ operation.refused.teams_unavailable,"External-operation refusal — fewer repair
 operation.refused.under_attack,"External-operation refusal — the ship is under fire and the operation cannot be worked through it (issue #1027)","[Under fire — cannot work the operation.]"
 operation.refused.hazard_band,"External-operation refusal — the ship is inside a hazard band the operation cannot be worked in (issue #1027)","[Hazard band — cannot work the operation.]"
 world.probe_stabilise.entity.tender.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Tender]
+world.probe_operations.entity.tug.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Tug]
+world.probe_operations.entity.hulk.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Derelict Hauler]
+world.probe_operations.entity.outrider.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Outrider]
+world.probe_operations.entity.convoy.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Convoy Hauler]
+world.probe_operations.entity.tender.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Transfer Tender]
+world.probe_operations.entity.berth.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Berth Depot]
+world.probe_operations.entity.sister.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Sister Ship]
+world.probe_operations.entity.depot_clear.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Clearwater Depot]
+world.probe_operations.entity.packhorse.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Packhorse]
+world.probe_operations.entity.depot_storm.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Stormside Depot]
+world.probe_operations.entity.storm.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Radiation Storm Band]
 world.probe_stabilise.entity.skyhook.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Skyhook]
 component.civilians.heading,"Civilian traffic panel on the Navigation console — heading above the list of civilian craft (issue #1028)","[TRAFFIC]"
 component.civilians.empty,"Civilian traffic panel when the world carries no civilian craft (issue #1028)","[NO CIVILIAN TRAFFIC]"

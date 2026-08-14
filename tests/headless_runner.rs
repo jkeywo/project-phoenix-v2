@@ -6573,3 +6573,463 @@ fn a_promise_gates_a_dialogue_option_and_its_resolution_writes_a_campaign_flag()
         "nothing is still owed at the end of this run"
     );
 }
+
+// ── Issue #1027: the four remaining verbs, end to end in a real run ──────────
+
+/// The named operator's operations record, or `None`.
+///
+/// By `EntityName` rather than by component, because `probe_operations.toml`
+/// runs five operators at once and "the first one the query yielded" would be a
+/// different ship on a different day.
+fn operations_named(
+    app: &mut bevy::prelude::App,
+    name: &str,
+) -> Option<project_phoenix::operations::ShipOperations> {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::operations::ShipOperations,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, ops)| ops.clone())
+}
+
+/// The named entity's live hold, which must exist.
+fn hold_of(app: &mut bevy::prelude::App, name: &str) -> project_phoenix::operations::OperationHold {
+    operations_named(app, name)
+        .unwrap_or_else(|| panic!("{name} carries no operations record"))
+        .active
+        .unwrap_or_else(|| panic!("{name} is running no operation"))
+}
+
+/// The named entity's world position, read off its transform.
+fn position_of(app: &mut bevy::prelude::App, name: &str) -> bevy::prelude::Vec3 {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &bevy::prelude::Transform,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, transform)| transform.translation)
+        .unwrap_or_else(|| panic!("{name} is not in this world"))
+}
+
+/// The named structure's infrastructure condition in points.
+fn condition_of(app: &mut bevy::prelude::App, name: &str) -> f32 {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::infrastructure::InfrastructureCondition,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, condition)| condition.0.condition())
+        .unwrap_or_else(|| panic!("{name} carries no condition track"))
+}
+
+/// The named structure's live level for a named capacity.
+fn capacity_of(app: &mut bevy::prelude::App, name: &str, capacity: &str) -> i64 {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::infrastructure::InfrastructureCondition,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .and_then(|(_, condition)| condition.0.capacity(capacity))
+        .unwrap_or_else(|| panic!("{name} carries no {capacity} capacity"))
+}
+
+/// Move the named ship by writing its `ShipPhysics`, which is what helm moves.
+/// Writing the `Transform` directly would be undone by `sync_ship_position`.
+fn move_named_to(app: &mut bevy::prelude::App, name: &str, position: bevy::prelude::Vec3) {
+    let entity = app
+        .world_mut()
+        .query::<(
+            bevy::prelude::Entity,
+            &project_phoenix::entities::spawner::EntityName,
+        )>()
+        .iter(app.world())
+        .find(|(_, entity_name)| entity_name.0 == name)
+        .map(|(entity, _)| entity)
+        .unwrap_or_else(|| panic!("{name} is not in this world"));
+    let mut physics = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::state::ShipPhysics>(entity)
+        .unwrap_or_else(|| panic!("{name} is not a ship"));
+    physics.x = position.x;
+    physics.y = position.y;
+    physics.z = position.z;
+}
+
+const TUG: &str = "world.probe_operations.entity.tug.name";
+const HULK: &str = "world.probe_operations.entity.hulk.name";
+const OUTRIDER: &str = "world.probe_operations.entity.outrider.name";
+const CONVOY: &str = "world.probe_operations.entity.convoy.name";
+const TENDER: &str = "world.probe_operations.entity.tender.name";
+const BERTH: &str = "world.probe_operations.entity.berth.name";
+const SISTER: &str = "world.probe_operations.entity.sister.name";
+const DEPOT_CLEAR: &str = "world.probe_operations.entity.depot_clear.name";
+const PACKHORSE: &str = "world.probe_operations.entity.packhorse.name";
+const DEPOT_STORM: &str = "world.probe_operations.entity.depot_storm.name";
+const THROUGHPUT: &str = "depot_transfer_throughput";
+
+fn operations_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_operations.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// **Issue #1027, tow.** The load's position becomes the tug's rig and stays
+/// there as the tug moves; a tow that stalls lets go.
+#[test]
+fn a_towed_hulk_rides_the_tugs_rig_and_a_stalled_tow_lets_it_go() {
+    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt, 20.0)).expect("app should build");
+    run(&mut app, 130);
+
+    let hold = hold_of(&mut app, TUG);
+    assert_eq!(hold.verb(), OperationVerb::Tow);
+    assert_eq!(
+        hold.state(),
+        HoldState::Holding,
+        "the scripted tow opened just after the t=1 s timer"
+    );
+
+    // The rig, not the hulk's own last position: it spawned 80 units to
+    // starboard of the tug and is now 120 astern of it.
+    let offset = position_of(&mut app, HULK) - position_of(&mut app, TUG);
+    assert!(
+        (offset.length() - 120.0).abs() < 1.0,
+        "the load rides the authored 120-unit tow offset, not wherever it happened to be — got a \
+         separation of {}",
+        offset.length()
+    );
+
+    // The tug moves; the load moves with it.
+    move_named_to(&mut app, TUG, bevy::prelude::Vec3::new(900.0, 0.0, -600.0));
+    run(&mut app, 10);
+    let carried = position_of(&mut app, HULK) - position_of(&mut app, TUG);
+    assert!(
+        (carried.length() - 120.0).abs() < 1.0,
+        "…and goes on riding it after the tug moves a kilometre, which is the whole of what a tow \
+         is. Got {}",
+        carried.length()
+    );
+    assert!(
+        position_of(&mut app, HULK).distance(bevy::prelude::Vec3::new(80.0, 0.0, 0.0)) > 500.0,
+        "the hulk really did travel — a test that only compared the two positions would pass with \
+         both of them sitting at the origin"
+    );
+
+    // Out of range: the tow stalls, and the towline parts.
+    let parted_at = position_of(&mut app, HULK);
+    move_named_to(
+        &mut app,
+        TUG,
+        bevy::prelude::Vec3::new(90_000.0, 0.0, 90_000.0),
+    );
+    run(&mut app, 30);
+    assert_eq!(
+        hold_of(&mut app, TUG).state(),
+        HoldState::Stalled(Ineligibility::OutOfRange),
+        "flying beyond the authored range stalls the tow rather than ending it"
+    );
+    assert!(
+        position_of(&mut app, HULK).distance(parted_at) < 200.0,
+        "…and a stalled tow has LET GO: the load stays roughly where the towline parted rather \
+         than being yanked ninety kilometres across the map to wherever the tug got to"
+    );
+}
+
+/// **Issue #1027, escort.** The hold advances against an escortee that is
+/// travelling under its own power, and ends — terminally — when it gets past
+/// the authored separation limit.
+#[test]
+fn an_escort_holds_on_a_moving_convoy_and_fails_when_it_is_lost() {
+    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt, 20.0)).expect("app should build");
+    run(&mut app, 70);
+
+    let opened = hold_of(&mut app, OUTRIDER);
+    assert_eq!(opened.verb(), OperationVerb::Escort);
+    let convoy_start = position_of(&mut app, CONVOY);
+    // Fifteen seconds. A bulk hauler makes about five units a second, so this
+    // is the window in which its travel becomes unmistakable rather than
+    // arguable — the assertion below is the point of the test and it should not
+    // be scraping its own threshold.
+    run(&mut app, 900);
+
+    let held = hold_of(&mut app, OUTRIDER);
+    assert_eq!(held.state(), HoldState::Holding);
+    assert!(
+        held.elapsed_ticks() > opened.elapsed_ticks() + 800,
+        "the escort banked eligible time throughout — progress ran from {} to {} ticks",
+        opened.elapsed_ticks(),
+        held.elapsed_ticks()
+    );
+    let travelled = position_of(&mut app, CONVOY).distance(convoy_start);
+    assert!(
+        travelled > 50.0,
+        "…and the escortee really was MOVING while it did: it covered {travelled:.1} units on its \
+         own lane. An escort that only held station on something parked would pass a proximity \
+         test without ever exercising the thing escort is for."
+    );
+
+    // The convoy runs for it, past the authored separation limit.
+    move_named_to(
+        &mut app,
+        CONVOY,
+        bevy::prelude::Vec3::new(200_000.0, 0.0, 200_000.0),
+    );
+    run(&mut app, 10);
+    assert_eq!(
+        hold_of(&mut app, OUTRIDER).state(),
+        HoldState::Failed(Ineligibility::Separated),
+        "past the separation limit the relationship is OVER, not stalled — a hold that stalled \
+         here would sit waiting for a convoy that has gone, and the crew would never be told"
+    );
+}
+
+/// **Issue #1027, transfer.** The load moves between two infrastructure
+/// entities, and a second delivery into a depot the first one filled stalls on
+/// the destination's capacity rather than moving anything.
+#[test]
+fn a_transfer_moves_a_capacity_between_two_depots_and_stalls_when_the_far_end_is_full() {
+    use project_phoenix::operations::{HoldState, Ineligibility};
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt, 20.0)).expect("app should build");
+
+    // Before: forty aboard the tender, twenty in a depot whose ceiling is forty.
+    run(&mut app, 30);
+    assert_eq!(capacity_of(&mut app, TENDER, THROUGHPUT), 40);
+    assert_eq!(capacity_of(&mut app, BERTH, THROUGHPUT), 20);
+
+    // The first delivery opens at t=2 s and needs six authored seconds.
+    run(&mut app, 540);
+    assert_eq!(
+        hold_of(&mut app, TENDER).state(),
+        HoldState::Completed,
+        "the first transfer ran to term"
+    );
+    assert_eq!(
+        (
+            capacity_of(&mut app, TENDER, THROUGHPUT),
+            capacity_of(&mut app, BERTH, THROUGHPUT),
+        ),
+        (20, 40),
+        "twenty berths moved off the tender and into the depot — BOTH ends, on the same tick. A \
+         transfer that only credited the destination would create capacity out of nothing."
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter(THROUGHPUT),
+        40,
+        "…and the world-flag counter a scenario predicate reads was RE-published, rather than \
+         still carrying the number the depot was authored with. That mirror is why the move goes \
+         through tick_infrastructure_condition instead of onto the component."
+    );
+
+    // The second delivery opens at t=12 s against a depot now at its ceiling.
+    run(&mut app, 660);
+    let blocked = hold_of(&mut app, TENDER);
+    assert_eq!(
+        blocked.state(),
+        HoldState::Stalled(Ineligibility::CapacityUnavailable),
+        "a start is only refused for a capability the hull lacks, so the second transfer OPENS — \
+         and then stalls, because the depot is full. That is the readable behaviour: the crew are \
+         alongside with cargo and nowhere to put it."
+    );
+    assert_eq!(
+        blocked.elapsed_ticks(),
+        0,
+        "and it banks nothing while it waits"
+    );
+    assert_eq!(
+        (
+            capacity_of(&mut app, TENDER, THROUGHPUT),
+            capacity_of(&mut app, BERTH, THROUGHPUT),
+        ),
+        (20, 40),
+        "…and moves nothing. The tender still has twenty aboard, so this refusal is a fact about \
+         the DESTINATION rather than about the source — which is the half a one-ended check would \
+         have missed."
+    );
+}
+
+/// **Issue #1027, field-repair.** Condition is paid per tick rather than on
+/// completion, and a storm band stretches the work — measured against a control
+/// tender doing the identical job in clear space.
+#[test]
+fn a_field_repair_pays_as_it_works_and_a_storm_band_halves_it() {
+    use project_phoenix::operations::{HoldState, OperationVerb, ProgressRate};
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt, 30.0)).expect("app should build");
+    run(&mut app, 70);
+
+    assert_eq!(hold_of(&mut app, SISTER).verb(), OperationVerb::FieldRepair);
+    assert_eq!(
+        hold_of(&mut app, PACKHORSE).rate(),
+        ProgressRate::percent(50),
+        "the tender parked inside the band is working at the rate its capability authored for a \
+         slow zone — through the ship's REAL region membership, not a flag something else set"
+    );
+    assert_eq!(
+        hold_of(&mut app, SISTER).rate(),
+        ProgressRate::FULL,
+        "…and the one six radii clear of it is not"
+    );
+
+    // Part way through: BOTH have already paid, which is what makes this
+    // field-repair rather than stabilise.
+    run(&mut app, 300);
+    let clear_mid = condition_of(&mut app, DEPOT_CLEAR);
+    let storm_mid = condition_of(&mut app, DEPOT_STORM);
+    assert!(
+        clear_mid > 41.0 && !hold_of(&mut app, SISTER).is_settled(),
+        "five seconds into a twenty-second repair the depot is ALREADY better off ({clear_mid}), \
+         with the hold still running. A crew pulled off here keep what they did — which is the \
+         whole difference between a repair and a stabilise."
+    );
+    assert!(
+        storm_mid > 40.0 && storm_mid < clear_mid,
+        "the tender in the band has done real work too, just less of it: {storm_mid} against \
+         {clear_mid}"
+    );
+
+    // Let the clear repair run to term.
+    run(&mut app, 900);
+    assert_eq!(
+        hold_of(&mut app, SISTER).state(),
+        HoldState::Completed,
+        "twenty authored seconds of eligible time"
+    );
+    let clear_total = condition_of(&mut app, DEPOT_CLEAR) - 40.0;
+    assert!(
+        (clear_total - 40.0).abs() < 1.5,
+        "two points a second for twenty seconds is forty points: got {clear_total}"
+    );
+
+    let storm_hold = hold_of(&mut app, PACKHORSE);
+    assert!(
+        !storm_hold.is_settled(),
+        "…while the one in the band is still going, because the band STRETCHED it rather than \
+         cancelling it. That is the storm mechanic in one assertion."
+    );
+    assert_eq!(
+        storm_hold.stalled_ticks(),
+        0,
+        "and it never stalled once, so no authored stall budget would ever have ended it — a \
+         slowed operation is being held, just badly"
+    );
+    let storm_total = condition_of(&mut app, DEPOT_STORM) - 40.0;
+    assert!(
+        (storm_total - clear_total / 2.0).abs() < 2.0,
+        "the payout tracks the rate exactly: half speed, half the repair. {storm_total} against \
+         {clear_total} in clear space. If these matched, parking in a storm would be free."
+    );
+}
+
+/// **Issue #1027, capacity as cost.** A tender holding a field-repair has a
+/// repair team committed for the duration and released when it settles — and
+/// the team never leaves the hull.
+#[test]
+fn a_field_repair_commits_one_of_the_tenders_own_teams_without_moving_it() {
+    use project_phoenix::messages::TeamSlot;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt, 30.0)).expect("app should build");
+    run(&mut app, 130);
+
+    let ops = operations_named(&mut app, SISTER).expect("the sister carries an operations record");
+    assert_eq!(
+        ops.committed_repair_teams(),
+        1,
+        "the running field-repair holds the capability's authored team count"
+    );
+
+    let slots = app
+        .world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::console::repair::server::ShipRepairTeams,
+        )>()
+        .iter(app.world())
+        .find(|(name, _)| name.0 == SISTER)
+        .map(|(_, teams)| teams.0.slots().to_vec())
+        .expect("the sister carries a repair roster");
+    assert!(
+        slots.iter().all(|slot| matches!(slot, TeamSlot::Idle)),
+        "THE TEAMS NEVER LEAVE THE HULL. Nothing is dispatched, nothing travels, and the console \
+         goes on showing idle teams — the commitment is a reservation the dispatchers honour, not \
+         a trip. Got {slots:?}"
+    );
+
+    // Let it finish, and the team comes back.
+    run(&mut app, 1_400);
+    let settled = operations_named(&mut app, SISTER).expect("the record survives");
+    assert!(settled.active.as_ref().is_some_and(|h| h.is_settled()));
+    assert_eq!(
+        settled.committed_repair_teams(),
+        0,
+        "released on completion, without a release step anyone had to remember to write: the \
+         commitment is derived from the live hold, so a settled hold commits nothing"
+    );
+}
+
+/// **Issue #1027.** All five verbs reach the wire under the operations
+/// blackboard channel, each carrying its own progress and rate.
+#[test]
+fn every_operating_ship_publishes_its_verb_and_its_rate_on_the_wire() {
+    use project_phoenix::messages::SystemBlackboard;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt, 10.0)).expect("app should build");
+    run(&mut app, 200);
+
+    let key = project_phoenix::messages::SystemId(
+        project_phoenix::operations::OPERATIONS_BLACKBOARD_KEY.to_string(),
+    );
+    let mut published: Vec<(String, u16)> = app
+        .world_mut()
+        .query::<&project_phoenix::server_app::ShipSystemBlackboards>()
+        .iter(app.world())
+        .filter_map(|boards| match boards.0.get(&key) {
+            Some(SystemBlackboard::Operations(bb)) => bb
+                .active
+                .as_ref()
+                .map(|active| (active.verb.clone(), active.rate_percent)),
+            _ => None,
+        })
+        .collect();
+    published.sort();
+    assert_eq!(
+        published,
+        vec![
+            ("escort".to_string(), 100),
+            ("field_repair".to_string(), 50),
+            ("field_repair".to_string(), 100),
+            ("tow".to_string(), 100),
+            ("transfer".to_string(), 100),
+        ],
+        "four verbs across five ships reach the console, and the one in the storm reports the \
+         rate the band is holding it to. A bar that crawled with no number beside it would read \
+         as a bug rather than as the storm."
+    );
+}

@@ -606,6 +606,16 @@ fn fold_infrastructure_namespace(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, flag);
             acc = fold_u64(acc, u64::from(held));
         }
+        // Capacity LEVELS, since #1027 made them movable. Two hosts that
+        // disagree about how many berths a depot has left disagree about
+        // whether the transfer window can be met, which is the mission. The
+        // ceiling is authored content and `content_digest` is answerable for
+        // it, so only the level is folded.
+        acc = fold_u64(acc, state.capacities().len() as u64);
+        for capacity in state.capacities() {
+            acc = fold_str(acc, &capacity.id);
+            acc = fold_u64(acc, capacity.level as u64);
+        }
     }
     acc
 }
@@ -666,6 +676,14 @@ fn fold_operations_namespace(world: &World, mut acc: u64) -> u64 {
         acc = fold_u64(acc, hold.elapsed_ticks());
         acc = fold_u64(acc, hold.required_ticks());
         acc = fold_u64(acc, hold.stalled_ticks());
+        // The sub-tick fraction a slowed hold has banked, and the rate it last
+        // banked at (issue #1027). Both are integers for the reason the tick
+        // counts are: they are what the simulation advances, and folding the
+        // 0–1 progress fraction instead would hide a divergence smaller than
+        // one tick — which is exactly the size of divergence a hazard band
+        // introduces, one tick at a time, for as long as the storm lasts.
+        acc = fold_u64(acc, u64::from(hold.rate_remainder()));
+        acc = fold_u64(acc, u64::from(hold.rate().as_percent()));
         acc = fold_str(acc, hold.state().as_str());
         acc = fold_str(acc, hold.state().reason().map(|r| r.as_str()).unwrap_or(""));
     }
@@ -1258,6 +1276,102 @@ mod tests {
             world_digest(&degraded),
             "…and a structure degraded past its threshold — a different condition AND a \
              different operational flag — must not fold to the number an intact one does"
+        );
+    }
+
+    /// **Issue #1027.** A depot's capacity LEVEL is folded, so two hosts that
+    /// disagree about how much a transfer moved disagree about the digest.
+    #[test]
+    fn a_moved_capacity_moves_the_digest() {
+        fn world_with(level: i64) -> World {
+            let mut world = fold_world();
+            let config = crate::infrastructure::InfrastructureConfig {
+                capacities: vec![crate::infrastructure::CapacityConfig {
+                    id: "berths".to_string(),
+                    amount: level,
+                    ceiling: Some(40),
+                }],
+                ..Default::default()
+            };
+            world.spawn((
+                EntityUuid("00000000-0000-8000-8000-000000000001".to_string()),
+                InfrastructureCondition(InfrastructureState::from_config(&config)),
+            ));
+            world
+        }
+        assert_eq!(
+            world_digest(&world_with(20)),
+            world_digest(&world_with(20)),
+            "two hosts holding the same depot at the same level must agree"
+        );
+        assert_ne!(
+            world_digest(&world_with(20)),
+            world_digest(&world_with(32)),
+            "…and a host that thinks twelve more berths are free disagrees about whether the              transfer window can be met, which is the mission. Before #1027 a capacity could not              move and folding it would have been noise; now it can, and not folding it would be              a hole."
+        );
+    }
+
+    /// **Issue #1027.** A slowed hold's sub-tick progress reaches the digest,
+    /// so a divergence smaller than one whole tick is still caught.
+    #[test]
+    fn a_slowed_holds_sub_tick_progress_moves_the_digest() {
+        use crate::operations::{
+            verdict, InterruptCause, InterruptResponse, InterruptRule, OperationConditions,
+            RegionEffectName,
+        };
+
+        fn world_with(slowed_ticks: u64) -> World {
+            let capability = crate::operations::CapabilityConfig {
+                verb: crate::operations::OperationVerb::Tow,
+                duration_secs: 10,
+                interrupts: vec![InterruptRule {
+                    cause: InterruptCause::Region,
+                    region_effect: Some(RegionEffectName::SlowZone),
+                    response: InterruptResponse::Slow,
+                    rate_percent: 30,
+                }],
+                ..Default::default()
+            };
+            let conditions = OperationConditions {
+                target_present: true,
+                target_has_condition_track: true,
+                distance: 1.0,
+                power_level: u8::MAX,
+                repair_teams_available: u8::MAX,
+                region_effects: vec![RegionEffectName::SlowZone],
+                ..Default::default()
+            };
+            let mut hold = OperationHold::start(0, "hulk", &capability, 60.0);
+            for _ in 0..slowed_ticks {
+                hold.advance(verdict(Some(&capability), &conditions));
+            }
+            let mut ops = ShipOperations {
+                capabilities: crate::operations::OperationsConfig {
+                    capabilities: vec![capability],
+                },
+                next_id: 1,
+                ..Default::default()
+            };
+            ops.active = Some(hold);
+            let mut world = fold_world();
+            world.spawn((
+                EntityUuid("00000000-0000-8000-8000-000000000001".to_string()),
+                ops,
+            ));
+            world
+        }
+        // Three ticks at 30 % and four ticks at 30 % are both ZERO whole ticks
+        // of hold — they differ only in the remainder. A digest folding the
+        // tick counts alone would call these two hosts agreed.
+        assert_ne!(
+            world_digest(&world_with(3)),
+            world_digest(&world_with(4)),
+            "a divergence smaller than one whole tick is exactly the size a hazard band              introduces, one tick at a time, for as long as the storm lasts — folding only the              whole ticks would let it accumulate unseen until it crossed a boundary"
+        );
+        assert_eq!(
+            world_digest(&world_with(4)),
+            world_digest(&world_with(4)),
+            "…and two hosts that agree still agree"
         );
     }
 

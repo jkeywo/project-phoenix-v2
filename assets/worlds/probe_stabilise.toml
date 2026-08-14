@@ -54,13 +54,26 @@
 # proves the restore point is the one being honoured rather than the failure
 # point read backwards.
 #
-# BASELINE (this world is new in #1026, so this is its first recorded digest):
-# `--seed 42 --ticks 900` gives final digest 0x03239642ba6f2710
-# (226189619638511376), and 12858075515466911134 at tick 0. Measured on a clean
-# tree at the commit that added this line. It is a NEW number, not a preserved
-# one — nothing to compare it against yet — so it is written down here to be the
-# thing a later change is A/B'd against, the way the shipped worlds' digests
-# already are.
+# BASELINE. `--seed 42 --ticks 900` gives final digest 0xe657d889d57232ae
+# (16597973038200402606), and 9365114570161849778 at tick 0.
+#
+# MOVED in #1027, deliberately, and by two changes that both bear on this world.
+# The depot's `[[infrastructure.capacity]]` LEVEL is now folded, because a
+# `transfer` operation can move it and two hosts that disagree about how many
+# berths a depot has left disagree about whether the mission can be finished.
+# And a hold now folds the sub-tick fraction a slowed operation banks, because a
+# divergence smaller than one whole tick is exactly the size a hazard band
+# introduces — one tick at a time, for as long as the storm lasts. Neither
+# number existed to fold before #1027: a capacity could not move, and no
+# operation could be slowed.
+#
+# The two SHIPPED worlds are unmoved by both (combat_test
+# 14942520827746055774, patrol 11531679067393217131). Neither authors
+# `[infrastructure]` and neither runs an operation, so both walks are still the
+# no-op they have always been — which is the affordance #1025 and #1026 each
+# wrote down, doing its job on the first change that tested it.
+#
+# The #1026 baseline, for the record, was 226189619638511376.
 
 [global]
 seed = 1026

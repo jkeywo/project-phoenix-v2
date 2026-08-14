@@ -1,0 +1,45 @@
+# Radiation storm band — a sweeping hazard that makes work take longer
+# (issue #1027).
+#
+# The Falling Skyway storm is authored as REGION TEMPLATES spawned and retired
+# on a schedule rather than as new hazard code, and this is the piece of it that
+# external operations read. Deliberately generic: any scenario that wants
+# "everything out here is harder" places one.
+#
+# WHAT IT IS NOT is as load-bearing as what it is. There is no `damage_zone`
+# here. A band that hurt the ship as well would make every test of the slow rule
+# also a test of the damage rule, and — more to the point — the storm's design
+# is a SLOW BURN: an information hazard and a tax on time, with the hull damage
+# authored separately where a scenario wants it. A crew flying through this one
+# loses minutes, not hull.
+#
+# `slow_zone` is what an operation's `[[operations.capability.interrupt]]` rule
+# names with `region_effect = "slow_zone"`. The rule and the rate live on the
+# CAPABILITY, not here: the same band stretches a tow and stops a field-repair
+# if that is what the designer authored, because how bad a storm is for a
+# particular job is a judgement about the job.
+#
+# `radar_dampening` rides along because a storm you cannot see through is the
+# same storm. It costs an operation nothing unless a capability authors a rule
+# naming it.
+
+tags = ["region", "storm", "slow_zone"]
+
+[radar_appearance]
+region_colour = [0.85, 0.55, 0.2]
+
+[shape]
+type = "sphere"
+radius = 400.0
+
+[effects]
+
+# The thrust/yaw numbers are the region system's own; an operation reads only
+# that a slow zone is PRESENT, because "how much slower does this make the work"
+# is the capability's rate to author and not the band's to impose.
+[effects.slow_zone]
+thrust_modifier = 0.5
+yaw_rate_modifier = 0.6
+
+[effects.radar_dampening]
+range_modifier = 0.5

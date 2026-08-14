@@ -2336,6 +2336,157 @@ fn a_world_with_no_operations_writes_no_operation_state() {
     );
 }
 
+// ── Issue #1027: a slowed hold and a moved capacity survive a resume ───────
+
+/// The operations probe: five operators, four verbs, one storm band.
+const OPERATIONS: &str = "assets/worlds/probe_operations.toml";
+
+/// Frames to run before the operations capture.
+///
+/// The probe opens the two field-repairs at t = 1 s and the first transfer at
+/// t = 2 s, and the transfer completes at t = 8 s (tick 480). This lands after
+/// that completion — so the capture carries a capacity that has MOVED off its
+/// authored value — and while both repairs are still running, one of them
+/// inside the band at a reduced rate. Both halves are asserted rather than
+/// trusted to the number.
+const OPERATIONS_CAPTURE_AT: u64 = 700;
+
+/// The tender parked inside the storm band, working at the authored slow rate.
+const PACKHORSE: &str = "world.probe_operations.entity.packhorse.name";
+/// The depot the first transfer filled.
+const BERTH: &str = "world.probe_operations.entity.berth.name";
+
+fn operations_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: OPERATIONS.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+/// The uuid of the entity carrying `name`, in a booted world.
+fn uuid_named(app: &mut bevy::prelude::App, name: &str) -> String {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::entities::spawner::EntityUuid,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, uuid)| uuid.0.clone())
+        .unwrap_or_else(|| panic!("{name} is not in this world"))
+}
+
+/// **Issue #1027.** A hold caught mid-slow comes back mid-slow, down to the
+/// fraction of a tick it had banked — and a capacity a transfer moved comes
+/// back moved.
+///
+/// Both are state a save has to carry that #1026's did not. Restoring the whole
+/// ticks and dropping the remainder would quietly discard part of a second of
+/// the crew's work on every save; restoring the depot's authored capacity
+/// instead of its level would hand the resumed mission back the cargo it had
+/// already delivered.
+#[test]
+fn the_resumed_world_keeps_a_slowed_hold_and_a_moved_capacity() {
+    let mut live = boot(&operations_args());
+    step(&mut live, OPERATIONS_CAPTURE_AT);
+
+    let packhorse = uuid_named(&mut live, PACKHORSE);
+    let berth = uuid_named(&mut live, BERTH);
+    let payload = capture(live.world());
+
+    let captured = payload
+        .entities
+        .iter()
+        .find(|e| e.uuid == packhorse)
+        .and_then(|e| e.operations.as_ref())
+        .expect("the packhorse's operations record is captured");
+    let hold = captured
+        .active
+        .as_ref()
+        .expect("precondition: it is running a field-repair");
+    assert!(
+        !hold.is_settled() && hold.rate().as_percent() == 50,
+        "precondition: the capture must be taken while the band is holding it at the authored \
+         slow rate — a capture at full rate would round-trip identically even if the rate were \
+         dropped ({:?} at {} %)",
+        hold.state(),
+        hold.rate().as_percent()
+    );
+    assert!(
+        hold.rate_remainder() > 0,
+        "precondition: and mid-TICK, with a fraction banked. A capture landing exactly on a tick \
+         boundary would round-trip identically even if the remainder were dropped entirely — \
+         which is the field this test exists for. Got remainder {}",
+        hold.rate_remainder()
+    );
+
+    let captured_capacity = payload
+        .entities
+        .iter()
+        .find(|e| e.uuid == berth)
+        .and_then(|e| e.infrastructure.as_ref())
+        .and_then(|state| state.capacity("depot_transfer_throughput"))
+        .expect("the berth depot's capacity is captured");
+    assert_eq!(
+        captured_capacity, 40,
+        "precondition: the first transfer has already run, so the depot is at its ceiling rather \
+         than at the 20 it was authored with — otherwise a restore that re-derived the authored \
+         number would look correct"
+    );
+
+    let mut resumed = boot_to_restore_point(&operations_args(), &payload);
+    let fresh_capacity = resumed
+        .world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityUuid,
+            &project_phoenix::infrastructure::InfrastructureCondition,
+        )>()
+        .iter(resumed.world())
+        .find(|(uuid, _)| uuid.0 == berth)
+        .and_then(|(_, condition)| condition.0.capacity("depot_transfer_throughput"))
+        .expect("the fresh world spawned the depot from its template");
+    assert_eq!(
+        fresh_capacity, 20,
+        "control: a freshly booted depot is back at its authored 20, so an inert restore would be \
+         visible here rather than hidden behind a value that happened to match"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let after = capture(resumed.world());
+
+    let restored_hold = after
+        .entities
+        .iter()
+        .find(|e| e.uuid == packhorse)
+        .and_then(|e| e.operations.as_ref())
+        .expect("the packhorse came back with its operations record");
+    assert_eq!(
+        restored_hold, captured,
+        "the hold has to come back WHOLE: its banked ticks, the fraction of a tick the band left \
+         it part-way through, the per-tick payout it owes and the rate it was last held at. Any \
+         one of them dropped is a resumed repair paying or progressing at a rate the storm is no \
+         longer imposing."
+    );
+
+    let restored_capacity = after
+        .entities
+        .iter()
+        .find(|e| e.uuid == berth)
+        .and_then(|e| e.infrastructure.as_ref())
+        .and_then(|state| state.capacity("depot_transfer_throughput"))
+        .expect("the depot came back with its condition track");
+    assert_eq!(
+        restored_capacity, 40,
+        "…and the depot comes back holding what the crew delivered, not what it was authored \
+         with. A capacity was immutable until #1027; now it is the record of work that was \
+         actually done."
+    );
+}
+
 // ── Issue #1028: civilian traffic survives a resume ─────────────────────────
 
 /// The civilian probe: four haulers on two authored lanes, ordered at t = 2 s.

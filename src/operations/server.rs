@@ -518,6 +518,17 @@ pub fn tick_operations(
                 })
                 .unwrap_or(false),
             region_effects: operator_region_effects(membership.as_deref(), &region_effects, entity),
+            // Issue #1035. Two authored facts meeting: the structure names the
+            // people who staff it, and the world says whether those people are
+            // out. Neither half alone is the condition — a depot with no
+            // workforce and a world with no dispute both read `false`, which is
+            // what keeps every world written before this slice unchanged.
+            target_work_stopped: target
+                .and_then(|(_, _, condition)| condition)
+                .and_then(|condition| condition.0.workforce())
+                // A `Deref` read, so asking the question never marks
+                // `WorldContentRuntime` changed on a tick nothing happened.
+                .is_some_and(|workforce| runtime.workforce.on_strike(workforce)),
         };
 
         let before = hold.state();

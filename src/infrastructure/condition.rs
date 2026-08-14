@@ -103,6 +103,26 @@ pub struct InfrastructureConfig {
     /// authored elsewhere rather than hidden in here.
     #[serde(default = "default_publish")]
     pub publish: bool,
+    /// The `[[workforce]]` id of the people who staff this structure
+    /// (issue #1035), or `None` for a structure nobody works — a nav beacon, an
+    /// automated relay, a rock.
+    ///
+    /// A *machine* id in the scenario's namespace, like a capacity id: it is
+    /// matched against the world's authored
+    /// [`Workforce::id`](crate::world::workforce::Workforce::id) and never
+    /// rendered. Naming a workforce a given world has no dispute about is
+    /// legal and means exactly what it says — the same depot template ships in
+    /// five scenarios and only one of them has a strike — so this is
+    /// deliberately not cross-checked at load. See
+    /// [`WorkforceRegister::on_strike`](crate::world::workforce::WorkforceRegister::on_strike).
+    ///
+    /// What a stoppage *does* to work here is not on this table either. It is
+    /// authored per verb on the operating hull's
+    /// `[[operations.capability.interrupt]]` with `cause = "work_stoppage"`,
+    /// because "transfers are refused but repairs merely go slowly" is a
+    /// judgement about the fiction rather than a property of the structure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workforce: Option<String>,
     /// Named capacities, in authored order.
     #[serde(default, rename = "capacity", skip_serializing_if = "Vec::is_empty")]
     pub capacities: Vec<CapacityConfig>,
@@ -122,6 +142,7 @@ impl Default for InfrastructureConfig {
             hull_damage_share: default_hull_damage_share(),
             hysteresis: default_hysteresis(),
             publish: default_publish(),
+            workforce: None,
             capacities: Vec::new(),
             thresholds: Vec::new(),
         }
@@ -282,6 +303,15 @@ impl InfrastructureConfig {
                 self.hysteresis
             ));
         }
+        if let Some(workforce) = &self.workforce {
+            if workforce.trim().is_empty() {
+                return Err(
+                    "[infrastructure] workforce must be a non-empty [[workforce]] id, or be \
+                     omitted entirely for a structure nobody works"
+                        .to_string(),
+                );
+            }
+        }
         for (index, capacity) in self.capacities.iter().enumerate() {
             if capacity.id.trim().is_empty() {
                 return Err("[[infrastructure.capacity]] needs a non-empty id".to_string());
@@ -405,6 +435,15 @@ pub struct InfrastructureState {
     decay_per_sec: f32,
     hull_damage_share: f32,
     publish: bool,
+    /// The `[[workforce]]` id staffing this structure (issue #1035), carried
+    /// through from the authored table so the one system that asks — the
+    /// operations tick — can read it off the component it already queries
+    /// rather than needing a second lookup back to the entity's TOML.
+    ///
+    /// Authored and immutable, like `publish`: nothing moves it, and a
+    /// structure does not change hands mid-mission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workforce: Option<String>,
     thresholds: Vec<ResolvedThreshold>,
     /// Held state per threshold, parallel to `thresholds`.
     held: Vec<bool>,
@@ -449,6 +488,7 @@ impl InfrastructureState {
             decay_per_sec: config.decay_per_sec,
             hull_damage_share: config.hull_damage_share,
             publish: config.publish,
+            workforce: config.workforce.clone(),
             thresholds,
             held,
             capacities: config
@@ -499,6 +539,18 @@ impl InfrastructureState {
     /// Whether this track reaches the wire payload.
     pub fn publishes(&self) -> bool {
         self.publish
+    }
+
+    /// The `[[workforce]]` id staffing this structure (issue #1035), or `None`
+    /// for one nobody works.
+    ///
+    /// Deliberately NOT on the wire. Which side of a dispute staffs a depot is
+    /// something the crew learn by talking to people, and putting it on the
+    /// published condition block would have every console read the answer off a
+    /// panel before the negotiation started. What the crew *do* see is the
+    /// refusal the stoppage produces, in words, on the operations panel.
+    pub fn workforce(&self) -> Option<&str> {
+        self.workforce.as_deref()
     }
 
     /// The aggregate hull total recorded by the last [`Self::observe_hull`],

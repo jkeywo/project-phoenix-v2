@@ -912,6 +912,7 @@ operation.refused.capacity_unavailable,"External-operation refusal — one end o
 operation.refused.teams_unavailable,"External-operation refusal — fewer repair teams are free than the operation commits (issue #1027)","[Not enough repair teams free.]"
 operation.refused.under_attack,"External-operation refusal — the ship is under fire and the operation cannot be worked through it (issue #1027)","[Under fire — cannot work the operation.]"
 operation.refused.hazard_band,"External-operation refusal — the ship is inside a hazard band the operation cannot be worked in (issue #1027)","[Hazard band — cannot work the operation.]"
+operation.refused.work_stopped,"External-operation refusal — the people who staff the target have stopped work, and an authored interrupt rule says this operation cannot be worked without them (issue #1035)","[The line is down. Nobody down there is authorising anything.]"
 world.probe_stabilise.entity.tender.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Tender]
 world.probe_operations.entity.tug.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Tug]
 world.probe_operations.entity.hulk.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Derelict Hauler]

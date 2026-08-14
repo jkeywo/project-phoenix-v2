@@ -133,6 +133,23 @@ pub struct WorldContentRuntime {
     /// and the state census (`tests/authoritative_state_enumeration.rs`) sees no
     /// new registration.
     pub evidence: crate::dossier::evidence::EvidenceLog,
+    /// The sides of this world's labour dispute (issue #1035): whether each is
+    /// out, and what each makes of the crew.
+    ///
+    /// A record with no evaluator and no queue — read
+    /// [`crate::world::workforce`] before adding anything to it. Armed once by
+    /// [`arm_mission_workforces`] from the world's `[[workforce]]` blocks, on
+    /// the same tick the deadline table is armed and for the same reason;
+    /// after that it moves only when a script says so. Nothing scans it, and
+    /// the one system that reads it per tick ([`crate::operations::
+    /// tick_operations`]) asks it a single yes/no question about the structure
+    /// an operation is being worked on.
+    ///
+    /// It sits on this resource beside `deadlines` and `commitments`, and for
+    /// their reason: every site that already borrows the content runtime to
+    /// apply a call's effects can apply a settlement too, and the state census
+    /// (`tests/authoritative_state_enumeration.rs`) sees no new registration.
+    pub workforce: crate::world::workforce::WorkforceRegister,
     /// Infrastructure condition adjustments queued this tick by a scripted
     /// `repair_infrastructure` / `damage_infrastructure` effect (issue #1025),
     /// already resolved to the target's UUID.
@@ -628,6 +645,12 @@ impl Plugin for WorldPlugin {
                     // so it is keyed off the same first-InProgress-tick moment
                     // (issue #1024). Runs its body exactly once per mission.
                     arm_mission_deadlines,
+                    // Beside the deadline arm, and for its reason: a
+                    // `[[workforce]]`'s authored strike status is the situation
+                    // the crew ARRIVE INTO, so it must be true before the first
+                    // handler runs and before any operation is offered
+                    // (issue #1035). Runs its body exactly once per mission.
+                    arm_mission_workforces,
                     collect_world_events,
                     tick_trigger_pipeline,
                 )
@@ -1543,6 +1566,49 @@ pub(crate) fn arm_mission_deadlines(
     // THE reuse, in one line: a deadline's firing is an entry on the EXISTING
     // deferred-callback queue.
     script.pending_callbacks.extend(queued);
+}
+
+/// Build the live workforce register from the world's `[[workforce]]` blocks,
+/// mirroring each side's opening state into the flag store (issue #1035).
+///
+/// The twin of [`arm_mission_deadlines`] and deliberately smaller: a workforce
+/// queues nothing, so there is no `ScheduledCall` to push and nothing to
+/// retract later. What it does have to be is **early** — the register is what
+/// decides whether a depot refuses a transfer, so it must hold the authored
+/// answer before the first script handler runs rather than one tick after.
+///
+/// # Why the mirror flags are written straight into the store
+///
+/// Every *later* move of a workforce writes its flag as an ordinary
+/// [`ActionCmd::MutateFlag`] through the trigger pipeline, so an
+/// `on_flag_cleared` chains off it. The opening state deliberately does not: a
+/// transition event on tick one would announce "the strike just started" for a
+/// strike that was already happening when the crew arrived, and would fire
+/// every trigger authored to watch for the settlement's opposite. This is the
+/// same reading `InfrastructureState::from_config` takes when it level-evaluates
+/// a degraded structure's thresholds instead of flipping them on tick one.
+///
+/// # Determinism
+///
+/// A no-op for every world that authors no workforce: the early returns happen
+/// before any `DerefMut`, so no change-detection tick flips and a
+/// workforce-free run is byte-identical to one from before this system existed.
+pub(crate) fn arm_mission_workforces(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut runtime: ResMut<WorldContentRuntime>,
+) {
+    // Immutable reads only on the already-armed path, so an armed mission does
+    // not mark `WorldContentRuntime` changed every tick.
+    let Some(world_config) = world_config else {
+        return;
+    };
+    if runtime.workforce.armed || world_config.workforces.is_empty() {
+        return;
+    }
+    let mirror = runtime.workforce.arm(&world_config.workforces);
+    for write in mirror {
+        runtime.flags.set_flag_value(&write.name, write.value);
+    }
 }
 
 /// Replay a script call's buffered `ctx.deadlines.slip(…)` / `.cancel(…)` against
@@ -2556,6 +2622,21 @@ pub(crate) fn apply_dispatch_result(
                         verb,
                         target_uuid,
                     });
+            }
+
+            // Issue #1035. Nothing to resolve and nothing to queue: a
+            // workforce is a party rather than an entity, and its register is
+            // a field on the very runtime this applier already holds. The
+            // mirror flag rides beside this command as an ordinary
+            // `MutateFlag`, so it gets its transition event from the one path
+            // that emits them.
+            ActionCmd::SetWorkforceState { id, mutation } => {
+                if runtime.workforce.apply(&id, mutation).is_none() {
+                    bevy::log::debug!(
+                        "{log_ctx}: SetWorkforceState: '{id}' is not a side this world \
+                         declared, or was already in that state — nothing moved"
+                    );
+                }
             }
 
             // Issue #1028, and the same shape for the same reason: the applier

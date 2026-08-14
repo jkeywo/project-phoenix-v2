@@ -252,6 +252,28 @@ pub enum InterruptCause {
     /// Membership is the whole test: an operation does not care *why* a band is
     /// dangerous, only that the ship is in it.
     Region,
+    /// The people who staff the **target** are out (issue #1035).
+    ///
+    /// The first cause that is a fact about the far end rather than about the
+    /// operator, and it is a cause rather than an eligibility condition for the
+    /// reason the other two are: what a stoppage means depends entirely on the
+    /// work. A transfer nobody will authorise cannot happen at any speed
+    /// (`response = "fail"`); a repair the local crews have walked away from is
+    /// still a repair, done the hard way (`response = "slow"`). Making it an
+    /// eligibility condition would have forced one answer on both.
+    WorkStoppage,
+}
+
+impl InterruptCause {
+    /// The authored spelling, for the load errors that quote a rule back to
+    /// the designer who wrote it.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InterruptCause::Attack => "attack",
+            InterruptCause::Region => "region",
+            InterruptCause::WorkStoppage => "work_stoppage",
+        }
+    }
 }
 
 /// The authored region effect an [`InterruptCause::Region`] rule watches for.
@@ -349,6 +371,7 @@ impl InterruptRule {
             InterruptCause::Region => self
                 .region_effect
                 .is_some_and(|effect| conditions.region_effects.contains(&effect)),
+            InterruptCause::WorkStoppage => conditions.target_work_stopped,
         }
     }
 
@@ -357,6 +380,7 @@ impl InterruptRule {
         match self.cause {
             InterruptCause::Attack => Ineligibility::UnderAttack,
             InterruptCause::Region => Ineligibility::HazardBand,
+            InterruptCause::WorkStoppage => Ineligibility::WorkStopped,
         }
     }
 }
@@ -675,10 +699,7 @@ impl OperationsConfig {
                             "[[operations.capability.interrupt]] on {verb} names a region_effect \
                              with cause = \"{}\", which does not read one — the rule would not \
                              mean what it says",
-                            match rule.cause {
-                                InterruptCause::Attack => "attack",
-                                InterruptCause::Region => "region",
-                            }
+                            rule.cause.as_str()
                         ));
                     }
                     _ => {}
@@ -757,6 +778,14 @@ pub struct OperationConditions {
     /// Which authored region effects the operator is currently inside
     /// (issue #1027), in a deterministic order.
     pub region_effects: Vec<RegionEffectName>,
+    /// Whether the people who staff the **target** are out (issue #1035).
+    ///
+    /// Read by the adapter off the target's own
+    /// `[infrastructure] workforce` and the world's live workforce register.
+    /// `false` for a target that names no workforce, for a world that declares
+    /// no dispute, and for a side that is at work — three different facts that
+    /// all mean the same thing to an operation: the local crews are there.
+    pub target_work_stopped: bool,
 }
 
 /// Why an operation may not run right now.
@@ -789,6 +818,13 @@ pub enum Ineligibility {
     /// The operator is inside a hazard band an authored interrupt rule watches
     /// for (issue #1027).
     HazardBand,
+    /// The people who staff the target are out, and an authored interrupt rule
+    /// says that matters (issue #1035).
+    ///
+    /// The one refusal in this list that names a decision somebody else made
+    /// rather than a physical fact, which is why it is the one the crew can do
+    /// something about by talking.
+    WorkStopped,
 }
 
 impl Ineligibility {
@@ -806,6 +842,7 @@ impl Ineligibility {
             Ineligibility::TeamsUnavailable => "operation.refused.teams_unavailable",
             Ineligibility::UnderAttack => "operation.refused.under_attack",
             Ineligibility::HazardBand => "operation.refused.hazard_band",
+            Ineligibility::WorkStopped => "operation.refused.work_stopped",
         }
     }
 
@@ -822,6 +859,7 @@ impl Ineligibility {
             Ineligibility::TeamsUnavailable => "teams_unavailable",
             Ineligibility::UnderAttack => "under_attack",
             Ineligibility::HazardBand => "hazard_band",
+            Ineligibility::WorkStopped => "work_stopped",
         }
     }
 
@@ -833,12 +871,16 @@ impl Ineligibility {
     /// about the target that no console can change, so a hold that meets one is
     /// over rather than waiting.
     ///
-    /// The two **interrupt** reasons — [`Self::UnderAttack`] and
-    /// [`Self::HazardBand`] — read as recoverable here, but that is only the
-    /// fallback: an interrupt carries its own authored terminality on
-    /// [`Interruption::terminal`], because whether a crew may keep working
-    /// through fire is a designer's call and not a property of the word
-    /// "attack".
+    /// The three **interrupt** reasons — [`Self::UnderAttack`],
+    /// [`Self::HazardBand`] and [`Self::WorkStopped`] — read as recoverable
+    /// here, but that is only the fallback: an interrupt carries its own
+    /// authored terminality on [`Interruption::terminal`], because whether a
+    /// crew may keep working through fire is a designer's call and not a
+    /// property of the word "attack". A stoppage is the clearest case of the
+    /// three: the reason it reads recoverable is that a negotiation can end it,
+    /// and the reason a shipped transfer capability nonetheless authors
+    /// `response = "fail"` against it is that a refused transfer is a refusal,
+    /// not a queue.
     pub fn recoverable(&self) -> bool {
         matches!(
             self,
@@ -848,6 +890,7 @@ impl Ineligibility {
                 | Ineligibility::TeamsUnavailable
                 | Ineligibility::UnderAttack
                 | Ineligibility::HazardBand
+                | Ineligibility::WorkStopped
         )
     }
 }
@@ -1407,6 +1450,7 @@ mod tests {
             repair_teams_available: u8::MAX,
             under_attack: false,
             region_effects: Vec::new(),
+            target_work_stopped: false,
         }
     }
 
@@ -2506,6 +2550,143 @@ stall_limit_secs = 12
              stretches an operation' has to mean if it means anything"
         );
         assert_eq!(hold.progress(), 1.0);
+    }
+
+    // ── Issue #1035: the work stoppage ───────────────────────────────────────
+    //
+    // The cause is one flag on the conditions and one arm in `fires`; what
+    // matters — and what these tests hold the design to — is that the SAME
+    // cause produces a refusal for one verb and a slower job for another, out of
+    // authored data alone.
+
+    #[test]
+    fn a_stoppage_refuses_the_verb_that_authors_fail_and_stretches_the_one_that_authors_slow() {
+        // The transfer: nobody will authorise it, so it is over. Both ends can
+        // take part — the cargo is aboard and the depot has room — which is
+        // what makes the refusal a fact about the PEOPLE rather than about the
+        // goods.
+        let refused = CapabilityConfig {
+            interrupts: vec![rule(InterruptCause::WorkStoppage, InterruptResponse::Fail)],
+            ..transfer(TransferDirection::Deliver, 10)
+        };
+        let struck = OperationConditions {
+            target_work_stopped: true,
+            ..with_capacities(Some((40, 0)), Some((0, 40)))
+        };
+        let mut hold = OperationHold::start(1, "depot-b", &refused, HZ);
+        assert_eq!(
+            hold.advance(verdict(Some(&refused), &struck)),
+            Some(Settlement::Failed(Ineligibility::WorkStopped)),
+            "the refusal lands on the FIRST tick — a transfer nobody is signing off does not \
+             sit there timing out"
+        );
+        assert_eq!(hold.state(), HoldState::Failed(Ineligibility::WorkStopped));
+        assert_eq!(
+            hold.state().reason().map(|r| r.string_id()),
+            Some("operation.refused.work_stopped"),
+            "and it carries a strings.csv id, so the crew are told in words rather than \
+             watching a bar that never moves"
+        );
+
+        // The field repair: the crews are gone, so the ship's own teams do it
+        // the hard way.
+        let unassisted = CapabilityConfig {
+            duration_secs: 1,
+            condition_per_second: 2.0,
+            interrupts: vec![InterruptRule {
+                rate_percent: 40,
+                ..rule(InterruptCause::WorkStoppage, InterruptResponse::Slow)
+            }],
+            ..capability(OperationVerb::FieldRepair)
+        };
+        let mut hold = OperationHold::start(2, "skyhook", &unassisted, HZ);
+        let struck_structure = OperationConditions {
+            target_work_stopped: true,
+            ..eligible()
+        };
+        assert_eq!(
+            hold.advance(verdict(Some(&unassisted), &struck_structure)),
+            None,
+            "the same stoppage, the same tick, and this one is still working"
+        );
+        assert_eq!(hold.state(), HoldState::Holding);
+        assert_eq!(
+            hold.rate().as_percent(),
+            40,
+            "at the rate the CAPABILITY authored — the stoppage carries no number of its own, \
+             which is what stops a hard-coded multiplier appearing at the call site"
+        );
+    }
+
+    #[test]
+    fn a_stoppage_that_ends_restores_the_rate_and_the_next_operation_runs() {
+        let capability = CapabilityConfig {
+            duration_secs: 1,
+            condition_per_second: 2.0,
+            interrupts: vec![InterruptRule {
+                rate_percent: 40,
+                ..rule(InterruptCause::WorkStoppage, InterruptResponse::Slow)
+            }],
+            ..capability(OperationVerb::FieldRepair)
+        };
+        let struck = OperationConditions {
+            target_work_stopped: true,
+            ..eligible()
+        };
+        let mut hold = OperationHold::start(1, "skyhook", &capability, HZ);
+        hold.advance(verdict(Some(&capability), &struck));
+        assert_eq!(hold.rate().as_percent(), 40);
+
+        // The negotiation lands. Nothing is un-latched, because nothing latched.
+        hold.advance(verdict(Some(&capability), &eligible()));
+        assert_eq!(
+            hold.rate(),
+            ProgressRate::FULL,
+            "settling the strike restores the assisted rate on the very next tick, with no \
+             restoration path to run — the rule simply stops firing"
+        );
+        assert!(
+            hold.condition_payout(ProgressRate::FULL) > hold.condition_payout(ProgressRate::percent(40)),
+            "and the repair pays out faster again, because the payout is scaled by the same rate"
+        );
+    }
+
+    #[test]
+    fn a_target_nobody_has_walked_out_on_is_worked_normally() {
+        let capability = CapabilityConfig {
+            interrupts: vec![rule(InterruptCause::WorkStoppage, InterruptResponse::Fail)],
+            ..transfer(TransferDirection::Deliver, 10)
+        };
+        assert_eq!(
+            verdict(
+                Some(&capability),
+                &with_capacities(Some((40, 0)), Some((0, 40)))
+            )
+            .outcome,
+            Ok(ProgressRate::FULL),
+            "a hull that authors the rule and a world with no dispute is the pre-#1035 \
+             behaviour exactly"
+        );
+    }
+
+    #[test]
+    fn a_stoppage_rule_may_not_name_a_region_effect() {
+        let config = OperationsConfig {
+            capabilities: vec![CapabilityConfig {
+                interrupts: vec![InterruptRule {
+                    cause: InterruptCause::WorkStoppage,
+                    region_effect: Some(RegionEffectName::SlowZone),
+                    response: InterruptResponse::Fail,
+                    rate_percent: default_slow_rate(),
+                }],
+                ..transfer(TransferDirection::Deliver, 10)
+            }],
+        };
+        let err = config.validate().expect_err("a stoppage reads no band");
+        assert!(
+            err.contains("work_stoppage"),
+            "the load error quotes the cause back to the author: {err}"
+        );
     }
 
     #[test]

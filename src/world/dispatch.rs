@@ -217,6 +217,27 @@ pub enum ActionCmd {
         verb: crate::operations::OperationVerb,
         target: String,
     },
+    /// Call out, settle, or re-price one side of a labour dispute
+    /// (issue #1035).
+    ///
+    /// `id` is the world's authored `[[workforce]]` id, not an entity name and
+    /// not a UUID: a workforce is a *party*, exactly as a commitment's
+    /// `made_to` is, and the people who run a skyway are not any one hull. So
+    /// there is nothing for the applier to resolve — it applies the mutation to
+    /// [`WorkforceRegister`](crate::world::workforce::WorkforceRegister)
+    /// directly, and a mutation naming a side this world never declared is a
+    /// logged no-op rather than a load error, for the reason the register's
+    /// own lookup returns "at work" for an unknown id.
+    ///
+    /// The mirror flag is **not** written here. The host fn that emits this
+    /// pushes an ordinary [`ActionCmd::MutateFlag`] beside it, so the flag a
+    /// script reads back gets its `FlagSet`/`FlagCleared` transition from the
+    /// one path that emits them and an `on_flag_cleared` trigger chains off a
+    /// settlement without this command knowing triggers exist.
+    SetWorkforceState {
+        id: String,
+        mutation: crate::world::workforce::WorkforceMutation,
+    },
     /// Order the named civilian to hold, divert or dock (issue #1028).
     ///
     /// `entity` is the world's authored entity NAME, not a UUID, and the applier

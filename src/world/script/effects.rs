@@ -63,7 +63,7 @@ use crate::comms::content::OpenCommsRequest;
 use crate::world::config::{
     parse_action_entry, RawActionEntry, RawModifier, RawZeroGate, TriggerAction,
 };
-use crate::world::dispatch::ActionCmd;
+use crate::world::dispatch::{ActionCmd, FlagMutation};
 
 /// A fractional literal carried as OPAQUE DATA, the `no_float`-safe fractional-leaf
 /// marker (issue #984, Rhai M6 follow-on).
@@ -435,6 +435,67 @@ pub fn register_effects(engine: &mut Engine) {
             sink.push(ActionCmd::OrderCivilian {
                 entity: entity.to_string(),
                 order: crate::civilian::CivilianOrder::dock_at(structure.to_string()),
+            });
+        },
+    );
+    // Labour dispute hooks (issue #1035). Three verbs rather than one setter,
+    // for the reason `repair_infrastructure` and `damage_infrastructure` are
+    // two: the direction lives in the name, so a scenario cannot end a strike by
+    // getting a boolean the wrong way round.
+    //
+    // Each pushes TWO commands, in this order: the register move, then the
+    // mirror flag. The flag is an ordinary `MutateFlag` on the same ordered
+    // buffer `ctx.flags.x = 1` uses, so `apply_script_commands` previews its
+    // transition and an `on_flag_cleared("workforce.<id>.on_strike", …)` trigger
+    // authored by the negotiation slice chains off a settlement — through
+    // machinery that was already there, and without this vocabulary knowing
+    // triggers exist.
+    //
+    // A settlement that changes nothing still writes its flag to the value it
+    // already held: `preview_mutation` sees no transition and emits no event, so
+    // the idempotent case costs a redundant write and never a spurious chain.
+    for (name, mutation, flag_value) in [
+        (
+            "call_strike",
+            crate::world::workforce::WorkforceMutation::CallStrike,
+            1,
+        ),
+        (
+            "settle_strike",
+            crate::world::workforce::WorkforceMutation::Settle,
+            0,
+        ),
+    ] {
+        engine.register_fn(name, move |sink: &mut EffectSink, id: ImmutableString| {
+            sink.push(ActionCmd::SetWorkforceState {
+                id: id.to_string(),
+                mutation,
+            });
+            sink.push(ActionCmd::MutateFlag {
+                target_layer: None,
+                name: crate::world::workforce::strike_flag(&id),
+                mutation: FlagMutation::SetValue(flag_value),
+            });
+        });
+    }
+    engine.register_fn(
+        "set_workforce_disposition",
+        |sink: &mut EffectSink, id: ImmutableString, value: i64| {
+            // Clamped here as well as in the register, because the mirror flag
+            // is written from THIS value and a script that asked for 9,000 must
+            // not leave the flag saying 9,000 while the record says 100.
+            let value = value.clamp(
+                crate::world::workforce::DISPOSITION_MIN,
+                crate::world::workforce::DISPOSITION_MAX,
+            );
+            sink.push(ActionCmd::SetWorkforceState {
+                id: id.to_string(),
+                mutation: crate::world::workforce::WorkforceMutation::SetDisposition(value),
+            });
+            sink.push(ActionCmd::MutateFlag {
+                target_layer: None,
+                name: crate::world::workforce::disposition_flag(&id),
+                mutation: FlagMutation::SetValue(value),
             });
         },
     );

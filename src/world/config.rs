@@ -520,6 +520,10 @@ pub struct RawWorld {
     /// matches the `[[route]]` array key, so no rename is needed.
     #[serde(default)]
     pub route: Vec<crate::civilian::RouteConfig>,
+    /// The sides of a labour dispute (issue #1035). The field name already
+    /// matches the `[[workforce]]` array key, so no rename is needed.
+    #[serde(default)]
+    pub workforce: Vec<crate::world::workforce::Workforce>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -1373,6 +1377,22 @@ pub struct WorldConfig {
     /// `world::validate` refuses a leg naming an anchor no world in the
     /// composition declares.
     pub routes: Vec<crate::civilian::RouteConfig>,
+    /// The sides of a labour dispute, in authored order (issue #1035).
+    ///
+    /// Authored data only. The *live* status — whether each side is out, and
+    /// what it makes of the crew — is
+    /// [`WorkforceRegister`](crate::world::workforce::WorkforceRegister) on
+    /// [`WorldContentRuntime`](crate::world::server::WorldContentRuntime),
+    /// armed from this list on the first simulation tick of the mission exactly
+    /// as the deadline table is. Ids are unique within a world; [`parse_world`]
+    /// refuses a duplicate by name.
+    ///
+    /// Deliberately NOT cross-checked against the `workforce` a structure's
+    /// `[infrastructure]` block names: an entity template ships in every
+    /// scenario and a world that has no dispute about those people is a world
+    /// where work there carries on. See
+    /// [`WorkforceRegister::on_strike`](crate::world::workforce::WorkforceRegister::on_strike).
+    pub workforces: Vec<crate::world::workforce::Workforce>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -1653,6 +1673,32 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         }
     }
 
+    // The sides of a labour dispute (issue #1035). Same argument as deadlines
+    // and routes, one vocabulary later: the id is the only handle a structure's
+    // `[infrastructure] workforce` and a script's `ctx.effects.settle_strike`
+    // have on a side, so a duplicate is two records competing for every
+    // settlement. The per-side checks (a non-empty id, a disposition on its
+    // authored scale) live on the vocabulary itself so the same rules apply
+    // wherever a `[[workforce]]` is built.
+    for (i, workforce) in raw.workforce.iter().enumerate() {
+        workforce
+            .validate()
+            .map_err(|e| format!("[[workforce]] #{i}: {e}"))?;
+        if let Some(j) = raw
+            .workforce
+            .iter()
+            .enumerate()
+            .take(i)
+            .position(|(_, other)| other.id == workforce.id)
+        {
+            return Err(format!(
+                "duplicate workforce id '{}': [[workforce]] #{j} and [[workforce]] #{i} \
+                 both declare it; workforce ids must be unique within a world",
+                workforce.id
+            ));
+        }
+    }
+
     // Validate extra_worlds: every entry must be a non-empty string.
     for (i, path) in raw.extra_worlds.iter().enumerate() {
         if path.trim().is_empty() {
@@ -1707,6 +1753,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         player_spawn: raw.player_spawn,
         deadlines: raw.deadline,
         routes: raw.route,
+        workforces: raw.workforce,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }
@@ -5219,6 +5266,72 @@ faction = "Harrow"
 "#;
         let err = actions(toml).expect_err("must reject");
         assert!(err.contains("enemy"), "error must mention enemy: {err}");
+    }
+
+    // ── The sides of a labour dispute (issue #1035) ──────────────────────────
+
+    #[test]
+    fn parse_world_reads_the_workforce_table_in_authored_order() {
+        let toml = r#"
+[[workforce]]
+id = "skyway_workers"
+label = "world.fs.workforce.workers.label"
+on_strike = true
+disposition = 30
+
+[[workforce]]
+id = "havelock_operations"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.workforces.len(), 2);
+        assert_eq!(cfg.workforces[0].id, "skyway_workers");
+        assert!(cfg.workforces[0].on_strike);
+        assert_eq!(cfg.workforces[0].disposition, 30);
+        // The second side takes both defaults: nobody said they were out, and
+        // nobody wrote down what they think of the crew.
+        assert_eq!(cfg.workforces[1].id, "havelock_operations");
+        assert!(
+            !cfg.workforces[1].on_strike,
+            "a `[[workforce]]` block declares a party, not a dispute — a side is at \
+             work until a world says otherwise"
+        );
+        assert_eq!(cfg.workforces[1].disposition, 50);
+        assert!(cfg.workforces[1].label.is_empty());
+    }
+
+    #[test]
+    fn parse_world_refuses_a_duplicate_workforce_id_naming_both_entries() {
+        let toml = r#"
+[[workforce]]
+id = "skyway_workers"
+
+[[workforce]]
+id = "skyway_workers"
+on_strike = true
+"#;
+        let err = parse_world(toml).expect_err("must refuse");
+        assert!(err.contains("skyway_workers"), "{err}");
+        assert!(err.contains("#0") && err.contains("#1"), "names both: {err}");
+    }
+
+    #[test]
+    fn parse_world_refuses_a_disposition_off_its_authored_scale() {
+        let toml = r#"
+[[workforce]]
+id = "skyway_workers"
+disposition = 400
+"#;
+        let err = parse_world(toml).expect_err("must refuse");
+        assert!(err.contains("disposition"), "{err}");
+    }
+
+    #[test]
+    fn a_world_that_declares_no_workforce_parses_with_an_empty_table() {
+        let cfg = parse_world("").expect("must parse");
+        assert!(
+            cfg.workforces.is_empty(),
+            "every world written before this vocabulary existed is unchanged by it"
+        );
     }
 
     // ── Named mission deadlines (issue #1024) ────────────────────────────────

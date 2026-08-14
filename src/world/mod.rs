@@ -18,4 +18,9 @@ pub mod scenario;
 pub mod script;
 pub mod server;
 pub mod validate;
+/// Who staffs a structure, and whether they are working (issue #1035) — the
+/// authored `[[workforce]]` sides of a labour dispute, their live strike status
+/// and their disposition toward the crew. A record, never a decider: what a
+/// stoppage *does* to a piece of work is authored on the hull's capability.
+pub mod workforce;
 pub use server::WorldPlugin;

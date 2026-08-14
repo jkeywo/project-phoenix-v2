@@ -1,5 +1,5 @@
-// The crew's intelligence files: a compact subject list, and the fact sheet
-// behind each one (issue #1030).
+// The crew's intelligence files: a compact subject list, the fact sheet behind
+// each one (issue #1030), and the entries they gathered themselves (#1031).
 //
 // Mounted as a sibling overlay to Comms on the destroyer's tactical console —
 // the destroyer has no comms console, comms is a toggle there, and this is a
@@ -31,8 +31,10 @@ import { t } from '../strings.js';
  *
  * A literal table rather than a composed id, for `ph-operation-panel`'s
  * STATE_LABELS reason: a composed id is invisible to the string checker. The
- * codes are the four issue #1031 names; that slice appends the entries this
- * renders, and an unmapped code shows no provenance rather than a machine word.
+ * codes are the four `EvidenceProvenance` names the host sends (issue #1031),
+ * and an unmapped one shows no provenance rather than a machine word — the entry
+ * itself still renders, so what the crew learned survives a client that is
+ * behind on how they learned it.
  */
 export const PROVENANCE_LABELS = Object.freeze({
   scan:      'component.dossier.provenance.scan',
@@ -225,9 +227,14 @@ export class PhDossierPanel extends HTMLElement {
       sheet.appendChild(row);
     });
 
-    // What this crew GATHERED, kept visibly apart from what they were given.
-    // Empty until issue #1031 appends to it, which is why the block is absent
-    // rather than empty: an evidence heading over nothing reads as a loss.
+    // What this crew GATHERED, kept visibly apart from what they were given —
+    // the separation is the readout, so these never merge into the fact rows
+    // above. Absent rather than empty when there is nothing: an evidence heading
+    // over no entries reads as a loss.
+    //
+    // Order is the host's, which is gather order (issue #1031). Nothing here
+    // sorts or groups by provenance: the block is the story of what the crew
+    // did, in the order they did it.
     const evidence = dossier.evidence || [];
     if (evidence.length > 0) {
       const block = document.createElement('div');

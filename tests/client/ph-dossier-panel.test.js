@@ -24,6 +24,22 @@ function facts(host) {
   ]);
 }
 
+function entries(host) {
+  return [...host.shadowRoot.querySelectorAll('.gathered .entry')].map((row) => [
+    row.querySelector('.text').textContent,
+    row.querySelector('.provenance').textContent,
+  ]);
+}
+
+// The two findings `assets/worlds/probe_evidence.toml` actually produces, in the
+// order that world produces them: a hull scan, then an admission on an open
+// channel. Real ids and real provenances rather than invented ones, so this file
+// and the headless probe are asserting about the same payload.
+const HOOK_EVIDENCE = [
+  { text: 'world.probe_evidence.evidence.stress_fracture', provenance: 'scan', gathered_at_tick: 180 },
+  { text: 'world.probe_evidence.evidence.foreman_admission', provenance: 'dialogue', gathered_at_tick: 302 },
+];
+
 const DEPOT = {
   uuid: 'skyway_depot-1',
   name: 'world.probe_dossier.entity.skyway_depot.name',
@@ -131,32 +147,85 @@ describe('PhDossierPanel', () => {
     ]);
   });
 
-  // Issue #1031's seam, exercised from this slice: an appended entry renders in
-  // its own block with its provenance, and the block is ABSENT — not empty —
-  // until there is something in it.
+  // Issue #1031: an appended entry renders in its own block with its
+  // provenance, and the block is ABSENT — not empty — until there is something
+  // in it, because a GATHERED heading over nothing reads as a loss.
   it('separates gathered evidence from the baseline facts, and hides the block when empty', () => {
     const el = setup();
     el.state = { dossiers: [DEPOT] };
     el.select('skyway_depot-1');
     expect(el.shadowRoot.querySelector('.gathered')).toBeNull();
 
-    el.state = {
-      dossiers: [{
-        ...DEPOT,
-        evidence: [{
-          text: 'world.probe_dossier.commitment.safe_passage.resolves',
-          provenance: 'scan',
-          gathered_at_tick: 900,
-        }],
-      }],
-    };
+    el.state = { dossiers: [{ ...DEPOT, evidence: HOOK_EVIDENCE.slice(0, 1) }] };
     const entry = el.shadowRoot.querySelector('.gathered .entry');
     expect(el.shadowRoot.querySelector('.gathered .heading').textContent)
       .toBe(t('component.dossier.gathered'));
     expect(entry.querySelector('.text').textContent)
-      .toBe(t('world.probe_dossier.commitment.safe_passage.resolves'));
+      .toBe(t('world.probe_evidence.evidence.stress_fracture'));
     expect(entry.querySelector('.provenance').textContent)
       .toBe(t('component.dossier.provenance.scan'));
+  });
+
+  // The whole slice, on screen: the two findings `probe_evidence.toml` actually
+  // produces — a scan and an admission — rendered in gather order, each saying
+  // how the crew came by it, and neither of them mixed in with the facts they
+  // were handed.
+  it('renders every gathered entry in order with its own provenance, apart from the facts', () => {
+    const el = setup();
+    el.state = { dossiers: [{ ...DEPOT, evidence: HOOK_EVIDENCE }] };
+    el.select('skyway_depot-1');
+    expect(entries(el)).toEqual([
+      [t('world.probe_evidence.evidence.stress_fracture'), t('component.dossier.provenance.scan')],
+      [t('world.probe_evidence.evidence.foreman_admission'), t('component.dossier.provenance.dialogue')],
+    ]);
+    // The baseline facts are untouched by any of it: two lists, one sheet.
+    expect(facts(el)).toEqual([
+      [t('dossier.fact.condition'), '42%'],
+      [t('dossier.fact.commitment_open'), t('world.probe_dossier.commitment.safe_passage.terms')],
+    ]);
+    // And the list's count is everything on file — handed and earned together,
+    // because "how much do we have on them" does not care which is which.
+    el.select(null);
+    expect(subjects(el)[0].count).toBe('4');
+  });
+
+  // Every provenance the host can send has a label, so no entry ever renders
+  // with a blank source line in a shipped build.
+  it('labels every provenance the host can send', () => {
+    const el = setup();
+    el.state = {
+      dossiers: [{
+        ...CLAIMANT,
+        evidence: ['scan', 'dialogue', 'records', 'briefing'].map((provenance, i) => ({
+          text: 'world.probe_evidence.evidence.stress_fracture',
+          provenance,
+          gathered_at_tick: i,
+        })),
+      }],
+    };
+    el.select('claimant-1');
+    expect(entries(el).map(([, provenance]) => provenance)).toEqual([
+      t('component.dossier.provenance.scan'),
+      t('component.dossier.provenance.dialogue'),
+      t('component.dossier.provenance.records'),
+      t('component.dossier.provenance.briefing'),
+    ]);
+  });
+
+  // A provenance this client does not know renders as NOTHING rather than as
+  // the machine word — the same refusal formatValue makes for an unknown value
+  // kind. The entry itself still shows: what the crew learned survives a client
+  // that is behind on how they learned it.
+  it('shows an entry with an unknown provenance, with no source line at all', () => {
+    const el = setup();
+    el.state = {
+      dossiers: [{
+        ...CLAIMANT,
+        evidence: [{ text: 'world.probe_evidence.evidence.stress_fracture', provenance: 'hearsay' }],
+      }],
+    };
+    el.select('claimant-1');
+    expect(entries(el)).toEqual([[t('world.probe_evidence.evidence.stress_fracture'), '']]);
   });
 
   it('falls back to the uuid when a subject carries no name id', () => {

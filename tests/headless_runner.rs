@@ -7803,3 +7803,164 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
          before anybody says a word about it"
     );
 }
+
+// ── Evidence entries with provenance (issue #1031, parent #851) ──────────────
+
+/// `probe_evidence.toml`, driven for eight mission seconds: the same subject
+/// learned about twice, by two genuinely different routes, and both entries on
+/// one fact sheet in the order the crew got them.
+///
+/// This is the whole slice end to end. The scan half comes from a `[[deadline]]`
+/// handler; the testimony half comes from a **real dialogue `on_pick`**, run
+/// because the ship's own AI-backfilled Comms officer answered an open thread
+/// through the ordinary admitted `RespondToMessage` path — not from a timer
+/// standing in for a player's finger. Every assertion is made against the
+/// PUBLISHED blackboard, which is the payload a console would render.
+///
+/// The two no-ops are asserted here rather than in a unit test because both are
+/// properties of the live applier: a duplicate append leaves one line stamped at
+/// the first tick, and an append to a name no entity answers to is dropped with
+/// a warning while the rest of the handler still runs.
+///
+/// The probe world's own header carries the authored timeline.
+#[test]
+fn a_scan_and_a_dialogue_admission_both_land_on_one_fact_sheet_with_their_provenance() {
+    use project_phoenix::dossier::{dossier_blackboard_key, FACT_CONDITION};
+    use project_phoenix::messages::{DossierBlackboard, SystemBlackboard};
+    use project_phoenix::server_app::ShipSystemBlackboards;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_evidence.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(8.0, dt),
+        seed: Some(1031),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+
+    // Both routes ran. The survey handler's flag is the one that proves the two
+    // no-ops inside it cost it nothing: a raise would have discarded the call
+    // and this counter with it.
+    {
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        assert_eq!(
+            flags.counter("survey_ran"),
+            1,
+            "the survey handler ran to completion — a duplicate append and an \
+             unknown subject are no-ops, not raises"
+        );
+        assert_eq!(
+            flags.counter("foreman_pressed"),
+            1,
+            "and the Comms officer answered the thread with response 0, so the \
+             on_pick ran"
+        );
+        assert_eq!(flags.counter("foreman_let_go"), 0);
+    }
+
+    // The store: three appends, two entries, one subject.
+    {
+        let log = &app.world().resource::<WorldContentRuntime>().evidence;
+        assert_eq!(
+            log.entries.len(),
+            2,
+            "three appends, one of them a duplicate and one of them addressed to \
+             nothing: {:?}",
+            log.entries
+        );
+        let scan = &log.entries[0];
+        let testimony = &log.entries[1];
+        assert_eq!(scan.text, "world.probe_evidence.evidence.stress_fracture");
+        assert_eq!(
+            testimony.text,
+            "world.probe_evidence.evidence.foreman_admission"
+        );
+        assert_eq!(
+            scan.subject_uuid, testimony.subject_uuid,
+            "both are about the hook — a finding is filed under what it is ABOUT, \
+             not under who said it"
+        );
+        assert!(
+            scan.gathered_at_tick < testimony.gathered_at_tick,
+            "the survey came back before the foreman talked ({} vs {})",
+            scan.gathered_at_tick,
+            testimony.gathered_at_tick
+        );
+    }
+
+    // The payload a console reads.
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let blackboards = q
+        .iter(app.world())
+        .next()
+        .expect("the local ship publishes");
+    let bb: DossierBlackboard = match blackboards.0.get(&dossier_blackboard_key()) {
+        Some(SystemBlackboard::Dossiers(bb)) => bb.clone(),
+        other => panic!("expected a dossier blackboard, got {other:?}"),
+    };
+
+    let hook = bb
+        .subjects
+        .iter()
+        .find(|d| d.name == "world.probe_evidence.entity.skyway_hook.name")
+        .expect("the hook is a subject through the infrastructure door");
+
+    // AC1/AC4/AC6: both entries, in gather order, each carrying its own
+    // provenance and the tick it was learned on.
+    assert_eq!(
+        hook.evidence
+            .iter()
+            .map(|e| (e.text.as_str(), e.provenance.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("world.probe_evidence.evidence.stress_fracture", "scan"),
+            (
+                "world.probe_evidence.evidence.foreman_admission",
+                "dialogue"
+            ),
+        ],
+        "the crew can say how they know, one entry at a time"
+    );
+    assert!(
+        hook.evidence.iter().all(|e| e.gathered_at_tick > 0),
+        "each is stamped with the tick the handler that wrote it ran on"
+    );
+
+    // The separation the panel renders: what they were handed is still in
+    // `facts`, what they went and got is in `evidence`, and neither list leaked
+    // into the other.
+    assert_eq!(
+        hook.facts
+            .iter()
+            .map(|f| f.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![FACT_CONDITION, "world.probe_evidence.capacity.berths.label"],
+        "the baseline facts are exactly what the world authored"
+    );
+    assert!(
+        !hook
+            .facts
+            .iter()
+            .any(|f| f.label.starts_with("world.probe_evidence.evidence.")),
+        "a finding never becomes a fact row"
+    );
+
+    // Nobody else's file grew an entry — including the foreman, whose testimony
+    // this was.
+    for subject in &bb.subjects {
+        if subject.name != "world.probe_evidence.entity.skyway_hook.name" {
+            assert!(
+                subject.evidence.is_empty(),
+                "{} was not what any of this was about",
+                subject.name
+            );
+        }
+    }
+}

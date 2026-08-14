@@ -1,0 +1,192 @@
+# Probe world for issue #1031 — evidence entries with provenance, gathered on
+# two genuinely different paths.
+#
+# The point of the slice is that the crew can say HOW they know, so this world
+# makes them learn the same subject's story twice, by two routes, and asserts
+# both land on one fact sheet in the order they happened:
+#
+#   skyway_hook     a published structure with a labelled capacity, so its sheet
+#                   carries BASELINE facts as well as gathered entries and the
+#                   separation between the two is visible
+#   line_foreman    a hailable hull — the witness, and the party whose testimony
+#                   becomes the second entry
+#
+# THE TWO ROUTES, in mission seconds:
+#
+#   t=3   the `survey_window` deadline fires. Its handler appends a SCAN entry
+#         to `skyway_hook`, then does two things that must be no-ops:
+#           * appends the SAME entry again — same subject, same provenance, same
+#             text — which the store deduplicates, keeping the first stamp;
+#           * appends to `no_such_structure`, a name no entity in this world
+#             answers to, which the applier warns about and drops. Neither costs
+#             the handler its call, so the flag it sets afterwards is written.
+#   t=5   `open_foreman_channel` opens a real scripted thread on `foreman_calls`.
+#         The ship's Comms officer is AI-backfilled in a headless run and
+#         answers with response 0 through the ordinary admitted
+#         `RespondToMessage` path, so `on_press_foreman` runs as a genuine
+#         dialogue `on_pick` — not a timer standing in for one — and appends the
+#         DIALOGUE entry.
+#
+# TWO THINGS MAKE THAT ANSWER LAND, and both are authored deliberately:
+#
+#   1. The Comms response policy on the player ship, as an override because
+#      `alliance_destroyer.toml` declares none. It is the rule
+#      `alliance_courier.toml` ships: answer an open thread with its first
+#      response while Comms is available and the sender is in range.
+#   2. The thread is opened FROM the foreman's own hull, not from `_self`. The
+#      response router range-gates a pick against the sender's live range flag,
+#      so only a real, hailable, in-range sender can be answered — which is also
+#      the more honest scene: somebody called, and the crew pressed them.
+#
+# NOTHING IS WITHHELD IN THIS WORLD, and that is deliberate: `probe_dossier.toml`
+# is the tripwire for the hidden-truth rule and still is. What this one proves is
+# the other half — that the ONLY way something reaches a fact sheet that the
+# world did not already imply is an authored append, with a provenance attached.
+#
+# BASELINE (release headless, `--seed 42 --ticks 900 --digest-every 900`, clean
+# tree, no `--ship` override — the invocation probe_commitments.toml and
+# probe_stabilise.toml record): final digest 0x4567b7901a66ffe4
+# (5001167740764356580). A NEW number — nothing to compare it against yet — so it
+# is written down to be the thing a later change is A/B'd against, the way the
+# shipped worlds' digests already are.
+#
+# The two anchors were re-measured on the same tree and are UNMOVED (combat_test
+# 14942520827746055774, patrol 11531679067393217131), so the claim below is
+# tested rather than asserted.
+#
+# Nothing this world exists to exercise is IN that digest. An evidence entry is
+# authoritative state, but it is SCENARIO state — the same "authoritative but not
+# folded" bucket as the deadline table and the commitments ledger, and for their
+# reason: it moves no hull, no shield and no reactor. What moves this number is
+# the depot's condition track and the entity population. If a later change makes
+# the digest move without moving either, something started folding scenario
+# state, and that is the question to ask before re-blessing this line.
+
+[global]
+seed = 1031
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship, with the Comms response policy the stock destroyer does not
+# author. Without it nothing answers the thread below and the dialogue half of
+# this probe never runs — see the header.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[entity.overrides.comms_console.ai.rule]]
+priority = 0
+channel = "comms_respond"
+when = "fact(comms_available) > 0 and fact(sender_in_range) > 0"
+verb = "respond_to_message"
+response_index = 0
+
+# ── The subject both routes are about ────────────────────────────────────────
+# A published structure, so its sheet already carries a condition row and a
+# labelled capacity before the crew learn anything. Everything gathered about it
+# has to stay visibly apart from those.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "skyway_hook"
+name = "world.probe_evidence.entity.skyway_hook.name"
+transform = { position = [900.0, 0.0, -200.0] }
+
+[[entity.overrides.infrastructure.capacity]]
+id = "depot_berths"
+amount = 4
+label = "world.probe_evidence.capacity.berths.label"
+
+# ── The witness ──────────────────────────────────────────────────────────────
+# Hailable, so it has a file of its own; its testimony is about the hook, which
+# is why the entry lands on the HOOK's sheet rather than on the foreman's. A
+# finding is filed under what it is about, not under who said it.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "line_foreman"
+name = "world.probe_evidence.entity.line_foreman.name"
+transform = { position = [500.0, 0.0, 300.0] }
+overrides = { comms = { hailable = true } }
+
+# ── The clock the survey is read on ──────────────────────────────────────────
+# There is no `[[evidence]]` block anywhere in this file, for the reason there is
+# no `[[commitment]]` one: what the crew found out depends on what they did, so a
+# world file cannot declare it. What a world file CAN declare is when the survey
+# comes back, and that is an ordinary deadline.
+[[deadline]]
+id = "survey_window"
+label = "world.probe_evidence.deadline.survey_window.label"
+due_secs = 3
+visible = true
+
+[script]
+setup = """
+on_timer(5, "open_foreman_channel");
+on_deadline("survey_window", "on_survey_window");
+
+// ROUTE ONE: the scan. Also the two no-ops, authored deliberately so the probe
+// proves they cost this handler nothing — the flag below is written either way.
+fn on_survey_window(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.probe_evidence.entity.skyway_hook.name",
+        text:       "world.probe_evidence.evidence.stress_fracture",
+        provenance: "scan",
+    });
+    // The same finding again. A re-scan is an ordinary thing for a crew to do
+    // and must not put a second identical line on the sheet.
+    ctx.dossier.append(#{
+        subject:    "world.probe_evidence.entity.skyway_hook.name",
+        text:       "world.probe_evidence.evidence.stress_fracture",
+        provenance: "scan",
+    });
+    // A subject this world does not field. Warned and dropped at the applier —
+    // never a panic, and never a lost call.
+    ctx.dossier.append(#{
+        subject:    "world.probe_evidence.entity.no_such_structure.name",
+        text:       "world.probe_evidence.evidence.stress_fracture",
+        provenance: "scan",
+    });
+    ctx.flags.increment("survey_ran", 1);
+}
+
+// ROUTE TWO: the testimony. A real node fn, opened through the real
+// `open_comms` pipeline and answered by the ship's own Comms officer.
+fn foreman_calls(ctx) {
+    #{
+        message: "world.probe_evidence.comms.foreman_calls",
+        responses: [
+            #{ text: "world.probe_evidence.comms.press", on_pick: "on_press_foreman" },
+            #{ text: "world.probe_evidence.comms.let_it_go", on_pick: "on_let_it_go" },
+        ],
+    }
+}
+
+// The pick that gets it out of him. Terminal — it returns nothing — so the
+// thread closes and the officer does not answer it again.
+fn on_press_foreman(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.probe_evidence.entity.skyway_hook.name",
+        text:       "world.probe_evidence.evidence.foreman_admission",
+        provenance: "dialogue",
+    });
+    ctx.flags.increment("foreman_pressed", 1);
+}
+
+fn on_let_it_go(ctx) {
+    ctx.flags.increment("foreman_let_go", 1);
+}
+
+// The thread comes from the foreman's own hull rather than from `_self`, and
+// that is load-bearing: the response router range-gates a pick against the
+// SENDER's live range flag, so a real, hailable, in-range sender is what makes
+// the officer's answer land instead of being refused.
+fn open_foreman_channel(ctx) {
+    ctx.effects.open_comms(#{
+        from:    "world.probe_evidence.entity.line_foreman.name",
+        node_fn: "foreman_calls",
+    });
+}
+"""

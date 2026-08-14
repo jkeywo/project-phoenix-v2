@@ -1014,3 +1014,12 @@ world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyw
 world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Take station off the skyhook. Get a condition read on the head and on both depots.]"
 world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
 world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]
+world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
+world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
+world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"
+world.probe_evidence.deadline.survey_window.label,"assets/worlds/probe_evidence.toml -> [[deadline]] label","[Survey returns]"
+world.probe_evidence.evidence.stress_fracture,"Evidence text — what the hull scan of the skyway hook found, in the #1031 probe world","[Scan: stress fracture through the primary spar.]"
+world.probe_evidence.evidence.foreman_admission,"Evidence text — what the line foreman admitted on an open channel, in the #1031 probe world","[The foreman: the spar was signed off without being looked at.]"
+world.probe_evidence.comms.foreman_calls,"Dialogue body — the line foreman on an open channel, in the #1031 probe world","[Foreman here. You are asking about the hook.]"
+world.probe_evidence.comms.press,"Response text — pressing the foreman for what he knows, in the #1031 probe world","[Who signed the inspection off?]"
+world.probe_evidence.comms.let_it_go,"Response text — letting the foreman off the hook, in the #1031 probe world","[Nothing further.]"

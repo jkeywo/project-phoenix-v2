@@ -2929,3 +2929,231 @@ fn an_entity_destroyed_before_the_save_does_not_come_back_after_a_resume() {
          collapse already failed"
     );
 }
+
+// ── Gathered evidence across a resume (issue #1031) ──────────────────────────
+
+/// The evidence probe: one finding from a survey deadline, a second from a
+/// dialogue the ship's own Comms officer answers.
+const EVIDENCE: &str = "assets/worlds/probe_evidence.toml";
+
+/// Frames the evidence world runs before its capture.
+///
+/// It has to land in the window where the two findings DISAGREE — after the
+/// survey deadline writes the scan entry at t=3 s and before the foreman is
+/// pressed at t=5 s. A capture taken before the survey would round-trip an empty
+/// log, which is the same payload a restore that dropped the field entirely
+/// would also produce. The assertions below make that precondition explicit
+/// rather than trusting the number.
+const EVIDENCE_CAPTURE_AT: u64 = 240;
+
+/// Frames both worlds are stepped after the restore — enough to carry them past
+/// the dialogue open at t=5 s and the officer's answer a tick or two later.
+const EVIDENCE_CONTINUE_FOR: u64 = 200;
+
+fn evidence_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: EVIDENCE.into(),
+        // The world's own player-ship hull, because the Comms response policy
+        // that answers the foreman is authored as an override ON that entry.
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+fn live_evidence(app: &bevy::prelude::App) -> &project_phoenix::dossier::EvidenceLog {
+    &app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .evidence
+}
+
+fn evidence_texts(app: &bevy::prelude::App) -> Vec<String> {
+    live_evidence(app)
+        .entries
+        .iter()
+        .map(|e| e.text.clone())
+        .collect()
+}
+
+/// A finding survives a resume with its provenance and the tick it was learned
+/// on, and the resumed run goes on to learn the second one exactly as the live
+/// run does.
+///
+/// The log is **not** folded into the simulation digest — it sits with the
+/// commitments ledger and the deadline table on that side of the line — so
+/// digest agreement below checks that the resume did not disturb the
+/// *simulation*, and every claim about what the crew know is asserted directly.
+/// A test that only compared digests would pass with the log dropped on the
+/// floor.
+#[test]
+fn a_gathered_finding_survives_a_resume_and_the_next_one_still_arrives() {
+    use project_phoenix::dossier::EvidenceProvenance;
+
+    let mut live = boot(&evidence_args());
+    step(&mut live, EVIDENCE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+    let scenario = scenario_of(&payload);
+
+    // The capture is genuinely mid-flight: the survey is back, the foreman has
+    // not talked yet. Those two states are what make the measurement
+    // discriminating.
+    assert_eq!(
+        scenario
+            .evidence
+            .entries
+            .iter()
+            .map(|e| (e.text.as_str(), e.provenance))
+            .collect::<Vec<_>>(),
+        vec![(
+            "world.probe_evidence.evidence.stress_fracture",
+            EvidenceProvenance::Scan
+        )],
+        "precondition: the capture is taken AFTER the scan and BEFORE the \
+         admission — a capture of an empty log would round-trip identically even \
+         if restore dropped the field entirely"
+    );
+    let captured_scan = scenario.evidence.entries[0].clone();
+    assert!(
+        captured_scan.gathered_at_tick > 0,
+        "the tick the crew learned it travels with the finding"
+    );
+    assert_eq!(
+        world_counter(&live, "foreman_pressed"),
+        0,
+        "nothing has pressed the foreman before the capture"
+    );
+
+    let mut resumed = boot_to_restore_point(&evidence_args(), &payload);
+
+    // The bootstrap's own state, before the restore overwrites it. A finding is
+    // only ever written by a script call, so a fresh app short of the mission's
+    // first tick has learned nothing — which is what stops any claim below being
+    // satisfied by a bootstrap coincidence.
+    assert!(
+        live_evidence(&resumed).is_empty(),
+        "precondition: the fresh app's crew have found nothing out"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        live_evidence(&resumed).entries,
+        vec![captured_scan.clone()],
+        "the restore takes the finding whole — subject, text, provenance and the \
+         tick it was gathered on"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did"
+    );
+
+    // Both worlds now step past the dialogue the officer answers.
+    step(&mut live, EVIDENCE_CONTINUE_FOR);
+    step(&mut resumed, EVIDENCE_CONTINUE_FOR);
+
+    assert_eq!(
+        evidence_texts(&live),
+        vec![
+            "world.probe_evidence.evidence.stress_fracture".to_string(),
+            "world.probe_evidence.evidence.foreman_admission".to_string(),
+        ],
+        "precondition: the live world's foreman talked"
+    );
+    assert_eq!(
+        live_evidence(&resumed).entries,
+        live_evidence(&live).entries,
+        "and the resumed world learned the same second thing, in the same order, \
+         at the same tick — with the first finding still stamped when it was \
+         actually made rather than re-stamped by the resume"
+    );
+    assert_eq!(
+        live_evidence(&resumed).entries[0],
+        captured_scan,
+        "the scan entry is untouched by everything that happened after it: the \
+         log is append-only"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        world_digest(live.world()),
+        "and the two worlds are still standing in the same place afterwards"
+    );
+}
+
+/// The log round-trips through the save's RON, and a run whose crew found
+/// nothing out writes nothing evidence-shaped at all.
+#[test]
+fn the_evidence_log_round_trips_and_an_incurious_run_writes_none() {
+    let mut live = boot(&evidence_args());
+    step(&mut live, EVIDENCE_CAPTURE_AT);
+    let payload = capture(live.world());
+
+    let run = run_for(
+        payload.clone(),
+        world_digest(live.world()),
+        SEED,
+        EVIDENCE,
+        current_versions(EVIDENCE),
+    );
+    let store = FileStore::new(scratch("evidence-roundtrip"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let reloaded = load_from(&store, "autosave", &current_versions(EVIDENCE))
+        .expect("the save reloads")
+        .snapshot
+        .expect("a saved game carries a snapshot");
+    assert_eq!(
+        scenario_of(&reloaded.state).evidence,
+        scenario_of(&payload).evidence,
+        "every field a finding carries — subject, text, provenance and tick — \
+         round-trips through RON"
+    );
+
+    // The compatibility half, and like the ledger's it cannot be shown by
+    // picking a world that authors no such block, because there IS no block: the
+    // duel simply never reaches a beat where the crew learn anything, and that
+    // is what an empty log means.
+    let mut quiet = duel();
+    step(&mut quiet, 120);
+    let quiet_payload = capture(quiet.world());
+    assert!(
+        scenario_of(&quiet_payload).evidence.is_empty(),
+        "a run whose crew found nothing out captures no evidence state"
+    );
+}
+
+/// A save written before evidence state was recorded is refused on **format**.
+///
+/// The field carries `#[serde(default)]`, so the older payload still parses —
+/// which is exactly why the constant had to move. A finding is a runtime
+/// artifact: no world file declares one, so an older save of the *same* world
+/// file has the same content digest and nothing else would refuse it. Restoring
+/// it hands the crew back a blank intelligence file, which is a plausible state
+/// rather than an obviously missing one — and a later re-scan would re-stamp the
+/// finding at the resumed tick, rewriting when they found out.
+#[test]
+fn a_save_written_before_evidence_state_is_refused_on_format() {
+    let mut live = boot(&evidence_args());
+    step(&mut live, EVIDENCE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(EVIDENCE);
+
+    // Recorded under the PREVIOUS format, everything else untouched, so the only
+    // reason to refuse is the one being tested.
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, EVIDENCE, previous);
+    let store = FileStore::new(scratch("evidence-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}

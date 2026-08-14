@@ -41,11 +41,20 @@
 # offered.
 #
 # BASELINE (this world is new in #1029, so this is its first recorded digest):
-# `--seed 42 --ticks 900` gives final digest 0x1e2be8a55a0b3ab1
-# (2173887675855764145). Measured on a clean tree at the commit that added this
+# `--seed 42 --ticks 900` gives final digest 0xc419b89426b6013c
+# (14130528252295774524). Measured on a clean tree at the commit that added this
 # line. It is a NEW number, not a preserved one — nothing to compare it against
 # yet — so it is written down here to be the thing a later change is A/B'd
 # against, the way the shipped worlds' digests already are.
+#
+# It is also, deliberately, the SAME number probe_deadlines.toml records, and
+# that is worth reading rather than glossing over. The two worlds differ only in
+# scenario-script state — deadlines there, commitments here — and neither is
+# folded into `state_digest`; they place the same hull at the same origin under
+# the same master seed. So the digests agreeing is the "authoritative but not
+# folded" decision showing its work. If a later change makes these two numbers
+# diverge, something started folding scenario state, and that is the question to
+# ask before re-blessing either line.
 
 [global]
 seed = 1029

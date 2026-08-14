@@ -120,7 +120,7 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 
 ## Resources
 
-`WorldContentRuntime`, `ObjectiveManagerRes`, `WorldConfig` (when loaded). Since #1025 `WorldContentRuntime` also carries `pending_condition_adjustments`, drained every tick by the infrastructure system and therefore empty at every tick boundary; #1026 added `pending_operation_starts` beside it, drained by `tick_operations` on the same terms. Since #1028 it also carries `pending_civilian_orders`, drained the same way by `tick_civilian_traffic`. Comms state lives in `CommsRuntime` + `CommsInboxRes` (`src/comms/server.rs`, split out in #816).
+`WorldContentRuntime`, `ObjectiveManagerRes`, `WorldConfig` (when loaded). Since #1025 `WorldContentRuntime` also carries `pending_condition_adjustments`, drained every tick by the infrastructure system and therefore empty at every tick boundary; #1026 added `pending_operation_starts` beside it, drained by `tick_operations` on the same terms. Since #1028 it also carries `pending_civilian_orders`, drained the same way by `tick_civilian_traffic`. Since #1029 it also carries `commitments`, a `CommitmentLedger` sitting beside the `deadlines` table — and unlike the three queues above it is **not** drained: it is a standing record of the promises the run has made, written only when a script call says so. Comms state lives in `CommsRuntime` + `CommsInboxRes` (`src/comms/server.rs`, split out in #816).
 
 ## Modules
 

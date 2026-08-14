@@ -326,6 +326,20 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // queue rather than a scheduler (and a resource) of its own, and
     // pasm/spec/architecture/scenario-scripting.yaml's `mission-deadline-state`
     // entity for the `implementation.symbols` naming those Rust types.
+    //
+    // Issue #1029's commitments ledger is covered the same way, by
+    // `WorldContentRuntime` above: `CommitmentLedger` — with its `Commitment`,
+    // `CommitmentState` and the `CommitmentChange`/`CommitmentMutation` a script
+    // call buffers — is a FIELD on that resource, sitting beside the deadline
+    // table for the reason the deadline table sits there. The slice registers no
+    // `#[derive(Resource)]` and no `#[derive(Component)]`, so nothing new appears
+    // in the registry this guard scans. Unlike deadlines it adds nothing to
+    // `WorldScriptRuntime` either: there is no `[[commitment]]` block and so no
+    // load-time declaration table to hold — a promise exists because of what a
+    // player said, not because of what an author wrote down. See
+    // `src/world/commitments.rs`, and
+    // pasm/spec/architecture/scenario-scripting.yaml's `commitment-ledger-state`
+    // entity for the `implementation.symbols` naming those Rust types.
     "RawWorldSource", "WorldScriptRuntime",
 ];
 

@@ -370,3 +370,93 @@ entities:
       - kind: test
         reference: "src/world/deadlines.rs tests; tests/snapshot_resume.rs"
         summary: "The pure table's arm/slip/cancel/note_fired behaviour, including the two-deadlines-sharing-a-call-key case and the stale-firing refusal, plus the save round-trip. `SNAPSHOT_FORMAT` moved 4 → 5: a format-4 payload carries no deadline record, so restoring one into a deadline-authoring world would re-arm every cancelled deadline, rewind every slip and un-fire the spent ones — the same silent re-arming that moved the constant to 2 for trigger latches."
+
+  - component: commitment-vocabulary
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Commitments — Recording a Promise, Settling It, and Gating on It
+      summary: "Issue #1029 (parent #851, Falling Skyway). The captain makes promises, and a promise is a RUNTIME artifact: there is no `[[commitment]]` block, because whether one exists at all depends on what the player chose to say. Script records and settles them through `ctx.commitments` — `record(#{id, made_to, terms, resolves_when})`, `keep(id)`, `break_promise(id)`, and `state(id)` returning `open`/`kept`/`broken`/`unknown`. Resolution writes a campaign flag (`commitment.<id>.kept` / `.broken`) as an ordinary `MutateFlag` on the call's shared effect sink, so an `on_flag_set` trigger authored against it chains through the trigger pipeline that already existed. The LIVE CONSUMER shipped in the same slice is a dialogue option: a node fn's `responses` array is built with an ordinary `if` over `ctx.commitments.state(…)`, so an option can exist only because a promise was made — and stop existing once it is spent."
+      rationale:
+        - "Gating is ordinary control flow, and no `when:` field is added to a dialogue response. A `ScriptDialogueResponse` is a `text` and an `on_pick`, and a node fn is a FUNCTION — so 'this option appears only if the captain promised' is an `if` around a `push`, in the language the author is already writing. A declarative predicate would need its own expression grammar, its own evaluator and its own load-time lint to say what Rhai already says in one line, and it would say it for dialogue options only."
+        - "`record` takes a map rather than four positional strings, matching `ctx.effects.open_comms(#{…})`: the fields are named at the call site, which is what stops `made_to` and `terms` being silently swapped by an author reading their own scenario rather than the host source."
+        - "Duplicate ids RAISE rather than overwrite or no-op, per AC1. Overwriting discards terms the crew were actually given; ignoring the second record leaves the mission believing it made a promise whose terms are somebody else's. Raising is what makes the refusal honest, because settled decision 10 drops the call's whole buffer rather than leaving half a negotiation applied. A scenario that can reach the same promise twice guards it with `state(id) == \"unknown\"`, which is one line and is one line the author has to have thought about."
+        - "`break_promise`, not `break`: the latter is a Rhai keyword (`(\"break\", Token::Break)` in `rhai::tokenizer`), so `ctx.commitments.break(\"x\")` is a parse error rather than a method call. The asymmetry with `keep` is preferred to renaming BOTH halves away from the `kept`/`broken` words the ledger itself uses."
+        - "`Commitments` follows `Deadlines`' snapshot-plus-buffer shape rather than inventing one: a per-call snapshot of the live ledger, mutated in place so a `state` read AFTER a `keep` in the same call sees the promise settled, with the mutations recorded separately for the host to replay. The snapshot's answer is also what decides whether a campaign flag is emitted, so a second `keep` of an already-kept promise writes nothing — the same no-op the live ledger reaches when the adapter replays it."
+        - "Mutations drain as a SIXTH `CallEffects` field for `deadline_changes`' reason: the generic action applier holds no handle on the ledger, and a promise is not an `ActionCmd`. The campaign flag is the deliberate exception — THAT half IS an `ActionCmd`, pushed onto the same ordered sink `ctx.flags.x = 1` uses, so it lands where the author put it and needs no new applier at all. `apply_commitment_changes` is correspondingly smaller than its deadline twin: no queue to edit, nothing to retract."
+        - "A commitment carries no due time and no `deadline_id`. A promise-by-time is authored as a `[[deadline]]` whose handler settles it — four lines of ordinary script over the table that already owns the one queued call. See `commitment-ledger-state` for why that composition is a rule rather than a convenience."
+    architecture:
+      kind: domain-model
+      authority: authoritative
+      owns: [commitment-ledger-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/world/commitments.rs
+        - src/world/script/commitments.rs
+        - src/world/script/engine.rs
+        - src/world/script/schedule.rs
+        - src/world/script/comms.rs
+        - src/world/server.rs
+        - src/comms/scripted.rs
+        - src/console/comms/server.rs
+        - assets/worlds/probe_commitments.toml
+      symbols:
+        - Commitments
+        - register_commitments
+        - apply_commitment_changes
+        - CommitmentChange
+        - CommitmentMutation
+        - CommitmentOutcome
+        - kept_flag
+        - broken_flag
+      tests: [cargo test, "cargo test --features headless --test headless_runner a_promise_gates"]
+    evidence:
+      - kind: test
+        reference: "tests/headless_runner.rs::a_promise_gates_a_dialogue_option_and_its_resolution_writes_a_campaign_flag"
+        summary: "`probe_commitments.toml` driven for fifteen mission seconds. ONE authored dialogue node fn is opened TWICE through the real `open_comms` pipeline: while `safe_passage` is owed it offers the response that exists only because the captain gave their word, and once it is kept that response is gone — asserted against `CommsRuntime::active_dialogues`, the node the comms pipeline actually built, rather than against anything the script says about itself. Keeping the promise writes `commitment.safe_passage.kept` and an `on_flag_set` trigger fires off it a tick later; the promise nobody kept is broken by a `[[deadline]]` handler."
+      - kind: test
+        reference: "src/comms/scripted.rs::a_player_pick_records_a_promise_that_unlocks_a_later_dialogue_option"
+        summary: "The player-driven half the probe cannot reach: four real `RespondToMessage` picks through the live Input chain, where the promise is recorded by a player's choice and the option it unlocks is offered by a node fn running on a LATER tick against the LIVE ledger — not against the snapshot the recording handler mutated."
+
+  - state: commitment-ledger-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Commitment Ledger State
+      summary: "Every promise a run has made, oldest first: a stable id, the party it was made to, a strings.csv id for the terms, a strings.csv id stating what would count as keeping it, open/kept/broken, and the `SimTick` at both ends. Held as a `CommitmentLedger` FIELD on `WorldContentRuntime`, beside the deadline table — so the slice registers no new component or resource. See the `RawWorldSource`/`WorldScriptRuntime` baseline note in tests/authoritative_state_enumeration.rs, which accounts for it."
+      rationale:
+        - "IT IS NOT A SCHEDULER AND IT IS NOT AN EVALUATOR, and both halves are rules rather than omissions. A commitment stores no due time: a promise-by-time is a `[[deadline]]` whose handler calls `break_promise`, so the deadline table owns the queued call and the ledger owns the record. A private `due_tick` would be a third deferred-work queue in a codebase that has decided it will have exactly two, and it would need a per-tick scan to notice its own expiry — precisely what #1024 refused to add. There is deliberately not even a `deadline_id` cross-reference: the pairing is stated once, in the handler, and a field here would invite a reader to believe the ledger enforces something it does not."
+        - "`resolves_when` is DECLARED, never evaluated. Nothing polls it and no system this slice adds scans the ledger for promises that have quietly come good. It exists so the bargain is data — the half a UI shows under the terms, and the half an author writes down so the scenario's intent survives a later editor — while script resolves at the beat where the fiction says the promise was tested."
+        - "THREE STATES, NEVER TWO. `Open` and `Broken` are separate because 'not yet' and 'failed' are different facts about the captain, and a mission that folds them together cannot tell an unfinished errand from a betrayal. `state_of` adds a fourth answer, `unknown`, for a promise that was never made — which is not a curiosity but the load-bearing guard: it is what a scenario tests before recording a duplicate, and in the probe world it is what offers the word in the first place."
+        - "`made_to` is stored as the script wrote it and is NOT resolved to a UUID. A promise is made to a PARTY, not to an entity handle: the ship you gave your word to can be destroyed, jump out, or never have been a single hull at all (`skyway_strike_committee`), and the promise outlives all three. A resolved handle would make the ledger's memory shorter than the fiction's — and it is what would force a record to be buffered through a name-resolving applier, which a pure module cannot be."
+        - "WHAT THE LEDGER HOLDS IS THE ACCOUNT. Every field is something that was actually promised; there is no 'real terms versus stated terms' pair and no hidden field. A scenario in which the crew are misled about what they agreed to authors the misleading line as its own dialogue content, exactly as `InfrastructureSnapshot` refuses a reported-versus-actual pair. That is what makes the whole record safe to hand to a later UI: inspecting it cannot reveal anything the crew were not already told, which is issue #1029's AC6."
+        - "Records are an ordered `Vec` rather than a map, for the reason `PendingCallbacks` is: the order is the order the captain gave their word, it is the order a debrief reads them in, and a `HashMap`'s iteration order must never reach a payload or a fold."
+        - "Duplicate ids are refused in the pure module (`DuplicateCommitment`) and re-resolution is a no-op. The first resolution is the one that happened; re-writing it would let a late-firing handler quietly convert a kept promise into a broken one."
+        - "AUTHORITATIVE BUT NOT FOLDED, exactly like `FlagStore`, `ObjectiveManager` and `DeadlineTable`: `state_digest` does not walk it. It is a record over script state that is itself unfolded, and folding one member of that family would give the digest a partial view of scenario state while moving no existing world's digest in a way that means anything. The property that matters — two peers reaching the same promise on the same tick — is already carried by the tick-keyed script calls that write it."
+    architecture:
+      classification: authoritative
+      owner: commitment-vocabulary
+      writers: [commitment-vocabulary]
+    implementation:
+      status: observed
+      # `src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `mission-deadline-state` omits it: it is a whole-payload module whose own
+      # imports the scanner would attribute wholesale to this entity. The
+      # persistence (`ScenarioState::commitments`, and the 5 → 6 `SNAPSHOT_FORMAT`
+      # bump the evidence below records) is traced through the evidence instead.
+      paths:
+        - src/world/commitments.rs
+        - src/world/server.rs
+      symbols:
+        - CommitmentLedger
+        - Commitment
+        - CommitmentState
+        - DuplicateCommitment
+        - WorldContentRuntime
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_kept_promise"]
+    evidence:
+      - kind: test
+        reference: "src/world/commitments.rs tests; tests/snapshot_resume.rs"
+        summary: "The pure ledger's record/query/resolve-kept/resolve-broken behaviour without Bevy, including the duplicate refusal, the re-resolution no-op, and open/kept/broken/unknown never collapsing into each other; plus the save round-trip. `SNAPSHOT_FORMAT` moved 5 → 6, and here the content digest could NOT stand in for it: a promise is a runtime artifact, so an older save of the SAME world file carries the same content digest and nothing else would refuse it. Restoring it resumes a captain who has promised nothing — a plausible state rather than an obviously missing one, which is what would let a resumed scenario re-offer a word already given."

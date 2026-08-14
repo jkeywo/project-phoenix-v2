@@ -2434,3 +2434,239 @@ fn the_resumed_world_keeps_a_civilians_lane_order_and_place_in_the_negotiation()
         );
     }
 }
+
+// ── The commitments ledger across a resume (issue #1029) ─────────────────────
+
+/// The commitments probe: two promises made to the same party, one kept on a
+/// script clock and one left for a deadline to break.
+const COMMITMENTS: &str = "assets/worlds/probe_commitments.toml";
+
+/// Frames the commitments world runs before its capture.
+///
+/// It has to land in the window where the two promises DISAGREE — after
+/// `safe_passage` is kept at t=6 s and before the deadline breaks
+/// `surface_records` at t=10 s. A capture taken before the keep would round-trip
+/// two open promises, which is the same payload a restore that dropped the field
+/// entirely would also produce. The assertions below make that precondition
+/// explicit rather than trusting the number.
+const COMMITMENTS_CAPTURE_AT: u64 = 480;
+
+/// Frames both worlds are stepped after the restore — enough to carry them
+/// across the deadline that breaks the second promise and the second dialogue
+/// open that reads the first one back.
+const COMMITMENTS_CONTINUE_FOR: u64 = 400;
+
+fn commitments_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: COMMITMENTS.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+fn live_commitments(
+    app: &bevy::prelude::App,
+) -> &project_phoenix::world::commitments::CommitmentLedger {
+    &app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .commitments
+}
+
+/// A kept promise and an open one both survive a resume, and the resumed world
+/// settles the open one exactly as the live world does.
+///
+/// The ledger is **not** folded into the simulation digest — it sits with
+/// `FlagStore` and `ObjectiveManager` on that side of the line — so digest
+/// agreement below is a check that the resume did not disturb the *simulation*,
+/// and every claim about the promises themselves is asserted directly. That is
+/// deliberate: a test that only compared digests would pass with the ledger
+/// dropped on the floor.
+#[test]
+fn a_kept_promise_and_an_open_one_both_survive_a_resume() {
+    use project_phoenix::world::commitments::CommitmentState;
+
+    let mut live = boot(&commitments_args());
+    step(&mut live, COMMITMENTS_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+    let scenario = scenario_of(&payload);
+
+    // The capture is genuinely mid-flight: one promise settled, one still owed.
+    // Those two states are what make the measurement discriminating.
+    let captured_passage = scenario
+        .commitments
+        .get("safe_passage")
+        .expect("the kept promise is captured")
+        .clone();
+    assert_eq!(
+        captured_passage.state,
+        CommitmentState::Kept,
+        "precondition: the capture is taken AFTER the promise was kept — a capture \
+         of two open promises would round-trip identically even if restore dropped \
+         the field entirely"
+    );
+    assert_eq!(
+        scenario.commitments.get("surface_records").map(|c| c.state),
+        Some(CommitmentState::Open),
+        "precondition: and BEFORE the deadline broke the other one"
+    );
+    assert_eq!(
+        captured_passage.made_to, "skyway_strike_committee",
+        "the party travels with the promise"
+    );
+    assert_eq!(
+        world_counter(&live, "records_broken_by_deadline"),
+        0,
+        "nothing has broken a promise before the capture"
+    );
+
+    let mut resumed = boot_to_restore_point(&commitments_args(), &payload);
+
+    // The bootstrap's own state, before the restore overwrites it. A promise is
+    // only ever written by a script call, so a fresh app short of the mission's
+    // first tick has made none — which is what stops any claim below being
+    // satisfied by a bootstrap coincidence.
+    assert!(
+        live_commitments(&resumed).is_empty(),
+        "precondition: the fresh app has given nobody its word"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        live_commitments(&resumed).get("safe_passage"),
+        Some(&captured_passage),
+        "the restore takes the captured promise whole — party, terms, stated \
+         resolution condition, state, and both tick stamps"
+    );
+    assert_eq!(
+        live_commitments(&resumed).state_of("surface_records"),
+        "open",
+        "and the promise still owed comes back owed rather than unmade"
+    );
+    assert_eq!(
+        live_commitments(&resumed).state_of("never_promised"),
+        "unknown",
+        "a promise the run never made is still unknown after a resume — which is \
+         what stops a resumed scenario re-offering a word already given"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did"
+    );
+
+    // Both worlds now step across the deadline that breaks the open promise.
+    step(&mut live, COMMITMENTS_CONTINUE_FOR);
+    step(&mut resumed, COMMITMENTS_CONTINUE_FOR);
+
+    assert_eq!(
+        live_commitments(&live).state_of("surface_records"),
+        "broken",
+        "precondition: the live world's deadline settled the open promise"
+    );
+    assert_eq!(
+        live_commitments(&resumed).state_of("surface_records"),
+        "broken",
+        "and the resumed world's deadline settles it too — the promise it \
+         restored was a real one, owed to a real party, waiting on a real clock"
+    );
+    assert_eq!(
+        live_commitments(&resumed).state_of("safe_passage"),
+        "kept",
+        "while the promise already kept is not re-settled by the resumed run"
+    );
+    assert_eq!(
+        world_counter(&resumed, "commitment.surface_records.broken"),
+        world_counter(&live, "commitment.surface_records.broken"),
+        "the campaign flag is written exactly once on both sides of the resume"
+    );
+    assert_eq!(
+        world_counter(&resumed, "broken_flag_chained"),
+        world_counter(&live, "broken_flag_chained"),
+        "and the on_flag_set trigger watching it fired the same number of times"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        world_digest(live.world()),
+        "and the two worlds are still standing in the same place afterwards"
+    );
+}
+
+/// The ledger round-trips through the save's RON, and a run that gave nobody
+/// its word writes nothing commitment-shaped at all.
+#[test]
+fn the_commitment_ledger_round_trips_and_a_promise_free_run_writes_none() {
+    let mut live = boot(&commitments_args());
+    step(&mut live, COMMITMENTS_CAPTURE_AT);
+    let payload = capture(live.world());
+
+    let run = run_for(
+        payload.clone(),
+        world_digest(live.world()),
+        SEED,
+        COMMITMENTS,
+        current_versions(COMMITMENTS),
+    );
+    let store = FileStore::new(scratch("commitment-roundtrip"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let reloaded = load_from(&store, "autosave", &current_versions(COMMITMENTS))
+        .expect("the save reloads")
+        .snapshot
+        .expect("a saved game carries a snapshot");
+    assert_eq!(
+        scenario_of(&reloaded.state).commitments,
+        scenario_of(&payload).commitments,
+        "every field a run writes — party, terms, condition, state and both tick \
+         stamps — round-trips through RON"
+    );
+
+    // The compatibility half. Unlike every other slice, this one cannot be shown
+    // by picking a world that authors no such block, because there IS no block:
+    // the duel simply never reaches a beat where anyone gives their word, and
+    // that is what an empty ledger means.
+    let mut quiet = duel();
+    step(&mut quiet, 120);
+    let quiet_payload = capture(quiet.world());
+    assert!(
+        scenario_of(&quiet_payload).commitments.is_empty(),
+        "a run that made no promises captures no commitment state"
+    );
+}
+
+/// A save written before commitment state was recorded is refused on **format**.
+///
+/// The field carries `#[serde(default)]`, so the older payload still parses —
+/// which is exactly why the constant had to move, and why the content digest
+/// could not be left to do the job. A promise is a runtime artifact: no world
+/// file declares one, so an older save of the *same* world file has the same
+/// content digest and nothing else would refuse it. Restoring it resumes a
+/// captain who has promised nothing, which is a plausible state rather than an
+/// obviously missing one.
+#[test]
+fn a_save_written_before_commitment_state_is_refused_on_format() {
+    let mut live = boot(&commitments_args());
+    step(&mut live, COMMITMENTS_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(COMMITMENTS);
+
+    // Recorded under the PREVIOUS format, everything else untouched, so the only
+    // reason to refuse is the one being tested.
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, COMMITMENTS, previous);
+    let store = FileStore::new(scratch("commitment-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}

@@ -326,6 +326,7 @@ A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedu
 | `ctx.schedule.after(n, \|ctx\| { … })` | Defers a whole closure. |
 | `ctx.deadlines.remaining(id)` / `state(id)` | Read a named mission deadline — see §1.6. |
 | `ctx.deadlines.slip(id, secs)` / `cancel(id)` | Move a deadline out (or in), or call it off. |
+| `ctx.commitments.record(#{…})` / `keep(id)` / `break_promise(id)` / `state(id)` | Promises the captain makes — see §1.9. |
 | `ctx.effects.order_hold(entity)` | Order a civilian to stop where it is — see §1.8. Refusable. |
 | `ctx.effects.order_divert_route(entity, route)` / `order_divert_anchor(entity, anchor)` | Send it down another lane, or to a single anchor. Refusable. |
 | `ctx.effects.order_dock(entity, structure)` | Send it to berth at a named structure. Refusable. |
@@ -509,6 +510,76 @@ refusal_reason = "world.fs.hauler.refusal"   # a strings.csv id, never English
   its leg pointer. A `hold` takes its directive away entirely, which is how any
   objective-less NPC comes to a stop.
 * Navigation sees the whole picture — lane, leg and compliance — on its console.
+
+
+### 1.9 Commitments: promises the captain makes
+
+A **commitment** is a promise on the books — who it was made to, what its terms
+are, what would count as keeping it, and whether it ends up kept or broken.
+There is **no `[[commitment]]` block**: a promise is a runtime artifact, made in
+the beat where the captain gives their word, and whether one exists at all
+depends on what the player chose to say.
+
+```toml
+[script]
+setup = """
+# The negotiation beat. In a shipped mission this body is a dialogue `on_pick`.
+fn on_promise_passage(ctx) {
+    ctx.commitments.record(#{
+        id:            "safe_passage",       # unique for the run; duplicates RAISE
+        made_to:       "skyway_strike_committee",
+        terms:         "world.fs.commitment.safe_passage.terms",    # strings.csv ids,
+        resolves_when: "world.fs.commitment.safe_passage.resolves", # never English
+    });
+}
+
+# THE PAYOFF: an option that exists only because the captain gave their word.
+# Gating is ordinary control flow — there is no `when:` field on a response.
+fn committee_calls_back(ctx) {
+    let responses = [ #{ text: "world.fs.comms.stall", on_pick: "on_stall" } ];
+    if ctx.commitments.state("safe_passage") == "open" {
+        responses.push(#{ text: "world.fs.comms.honour", on_pick: "on_honour" });
+    }
+    #{ message: "world.fs.comms.committee", responses: responses }
+}
+
+fn on_honour(ctx) { ctx.commitments.keep("safe_passage"); }
+"""
+```
+
+* `state(id)` is `"open"` / `"kept"` / `"broken"` / `"unknown"`. All four are
+  load-bearing. **"Broken" is not "open"** — an unfinished errand is not a
+  betrayal — and **"unknown" is not "broken"**: a promise nobody ever made is a
+  different fact again, and it is the guard you use before recording one.
+* **A duplicate `id` raises**, which drops the whole call's effects. If a beat
+  can be reached twice, guard it:
+  `if ctx.commitments.state("safe_passage") == "unknown" { … }`.
+* `resolves_when` is a *statement*, not a predicate. Nothing evaluates it and
+  nothing scans for promises that have come good — it is there so the bargain is
+  data. **You** settle the promise, at the beat where the fiction tests it.
+* Settling writes an ordinary world flag — `commitment.<id>.kept` or
+  `commitment.<id>.broken` — so `on_flag_set("commitment.safe_passage.kept", "h")`
+  is how a promise reaches past the scene it was made in. Two flags, not one,
+  because a handler needs to know which way it went.
+* Settling a promise twice is a no-op: the first resolution stands.
+* `break_promise`, not `break` — the latter is a Rhai keyword.
+* **A promise carries no clock.** For a promise-by-time, author a `[[deadline]]`
+  (§1.6) and let its handler settle it:
+
+  ```
+  on_deadline("transfer_window_closes", "on_window_closed");
+
+  fn on_window_closed(ctx) {
+      if ctx.commitments.state("safe_passage") == "open" {
+          ctx.commitments.break_promise("safe_passage");
+      }
+  }
+  ```
+
+* Reads inside one handler see that handler's own writes.
+* `made_to` is stored exactly as you write it and is never resolved to an
+  entity. A promise is made to a *party* — a faction, a committee, a person —
+  and it outlives the hull you were talking to.
 
 ### Example — a world, end to end
 

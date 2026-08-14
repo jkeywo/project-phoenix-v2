@@ -175,6 +175,7 @@ use crate::ship::state::{ShipPhysics, ShipRedAlert};
 use crate::sim_rng::{SimRng, SimRngState};
 use crate::sim_tick::SimTick;
 use crate::torpedo::{Torpedo, TubeBurstState, TubeLoadState};
+use crate::world::commitments::CommitmentLedger;
 use crate::world::content::WorldEvent;
 use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
@@ -241,7 +242,21 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// silent re-arming that moved this constant to 2 for trigger latches. Nothing in
 /// the payload distinguishes that save from one whose world simply authored no
 /// deadlines, so both are refused by `Versions::check`, which names the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 5;
+///
+/// `6` — issue #1029 added [`ScenarioState::commitments`], and the argument is
+/// the same one a third time with one twist that makes it sharper. A promise is
+/// a RUNTIME artifact: no world file declares one, so nothing in the content
+/// digest changes when a run happens to make one, and a format-5 payload of a
+/// run that had given its word is byte-indistinguishable from a format-5 payload
+/// of a run that had not. Restoring the first into a #1029 build resumes a
+/// captain who has promised nothing — which is not merely missing state, it is a
+/// *plausible* state, and the ledger's own "unknown" answer is what a scenario
+/// guards a duplicate promise with. So the resumed run would re-offer a word
+/// already given, and every campaign flag that promise was going to write would
+/// be written twice or not at all. Nothing in the payload distinguishes that
+/// save from one whose run simply had not reached the negotiation yet, so both
+/// are refused by `Versions::check`, which names the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 6;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -1150,6 +1165,25 @@ pub struct ScenarioState {
     /// already deterministic across peers.
     #[serde(default, skip_serializing_if = "DeadlineTable::is_empty")]
     pub deadlines: DeadlineTable,
+    /// `WorldContentRuntime::commitments`, whole (issue #1029).
+    ///
+    /// The promises the run made, with who each was made to, its terms, its
+    /// stated resolution condition, whether it ended up kept or broken, and the
+    /// ticks at both ends.
+    ///
+    /// Unlike every other field on this struct, **nothing in the world file
+    /// predicts whether this is empty**: a promise exists because of what the
+    /// player said, not because of what an author declared. That is why the
+    /// content digest cannot stand in for the format bump here — see
+    /// [`SNAPSHOT_FORMAT`] — and it is also why the whole ledger is stored
+    /// rather than a projection of the open ones: a resumed run that could not
+    /// tell a kept promise from one never made would let the crew give the same
+    /// word twice.
+    ///
+    /// In the order the promises were made, never sorted, for
+    /// [`Self::deadlines`]' reason.
+    #[serde(default, skip_serializing_if = "CommitmentLedger::is_empty")]
+    pub commitments: CommitmentLedger,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -1577,6 +1611,10 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // for every world that authors no `[[deadline]]`, which is every shipped
         // world today.
         deadlines: runtime.deadlines.clone(),
+        // The promises (issue #1029). Empty — and so absent from the payload —
+        // for every run that never reached a beat where the captain gave their
+        // word, which is every shipped world today.
+        commitments: runtime.commitments.clone(),
     })
 }
 
@@ -2947,6 +2985,12 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // beside the capture's. Taking the table whole also carries its `armed`
         // latch, which is what stops the arming system re-arming over the top.
         runtime.deadlines = stored.deadlines.clone();
+        // Wholesale replacement for the same rule (issue #1029), and here it is not
+        // even a choice: a promise is only ever written by a script call, so the
+        // fresh app's ledger is empty on the way to the restore point and merging
+        // would be indistinguishable from replacing. Taking it whole is what stays
+        // correct once #849's continuation log replays commands INTO a restored run.
+        runtime.commitments = stored.commitments.clone();
     }
 
     match world.get_resource_mut::<WorldScriptRuntime>() {

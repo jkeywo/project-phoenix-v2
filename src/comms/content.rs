@@ -110,16 +110,21 @@ pub struct ActiveDialogue {
 /// The script half of an [`ActiveDialogue`] — what a scripted thread needs to
 /// answer the next `RespondToMessage` (issue #984).
 ///
-/// Strings only, so the dialogue state *can* round-trip through a save (issue
-/// #864) exactly as [`OpenCommsRequest`] does: no `AST`, no closure, no
-/// `Entity`. Nothing snapshots it YET — neither `CommsRuntime::active_dialogues`
-/// nor `WorldScriptRuntime::pending_comms_opens` is in the snapshot today, so a
-/// save taken mid-thread reloads without it. When #864's comms slice (S8) lands,
-/// a restore will bind against `WorldScriptRuntime::content_hash` so a save whose
-/// scripts changed refuses rather than resolving `node_fn` against a different
-/// tree. Both fields must join the snapshot together: a restored
-/// `pending_comms_opens` without its `active_dialogues` would re-open threads the
-/// player had already answered.
+/// Strings only, so the dialogue state round-trips through a save exactly as
+/// [`OpenCommsRequest`] does: no `AST`, no closure, no `Entity`. Both of them DO
+/// travel, and travel together — S8 put `CommsRuntime::active_dialogues` and
+/// `WorldScriptRuntime::pending_comms_opens` into
+/// [`PhoenixSnapshot::comms`](crate::snapshot::PhoenixSnapshot::comms) in one
+/// slice, because a restored `pending_comms_opens` without its
+/// `active_dialogues` would re-open threads the player had already answered.
+///
+/// The restore resolves `node_fn` and `on_pick` against the **recompiled**
+/// script set, and what makes that the same tree the capture read is issue
+/// #864's content binding rather than anything stored here: `load_world_scripts`
+/// records the compiled set's `content_hash` into the content ledger,
+/// `snapshot::content_digest` folds it, and `Versions::check` refuses a save
+/// whose scripts moved — so an edited `on_pick` body refuses the save instead of
+/// resolving the name against a different fn.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptedDialogue {
     /// Content-relative path of the unit defining this thread's node fns — the

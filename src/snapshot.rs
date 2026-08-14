@@ -73,6 +73,13 @@
 //!   triggers re-arm and fire a second time, pending callbacks are forgotten,
 //!   and `on_timer` thresholds are measured from the age of the fresh app
 //!   rather than of the run.
+//! * `comms` ([`CommsState`], issue #984's S8) is the same widening applied to
+//!   the conversation a scenario is in the middle of *having*: the inbox, the
+//!   dialogue entries that make its messages answerable, the template latches
+//!   that stop them being injected twice, and the scripted `open_comms`
+//!   requests queued but not yet materialised. Nothing folds any of it, and
+//!   without it a save taken mid-thread comes back to an empty Comms console
+//!   with a scenario waiting on an answer that can no longer be given.
 //!
 //! **Excluded, and the exclusion is the design.** Browser UI state, PeerJS
 //! sessions, renderer caches, client projections, and raw ECS `Entity` handles
@@ -140,6 +147,10 @@ use vellum_save::{Ledger, Run, Snapshot, Versions};
 use crate::asteroid_lifecycle::{AsteroidData, AsteroidEntityMap, AsteroidWindow};
 use crate::balance::{BalanceEvent, StampedBalanceEvent, VictimKind, WEAPON_KIND_COLLISION};
 use crate::command_admission::log::LoggedCommand;
+use crate::comms::content::{
+    ActiveDialogue, CommsDialogueNode, CommsResponse, OpenCommsRequest, ScriptedDialogue,
+};
+use crate::comms::server::{CommsInboxRes, CommsRuntime};
 use crate::console::repair::server::{RepairQueueEntry, RepairRequestQueue, ShipRepairTeams};
 use crate::console::weapons::beam::{
     ActiveBeam, ActiveBeamSlot, LastShipAttacker, PhaserCooldown, TacticalRadarSelection,
@@ -148,7 +159,7 @@ use crate::console::weapons::torpedo::TorpedoSystemResource;
 use crate::core::telemetry::RunTelemetry;
 use crate::entity_spawner::{EntityShipArcHull, EntitySystemHull, EntityUuid};
 use crate::lobby::WorldResource;
-use crate::messages::{GamePhase, SystemId, TeamSlot, WorldData};
+use crate::messages::{CommsMessage, GamePhase, SystemId, TeamSlot, WorldData};
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
 use crate::ship::components::LastHelmInput;
 use crate::ship::components::RepairHumanAlerted;
@@ -188,7 +199,18 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// the same class of silent gap [`RestoreGap`] exists to refuse out loud. A
 /// save this build cannot honour is refused by `Versions::check`, which names
 /// the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 2;
+///
+/// `3` — issue #984's S8 added [`PhoenixSnapshot::comms`], and the same
+/// reasoning applies unchanged. Every new field defaults, so a format-2 save
+/// parses, and a format-2 save of a comms-quiet world would even restore
+/// *correctly* — which is precisely why the version cannot be left at 2. The
+/// payload has no way to distinguish "this world had no conversation open" from
+/// "this save predates conversations being recorded", and the second one
+/// restores a scenario mid-thread into a world with an empty inbox, no dialogue
+/// to answer, and every `open_comms` request the run had queued discarded. That
+/// is silently wrong in exactly the way a re-armed trigger latch was, so it is
+/// refused on the same dimension.
+pub const SNAPSHOT_FORMAT: u32 = 3;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -1043,6 +1065,227 @@ pub struct WorldEventRecord {
     pub numbers: [f32; 2],
 }
 
+/// The **comms** state a mid-conversation save resumes from (issue #984, S8).
+///
+/// [`ScenarioState`] is what the scenario has done and is still owed. This is
+/// the conversation it is in the middle of *having*: the inbox the Comms
+/// officer is looking at, the dialogue entries that make those messages
+/// answerable, and the scripted `open_comms` requests that have been queued but
+/// not yet materialised into threads.
+///
+/// Nothing comms-shaped was in this payload before this issue — not the inbox,
+/// not the dialogues, not a template's fired latch — so a save taken mid-thread
+/// came back to a world with an empty Comms console and a scenario waiting for
+/// an answer that could no longer be given. That is the whole gap; what follows
+/// is which parts of it this slice closes and which it does not.
+///
+/// # A dialogue travels when its node reduces losslessly, and is refused out
+/// loud when it does not
+///
+/// [`ActiveDialogue::current_node`] is a [`CommsDialogueNode`], and a
+/// *declarative* one's responses may carry `Vec<TriggerAction>` and a nested
+/// `follow_up` tree. Serialising those is exactly the commitment
+/// [`ScenarioState`] refuses for `pending_delayed_actions` — a serde derive on
+/// `TriggerAction` and the six authored-config types under it — and it is
+/// refused here for the same reason.
+///
+/// The line is therefore drawn on the *node*, not on the kind of thread:
+/// [`DialogueState`] carries a node as body, speaker and per-response
+/// `(text, important)`, which is lossless exactly when every response has
+/// `actions: []` and `follow_up: None`. That holds for every scripted node **by
+/// construction** (`project_node` builds them that way, because a scripted
+/// response's effects and follow-up come from calling its `on_pick`), and it
+/// holds for the shipped declarative broadcasts too — Combat Test's `[[comms]]`
+/// traffic authors no responses at all. A node it does *not* hold for is left
+/// out and [`RestoreGap::CommsDialoguesUncarried`] says so, rather than being
+/// carried with the effects its buttons apply silently deleted.
+///
+/// The check is made on the real node at capture, never assumed from the
+/// thread's kind. One further field is rebuilt rather than carried: a node's
+/// `trigger` gates its *injection*, and a node in `active_dialogues` has been
+/// injected — it is a spent condition nothing reads off `current_node`
+/// afterwards, so it comes back `None` rather than pinning `TriggerCondition`'s
+/// shape as stored surface for no reader.
+///
+/// # Honestly not covered
+///
+/// `CommsRuntime::pending_follow_ups` holds whole [`CommsDialogueNode`]s for the
+/// same reason and is out on the same grounds — see
+/// [`Self::uncarried_follow_ups`], which carries enough to keep the restored
+/// inbox honest about them rather than nothing at all.
+///
+/// `contacts`, `range_flags` and `range_active` are **derived**, not
+/// progression: `init_comms_runtime` rebuilds the contact list from the world's
+/// own `[[comms]]` templates at `Startup` (and `merge_comms_content` extends it
+/// as layers load, which a resumed world replays), and `update_comms_range_flags`
+/// recomputes the range map from ship and entity transforms every tick. A
+/// resumed world derives all three from state this payload *does* restore.
+/// `needs_broadcast` is set true by the restore rather than carried, because
+/// after a restore it is unconditionally true.
+///
+/// `OnScreenMessage` — which message the Comms officer put on the viewscreen —
+/// is a presentation choice, not scenario progression, and falls under this
+/// module's standing exclusion of client projections. Nothing folds it and it is
+/// re-established by the next `ShowOnScreen`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CommsState {
+    /// `CommsInboxRes`, **in inbox order** — which is injection order, the order
+    /// `CommsInbox::messages()` projects onto the wire and the order
+    /// `operate_comms_response_ai` decides in. Not sorted, for
+    /// [`ScenarioState::script_callbacks`]' reason: it is a `Vec` whose order is
+    /// already a deterministic function of the run, and it is read in that
+    /// order by an actor that emits commands from it.
+    ///
+    /// [`crate::messages::CommsMessage`] is the wire type and was already
+    /// `Serialize`/`Deserialize` — this stores it verbatim rather than
+    /// projecting it, because every field on it (`is_read`, `selected_response`,
+    /// `is_urgent`, `thread_id`, `sender_uuid`) is authoritative state the
+    /// response handler reads back out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inbox: Vec<CommsMessage>,
+    /// Every `CommsRuntime::active_dialogues` entry whose node reduces
+    /// losslessly (see the type docs), sorted by message id — the standing rule
+    /// for anything that is a `HashMap` in the runtime, and the message id is
+    /// the map's own key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dialogues: Vec<DialogueState>,
+    /// How many `active_dialogues` entries had a node that does **not** reduce
+    /// losslessly — a declarative response carrying `TriggerAction`s or a nested
+    /// `follow_up` — and were therefore not carried. See the type docs; this is
+    /// the number [`RestoreGap::CommsDialoguesUncarried`] reports.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub uncarried_dialogues: u32,
+    /// One entry per `CommsRuntime::pending_follow_ups` row that was **not**
+    /// carried, holding that follow-up's `placeholder_id` (or an empty string
+    /// for a chained root, which shows nothing until it fires).
+    ///
+    /// The count is what [`RestoreGap::CommsFollowUpsUncarried`] reports. The
+    /// ids are what stops the gap being *visible* as well as reported: a
+    /// response follow-up leaves a `…` placeholder message in the inbox while it
+    /// waits, and restoring that placeholder with nothing left to resolve it
+    /// would seat a row that spins forever. The restore removes them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncarried_follow_ups: Vec<String>,
+    /// Each `CommsRuntime::comms_template_states` row's fired latch, in runtime
+    /// order — [`TriggerRuntimeState::fired`]'s twin, and captured for the
+    /// identical reason: a single-shot `[[comms]]` template whose latch was
+    /// rewound fires a second time and injects a duplicate root message on top
+    /// of the very inbox this payload just restored. Every row is written, so
+    /// the length is itself the alignment check, and a length mismatch is
+    /// [`RestoreGap::CommsTemplatesMoved`] rather than a write by position.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub template_fired: Vec<bool>,
+    /// `CommsRuntime::open_hails`, already ordered (a `BTreeSet`). The record of
+    /// which targets this ship has hailed and not cleared; without it a resumed
+    /// Backfill comms officer re-hails a contact it had already hailed, which
+    /// seats a duplicate thread in the restored inbox.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_hails: Vec<String>,
+    /// `WorldScriptRuntime::pending_comms_opens`, **in queue order**.
+    ///
+    /// Not sorted, and the justification is [`ScenarioState::script_callbacks`]'
+    /// verbatim, one step stronger: `open_scripted_comms_threads` drains this
+    /// `Vec` front-to-back and mints a message id per request from the
+    /// tick-scoped [`WorldIdMint`], so a reordered queue does not merely apply
+    /// effects in a different order — it hands different threads different ids,
+    /// which `world_digest` folds through the mint's per-namespace counters. The
+    /// order is already deterministic (it is the order the scripts pushed), so
+    /// there is nothing to normalise away.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_opens: Vec<OpenCommsRequest>,
+}
+
+/// One live dialogue whose node reduced losslessly — see [`CommsState`] for the
+/// reduction rule and for what happens to a node that does not meet it.
+///
+/// The node is stored as body, speaker and per-response `(text, important)`
+/// rather than as a [`CommsDialogueNode`]. That is the whole of a node when
+/// every response has `actions: []` and `follow_up: None` — the condition
+/// [`reduce_dialogue_node`] checks on the real node before a row is written — so
+/// this is a faithful copy and not a lossy shortcut, and nothing here pins an
+/// authored-config type's shape as stored surface.
+// No `Default`: a dialogue row is always built whole from a live
+// `ActiveDialogue`, and there is no meaningful empty one — a `message_id` of
+// `""` addresses nothing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DialogueState {
+    /// The `CommsMessage::id` this dialogue answers — `active_dialogues`' key,
+    /// and what a `RespondToMessage` addresses.
+    pub message_id: String,
+    /// The thread every message in this conversation shares.
+    pub thread_id: String,
+    /// The shown node's body text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub body: String,
+    /// The node's display-speaker override, carried because it is a plain
+    /// string and dropping it would make this a reduction rather than a copy.
+    /// `None` on every scripted node (who is calling is metadata on the open).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    /// `(text, important)` per shown response, in the order the player sees them
+    /// — the index a `RespondToMessage` submits.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub responses: Vec<(String, bool)>,
+    /// `Some` for a scripted thread, `None` for a declarative one — the same
+    /// disjointness [`ActiveDialogue::script`] carries, and what decides which
+    /// arm of `handle_respond_to_message` answers the restored dialogue.
+    ///
+    /// [`ScriptedDialogue`] is strings only (`script_path`, `node_fn`, the
+    /// parallel `on_pick` names) and already derives serde for this. Those names
+    /// resolve against the **recompiled** script set, and what makes that safe is
+    /// issue #864's content binding rather than anything here:
+    /// `load_world_scripts` records `CompiledScripts::content_hash` into the
+    /// content ledger, `content_digest` folds it, and `Versions::check` refuses
+    /// a save whose scripts moved — so a restored `node_fn`/`on_pick` pair is
+    /// always read against the identical compiled units it was captured from.
+    /// The runtime backstop is still there underneath
+    /// (`EnterError::Unresolved` refuses the pick visibly rather than acting on
+    /// a name that no longer exists), and so is the load-time `on_pick` lint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<ScriptedDialogue>,
+}
+
+/// `skip_serializing_if` helper: a zero count is the common case and writing it
+/// would put a line in every comms-quiet world's payload.
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Reduce one live dialogue to a [`DialogueState`], or refuse it.
+///
+/// `None` is the honest answer for a node this payload cannot copy without
+/// deleting something: a response carrying `TriggerAction`s (which the
+/// declarative answer arm dispatches) or a nested `follow_up` (which it advances
+/// to). Both are authored-config trees, and serialising them is the commitment
+/// [`ScenarioState`] refuses for `pending_delayed_actions`.
+///
+/// The condition is checked on the real node rather than inferred from whether
+/// the thread is scripted. It holds for every scripted node by construction
+/// (`project_node`), and for a declarative broadcast that authors no responses —
+/// so both travel, and the one that does not is the one that genuinely cannot.
+fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) -> Option<DialogueState> {
+    let node = &dialogue.current_node;
+    if node
+        .responses
+        .iter()
+        .any(|r| !r.actions.is_empty() || r.follow_up.is_some())
+    {
+        return None;
+    }
+    Some(DialogueState {
+        message_id: message_id.to_string(),
+        thread_id: dialogue.thread_id.clone(),
+        body: node.body.clone(),
+        speaker: node.speaker.clone(),
+        responses: node
+            .responses
+            .iter()
+            .map(|r| (r.text.clone(), r.important))
+            .collect(),
+        script: dialogue.script.clone(),
+    })
+}
+
 /// Captured authoritative world state: everything issue #894's record says a
 /// divergence is defined over, at one tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -1079,6 +1322,12 @@ pub struct PhoenixSnapshot {
     /// at all (a bare-`App` fixture).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scenario: Option<ScenarioState>,
+    /// The conversation the scenario is in the middle of having — the inbox, the
+    /// dialogues that make it answerable, and the scripted thread opens still
+    /// queued. See [`CommsState`]. `None` only for a world with no
+    /// `CommsRuntime` at all (a bare-`App` fixture).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comms: Option<CommsState>,
     /// `AiPolicyTickClock` — the tick-derived clock every stateful AI policy
     /// measures `state_time` against (issue #882's AC4).
     ///
@@ -1148,6 +1397,7 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .map(|rt| rt.flags.clone()),
         layer_flags: capture_layer_flags(world),
         scenario: capture_scenario(world),
+        comms: capture_comms(world),
         ai_policy_clock: world
             .get_resource::<crate::ship::helm_ai::AiPolicyTickClock>()
             .map(|clock| clock.0),
@@ -1248,6 +1498,56 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         script_callbacks: world
             .get_resource::<WorldScriptRuntime>()
             .map(|script| script.pending_callbacks.0.clone())
+            .unwrap_or_default(),
+    })
+}
+
+/// Walk the comms state a mid-conversation save resumes from — see
+/// [`CommsState`].
+///
+/// Read-only, like every other `capture_*` here, so a save-free run is
+/// digest-neutral by construction: nothing in this function takes a `&mut` on
+/// any resource, so no change-detection tick flips and no system downstream sees
+/// a different world because a capture was taken.
+fn capture_comms(world: &World) -> Option<CommsState> {
+    let comms = world.get_resource::<CommsRuntime>()?;
+
+    // Sorted by message id — the map's own key. See `CommsState::dialogues`.
+    let mut dialogues: Vec<DialogueState> = comms
+        .active_dialogues
+        .iter()
+        .filter_map(|(message_id, dialogue)| reduce_dialogue_node(message_id, dialogue))
+        .collect();
+    dialogues.sort_by(|a, b| a.message_id.cmp(&b.message_id));
+
+    let uncarried_dialogues = (comms.active_dialogues.len() - dialogues.len()) as u32;
+
+    Some(CommsState {
+        inbox: world
+            .get_resource::<CommsInboxRes>()
+            .map(|inbox| inbox.0.messages())
+            .unwrap_or_default(),
+        dialogues,
+        uncarried_dialogues,
+        // In queue order rather than sorted, because the ids are what the
+        // restore uses to retire orphaned `…` placeholders and the count is what
+        // it reports — neither reads the vec associatively.
+        uncarried_follow_ups: comms
+            .pending_follow_ups
+            .iter()
+            .map(|f| f.placeholder_id.clone().unwrap_or_default())
+            .collect(),
+        template_fired: comms
+            .comms_template_states
+            .iter()
+            .map(|state| state.fired)
+            .collect(),
+        open_hails: comms.open_hails.iter().cloned().collect(),
+        // The scripted half, absent for every script-free world — the same
+        // shape-preserving property `ScenarioState::script_callbacks` has.
+        pending_opens: world
+            .get_resource::<WorldScriptRuntime>()
+            .map(|script| script.pending_comms_opens.clone())
             .unwrap_or_default(),
     })
 }
@@ -2199,6 +2499,50 @@ pub enum RestoreGap {
     /// compile. The content dimension is what should have refused this; the gap
     /// is here so it is never silent if it does not.
     ScriptRuntimeAbsent { pending_callbacks: usize },
+    /// The capture held live dialogues whose nodes do not reduce losslessly —
+    /// see [`CommsState`]'s type docs for the rule. Always *declarative* ones:
+    /// only a declarative response can carry `TriggerAction`s or a nested
+    /// `follow_up`, the serde commitment [`ScenarioState`] refuses for
+    /// `pending_delayed_actions`, and a scripted node has neither by
+    /// construction.
+    ///
+    /// The restored inbox still shows those messages; what they have lost is the
+    /// `active_dialogues` entry that makes them answerable, so a submission on
+    /// one takes `handle_respond_to_message`'s existing stale-submission arm and
+    /// is refused *visibly* rather than applying a reduced set of effects. This
+    /// gap is how the count reaches the caller instead of only the player.
+    CommsDialoguesUncarried { declarative: usize },
+    /// The capture had queued comms follow-ups awaiting their trigger, which
+    /// this payload does not carry for [`Self::CommsDialoguesUncarried`]'s
+    /// reason — a `PendingFollowUp` holds a whole `CommsDialogueNode`.
+    ///
+    /// Any `…` placeholder those follow-ups had seated is removed from the
+    /// restored inbox rather than left spinning; `removed_placeholders` is how
+    /// many of the `queued` had one.
+    CommsFollowUpsUncarried {
+        queued: usize,
+        removed_placeholders: usize,
+    },
+    /// The bootstrapped world's comms-template table is a different length than
+    /// the capture's, so the fired latches cannot be trusted to name the same
+    /// templates — [`Self::ScenarioTriggersMoved`]'s twin, and refused rather
+    /// than written by position for its reason: `init_comms_runtime` rebuilds
+    /// the table by a deterministic replay of the same parse, so a different
+    /// length is a different world, not a shifted table.
+    CommsTemplatesMoved { saved: usize, found: usize },
+    /// The capture was holding scripted comms state — queued `open_comms`
+    /// requests, or live scripted dialogues — and the bootstrapped world has no
+    /// `WorldScriptRuntime` to run them against.
+    ///
+    /// [`Self::ScriptRuntimeAbsent`]'s comms twin and reported separately
+    /// because the loss is different: a dropped callback is deferred work that
+    /// never happens, while this is a conversation the player is *in* that
+    /// cannot be answered. The content dimension is what should have refused the
+    /// save; this is here so it is never silent if it does not.
+    CommsScriptRuntimeAbsent {
+        pending_opens: usize,
+        scripted_dialogues: usize,
+    },
 }
 
 impl std::fmt::Display for RestoreGap {
@@ -2224,6 +2568,37 @@ impl std::fmt::Display for RestoreGap {
                 f,
                 "this save is waiting on {pending_callbacks} scripted callback(s) \
                  and the world compiled no scripts to run them"
+            ),
+            RestoreGap::CommsDialoguesUncarried { declarative } => write!(
+                f,
+                "this save was mid-conversation on {declarative} declarative \
+                 dialogue(s), which this payload does not carry; their messages \
+                 come back unanswerable"
+            ),
+            RestoreGap::CommsFollowUpsUncarried {
+                queued,
+                removed_placeholders,
+            } => write!(
+                f,
+                "this save had {queued} comms follow-up(s) awaiting a trigger, \
+                 which this payload does not carry; {removed_placeholders} \
+                 placeholder row(s) were removed from the restored inbox rather \
+                 than left waiting on them"
+            ),
+            RestoreGap::CommsTemplatesMoved { saved, found } => write!(
+                f,
+                "this save records {saved} comms template(s) and the world has \
+                 {found}; writing fired state in by position would re-arm the \
+                 wrong templates"
+            ),
+            RestoreGap::CommsScriptRuntimeAbsent {
+                pending_opens,
+                scripted_dialogues,
+            } => write!(
+                f,
+                "this save holds {pending_opens} queued comms open(s) and \
+                 {scripted_dialogues} scripted dialogue(s) and the world \
+                 compiled no scripts to answer them"
             ),
         }
     }
@@ -2399,6 +2774,7 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     }
 
     restore_scenario(world, snapshot, report);
+    restore_comms(world, snapshot, report);
 
     restore_collisions(world, snapshot);
 
@@ -2507,6 +2883,154 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         None if !stored.script_callbacks.is_empty() => {
             report.gaps.push(RestoreGap::ScriptRuntimeAbsent {
                 pending_callbacks: stored.script_callbacks.len(),
+            });
+        }
+        None => {}
+    }
+}
+
+/// Put the conversation back — see [`CommsState`].
+///
+/// Wholesale replacement throughout, [`restore_scenario`]'s rule and for its
+/// reason: the fresh app ran its own opening on the way to the restore point, so
+/// merging would leave the resumed world holding a thread the capture never
+/// opened. The inbox is rebuilt from empty rather than injected into, which is
+/// the same statement made about a container `CommsInbox` has no bulk setter for
+/// — `inject` skips duplicate ids, so injecting the captured rows in order into
+/// a *cleared* inbox reproduces the record vec exactly.
+///
+/// # The scripted names resolve against the recompiled set
+///
+/// A [`DialogueState::script`] carries `(script_path, node_fn, on_pick[])` and
+/// nothing else — no `AST`, no handle — so answering a restored dialogue means
+/// looking `script_path` up in the *bootstrapped* world's
+/// `WorldScriptRuntime::asts` and calling the named fn. What makes that the same
+/// tree the capture was reading is issue #864's content binding, not anything
+/// here: `load_world_scripts` records the compiled set's `content_hash` into the
+/// content ledger, `content_digest` folds it, and `Versions::check` refuses a
+/// save whose scripts moved before `restore` is ever reached. Editing a single
+/// `on_pick` body therefore refuses the save rather than resolving the name
+/// against a different fn. Underneath that, `enter_node` still refuses an
+/// unresolvable name visibly (`EnterError::Unresolved` → the control flashes
+/// red), and `validate_on_pick_fns` still lints the authored names at load.
+fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut RestoreReport) {
+    let Some(stored) = snapshot.comms.as_ref() else {
+        return;
+    };
+
+    // Which `…` placeholders the uncarried follow-ups had seated — removed
+    // below so the restored inbox holds no row that nothing can ever resolve.
+    let orphaned_placeholders: std::collections::HashSet<&str> = stored
+        .uncarried_follow_ups
+        .iter()
+        .filter(|id| !id.is_empty())
+        .map(String::as_str)
+        .collect();
+
+    if let Some(mut inbox) = world.get_resource_mut::<CommsInboxRes>() {
+        inbox.0 = crate::comms_inbox::CommsInbox::new();
+        for message in &stored.inbox {
+            if orphaned_placeholders.contains(message.id.as_str()) {
+                continue;
+            }
+            inbox.0.inject(message.clone());
+        }
+        // A restore always owes its clients a push, whatever the inbox's own
+        // dirty flag happened to be at the capture.
+        inbox.0.mark_dirty();
+    }
+
+    if let Some(mut comms) = world.get_resource_mut::<CommsRuntime>() {
+        comms.active_dialogues = stored
+            .dialogues
+            .iter()
+            .map(|row| {
+                (
+                    row.message_id.clone(),
+                    ActiveDialogue {
+                        // The inverse of `reduce_dialogue_node`, and lossless
+                        // for the same reason: `actions` and `follow_up` are
+                        // empty on every node that reduction accepted, and
+                        // `trigger` is the spent injection gate — see
+                        // [`CommsState`].
+                        current_node: CommsDialogueNode {
+                            body: row.body.clone(),
+                            responses: row
+                                .responses
+                                .iter()
+                                .map(|(text, important)| CommsResponse {
+                                    text: text.clone(),
+                                    important: *important,
+                                    actions: Vec::new(),
+                                    follow_up: None,
+                                })
+                                .collect(),
+                            speaker: row.speaker.clone(),
+                            trigger: None,
+                        },
+                        thread_id: row.thread_id.clone(),
+                        script: row.script.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        if stored.template_fired.len() == comms.comms_template_states.len() {
+            for (state, fired) in comms
+                .comms_template_states
+                .iter_mut()
+                .zip(stored.template_fired.iter())
+            {
+                state.fired = *fired;
+            }
+        } else {
+            report.gaps.push(RestoreGap::CommsTemplatesMoved {
+                saved: stored.template_fired.len(),
+                found: comms.comms_template_states.len(),
+            });
+        }
+
+        comms.open_hails = stored.open_hails.iter().cloned().collect();
+        // Not carried, and the fresh app's own bootstrap may have queued some of
+        // its own — so this is cleared rather than left, for the merge reason
+        // above. The loss is reported below.
+        comms.pending_follow_ups.clear();
+        // `range_flags` / `range_active` are recomputed by
+        // `update_comms_range_flags` on the next tick and `contacts` was rebuilt
+        // by the fresh app's own `init_comms_runtime`; what they all need is for
+        // the resumed world to push a fresh `CommsState` to its clients.
+        comms.needs_broadcast = true;
+    }
+
+    if !stored.uncarried_follow_ups.is_empty() {
+        report.gaps.push(RestoreGap::CommsFollowUpsUncarried {
+            queued: stored.uncarried_follow_ups.len(),
+            removed_placeholders: orphaned_placeholders.len(),
+        });
+    }
+    if stored.uncarried_dialogues > 0 {
+        report.gaps.push(RestoreGap::CommsDialoguesUncarried {
+            declarative: stored.uncarried_dialogues as usize,
+        });
+    }
+
+    let scripted_dialogues = stored
+        .dialogues
+        .iter()
+        .filter(|row| row.script.is_some())
+        .count();
+    match world.get_resource_mut::<WorldScriptRuntime>() {
+        Some(mut script) => {
+            script.pending_comms_opens = stored.pending_opens.clone();
+        }
+        // The scripted dialogues are counted here too: a scripted thread with no
+        // runtime behind it is answerable by nothing, which is a loss the caller
+        // has to hear about even when no open was queued. A *declarative*
+        // dialogue is unaffected — it never needed a script runtime.
+        None if !stored.pending_opens.is_empty() || scripted_dialogues > 0 => {
+            report.gaps.push(RestoreGap::CommsScriptRuntimeAbsent {
+                pending_opens: stored.pending_opens.len(),
+                scripted_dialogues,
             });
         }
         None => {}

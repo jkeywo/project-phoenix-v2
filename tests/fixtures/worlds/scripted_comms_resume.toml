@@ -1,0 +1,118 @@
+# Fixture world for issue #984's S8 — scripted COMMS state across a resume.
+#
+# A test fixture rather than a shipped `assets/worlds/` probe, for the reason
+# `scripted_resume.toml` (issue #864) is one: nothing plays this, it exists to be
+# booted by `tests/snapshot_resume.rs` and its whole shape is chosen to make one
+# frame boundary discriminating.
+#
+# ── The one frame this world exists to produce ───────────────────────────────
+#
+# One player cruiser, one Federation station in comms range of it, and one
+# scripted `on_timer(1, …)` trigger that opens a thread. At the default 60 Hz
+# `sim_tick_hz` the trigger fires ~1 s (~tick 60) in, and
+# `open_scripted_comms_threads` materialises the thread in `SimSet::Physics` of
+# that tick. Two things are therefore true at the END of that frame and at no
+# other:
+#
+#   * `CommsRuntime::active_dialogues` holds thread A, shown and UNANSWERED —
+#     the Backfill Comms AI answers in `SimSet::Input`, which for a thread opened
+#     in Physics is the NEXT tick at the earliest.
+#   * `WorldScriptRuntime::pending_comms_opens` holds thread B's request,
+#     QUEUED AND UNDRAINED — `axiom_root` calls `open_comms` while it is itself
+#     running inside the drain, and a nested request is deliberately re-queued
+#     for the next tick rather than entered re-entrantly.
+#
+# That frame is what the S8 tests capture at, and both halves of the slice are
+# measured from it: the dialogue has to come back answerable, and the queued
+# open has to come back and fire.
+#
+# ── Why the answer comes from the AI ─────────────────────────────────────────
+#
+# Nothing in the test submits a `RespondToMessage`. `alliance_cruiser.toml`
+# merges `fragments/ai/fleet_baseline.toml`, whose `comms_respond` channel
+# answers any open dialogue from an in-range sender with `response_index = 0`,
+# and it does so through ordinary admission — the same command path a human
+# Comms officer's click takes. So the answer is production wiring rather than
+# test scaffolding, and "the resumed dialogue is answerable" is measured by the
+# same actor that would answer it in a real run.
+#
+# ── Why the station is a real entity ─────────────────────────────────────────
+#
+# `handle_respond_to_message`'s range gate is a raw `range_flags` lookup once
+# range tracking is active, so a synthetic sender (an unresolvable `from`) has
+# every response refused. `station_axiom.toml` authors `[comms] range = 800` and
+# the cruiser authors 1200, so the effective range is 800 and the station sits
+# at 300 — comfortably inside it, and far enough that nothing about the fixture
+# depends on the exact figure.
+#
+# `message` is omitted from `game_over` (it is optional), so this world needs no
+# strings.csv entry — `scripted_resume.toml`'s reason.
+
+[global]
+seed = 984
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The sender. `name` is the key `open_comms`'s `from` resolves through
+# `name_to_uuid`, exactly as a `[[comms]]` template's `from` does.
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "axiom"
+transform = { position = [300.0, 0.0, 0.0] }
+
+[script]
+setup = """
+on_timer(1, "open_first_thread");
+
+fn open_first_thread(ctx) {
+    ctx.effects.open_comms(#{ from: "axiom", node_fn: "axiom_root", urgent: true });
+}
+
+fn axiom_root(ctx) {
+    // NESTED open: buffered while this fn is running inside the drain, so the
+    // host re-queues it for the NEXT tick rather than entering it re-entrantly.
+    // This is the request a capture taken on this frame boundary catches
+    // undrained.
+    ctx.effects.open_comms(#{ from: "axiom", node_fn: "axiom_second" });
+    #{
+        message: "Axiom Station to inbound cruiser.",
+        responses: [ #{ text: "Acknowledged.", on_pick: "on_first_ack" } ]
+    }
+}
+
+// Thread B is a one-way broadcast: no responses, so the Backfill Comms AI
+// skips it and it stays inert. Its whole job is to prove the QUEUED open
+// fired — which it does by bumping a counter and by minting a message id.
+fn axiom_second(ctx) {
+    ctx.flags.increment("second_thread_opened", 1);
+    #{ message: "Axiom Station, traffic advisory. No reply required." }
+}
+
+// Answering thread A returns a FOLLOW-UP node rather than ending the thread,
+// and that is what makes the answer visible to `world_digest`: advancing a
+// scripted thread mints a message id from the tick-scoped `WorldIdMint`, whose
+// per-namespace counters the digest folds. A resumed world that lost the
+// dialogue answers nothing, mints nothing, and parts company on that tick.
+fn on_first_ack(ctx) {
+    ctx.flags.increment("first_answered", 1);
+    #{
+        message: "Axiom Station, understood.",
+        responses: [ #{ text: "Cruiser out.", on_pick: "on_first_close" } ]
+    }
+}
+
+fn on_first_close(ctx) {
+    ctx.flags.increment("first_closed", 1);
+    ctx.effects.game_over("", "victory");
+    ()
+}
+"""

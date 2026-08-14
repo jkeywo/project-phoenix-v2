@@ -1501,3 +1501,419 @@ fn a_lobby_capture_is_distinguishable_from_a_run_in_progress() {
          guard (server/bridge.rs) refuses to write a save from"
     );
 }
+
+// ── Scripted comms across a resume (issue #984, S8) ──────────────────────────
+
+/// The scripted-comms fixture — see
+/// `tests/fixtures/worlds/scripted_comms_resume.toml` for why its one open is
+/// timed where it is and why the sender is a real station.
+const SCRIPTED_COMMS: &str = "tests/fixtures/worlds/scripted_comms_resume.toml";
+
+/// Frames the comms fixture is allowed to run while hunting for its capture
+/// frame. Generous: the open lands ~1 s (~tick 60) in and the hunt stops the
+/// instant it sees it, so this is a runaway guard rather than a tuning knob.
+const COMMS_HUNT_LIMIT: u64 = 400;
+
+/// Frames both worlds are stepped after the restore — past thread B's open,
+/// past both AI answers, and out the other side of the victory they declare.
+const COMMS_CONTINUE_FOR: u64 = 180;
+
+fn scripted_comms_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: SCRIPTED_COMMS.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+/// The comms state a mid-conversation save resumes from, named rather than left
+/// inside a digest that folds none of it.
+fn comms_of(payload: &PhoenixSnapshot) -> &project_phoenix::snapshot::CommsState {
+    payload
+        .comms
+        .as_ref()
+        .expect("a world with a comms runtime captures its comms state")
+}
+
+fn live_dialogue_count(app: &bevy::prelude::App) -> usize {
+    app.world()
+        .resource::<project_phoenix::comms::server::CommsRuntime>()
+        .active_dialogues
+        .len()
+}
+
+fn live_inbox(app: &bevy::prelude::App) -> Vec<project_phoenix::messages::CommsMessage> {
+    app.world()
+        .resource::<project_phoenix::comms::server::CommsInboxRes>()
+        .0
+        .messages()
+}
+
+/// Step until the fixture's thread A is open and stop on that frame.
+///
+/// A hunt rather than a frame constant, and that is deliberate rather than a
+/// convenience: the window this file needs is ONE frame wide by construction
+/// (`open_scripted_comms_threads` runs in `SimSet::Physics`, the Backfill Comms
+/// AI answers in the next tick's `SimSet::Input`), so a hard-coded number would
+/// be a number that happened to work on the machine it was written on. The
+/// caller asserts the shape of what it caught.
+fn step_to_the_open_thread(app: &mut bevy::prelude::App) -> u64 {
+    for frame in 1..=COMMS_HUNT_LIMIT {
+        app.update();
+        if live_dialogue_count(app) > 0 {
+            return frame;
+        }
+    }
+    panic!("the scripted comms fixture never opened a thread in {COMMS_HUNT_LIMIT} frames");
+}
+
+/// S8's acceptance: a save taken with a scripted dialogue OPEN comes back
+/// answerable, and answering it does the same thing it would have done live.
+///
+/// The capture is taken on the one frame where thread A is shown and unanswered
+/// (see the fixture). The resumed world is then stepped alongside the live one
+/// across the Backfill Comms AI's answer, and the claim is read off
+/// `world_digest` every frame — which folds no comms state at all, and does not
+/// need to: answering mints the follow-up thread's ids from the tick-scoped
+/// `WorldIdMint` (whose per-namespace counters the digest DOES fold) and the
+/// second thread's `on_pick` ends the run in a declared victory (`GamePhase`,
+/// also folded). A resumed world that came back with an empty `active_dialogues`
+/// answers nothing, mints nothing and never gets there.
+#[test]
+fn a_scripted_dialogue_open_at_the_save_is_answerable_after_a_resume() {
+    let mut live = boot(&scripted_comms_args());
+    let opened_at = step_to_the_open_thread(&mut live);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+    let comms = comms_of(&payload);
+
+    // The capture is genuinely mid-conversation. Each of these is a separate
+    // way the measurement could have been vacuous.
+    assert_eq!(
+        comms.dialogues.len(),
+        1,
+        "the capture should hold exactly one open scripted dialogue \
+         (caught on frame {opened_at})"
+    );
+    let script = comms.dialogues[0]
+        .script
+        .as_ref()
+        .expect("the open dialogue is a scripted one");
+    assert_eq!(
+        script.node_fn, "axiom_root",
+        "the open dialogue should be sitting on the thread's root node"
+    );
+    assert_eq!(
+        script.on_pick,
+        vec!["on_first_ack".to_string()],
+        "the response's on_pick fn travels alongside the button it answers"
+    );
+    assert_eq!(
+        comms.dialogues[0].responses,
+        vec![("Acknowledged.".to_string(), false)],
+        "the shown response text and its `important` flag travel too"
+    );
+    assert_eq!(comms.inbox.len(), 1, "one message is seated in the inbox");
+    assert!(
+        comms.inbox[0].selected_response.is_none(),
+        "the captured message must be UNANSWERED, or this test measures nothing"
+    );
+    assert!(
+        comms.inbox[0].is_urgent,
+        "the fixture opens the thread urgent, so the flag should have travelled"
+    );
+    assert_eq!(
+        world_counter(&live, "first_answered"),
+        0,
+        "the AI has not answered yet at the capture"
+    );
+
+    let mut resumed = boot_to_restore_point(&scripted_comms_args(), &payload);
+    // The fresh app has not reached the ~1 s timer, so everything below can only
+    // have come from the payload.
+    assert_eq!(
+        live_dialogue_count(&resumed),
+        0,
+        "the fresh app has opened no thread of its own at the restore point"
+    );
+    assert!(
+        live_inbox(&resumed).is_empty(),
+        "and its inbox is empty, so a restored message can only be the save's"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        live_dialogue_count(&resumed),
+        1,
+        "the restore should have seated the captured dialogue"
+    );
+    assert_eq!(
+        live_inbox(&resumed),
+        live_inbox(&live),
+        "and the inbox it answers, message for message"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did"
+    );
+
+    // Both worlds now step across the AI's answer, thread B's open, ITS answer,
+    // and the victory that answer declares.
+    let mut live_answered_at = None;
+    let mut resumed_answered_at = None;
+    for frame in 1..=COMMS_CONTINUE_FOR {
+        live.update();
+        resumed.update();
+        if live_answered_at.is_none() && world_counter(&live, "first_answered") > 0 {
+            live_answered_at = Some(frame);
+        }
+        if resumed_answered_at.is_none() && world_counter(&resumed, "first_answered") > 0 {
+            resumed_answered_at = Some(frame);
+        }
+        assert_eq!(
+            world_digest(resumed.world()),
+            world_digest(live.world()),
+            "the two worlds diverged {frame} frame(s) after the restore"
+        );
+    }
+
+    assert!(
+        live_answered_at.is_some(),
+        "the live Backfill Comms AI should have answered within \
+         {COMMS_CONTINUE_FOR} frames of the capture"
+    );
+    assert_eq!(
+        resumed_answered_at, live_answered_at,
+        "the resumed dialogue was answered on a different frame than the live one"
+    );
+    assert_eq!(
+        world_counter(&resumed, "first_closed"),
+        world_counter(&live, "first_closed"),
+        "and the thread ran on through its follow-up, answer for answer"
+    );
+    assert!(
+        world_counter(&live, "first_closed") > 0,
+        "the live thread should have reached its closing response, or the \
+         digest claim above never crossed anything"
+    );
+    assert_eq!(
+        phase_of(&resumed),
+        phase_of(&live),
+        "including the victory the last on_pick declares"
+    );
+}
+
+/// S8's other half: an `open_comms` that was QUEUED but not yet drained at the
+/// save fires after the resume.
+///
+/// The fixture's root node fn opens a second thread while it is itself running
+/// inside the drain, and a nested request is re-queued for the next tick rather
+/// than entered re-entrantly — so the capture frame catches exactly one request
+/// sitting on `pending_comms_opens`. Nothing else produces that state: every
+/// other `open_comms` path queues and drains inside one tick.
+#[test]
+fn a_queued_open_comms_request_survives_a_resume_and_fires() {
+    let mut live = boot(&scripted_comms_args());
+    step_to_the_open_thread(&mut live);
+
+    let payload = capture(live.world());
+    let comms = comms_of(&payload);
+    assert_eq!(
+        comms.pending_opens.len(),
+        1,
+        "the root node fn's nested open should be queued and undrained"
+    );
+    assert_eq!(
+        comms.pending_opens[0].root_fn, "axiom_second",
+        "and it should name the second thread's root node fn"
+    );
+    assert_eq!(
+        world_counter(&live, "second_thread_opened"),
+        0,
+        "the queued open must NOT have fired before the capture"
+    );
+
+    let mut resumed = boot_to_restore_point(&scripted_comms_args(), &payload);
+    assert_eq!(
+        world_counter(&resumed, "second_thread_opened"),
+        0,
+        "the fresh app has queued no open of its own, so a resumed one can only \
+         have come from the save"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    // One frame is all it takes: the queue is drained on the next tick.
+    resumed.update();
+    live.update();
+    assert_eq!(
+        world_counter(&resumed, "second_thread_opened"),
+        1,
+        "the restored request should have opened its thread on the very next tick"
+    );
+    assert_eq!(
+        world_counter(&live, "second_thread_opened"),
+        world_counter(&resumed, "second_thread_opened"),
+        "and the live world agrees it fired exactly once"
+    );
+    assert_eq!(
+        live_inbox(&resumed).len(),
+        2,
+        "the second thread's message joined the restored inbox"
+    );
+}
+
+/// A **comms-quiet** world's payload carries the comms state that exists and
+/// nothing conversation-shaped — the compatibility half of this slice.
+///
+/// The duel authors no `[[comms]]` and no `[script]`, so it has no templates, no
+/// threads and no script runtime. Its capture must still produce a `CommsState`
+/// (the runtime exists on every world), leave every conversation field empty,
+/// and round-trip through RON.
+#[test]
+fn a_comms_quiet_world_captures_an_empty_comms_state() {
+    let mut live = duel();
+    step(&mut live, 120);
+
+    let payload = capture(live.world());
+    let comms = comms_of(&payload);
+    assert!(comms.inbox.is_empty(), "the duel seats no messages");
+    assert!(comms.dialogues.is_empty(), "and opens no threads");
+    assert!(comms.pending_opens.is_empty(), "and queues no opens");
+    assert_eq!(comms.uncarried_dialogues, 0);
+    assert!(comms.uncarried_follow_ups.is_empty());
+
+    let run = run_for(
+        payload.clone(),
+        world_digest(live.world()),
+        SEED,
+        DUEL,
+        current_versions(DUEL),
+    );
+    let store = FileStore::new(scratch("comms-quiet"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let reloaded = load_from(&store, "autosave", &current_versions(DUEL))
+        .expect("the save reloads")
+        .snapshot
+        .expect("a saved game carries a snapshot");
+    assert_eq!(
+        reloaded.state.comms, payload.comms,
+        "the comms state round-trips through RON"
+    );
+}
+
+/// A save written before comms state was recorded is refused on **format**.
+///
+/// Every field `CommsState` added carries `#[serde(default)]`, so the older
+/// payload still parses — which is exactly why the constant had to move. The
+/// payload cannot tell "this world had no conversation open" from "this save
+/// predates conversations being recorded", and restoring the second one puts a
+/// scenario mid-thread into a world with an empty inbox and no dialogue to
+/// answer. `Versions::check` is what refuses it, and it names the dimension.
+#[test]
+fn a_save_written_before_comms_state_is_refused_on_format() {
+    let mut live = boot(&scripted_comms_args());
+    step_to_the_open_thread(&mut live);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(SCRIPTED_COMMS);
+
+    // Recorded under the PREVIOUS format, everything else untouched, so the only
+    // reason to refuse is the one being tested.
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, SCRIPTED_COMMS, previous);
+    let store = FileStore::new(scratch("comms-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}
+
+/// What this slice does NOT carry, it reports — it does not drop it quietly.
+///
+/// A declarative dialogue's node holds `TriggerAction`s and a nested follow-up
+/// tree, and a queued follow-up holds a whole node; carrying either means a
+/// serde derive on the authored-config vocabulary, the commitment
+/// `ScenarioState` already refuses for `pending_delayed_actions`. So they stay
+/// out — and the restore says so on the report rather than leaving the caller to
+/// notice.
+///
+/// Driven from a hand-built payload rather than from a world, because what is
+/// being asserted is the restore's handling of counts the capture records when
+/// it has to leave something behind — and a fixture that produced them would be
+/// asserting the declarative comms front-end's behaviour, not this slice's.
+#[test]
+fn uncarried_comms_state_is_reported_as_a_gap_not_dropped_quietly() {
+    use project_phoenix::snapshot::RestoreGap;
+
+    let mut live = duel();
+    step(&mut live, 60);
+
+    let mut payload = capture(live.world());
+    let mut comms = payload
+        .comms
+        .clone()
+        .expect("the duel captures comms state");
+    comms.uncarried_dialogues = 2;
+    // One response follow-up (its `…` placeholder is seated in the inbox) and
+    // one chained root, which shows nothing until it fires.
+    comms.uncarried_follow_ups = vec!["placeholder-1".to_string(), String::new()];
+    comms.inbox = vec![project_phoenix::messages::CommsMessage::injected(
+        "placeholder-1".to_string(),
+        "sender-uuid".to_string(),
+        "Sender".to_string(),
+        "...".to_string(),
+        Vec::new(),
+        "thread-1".to_string(),
+        true,
+        false,
+    )];
+    payload.comms = Some(comms);
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    let report = restore(resumed.world_mut(), &payload);
+
+    assert!(
+        report
+            .gaps
+            .contains(&RestoreGap::CommsDialoguesUncarried { declarative: 2 }),
+        "the declarative dialogues left behind should be reported: {:?}",
+        report.gaps
+    );
+    assert!(
+        report.gaps.contains(&RestoreGap::CommsFollowUpsUncarried {
+            queued: 2,
+            removed_placeholders: 1,
+        }),
+        "so should the follow-ups, and how many placeholder rows went with \
+         them: {:?}",
+        report.gaps
+    );
+    assert!(
+        live_inbox(&resumed).is_empty(),
+        "the orphaned placeholder is removed rather than left in the restored \
+         inbox waiting on a follow-up that is not coming back"
+    );
+
+    // And the gap type says all of that in words, for a host that only logs it.
+    let rendered = RestoreGap::CommsFollowUpsUncarried {
+        queued: 2,
+        removed_placeholders: 1,
+    }
+    .to_string();
+    assert!(
+        rendered.contains('2') && rendered.contains('1'),
+        "{rendered}"
+    );
+}

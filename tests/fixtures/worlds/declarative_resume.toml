@@ -2,29 +2,29 @@
 # whose progression is captured and resumed.
 #
 # The sibling of `scripted_resume.toml`, and deliberately its opposite: the same
-# one-ship, no-hostiles shape and the same single timer, authored as a
-# `[[trigger]]` instead of a Rhai registration. Nothing plays it; it exists to be
-# booted by `tests/snapshot_resume.rs`.
+# one-ship, no-hostiles shape, with no `[script]` block at all. Nothing plays it;
+# it exists to be booted by `tests/snapshot_resume.rs`.
 #
 # ── Why a fixture rather than a shipped world ────────────────────────────────
 #
 # It used to be `assets/worlds/combat_test.toml`, on the reasonable ground that a
 # shipped world is a better subject than an invented one. Issue #984 converted
 # every shipped world to `[script]`, so there is no script-free shipped world
-# left to point at — and there will not be one again. The claim under test
-# ("a world that compiles no `WorldScriptRuntime` still captures its declarative
-# trigger latches and its mission clock, and its payload is shaped exactly as it
-# was before scripting existed") is about the DECLARATIVE front-end, which is
-# still live for mod packs and hand-authored worlds. A fixture is what keeps that
-# claim testable without the test's subject being hostage to a content decision.
+# left to point at — and there will not be one again.
 #
-# ── What the timing is for ───────────────────────────────────────────────────
+# ── What the claim is now ────────────────────────────────────────────────────
 #
-# `after_secs = 1.0` fires ~1 s (~tick 60) into the mission, so a capture taken
-# at ~tick 120 sits AFTER it: the trigger is latched, which is the state the
-# resume has to preserve, and `scenario.triggers` is therefore non-empty in the
-# payload. `increment_flag` is what makes a re-armed latch visible — the counter
-# would read 2.
+# It carried a `[[trigger]]` block until issue #985 deleted that front-end, and
+# the claim was that a world compiling no `WorldScriptRuntime` still captured
+# its declarative trigger latches. There are no declarative triggers any more,
+# so the surviving claim is the one that does not depend on them: a world with
+# NO scenario logic of any kind still captures a running mission clock, leaves
+# both script-shaped fields empty, and round-trips through RON — i.e. the
+# payload is well-formed for a world that simply has nothing to progress.
+#
+# A world that still authors `[[trigger]]` is now REFUSED by `parse_world`
+# rather than loading with its logic silently absent; `world::layers`' own tests
+# pin that refusal.
 
 [global]
 seed = 864
@@ -39,12 +39,3 @@ template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
-
-[[trigger]]
-condition = "on_timer"
-after_secs = 1.0
-
-  [[trigger.action]]
-  type = "increment_flag"
-  name = "beacon_pulses"
-  by   = 1

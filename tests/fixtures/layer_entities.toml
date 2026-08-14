@@ -1,0 +1,20 @@
+# Layer-fixture world for the `src/world/server.rs` layer tests.
+#
+# A layer contributes ENTITIES, and (until script-in-layers, #1045) nothing
+# else. It was a deliberately DECLARATIVE `[[trigger]]` world until issue #985
+# deleted that front-end: the layer-load path only ever merged declarative
+# trigger states, because scripts compile on the standalone/base-world path
+# only, so with the parser gone a layer has no way to author scenario logic at
+# all. These tests pin the CURRENT layer contract: a loaded layer's entities
+# spawn and register their names, and unload despawns exactly them.
+#
+# When #1045 lands script-in-layers, re-author this fixture with a `[script]`
+# block and add the merge/removal assertions back.
+
+[global]
+seed = 7
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_destroyer.toml"
+name = "test.layer_fixture.raider"
+transform = { position = [400.0, 0.0, 0.0] }

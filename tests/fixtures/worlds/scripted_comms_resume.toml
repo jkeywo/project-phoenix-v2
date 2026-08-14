@@ -63,7 +63,7 @@ transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 
 # The sender. `name` is the key `open_comms`'s `from` resolves through
-# `name_to_uuid`, exactly as a `[[comms]]` template's `from` does.
+# `name_to_uuid`.
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"
 name = "axiom"

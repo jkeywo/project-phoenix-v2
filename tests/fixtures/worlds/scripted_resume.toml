@@ -1,7 +1,7 @@
 # Fixture world for issue #864 — scripted scenario progression across a resume.
 #
 # A test fixture rather than a shipped `assets/worlds/` probe, for the reason
-# `tests/fixtures/layer_declarative_triggers.toml` is one: nothing plays this,
+# `tests/fixtures/layer_entities.toml` is one: nothing plays this,
 # it exists to be booted by `tests/snapshot_resume.rs` and its whole shape is
 # chosen to make one measurement discriminating.
 #

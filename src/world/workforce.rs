@@ -538,7 +538,10 @@ mod tests {
             "a runaway negotiation cannot push a side off its own scale"
         );
         register.apply("skyway_workers", WorkforceMutation::SetDisposition(-40));
-        assert_eq!(register.disposition("skyway_workers"), Some(DISPOSITION_MIN));
+        assert_eq!(
+            register.disposition("skyway_workers"),
+            Some(DISPOSITION_MIN)
+        );
     }
 
     #[test]

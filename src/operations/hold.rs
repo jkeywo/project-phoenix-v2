@@ -2646,7 +2646,8 @@ stall_limit_secs = 12
              restoration path to run — the rule simply stops firing"
         );
         assert!(
-            hold.condition_payout(ProgressRate::FULL) > hold.condition_payout(ProgressRate::percent(40)),
+            hold.condition_payout(ProgressRate::FULL)
+                > hold.condition_payout(ProgressRate::percent(40)),
             "and the repair pays out faster again, because the payout is scaled by the same rate"
         );
     }

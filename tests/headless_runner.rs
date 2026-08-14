@@ -7385,8 +7385,12 @@ fn a_strike_refuses_a_depot_transfer_and_unassists_a_repair_until_it_is_settled(
     let struck = hold_of(&mut app, S_STRUCK);
     let clear = hold_of(&mut app, S_CLEAR);
     assert_eq!(struck.verb(), OperationVerb::FieldRepair);
-    assert_eq!(struck.state(), HoldState::Holding, "still working — the ship's own team can \
-         climb the spine; they are simply on their own");
+    assert_eq!(
+        struck.state(),
+        HoldState::Holding,
+        "still working — the ship's own team can \
+         climb the spine; they are simply on their own"
+    );
     assert_eq!(
         (struck.rate().as_percent(), clear.rate().as_percent()),
         (40, 100),
@@ -7435,7 +7439,10 @@ fn a_strike_refuses_a_depot_transfer_and_unassists_a_repair_until_it_is_settled(
             !runtime.flags.flag("workforce.probe_workers.on_strike"),
             "the mirror followed the register rather than drifting from it"
         );
-        assert_eq!(runtime.flags.counter("workforce.probe_workers.disposition"), 70);
+        assert_eq!(
+            runtime.flags.counter("workforce.probe_workers.disposition"),
+            70
+        );
     }
     assert_eq!(
         hold_of(&mut app, S_STRUCK).rate(),
@@ -8174,7 +8181,8 @@ fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
     use project_phoenix::entities::spawner::EntityName;
     use project_phoenix::infrastructure::InfrastructureCondition;
     use project_phoenix::operations::{
-        HoldState, Ineligibility, OperationVerb, PendingOperationStart, ProgressRate, ShipOperations,
+        HoldState, Ineligibility, OperationVerb, PendingOperationStart, ProgressRate,
+        ShipOperations,
     };
     use project_phoenix::ship::state::ShipPhysics;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -8225,12 +8233,7 @@ fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
         .world_mut()
         .query::<(&EntityName, &InfrastructureCondition)>()
         .iter(app.world())
-        .map(|(name, condition)| {
-            (
-                name.0.clone(),
-                condition.0.workforce().map(str::to_string),
-            )
-        })
+        .map(|(name, condition)| (name.0.clone(), condition.0.workforce().map(str::to_string)))
         .collect();
     assert_eq!(
         staffed.get(SKYHOOK).cloned().flatten(),
@@ -8270,7 +8273,10 @@ fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
             .unwrap_or_else(|| panic!("{name} is not in this world"))
     };
     let move_ship = |app: &mut bevy::prelude::App, to: bevy::prelude::Vec3| {
-        let mut physics = app.world_mut().get_mut::<ShipPhysics>(ship).expect("a ship");
+        let mut physics = app
+            .world_mut()
+            .get_mut::<ShipPhysics>(ship)
+            .expect("a ship");
         physics.x = to.x;
         physics.y = to.y;
         physics.z = to.z;
@@ -8323,8 +8329,12 @@ fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
         .and_then(|ops| ops.active.clone())
         .expect("the repair opened");
     assert_eq!(unassisted.verb(), OperationVerb::FieldRepair);
-    assert_eq!(unassisted.state(), HoldState::Holding, "the ship's own team \
-         can still work the spine — they are simply on their own");
+    assert_eq!(
+        unassisted.state(),
+        HoldState::Holding,
+        "the ship's own team \
+         can still work the spine — they are simply on their own"
+    );
     assert_eq!(
         unassisted.rate().as_percent(),
         35,

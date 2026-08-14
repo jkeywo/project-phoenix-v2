@@ -5311,7 +5311,10 @@ on_strike = true
 "#;
         let err = parse_world(toml).expect_err("must refuse");
         assert!(err.contains("skyway_workers"), "{err}");
-        assert!(err.contains("#0") && err.contains("#1"), "names both: {err}");
+        assert!(
+            err.contains("#0") && err.contains("#1"),
+            "names both: {err}"
+        );
     }
 
     #[test]

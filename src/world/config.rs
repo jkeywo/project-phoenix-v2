@@ -700,6 +700,12 @@ pub struct RawWorld {
     /// Optional spawn point for the player ship.
     #[serde(default)]
     pub player_spawn: Option<PlayerSpawnEntry>,
+    /// The raw `[script]` block. Deserialized here — rather than left to
+    /// `world::script::load::lift_world_scripts`, which still owns activation —
+    /// only so `parse_world` can retain the INLINE Rhai bodies for
+    /// [`entity_template_paths`] to scan (issue #984).
+    #[serde(default)]
+    pub script: Option<toml::Value>,
 }
 
 // -- Trigger / comms pure config types --------------------------------------
@@ -1763,6 +1769,18 @@ pub struct WorldConfig {
     pub available_ships: Vec<AvailableShipEntry>,
     /// Optional spawn point for the player ship.
     pub player_spawn: Option<PlayerSpawnEntry>,
+    /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
+    ///
+    /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
+    /// `spawn_entity` surface (issue #984). Activation does not read it — the
+    /// loader lifts its own [`ScriptSource`]s from the raw TOML, and can also
+    /// resolve the sibling-FILE form (`script = "combat.rhai"`) that this field
+    /// deliberately cannot: `parse_world` has no resolver, so a world whose
+    /// script lives beside it contributes no entry here. That is the boundary of
+    /// the preload scan, and it is why shipped worlds author `[script]` inline.
+    ///
+    /// [`ScriptSource`]: vellum_script::ScriptSource
+    pub script_sources: Vec<String>,
 }
 
 impl WorldConfig {
@@ -1808,7 +1826,13 @@ impl WorldEntity {
 /// a flag-store chain and nothing else — there is no bag, nothing folds one, and
 /// there is no per-system scope a window could even belong to. Left alone the
 /// atom would parse, load, and read `false` for the whole scenario.
-fn reject_world_history(pred: &crate::world::flags::Predicate, what: &str) -> Result<(), String> {
+/// `pub(crate)` because the Rhai front-end's `.when(…)` modifier
+/// ([`crate::world::script::triggers`]) has to refuse the same atom the
+/// declarative `when =` field refuses — one rule, both front-ends.
+pub(crate) fn reject_world_history(
+    pred: &crate::world::flags::Predicate,
+    what: &str,
+) -> Result<(), String> {
     match pred.history_atom() {
         Some(atom) => Err(format!(
             "{what} reads {}: bounded history windows belong to an AI fine system's \
@@ -2127,7 +2151,25 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         dust: raw.dust,
         available_ships,
         player_spawn: raw.player_spawn,
+        script_sources: inline_script_sources(raw.script.as_ref()),
     })
+}
+
+/// Collect the INLINE Rhai bodies out of a raw `[script]` block.
+///
+/// A table (`[script] setup = """…"""`) yields one entry per string-valued key,
+/// in `toml::Map` key order; a bare string (`script = "combat.rhai"`) names a
+/// sibling file this pass cannot read and yields nothing. Non-string table
+/// values are skipped here and rejected as findings by
+/// `world::script::load::lift_world_scripts`, which is the validator.
+fn inline_script_sources(script: Option<&toml::Value>) -> Vec<String> {
+    match script {
+        Some(toml::Value::Table(table)) => table
+            .values()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Build a `name ? uuid` map for the named entries in an `[[entity]]` slice.
@@ -2197,6 +2239,11 @@ where
 ///    until after preload completes). (#475)
 /// 4. `[[comms.response.action]] type = "spawn_entity"` references nested
 ///    arbitrarily deep in dialogue follow-ups. (#475)
+/// 5. `ctx.effects.spawn_entity(#{ template_path: "…" })` references inside an
+///    inline `[script]` body (#984) — the Rhai equivalent of surfaces 3 and 4,
+///    and load-bearing for the same reason: `combat_test`, the one selectable
+///    scenario, spawns its whole eight-wave raid from script handlers that do
+///    not run until long after preload has finished.
 pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> Vec<String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<String> = Vec::new();
@@ -2257,7 +2304,78 @@ pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> V
         }
     }
 
+    // 5. Scripted `spawn_entity` references (issue #984).
+    for source in &world.script_sources {
+        for path in script_spawn_template_paths(source) {
+            if seen.insert(path.clone()) {
+                out.push(path);
+            }
+        }
+    }
+
     out
+}
+
+/// Scan an inline Rhai body for the `template_path` string literals its
+/// `spawn_entity` maps name.
+///
+/// A STATIC scan, because there is nothing else available: a handler's body
+/// never runs at load (`Engine::run_ast` executes only a unit's top level), so
+/// the only thing that can be known about a scripted spawn before preload is
+/// what its source says literally. That is enough for the shape every converted
+/// world authors — a literal `template_path: "assets/entities/….toml"` inside
+/// the map — and the failure mode of a miss is asymmetric: an extra path is a
+/// wasted fetch, a missed one is a wave that never spawns in the browser.
+///
+/// `//` line comments are stripped first so prose that mentions the key does not
+/// queue a fetch. A computed path (`template_path: hull_for(wave)`) is invisible
+/// to this and always will be; shipped content authors literals.
+fn script_spawn_template_paths(source: &str) -> Vec<String> {
+    const KEY: &str = "template_path";
+    let mut out = Vec::new();
+    for line in source.lines() {
+        let code = match line.find("//") {
+            Some(i) => &line[..i],
+            None => line,
+        };
+        let bytes = code.as_bytes();
+        let mut from = 0;
+        while let Some(rel) = code[from..].find(KEY) {
+            let at = from + rel;
+            from = at + KEY.len();
+            // Word boundary, so `xtemplate_path` / `template_pathy` do not match.
+            let before_ok = at == 0 || !is_ident_byte(bytes[at - 1]);
+            let after_ok = from >= bytes.len() || !is_ident_byte(bytes[from]);
+            if !before_ok || !after_ok {
+                continue;
+            }
+            // Skip whitespace and the one separator (`:` in Rhai, `=` in TOML).
+            let mut i = from;
+            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                i += 1;
+            }
+            if i < bytes.len() && (bytes[i] == b':' || bytes[i] == b'=') {
+                i += 1;
+            }
+            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                i += 1;
+            }
+            if i >= bytes.len() || bytes[i] != b'"' {
+                continue;
+            }
+            let start = i + 1;
+            if let Some(len) = code[start..].find('"') {
+                out.push(code[start..start + len].to_string());
+                from = start + len + 1;
+            }
+        }
+    }
+    out
+}
+
+/// Is `b` part of a Rust/Rhai identifier?
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Partition immediate-spawn entity instances into (asteroid_field, other).
@@ -5092,44 +5210,108 @@ entity    = "raider"
         );
     }
 
+    /// (#475, rewritten for #892, re-authored for #960 + #936, re-homed onto the
+    /// script front-end for #984.)
+    ///
+    /// The combat-test scenario is a TIMED eight-wave defence. This test pins
+    /// the structure the runtime then leans on:
+    ///
+    ///   - EIGHT `on_timer` registrations, one per wave, at 45-second intervals;
+    ///     no spawn hangs off a death any more
+    ///   - the eight-wave table: singles alternating cruiser/destroyer through
+    ///     wave 4, pairs through wave 7, closing on a patrol cruiser
+    ///   - every hostile spawn registers into `hostiles` (victory) and into its
+    ///     own `wave_N` group (its objective), tier bonuses included
+    ///   - NO standing pickets and no `pickets` group
+    ///   - every spawn — not just the cruisers (#936) — carries the
+    ///     `assault-starbase` Destroy override naming the starbase's STRING ID,
+    ///     the `close-on-starbase` Reach run-in, and the 200-unit acquisition
+    ///     band (#960)
+    ///   - ONE victory registration over the dynamic `hostiles` group, guarded
+    ///     by `counter(waves_spawned) >= 8`, whose `game_over` is the only
+    ///     deferred effect in the world
+    ///   - 1 on_destroyed Starbase Alpha defeat registration
+    ///   - 8 wave objectives, each completed on its OWN group being cleared
+    ///     alongside a single `mission_threat_remaining` decrement (#943)
+    ///   - 1 on_world_loaded objective registration, and an `on_world_loaded`
+    ///     that spawns nothing
+    ///   - 12 comms announcements (1 on world-load + 8 on the clock + 3 hull
+    ///     bands), all from Starbase Alpha
+    ///
+    /// # Why this reads the script rather than `cfg.triggers`
+    ///
+    /// Issue #984 moved all of it into `[script]`, so the declarative lists parse
+    /// EMPTY and there is nothing to read there. The facts above did not become
+    /// unobservable, they moved: a registration's condition is on the
+    /// `ScriptTrigger` the front-end built (byte-identical to its TOML twin), and
+    /// its effects are what running its handler buffers. Both are read here
+    /// through the production compiler and the production runtime host, so this
+    /// still pins the shipped world rather than a description of it.
+    ///
+    /// It also got STRONGER in one place. The power-tier bonuses used to be
+    /// action `when` predicates, and the old test could only count that eight of
+    /// them carried *a* predicate. They are `if` guards inside the handler now,
+    /// so the guard is exercised instead of counted: the same handlers are run at
+    /// three `ship_power` tiers and the spawn set is asserted at each.
     #[test]
-    fn parse_world_combat_test_toml_parses_and_carries_8_timed_waves() {
-        // (#475, rewritten for #892, re-authored for #960 + #936) The
-        // combat-test scenario is a TIMED eight-wave defence. This test pins the
-        // structure the runtime then leans on:
-        //
-        //   - EIGHT `on_timer` triggers, one per wave, at 45-second intervals;
-        //     no spawn hangs off a death any more
-        //   - the eight-wave table: singles alternating cruiser/destroyer
-        //     through wave 4, pairs through wave 7, closing on a patrol cruiser
-        //   - every hostile spawn registers into `hostiles` (victory) and into
-        //     its own `wave_N` group (its objective), tier bonuses included
-        //   - NO standing pickets and no `pickets` group
-        //   - every spawn — not just the cruisers (#936) — carries the
-        //     `assault-starbase` Destroy override naming the starbase's STRING
-        //     ID, the `close-on-starbase` Reach run-in, and the 200-unit
-        //     acquisition band (#960)
-        //   - ONE victory trigger over the dynamic `hostiles` group, guarded by
-        //     `counter(waves_spawned) >= 8`, whose `game_over` is the only
-        //     delayed action left in the world
-        //   - 1 on_destroyed Starbase Alpha defeat trigger
-        //   - 8 wave objectives, each completed on its OWN group being cleared
-        //     alongside a single `mission_threat_remaining` decrement (#943)
-        //   - 1 on_world_loaded objective trigger, and an `on_world_loaded` that
-        //     spawns nothing
-        //   - 9 comms templates (1 on world-load + 8 on the clock)
+    fn parse_world_combat_test_toml_is_script_authored_with_8_timed_waves() {
+        use crate::world::dispatch::{ActionCmd, FlagMutation};
+        use crate::world::flags::FlagStore;
+        use crate::world::script::effects::BufferedEffect;
+        use crate::world::script::fixture::ScriptedWorld;
+
+        const WORLD: &str = "assets/worlds/combat_test.toml";
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
+        assert!(
+            cfg.triggers.is_empty() && cfg.comms.is_empty() && cfg.scripted_comms.is_empty(),
+            "combat_test is [script]-authored (#984): every declarative list parses empty"
+        );
+        let world = ScriptedWorld::compile(WORLD, toml);
 
-        // ── The clock ────────────────────────────────────────────────────────
-        // Eight timer triggers at the authored cadence. `after_secs` IS the
-        // schedule: a reader of the world file can see when each wave lands
-        // without simulating anything, which is the point of the conversion.
-        let timer_starts: Vec<f32> = cfg
+        /// The player tier a run is read at. The DEMO tier (destroyer,
+        /// power_rating 70) is under both bonus gates.
+        fn tier(ship_power: i64) -> FlagStore {
+            let mut flags = FlagStore::new();
+            flags.set_flag_value("ship_power", ship_power);
+            flags
+        }
+        let top = tier(120);
+
+        // Every registration's effects at the top tier, so the bonus spawns are
+        // included, paired with the condition that releases them.
+        let fired: Vec<(
+            TriggerCondition,
+            crate::world::script::schedule::CallEffects,
+        )> = world
             .triggers
             .iter()
-            .filter_map(|t| match t.condition {
-                TriggerCondition::OnTimer { after_secs } => Some(after_secs),
+            .map(|t| (t.trigger.condition.clone(), world.call(&t.handler, &top)))
+            .collect();
+        let actions =
+            |effects: &crate::world::script::schedule::CallEffects| -> Vec<TriggerAction> {
+                crate::world::script::fixture::buffered_actions(effects.commands.clone())
+            };
+        let all_actions: Vec<TriggerAction> = fired.iter().flat_map(|(_, e)| actions(e)).collect();
+        let all_commands: Vec<ActionCmd> = fired
+            .iter()
+            .flat_map(|(_, e)| e.commands.iter())
+            .filter_map(|e| match e {
+                BufferedEffect::Cmd(c) => Some(c.clone()),
+                BufferedEffect::Action(_) => None,
+            })
+            .collect();
+
+        // ── The clock ────────────────────────────────────────────────────────
+        // Eight timer registrations at the authored cadence, then eight more for
+        // the comms calls that ride the same clock. `on_timer(n, …)` IS the
+        // schedule: a reader of the world file can see when each wave lands
+        // without simulating anything, which is the point of the conversion.
+        let timer_starts: Vec<f32> = fired
+            .iter()
+            .filter(|(_, e)| e.comms_opens.is_empty())
+            .filter_map(|(c, _)| match c {
+                TriggerCondition::OnTimer { after_secs } => Some(*after_secs),
                 _ => None,
             })
             .collect();
@@ -5142,45 +5324,44 @@ entity    = "raider"
         // Nothing spawns off a death. This is the assertion the conversion is
         // FOR: an `on_all_destroyed` that spawns is a death-gate by another
         // name, and re-introducing one would restore the pacing #960 removed.
-        for trigger in &cfg.triggers {
-            if !matches!(trigger.condition, TriggerCondition::OnAllDestroyed { .. }) {
+        for (condition, effects) in &fired {
+            if !matches!(condition, TriggerCondition::OnAllDestroyed { .. }) {
                 continue;
             }
             assert!(
-                !trigger
-                    .actions
+                !actions(effects)
                     .iter()
                     .any(|a| matches!(a, TriggerAction::SpawnEntity { .. })),
-                "no wave may be released by a death — {:?} spawns",
-                trigger.condition
+                "no wave may be released by a death — {condition:?} spawns"
             );
         }
-        // …and the game-over window is the only delayed action left, so a
-        // `delay_secs` cannot quietly become a second, hidden schedule.
-        let delayed: Vec<&TriggerAction> = cfg
-            .triggers
+        // …and the game-over window is the only deferred effect left, so a
+        // `schedule.in_seconds` cannot quietly become a second, hidden schedule.
+        let delayed: Vec<&TriggerAction> = fired
             .iter()
-            .flat_map(|t| t.actions.iter().zip(t.action_delays.iter()))
-            .filter(|(_, d)| **d > 0.0)
-            .map(|(a, _)| a)
+            .flat_map(|(_, e)| e.delayed.iter())
+            .map(|d| &d.action)
             .collect();
         assert_eq!(
             delayed.len(),
             1,
-            "expected one delayed action, got {delayed:?}"
+            "expected one delayed effect, got {delayed:?}"
         );
         assert!(
             matches!(delayed[0], TriggerAction::GameOver { .. }),
-            "the only delayed action may be the game-over window, got {:?}",
+            "the only delayed effect may be the game-over window, got {:?}",
             delayed[0]
+        );
+        assert!(
+            fired.iter().all(|(_, e)| e.callbacks.is_empty()),
+            "no handler defers a CALLBACK — the world's only deferral is the \
+             game-over window, and a callback would be a second scheduler"
         );
 
         // Collect every spawn in the world, keyed by spawned entity name.
         #[allow(clippy::type_complexity)]
-        let spawns: HashMap<&str, (&str, &Vec<String>, &Option<toml::Value>)> = cfg
-            .triggers
+        let spawns: HashMap<String, (String, Vec<String>, Option<toml::Value>)> = all_actions
             .iter()
-            .flat_map(|t| t.actions.iter())
             .filter_map(|a| match a {
                 TriggerAction::SpawnEntity {
                     name,
@@ -5188,7 +5369,10 @@ entity    = "raider"
                     groups,
                     overrides,
                     ..
-                } => Some((name.as_str(), (template_path.as_str(), groups, overrides))),
+                } => Some((
+                    name.clone(),
+                    (template_path.clone(), groups.clone(), overrides.clone()),
+                )),
                 _ => None,
             })
             .collect();
@@ -5214,7 +5398,7 @@ entity    = "raider"
         ];
         for (name, template) in table {
             let (path, groups, _) = spawns
-                .get(name)
+                .get(*name)
                 .unwrap_or_else(|| panic!("combat_test must spawn {name}"));
             assert_eq!(path, template, "{name} must fly {template}");
             let wave_group = name.trim_end_matches("_second");
@@ -5227,7 +5411,7 @@ entity    = "raider"
         // Waves 1-4 and 8 are singles; only 5, 6 and 7 field a second ship.
         for wave in [1, 2, 3, 4, 8] {
             assert!(
-                !spawns.contains_key(format!("wave_{wave}_second").as_str()),
+                !spawns.contains_key(&format!("wave_{wave}_second")),
                 "wave {wave} is a single ship in the corrected table"
             );
         }
@@ -5237,11 +5421,11 @@ entity    = "raider"
         for wave in 1..=8 {
             let name = format!("wave_{wave}_bonus");
             let (path, groups, _) = spawns
-                .get(name.as_str())
+                .get(&name)
                 .unwrap_or_else(|| panic!("combat_test must author {name}"));
             let expected = if wave % 2 == 1 { DESTROYER } else { CRUISER };
             assert_eq!(
-                *path, expected,
+                path, expected,
                 "{name} is the odd/even tier bonus and must fly {expected}"
             );
             assert!(
@@ -5250,19 +5434,46 @@ entity    = "raider"
                 "{name} must gate both victory and its wave, got {groups:?}"
             );
         }
-        // Each bonus is gated by an ACTION predicate on its wave's own trigger.
-        let bonus_gates = cfg
-            .triggers
-            .iter()
-            .flat_map(|t| t.actions.iter().zip(t.action_predicates.iter()))
-            .filter(|(a, _)| {
-                matches!(a, TriggerAction::SpawnEntity { name, .. } if name.ends_with("_bonus"))
-            })
-            .filter(|(_, p)| p.is_some())
-            .count();
+
+        // ── The bonus gates, EXERCISED (#984) ────────────────────────────────
+        // The declarative form was an action `when` predicate and could only be
+        // counted; the scripted form is an `if` on the same counter, so run the
+        // same handlers at each tier and read what they spawn.
+        let bonuses_at = |ship_power: i64| -> Vec<String> {
+            let flags = tier(ship_power);
+            let mut names: Vec<String> = world
+                .triggers
+                .iter()
+                .flat_map(|t| world.actions(&t.handler, &flags))
+                .filter_map(|a| match a {
+                    TriggerAction::SpawnEntity { name, .. } if name.ends_with("_bonus") => {
+                        Some(name)
+                    }
+                    _ => None,
+                })
+                .collect();
+            names.sort();
+            names
+        };
+        assert!(
+            bonuses_at(70).is_empty(),
+            "the DEMO tier (destroyer, power_rating 70) is under both gates and \
+             must see exactly the authored eight-wave table"
+        );
         assert_eq!(
-            bonus_gates, 8,
-            "all eight tier bonuses must carry a ship_power action predicate"
+            bonuses_at(90),
+            vec![
+                "wave_1_bonus".to_string(),
+                "wave_3_bonus".to_string(),
+                "wave_5_bonus".to_string(),
+                "wave_7_bonus".to_string()
+            ],
+            "a cruiser or battleship (>= 90) adds a destroyer to each ODD wave"
+        );
+        assert_eq!(
+            bonuses_at(120).len(),
+            8,
+            "a battleship (>= 100) adds a cruiser to each EVEN wave as well"
         );
 
         // ── No standing presence (#960) ──────────────────────────────────────
@@ -5283,25 +5494,43 @@ entity    = "raider"
                  world belongs to a wave now, got {groups:?}"
             );
         }
-        // The `on_world_loaded` trigger flips factions and publishes the threat
-        // count; it must no longer put anything on station.
-        for trigger in &cfg.triggers {
-            if !matches!(trigger.condition, TriggerCondition::OnWorldLoaded) {
+        // The `on_world_loaded` handlers flip factions, publish the threat count
+        // and add the standing mission; none may put anything on station.
+        for (condition, effects) in &fired {
+            if !matches!(condition, TriggerCondition::OnWorldLoaded) {
                 continue;
             }
             assert!(
-                !trigger
-                    .actions
+                !actions(effects)
                     .iter()
                     .any(|a| matches!(a, TriggerAction::SpawnEntity { .. })),
                 "world load must spawn nothing — the raid is the whole roster"
             );
         }
+        // Both directions of the Federation <-> Harrow rivalry are armed there.
+        let enemies: Vec<(&str, &str)> = all_actions
+            .iter()
+            .filter_map(|a| match a {
+                TriggerAction::AddFactionEnemy { faction, enemy } => {
+                    Some((faction.as_str(), enemy.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            enemies,
+            vec![("Harrow", "Federation"), ("Federation", "Harrow")],
+            "the rivalry is asymmetric, so both directions must be authored"
+        );
 
         // ── Every wave commits to the assault (#936) ─────────────────────────
         // Asserted per spawn rather than counted: #936 exists precisely because
         // the override was authored on some spawns and not others, and a count
-        // cannot tell the difference between "all eleven" and "eleven of twenty".
+        // cannot tell the difference between "all nineteen" and "eleven of
+        // nineteen". The conversion factors the override into `raid_overrides()`
+        // so there is one place to author it — but this still reads the value
+        // each spawn ACTUALLY carries, because a factored helper is only as good
+        // as every call site using it.
         for (name, (_, _, overrides)) in &spawns {
             let doctrine = overrides
                 .as_ref()
@@ -5322,6 +5551,14 @@ entity    = "raider"
                 "{name}'s assault must name the starbase's STRING ID — the \
                  display text 'Starbase Alpha' matches no entity name, which is \
                  how every wave's assault silently resolved to nothing"
+            );
+            // The fractional leaves survive the `no_float` boundary as the same
+            // f64 the declarative `0.9` parsed to: `flt("0.9")` carries the value
+            // as opaque data rather than as arithmetic (#984).
+            assert_eq!(
+                assault.get("target_speed").and_then(|s| s.as_float()),
+                Some(0.9),
+                "{name}'s assault must keep its fractional cruise speed"
             );
             assert!(
                 entry("close-on-starbase").is_some(),
@@ -5344,47 +5581,58 @@ entity    = "raider"
             );
         }
 
-        // Victory: ONE trigger over the dynamic `hostiles` group, guarded by the
-        // wave counter. The three per-tier name-list variants are gone — an
+        // Victory: ONE registration over the dynamic `hostiles` group, guarded by
+        // the wave counter. The three per-tier name-list variants are gone — an
         // unregistered name in such a list permanently blocks victory, which is
         // how this world shipped unwinnable.
-        let victories: Vec<_> = cfg
-            .triggers
+        let victories: Vec<&(
+            TriggerCondition,
+            crate::world::script::schedule::CallEffects,
+        )> = fired
             .iter()
-            .filter(|t| {
-                t.actions.iter().any(|a| {
-                    matches!(a, TriggerAction::GameOver { outcome, .. }
-                        if *outcome == Some(crate::balance::Outcome::Victory))
+            .filter(|(_, e)| {
+                e.delayed.iter().any(|d| {
+                    matches!(&d.action, TriggerAction::GameOver { outcome, .. }
+                            if *outcome == Some(crate::balance::Outcome::Victory))
                 })
             })
             .collect();
         assert_eq!(
             victories.len(),
             1,
-            "combat_test must have ONE victory trigger"
+            "combat_test must have ONE victory registration"
         );
-        match &victories[0].condition {
+        match &victories[0].0 {
             TriggerCondition::OnAllDestroyed { group, .. } => {
                 assert_eq!(group, "hostiles", "victory covers every hostile spawned");
             }
             other => panic!("victory must be on_all_destroyed, got {other:?}"),
         }
-        assert!(
-            victories[0].when.is_some(),
-            "victory must be guarded by the waves_spawned counter. Under a CLOCK \
-             this matters MORE than it did under the death-gated chain: a good \
-             player can clear every ship on the field with four waves still \
-             unspawned, and without the guard that window reads as victory"
-        );
-        // The guard has to be satisfiable: eight increments are authored.
-        let increments: i64 = cfg
+        let victory_trigger = world
             .triggers
             .iter()
-            .flat_map(|t| t.actions.iter())
-            .filter_map(|a| match a {
-                TriggerAction::IncrementWorldFlag { name, by } if name == "waves_spawned" => {
-                    Some(*by)
-                }
+            .find(|t| t.trigger.condition == victories[0].0)
+            .expect("the victory registration");
+        assert!(
+            victory_trigger.trigger.when.is_some(),
+            "victory must be guarded by the waves_spawned counter, and by a \
+             trigger-level `.when(…)` rather than an `if` in the handler. Under a \
+             CLOCK this matters MORE than it did under the death-gated chain: a \
+             good player can clear every ship on the field with four waves still \
+             unspawned, and without the guard that window reads as victory. An \
+             in-handler guard would not do — the condition would already have \
+             fired and SPENT the one-shot trigger, so victory could never fire \
+             again; a `when` that reads false leaves it armed"
+        );
+        // The guard has to be satisfiable: eight increments are authored.
+        let increments: i64 = all_commands
+            .iter()
+            .filter_map(|c| match c {
+                ActionCmd::MutateFlag {
+                    name,
+                    mutation: FlagMutation::Increment(by),
+                    ..
+                } if name == "waves_spawned" => Some(*by),
                 _ => None,
             })
             .sum();
@@ -5393,16 +5641,16 @@ entity    = "raider"
             "waves_spawned must be able to reach the victory guard's threshold"
         );
 
-        // Starbase-destroyed defeat trigger.
-        let defeat = cfg.triggers.iter().any(|t| {
+        // Starbase-destroyed defeat registration.
+        let defeat = fired.iter().any(|(c, _)| {
             matches!(
-                &t.condition,
+                c,
                 TriggerCondition::OnDestroyed { entity_name } if entity_name == "world.entity.starbase_alpha.name"
             )
         });
         assert!(
             defeat,
-            "must have on_destroyed Starbase Alpha defeat trigger"
+            "must have on_destroyed Starbase Alpha defeat registration"
         );
 
         for anchor in [
@@ -5438,7 +5686,7 @@ entity    = "raider"
         // entry — stands it DOWN rather than de-prioritising it. A `Patrol` at
         // `base_priority = 0` is still a Patrol, and a Patrol still names its
         // anchors, so this is the assertion that keeps the two anchors deleted.
-        let (_, _, wave_8_overrides) = spawns["wave_8"];
+        let (_, _, wave_8_overrides) = &spawns["wave_8"];
         let ironveil = wave_8_overrides
             .as_ref()
             .and_then(|o| o.get("behaviour"))
@@ -5492,26 +5740,27 @@ entity    = "raider"
         for wave in 1..=8 {
             let group = format!("wave_{wave}");
             let id = format!("obj-destroy-wave-{wave}");
-            let trigger = cfg
-                .triggers
+            let effects = fired
                 .iter()
-                .find(|t| {
-                    matches!(&t.condition,
+                .find(|(c, e)| {
+                    matches!(c,
                         TriggerCondition::OnAllDestroyed { group: g, .. } if *g == group)
-                        && t.actions.iter().any(|a| {
-                            matches!(a, TriggerAction::CompleteObjective { id: cid } if *cid == id)
+                        && e.commands.iter().any(|cmd| {
+                            matches!(cmd, BufferedEffect::Cmd(ActionCmd::CompleteObjective { id: cid })
+                                if *cid == id)
                         })
                 })
+                .map(|(_, e)| e)
                 .unwrap_or_else(|| panic!("{id} must complete when {group} is cleared"));
-            let paid: i64 = trigger
-                .actions
+            let paid: i64 = effects
+                .commands
                 .iter()
-                .filter_map(|a| match a {
-                    TriggerAction::IncrementWorldFlag { name, by }
-                        if name == "mission_threat_remaining" =>
-                    {
-                        Some(*by)
-                    }
+                .filter_map(|c| match c {
+                    BufferedEffect::Cmd(ActionCmd::MutateFlag {
+                        name,
+                        mutation: FlagMutation::Increment(by),
+                        ..
+                    }) if name == "mission_threat_remaining" => Some(*by),
                     _ => None,
                 })
                 .sum();
@@ -5523,29 +5772,28 @@ entity    = "raider"
             );
         }
         // The counter starts at the number of waves and is paid down to zero.
-        let seeded: i64 = cfg
-            .triggers
+        // An ABSOLUTE write (`flags.x = 8`), the scripted spelling of the
+        // declarative `set_flag_value`; the decrements are composable
+        // `increment`s, which is what lets them apply in any order (#981).
+        let seeded: i64 = all_commands
             .iter()
-            .flat_map(|t| t.actions.iter())
-            .find_map(|a| match a {
-                TriggerAction::SetWorldFlagValue { name, value }
-                    if name == "mission_threat_remaining" =>
-                {
-                    Some(*value)
-                }
+            .find_map(|c| match c {
+                ActionCmd::MutateFlag {
+                    name,
+                    mutation: FlagMutation::SetValue(value),
+                    ..
+                } if name == "mission_threat_remaining" => Some(*value),
                 _ => None,
             })
             .expect("combat_test must publish mission_threat_remaining");
-        let paid_total: i64 = cfg
-            .triggers
+        let paid_total: i64 = all_commands
             .iter()
-            .flat_map(|t| t.actions.iter())
-            .filter_map(|a| match a {
-                TriggerAction::IncrementWorldFlag { name, by }
-                    if name == "mission_threat_remaining" =>
-                {
-                    Some(*by)
-                }
+            .filter_map(|c| match c {
+                ActionCmd::MutateFlag {
+                    name,
+                    mutation: FlagMutation::Increment(by),
+                    ..
+                } if name == "mission_threat_remaining" => Some(*by),
                 _ => None,
             })
             .sum();
@@ -5557,10 +5805,8 @@ entity    = "raider"
              magazine paced against it never releases its last reserve"
         );
 
-        let defend = cfg
-            .triggers
+        let defend = all_actions
             .iter()
-            .flat_map(|t| t.actions.iter())
             .find(|a| matches!(a, TriggerAction::AddObjective { id, .. } if id == "obj-defend"))
             .expect("combat_test must add obj-defend");
         match defend {
@@ -5584,10 +5830,8 @@ entity    = "raider"
             other => panic!("expected obj-defend AddObjective, got {other:?}"),
         }
 
-        let destroy_objectives: Vec<_> = cfg
-            .triggers
+        let destroy_objectives: Vec<_> = all_actions
             .iter()
-            .flat_map(|t| t.actions.iter())
             .filter_map(|a| match a {
                 TriggerAction::AddObjective {
                     id,
@@ -5629,50 +5873,79 @@ entity    = "raider"
             assert_eq!(*base_priority, 80.0);
         }
 
-        // Comms: 1 on_world_loaded urgent intro + 8 calls on the clock, one per
-        // wave. Command warns the bridge that the next wave has LAUNCHED; under
-        // a clock there is no death to report, and a player who is behind the
-        // schedule still gets the warning.
-        assert_eq!(
-            cfg.comms.len(),
-            12,
-            "combat_test must have 12 comms templates"
-        );
-        let timed: Vec<f32> = cfg
-            .comms
+        // ── Comms (#984) ─────────────────────────────────────────────────────
+        // Twelve one-way reports, all from Starbase Alpha: 1 on_world_loaded
+        // urgent brief + 8 calls on the clock, one per wave + 3 integrity bands.
+        // Command warns the bridge that the next wave has LAUNCHED; under a clock
+        // there is no death to report, and a player who is behind the schedule
+        // still gets the warning.
+        let opens: Vec<(&TriggerCondition, &crate::comms::content::OpenCommsRequest)> = fired
             .iter()
-            .filter_map(|c| match c.trigger {
-                TriggerCondition::OnTimer { after_secs } => Some(after_secs),
+            .flat_map(|(c, e)| e.comms_opens.iter().map(move |o| (c, o)))
+            .collect();
+        assert_eq!(opens.len(), 12, "combat_test must open 12 comms threads");
+        assert!(
+            opens
+                .iter()
+                .all(|(_, o)| o.from == "world.entity.starbase_alpha.name"),
+            "every report comes from the station the scenario defends"
+        );
+        let comms_timed: Vec<f32> = opens
+            .iter()
+            .filter_map(|(c, _)| match c {
+                TriggerCondition::OnTimer { after_secs } => Some(*after_secs),
                 _ => None,
             })
             .collect();
         assert_eq!(
-            timed,
+            comms_timed,
             vec![0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0],
             "every wave call fires with its matching wave release"
         );
         assert!(
-            cfg.comms
+            opens
                 .iter()
-                .all(|c| !matches!(c.trigger, TriggerCondition::OnAllDestroyed { .. })),
-            "no comms template may still wait on a wave dying"
+                .all(|(c, _)| !matches!(c, TriggerCondition::OnAllDestroyed { .. })),
+            "no comms report may still wait on a wave dying"
         );
-        // Each call lands before the wave it announces — the ordering that
-        // makes it a warning rather than a running commentary.
-        assert_eq!(timed, timer_starts);
-        assert!(cfg
-            .comms
+        // Each call lands with the wave it announces — the ordering that makes
+        // it a warning rather than a running commentary.
+        assert_eq!(comms_timed, timer_starts);
+        let hull_thresholds: Vec<f32> = opens
             .iter()
-            .all(|c| c.from == "world.entity.starbase_alpha.name"));
-        let hull_thresholds: Vec<f32> = cfg
-            .comms
-            .iter()
-            .filter_map(|c| match c.trigger {
-                TriggerCondition::OnHullBelow { threshold, .. } => Some(threshold),
+            .filter_map(|(c, _)| match c {
+                TriggerCondition::OnHullBelow { threshold, .. } => Some(*threshold),
                 _ => None,
             })
             .collect();
-        assert_eq!(hull_thresholds, vec![0.75, 0.5, 0.1]);
+        assert_eq!(
+            hull_thresholds,
+            vec![0.75, 0.5, 0.1],
+            "the three integrity bands survive the `no_float` boundary as the \
+             same f32 the declarative `threshold = 0.75` parsed to"
+        );
+        // Urgency: the brief, the last four wave calls and all three hull bands.
+        assert_eq!(
+            opens.iter().filter(|(_, o)| o.urgent).count(),
+            8,
+            "eight of the twelve reports are flagged urgent"
+        );
+        assert!(
+            fired
+                .iter()
+                .filter(|(_, e)| !e.comms_opens.is_empty())
+                .all(|(_, e)| e.commands.is_empty() && e.delayed.is_empty()),
+            "a comms registration opens a thread and does nothing else — mixing \
+             an effect into one would make the report's position in the tick \
+             observable"
+        );
+        // The demo world flies its own opening brief on world load.
+        assert!(
+            opens
+                .iter()
+                .any(|(c, o)| matches!(c, TriggerCondition::OnWorldLoaded) && o.urgent),
+            "combat_test must open with an urgent brief"
+        );
     }
 
     // -- entity_template_paths ---------------------------------------------
@@ -5791,6 +6064,45 @@ message = "Greetings."
         );
     }
 
+    /// (#984) The scripted surface. A Rhai handler's `spawn_entity` map names
+    /// its template as a literal and the handler does not RUN until long after
+    /// preload, so the only thing available before the fetch is the source text.
+    ///
+    /// The two negative cases matter as much as the positive one: a mention in a
+    /// `//` comment must not queue a fetch (an over-fetch of a path that does not
+    /// exist is a load error, not a wasted request), and a sibling-FILE script
+    /// contributes nothing because `parse_world` has no resolver to read it —
+    /// which is exactly why every shipped world authors `[script]` inline.
+    #[test]
+    fn entity_template_paths_includes_script_spawn_entity_templates() {
+        let toml = r#"
+[script]
+setup = """
+on_timer(0, "wave");
+
+// A wave used to name template_path: "assets/entities/retired.toml" here.
+fn wave(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_harrow_cruiser.toml",
+        name: "wave_1", position: [0, 0, 0]
+    });
+}
+"""
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let paths = entity_template_paths(&cfg, &[]);
+        assert_eq!(
+            paths,
+            vec!["assets/entities/ship_harrow_cruiser.toml".to_string()],
+            "the scripted spawn must be discovered and the commented-out one must not"
+        );
+
+        // A sibling-file script is outside the scan by construction.
+        let sibling = parse_world("script = \"combat.rhai\"\n").expect("must parse");
+        assert!(sibling.script_sources.is_empty());
+        assert!(entity_template_paths(&sibling, &[]).is_empty());
+    }
+
     #[test]
     fn entity_template_paths_dedups_across_entity_trigger_and_comms_walks() {
         // (#475) Same template referenced from a static [[entity]] block, a
@@ -5836,9 +6148,15 @@ message = "."
     #[test]
     fn entity_template_paths_combat_test_includes_wave_templates() {
         // (#475) Pin the exact bug: combat_test.toml references its
-        // wave templates only inside [[trigger.action]] spawn_entity
-        // blocks. All of them must appear in the preload list — a
-        // template that is spawned but not preloaded pops in late.
+        // wave templates only inside spawn_entity actions. All of them must
+        // appear in the preload list — a template that is spawned but not
+        // preloaded pops in late.
+        //
+        // (#984) Those actions are now `ctx.effects.spawn_entity(#{…})` calls
+        // in Rhai handlers, which is why `entity_template_paths` grew a fifth,
+        // SCRIPT surface. This is the test that fails without it, and it is not
+        // a cosmetic failure: `combat_test` is the only selectable scenario, so
+        // the surface is the whole demo's raid.
         //
         // (#883) `ship_harrow_destroyer` joins the list: it is the
         // fly-through interceptor wave, and it is the one hull whose
@@ -5856,7 +6174,7 @@ message = "."
             // eight-wave table closes on a patrol cruiser rather than a
             // Warhawk — so `ship_harrow_warhawk.toml` left this list with the
             // hull that read it. Three hulls fly here now: the patrol cruiser
-            // (two standing pickets plus wave 8), the destroyer, the cruiser.
+            // (wave 8), the destroyer, the cruiser.
             "assets/entities/ship_harrow_patrol.toml",
             "assets/entities/ship_harrow_destroyer.toml",
             "assets/entities/ship_harrow_cruiser.toml",

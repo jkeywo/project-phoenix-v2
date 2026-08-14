@@ -341,14 +341,15 @@ mod shipped_world_rosters {
     /// The world conversions are what turn this on, per world. When one does,
     /// THIS test is the thing that must be updated deliberately.
     ///
-    /// `station_axiom` is the first and so far only entry (issue #984, the
-    /// `default.toml` conversion). It is safe at template level because the two
-    /// worlds that field the station — `default` and `combat_test` — both
-    /// already listed it as their one hailable contact, and `combat_test` still
-    /// authors `[[comms]]`, whose entry WINS the roster's UUID de-duplication.
-    /// The same conversion's other sender, `ship_harrow_patrol`, is deliberately
-    /// NOT here: it also flies in four worlds that never listed it, so its
-    /// opt-in is a per-instance override in `default.toml` (see INVARIANT 3).
+    /// `station_axiom` is the first and, now that every shipped world is
+    /// converted, the ONLY entry (issue #984). It is safe at template level
+    /// because the two worlds that field the station — `default` and
+    /// `combat_test` — both listed it as their one hailable contact before they
+    /// converted, so the template-level opt-in reproduces exactly the roster
+    /// they had. The conversions' other sender, `ship_harrow_patrol`, is
+    /// deliberately NOT here: it also flies in four worlds that never listed it
+    /// — including `combat_test`'s own wave 8 — so its opt-in is a per-instance
+    /// override in `default.toml` (see INVARIANT 3).
     #[test]
     fn only_the_converted_worlds_senders_opt_in_to_the_hail_roster() {
         const EXPECTED: &[&str] = &["station_axiom.toml"];
@@ -389,17 +390,19 @@ mod shipped_world_rosters {
     ///
     /// One entry per shipped world; the value is the ordered-unique `[[comms]]`
     /// `from` list. A world absent from this table must have an EMPTY roster.
-    /// `combat_test` is the demo scenario: twelve `[[comms]]` templates, all
-    /// from Starbase Alpha, collapsing to a single contact.
     ///
-    /// `default.toml` LEFT this table in issue #984: its comms converted to
-    /// `[script]`, so it produces no declarative contacts at all and its roster
-    /// is now entirely entity-derived. INVARIANT 3 is what holds that roster to
-    /// the two senders this table used to carry.
+    /// The table is now EMPTY, and that is the finished state rather than a
+    /// gap: issue #984 converted `default.toml` and then `combat_test.toml` —
+    /// the last shipped world authoring `[[comms]]` — so no shipped world
+    /// produces a declarative contact any more and every roster is entirely
+    /// entity-derived. INVARIANT 3 is what holds the converted rosters to the
+    /// senders this table used to carry. The assertion stays because the
+    /// declarative source is still LIVE (a mod pack or hand-authored world may
+    /// use it): a shipped world that starts authoring `[[comms]]` again is a
+    /// roster change and has to be seen.
     #[test]
     fn shipped_world_declarative_rosters_are_unchanged() {
-        const EXPECTED: &[(&str, &[&str])] =
-            &[("combat_test.toml", &["world.entity.starbase_alpha.name"])];
+        const EXPECTED: &[(&str, &[&str])] = &[];
 
         let dir = manifest("assets/worlds");
         let mut worlds: Vec<PathBuf> = std::fs::read_dir(&dir)
@@ -487,22 +490,27 @@ mod shipped_world_rosters {
         out
     }
 
-    /// INVARIANT 3 — `default.toml`'s roster survived its conversion (#984).
+    /// INVARIANT 3 — the converted worlds' rosters survived their conversions
+    /// (#984).
     ///
-    /// The world's comms are `[script]` now, so the declarative source that
-    /// produced its two contacts is gone. The entity-derived source has to
-    /// produce the SAME two senders, and in the same order: the declarative
-    /// roster was `[raider_alpha, starbase_alpha]` in authored order, and the
-    /// entity-derived one appends in `(name, uuid)` order — which for these two
-    /// reference ids is the same sequence. That coincidence is load-bearing:
-    /// `tests/smoke/comms.spec.js` hails `contacts[0]`.
+    /// Both worlds' comms are `[script]` now, so the declarative source that
+    /// produced their contacts is gone and the entity-derived source has to
+    /// produce the SAME senders, in the same order.
     ///
-    /// The raider's opt-in is a per-instance `overrides.comms.hailable`, which
-    /// is what keeps `patrol`, `probe_huge_rock`, `reinforcements` and
-    /// `combat_test`'s wave 8 — all of which fly the same hull and never listed
-    /// it as a contact — with the rosters they have.
+    /// `default.toml`: the declarative roster was `[raider_alpha,
+    /// starbase_alpha]` in authored order, and the entity-derived one appends in
+    /// `(name, uuid)` order — which for these two reference ids is the same
+    /// sequence. That coincidence is load-bearing: `tests/smoke/comms.spec.js`
+    /// hails `contacts[0]`.
+    ///
+    /// `combat_test.toml`: twelve `[[comms]]` templates, all from Starbase
+    /// Alpha, collapsed to a single contact; the entity-derived source produces
+    /// that same one contact from `station_axiom.toml`'s template-level opt-in.
+    /// Its wave 8 flies `ship_harrow_patrol`, whose opt-in is deliberately
+    /// per-INSTANCE in `default.toml` — so the raid adds nobody to the roster,
+    /// which is the whole reason that opt-in is not template-level.
     #[test]
-    fn default_worlds_converted_roster_matches_the_declarative_one_it_replaced() {
+    fn the_converted_worlds_rosters_match_the_declarative_ones_they_replaced() {
         let default_text = include_str!("../../assets/worlds/default.toml");
         let world = crate::world::config::parse_world(default_text).expect("default.toml parses");
         assert!(
@@ -526,27 +534,19 @@ mod shipped_world_rosters {
             "reinforcements.toml has no hail contacts and must not gain any"
         );
 
-        // The other world that fields the station keeps its declarative entry,
-        // which wins the UUID de-duplication — so its roster is untouched.
+        // The demo scenario: twelve templates onto one contact, and after the
+        // conversion that one contact has to come from the entity instead.
         let combat_test = include_str!("../../assets/worlds/combat_test.toml");
+        let world =
+            crate::world::config::parse_world(combat_test).expect("combat_test.toml must parse");
+        assert!(
+            world.comms.is_empty(),
+            "combat_test's twelve comms templates are [script]-authored (#984)"
+        );
         assert_eq!(
             entity_derived_roster(combat_test),
             vec!["world.entity.starbase_alpha.name".to_string()],
             "combat_test's one entity-derived candidate is the contact it already had"
         );
-    }
-
-    /// The demo scenario's twelve templates really are twelve, collapsing to
-    /// one contact — the specific number the M7 teardown would have zeroed.
-    #[test]
-    fn combat_test_collapses_twelve_templates_onto_one_contact() {
-        let text = include_str!("../../assets/worlds/combat_test.toml");
-        let world = crate::world::config::parse_world(text).expect("combat_test.toml must parse");
-        assert_eq!(
-            world.comms.len(),
-            12,
-            "combat_test authors 12 comms templates"
-        );
-        assert_eq!(declarative_roster(&world).len(), 1);
     }
 }

@@ -42,7 +42,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, FnPtr, ImmutableString};
+use rhai::{Engine, EvalAltResult, FnPtr, ImmutableString};
 use serde::{Deserialize, Serialize};
 
 use crate::world::config::TriggerAction;
@@ -447,6 +447,33 @@ pub fn register_scheduling(engine: &mut Engine) {
             outcome: None,
         });
     });
+    engine.register_fn(
+        "game_over",
+        |b: &mut Schedule,
+         reason: ImmutableString,
+         outcome: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            // The outcome-DECLARING delayed end, the twin of the immediate
+            // two-arg `ctx.effects.game_over` (issue #984). A declarative
+            // `game_over` action carries `outcome` and `delay_secs` on the SAME
+            // action — combat_test's victory window is exactly that shape — so
+            // without this overload a delayed end could only be authored as an
+            // undeclared one, and the balance classifier would read a scripted
+            // victory as a draw. Validated through the same `Outcome::parse`, so
+            // a typo raises and discards the call rather than deferring a bad end.
+            let outcome = crate::balance::Outcome::parse(&outcome).map_err(|e| {
+                Box::new(EvalAltResult::ErrorRuntime(
+                    format!("game_over: {e}").into(),
+                    rhai::Position::NONE,
+                ))
+            })?;
+            b.defer(TriggerAction::GameOver {
+                message: Some(reason.to_string()),
+                outcome: Some(outcome),
+            });
+            Ok(())
+        },
+    );
 }
 
 #[cfg(test)]
@@ -523,6 +550,63 @@ mod tests {
                 script_path: "combat.rhai".to_string(),
                 fn_name: "anon$abc".to_string(),
             }]
+        );
+    }
+
+    /// The delayed `game_over` overload that DECLARES an outcome (issue #984).
+    ///
+    /// `combat_test`'s victory window is a declarative `game_over` carrying both
+    /// `outcome = "victory"` and `delay_secs = 5.0` on the same action, so
+    /// without this the conversion could only defer an UNDECLARED end and the
+    /// balance classifier would read a scripted victory as a draw. Validated
+    /// through the same `Outcome::parse` as the immediate form, so a typo raises
+    /// and the call's whole buffer is discarded rather than a bad end deferred.
+    #[test]
+    fn a_delayed_game_over_can_declare_its_outcome() {
+        use crate::world::script::engine::runtime_engine;
+        use rhai::{Dynamic, Map};
+
+        fn deferred(source: &str) -> Result<Vec<DelayedAction>, String> {
+            let engine = runtime_engine();
+            let ast = engine.compile(source).expect("compiles");
+            let sink = ScheduleSink::new();
+            let mut ctx = Map::new();
+            ctx.insert("schedule".into(), Dynamic::from(sink.clone()));
+            vellum_script::call_fn(&engine, &ast, "t.rhai", "on_x", ctx)
+                .map(|_| sink.drain(&clock(0, 0.0, 60.0), "t.rhai").0)
+                .map_err(|e| e.to_string())
+        }
+
+        let delayed =
+            deferred(r#"fn on_x(ctx) { ctx.schedule.in_seconds(5).game_over("msg", "victory"); }"#)
+                .expect("the call runs");
+        assert_eq!(delayed.len(), 1);
+        assert_eq!(delayed[0].fire_at_elapsed, 5.0);
+        assert_eq!(
+            delayed[0].action,
+            TriggerAction::GameOver {
+                message: Some("msg".to_string()),
+                outcome: Some(crate::balance::Outcome::Victory),
+            }
+        );
+
+        // The one-arg form still defers an UNDECLARED end.
+        let undeclared =
+            deferred(r#"fn on_x(ctx) { ctx.schedule.in_seconds(5).game_over("msg"); }"#)
+                .expect("the call runs");
+        assert_eq!(
+            undeclared[0].action,
+            TriggerAction::GameOver {
+                message: Some("msg".to_string()),
+                outcome: None,
+            }
+        );
+
+        // And a bad outcome raises rather than deferring a nonsense end.
+        assert!(
+            deferred(r#"fn on_x(ctx) { ctx.schedule.in_seconds(5).game_over("m", "victni"); }"#)
+                .is_err(),
+            "an unparseable outcome must raise, as it does on the immediate form"
         );
     }
 

@@ -25,7 +25,9 @@ use std::sync::{Arc, Mutex};
 use rhai::{Engine, Map, AST};
 
 use crate::world::flags::FlagStore;
-use crate::world::script::effects::{register_effects, BufferedEffect, EffectSink};
+use crate::world::script::effects::{
+    register_effects, register_real_lit, BufferedEffect, EffectSink,
+};
 use crate::world::script::flags::{register_flags, Flags};
 use crate::world::script::schedule::{
     register_scheduling, CallEffects, SchedClock, ScheduleSink, TickBudget,
@@ -143,6 +145,11 @@ pub fn loading_engine(state: Arc<Mutex<BuilderState>>) -> Engine {
             });
         },
     );
+
+    // The fractional-leaf marker (issue #984). Needed HERE as well as on the
+    // runtime engine because `on_hull_below(entity, flt("0.75"), handler)` is a
+    // top-level registration, and a unit's top level only ever runs on this one.
+    register_real_lit(&mut engine);
 
     // The typed trigger-builder vocabulary (issue #980, M2): one registration fn
     // per `TriggerCondition` variant, each building a `Trigger` into `state`.

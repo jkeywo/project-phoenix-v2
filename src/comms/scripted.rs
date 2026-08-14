@@ -1464,4 +1464,353 @@ fn on_send(ctx) {
         assert_eq!(status(&app, "decl_obj"), ObjectiveStatus::Completed);
         assert_eq!(status(&app, "script_obj"), ObjectiveStatus::Active);
     }
+
+    // ── The shipped demo scenario (issue #984) ────────────────────────────────
+    //
+    // `combat_test.toml` is the LAST world to convert, and the only one whose
+    // comms a headless run can neither exercise nor speak for: its twelve
+    // reports are one-way announcements over Channel 2, which no `SimOutbox`
+    // message and no `state_digest` field records. The digest A/B that gates the
+    // conversion therefore proves the world's SIMULATION is unmoved — it matches
+    // to the byte over three run lengths — and says nothing at all about the
+    // reports. These tests are that half of the evidence, on the real shipped
+    // script compiled the way production compiles it.
+
+    /// Compile the SHIPPED `combat_test.toml`'s `[script]` block exactly as
+    /// `compile_world_scripts` does.
+    fn compile_combat_test() -> (WorldScriptRuntime, String) {
+        let text = include_str!("../../assets/worlds/combat_test.toml");
+        let value: toml::Value = toml::from_str(text).expect("combat_test.toml is valid TOML");
+        let compiled = crate::world::script::load::load_world_scripts(
+            "assets/worlds/combat_test.toml",
+            &value,
+            &NoScriptResolver,
+        );
+        assert!(
+            !crate::world::validate::has_error(&compiled.findings),
+            "the shipped combat_test.toml script must compile and lint clean: {:?}",
+            compiled.findings
+        );
+        let path = compiled
+            .asts
+            .keys()
+            .next()
+            .cloned()
+            .expect("combat_test.toml lifts one inline script unit");
+        (
+            WorldScriptRuntime {
+                host: RuntimeHost::new(),
+                asts: compiled.asts,
+                triggers: compiled.script_triggers,
+                handlers: Vec::new(),
+                budget: TickBudget::new(),
+                budget_tick: 0,
+                content_hash: compiled.content_hash,
+                pending_callbacks: PendingCallbacks::new(),
+                pending_comms_opens: Vec::new(),
+            },
+            path,
+        )
+    }
+
+    /// The twelve reports, in the order the `[[comms]]` templates were authored:
+    /// `(handler, node fn, strings.csv body id, urgent)`.
+    const COMBAT_TEST_REPORTS: &[(&str, &str, &str, bool)] = &[
+        (
+            "send_brief",
+            "brief",
+            "world.combat_test.comms.0.message",
+            true,
+        ),
+        (
+            "report_wave_1",
+            "wave_1_report",
+            "world.combat_test.comms.1.message",
+            false,
+        ),
+        (
+            "report_wave_2",
+            "wave_2_report",
+            "world.combat_test.comms.2.message",
+            false,
+        ),
+        (
+            "report_wave_3",
+            "wave_3_report",
+            "world.combat_test.comms.3.message",
+            false,
+        ),
+        (
+            "report_wave_4",
+            "wave_4_report",
+            "world.combat_test.comms.4.message",
+            false,
+        ),
+        (
+            "report_wave_5",
+            "wave_5_report",
+            "world.combat_test.comms.5.message",
+            true,
+        ),
+        (
+            "report_wave_6",
+            "wave_6_report",
+            "world.combat_test.comms.6.message",
+            true,
+        ),
+        (
+            "report_wave_7",
+            "wave_7_report",
+            "world.combat_test.comms.7.message",
+            true,
+        ),
+        (
+            "report_wave_8",
+            "wave_8_report",
+            "world.combat_test.comms.8.message",
+            true,
+        ),
+        (
+            "report_hull_75",
+            "hull_75",
+            "world.combat_test.comms.9.message",
+            true,
+        ),
+        (
+            "report_hull_50",
+            "hull_50",
+            "world.combat_test.comms.10.message",
+            true,
+        ),
+        (
+            "report_hull_10",
+            "hull_10",
+            "world.combat_test.comms.11.message",
+            true,
+        ),
+    ];
+
+    /// Every registration the deleted twenty `[[trigger]]` blocks and twelve
+    /// `[[comms]]` templates carried is present, with the same condition, in the
+    /// authored order — the order intra-tick dispatch (and therefore the digest)
+    /// depends on.
+    ///
+    /// The comms registrations sit LAST and unmerged, even though eight of them
+    /// share a clock with a wave handler that could have carried them: the
+    /// declarative comms evaluator drained its templates in authored order after
+    /// the triggers had run, and keeping them last is what reproduces the order
+    /// the twelve opens are queued in.
+    #[test]
+    fn combat_tests_script_registers_every_trigger_and_comms_block_it_replaced() {
+        use crate::world::config::TriggerCondition;
+        const STARBASE: &str = "world.entity.starbase_alpha.name";
+        let (sr, _path) = compile_combat_test();
+
+        let mut expected: Vec<(TriggerCondition, String)> =
+            vec![(TriggerCondition::OnWorldLoaded, "arm_the_scenario".into())];
+        let cadence = [0.0f32, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0];
+        for (wave, after_secs) in cadence.iter().enumerate() {
+            expected.push((
+                TriggerCondition::OnTimer {
+                    after_secs: *after_secs,
+                },
+                format!("release_wave_{}", wave + 1),
+            ));
+        }
+        for wave in 1..=8 {
+            expected.push((
+                TriggerCondition::OnAllDestroyed {
+                    group: format!("wave_{wave}"),
+                    after_secs: 0.0,
+                },
+                format!("wave_{wave}_cleared"),
+            ));
+        }
+        expected.push((
+            TriggerCondition::OnAllDestroyed {
+                group: "hostiles".into(),
+                after_secs: 0.0,
+            },
+            "on_raid_broken".into(),
+        ));
+        expected.push((
+            TriggerCondition::OnDestroyed {
+                entity_name: STARBASE.into(),
+            },
+            "on_starbase_lost".into(),
+        ));
+        expected.push((
+            TriggerCondition::OnWorldLoaded,
+            "add_standing_mission".into(),
+        ));
+        // The twelve comms, in the order the templates were authored.
+        expected.push((TriggerCondition::OnWorldLoaded, "send_brief".into()));
+        for (wave, after_secs) in cadence.iter().enumerate() {
+            expected.push((
+                TriggerCondition::OnTimer {
+                    after_secs: *after_secs,
+                },
+                format!("report_wave_{}", wave + 1),
+            ));
+        }
+        for (threshold, handler) in [
+            (0.75f32, "report_hull_75"),
+            (0.5, "report_hull_50"),
+            (0.1, "report_hull_10"),
+        ] {
+            expected.push((
+                TriggerCondition::OnHullBelow {
+                    entity_name: STARBASE.into(),
+                    threshold,
+                },
+                handler.into(),
+            ));
+        }
+
+        let registered: Vec<(TriggerCondition, String)> = sr
+            .triggers
+            .iter()
+            .map(|t| (t.trigger.condition.clone(), t.handler.clone()))
+            .collect();
+        assert_eq!(registered, expected);
+
+        // The victory guard is a trigger-LEVEL predicate, not an `if` in the
+        // handler. That distinction is the scenario: a `when` that reads false
+        // leaves the trigger armed, an in-handler guard spends it (issue #892).
+        let guarded: Vec<&str> = sr
+            .triggers
+            .iter()
+            .filter(|t| t.trigger.when.is_some())
+            .map(|t| t.handler.as_str())
+            .collect();
+        assert_eq!(
+            guarded,
+            vec!["on_raid_broken"],
+            "victory is the one guarded registration in this world"
+        );
+    }
+
+    /// Each of the twelve handlers opens exactly one thread, from Starbase
+    /// Alpha, with the urgency its template authored — and the node it names
+    /// returns the same `strings.csv` body id the template's `message` carried,
+    /// with no responses, because all twelve always were one-way reports.
+    #[test]
+    fn combat_tests_twelve_reports_keep_their_senders_bodies_and_urgency() {
+        const STARBASE: &str = "world.entity.starbase_alpha.name";
+        let (sr, path) = compile_combat_test();
+        let ast = sr.asts.get(&path).expect("compiled unit");
+        let flags = crate::world::flags::FlagStore::new();
+
+        for (handler, node_fn, body, urgent) in COMBAT_TEST_REPORTS {
+            let mut budget = TickBudget::new();
+            let (effects, node) = crate::world::script::comms::enter_node(
+                &sr.host,
+                &mut budget,
+                &SchedClock::ZERO,
+                ast,
+                &path,
+                handler,
+                &flags,
+            )
+            .unwrap_or_else(|e| panic!("{handler} must run: {e}"));
+            assert!(node.is_none(), "{handler} is a trigger handler, not a node");
+            assert!(
+                effects.commands.is_empty() && effects.delayed.is_empty(),
+                "{handler} opens a thread and does nothing else"
+            );
+            assert_eq!(effects.comms_opens.len(), 1, "{handler} opens one thread");
+            let open = &effects.comms_opens[0];
+            assert_eq!(open.from, STARBASE);
+            assert_eq!(open.root_fn, *node_fn);
+            assert_eq!(open.urgent, *urgent, "{handler}'s urgency is authored");
+            assert!(open.display_name.is_none() && open.thread_id.is_none());
+
+            let mut budget = TickBudget::new();
+            let (_, node) = crate::world::script::comms::enter_node(
+                &sr.host,
+                &mut budget,
+                &SchedClock::ZERO,
+                ast,
+                &path,
+                node_fn,
+                &flags,
+            )
+            .unwrap_or_else(|e| panic!("{node_fn} must run: {e}"));
+            let node = node.unwrap_or_else(|| panic!("{node_fn} must return a dialogue node"));
+            assert_eq!(node.message, *body, "{node_fn} keeps its strings.csv id");
+            assert!(
+                node.responses.is_empty(),
+                "{node_fn} is an announcement — the player cannot reply to it"
+            );
+        }
+    }
+
+    /// End to end through the LIVE drain: the twelve requests the shipped
+    /// handlers actually produce become twelve inbox messages, with the twelve
+    /// authored body ids in the authored order, each attributed to the station's
+    /// resolved UUID and carrying its authored urgency.
+    ///
+    /// This is the assertion the digest cannot make. A converted world's
+    /// simulation parity is proven by `--seed 42` matching to the byte; the
+    /// reports never touch that surface, so they are proven here instead.
+    #[test]
+    fn combat_tests_reports_reach_the_inbox_with_their_authored_bodies() {
+        const STARBASE: &str = "world.entity.starbase_alpha.name";
+        const STARBASE_UUID: &str = "starbase-uuid";
+        let mut app = scripted_comms_app();
+        let (mut sr, path) = compile_combat_test();
+        let flags = crate::world::flags::FlagStore::new();
+
+        // Queue what the world's own handlers queue, in registration order.
+        let ast = sr.asts.get(&path).expect("compiled unit").clone();
+        let mut queued = Vec::new();
+        for (handler, _, _, _) in COMBAT_TEST_REPORTS {
+            let mut budget = TickBudget::new();
+            let (effects, _) = crate::world::script::comms::enter_node(
+                &sr.host,
+                &mut budget,
+                &SchedClock::ZERO,
+                &ast,
+                &path,
+                handler,
+                &flags,
+            )
+            .expect("the handler runs");
+            queued.extend(effects.comms_opens);
+        }
+        assert_eq!(queued.len(), COMBAT_TEST_REPORTS.len());
+        sr.pending_comms_opens = queued;
+
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert(STARBASE.into(), STARBASE_UUID.into());
+        app.world_mut().insert_resource(sr);
+        app.world_mut()
+            .insert_resource(crate::world_id::WorldIdMint::default());
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(
+            messages
+                .iter()
+                .map(|m| (m.body.as_str(), m.is_urgent))
+                .collect::<Vec<_>>(),
+            COMBAT_TEST_REPORTS
+                .iter()
+                .map(|(_, _, body, urgent)| (*body, *urgent))
+                .collect::<Vec<_>>(),
+            "every authored report reaches the wire, in order, with its urgency"
+        );
+        assert!(
+            messages.iter().all(|m| m.sender_uuid == STARBASE_UUID),
+            "each report resolves `from` through name_to_uuid, as its template's \
+             `from` did"
+        );
+        assert!(
+            messages.iter().all(|m| m.responses.is_empty()),
+            "all twelve are one-way"
+        );
+    }
 }

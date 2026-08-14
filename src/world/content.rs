@@ -1829,11 +1829,19 @@ entity    = "world.entity.raider_alpha.name"
     // backfill, which does not clear the whole raid at any seed sampled, so a
     // run there never reaches the end of the schedule.
     //
-    // This drives the REAL parsed triggers through the REAL evaluator with a
+    // This drives the world's REAL triggers through the REAL evaluator with a
     // scripted player, and models exactly the runtime behaviours the authoring
     // leans on: `OnTimer` fires once its `after_secs` has elapsed, group
-    // membership accumulates on spawn and is never removed, and an action with
-    // `delay_secs` dispatches later than the trigger that queued it.
+    // membership accumulates on spawn and is never removed, and a deferred
+    // effect dispatches later than the trigger that queued it.
+    //
+    // (#984) Those triggers are Rhai registrations now, so the harness mirrors
+    // `tick_trigger_pipeline` one step further than it used to: it evaluates
+    // per-INDEX through `evaluate_single_trigger` (a scripted trigger fires with
+    // an EMPTY action list, so the index is what finds its handler), then RUNS
+    // that handler on the production runtime host and applies what it buffered.
+    // Nothing about the evaluator changed; what changed is where the effects
+    // come from, and the whole point of this test is that the answer is the same.
 
     /// Outcome of one scripted run of `combat_test.toml`'s trigger set.
     struct ChainRun {
@@ -1855,14 +1863,24 @@ entity    = "world.entity.raider_alpha.name"
     /// is a player falling behind the clock, which is a state the death-gated
     /// chain could not produce at all.
     fn run_combat_test_chain(ship_power: i64, kill_after_secs: f32) -> ChainRun {
+        use crate::world::script::effects::BufferedEffect;
+        use crate::world::script::fixture::ScriptedWorld;
+        use crate::world::script::schedule::SchedClock;
+
+        const WORLD: &str = "assets/worlds/combat_test.toml";
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = crate::world::config::parse_world(toml).expect("combat_test.toml must parse");
+        assert!(
+            cfg.triggers.is_empty(),
+            "combat_test's triggers are [script]-authored (#984)"
+        );
+        let world = ScriptedWorld::compile(WORLD, toml);
 
-        let mut states: Vec<TriggerState> = cfg
+        let mut states: Vec<TriggerState> = world
             .triggers
             .iter()
-            .map(|t| TriggerState {
-                trigger: t.clone(),
+            .map(|st| TriggerState {
+                trigger: st.trigger.clone(),
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
@@ -1935,30 +1953,46 @@ entity    = "world.entity.raider_alpha.name"
             }
 
             // 3. Evaluate, chaining within the step exactly as the runtime's
-            //    per-tick chaining loop does.
+            //    per-tick chaining loop does. Per-INDEX, because a scripted
+            //    trigger's effects come from the handler the index names.
             let mut round = events;
             for _ in 0..8 {
-                let flag_chain = [&flags];
-                let fired = evaluate_triggers_with_flags(
-                    &mut states,
-                    &round,
-                    &name_to_uuid,
-                    &flag_chain,
-                    &entity_groups,
-                    elapsed,
-                );
+                let mut fired: Vec<usize> = Vec::new();
+                for (idx, state) in states.iter_mut().enumerate() {
+                    let flag_chain = [&flags];
+                    if evaluate_single_trigger(
+                        state,
+                        &round,
+                        &name_to_uuid,
+                        &flag_chain,
+                        &[None],
+                        &entity_groups,
+                        elapsed,
+                    )
+                    .is_some()
+                    {
+                        fired.push(idx);
+                    }
+                }
                 if fired.is_empty() {
                     break;
                 }
                 round = Vec::new();
-                for ft in fired {
-                    for (i, action) in ft.actions.iter().enumerate() {
-                        let delay = ft.action_delays.get(i).copied().unwrap_or(0.0);
-                        if delay > 0.0 {
-                            pending.push((elapsed + delay, action.clone()));
-                        } else {
-                            apply_action(
-                                action,
+                let clock = SchedClock {
+                    tick: 0,
+                    elapsed_secs: elapsed,
+                    tick_hz: 60.0,
+                };
+                for idx in fired {
+                    let effects = world.fire(idx, &flags, &clock);
+                    // Immediate effects, in authored order. A name-resolving
+                    // `Action` is what the applier re-dispatches; a `Cmd` is
+                    // already resolved, and the only ones this world emits that
+                    // the model cares about are its flag writes.
+                    for effect in effects.commands {
+                        match effect {
+                            BufferedEffect::Action(action) => apply_action(
+                                &action,
                                 elapsed,
                                 kill_after_secs,
                                 &mut name_to_uuid,
@@ -1966,8 +2000,16 @@ entity    = "world.entity.raider_alpha.name"
                                 &mut alive,
                                 &mut flags,
                                 &mut run,
-                            );
+                            ),
+                            BufferedEffect::Cmd(cmd) => {
+                                apply_cmd(&cmd, &mut flags);
+                            }
                         }
+                    }
+                    // Deferred effects join the same queue a `delay_secs` action
+                    // did; the clock above makes `fire_at_elapsed` absolute.
+                    for delayed in effects.delayed {
+                        pending.push((delayed.fire_at_elapsed, delayed.action));
                     }
                 }
             }
@@ -2042,6 +2084,32 @@ entity    = "world.entity.raider_alpha.name"
                 run.waves_at_victory = flags.counter("waves_spawned");
             }
             _ => {}
+        }
+    }
+
+    /// Apply one RESOLVED command effect to the scripted world.
+    ///
+    /// A scripted handler's flag writes arrive as `MutateFlag` rather than as
+    /// the `IncrementWorldFlag` / `SetWorldFlagValue` actions the declarative
+    /// front-end dispatched, so the model applies them through the same two
+    /// `FlagStore` verbs `world::server`'s own `MutateFlag` arm uses. Everything
+    /// else this world emits as a command — objective completions, the defeat
+    /// `game_over` — the model does not track.
+    fn apply_cmd(
+        cmd: &crate::world::dispatch::ActionCmd,
+        flags: &mut crate::world::flags::FlagStore,
+    ) {
+        use crate::world::dispatch::{ActionCmd, FlagMutation};
+        if let ActionCmd::MutateFlag { name, mutation, .. } = cmd {
+            match mutation {
+                FlagMutation::Increment(by) => {
+                    flags.increment_flag(name, *by);
+                }
+                FlagMutation::SetValue(v) => {
+                    flags.set_flag_value(name, *v);
+                }
+                _ => {}
+            }
         }
     }
 

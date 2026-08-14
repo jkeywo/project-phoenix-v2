@@ -377,12 +377,12 @@ message   = "A.E.V. Ardent, this is the Research Outpost. Stand by — patching 
 
 ### Example — a declarative world, end to end
 
-> **The shipped `assets/worlds/default.toml` no longer looks like this.** Issue
-> #984 converted it — triggers *and* comms — to a single `[script]` block, so
-> the real file is now the worked example of the Rhai form rather than the
-> declarative one. The listing below is kept because `[[trigger]]` / `[[comms]]`
-> are still parsed, `combat_test.toml` still authors them, and this is the shape
-> a conversion starts from.
+> **No shipped world looks like this any more.** Issue #984 converted them all
+> — triggers *and* comms — to a single `[script]` block each, finishing with
+> `combat_test.toml`, so the real files are the worked examples of the Rhai form
+> rather than the declarative one. The listing below is kept because
+> `[[trigger]]` / `[[comms]]` are still parsed — a mod pack or a hand-authored
+> world may use them — and because this is the shape a conversion starts from.
 
 ```toml
 title = "Default Patrol"

@@ -8078,15 +8078,16 @@ hull_max_hp = 6
              doctrine-level fix worthless here"
         );
 
-        // Each world's doctrine-replacement marker in its own authoring: combat_test
-        // still declares spawn overrides in TOML; duel is [script]-authored (issue
-        // #984) and writes the same override as a Rhai map. Both spell "this
+        // The doctrine-replacement marker each world writes. BOTH are
+        // [script]-authored since issue #984, so both spell it as a Rhai map and
+        // the declarative `behaviour = { doctrine = [` form appears in no
+        // shipped world at all. It means the same thing either way: "this
         // scenario replaces a spawned hull's doctrine list".
         for (name, world, doctrine_marker) in [
             (
                 "combat_test.toml",
                 include_str!("../../assets/worlds/combat_test.toml"),
-                "behaviour = { doctrine = [",
+                "behaviour: #{ doctrine: [",
             ),
             (
                 "duel.toml",

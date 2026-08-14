@@ -32,13 +32,36 @@
 
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, ImmutableString};
+use rhai::{Engine, EvalAltResult, ImmutableString, Position};
 
-use crate::world::config::{scripted_trigger, TriggerCondition};
+use crate::world::config::{reject_world_history, scripted_trigger, TriggerCondition};
+use crate::world::script::effects::RealLit;
 use crate::world::script::engine::{BuilderState, ScriptTrigger};
 
-/// Record one script-authored trigger against the unit currently running.
-fn push_trigger(state: &Mutex<BuilderState>, condition: TriggerCondition, handler: &str) {
+/// A handle to the trigger a registration fn just authored, returned so
+/// TRIGGER-LEVEL fields — the ones that are neither the condition nor the
+/// handler — can be chained onto it:
+///
+/// ```rhai
+/// on_all_destroyed("hostiles", "on_victory").when("counter(waves_spawned) >= 8");
+/// ```
+///
+/// It is an index into the running unit's `script_triggers`, not a borrow, so
+/// the builder state lock is taken once per call and nothing outlives it. A
+/// registration used as a statement simply discards it, which is why every
+/// existing `on_*(…);` line is unaffected.
+#[derive(Clone, Copy, Debug)]
+pub struct TriggerHandle {
+    index: usize,
+}
+
+/// Record one script-authored trigger against the unit currently running, and
+/// hand back a [`TriggerHandle`] to it.
+fn push_trigger(
+    state: &Mutex<BuilderState>,
+    condition: TriggerCondition,
+    handler: &str,
+) -> TriggerHandle {
     let mut s = state.lock().expect("builder state lock");
     let source_path = s.current_path.clone();
     s.script_triggers.push(ScriptTrigger {
@@ -46,6 +69,14 @@ fn push_trigger(state: &Mutex<BuilderState>, condition: TriggerCondition, handle
         handler: handler.to_string(),
         source_path,
     });
+    TriggerHandle {
+        index: s.script_triggers.len() - 1,
+    }
+}
+
+/// Build a Rhai load-time error from a builder message.
+fn raise(message: String) -> Box<EvalAltResult> {
+    Box::new(EvalAltResult::ErrorRuntime(message.into(), Position::NONE))
 }
 
 /// Register the typed trigger-builder host functions on a loading engine.
@@ -65,7 +96,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     entity_name: entity.to_string(),
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -81,7 +112,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     after_secs: 0.0,
                 },
                 &handler,
-            );
+            )
         },
     );
     // … and the gated form (integer seconds → f32 at the boundary).
@@ -96,7 +127,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     after_secs: after_secs as f32,
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -111,7 +142,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     entity_name: entity.to_string(),
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -126,7 +157,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     after_secs: after_secs as f32,
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -141,7 +172,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     entity_name: entity.to_string(),
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -156,7 +187,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     name: name.to_string(),
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -171,14 +202,14 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     name: name.to_string(),
                 },
                 &handler,
-            );
+            )
         },
     );
 
     // 8. OnWorldLoaded (no condition params)
     let s = state.clone();
     engine.register_fn("on_world_loaded", move |handler: ImmutableString| {
-        push_trigger(&s, TriggerCondition::OnWorldLoaded, &handler);
+        push_trigger(&s, TriggerCondition::OnWorldLoaded, &handler)
     });
 
     // 9. OnEnteredRegion { entity_name }
@@ -192,7 +223,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     entity_name: entity.to_string(),
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -207,7 +238,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     entity_name: entity.to_string(),
                 },
                 &handler,
-            );
+            )
         },
     );
 
@@ -223,7 +254,7 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     waypoint: None,
                 },
                 &handler,
-            );
+            )
         },
     );
     // … and the specific-anchor form.
@@ -238,9 +269,86 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
                     waypoint: Some(waypoint.to_string()),
                 },
                 &handler,
-            );
+            )
         },
     );
+
+    // 12. OnHullBelow { entity_name, threshold } — the one condition whose own
+    // field is a FRACTION, so it is the one registration that takes a `flt(…)`
+    // marker rather than an INT (issue #984, the combat_test conversion). The
+    // threshold is a hull fraction in (0, 1]: a whole number could only ever be
+    // 1, so this is the boundary where the integer-only rule genuinely runs out
+    // and the same `RealLit` the effect maps use carries the value instead.
+    // Range validation mirrors the declarative front-end's, and a rejection is a
+    // load-time finding exactly as a bad `threshold = …` fails the world parse.
+    let s = state.clone();
+    engine.register_fn(
+        "on_hull_below",
+        move |entity: ImmutableString,
+              threshold: RealLit,
+              handler: ImmutableString|
+              -> Result<TriggerHandle, Box<EvalAltResult>> {
+            let threshold = threshold.0 as f32;
+            if !(threshold > 0.0 && threshold <= 1.0) {
+                return Err(raise(format!(
+                    "on_hull_below threshold must be in (0, 1], got {threshold}"
+                )));
+            }
+            Ok(push_trigger(
+                &s,
+                TriggerCondition::OnHullBelow {
+                    entity_name: entity.to_string(),
+                    threshold,
+                },
+                &handler,
+            ))
+        },
+    );
+
+    // The trigger-LEVEL predicate gate, chained onto whichever registration just
+    // ran: `on_all_destroyed("hostiles", "h").when("counter(waves) >= 8")`.
+    //
+    // It is a modifier rather than an argument because it is orthogonal to every
+    // condition — the declarative front-end spells it as a sibling field of
+    // `condition`, not part of it — and eleven `_when` overloads would say the
+    // same thing eleven times.
+    //
+    // The semantics that make it worth having, and not expressible as an `if` at
+    // the top of the handler: a `when` that reads false suppresses the firing
+    // WITHOUT consuming the trigger (`evaluate_triggers_with_flags` `continue`s
+    // before `state.fired = true`), so the trigger stays armed for a later
+    // moment when the predicate holds. An in-handler guard cannot do that — the
+    // condition already fired, and the trigger is spent.
+    //
+    // Parsed through the SAME `parse_predicate` the declarative `when =` field
+    // uses, and refused the same bounded-history atoms, so the two front-ends
+    // build the identical `Predicate`.
+    let s = state.clone();
+    engine.register_fn(
+        "when",
+        move |handle: &mut TriggerHandle,
+              predicate: ImmutableString|
+              -> Result<(), Box<EvalAltResult>> {
+            let pred = crate::world::flags::parse_predicate(&predicate)
+                .map_err(|e| raise(format!("Trigger 'when' predicate parse error: {e}")))?;
+            reject_world_history(&pred, "Trigger 'when' predicate").map_err(raise)?;
+            let mut st = s.lock().expect("builder state lock");
+            let index = handle.index;
+            match st.script_triggers.get_mut(index) {
+                Some(t) => {
+                    t.trigger.when = Some(pred);
+                    Ok(())
+                }
+                // Unreachable through the front-end: a handle is only ever minted
+                // by `push_trigger`, and nothing removes from `script_triggers`.
+                None => Err(raise(format!(
+                    "when(): trigger handle {index} names no registered trigger"
+                ))),
+            }
+        },
+    );
+
+    engine.register_type_with_name::<TriggerHandle>("Trigger");
 }
 
 #[cfg(test)]
@@ -429,6 +537,93 @@ mod tests {
                 waypoint: Some("beacon_3".into())
             }
         );
+    }
+
+    #[test]
+    fn on_hull_below_matches_toml() {
+        // The one condition with a FRACTIONAL field, so the one registration
+        // taking a `flt(…)` marker rather than an INT (issue #984).
+        assert_parity(
+            r#"on_hull_below("station", flt("0.75"), "h")"#,
+            "condition = \"on_hull_below\"\nentity = \"station\"\nthreshold = 0.75",
+        );
+        let regs = script_triggers(r#"on_hull_below("station", flt("0.5"), "h"); fn h(ctx) { }"#);
+        assert_eq!(
+            regs[0].trigger.condition,
+            TriggerCondition::OnHullBelow {
+                entity_name: "station".into(),
+                threshold: 0.5
+            }
+        );
+    }
+
+    #[test]
+    fn on_hull_below_rejects_a_threshold_outside_the_authored_range() {
+        // Mirrors the declarative front-end's `(0, 1]` check, so the two
+        // front-ends refuse the same content.
+        for bad in ["0.0", "1.5", "-0.25"] {
+            let compiled = compile_scripts(&[ScriptSource {
+                path: "w.toml#script.setup".to_string(),
+                source: format!("on_hull_below(\"s\", flt(\"{bad}\"), \"h\"); fn h(ctx) {{ }}"),
+            }]);
+            assert!(
+                !compiled.findings.is_empty(),
+                "threshold {bad} must be refused at load"
+            );
+        }
+    }
+
+    // ── the trigger-level `when` modifier (issue #984) ────────────────────────
+
+    #[test]
+    fn when_builds_the_same_predicate_the_declarative_field_does() {
+        assert_parity(
+            r#"on_all_destroyed("hostiles", "h").when("counter(waves_spawned) >= 8")"#,
+            "condition = \"on_all_destroyed\"\ngroup = \"hostiles\"\nwhen = \"counter(waves_spawned) >= 8\"",
+        );
+    }
+
+    #[test]
+    fn when_applies_to_the_registration_it_is_chained_onto() {
+        // Two registrations, one guarded: the modifier must land on ITS OWN
+        // trigger, which is what the returned handle is for.
+        let regs = script_triggers(
+            r#"
+            on_world_loaded("a");
+            on_destroyed("x", "b").when("flag(armed)");
+            on_timer(5, "c");
+            fn a(ctx) { }
+            fn b(ctx) { }
+            fn c(ctx) { }
+            "#,
+        );
+        let guarded: Vec<&str> = regs
+            .iter()
+            .filter(|r| r.trigger.when.is_some())
+            .map(|r| r.handler.as_str())
+            .collect();
+        assert_eq!(guarded, vec!["b"]);
+    }
+
+    #[test]
+    fn when_rejects_a_malformed_predicate_and_a_world_history_atom() {
+        for bad in [
+            // Not a predicate at all.
+            "counter(",
+            // A bounded-history window, which a WORLD expression cannot fold —
+            // refused by the same `reject_world_history` the declarative `when =`
+            // field runs (issue #890).
+            "history(hull_below, 5) >= 1",
+        ] {
+            let compiled = compile_scripts(&[ScriptSource {
+                path: "w.toml#script.setup".to_string(),
+                source: format!("on_world_loaded(\"h\").when(\"{bad}\"); fn h(ctx) {{ }}"),
+            }]);
+            assert!(
+                !compiled.findings.is_empty(),
+                "predicate `{bad}` must be refused at load"
+            );
+        }
     }
 
     // ── the front-end also records the handler and defaults the lifecycle ─────

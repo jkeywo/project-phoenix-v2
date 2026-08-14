@@ -609,19 +609,30 @@ mod tests {
 
     // ── Shipped-world integration ─────────────────────────────────────────
 
-    /// A real shipped world's `[[comms]]` template fires from a real world
-    /// event through this evaluator.
+    /// An authored `[[comms]]` template fires from a real world event, parsed
+    /// out of a world TOML by the real parser and evaluated by this evaluator.
     ///
-    /// This used to read `default.toml`'s `on_attacked` raider template. Issue
-    /// #984 converted that world's comms to `[script]`, so `combat_test` — the
-    /// demo scenario, and the last shipped world authoring `[[comms]]` — is the
-    /// remaining declarative subject. The converted world's equivalent coverage
-    /// is `comms::scripted`'s `default_world_dialogue_tree_*` tests, which run
-    /// its dialogue tree through the scripted front-end.
+    /// The subject is a LITERAL, and this is the second time it has moved: it
+    /// read `default.toml`'s `on_attacked` raider template until issue #984
+    /// converted that world, then `combat_test`'s opening brief until the same
+    /// issue converted THAT one — and with it the last shipped world authoring
+    /// `[[comms]]` at all. There is no shipped subject left to point at, so the
+    /// world is inline here. The front-end is still live and still parses (mod
+    /// packs and hand-authored worlds may use it); what no longer exists is a
+    /// shipped user of it.
+    ///
+    /// The converted worlds' equivalent coverage is in `comms::scripted`, which
+    /// runs their real dialogue trees through the scripted front-end.
     #[test]
-    fn combat_test_world_on_world_loaded_fires_comms_template() {
-        let toml = include_str!("../../assets/worlds/combat_test.toml");
-        let world = crate::world::config::parse_world(toml).expect("combat_test.toml must parse");
+    fn an_authored_on_world_loaded_comms_template_fires() {
+        let toml = r#"
+[[comms]]
+from    = "world.entity.starbase_alpha.name"
+trigger = "on_world_loaded"
+urgent  = true
+message = "world.combat_test.comms.0.message"
+"#;
+        let world = crate::world::config::parse_world(toml).expect("world must parse");
         let mut states = comms_template_states_from_world(&world);
         let name_to_uuid: HashMap<String, String> = HashMap::new();
         let events = vec![WorldEvent::WorldLoaded];

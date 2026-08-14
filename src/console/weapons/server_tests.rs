@@ -10521,19 +10521,25 @@ fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
     )
     .expect("the shipped raid cruiser must parse");
 
-    let world =
-        crate::world::config::parse_world(include_str!("../../../assets/worlds/combat_test.toml"))
-            .expect("combat_test.toml must parse");
+    // (#984) The spawn is a Rhai handler's `ctx.effects.spawn_entity(#{…})`
+    // now, so the override is read by RUNNING the world's own handlers and
+    // taking the `TriggerAction::SpawnEntity` they buffer — the same value the
+    // applier merges, from the same shipped file.
+    let world = crate::world::script::fixture::ScriptedWorld::compile(
+        "assets/worlds/combat_test.toml",
+        include_str!("../../../assets/worlds/combat_test.toml"),
+    );
+    let flags = crate::world::flags::FlagStore::new();
     let overrides = world
         .triggers
         .iter()
-        .flat_map(|t| t.actions.iter())
+        .flat_map(|t| world.actions(&t.handler, &flags))
         .find_map(|a| match a {
             crate::world::config::TriggerAction::SpawnEntity {
                 name,
                 overrides: Some(o),
                 ..
-            } if name == "wave_1" => Some(o.clone()),
+            } if name == "wave_1" => Some(o),
             _ => None,
         })
         .expect("combat_test must spawn `wave_1` with inline overrides");
@@ -10694,20 +10700,28 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
         .get("min_rounds_per_threat")
         .expect("the shipped magazine doctrine authors a reserve");
 
-    // The mission length is the world's, not this test's.
-    let world =
-        crate::world::config::parse_world(include_str!("../../../assets/worlds/combat_test.toml"))
-            .expect("combat_test.toml must parse");
+    // The mission length is the world's, not this test's. (#984) The world
+    // publishes it from a Rhai handler now — `ctx.flags.mission_threat_remaining
+    // = 8` — which drains as the same absolute `MutateFlag { SetValue }` the
+    // declarative `set_flag_value` action dispatched, so the number is read by
+    // running the world's own handlers rather than by re-stating it here.
+    let world = crate::world::script::fixture::ScriptedWorld::compile(
+        "assets/worlds/combat_test.toml",
+        include_str!("../../../assets/worlds/combat_test.toml"),
+    );
+    let flags = crate::world::flags::FlagStore::new();
     let waves = world
         .triggers
         .iter()
-        .flat_map(|t| t.actions.iter())
-        .find_map(|a| match a {
-            crate::world::config::TriggerAction::SetWorldFlagValue { name, value }
-                if name == crate::entities::config::MISSION_THREAT_REMAINING_COUNTER =>
-            {
-                Some(*value)
-            }
+        .flat_map(|t| world.call(&t.handler, &flags).commands)
+        .find_map(|e| match e {
+            crate::world::script::effects::BufferedEffect::Cmd(
+                crate::world::dispatch::ActionCmd::MutateFlag {
+                    name,
+                    mutation: crate::world::dispatch::FlagMutation::SetValue(value),
+                    ..
+                },
+            ) if name == crate::entities::config::MISSION_THREAT_REMAINING_COUNTER => Some(value),
             _ => None,
         })
         .expect("combat_test must publish its remaining-threat count");

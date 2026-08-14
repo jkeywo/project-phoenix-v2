@@ -41,9 +41,10 @@ use crate::world::script::engine::{loading_engine, BuilderState};
 ///
 /// `receiver` is the `ctx` sub-object a method hangs off (`"effects"`,
 /// `"flags"`, `"schedule"`), `"delay"` for the delay-builder verbs reached via
-/// `ctx.schedule.in_seconds(n).<verb>(…)`, or `""` for a top-level call
-/// (`on_destroyed(…)`, `on(…)`). Everything is `&'static` — the registry is a
-/// compile-time constant list.
+/// `ctx.schedule.in_seconds(n).<verb>(…)`, `"trigger"` for a modifier chained
+/// onto a registration's own handle (`on_timer(…).when(…)`), or `""` for a
+/// top-level call (`on_destroyed(…)`, `on(…)`). Everything is `&'static` — the
+/// registry is a compile-time constant list.
 #[derive(Clone, Copy, Debug)]
 pub struct HostFn {
     /// The callable name, exactly as it is registered on the engine.
@@ -166,6 +167,24 @@ pub const HOST_FNS: &[HostFn] = &[
         category: "trigger",
         summary: "Fire when the named entity reaches a waypoint. Optional middle \
                   arg `waypoint` pins a specific anchor.",
+    },
+    HostFn {
+        name: "on_hull_below",
+        receiver: "",
+        params: &["entity", "threshold", "handler"],
+        category: "trigger",
+        summary: "Fire when the named entity's hull fraction crosses DOWN through \
+                  `threshold`, a fraction in (0, 1] written `flt(\"0.75\")`.",
+    },
+    // ── chained onto a registration's handle (loading engine) ────────────────
+    HostFn {
+        name: "when",
+        receiver: "trigger",
+        params: &["predicate"],
+        category: "trigger",
+        summary: "Gate the registration just authored on a flag predicate: \
+                  `on_all_destroyed(g, h).when(\"counter(x) >= 8\")`. A false \
+                  reading suppresses the firing WITHOUT consuming the trigger.",
     },
     // ── ctx.effects.* (runtime engine) ───────────────────────────────────────
     HostFn {
@@ -402,9 +421,24 @@ mod tests {
             "on" => "\"evt\", \"h\"",     // on(event, handler)
             "on_timer" => "0, \"h\"",     // on_timer(after_secs: INT, handler)
             "on_world_loaded" => "\"h\"", // on_world_loaded(handler)
+            // The one fractional condition field: a `flt(…)` marker, not an INT.
+            "on_hull_below" => "\"e\", flt(\"0.5\"), \"h\"",
             // Every other trigger builder is (name/entity/group, handler).
             _ => "\"e\", \"h\"",
         }
+    }
+
+    /// A top-level statement that exercises `hf` on the LOADING engine: a bare
+    /// registration for a `""` receiver, or a registration with the modifier
+    /// chained onto its handle for a `"trigger"` one.
+    fn top_level_probe(hf: &HostFn) -> String {
+        if hf.receiver == "trigger" {
+            return match hf.name {
+                "when" => "on_world_loaded(\"h\").when(\"flag(armed)\");".to_string(),
+                other => panic!("add a probe for the new trigger.{other}"),
+            };
+        }
+        format!("{}({});", hf.name, top_level_args(hf.name))
     }
 
     /// A `ctx.<receiver>.<name>(…)` expression that exercises `hf` correctly, so
@@ -440,10 +474,10 @@ mod tests {
     /// engine never registered — answers "Function not found".
     fn assert_hostfn_resolves(hf: &HostFn, loading: &Engine, host: &RuntimeHost) {
         let is_not_found = |msg: &str| msg.contains("Function not found");
-        if hf.receiver.is_empty() {
-            // Top-level builder / `on`: run it on the loading engine's top level,
-            // exactly as the loader's `run_ast` does.
-            let src = format!("{}({});", hf.name, top_level_args(hf.name));
+        if hf.receiver.is_empty() || hf.receiver == "trigger" {
+            // Top-level builder / `on` / a handle modifier: run it on the loading
+            // engine's top level, exactly as the loader's `run_ast` does.
+            let src = top_level_probe(hf);
             let ast = loading.compile(&src).expect("probe compiles");
             if let Err(err) = loading.run_ast(&ast) {
                 assert!(
@@ -509,12 +543,15 @@ mod tests {
             "on_entered_region",
             "on_exited_region",
             "on_waypoint_reached",
+            "on_hull_below",
         ] {
             assert!(
                 names.contains(&("", expected)),
                 "missing top-level {expected}"
             );
         }
+        // Chained onto a registration's handle (triggers.rs).
+        assert!(names.contains(&("trigger", "when")), "missing trigger.when");
         // ctx.effects.* (effects.rs) and the same verbs as delay-builder methods
         // (schedule.rs).
         for verb in [

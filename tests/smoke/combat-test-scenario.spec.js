@@ -46,32 +46,47 @@ const COMBAT_TEST_TOML = fs.readFileSync(
 // fixture instead — see the header of `fixtures.js` for the convention.
 const AVAILABLE_SHIP_COUNT = countTableArray(COMBAT_TEST_TOML, 'available_ships');
 
-/** Objective ids added by the `[[trigger]]` blocks `keep` selects. */
-function objectivesAddedBy(toml, keep) {
+// Issue #984 moved the triggers into a Rhai `[script]` block, so the two
+// expectations below are read out of THAT instead — still out of the same text
+// the spec serves to the page, and still deliberately not a parser: a
+// registration line names a handler fn, and the objective ids are the `id:`
+// keys of the `add_objective` maps in that fn's body.
+const SCRIPT_BODY = COMBAT_TEST_TOML.match(/^setup\s*=\s*"""\n([\s\S]*?)\n"""/m)?.[1] ?? '';
+
+/** The body of `fn name(ctx) { … }`, by brace matching from its opening `{`. */
+function handlerBody(script, name) {
+  const start = script.search(new RegExp(String.raw`^fn\s+${name}\s*\(`, 'm'));
+  if (start < 0) return '';
+  let depth = 0;
+  for (let i = script.indexOf('{', start); i < script.length; i += 1) {
+    if (script[i] === '{') depth += 1;
+    else if (script[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return script.slice(start, i + 1);
+    }
+  }
+  return '';
+}
+
+/** Objective ids added by the handlers of the registrations `pattern` matches. */
+function objectivesAddedBy(script, pattern) {
   const ids = [];
-  for (const block of toml.split(/^\[\[trigger\]\]\s*$/m).slice(1)) {
-    if (!keep(block)) continue;
-    for (const action of block.split(/^\s*\[\[trigger\.action\]\]\s*$/m)) {
-      if (!/^\s*type\s*=\s*"add_objective"/m.test(action)) continue;
-      const id = action.match(/^\s*id\s*=\s*"([^"]+)"/m);
-      if (id) ids.push(id[1]);
+  for (const [, handler] of script.matchAll(pattern)) {
+    for (const [, id] of handlerBody(script, handler).matchAll(
+      /add_objective\(#\{\s*id:\s*"([^"]+)"/g,
+    )) {
+      ids.push(id);
     }
   }
   return ids;
 }
 
-const WORLD_LOAD_OBJECTIVES = objectivesAddedBy(COMBAT_TEST_TOML, (b) =>
-  /^\s*condition\s*=\s*"on_world_loaded"/m.test(b),
-);
+const WORLD_LOAD_OBJECTIVES = objectivesAddedBy(SCRIPT_BODY, /^on_world_loaded\("([^"]+)"\)/gm);
 
-// The undelayed wave: `on_timer` with `after_secs = 0`. Since #960 every wave
-// is on a clock, but the rest of them are 45 seconds and more apart, so this is
-// still the only wave a fast smoke run can see.
-const FIRST_WAVE_OBJECTIVES = objectivesAddedBy(
-  COMBAT_TEST_TOML,
-  (b) =>
-    /^\s*condition\s*=\s*"on_timer"/m.test(b) && /^\s*after_secs\s*=\s*0(\.0+)?\s*$/m.test(b),
-);
+// The undelayed wave: `on_timer(0, …)`. Since #960 every wave is on a clock,
+// but the rest of them are 45 seconds and more apart, so this is still the only
+// wave a fast smoke run can see.
+const FIRST_WAVE_OBJECTIVES = objectivesAddedBy(SCRIPT_BODY, /^on_timer\(0,\s*"([^"]+)"\)/gm);
 
 test('combat_test scenario: starbase + objective + player + first wave appear after game start', async ({ context }) => {
   await context.route('**/assets/worlds/combat_test.toml', (route) =>

@@ -192,15 +192,21 @@ impl EffectSink {
 /// them as `ctx.effects.complete_objective("obj1")`. The M1 set pushes a resolved
 /// `ActionCmd`; the three M6 name-resolving verbs buffer a declarative
 /// `TriggerAction` for the applier to resolve.
-pub fn register_effects(engine: &mut Engine) {
-    engine.register_type_with_name::<EffectSink>("Effects");
-
-    // The `no_float`-safe fractional-leaf marker. `flt("0.9")` parses the string
-    // into a `RealLit` the effect readers unwrap; the parse happens ONCE, at
-    // map-build time, and the `f64` is never arithmetic'd in script — so a
-    // fractional constant reaches the declarative boundary with determinism
-    // intact. A bad string raises (discarding the call, settled decision 10),
-    // exactly as a malformed declarative float fails the world load.
+/// Register the `no_float`-safe fractional-leaf marker on an engine.
+///
+/// `flt("0.9")` parses the string into a [`RealLit`] its readers unwrap; the
+/// parse happens ONCE, at map-build time, and the `f64` is never arithmetic'd in
+/// script — so a fractional constant reaches the declarative boundary with
+/// determinism intact. A bad string raises (discarding the call, settled
+/// decision 10), exactly as a malformed declarative float fails the world load.
+///
+/// Registered on BOTH engines: the runtime engine reads it inside handler maps
+/// (`target_speed: flt("0.9")`), and the LOADING engine needs it because a
+/// trigger registration can carry a fractional condition field —
+/// `on_hull_below(entity, flt("0.75"), handler)` is authored at a unit's top
+/// level, which only the loading engine ever runs. One marker, one spelling,
+/// wherever a fraction has to be said.
+pub fn register_real_lit(engine: &mut Engine) {
     engine.register_type_with_name::<RealLit>("RealLit");
     engine.register_fn(
         "flt",
@@ -210,6 +216,12 @@ pub fn register_effects(engine: &mut Engine) {
                 .map_err(|e| raise(format!("flt(\"{s}\"): not a real number: {e}")))
         },
     );
+}
+
+pub fn register_effects(engine: &mut Engine) {
+    engine.register_type_with_name::<EffectSink>("Effects");
+
+    register_real_lit(engine);
 
     engine.register_fn(
         "complete_objective",

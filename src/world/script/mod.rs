@@ -88,6 +88,11 @@ pub mod authoring;
 pub mod comms;
 pub mod effects;
 pub mod engine;
+/// Test-only harness for driving a `[script]`-authored world's handlers, shared
+/// by the four modules whose shipped-world tests lost their declarative subject
+/// to the conversion (issue #984).
+#[cfg(test)]
+pub mod fixture;
 pub mod flags;
 pub mod load;
 pub mod schedule;

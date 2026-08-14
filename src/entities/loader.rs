@@ -821,10 +821,86 @@ size_max = 2.0
         result
     }
 
-    /// Every `(template, overrides)` pair the shipped worlds author, from both
-    /// `[[entity]].overrides` and `[[trigger]]` `spawn_entity` actions — the
-    /// two places an override is written.
+    /// Every `(template, overrides)` pair the shipped worlds author, from all
+    /// THREE places an override is written: `[[entity]].overrides`, a
+    /// declarative `spawn_entity` action, and — since issue #984 converted the
+    /// last world — a Rhai handler's `ctx.effects.spawn_entity(#{ overrides })`.
+    ///
+    /// The scripted half is harvested by RUNNING each registered handler on the
+    /// runtime host and reading the `TriggerAction::SpawnEntity` it buffers,
+    /// rather than by scanning source: that is the same `toml::Value` the
+    /// applier will merge, built by the same `dynamic_to_toml`, so the walk
+    /// guards the real thing. It matters that it reaches them — after
+    /// `combat_test`'s conversion the declarative walk alone finds seven pairs
+    /// where it used to find twenty-six, and the nineteen it lost are the entire
+    /// shipped raid's doctrine.
     fn shipped_override_pairs() -> Vec<(String, String, toml::Value)> {
+        /// Run every handler a world's `[script]` registers and collect the
+        /// overrides its `spawn_entity` effects carry.
+        ///
+        /// `ship_power` is seeded at 100 so the power-tier bonus spawns — which
+        /// are `if` guards inside the handler, not separate registrations — are
+        /// harvested too. A world with no `[script]` block compiles to nothing
+        /// and contributes nothing.
+        fn scripted_pairs(world: &str, text: &str, out: &mut Vec<(String, String, toml::Value)>) {
+            use crate::world::script::effects::BufferedEffect;
+            use crate::world::script::engine::RuntimeHost;
+            use crate::world::script::load::compile_scripts;
+            use crate::world::script::schedule::{SchedClock, TickBudget};
+            use vellum_script::ScriptSource;
+
+            let value: toml::Value = toml::from_str(text).expect("world must be valid TOML");
+            let Some(table) = value.get("script").and_then(|s| s.as_table()) else {
+                return;
+            };
+            let sources: Vec<ScriptSource> = table
+                .iter()
+                .filter_map(|(key, v)| {
+                    v.as_str().map(|source| ScriptSource {
+                        path: format!("{world}#script.{key}"),
+                        source: source.to_string(),
+                    })
+                })
+                .collect();
+            let compiled = compile_scripts(&sources);
+            assert!(
+                compiled.findings.is_empty(),
+                "{world} script must compile: {:?}",
+                compiled.findings
+            );
+
+            let mut flags = crate::world::flags::FlagStore::new();
+            flags.set_flag_value("ship_power", 100);
+            let host = RuntimeHost::new();
+            let mut budget = TickBudget::new();
+            for st in &compiled.script_triggers {
+                let Some(ast) = compiled.asts.get(&st.source_path) else {
+                    continue;
+                };
+                let effects = host.call(
+                    &mut budget,
+                    &SchedClock::ZERO,
+                    ast,
+                    &st.source_path,
+                    &st.handler,
+                    &flags,
+                    rhai::Map::new(),
+                );
+                for effect in effects.commands {
+                    if let BufferedEffect::Action(
+                        crate::world::config::TriggerAction::SpawnEntity {
+                            template_path,
+                            overrides: Some(overrides),
+                            ..
+                        },
+                    ) = effect
+                    {
+                        out.push((world.to_string(), template_path, overrides));
+                    }
+                }
+            }
+        }
+
         fn walk(world: &str, value: &toml::Value, out: &mut Vec<(String, String, toml::Value)>) {
             match value {
                 toml::Value::Table(t) => {
@@ -860,6 +936,7 @@ size_max = 2.0
             let value: toml::Value =
                 toml::from_str(&text).unwrap_or_else(|e| panic!("{world} must be valid TOML: {e}"));
             walk(&world, &value, &mut out);
+            scripted_pairs(&world, &text, &mut out);
         }
         out
     }

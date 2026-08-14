@@ -4384,6 +4384,14 @@ pub struct EntityConfig {
     /// be done *to* an entity, this one says what an entity can do.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operations: Option<crate::operations::OperationsConfig>,
+    /// The sensor suite's scan capability (issue #1032). Present on a hull whose
+    /// science station can take a reading of an external structure; absent for
+    /// everything else, which can scan nothing and is refused by name if asked.
+    /// The mirror image of `infrastructure` in the other direction from
+    /// `operations`: that table says what can be *done to* an entity, this one
+    /// says what an entity can *read*.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<crate::science::ScanConfig>,
     /// Civilian traffic (issue #1028). Present for a hull that flies an authored
     /// `[[route]]` and can be given `hold` / `divert` / `dock` orders. Absent for
     /// everything else, which behaves exactly as it did before this section
@@ -4748,6 +4756,16 @@ impl EntityConfig {
         // crew can start and never finish.
         if let Some(ref operations) = config.operations {
             operations.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [scan] table has to describe a fidelity ladder that can
+        // actually answer (issue #1032). No bands at all, two bands claiming
+        // the same id, ranges that do not strictly increase, an unlabelled band
+        // or a reporting step outside (0, 1] are all author mistakes whose only
+        // other symptom would be a science console that quietly returns nothing
+        // for the rest of the mission.
+        if let Some(ref scan) = config.scan {
+            scan.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [civilian] table has to name a lane something can fly

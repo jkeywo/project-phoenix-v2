@@ -3379,3 +3379,175 @@ fn a_save_written_before_evidence_state_is_refused_on_format() {
         "the refusal names the dimension that moved: {refusal}"
     );
 }
+
+// ── Issue #1032: a sensor reading survives a resume ──────────────────────────
+
+/// The scan probe: one destroyer, one structure failing under its own authored
+/// decay, and two contacts it must refuse.
+const SCAN: &str = "assets/worlds/probe_scan.toml";
+
+/// Frames to run before the scan capture — far enough in that the game is
+/// InProgress and the ship's stations are backfilled.
+const SCAN_CAPTURE_AT: u64 = 90;
+
+fn scan_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: SCAN.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        max_ticks: 600,
+        deterministic: true,
+        seed: Some(1032),
+        ..Default::default()
+    }
+}
+
+/// Fly the scanner to 80 units off the depot and take a reading through the
+/// ordinary admitted path, exactly as `tests/headless_runner.rs` does.
+fn take_a_reading(app: &mut bevy::prelude::App) {
+    use project_phoenix::entity_spawner::{EntityName, EntityUuid};
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::server_app::LocalShip;
+    use project_phoenix::ship::state::ShipPhysics;
+
+    let depot = {
+        let mut q = app.world_mut().query::<(&EntityName, &EntityUuid)>();
+        let found = q
+            .iter(app.world())
+            .find(|(n, _)| n.0 == "world.probe_scan.entity.skyway_depot.name")
+            .map(|(_, uuid)| uuid.0.clone());
+        found.expect("the probe world spawns the depot")
+    };
+    let ship = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<LocalShip>>();
+        let found = q.iter(app.world()).next();
+        found.expect("the probe world spawns a local ship")
+    };
+    app.world_mut()
+        .get_mut::<ShipPhysics>(ship)
+        .expect("the local ship is a ship")
+        .x = 520.0;
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: "ai:scan-resume-probe".into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::ship::system_registry::sensors_system_id(),
+                payload: SystemControlPayload::ScanTarget { uuid: depot },
+            },
+        });
+    step(app, 2);
+}
+
+/// **Issue #1032.** A mission saved after the crew surveyed a structure comes
+/// back with the survey.
+///
+/// This is the one piece of scan state a fold cannot recover. Everything else —
+/// the depot's condition, the ship's range, the grid's level — is re-derivable
+/// from the resumed world, but the READING is what the crew saw when they
+/// looked, at the fidelity that moment bought them, and the structure has gone
+/// on failing since. A resumed crew handed a blank readout would have to
+/// re-survey a thing they had already surveyed, and would get a different
+/// answer, which is the whole reason the reading is stored rather than folded.
+///
+/// The control below reads the freshly booted ship first, so an inert restore is
+/// visible rather than hidden behind a value that happened to match.
+#[test]
+fn the_resumed_world_keeps_the_reading_the_crew_took() {
+    let mut live = boot(&scan_args());
+    step(&mut live, SCAN_CAPTURE_AT);
+    take_a_reading(&mut live);
+
+    let payload = capture(live.world());
+    let captured: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.scan.as_ref().map(|s| (&e.uuid, s)))
+        .collect();
+    assert_eq!(
+        captured.len(),
+        1,
+        "the probe world carries exactly one ship with a survey suite"
+    );
+    let (uuid, record) = captured[0];
+    let reading = record
+        .last
+        .as_ref()
+        .expect("precondition: the capture must be taken after a scan came back");
+    assert_eq!(
+        reading.band, "detailed",
+        "precondition: and from inside the destroyer's finest authored band, so the \
+         restored value is a specific one rather than whatever a default would give"
+    );
+    assert!(
+        reading.condition_fraction > 0.0,
+        "precondition: it read a real, non-zero condition off the depot's track"
+    );
+    assert!(record.refusal.is_none());
+
+    let mut resumed = boot_to_restore_point(&scan_args(), &payload);
+    let before_restore = resumed
+        .world_mut()
+        .query::<&project_phoenix::science::ShipScanRecord>()
+        .iter(resumed.world())
+        .next()
+        .cloned()
+        .expect("the fresh world spawned the destroyer from its template");
+    assert!(
+        before_restore.last.is_none(),
+        "control: a freshly booted crew have surveyed nothing, so an inert restore \
+         would be visible here rather than hidden behind a value that matched"
+    );
+    assert_eq!(
+        before_restore.config.bands.len(),
+        2,
+        "…and it carries its authored fidelity ladder, which the save deliberately \
+         does NOT: that is content, re-derived from the template on spawn"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let after = capture(resumed.world());
+    let restored = after
+        .entities
+        .iter()
+        .find(|e| &e.uuid == uuid)
+        .and_then(|e| e.scan.as_ref())
+        .unwrap_or_else(|| panic!("ship {uuid} came back without its scan record"));
+    assert_eq!(
+        restored, record,
+        "ship {uuid}: the subject, the band, the tick it was taken on, the quantised \
+         condition and every labelled row must all come back exactly as captured"
+    );
+
+    let live_ladder = resumed
+        .world_mut()
+        .query::<&project_phoenix::science::ShipScanRecord>()
+        .iter(resumed.world())
+        .next()
+        .map(|record| record.config.clone())
+        .expect("the record is still attached");
+    assert_eq!(
+        live_ladder, before_restore.config,
+        "and the restore left the spawned ladder alone — it restores the mutable half \
+         of the record, not the content half"
+    );
+}
+
+/// **Issue #1032.** A world whose hulls carry no survey suite writes nothing
+/// scan-shaped into its save.
+///
+/// `probe_stabilise` flies two cruisers, and a cruiser authors no `[scan]`.
+/// Every world in the repository whose hulls are not destroyers is in this arm,
+/// and none of them should pay a byte for a feature they do not use.
+#[test]
+fn a_world_with_no_survey_suite_writes_no_scan_state() {
+    let mut live = boot(&stabilise_args());
+    step(&mut live, 120);
+    let payload = capture(live.world());
+    assert!(
+        payload.entities.iter().all(|e| e.scan.is_none()),
+        "a hull with no [scan] table carries no scan record and writes no scan state"
+    );
+}

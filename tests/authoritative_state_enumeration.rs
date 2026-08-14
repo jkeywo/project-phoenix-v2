@@ -125,6 +125,17 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     // every tick, so there was nothing to register and nothing extra to
     // classify.
     "ResolvedCapacity", "CapacityAdjustment",
+    // Issue #1032, the science scan. `ShipScanRecord` is the one new Bevy
+    // COMPONENT — the per-ship survey suite and the last reading it took — and
+    // the reading is the part no fold can recover: it is what the crew saw when
+    // they looked, at the fidelity that moment bought them, and the structure
+    // has moved on since (#1031's evidence log is stored for the same reason).
+    // `ScanReading`, `ScanRefusal` and `ScanSaveState` are the value types
+    // behind it, listed for traceability the way `OperationHold` is; `ScanConfig`
+    // is the authored ladder, which is content re-derived at spawn rather than
+    // saved. Transcribed from `science-scan-state` in
+    // pasm/spec/architecture/world-files.yaml.
+    "ShipScanRecord", "ScanReading", "ScanRefusal", "ScanSaveState", "ScanConfig",
     "PendingArcBearingRequest", "PendingWorldLayerChanges", "PhaserCooldown",
     "Player", "PowerBlackboard", "Provenance", "QualifiedRef", "RecentCombatActivity",
     "RegionEffectKind", "RepairBlackboard", "RepairTeams", "ResolvedTemplate", "ScenarioCatalog",

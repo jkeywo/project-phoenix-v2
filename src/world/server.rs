@@ -596,6 +596,12 @@ impl Plugin for WorldPlugin {
             // `CommsRuntime`'s, and every subject on its roster came out of a
             // world file. The plugin registers a publisher and nothing else.
             .add_plugins(crate::dossier::DossierPlugin)
+            // The science scan (issue #1032) for the same reason again: what it
+            // reads is an authored structure's condition track, so it is
+            // meaningless in an app with no world — and its tick is explicitly
+            // ordered AFTER `InfrastructurePlugin`'s, so a scan taken on the
+            // tick a repair lands reads the repaired number.
+            .add_plugins(crate::science::SciencePlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
@@ -9158,6 +9164,7 @@ seed = 1
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -9452,6 +9459,7 @@ seed = 1
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,

@@ -112,6 +112,16 @@ describe('dirtyConsolesFor — BlackboardUpdate on battleship (identity stations
     expect(dirtyConsolesFor(bbUpdate(['warp-core']), BATTLESHIP_STATIONS))
       .toEqual(new Set());
   });
+
+  // The `scan` channel (issue #1032) is not a system id — the commandable,
+  // damageable thing is `sensors` — so it needs the reserved-channel table to
+  // reach a console at all.
+  it('the scan channel dirties the console that renders sensors', () => {
+    expect(dirtyConsolesFor(bbUpdate(['scan']), BATTLESHIP_STATIONS))
+      .toEqual(new Set(['sensors']));
+    expect(dirtyConsolesFor(bbUpdate(['scan']), DESTROYER_STATIONS))
+      .toEqual(new Set(['captain']));
+  });
 });
 
 describe('dirtyConsolesFor — captain/viewscreen currentView cascade', () => {

@@ -1766,6 +1766,24 @@ pub enum SystemControlPayload {
     /// disambiguate, and an abort naming an id the console read a tick ago
     /// could only ever be stale.
     AbortOperation,
+    /// Take a sensor reading of a named external structure (issue #1032).
+    ///
+    /// Targets `sensors` (`system_registry::SENSORS_SYSTEM_ID`), a real
+    /// station-owned system — the one the destroyer's captain station holds —
+    /// so a scan takes exactly the admission path and station-tenure check
+    /// `SetScienceTarget` takes. The *result* is not a system's state and
+    /// publishes under a reserved blackboard channel instead
+    /// (`science::SCAN_BLACKBOARD_KEY`).
+    ///
+    /// The uuid is carried rather than implied from the current science target,
+    /// for `StartOperation`'s reason: a console must be able to say what it
+    /// meant, and a command that read a selection the server updated in between
+    /// would scan something the crew never pointed at.
+    ScanTarget {
+        /// The subject entity's UUID — the same identifier `SetScienceTarget`
+        /// carries, and the one the client already holds from its radar blips.
+        uuid: String,
+    },
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -3203,6 +3221,15 @@ pub enum SystemBlackboard {
     /// wholly DERIVED — every field on it is a projection of state some other
     /// subsystem already owns, which is why nothing behind it is snapshotted.
     Dossiers(DossierBlackboard),
+    /// The last sensor reading this ship took (issue #1032), keyed by
+    /// `science::SCAN_BLACKBOARD_KEY`.
+    ///
+    /// A channel rather than a system id, for `Operations`' reason: the thing
+    /// aboard the ship that can be commanded and damaged is `sensors`, and that
+    /// is what the `ScanTarget` command targets. What rides here is the
+    /// *result* — a reading taken at a tick, which outlives the tick that took
+    /// it and is not a live gauge of anything.
+    Scan(ScanBlackboard),
 }
 
 /// One verb a hull can perform, as the console offers it (issue #1026).
@@ -3282,6 +3309,94 @@ pub struct OperationsBlackboard {
     /// which the crew act on differently from one that opened and stalled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+}
+
+// ── Science scan wire types (issue #1032) ───────────────────────────────────
+
+/// The last sensor reading a ship took, as its console reads it (issue #1032).
+///
+/// Published on the scanning ship's blackboard map under
+/// [`SCAN_BLACKBOARD_KEY`](crate::science::SCAN_BLACKBOARD_KEY), a *channel*
+/// rather than a system id for the reason `"operations"` is.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ScanBlackboard {
+    /// Whether this hull authored a `[scan]` table with at least one fidelity
+    /// band. `false` is meaningful: the console says "no scan capability"
+    /// rather than showing an empty readout the crew have to interpret.
+    #[serde(default)]
+    pub capable: bool,
+    /// The last reading, or `None` when the last scan returned nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading: Option<ScanReadingSnapshot>,
+    /// `strings.csv` id for why the last scan returned nothing. Never set at
+    /// the same time as `reading`: a refusal replaces the previous answer
+    /// rather than sitting beside it, because a stale reading under a fresh
+    /// complaint is how a crew end up acting on a number that is no longer
+    /// about the thing they just pointed at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// One sensor reading of an external structure (issue #1032).
+///
+/// **Every value here is derived from the subject's authoritative condition
+/// track**, and every string is a `strings.csv` id an author wrote against the
+/// quantity it names — the structure's own name, a threshold's `label`, a
+/// capacity's `label`, the fidelity band's `label`. There is deliberately no
+/// field for a scan *result* in prose: `simulation-differentiation.yaml`'s
+/// `must_not_be` names "scripted exposition dressed as sensor output" as the
+/// thing this must never be, so the payload has nowhere for it to ride. See
+/// [`crate::science::scan`] for the derivation and the argument.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ScanReadingSnapshot {
+    /// The subject entity's UUID — the key a dossier comparison joins on.
+    pub subject_uuid: String,
+    /// `strings.csv` id for the subject's crew-facing name, or empty.
+    #[serde(default)]
+    pub subject_name: String,
+    /// The machine code of the fidelity band that answered (`"detailed"`).
+    pub band: String,
+    /// `strings.csv` id for that band's crew-facing name.
+    pub band_label: String,
+    /// The `SimTick` the reading was taken on. A reading, not a gauge: the crew
+    /// read the structure as it stood when they looked at it.
+    pub taken_at_tick: u64,
+    /// Condition as a fraction of the subject's authored ceiling, rounded to
+    /// the answering band's step. The client renders the percentage.
+    pub condition_fraction: f32,
+    /// The step it was rounded to, so the console can show how precise the
+    /// reading is rather than implying a precision the band never had.
+    pub condition_step: f32,
+    /// `(label id, held)` per operational flag the subject authored a label
+    /// for. Empty when the answering band does not resolve flags.
+    #[serde(default)]
+    pub flags: Vec<(String, bool)>,
+    /// `(label id, level)` per capacity the subject authored a label for. Empty
+    /// when the answering band does not resolve capacities.
+    #[serde(default)]
+    pub capacities: Vec<(String, i64)>,
+}
+
+impl ScanReadingSnapshot {
+    /// Project a stored reading onto the wire.
+    ///
+    /// A field-for-field copy today, and a separate type on purpose: the wire
+    /// shape is pinned in `codec.rs`, and a payload that simply re-serialised a
+    /// simulation struct would gain a field the moment the simulation did —
+    /// which is exactly the accident #1030's leak rule is written to prevent.
+    pub fn from_reading(reading: &crate::science::ScanReading) -> Self {
+        Self {
+            subject_uuid: reading.subject_uuid.clone(),
+            subject_name: reading.subject_name.clone(),
+            band: reading.band.clone(),
+            band_label: reading.band_label.clone(),
+            taken_at_tick: reading.taken_at_tick,
+            condition_fraction: reading.condition_fraction,
+            condition_step: reading.condition_step,
+            flags: reading.flags.clone(),
+            capacities: reading.capacities.clone(),
+        }
+    }
 }
 
 // ── Dossier wire types (issue #1030) ────────────────────────────────────────

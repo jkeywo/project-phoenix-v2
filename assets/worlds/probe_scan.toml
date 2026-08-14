@@ -1,0 +1,130 @@
+# Probe world for issue #1032 — the science scan, with everything the reading
+# must be derived FROM sitting in the world and nothing it could be copied from
+# anywhere at all.
+#
+# One scanning destroyer and three contacts, chosen so that every branch of the
+# derivation and both refusal classes are reachable in one run. No combat and no
+# scripted scan: the readings are taken by the TEST, through the ordinary
+# admitted `ScanTarget` path, which is the only way to prove the command rides
+# the same admission the crew's own console would.
+#
+#   skyway_depot    a PUBLISHED structure, decaying under its own authored
+#                   `decay_per_sec`                  -> a reading that changes on
+#                                                       its own, with no author
+#                                                       touching a line of copy
+#   sealed_depot    a structure the scenario keeps OFF the wire, sitting at
+#                   31/100                           -> refused, with the SAME
+#                                                       reason a bare rock gets
+#   lonely_beacon   no `[infrastructure]` at all     -> refused, same reason
+#
+# WHAT THIS WORLD PROVES, and why each piece is here:
+#
+#   1. THE READING IS A DERIVATION. `skyway_depot` loses four condition points a
+#      second, authored on the entity and driven by nobody. Two scans taken from
+#      the SAME position a few seconds apart therefore report different numbers,
+#      and cross the depot's own 40 % threshold in between so the operational
+#      flag reads out as failed on the second. There is no scan text in this
+#      file, in the entity template, or in `strings.csv` — the only prose ids
+#      anywhere near it are the labels the depot's own capacity and threshold
+#      authored, which name the QUANTITIES rather than the finding.
+#
+#   2. FIDELITY IS AUTHORED AND THE CREW CONTROL IT. The destroyer's shipped
+#      `[scan]` ladder is used as authored — detailed inside 120 units, coarse
+#      out to 260, nothing past that — so the test flies the ship rather than
+#      editing a number. The same depot at the same instant reads whole percent
+#      from close in and quarters from further out, and stops reporting berths
+#      at all, because the coarse band authors `report_capacities = false`.
+#
+#   3. THE PUBLISH GATE IS NOT A DOOR THE SCAN OPENS. `sealed_depot` authors
+#      `publish = false` and a real, live 31 points. #1025's `from_state` is the
+#      single gate every console surface goes through and the scan is one, so it
+#      is refused — and refused with the identical reason `lonely_beacon` gets,
+#      because an error that distinguished "nothing to read" from "something I am
+#      not telling you" would leak the secret by its shape.
+#
+# The two labelled fields on `skyway_depot` are the second gate, the same one
+# #1030 uses: a capacity or threshold id is a machine name in the author's
+# namespace, so it reaches a readout only where the scenario also authored a
+# `strings.csv` label for it. `depot_transfer_throughput` is left unlabelled on
+# purpose — published data a script can read, and prose the console never shows.
+#
+# BASELINE (release headless, `--seed 42 --ticks 900`, no --ship, clean tree):
+# final digest 0x6f00c8d6ee2fb3ef (8000226176452170735).
+#
+# Nothing this world exists to exercise is IN that digest. A scan reading is
+# authoritative but unfolded, in the same bucket as the deadline table, the
+# commitments ledger and the evidence log; what moves this number is the depot's
+# condition track and the entity population, both of which #1025 already folds —
+# and the decay authored below is exactly that, walking every tick. If a later
+# change moves this digest without moving either, something started folding a
+# scan, and that is the question to ask before re-blessing this line.
+
+[global]
+seed = 1032
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The scanning ship. The destroyer's own shipped `[scan]` ladder is used
+# unmodified — this world overrides nothing about the suite, so the run is a
+# test of the hull the demo actually flies rather than of a fixture.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The subject: a published structure coming apart on its own ───────────────
+# 62 of 100 points, losing four a second. Its capacity and threshold tables are
+# replaced wholesale by this instance (arrays replace at the instance layer), so
+# the labelled/unlabelled split is authored here rather than pushed onto every
+# world that fields a depot.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "skyway_depot"
+name = "world.probe_scan.entity.skyway_depot.name"
+transform = { position = [600.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition = 62.0
+# The whole of change (1) above. Nobody scripts this, nothing shoots it: the
+# structure is simply failing while the crew watch, which is what makes the
+# second reading different from the first.
+decay_per_sec = 4.0
+
+[[entity.overrides.infrastructure.capacity]]
+# Labelled, so a reading can say what the number is.
+id = "depot_berths"
+amount = 4
+label = "world.probe_scan.capacity.berths.label"
+
+[[entity.overrides.infrastructure.capacity]]
+# Unlabelled on purpose. A script can read this; a sensor readout cannot show it.
+id = "depot_transfer_throughput"
+amount = 40
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "depot_transfer_capable"
+fails_below = 0.4
+label = "world.probe_scan.threshold.transfer_capable.label"
+
+# ── The structure the scenario is keeping back ───────────────────────────────
+# 31 of 100 points is a real, live, degraded track — the number a leak would
+# report, sitting in the world for the test to fail to find.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "sealed_depot"
+name = "world.probe_scan.entity.sealed_depot.name"
+transform = { position = [600.0, 0.0, 40.0] }
+overrides = { infrastructure = { condition = 31.0, publish = false, capacity = [], threshold = [] } }
+
+# ── Nothing to read ─────────────────────────────────────────────────────────
+# Named, visible, selectable, and carrying no condition track of any kind. A
+# refusal that only ever fired on withheld structures would be a refusal that
+# announced them.
+[[entity]]
+template_path = "assets/entities/nav_beacon.toml"
+id = "lonely_beacon"
+name = "world.probe_scan.entity.lonely_beacon.name"
+transform = { position = [600.0, 0.0, -40.0] }

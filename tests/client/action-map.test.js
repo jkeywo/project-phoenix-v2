@@ -26,6 +26,7 @@ describe('ACTION_MAP', () => {
       'order_civilian',
       'respond_to_message',
       'return_to_lobby',
+      'scan_target',
       'select_comms_message',
       'select_player_ship',
       'select_scenario',
@@ -868,6 +869,28 @@ describe('start_operation / abort_operation', () => {
       target: 'captain',
       payload: { type: 'AbortOperation' },
     });
+  });
+});
+
+// ── The science scan (issue #1032) ────────────────────────────────────────────
+
+describe('scan_target', () => {
+  it('sends ScanTarget at the sensors system with the contact uuid', () => {
+    // The sensors system, not a scan one: the suite is the thing aboard the
+    // ship that can be commanded and damaged, so a scan rides the same
+    // station-tenure admission the science target selection already does.
+    const send = mkSend();
+    ACTION_MAP.scan_target({ action: 'scan_target', uuid: 'depot-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
+    });
+  });
+
+  it('sends nothing when no contact is named', () => {
+    const send = mkSend();
+    ACTION_MAP.scan_target({ action: 'scan_target' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

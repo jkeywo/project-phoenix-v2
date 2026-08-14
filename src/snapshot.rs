@@ -453,6 +453,54 @@ pub struct EntityState {
     /// long before this field is read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operations: Option<crate::operations::OperationsSaveState>,
+    /// The ship's scan record (issue #1032) — the last reading its sensor suite
+    /// took, or why the last scan returned nothing.
+    ///
+    /// A **projection**, not the whole component, for `operations`' reason: the
+    /// hull's authored `[scan]` fidelity ladder rides on the component too and
+    /// is re-derived from the template on the tick the ship spawns.
+    ///
+    /// This is the one piece of scan state a fold cannot recover, and that is
+    /// exactly why it is here. Everything else about a scan is re-derivable —
+    /// the structure's condition, the ship's range, the grid's level — but a
+    /// *reading* is what the crew saw when they looked, at the fidelity that
+    /// moment bought them, and the structure has moved on since. #1031's
+    /// evidence log is stored for the same reason and states it at more length.
+    ///
+    /// The variant-order hazard does not apply: `ScanRefusal` serialises by
+    /// NAME (`#[serde(rename_all = "snake_case")]`), not by index, and every
+    /// other field is a scalar, a `String`, or a `Vec` of those.
+    ///
+    /// # Why this did not bump [`SNAPSHOT_FORMAT`]
+    ///
+    /// #1025's argument, unchanged and for the same shape of field. A save
+    /// written without it would restore a crew as never having scanned when the
+    /// mission had them holding a reading — silently wrong, and
+    /// indistinguishable from a crew who genuinely had not looked. It cannot
+    /// happen: a world gains a scanning ship by its hull TOML gaining a `[scan]`
+    /// table, which moves `content_digest` and gets the older save refused as
+    /// content-moved long before this field is read.
+    ///
+    /// The contrast with the two bumps this sits between is worth stating,
+    /// because both look similar and neither argument reaches here.
+    ///
+    /// #1031's evidence is written by a *script call*, so a world could gain
+    /// findings with no template change at all and a format-6 payload of a run
+    /// that had scanned was byte-indistinguishable from one that had not.
+    /// #1035's workforce IS declared in the world file, and still had to bump,
+    /// because [`RawWorld`](crate::world::config) sets no `deny_unknown_fields`
+    /// — so an older build loads a world authoring `[[workforce]]`, drops the
+    /// table on the floor, and writes a save with the SAME content digest.
+    ///
+    /// That second loophole is precisely the one this field does not have.
+    /// `EntityConfig` **does** set `deny_unknown_fields`, so a build that
+    /// predates this vocabulary does not quietly ignore a hull's `[scan]` table
+    /// — it refuses to load the template at all, and never gets as far as
+    /// writing a save to disagree with. A scan reading cannot exist without the
+    /// table that produced it, and that table is content the loader is strict
+    /// about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<crate::science::ScanSaveState>,
     /// The entity's civilian traffic state (issue #1028), whole.
     ///
     /// Stored whole for the same reason the condition track is: the parts have
@@ -2384,6 +2432,19 @@ fn capture_operations(world: &World) -> Vec<(String, crate::operations::Operatio
         .collect()
 }
 
+/// The scan records, in a query of their own, joined by uuid — see
+/// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
+/// worlds capture an empty list.
+fn capture_scans(world: &World) -> Vec<(String, crate::science::ScanSaveState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::science::ShipScanRecord)>() else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, record)| (uuid.0.clone(), record.save_state()))
+        .collect()
+}
+
 /// The civilian traffic states, in a query of their own, joined by uuid — see
 /// [`EntityState::civilian`]. Only entities that authored `[civilian]` carry
 /// one, so most worlds capture an empty list.
@@ -2407,6 +2468,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let pass_surfaces = capture_pass_surfaces(world);
     let infrastructure = capture_infrastructure(world);
     let operations = capture_operations(world);
+    let scans = capture_scans(world);
     let civilians = capture_civilians(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
@@ -2455,6 +2517,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
             operations: operations
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            scan: scans
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
@@ -3467,6 +3533,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(operations) = &row.operations {
             if let Some(mut ops) = entity_mut.get_mut::<crate::operations::ShipOperations>() {
                 ops.restore(operations);
+            }
+        }
+        if let Some(scan) = &row.scan {
+            if let Some(mut record) = entity_mut.get_mut::<crate::science::ShipScanRecord>() {
+                record.restore(scan);
             }
         }
         if let Some(civilian) = &row.civilian {

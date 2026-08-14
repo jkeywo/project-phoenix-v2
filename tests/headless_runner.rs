@@ -8355,3 +8355,327 @@ fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
         .expect("the control repair opened");
     assert_eq!(assisted.rate(), ProgressRate::FULL);
 }
+
+// ── The science scan (issue #1032, parent #851) ──────────────────────────────
+
+/// `probe_scan.toml` — the world's own header carries what each contact is for.
+const SCAN_WORLD: &str = "assets/worlds/probe_scan.toml";
+/// The published, decaying structure every reading is taken of.
+const SCAN_DEPOT: &str = "world.probe_scan.entity.skyway_depot.name";
+/// The structure the scenario keeps off the wire, sitting at a real 31/100.
+const SCAN_SEALED: &str = "world.probe_scan.entity.sealed_depot.name";
+/// A named contact with no condition track of any kind.
+const SCAN_BEACON: &str = "world.probe_scan.entity.lonely_beacon.name";
+
+/// The `ai:` probe token every scan below is asked for under.
+///
+/// Unregistered, so admission routes it to the LocalShip, whose backfilled
+/// `sensors` system `operate_ai`s — the same admission path every AI command
+/// takes and the same one a human on the captain's console would take
+/// (AGENTS.md rule 6). Nothing downstream can tell which sent it, which is the
+/// point.
+const SCAN_TOKEN: &str = "ai:scan-probe";
+
+fn scan_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: SCAN_WORLD.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(1032),
+        ..test_args()
+    }
+}
+
+/// The minted UUID of the entity carrying `name`.
+fn scan_uuid_named(app: &mut App, name: &str) -> String {
+    use project_phoenix::entities::spawner::{EntityName, EntityUuid};
+    let mut q = app.world_mut().query::<(&EntityName, &EntityUuid)>();
+    let found = q
+        .iter(app.world())
+        .find(|(n, _)| n.0 == name)
+        .map(|(_, uuid)| uuid.0.clone());
+    found.unwrap_or_else(|| panic!("the probe world spawns '{name}'"))
+}
+
+/// Put the scanning ship at `x` by writing its `ShipPhysics`, which is what helm
+/// moves. Writing the `Transform` directly would be undone by
+/// `sync_ship_position` on the next tick.
+///
+/// Range is the crew's own lever on how good a reading they get, so the test
+/// pulls it the way the crew would rather than editing an authored band.
+fn place_scanner_at(app: &mut App, x: f32) {
+    let entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the probe world spawns a local ship");
+    app.world_mut()
+        .get_mut::<ShipPhysics>(entity)
+        .expect("the local ship is a ship")
+        .x = x;
+}
+
+/// Ask for a scan through the real admission path, and give it the ticks to
+/// arrive: the message is drained per frame in `PreUpdate`, admitted before
+/// `SimSet::Input`, and consumed in `SimSet::Modifiers` of the same tick.
+fn ask_for_scan(app: &mut App, uuid: &str) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemControlPayload};
+
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: SCAN_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::ship::system_registry::sensors_system_id(),
+                payload: SystemControlPayload::ScanTarget {
+                    uuid: uuid.to_string(),
+                },
+            },
+        });
+    run(app, 2);
+}
+
+/// The scan channel as the local ship publishes it — the payload a console
+/// renders, never the component behind it.
+fn published_scan(app: &mut App) -> project_phoenix::messages::ScanBlackboard {
+    use project_phoenix::messages::SystemBlackboard;
+    use project_phoenix::server_app::ShipSystemBlackboards;
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let boards = q
+        .iter(app.world())
+        .next()
+        .expect("the local ship publishes");
+    match boards.0.get(&project_phoenix::science::scan_blackboard_key()) {
+        Some(SystemBlackboard::Scan(bb)) => bb.clone(),
+        other => panic!("expected a scan blackboard, got {other:?}"),
+    }
+}
+
+/// **Issue #1032, AC1 and AC2 — the whole point of the slice, end to end.**
+///
+/// Two scans of the same structure from the same place, a few seconds apart,
+/// through the ordinary admitted command path. The depot is failing under its
+/// own authored `decay_per_sec` the entire time, and the second reading says so:
+/// a lower condition, and an operational flag that has dropped in between.
+///
+/// **No content is edited between the two readings.** Nothing in this test, this
+/// world, the entity template or `strings.csv` describes either result — the
+/// numbers are the depot's condition track and the words are the labels its own
+/// capacity and threshold authored. That is
+/// `pasm/spec/design/simulation-differentiation.yaml`'s "sensors reveal state
+/// rather than scenario text", asserted rather than claimed.
+#[test]
+fn two_scans_of_a_failing_structure_report_it_failing_with_no_content_edited() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&scan_args(dt, 10.0)).expect("app should build");
+    // Far enough in that the game is InProgress and the ship is backfilled.
+    run(&mut app, 60);
+    let depot = scan_uuid_named(&mut app, SCAN_DEPOT);
+
+    // 80 units off the depot at x = 600: inside the destroyer's authored
+    // detailed band, which reads whole percent and counts berths.
+    place_scanner_at(&mut app, 520.0);
+    ask_for_scan(&mut app, &depot);
+    let first = published_scan(&mut app)
+        .reading
+        .expect("the first scan comes back");
+
+    assert_eq!(first.subject_uuid, depot);
+    assert_eq!(first.subject_name, SCAN_DEPOT);
+    assert_eq!(first.band, "detailed");
+    assert!(
+        first.condition_fraction > 0.45 && first.condition_fraction <= 0.62,
+        "the depot spawned at 62 points and has been shedding four a second since: {}",
+        first.condition_fraction
+    );
+    assert_eq!(
+        first.flags,
+        vec![(
+            "world.probe_scan.threshold.transfer_capable.label".to_string(),
+            true
+        )],
+        "its transfer arm is still in tolerance, reported under the LABEL the depot \
+         authored for the flag rather than under any word this slice invented"
+    );
+    assert_eq!(
+        first.capacities,
+        vec![("world.probe_scan.capacity.berths.label".to_string(), 4)],
+        "the detailed band counts berths — and only the LABELLED capacity, so the \
+         depot's unlabelled throughput stays published data and not published prose"
+    );
+
+    // Five more seconds of the storm. Nobody scripts anything; the structure is
+    // simply still failing.
+    run(&mut app, ticks_for_sim_seconds(5.0, dt));
+    place_scanner_at(&mut app, 520.0);
+    ask_for_scan(&mut app, &depot);
+    let second = published_scan(&mut app)
+        .reading
+        .expect("the second scan comes back");
+
+    assert_eq!(
+        second.band, first.band,
+        "same suite, same range, same fidelity"
+    );
+    assert!(
+        second.condition_fraction < first.condition_fraction - 0.1,
+        "the reading MOVED with the track it is derived from: {} then {}",
+        first.condition_fraction,
+        second.condition_fraction
+    );
+    assert_eq!(
+        second.flags,
+        vec![(
+            "world.probe_scan.threshold.transfer_capable.label".to_string(),
+            false
+        )],
+        "…and the depot dropped through its own 40 % threshold in between, so the \
+         same row now reads as failed"
+    );
+    assert!(
+        second.taken_at_tick > first.taken_at_tick,
+        "each reading is stamped with the tick it was taken on — it is a reading, \
+         not a live gauge"
+    );
+}
+
+/// **AC5.** The same structure, seconds apart, read from twice the range: a
+/// rounder number and a capacity list the coarse band does not claim to know.
+///
+/// Both bands are the destroyer's own shipped `[scan]` ladder, unmodified by
+/// this world — the gate is authored data, and the lever the crew pull is helm.
+#[test]
+fn the_same_structure_reads_coarser_from_further_out() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&scan_args(dt, 8.0)).expect("app should build");
+    run(&mut app, 60);
+    let depot = scan_uuid_named(&mut app, SCAN_DEPOT);
+
+    // 200 units out: past the detailed band's 120 and inside the coarse band's
+    // 260.
+    place_scanner_at(&mut app, 400.0);
+    ask_for_scan(&mut app, &depot);
+    let far = published_scan(&mut app).reading.expect("a coarse reading");
+
+    // …and straight back in to 80, on the very next scan.
+    place_scanner_at(&mut app, 520.0);
+    ask_for_scan(&mut app, &depot);
+    let close = published_scan(&mut app).reading.expect("a detailed reading");
+
+    assert_eq!(far.band, "coarse");
+    assert_eq!(close.band, "detailed");
+    assert_eq!(
+        far.condition_step, 0.25,
+        "the coarse band reports to the nearest quarter, and says so"
+    );
+    assert_eq!(close.condition_step, 0.01);
+    assert_eq!(
+        far.condition_fraction % 0.25,
+        0.0,
+        "the coarse reading lands on a quarter: {}",
+        far.condition_fraction
+    );
+    assert!(
+        far.capacities.is_empty(),
+        "the coarse band authors report_capacities = false — a sweep that rough \
+         does not pretend to count berths"
+    );
+    assert_eq!(
+        close.capacities.len(),
+        1,
+        "…while closing to 80 units buys the crew the count back"
+    );
+    assert_eq!(
+        far.flags.len(),
+        1,
+        "both bands still resolve the operational flag, because the ladder says so"
+    );
+}
+
+/// **AC1's refusal half, and the leak rule.**
+///
+/// A structure the scenario keeps off the wire and a beacon with no condition
+/// track at all are refused with the **same** reason. That identity is the
+/// load-bearing part: an error distinguishing "nothing to read" from "something
+/// I am not telling you" would betray the secret by its shape, which is the leak
+/// #1030 closed and this slice must not reopen.
+///
+/// The withheld 31 points are then hunted for across the whole published
+/// channel, the way `probe_dossier`'s test hunts them across every fact.
+#[test]
+fn a_withheld_structure_and_a_bare_beacon_are_refused_with_the_same_reason() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&scan_args(dt, 8.0)).expect("app should build");
+    run(&mut app, 60);
+    let sealed = scan_uuid_named(&mut app, SCAN_SEALED);
+    let beacon = scan_uuid_named(&mut app, SCAN_BEACON);
+    let depot = scan_uuid_named(&mut app, SCAN_DEPOT);
+
+    // Close enough that range is not what refuses any of the three.
+    place_scanner_at(&mut app, 520.0);
+    ask_for_scan(&mut app, &depot);
+    assert!(
+        published_scan(&mut app).reading.is_some(),
+        "precondition: from here the suite reads a published structure fine"
+    );
+
+    place_scanner_at(&mut app, 520.0);
+    ask_for_scan(&mut app, &sealed);
+    let withheld = published_scan(&mut app);
+    assert_eq!(
+        withheld.refusal.as_deref(),
+        Some("scan.refusal.no_readable_condition")
+    );
+    assert!(
+        withheld.reading.is_none(),
+        "a refusal replaces the previous reading rather than leaving one on screen \
+         beside a complaint about a different contact"
+    );
+
+    place_scanner_at(&mut app, 520.0);
+    ask_for_scan(&mut app, &beacon);
+    let bare = published_scan(&mut app);
+    assert_eq!(
+        bare.refusal, withheld.refusal,
+        "the same answer, exactly — the shape of the refusal must not tell the crew \
+         that the sealed depot is keeping something back"
+    );
+
+    // The number itself, hunted for across the whole published channel.
+    let json = serde_json::to_string(&published_scan(&mut app)).expect("serialises");
+    assert!(
+        !json.contains("31"),
+        "the sealed depot's real 31 of 100 points reached the wire: {json}"
+    );
+}
+
+/// Past the coarsest authored band the suite returns nothing, and says which
+/// gate stopped it — a refusal the crew can act on with helm, rather than an
+/// empty readout they have to interpret.
+#[test]
+fn a_scan_from_past_the_last_band_is_refused_as_out_of_range() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&scan_args(dt, 8.0)).expect("app should build");
+    run(&mut app, 60);
+    let depot = scan_uuid_named(&mut app, SCAN_DEPOT);
+
+    // The origin is 600 units off the depot; the destroyer's coarsest band
+    // reaches 260.
+    place_scanner_at(&mut app, 0.0);
+    ask_for_scan(&mut app, &depot);
+    let bb = published_scan(&mut app);
+    assert_eq!(bb.refusal.as_deref(), Some("scan.refusal.out_of_range"));
+    assert!(bb.reading.is_none());
+    assert!(
+        bb.capable,
+        "…and the hull still reports that it HAS a survey suite, so the console says \
+         'too far' rather than 'you cannot do this'"
+    );
+}

@@ -913,6 +913,26 @@ operation.refused.teams_unavailable,"External-operation refusal — fewer repair
 operation.refused.under_attack,"External-operation refusal — the ship is under fire and the operation cannot be worked through it (issue #1027)","[Under fire — cannot work the operation.]"
 operation.refused.hazard_band,"External-operation refusal — the ship is inside a hazard band the operation cannot be worked in (issue #1027)","[Hazard band — cannot work the operation.]"
 operation.refused.work_stopped,"External-operation refusal — the people who staff the target have stopped work, and an authored interrupt rule says this operation cannot be worked without them (issue #1035)","[The line is down. Nobody down there is authorising anything.]"
+component.scan.heading,"Science scan readout — heading above the last sensor reading (issue #1032)","[SENSOR RETURN]"
+component.scan.none,"Science scan readout when the hull carries no survey suite at all (issue #1032)","[NO SURVEY SUITE]"
+component.scan.idle,"Science scan readout when the suite is fitted and nothing has been read yet (issue #1032)","[NOTHING SCANNED]"
+component.scan.take,"Science scan readout — button that reads the selected contact (issue #1032)","[TAKE READING]"
+component.scan.condition,"Science scan readout — row label for the subject's structural condition, derived from its condition track (issue #1032)","[Structural condition]"
+component.scan.flag.held,"Science scan readout — value shown for an operational flag the subject is still holding (issue #1032)","[Nominal]"
+component.scan.flag.down,"Science scan readout — value shown for an operational flag the subject has dropped (issue #1032)","[Failed]"
+scan.refusal.not_capable,"Scan refusal — this hull authored no survey suite (issue #1032)","[This hull carries no survey suite.]"
+scan.refusal.no_such_target,"Scan refusal — nothing in the world answers to the contact the console named (issue #1032)","[Contact lost.]"
+scan.refusal.no_readable_condition,"Scan refusal — the contact carries nothing structural the suite can read (issue #1032)","[Nothing structural to read on that contact.]"
+scan.refusal.out_of_range,"Scan refusal — the contact is past the coarsest authored band (issue #1032)","[Out of sensor range — close on the contact.]"
+scan.refusal.underpowered,"Scan refusal — the sensor bus is below its authored power level or the grid is locked out (issue #1032)","[Insufficient power to the sensor bus.]"
+scan.refusal.blinded,"Scan refusal — interference has pushed the return past the coarsest band (issue #1032)","[Interference — the return is noise.]"
+entity.alliance_destroyer.scan.band.detailed.label,"assets/entities/alliance_destroyer.toml -> [[scan.band]] label","[Detailed Survey]"
+entity.alliance_destroyer.scan.band.coarse.label,"assets/entities/alliance_destroyer.toml -> [[scan.band]] label","[Coarse Sweep]"
+world.probe_scan.entity.skyway_depot.name,assets/worlds/probe_scan.toml -> [[entity]] name,[Skyway Transfer Depot]
+world.probe_scan.entity.sealed_depot.name,assets/worlds/probe_scan.toml -> [[entity]] name,[Sealed Depot]
+world.probe_scan.entity.lonely_beacon.name,assets/worlds/probe_scan.toml -> [[entity]] name,[Lonely Beacon]
+world.probe_scan.capacity.berths.label,assets/worlds/probe_scan.toml -> [[entity.overrides.infrastructure.capacity]] label,[Berths]
+world.probe_scan.threshold.transfer_capable.label,assets/worlds/probe_scan.toml -> [[entity.overrides.infrastructure.threshold]] label,[Transfer arm]
 world.probe_stabilise.entity.tender.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Tender]
 world.probe_operations.entity.tug.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Tug]
 world.probe_operations.entity.hulk.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Derelict Hauler]

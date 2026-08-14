@@ -411,6 +411,103 @@ entities:
         - RecordDossierEvidence
       tests: [cargo test]
 
+  - component: science-scan-deriver
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Science Scan Deriver
+      summary: Turns an admitted ScanTarget command into a sensor reading DERIVED from the subject's live infrastructure condition track - its condition fraction, its operational flags and its capacity levels - at a fidelity the hull's authored range bands, power draw and interference rules decide. Refuses, with a typed reason, any target that carries nothing readable, any range past the coarsest band, and any suite that is underpowered or blinded.
+      rationale:
+        - "[ai] THIS IS THE SLICE WHERE THE DIFFERENTIATION PRINCIPLE IS EITHER HONOURED OR ABANDONED. pasm/spec/design/simulation-differentiation.yaml says sensors reveal STATE rather than scenario text, and names the failure mode it must not be satisfied by: scripted exposition dressed as sensor output. So the module is built so the easy wrong thing has nowhere to live. ScanSubject - the whole pure input port - has exactly a uuid, a name id and an already-published condition track, and no field for a result, a description or a narration. Every string on a reading is either a machine code or a strings.csv id an author wrote against the QUANTITY it names (the structure's name, a threshold's label, a capacity's label, the band's label); none of them describes a finding."
+        - "[ai] The claim is tested from three ends. The pure module mutates the subject's condition and asserts the reading changes with nothing else moved; the ECS adapter does the same through a live world; and codec.rs asserts the serialised reading's WHOLE KEY SET - nine keys, every one a measured quantity or a label for one - so a scan_text field would have to be added there, in a diff, moving that test. That is what 'structurally absent rather than filtered at render time' can mean in a language with no reflection."
+        - "[ai] IT IS A NEW ACT, NOT A NEW DOOR. #1030 closed a specific leak: publish = false means keep this structure's condition off every console, and InfrastructureSnapshot::from_state is the single gate. A scan is a console readout, so it goes through the same gate - the input is a dossier SubjectCondition, whose only constructor consumes that Option - and a withheld track is REFUSED. Crucially it is refused with the SAME reason a bare rock gets, because an error that distinguished 'nothing to read' from 'something I am not telling you' would leak the secret by its shape."
+        - "[ai] FIDELITY IS A DECISION, AND IT IS AUTHORED. A free perfect reveal is not a decision, so three authored gates sit between the crew and a reading and each is something a different station can act on: range bands ([[scan.band]], finest first, each with its own reporting step and its own choice about whether to resolve flags and capacities), power (power_group / min_power_level, read off the live grid), and interference (degraded_by naming the region-effect vocabulary #1027's interrupt rules already use, dropping the reading interference_bands steps coarser). None of the three is a constant in Rust; a hull that wants one perfect band authors one."
+        - "[ai] COARSENESS IS THE SAME NUMBER, ROUNDED - not a second number. The band's condition_step quantises the live fraction, so there is exactly one source for what a structure's condition is and the fidelity is arithmetic over it. A 'coarse reading' authored as its own field would be the must_not_be with extra steps."
+        - "[ai] The command targets the real, station-owned sensors system rather than a scan system id of its own: the suite is the thing aboard the ship that can be commanded and damaged, and the reading is not. That gives a scan the same admission path and station-tenure check SetScienceTarget takes, and puts it on the destroyer captain's console without a second routing rule, since that station owns sensors. Nothing downstream branches on whether a human or the ship's AI asked."
+        - "[ai] Runs in SimSet::Modifiers rather than Input, and explicitly AFTER tick_infrastructure_condition. A scan is instantaneous and every input is a this-tick reading; a scan taken on the tick a repair team finishes must read the repaired number, which is the only answer a crew watching both consoles would accept. AdmittedCommands is cleared and refilled once per tick before Input, so a Modifiers reader sees the whole tick's set."
+        - "[ai] A COMPLETED SCAN DOES NOT FILE EVIDENCE, and the omission is the point rather than an oversight. #1031's EvidenceEntry.text is a strings.csv id, so auto-filing a derived reading would require authoring a per-scan result string - precisely the must_not_be. A scenario that wants a finding on the fact sheet appends it at an authored beat with provenance scan, which is what #1031 built; what this slice supplies is the READING the crew can hold against that sheet."
+        - "[ai] Ships are walked in UUID order, never archetype order, and the subject is resolved by uuid rather than by whichever entity a query yielded first - each scan overwrites that ship's single stored reading, so the sequence has to be the same on two hosts."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [science-scan-state]
+      reads: [infrastructure-condition-state, world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/science/scan.rs
+        - src/science/server.rs
+      symbols:
+        - ScanConfig
+        - ScanBandConfig
+        - ScanSubject
+        - ScanConditions
+        - ScanRefusal
+        - derive
+        - quantise
+        - SciencePlugin
+        - tick_scans
+        - publish_scan_blackboard
+        - SCAN_BLACKBOARD_KEY
+      tests: [cargo test]
+
+  - state: science-scan-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Science Scan State
+      summary: "Per-ship survey record - the hull's authored fidelity ladder as spawned, the last reading its sensor suite took (subject, band, tick, quantised condition, labelled flags and capacities), and the typed reason the last scan returned nothing. Authoritative on the reading half: what the crew saw when they looked cannot be re-derived from a world that has moved on since."
+      rationale:
+        - "[ai] AUTHORITATIVE BUT NOT FOLDED, the same bucket as the deadline table, the commitments ledger and the evidence log, and for their reason: a reading moves no hull, no shield and no reactor, so two hosts that disagreed about one would still agree about the simulation. Its probe world's baseline digest is recorded so that stays testable rather than assumed."
+        - "[ai] SNAPSHOTTED, and this is the field that decides it. Everything else about a scan is re-derivable - the structure's condition, the ship's range, the grid's level - but a READING is what the crew saw at the fidelity that moment bought them. Restoring a run without it hands the crew back a blank sheet on a structure they had already surveyed. The authored ladder is deliberately NOT saved: it is content, re-derived from the hull template at spawn, and writing it would put content into a save that content_digest is answerable for."
+        - "[ai] It did NOT bump SNAPSHOT_FORMAT, where #1031's evidence did, and the contrast is exact. An evidence entry is written by a script call, so a world could gain findings with no template change and a stale payload was byte-indistinguishable from a run that had learned nothing. A scan reading cannot exist without the [scan] table that produced it, and that table is content - so a save old enough to lack this field is refused as content-moved long before the field is read."
+        - "[ai] A READING AND A REFUSAL ARE NEVER BOTH CURRENT. Whichever the last scan produced replaces the other, because a stale reading sitting under a fresh complaint is how a crew end up acting on a number that is no longer about the thing they just pointed at."
+        - "[ai] One component rather than three: the ladder, the reading and the refusal are read together by the publisher and restored together by a save, and splitting them would give the census three entries where one tells the whole story."
+    architecture:
+      classification: authoritative
+      owner: science-scan-deriver
+      writers: [science-scan-deriver]
+      replicas: [science-scan-published-state]
+    implementation:
+      status: declared
+      paths:
+        - src/science/server.rs
+        - src/snapshot.rs
+      symbols:
+        - ShipScanRecord
+        - ScanReading
+        - ScanRefusal
+        - ScanSaveState
+      tests: [cargo test]
+
+  - state: science-scan-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Published Scan State
+      summary: The client-visible sensor reading - whether the hull carries a survey suite at all, the last reading it took as labelled quantities, and the strings.csv id for why the last scan returned nothing. Published under a reserved blackboard channel key on every ship that authored [scan].
+      rationale:
+        - "[ai] A SystemBlackboard variant under a reserved CHANNEL key, in the same not-a-system-id bucket as operations and dossiers. A field on SensorsBlackboard was the obvious alternative and was rejected: that payload is the radar's live configuration, republished as contacts move, so hanging a rarely-changing reading off it would re-broadcast the reading every time a blip did."
+        - "[ai] The payload's whole key set IS the derivation-purity guarantee, asserted in codec.rs rather than described here: nine keys, each a measured quantity or a strings.csv id an author wrote against one. There is no result, summary or narration field for authored prose to ride in."
+        - "[ai] condition_step crosses the wire beside condition_fraction so the console can say how precise a reading is instead of implying a precision the answering band never had. A host that pre-formatted the percentage would have thrown that away."
+        - "[ai] capable = false is meaningful rather than an empty payload: a hull with no survey suite makes the console say so, which is a different thing from a suite that has read nothing yet."
+        - "[ai] Empty for every world whose hulls author no [scan], so those worlds put exactly the payload on the wire they did before. The destroyer authors one, so combat_test and patrol gain a channel - a real payload change and a deliberate one. It moves no digest, because a blackboard is not folded; the anchors were measured to confirm that rather than assumed."
+    architecture:
+      classification: client-projection
+      owner: science-scan-deriver
+      writers: [science-scan-deriver]
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - gui/components/ph-scan-readout.js
+        - gui/destroyer/captain.html
+      symbols:
+        - ScanBlackboard
+        - ScanReadingSnapshot
+      tests: [cargo test, npx vitest run]
+
   - component: world-trigger-evaluator
     core:
       status: implemented

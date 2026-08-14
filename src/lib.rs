@@ -118,6 +118,11 @@ pub mod infrastructure;
 pub mod operations;
 pub mod radar;
 pub mod radar_config;
+/// The science scan (issue #1032): the pure derivation that turns a structure's
+/// live condition track into a fidelity-banded sensor reading, and its Bevy
+/// adapter. There is no authored scan text anywhere behind it — see
+/// `pasm/spec/design/simulation-differentiation.yaml`.
+pub mod science;
 pub mod ship_plugin;
 /// The canonical authoritative-state digest (issue #901). At the crate root
 /// rather than under `headless` since issue #904: a digest that only compiles

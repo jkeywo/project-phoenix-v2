@@ -3159,6 +3159,7 @@ verb = "fire_blaster"
             shield_arcs: Vec::new(),
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             hull: None,

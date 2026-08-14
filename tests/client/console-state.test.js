@@ -1586,6 +1586,40 @@ describe('buildSensorsConsoleState', () => {
     expect(blip.radar_y).toBeCloseTo(1);
   });
 
+  // The science scan (issue #1032). Read from its own channel key, not off the
+  // sensors blackboard: a hull with no `[scan]` publishes none at all, which is
+  // the empty shape the panel renders its own "no suite" state from.
+  it('reads the scan reading from its own blackboard channel', () => {
+    const reading = {
+      subject_uuid: 'depot-1',
+      subject_name: 'world.entity.skyhook.name',
+      band: 'coarse',
+      band_label: 'entity.alliance_destroyer.scan.band.coarse.label',
+      taken_at_tick: 900,
+      condition_fraction: 0.25,
+      condition_step: 0.25,
+      flags: [['world.skyhook.transfer.label', false]],
+      capacities: [],
+    };
+    const s = parse(buildSensorsConsoleState({
+      blackboards: { scan: { capable: true, reading, refusal: null } },
+    }));
+    expect(s.scan).toEqual({ capable: true, reading, refusal: null });
+  });
+
+  it('reports a hull with no scan channel as having no survey suite', () => {
+    expect(parse(buildSensorsConsoleState(EMPTY)).scan)
+      .toEqual({ capable: false, reading: null, refusal: null });
+  });
+
+  it('carries a scan refusal through as its string id', () => {
+    const s = parse(buildSensorsConsoleState({
+      blackboards: { scan: { capable: true, refusal: 'scan.refusal.out_of_range' } },
+    }));
+    expect(s.scan.refusal).toBe('scan.refusal.out_of_range');
+    expect(s.scan.reading).toBeNull();
+  });
+
   it('projects asteroid-field overlays with the same ship-local frame as blips', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: Math.PI / 2, sensorsRadarRange: 100,

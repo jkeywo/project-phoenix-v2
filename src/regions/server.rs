@@ -578,6 +578,7 @@ mod tests {
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -884,6 +885,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -958,6 +960,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1406,6 +1409,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1577,6 +1581,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1942,6 +1947,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -2003,6 +2009,7 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

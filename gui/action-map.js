@@ -202,6 +202,22 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /**
+   * Take a sensor reading of a named external structure (issue #1032).
+   *
+   * Targets the `sensors` system — the one the science target selection already
+   * rides — so a scan takes the ordinary station-tenure admission check. The
+   * uuid is carried rather than left implicit: the console says what it meant,
+   * and the server never has to guess which contact was selected when.
+   */
+  scan_target: (a, send) => {
+    if (!a.uuid) return;
+    send('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'ScanTarget', data: { uuid: a.uuid } },
+    });
+  },
+
   /** Send helm thrust / steering inputs.
    *
    *  One joystick action fans out to the two per-axis wire messages (issue

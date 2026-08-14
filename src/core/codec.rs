@@ -1765,6 +1765,125 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    /// The scan command (issue #1032).
+    ///
+    /// It targets the real, station-owned `sensors` system rather than a scan
+    /// system id of its own — the suite is the thing aboard the ship that can be
+    /// damaged and commanded, the reading is not — so the wire shape pinned here
+    /// is what gives it the ordinary station-tenure admission check, the same one
+    /// `SetScienceTarget` takes.
+    #[test]
+    fn scan_target_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.into()),
+            payload: SystemControlPayload::ScanTarget {
+                uuid: "00000000-0000-8000-8000-000000000042".into(),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"sensors","payload":{"type":"ScanTarget","data":{"uuid":"00000000-0000-8000-8000-000000000042"}}}}"#,
+            "ScanTarget wire shape must stay pinned"
+        );
+    }
+
+    /// The scan blackboard (issue #1032), and the derivation-purity guarantee
+    /// stated where the payload is actually made: **as the reading's whole key
+    /// set**.
+    ///
+    /// `pasm/spec/design/simulation-differentiation.yaml` says a sensor readout
+    /// must not be "scripted exposition dressed as sensor output". In a language
+    /// with no reflection, the enforceable form of that is the assertion below:
+    /// a reading has exactly these nine keys, every one of them a quantity read
+    /// off the subject's condition track or a `strings.csv` id an author wrote
+    /// against a quantity — and none of them a result, a summary, a narration or
+    /// a description. A `scan_text` field would have to be added here, in a diff,
+    /// moving this test.
+    #[test]
+    fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() {
+        use crate::messages::{ScanBlackboard, ScanReadingSnapshot};
+        use std::collections::BTreeSet;
+
+        let reading = ScanReadingSnapshot {
+            subject_uuid: "00000000-0000-8000-8000-000000000042".into(),
+            subject_name: "world.entity.skyhook.name".into(),
+            band: "detailed".into(),
+            band_label: "entity.alliance_destroyer.scan.band.detailed.label".into(),
+            taken_at_tick: 900,
+            condition_fraction: 0.31,
+            condition_step: 0.01,
+            flags: vec![("world.skyhook.transfer.label".into(), false)],
+            capacities: vec![("world.skyhook.berths.label".into(), 4)],
+        };
+
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+        assert_eq!(
+            value
+                .as_object()
+                .expect("a reading is an object")
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<&str>>(),
+            BTreeSet::from([
+                "subject_uuid",
+                "subject_name",
+                "band",
+                "band_label",
+                "taken_at_tick",
+                "condition_fraction",
+                "condition_step",
+                "flags",
+                "capacities",
+            ]),
+            "the reading's whole surface — every key is a measured quantity or a \
+             label an author wrote against one, and there is nowhere for a \
+             written-out scan result to ride"
+        );
+
+        let bb = SystemBlackboard::Scan(ScanBlackboard {
+            capable: true,
+            reading: Some(reading),
+            refusal: None,
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains(r#""kind":"Scan""#), "got: {json}");
+        assert_eq!(serde_json::from_str::<SystemBlackboard>(&json).unwrap(), bb);
+
+        // A refused scan carries the reason and no stale reading.
+        let refused = SystemBlackboard::Scan(ScanBlackboard {
+            capable: true,
+            reading: None,
+            refusal: Some(crate::science::ScanRefusal::OutOfRange.string_id().into()),
+        });
+        let json = serde_json::to_string(&refused).unwrap();
+        assert!(
+            !json.contains("reading") && json.contains("scan.refusal.out_of_range"),
+            "a refusal replaces the reading rather than sitting beside it: {json}"
+        );
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+            refused
+        );
+
+        // ADDITIVE ON THE WIRE: adding this variant moved no other variant's
+        // decoding, and every field on it is `#[serde(default)]`.
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Scan","data":{}}"#).unwrap(),
+            SystemBlackboard::Scan(ScanBlackboard::default())
+        );
+
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId(crate::science::SCAN_BLACKBOARD_KEY.into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     /// The dossier blackboard (issue #1030), and the hidden-truth guarantee
     /// stated where the payload is actually made: **as the payload's whole key
     /// set**.

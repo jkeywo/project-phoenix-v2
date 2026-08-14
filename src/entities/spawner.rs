@@ -1137,6 +1137,17 @@ pub fn spawn_entity(
         });
     }
 
+    // The science scan (issue #1032) — attach the record when `[scan]` is
+    // present, on the same argument again. The record carries the authored
+    // fidelity ladder AND the last reading: a hull that can scan starts able to
+    // and having read nothing.
+    if let Some(scan) = &config.scan {
+        entity_commands.insert(crate::science::ShipScanRecord {
+            config: scan.clone(),
+            ..Default::default()
+        });
+    }
+
     // Civilian traffic (issue #1028) — attach the authored assignment and the
     // live route/order/compliance state when `[civilian]` is present. Same
     // placement argument as the infrastructure block above. The pair is
@@ -1617,6 +1628,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1700,6 +1712,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1753,6 +1766,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1811,6 +1825,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1873,6 +1888,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1941,6 +1957,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2020,6 +2037,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2082,6 +2100,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2188,6 +2207,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             lod_bubble: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
         };
 
@@ -2249,6 +2269,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             asteroid_field: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2292,6 +2313,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             tags: vec![],
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: Some(faction_id),
             hull: None,
@@ -2402,6 +2424,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2618,6 +2641,7 @@ regen_per_sec = 0.0
             effects: None,
             infrastructure: None,
             operations: None,
+            scan: None,
             civilian: None,
             faction: None,
             behaviour: None,

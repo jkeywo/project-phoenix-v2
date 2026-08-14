@@ -157,6 +157,7 @@ use crate::console::weapons::beam::{
 };
 use crate::console::weapons::torpedo::TorpedoSystemResource;
 use crate::core::telemetry::RunTelemetry;
+use crate::dossier::evidence::EvidenceLog;
 use crate::entity_spawner::{EntityShipArcHull, EntitySystemHull, EntityUuid};
 use crate::lobby::WorldResource;
 use crate::messages::{CommsMessage, GamePhase, SystemId, TeamSlot, WorldData};
@@ -256,7 +257,22 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// be written twice or not at all. Nothing in the payload distinguishes that
 /// save from one whose run simply had not reached the negotiation yet, so both
 /// are refused by `Versions::check`, which names the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 6;
+///
+/// `7` — issue #1031 added [`ScenarioState::evidence`], and it is the #1029
+/// argument with the twist turned one notch further. A finding is a runtime
+/// artifact for the same reason a promise is — no world file declares one, so
+/// the content digest is silent about it — but where a missing promise resumes a
+/// captain who has said nothing, a missing FINDING resumes a crew who never
+/// learned something, and the whole Thin Margin arc is about what the crew know
+/// and how they came to know it. A format-6 payload of a run that had scanned the
+/// skyhook is byte-indistinguishable from one that had not; restoring the first
+/// into a #1031 build hands the crew back a blank intelligence file, and because
+/// the store deduplicates on `(subject, provenance, text)` rather than on a
+/// counter, a re-scan would re-stamp the finding at the resumed tick and quietly
+/// rewrite when they found out. Nothing in the payload distinguishes that save
+/// from one whose run had simply not scanned anything yet, so both are refused by
+/// `Versions::check`, which names the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 7;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -1184,6 +1200,28 @@ pub struct ScenarioState {
     /// [`Self::deadlines`]' reason.
     #[serde(default, skip_serializing_if = "CommitmentLedger::is_empty")]
     pub commitments: CommitmentLedger,
+    /// `WorldContentRuntime::evidence`, whole (issue #1031).
+    ///
+    /// What the crew found out, what each finding was about, how they learned it
+    /// and on which tick.
+    ///
+    /// Stored for [`Self::commitments`]' reason — nothing in the world file
+    /// predicts whether it is empty, because a finding exists because of what the
+    /// crew *did* — and stored WHOLE for [`Self::deadlines`]' reason: every field
+    /// is a `String`, a `u64`, or one small enum travelling by its own
+    /// `snake_case` serde name.
+    ///
+    /// This is the only dossier state a save carries, and the distinction is the
+    /// whole of `src/dossier/`: the facts on a sheet are re-folded from the
+    /// condition track, the ledger and the roster every tick and would disagree
+    /// with them if persisted, whereas what the crew learned is recoverable from
+    /// nothing at all.
+    ///
+    /// In the order the findings were made, never sorted, for
+    /// [`Self::deadlines`]' reason — and here the order is also what the fact
+    /// sheet renders.
+    #[serde(default, skip_serializing_if = "EvidenceLog::is_empty")]
+    pub evidence: EvidenceLog,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -1615,6 +1653,10 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // for every run that never reached a beat where the captain gave their
         // word, which is every shipped world today.
         commitments: runtime.commitments.clone(),
+        // What the crew found out (issue #1031). Empty — and so absent from the
+        // payload — for every run whose scenario never said the crew learned
+        // anything, which is every shipped world today.
+        evidence: runtime.evidence.clone(),
     })
 }
 
@@ -2991,6 +3033,12 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // would be indistinguishable from replacing. Taking it whole is what stays
         // correct once #849's continuation log replays commands INTO a restored run.
         runtime.commitments = stored.commitments.clone();
+        // Wholesale replacement again (issue #1031), on the ledger's terms and
+        // with one extra reason of its own: the store deduplicates on
+        // `(subject, provenance, text)` and keeps the FIRST tick, so a merge that
+        // let the fresh app's own appends land first would re-stamp a finding at
+        // the bootstrap's tick and quietly rewrite when the crew learned it.
+        runtime.evidence = stored.evidence.clone();
     }
 
     match world.get_resource_mut::<WorldScriptRuntime>() {

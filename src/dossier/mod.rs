@@ -6,13 +6,23 @@
 //! and the place the known/hidden rule is written down; [`server`] is the thin
 //! adapter that gathers the live inputs and publishes the result on the local
 //! ship's `dossiers` blackboard channel.
+//!
+//! [`evidence`] is the other half (issue #1031): what the crew **found out**,
+//! with the provenance that says how. Unlike everything the projection folds,
+//! that is real state — a run that scanned the skyhook and a run that did not
+//! are different runs — so it is stored, snapshotted and censused, and it is the
+//! one input the fold does not recompute.
 
+/// Gathered evidence and its provenance: the append-only record of what this
+/// crew learned, and how (issue #1031).
+pub mod evidence;
 /// The pure fold: the input port, the fact vocabulary, and the rule that keeps
 /// hidden truth out by construction.
 pub mod projection;
 /// The Bevy adapter: the derived subject roster and the blackboard publisher.
 pub mod server;
 
+pub use evidence::{EvidenceEntry, EvidenceLog, EvidenceProvenance, UnknownProvenance};
 pub use projection::{
     project, DossierSubject, SubjectCondition, FACT_COMMITMENT_BROKEN, FACT_COMMITMENT_KEPT,
     FACT_COMMITMENT_OPEN, FACT_COMMS, FACT_CONDITION, FACT_FACTION, SHARED_FACT_LABELS,

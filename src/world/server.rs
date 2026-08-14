@@ -115,6 +115,24 @@ pub struct WorldContentRuntime {
     /// effects can apply its commitment mutations too, and the state census
     /// (`tests/authoritative_state_enumeration.rs`) sees no new registration.
     pub commitments: crate::world::commitments::CommitmentLedger,
+    /// What this run's crew have found out (issue #1031): every
+    /// `ctx.dossier.append(…)` a scan handler or a dialogue `on_pick` wrote,
+    /// with the provenance that says how they learned it.
+    ///
+    /// Append-only, deduplicated on `(subject, provenance, text)`, and read back
+    /// by the dossier projection and nothing else — read
+    /// [`crate::dossier::evidence`] before adding anything to it. Like the ledger
+    /// above it there is no queue and no evaluator: an entry is written when a
+    /// script says the crew learned something, and nothing scans for findings
+    /// that have quietly become available.
+    ///
+    /// It is the ONE input to a dossier that is not recomputed every tick, which
+    /// is why it sits here rather than in `src/dossier/`: state belongs beside
+    /// the other scenario state already on this resource, so every site that
+    /// borrows the content runtime to apply a call's effects can append to it,
+    /// and the state census (`tests/authoritative_state_enumeration.rs`) sees no
+    /// new registration.
+    pub evidence: crate::dossier::evidence::EvidenceLog,
     /// Infrastructure condition adjustments queued this tick by a scripted
     /// `repair_infrastructure` / `damage_infrastructure` effect (issue #1025),
     /// already resolved to the target's UUID.

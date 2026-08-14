@@ -75,11 +75,20 @@ pub fn handle_dispatch_repair_team(
             &crate::ship_plugin::ShipConfigComponent,
             &mut ShipRepairTeams,
             Option<&crate::entity_spawner::EntitySystemHull>,
+            // Issue #1027: how many teams an external field-repair is holding.
+            // Read here as well as in the AI dispatcher, because humans and AI
+            // issue the same command and so have to meet the same constraint —
+            // a commitment one path honoured and the other did not would be a
+            // capacity-as-cost trade a player could opt out of.
+            Option<&crate::operations::ShipOperations>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (admitted, ship_config, mut teams, hull_opt) in ship_query.iter_mut() {
+    for (admitted, ship_config, mut teams, hull_opt, operations) in ship_query.iter_mut() {
+        let committed = operations
+            .map(|ops| ops.committed_repair_teams())
+            .unwrap_or(0);
         // Look up a human-readable display name for a SystemId. Prefer the
         // ship's `EntitySystemHull` entry (populated from TOML with the
         // designer-authored display name), and fall back to the raw SystemId
@@ -109,6 +118,15 @@ pub fn handle_dispatch_repair_team(
                 let Some(sid) = resolve_repair_target(repair_target, ship_config, hull_ref) else {
                     continue;
                 };
+                // A team held by a field-repair is not dispatchable, however
+                // the order was issued. Same nothing-happens as a dispatch to
+                // an undamaged station: the slot is left exactly as it was.
+                if teams
+                    .0
+                    .is_committed_to_operation(*team_idx as usize, committed)
+                {
+                    continue;
+                }
                 let display = display_name_for(&sid);
                 teams.0.dispatch(*team_idx as usize, sid, display);
             }

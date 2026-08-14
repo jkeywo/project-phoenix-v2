@@ -3146,13 +3146,14 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
 
     // The scheduled writers named by the policy table: the helm integrator
     // (`integrate_ship_physics`), the low-LOD substitute
-    // (`simulate_low_lod_ships`), the collision responder (`handle_collisions`)
-    // and blaster recoil (`tick_blaster_system`). The table's fifth entry,
+    // (`simulate_low_lod_ships`), the collision responder (`handle_collisions`),
+    // blaster recoil (`tick_blaster_system`) and the tow rig
+    // (`move_towed_targets`, issue #1027). The table's remaining entry,
     // `handle_slow_zone_speed_clamp`, is an observer and so is in no schedule —
     // see `ship_physics_writers`.
     assert_eq!(
         writers.len(),
-        4,
+        5,
         "the number of scheduled systems writing ShipPhysics changed. Every writer \
          beyond the helm integrator has to be a correction layered on top of it rather \
          than a competing integrator, and has to be documented in the writer-policy \
@@ -3164,19 +3165,22 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
          found:\n{inventory}"
     );
 
-    // Exactly two of them are unfiltered corrections (collision response and
-    // blaster recoil): they deliberately apply to every ship, high-LOD and
-    // low-LOD alike, and their safety argument is that they are one-shot
-    // corrections rather than integrators — not filter disjointness.
+    // Exactly three of them are unfiltered corrections (collision response,
+    // blaster recoil, and the tow rig): they deliberately apply to every ship,
+    // high-LOD and low-LOD alike, and their safety argument is that they are
+    // one-shot corrections rather than integrators — not filter disjointness.
+    // The tow is unfiltered on purpose: a demoted freighter under tow is
+    // exactly the case that has to keep working, and dead reckoning it away
+    // from the rig would drag it out of the tug's wake.
     let unfiltered = (0..writers.len())
         .filter(|i| high_fi.contains(i) && low_lod.contains(i))
         .count();
     assert_eq!(
-        unfiltered, 2,
-        "expected exactly two unfiltered ShipPhysics correction writers (collision \
-         response and blaster recoil). A change here means a correction grew an \
-         `AiHighFidelity` filter, or an integrator lost one — either way the set of \
-         ships that get moved twice per tick has changed. Reconcile with the \
+        unfiltered, 3,
+        "expected exactly three unfiltered ShipPhysics correction writers (collision \
+         response, blaster recoil and the tow rig). A change here means a correction \
+         grew an `AiHighFidelity` filter, or an integrator lost one — either way the \
+         set of ships that get moved twice per tick has changed. Reconcile with the \
          writer-policy table on `ShipPhysics` (src/ship/state.rs). ShipPhysics writers \
          found:\n{inventory}"
     );

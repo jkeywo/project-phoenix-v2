@@ -22,7 +22,7 @@ use bevy::prelude::Component;
 /// The helm-path fields it owns are `x`/`y`/`z`/`yaw`/`forward_speed`/
 /// `lateral_speed`/`vertical_speed`/`roll` (the vertical pair added in #744).
 ///
-/// It is deliberately **not** the only writer of these fields overall. Four
+/// It is deliberately **not** the only writer of these fields overall. Five
 /// out-of-band writers are **sanctioned exceptions**. They are corrections and
 /// overrides layered on top of the helm integration rather than competing
 /// integrators, so they are intentionally left as direct writes and do not
@@ -34,6 +34,7 @@ use bevy::prelude::Component;
 /// | `handle_collisions` / `separate_ship_from_collision` | `src/server_app.rs` | `forward_speed`, `x`, `z` | Collision response: a hard stop plus a positional de-overlap. Routing it through helm intent would let the ship integrate *into* geometry for a frame before responding. |
 /// | `tick_blaster_system` recoil (issue #638) | `src/console/weapons/blaster.rs` | `forward_speed` | An impulse applied by weapons fire, not a helm decision. It adds to whatever the helm integrator produced. |
 /// | `handle_slow_zone_speed_clamp` | `src/regions/server.rs` | `forward_speed` | An **observer** (`trigger: On<RegionEntered>`), not a scheduled system — it can fire at any point, outside any `SimSet` ordering window, so it cannot be sequenced relative to the helm integrator. |
+/// | `move_towed_targets` (issue #1027) | `src/operations/server.rs` | `x`, `y`, `z`, `forward_speed`, `lateral_speed`, `vertical_speed` | A **tow**: while an operation holds, the towed craft's position is the tug's rig, not its own helm's. The same shape as the collision de-overlap — a correction applied after integration, in `SimSet::Modifiers` — and the speeds are zeroed for the collision responder's reason turned around: a craft released from the rig must not shoot off at a velocity its helm accumulated against a position it was never allowed to reach. |
 ///
 /// When adding a new writer, prefer helm intent components. Only write these
 /// fields directly if the change is genuinely one of the above shapes — a

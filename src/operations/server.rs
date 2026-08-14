@@ -40,16 +40,17 @@
 use bevy::prelude::*;
 
 use crate::entities::spawner::{EntityName, EntityUuid};
-use crate::infrastructure::{ConditionAdjustment, InfrastructureCondition};
+use crate::infrastructure::{CapacityAdjustment, ConditionAdjustment, InfrastructureCondition};
 use crate::logging::LogFilterConfig;
 use crate::messages::{
     ActiveOperationSnapshot, AdmittedCommands, CapabilityOffer, OperationsBlackboard, PowerGroupId,
-    SystemBlackboard, SystemControlPayload, SystemId,
+    SystemBlackboard, SystemControlPayload, SystemId, TeamSlot,
 };
 use crate::operations::hold::{
-    eligibility, Ineligibility, OperationConditions, OperationHold, OperationVerb,
-    OperationsConfig, Settlement,
+    verdict, CapacityReading, Ineligibility, OperationConditions, OperationHold, OperationVerb,
+    OperationsConfig, RegionEffectName, Settlement, TransferDirection,
 };
+use crate::regions::effects::RegionEffectKind;
 use crate::ship::power::ShipPowerSystem;
 use crate::world::server::WorldContentRuntime;
 
@@ -96,6 +97,30 @@ pub struct ShipOperations {
     /// A per-ship counter rather than a minted world id: an operation is not an
     /// entity, and starts are already in a deterministic order.
     pub next_id: u64,
+}
+
+impl ShipOperations {
+    /// How many of this ship's repair teams the running operation is holding
+    /// (issue #1027) — the **capacity-as-cost** reading the repair console
+    /// takes.
+    ///
+    /// Derived from the live hold rather than stored, which is what makes
+    /// "released on completion or abort" true by construction: a settled hold
+    /// commits nothing, so there is no release step to forget and nothing extra
+    /// for a save to carry. The teams themselves never move — no slot is
+    /// dispatched, no team travels anywhere, and the hull's own roster is
+    /// untouched. They are simply spoken for.
+    pub fn committed_repair_teams(&self) -> u8 {
+        self.active
+            .as_ref()
+            .filter(|hold| !hold.is_settled())
+            .and_then(|hold| {
+                self.capabilities
+                    .capability(hold.verb())
+                    .map(|capability| capability.repair_teams)
+            })
+            .unwrap_or(0)
+    }
 }
 
 /// The mutable part of a ship's operations record, as a save carries it
@@ -176,6 +201,12 @@ impl Plugin for OperationsPlugin {
                 tick_operations
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .before(crate::infrastructure::tick_infrastructure_condition),
+                // After the tick that decides whether a tow is holding, so a
+                // load is moved by the tow that is actually running this tick
+                // rather than by one that stalled at the top of it.
+                move_towed_targets
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .after(tick_operations),
                 publish_operations_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
@@ -320,19 +351,40 @@ fn tick_hz_of(world_config: Option<&crate::world::config::WorldConfig>) -> f32 {
 /// Advance every live operation by one logical tick.
 ///
 /// Per ship, in UUID order: drain any script-queued start, gather this tick's
-/// real conditions, hand them to the pure eligibility test, apply what comes
-/// back, and pay a completion into #1025's condition queue.
+/// real conditions, hand them to the pure verdict, apply what comes back, and
+/// pay whatever it earned into #1025's queues.
+///
+/// # Where the interrupt signals come from (issue #1027)
+///
+/// * **Attack** — `RecentCombatActivity` folded through
+///   `objectives::last_landed_hit_secs` against the world's authored
+///   `attacked_memory_secs`, which is the same reading the doctrine gates and
+///   the viewscreen take. Own weapons fire is deliberately not in it: shooting
+///   back is not being interrupted.
+/// * **Region** — `RegionMembership`, which `update_region_membership`
+///   recomputes in `SimSet::Physics`, one set earlier than this. Membership is
+///   only tracked for entities carrying the `Ship` marker, which every operator
+///   is.
+/// * **Power** — unchanged from #1026: it was already an eligibility condition,
+///   and giving it a second spelling as an interrupt rule would let one
+///   capability author two answers to the same question.
+#[allow(clippy::too_many_arguments)]
 pub fn tick_operations(
     runtime: Option<ResMut<WorldContentRuntime>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    time: Option<Res<Time>>,
+    membership: Option<Res<crate::regions::server::RegionMembership>>,
     mut ships: Query<(
         Entity,
         &EntityUuid,
         &Transform,
         Option<&ShipPowerSystem>,
+        Option<&crate::console::repair::server::ShipRepairTeams>,
+        Option<&crate::ship::combat_activity::RecentCombatActivity>,
         &mut ShipOperations,
     )>,
-    targets: Query<(&EntityUuid, &Transform, Has<InfrastructureCondition>)>,
+    targets: Query<(&EntityUuid, &Transform, Option<&InfrastructureCondition>)>,
+    region_effects: Query<&crate::entities::spawner::RegionEffectsSection>,
     log: Option<Res<LogFilterConfig>>,
 ) {
     let Some(mut runtime) = runtime else {
@@ -344,6 +396,11 @@ pub fn tick_operations(
         return;
     }
     let tick_hz = tick_hz_of(world_config.as_deref());
+    let now_secs = time.map(|t| t.elapsed_secs()).unwrap_or(0.0);
+    let attacked_memory_secs = world_config
+        .as_deref()
+        .map(|wc| wc.global.attacked_memory_secs)
+        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().attacked_memory_secs);
     // Draining through `DerefMut` would mark `WorldContentRuntime` changed on
     // every quiet tick, and every world in the repository carries that resource.
     // The emptiness check above is a `Deref` read, so it costs nothing.
@@ -355,12 +412,12 @@ pub fn tick_operations(
 
     let mut rows: Vec<(String, Entity)> = ships
         .iter()
-        .map(|(entity, uuid, _, _, _)| (uuid.0.clone(), entity))
+        .map(|(entity, uuid, ..)| (uuid.0.clone(), entity))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (uuid, entity) in rows {
-        let Ok((_, _, transform, power, mut ops)) = ships.get_mut(entity) else {
+        let Ok((_, _, transform, power, teams, combat, mut ops)) = ships.get_mut(entity) else {
             continue;
         };
 
@@ -388,6 +445,18 @@ pub fn tick_operations(
             continue;
         };
         let capability = ops.capabilities.capability(verb).cloned();
+        // The operator's own capacity reading is taken before the hold is
+        // borrowed mutably, because a transfer's other end may be this very
+        // ship.
+        let operator_capacity = capability
+            .as_ref()
+            .and_then(|c| c.transfer.as_ref())
+            .and_then(|transfer| {
+                targets
+                    .iter()
+                    .find(|(id, _, _)| id.0 == uuid)
+                    .and_then(|(_, _, condition)| capacity_of(condition, &transfer.capacity))
+            });
         let Some(hold) = ops.active.as_mut() else {
             continue;
         };
@@ -395,10 +464,16 @@ pub fn tick_operations(
         let ship_pos = transform.translation;
         let conditions = OperationConditions {
             target_present: target.is_some(),
-            // `stabilise` means something only on an entity that carries a
-            // condition track. A pristine asteroid is present, in range, and
-            // still not a thing you can stabilise.
-            target_applicable: target.map(|(_, _, has)| has).unwrap_or(false),
+            target_has_condition_track: target
+                .map(|(_, _, condition)| condition.is_some())
+                .unwrap_or(false),
+            target_capacity: capability
+                .as_ref()
+                .and_then(|c| c.transfer.as_ref())
+                .and_then(|transfer| {
+                    target.and_then(|(_, _, condition)| capacity_of(condition, &transfer.capacity))
+                }),
+            operator_capacity,
             distance: target
                 .map(|(_, tf, _)| ship_pos.distance(tf.translation))
                 .unwrap_or(f32::INFINITY),
@@ -413,10 +488,42 @@ pub fn tick_operations(
                 _ => u8::MAX,
             },
             power_locked: power.map(|power| power.0.locked()).unwrap_or(false),
+            // Idle slots, counted the way the repair AI counts them. A hull with
+            // no repair roster at all reads as unconstrained, on exactly the
+            // reading `power_level` takes for a hull with no grid: the ceiling
+            // is absent, not zero.
+            repair_teams_available: teams
+                .map(|teams| {
+                    teams
+                        .0
+                        .slots()
+                        .iter()
+                        .filter(|slot| matches!(slot, TeamSlot::Idle))
+                        .count()
+                        .min(usize::from(u8::MAX)) as u8
+                })
+                .unwrap_or(u8::MAX),
+            // Landed hits only — the same fold the doctrine gates take. Firing
+            // your own guns is not being attacked.
+            under_attack: combat
+                .map(|activity| {
+                    crate::objectives::attacked_recently(
+                        crate::objectives::last_landed_hit_secs(
+                            activity.last_damage_taken,
+                            activity.last_hostile_fire_taken,
+                        ),
+                        now_secs,
+                        attacked_memory_secs,
+                    )
+                })
+                .unwrap_or(false),
+            region_effects: operator_region_effects(membership.as_deref(), &region_effects, entity),
         };
 
         let before = hold.state();
-        let settlement = hold.advance(eligibility(capability.as_ref(), &conditions));
+        let tick_verdict = verdict(capability.as_ref(), &conditions);
+        let rate = tick_verdict.rate();
+        let settlement = hold.advance(tick_verdict);
         let after = hold.state();
         if before != after {
             crate::pdebug!(
@@ -431,20 +538,228 @@ pub fn tick_operations(
             );
         }
 
-        // The payoff. Queued for `tick_infrastructure_condition` rather than
-        // written onto the target, so the crossing it may cause is detected and
-        // mirrored by the one system that owns operational-flag edges (#1025).
-        if settlement == Some(Settlement::Completed) {
-            let points = hold.condition_on_complete();
-            let target_uuid = hold.target_uuid().to_string();
+        // ── The payoffs ──
+        //
+        // Every one of them is QUEUED for `tick_infrastructure_condition`
+        // rather than written onto the target, so the crossing a condition move
+        // may cause is detected and mirrored by the one system that owns
+        // operational-flag edges, and a capacity move re-publishes the counter
+        // a scenario predicate reads (#1025).
+
+        // `field_repair`'s per-tick slice, scaled by the rate this tick
+        // actually banked at. Paid for every tick the hold advanced, including
+        // the one it completed on — that tick was held like any other.
+        if let Some(rate) = rate {
+            let points = hold.condition_payout(rate);
             if points > 0.0 {
                 runtime
                     .pending_condition_adjustments
                     .push(ConditionAdjustment {
-                        uuid: target_uuid,
+                        uuid: hold.target_uuid().to_string(),
                         delta: points,
                     });
             }
+        }
+
+        if settlement == Some(Settlement::Completed) {
+            // `stabilise`'s lump, paid once off the single settlement the pure
+            // hold reports.
+            let points = hold.condition_on_complete();
+            if points > 0.0 {
+                runtime
+                    .pending_condition_adjustments
+                    .push(ConditionAdjustment {
+                        uuid: hold.target_uuid().to_string(),
+                        delta: points,
+                    });
+            }
+            // `transfer`'s load. Both ends move on the same tick and in a fixed
+            // order — source first — so two hosts queue the pair identically.
+            // Eligibility has already proved both ends can take part; the
+            // clamp inside `adjust_capacity` is the backstop, not the check.
+            if let Some(transfer) = capability.as_ref().and_then(|c| c.transfer.as_ref()) {
+                let (source, destination) = match transfer.direction {
+                    TransferDirection::Deliver => (uuid.clone(), hold.target_uuid().to_string()),
+                    TransferDirection::Collect => (hold.target_uuid().to_string(), uuid.clone()),
+                };
+                runtime
+                    .pending_capacity_adjustments
+                    .push(CapacityAdjustment {
+                        uuid: source,
+                        capacity: transfer.capacity.clone(),
+                        delta: -transfer.amount,
+                    });
+                runtime
+                    .pending_capacity_adjustments
+                    .push(CapacityAdjustment {
+                        uuid: destination,
+                        capacity: transfer.capacity.clone(),
+                        delta: transfer.amount,
+                    });
+            }
+        }
+    }
+}
+
+/// One end of a transfer, read off an entity's condition track.
+fn capacity_of(
+    condition: Option<&InfrastructureCondition>,
+    capacity: &str,
+) -> Option<CapacityReading> {
+    condition
+        .and_then(|condition| condition.0.capacity_reading(capacity))
+        .map(|reading| CapacityReading {
+            level: reading.level,
+            headroom: reading.headroom(),
+        })
+}
+
+/// Which authored region effects the operator is standing in, deduplicated and
+/// in a fixed order.
+///
+/// Sorted by declaration order rather than by whichever region entity the
+/// membership set happened to yield first: two hosts that spawned the same
+/// bands in different orders must hand the pure module the same list, because
+/// the strictest-rule-wins tie-break reads it.
+fn operator_region_effects(
+    membership: Option<&crate::regions::server::RegionMembership>,
+    region_effects: &Query<&crate::entities::spawner::RegionEffectsSection>,
+    operator: Entity,
+) -> Vec<RegionEffectName> {
+    let Some(regions) = membership.and_then(|m| m.inside.get(&operator)) else {
+        return Vec::new();
+    };
+    let mut names: Vec<RegionEffectName> = regions
+        .iter()
+        .filter_map(|region| region_effects.get(*region).ok())
+        .flat_map(|effects| effects.0.iter().map(region_effect_name))
+        .collect();
+    names.sort_by_key(|name| {
+        RegionEffectName::ALL
+            .iter()
+            .position(|candidate| candidate == name)
+            .unwrap_or(usize::MAX)
+    });
+    names.dedup();
+    names
+}
+
+/// The authorable name of a live region effect.
+///
+/// Total by construction — a new `RegionEffectKind` variant will not compile
+/// until it has a name an interrupt rule can be written against, which is the
+/// point. A hazard band nobody can author a rule for is a hazard operations
+/// cannot be told about.
+pub fn region_effect_name(kind: &RegionEffectKind) -> RegionEffectName {
+    match kind {
+        RegionEffectKind::DamageZone { .. } => RegionEffectName::DamageZone,
+        RegionEffectKind::SlowZone { .. } => RegionEffectName::SlowZone,
+        RegionEffectKind::BlocksImpulse => RegionEffectName::BlocksImpulse,
+        RegionEffectKind::RadarDampening { .. } => RegionEffectName::RadarDampening,
+        RegionEffectKind::CommsJam => RegionEffectName::CommsJam,
+        RegionEffectKind::SensorBlind => RegionEffectName::SensorBlind,
+        RegionEffectKind::NebulaFog { .. } => RegionEffectName::NebulaFog,
+    }
+}
+
+// ── The tow ──────────────────────────────────────────────────────────────────
+
+/// Hold every towed target on its operator's tow rig (issue #1027).
+///
+/// # Why this writes the target's position directly
+///
+/// Nothing in this codebase attaches one entity to another: there is no dock,
+/// no parent, no carried marker. The only sanctioned precedent for overriding a
+/// ship's authoritative position is the writer-policy table on
+/// [`crate::ship::state::ShipPhysics`] — collision de-overlap, blaster recoil,
+/// the low-LOD substitute — and a tow is exactly that shape: a **correction
+/// layered on top of** the helm integration rather than a second integrator.
+/// So this is a fifth row in that table, and the count in
+/// `tests/headless_runner.rs` is bumped to match.
+///
+/// It writes `ShipPhysics` where the target has one and lets
+/// `sync_ship_position` project it, and writes the `Transform` too so the two
+/// agree within the tick rather than a tick apart. A target that is *not* a
+/// ship — a derelict with no `[behaviour]` block — has no `ShipPhysics` and
+/// nothing else that ever moves it, so the transform write is the whole of it.
+///
+/// # What a tow means for a civilian's orders
+///
+/// Nothing, deliberately. A towed hauler goes on publishing whatever route
+/// directive #1028 gave it and goes on complying or refusing exactly as before:
+/// a tow is a *physical* override, not an order, and the compliance state
+/// machine is about orders. What the tow does take away is the motion — the
+/// three speed fields are zeroed while attached — so a craft released from a
+/// tow does not shoot off at whatever velocity its own helm had been quietly
+/// accumulating against the rig.
+///
+/// # Determinism
+///
+/// Operators are walked in UUID order and the load is placed from the
+/// operator's post-integration transform, so two hosts put the same craft in
+/// the same place on the same tick.
+pub fn move_towed_targets(
+    mut set: ParamSet<(
+        Query<(&EntityUuid, &Transform, &ShipOperations)>,
+        Query<(
+            &EntityUuid,
+            &mut Transform,
+            Option<&mut crate::ship::state::ShipPhysics>,
+        )>,
+    )>,
+) {
+    // Operator uuid, target uuid, and where the rig puts the load. The
+    // authored offset is in the operator's OWN frame, so a tug that turns
+    // swings its load around with it rather than dragging it sideways through
+    // the towline — which is why the rotation is applied here, against the
+    // operator's post-integration transform, rather than added in world space.
+    let mut rigs: Vec<(String, String, Vec3)> = set
+        .p0()
+        .iter()
+        .filter_map(|(uuid, transform, ops)| {
+            let hold = ops.active.as_ref().filter(|hold| !hold.is_settled())?;
+            if hold.verb() != OperationVerb::Tow {
+                return None;
+            }
+            // Only a hold that is actually HOLDING drags its load. A tow that
+            // has stalled — out of range, out of power, interrupted by an
+            // authored rule — has let go, which is the readable behaviour: the
+            // crew watch the hulk stop following them.
+            if hold.state() != crate::operations::hold::HoldState::Holding {
+                return None;
+            }
+            let capability = ops.capabilities.capability(hold.verb())?;
+            Some((
+                uuid.0.clone(),
+                hold.target_uuid().to_string(),
+                transform.translation + transform.rotation * Vec3::from(capability.tow_offset),
+            ))
+        })
+        .collect();
+    if rigs.is_empty() {
+        return;
+    }
+    rigs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (_, target_uuid, placed) in rigs {
+        let mut targets = set.p1();
+        let Some((_, mut transform, physics)) = targets
+            .iter_mut()
+            .find(|(uuid, _, _)| uuid.0 == target_uuid)
+        else {
+            continue;
+        };
+        transform.translation = placed;
+        if let Some(mut physics) = physics {
+            physics.x = placed.x;
+            physics.y = placed.y;
+            physics.z = placed.z;
+            // Zeroed so a craft released from the rig does not shoot off at
+            // whatever velocity its own helm had been quietly accumulating
+            // against a position it was never allowed to reach.
+            physics.forward_speed = 0.0;
+            physics.lateral_speed = 0.0;
+            physics.vertical_speed = 0.0;
         }
     }
 }
@@ -478,6 +793,10 @@ pub fn publish_operations_blackboard(
                 progress: hold.progress(),
                 state: state.as_str().to_string(),
                 reason: state.reason().map(|r| r.string_id().to_string()),
+                // AC3: the slowed rate is visible. A crawling bar with no
+                // number beside it reads as a bug; a crawling bar labelled
+                // 25 % reads as the storm.
+                rate_percent: hold.rate().as_percent(),
             }
         });
         let blackboard = SystemBlackboard::Operations(OperationsBlackboard {
@@ -511,6 +830,10 @@ pub fn publish_operations_blackboard(
 pub fn verb_label(verb: OperationVerb) -> &'static str {
     match verb {
         OperationVerb::Stabilise => "operation.verb.stabilise",
+        OperationVerb::Tow => "operation.verb.tow",
+        OperationVerb::Escort => "operation.verb.escort",
+        OperationVerb::Transfer => "operation.verb.transfer",
+        OperationVerb::FieldRepair => "operation.verb.field_repair",
     }
 }
 
@@ -530,7 +853,7 @@ mod tests {
             power_group: "helm".to_string(),
             min_power_level: 2,
             condition_on_complete: 25.0,
-            stall_limit_secs: None,
+            ..Default::default()
         }
     }
 
@@ -1205,5 +1528,899 @@ mod tests {
                 verb.as_str()
             );
         }
+    }
+
+    // ══ Issue #1027 ══════════════════════════════════════════════════════════
+
+    use crate::infrastructure::{CapacityConfig, InfrastructureConfig, InfrastructureState};
+    use crate::operations::hold::{
+        InterruptCause, InterruptResponse, InterruptRule, ProgressRate, TargetRequirement,
+        TransferTerms,
+    };
+
+    fn capability_of(verb: OperationVerb) -> CapabilityConfig {
+        CapabilityConfig {
+            verb,
+            range: 400.0,
+            duration_secs: 2,
+            ..Default::default()
+        }
+    }
+
+    fn ops_with(capability: CapabilityConfig) -> ShipOperations {
+        ShipOperations {
+            capabilities: OperationsConfig {
+                capabilities: vec![capability],
+            },
+            ..Default::default()
+        }
+    }
+
+    // ── The region-effect vocabulary is total ──
+
+    #[test]
+    fn every_live_region_effect_maps_onto_an_authorable_name() {
+        // The mapping is a `match` on `RegionEffectKind`, so a new hazard will
+        // not compile until it is authorable. This pins the pairs so the
+        // mapping cannot be made total by pointing two kinds at one name.
+        let pairs = [
+            (
+                RegionEffectKind::DamageZone {
+                    dps: 1.0,
+                    shield_pierce: 0.0,
+                },
+                RegionEffectName::DamageZone,
+            ),
+            (
+                RegionEffectKind::SlowZone {
+                    thrust_modifier: None,
+                    yaw_rate_modifier: None,
+                },
+                RegionEffectName::SlowZone,
+            ),
+            (
+                RegionEffectKind::BlocksImpulse,
+                RegionEffectName::BlocksImpulse,
+            ),
+            (
+                RegionEffectKind::RadarDampening { multiplier: 0.5 },
+                RegionEffectName::RadarDampening,
+            ),
+            (RegionEffectKind::CommsJam, RegionEffectName::CommsJam),
+            (RegionEffectKind::SensorBlind, RegionEffectName::SensorBlind),
+            (
+                RegionEffectKind::NebulaFog {
+                    color: [0.0; 3],
+                    density: 0.01,
+                },
+                RegionEffectName::NebulaFog,
+            ),
+        ];
+        assert_eq!(
+            pairs.len(),
+            RegionEffectName::ALL.len(),
+            "every authorable name is reachable from a live region effect, and vice versa — a \
+             hazard band an interrupt rule cannot name is a hazard operations cannot be told about"
+        );
+        for (kind, name) in pairs {
+            assert_eq!(region_effect_name(&kind), name);
+        }
+    }
+
+    // ── AC2/AC3: the interrupts arrive through the real world ──
+
+    /// A bare app carrying one operating ship inside one authored region, plus
+    /// the stabilisable target.
+    fn app_in_a_region(
+        ops: ShipOperations,
+        effects: Vec<RegionEffectKind>,
+    ) -> (App, Entity, Entity) {
+        let (mut app, ship, target) = app_with(ops, 100.0);
+        let region = app
+            .world_mut()
+            .spawn(crate::entities::spawner::RegionEffectsSection(effects))
+            .id();
+        let mut membership = crate::regions::server::RegionMembership::default();
+        membership
+            .inside
+            .insert(ship, std::iter::once(region).collect());
+        app.insert_resource(membership);
+        (app, ship, target)
+    }
+
+    #[test]
+    fn a_slow_zone_stretches_the_hold_through_the_real_region_membership() {
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 1,
+            interrupts: vec![InterruptRule {
+                cause: InterruptCause::Region,
+                region_effect: Some(RegionEffectName::SlowZone),
+                response: InterruptResponse::Slow,
+                rate_percent: 50,
+            }],
+            ..capability_of(OperationVerb::Tow)
+        });
+        let (mut app, ship, _) = app_in_a_region(
+            ops,
+            vec![RegionEffectKind::SlowZone {
+                thrust_modifier: None,
+                yaw_rate_modifier: None,
+            }],
+        );
+        start_via_script(&mut app, OperationVerb::Tow);
+        for _ in 0..60 {
+            app.update();
+        }
+
+        let hold = ops_of(&app, ship).active.expect("the hold opened");
+        assert_eq!(
+            hold.state(),
+            HoldState::Holding,
+            "the band SLOWS the operation — it does not stall it, and the crew are not being \
+             punished for flying through the storm they were sent into"
+        );
+        assert_eq!(hold.rate(), ProgressRate::percent(50));
+        assert_eq!(
+            hold.elapsed_ticks(),
+            30,
+            "sixty ticks in the band buy thirty ticks of hold — the interruption arrives through \
+             the ship's REAL region membership, not through a flag something else set"
+        );
+        assert_eq!(hold.stalled_ticks(), 0);
+    }
+
+    #[test]
+    fn a_band_the_capability_authored_no_rule_for_does_nothing_at_all() {
+        // The nebula the tender flies through on the way is not the storm.
+        let ops = ops_with(CapabilityConfig {
+            interrupts: vec![InterruptRule {
+                cause: InterruptCause::Region,
+                region_effect: Some(RegionEffectName::SlowZone),
+                response: InterruptResponse::Fail,
+                rate_percent: 50,
+            }],
+            ..stabilise_capability()
+        });
+        let (mut app, ship, _) = app_in_a_region(
+            ops,
+            vec![
+                RegionEffectKind::CommsJam,
+                RegionEffectKind::NebulaFog {
+                    color: [0.1; 3],
+                    density: 0.01,
+                },
+            ],
+        );
+        start_via_script(&mut app, OperationVerb::Stabilise);
+        for _ in 0..30 {
+            app.update();
+        }
+        let hold = ops_of(&app, ship).active.expect("the hold opened");
+        assert_eq!(hold.state(), HoldState::Holding);
+        assert_eq!(hold.elapsed_ticks(), 30, "at full rate");
+    }
+
+    #[test]
+    fn coming_under_fire_interrupts_the_hold_on_the_authored_terms() {
+        use crate::ship::combat_activity::RecentCombatActivity;
+
+        let ops = ops_with(CapabilityConfig {
+            interrupts: vec![InterruptRule {
+                cause: InterruptCause::Attack,
+                region_effect: None,
+                response: InterruptResponse::Fail,
+                rate_percent: 100,
+            }],
+            ..capability_of(OperationVerb::FieldRepair)
+        });
+        let (mut app, ship, _) = app_with(ops, 100.0);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(RecentCombatActivity::default());
+        start_via_script(&mut app, OperationVerb::FieldRepair);
+        app.update();
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Holding),
+            "precondition: a ship nobody has hit is holding"
+        );
+
+        // A hit lands. `Time` in a bare app sits at zero, so a timestamp of
+        // zero is inside any window — which is the same reading the doctrine
+        // gates take of a ship hit on tick zero.
+        app.world_mut()
+            .get_mut::<RecentCombatActivity>(ship)
+            .unwrap()
+            .last_hostile_fire_taken = Some(0.0);
+        app.update();
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Failed(Ineligibility::UnderAttack)),
+            "a repair party working an open hull under fire is called off — and the reason names \
+             the fire, so the crew know what to fix"
+        );
+    }
+
+    #[test]
+    fn firing_your_own_guns_is_not_being_interrupted() {
+        use crate::ship::combat_activity::RecentCombatActivity;
+
+        let ops = ops_with(CapabilityConfig {
+            interrupts: vec![InterruptRule {
+                cause: InterruptCause::Attack,
+                region_effect: None,
+                response: InterruptResponse::Fail,
+                rate_percent: 100,
+            }],
+            ..stabilise_capability()
+        });
+        let (mut app, ship, _) = app_with(ops, 100.0);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(RecentCombatActivity {
+                last_weapon_fired: Some(0.0),
+                ..Default::default()
+            });
+        start_via_script(&mut app, OperationVerb::Stabilise);
+        for _ in 0..30 {
+            app.update();
+        }
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Holding),
+            "the interrupt reads LANDED HITS, the same fold the doctrine gates take. A tender \
+             that fired a warning shot has not been interrupted, and folding its own fire in \
+             would make every armed operator interrupt itself."
+        );
+    }
+
+    // ── AC6: the tow moves its load ──
+
+    #[test]
+    fn a_towed_target_rides_the_authored_offset_in_the_operators_own_frame() {
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 60,
+            range: 5_000.0,
+            tow_offset: [0.0, 0.0, -150.0],
+            ..capability_of(OperationVerb::Tow)
+        });
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.add_systems(Update, (tick_operations, move_towed_targets).chain());
+        // The tug faces along -Z with no yaw, 1000 units out on X.
+        let ship = app
+            .world_mut()
+            .spawn((
+                EntityUuid(SHIP.to_string()),
+                Transform::from_xyz(1_000.0, 0.0, 0.0),
+                ops,
+            ))
+            .id();
+        let hulk = app
+            .world_mut()
+            .spawn((
+                EntityUuid(TARGET.to_string()),
+                Transform::from_xyz(1_010.0, 0.0, 0.0),
+            ))
+            .id();
+        start_via_script(&mut app, OperationVerb::Tow);
+        app.update();
+
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Holding),
+            "a tow does not need a condition track on its target — a derelict freighter carries \
+             none, and is exactly the thing you tow"
+        );
+        assert_eq!(
+            app.world().get::<Transform>(hulk).unwrap().translation,
+            Vec3::new(1_000.0, 0.0, -150.0),
+            "the load rides 150 units astern of the tug, not at its own last position"
+        );
+
+        // Move the tug: the load follows.
+        app.world_mut()
+            .get_mut::<Transform>(ship)
+            .unwrap()
+            .translation = Vec3::new(2_000.0, 40.0, 0.0);
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(hulk).unwrap().translation,
+            Vec3::new(2_000.0, 40.0, -150.0),
+            "…and goes on following it, which is the whole of what a tow is"
+        );
+    }
+
+    #[test]
+    fn the_offset_turns_with_the_tug_rather_than_dragging_sideways() {
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 60,
+            range: 5_000.0,
+            tow_offset: [0.0, 0.0, -100.0],
+            ..capability_of(OperationVerb::Tow)
+        });
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.add_systems(Update, (tick_operations, move_towed_targets).chain());
+        let ship = app
+            .world_mut()
+            .spawn((
+                EntityUuid(SHIP.to_string()),
+                Transform::from_xyz(0.0, 0.0, 0.0)
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+                ops,
+            ))
+            .id();
+        let hulk = app
+            .world_mut()
+            .spawn((EntityUuid(TARGET.to_string()), Transform::default()))
+            .id();
+        start_via_script(&mut app, OperationVerb::Tow);
+        app.update();
+        let _ = ship;
+
+        let placed = app.world().get::<Transform>(hulk).unwrap().translation;
+        assert!(
+            (placed - Vec3::new(-100.0, 0.0, 0.0)).length() < 1e-3,
+            "a tug yawed a quarter turn puts its load abeam of world axes but still ASTERN of \
+             itself: the offset is authored in the operator's own frame, so a tug that turns \
+             swings its load around with it rather than dragging it sideways through the \
+             towline. Got {placed:?}"
+        );
+    }
+
+    #[test]
+    fn a_towed_ship_has_its_own_motion_zeroed_and_a_stalled_tow_lets_go() {
+        use crate::ship::state::ShipPhysics;
+
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 60,
+            range: 400.0,
+            tow_offset: [0.0, 0.0, -50.0],
+            ..capability_of(OperationVerb::Tow)
+        });
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.add_systems(Update, (tick_operations, move_towed_targets).chain());
+        let ship = app
+            .world_mut()
+            .spawn((EntityUuid(SHIP.to_string()), Transform::default(), ops))
+            .id();
+        let hauler = app
+            .world_mut()
+            .spawn((
+                EntityUuid(TARGET.to_string()),
+                Transform::from_xyz(10.0, 0.0, 0.0),
+                ShipPhysics {
+                    x: 10.0,
+                    forward_speed: 90.0,
+                    ..Default::default()
+                },
+            ))
+            .id();
+        start_via_script(&mut app, OperationVerb::Tow);
+        app.update();
+
+        let physics = *app.world().get::<ShipPhysics>(hauler).unwrap();
+        assert_eq!(
+            (physics.x, physics.y, physics.z),
+            (0.0, 0.0, -50.0),
+            "the tow writes the target's OWN authoritative position source, so sync_ship_position \
+             projects it rather than undoing it next tick"
+        );
+        assert_eq!(
+            physics.forward_speed, 0.0,
+            "…and its motion is zeroed, so a craft released from the rig does not shoot off at a \
+             velocity its helm accumulated against a position it was never allowed to reach"
+        );
+
+        // Fly the tug out of range: the tow stalls, and lets go.
+        app.world_mut()
+            .get_mut::<Transform>(ship)
+            .unwrap()
+            .translation
+            .x = 50_000.0;
+        app.update();
+        let after = *app.world().get::<ShipPhysics>(hauler).unwrap();
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Stalled(Ineligibility::OutOfRange))
+        );
+        assert_eq!(
+            (after.x, after.y, after.z),
+            (0.0, 0.0, -50.0),
+            "a stalled tow has LET GO — the load stays where the towline parted rather than being \
+             yanked across the map to wherever the tug got to. Only a hold that is actually \
+             holding drags its load."
+        );
+    }
+
+    // ── AC7: transfer moves capacity between two infrastructure entities ──
+
+    fn depot(capacity: &str, level: i64, ceiling: i64) -> InfrastructureCondition {
+        InfrastructureCondition(InfrastructureState::from_config(&InfrastructureConfig {
+            capacities: vec![CapacityConfig {
+                id: capacity.to_string(),
+                amount: level,
+                ceiling: Some(ceiling),
+            }],
+            ..Default::default()
+        }))
+    }
+
+    /// A tender and a depot, each carrying the same named capacity.
+    fn transfer_app(
+        direction: TransferDirection,
+        amount: i64,
+        operator: (i64, i64),
+        target: (i64, i64),
+    ) -> (App, Entity) {
+        const CAPACITY: &str = "berths";
+        let ops = ops_with(CapabilityConfig {
+            transfer: Some(TransferTerms {
+                capacity: CAPACITY.to_string(),
+                amount,
+                direction,
+            }),
+            ..capability_of(OperationVerb::Transfer)
+        });
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.add_systems(Update, tick_operations);
+        let ship = app
+            .world_mut()
+            .spawn((
+                EntityUuid(SHIP.to_string()),
+                Transform::from_xyz(100.0, 0.0, 0.0),
+                depot(CAPACITY, operator.0, operator.1),
+                ops,
+            ))
+            .id();
+        app.world_mut().spawn((
+            EntityUuid(TARGET.to_string()),
+            Transform::default(),
+            depot(CAPACITY, target.0, target.1),
+        ));
+        (app, ship)
+    }
+
+    fn queued_capacity_moves(app: &App) -> Vec<(String, String, i64)> {
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .pending_capacity_adjustments
+            .iter()
+            .map(|a| (a.uuid.clone(), a.capacity.clone(), a.delta))
+            .collect()
+    }
+
+    #[test]
+    fn a_completed_delivery_queues_both_ends_of_the_move() {
+        let (mut app, ship) = transfer_app(TransferDirection::Deliver, 12, (40, 40), (0, 40));
+        start_via_script(&mut app, OperationVerb::Transfer);
+        for _ in 0..120 {
+            app.update();
+        }
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Completed)
+        );
+        assert_eq!(
+            queued_capacity_moves(&app),
+            vec![
+                (SHIP.to_string(), "berths".to_string(), -12),
+                (TARGET.to_string(), "berths".to_string(), 12),
+            ],
+            "both ends move on the same tick and in a fixed order — source first — so two hosts \
+             queue the pair identically. And they are QUEUED for \
+             tick_infrastructure_condition rather than written onto the components, because that \
+             is the one system that re-publishes the counter a scenario predicate reads (#1025)"
+        );
+    }
+
+    #[test]
+    fn a_collection_moves_the_load_the_other_way() {
+        let (mut app, _) = transfer_app(TransferDirection::Collect, 5, (0, 40), (40, 40));
+        start_via_script(&mut app, OperationVerb::Transfer);
+        for _ in 0..120 {
+            app.update();
+        }
+        assert_eq!(
+            queued_capacity_moves(&app),
+            vec![
+                (TARGET.to_string(), "berths".to_string(), -5),
+                (SHIP.to_string(), "berths".to_string(), 5),
+            ],
+            "collecting takes from the depot and puts it aboard, and the SOURCE is still queued \
+             first — the order is the transfer's direction, not the entity's identity"
+        );
+    }
+
+    #[test]
+    fn a_transfer_with_no_room_at_the_far_end_stalls_and_moves_nothing() {
+        // The tender is loaded; the depot is already full.
+        let (mut app, ship) = transfer_app(TransferDirection::Deliver, 12, (40, 40), (40, 40));
+        start_via_script(&mut app, OperationVerb::Transfer);
+        for _ in 0..120 {
+            app.update();
+        }
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Stalled(Ineligibility::CapacityUnavailable)),
+            "a full depot STALLS the transfer rather than failing it: a crew waiting at the \
+             airlock for a berth to clear is playing the game"
+        );
+        assert!(
+            queued_capacity_moves(&app).is_empty(),
+            "…and nothing moves while it waits"
+        );
+    }
+
+    #[test]
+    fn a_transfer_against_a_target_that_has_no_such_capacity_is_inapplicable() {
+        const CAPACITY: &str = "berths";
+        let ops = ops_with(CapabilityConfig {
+            transfer: Some(TransferTerms {
+                capacity: CAPACITY.to_string(),
+                amount: 1,
+                direction: TransferDirection::Deliver,
+            }),
+            ..capability_of(OperationVerb::Transfer)
+        });
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.add_systems(Update, tick_operations);
+        let ship = app
+            .world_mut()
+            .spawn((
+                EntityUuid(SHIP.to_string()),
+                Transform::from_xyz(100.0, 0.0, 0.0),
+                depot(CAPACITY, 10, 10),
+                ops,
+            ))
+            .id();
+        // A depot that publishes a DIFFERENT capacity: present, in range, and
+        // not a thing you can deliver berths to.
+        app.world_mut().spawn((
+            EntityUuid(TARGET.to_string()),
+            Transform::default(),
+            depot("fuel", 0, 100),
+        ));
+        start_via_script(&mut app, OperationVerb::Transfer);
+        app.update();
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Failed(Ineligibility::TargetNotApplicable)),
+            "'no room' would send the crew away to wait for a berth that is never coming — the \
+             refusal has to say the depot does not do berths at all"
+        );
+    }
+
+    // ── AC4/AC5: field-repair pays per tick and commits teams ──
+
+    #[test]
+    fn a_field_repair_pays_condition_every_tick_it_holds_rather_than_on_completion() {
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 1,
+            condition_per_second: 6.0,
+            ..capability_of(OperationVerb::FieldRepair)
+        });
+        let (mut app, ship, _) = app_with(ops, 100.0);
+        start_via_script(&mut app, OperationVerb::FieldRepair);
+        for _ in 0..30 {
+            app.update();
+        }
+        let paid = queued_adjustments(&app);
+        assert_eq!(
+            paid.len(),
+            30,
+            "half a second in, the repair has already paid thirty slices — a crew pulled off \
+             here keep half a second of work, which is what makes field-repair different from \
+             stabilise's all-or-nothing lump"
+        );
+        assert!(
+            paid.iter()
+                .all(|a| a.uuid == TARGET && (a.delta - 0.1).abs() < 1e-6),
+            "each slice is a tenth of a point — six a second at 60 Hz — and lands on the target: \
+             {paid:?}"
+        );
+        assert!(
+            !ops_of(&app, ship).active.unwrap().is_settled(),
+            "precondition: it has not completed yet, so none of this is a completion payout"
+        );
+    }
+
+    #[test]
+    fn a_stalled_field_repair_pays_nothing_and_a_slowed_one_pays_less() {
+        let interrupts = vec![InterruptRule {
+            cause: InterruptCause::Region,
+            region_effect: Some(RegionEffectName::DamageZone),
+            response: InterruptResponse::Slow,
+            rate_percent: 50,
+        }];
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 10,
+            condition_per_second: 6.0,
+            interrupts,
+            ..capability_of(OperationVerb::FieldRepair)
+        });
+        let (mut app, ship, _) = app_in_a_region(
+            ops,
+            vec![RegionEffectKind::DamageZone {
+                dps: 1.0,
+                shield_pierce: 0.0,
+            }],
+        );
+        start_via_script(&mut app, OperationVerb::FieldRepair);
+        for _ in 0..10 {
+            app.update();
+        }
+        let slowed = queued_adjustments(&app);
+        assert_eq!(slowed.len(), 10);
+        assert!(
+            slowed.iter().all(|a| (a.delta - 0.05).abs() < 1e-6),
+            "half rate pays half a slice: the work and its payoff cannot come apart, or parking \
+             in a storm would be a way of farming condition points. Got {slowed:?}"
+        );
+
+        // Out of range: stalled, and paying nothing at all.
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_condition_adjustments
+            .clear();
+        app.world_mut()
+            .get_mut::<Transform>(ship)
+            .unwrap()
+            .translation
+            .x = 50_000.0;
+        for _ in 0..10 {
+            app.update();
+        }
+        assert!(
+            queued_adjustments(&app).is_empty(),
+            "a stalled repair pays nothing — the party is not working"
+        );
+    }
+
+    #[test]
+    fn a_field_repair_commits_teams_and_releases_them_when_it_settles() {
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 1,
+            repair_teams: 2,
+            ..capability_of(OperationVerb::FieldRepair)
+        });
+        let (mut app, ship, _) = app_with(ops, 100.0);
+        assert_eq!(
+            ops_of(&app, ship).committed_repair_teams(),
+            0,
+            "a ship running nothing commits nothing"
+        );
+        start_via_script(&mut app, OperationVerb::FieldRepair);
+        app.update();
+        assert_eq!(
+            ops_of(&app, ship).committed_repair_teams(),
+            2,
+            "the hold commits the capability's authored team count for the duration"
+        );
+
+        for _ in 0..60 {
+            app.update();
+        }
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Completed),
+            "precondition: it finished"
+        );
+        assert_eq!(
+            ops_of(&app, ship).committed_repair_teams(),
+            0,
+            "…and the teams are released on completion. Derived from the live hold rather than \
+             stored, so there is no release step to forget and nothing extra for a save to carry."
+        );
+    }
+
+    #[test]
+    fn a_hull_short_of_teams_stalls_the_field_repair_rather_than_running_it_free() {
+        use crate::console::repair::server::ShipRepairTeams;
+        use crate::modifiers::repair_teams::RepairTeams;
+
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 1,
+            repair_teams: 3,
+            ..capability_of(OperationVerb::FieldRepair)
+        });
+        let (mut app, ship, _) = app_with(ops, 100.0);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ShipRepairTeams(RepairTeams::new(2)));
+        start_via_script(&mut app, OperationVerb::FieldRepair);
+        app.update();
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Stalled(Ineligibility::TeamsUnavailable)),
+            "an operation that commits three teams cannot run on a hull carrying two — and it \
+             stalls rather than failing, because a team finishing its internal job would free it"
+        );
+    }
+
+    #[test]
+    fn a_hull_with_no_repair_roster_at_all_is_not_gated_on_teams() {
+        // The fixture ship carries no `ShipRepairTeams`. Absence of a roster is
+        // absence of the constraint, on the same reading a missing power grid
+        // takes.
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 1,
+            repair_teams: 4,
+            ..capability_of(OperationVerb::FieldRepair)
+        });
+        let (mut app, ship, _) = app_with(ops, 100.0);
+        start_via_script(&mut app, OperationVerb::FieldRepair);
+        app.update();
+        assert_eq!(
+            ops_of(&app, ship).active.map(|h| h.state()),
+            Some(HoldState::Holding),
+            "a fixture with no repair roster must not be refused for a component it never had"
+        );
+    }
+
+    // ── The wire ──
+
+    #[test]
+    fn the_published_hold_carries_the_slowed_rate_the_console_has_to_show() {
+        let ops = ops_with(CapabilityConfig {
+            duration_secs: 30,
+            interrupts: vec![InterruptRule {
+                cause: InterruptCause::Region,
+                region_effect: Some(RegionEffectName::SlowZone),
+                response: InterruptResponse::Slow,
+                rate_percent: 25,
+            }],
+            ..capability_of(OperationVerb::Tow)
+        });
+        let (mut app, ship, _) = app_in_a_region(
+            ops,
+            vec![RegionEffectKind::SlowZone {
+                thrust_modifier: None,
+                yaw_rate_modifier: None,
+            }],
+        );
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::server_app::ShipSystemBlackboards::default());
+        app.add_systems(Update, publish_operations_blackboard.after(tick_operations));
+        start_via_script(&mut app, OperationVerb::Tow);
+        app.update();
+
+        let blackboards = app
+            .world()
+            .get::<crate::server_app::ShipSystemBlackboards>(ship)
+            .expect("the ship carries a blackboard map");
+        let Some(SystemBlackboard::Operations(bb)) =
+            blackboards.0.get(&operations_blackboard_key())
+        else {
+            panic!("operations publish under their own channel key");
+        };
+        let active = bb.active.as_ref().expect("the live hold is published");
+        assert_eq!(active.state, "holding");
+        assert_eq!(
+            active.rate_percent, 25,
+            "a bar that crawls with no number beside it reads as a bug; one labelled 25 % reads \
+             as the storm, which is the whole reason the rate is on the wire"
+        );
+        assert_eq!(
+            bb.capabilities
+                .iter()
+                .map(|c| c.verb.as_str())
+                .collect::<Vec<_>>(),
+            vec!["tow"],
+            "…and the verb travels as its machine code, with a strings.csv id beside it"
+        );
+    }
+
+    #[test]
+    fn a_hull_offering_every_verb_publishes_every_one_of_them() {
+        let mut app = App::new();
+        app.add_systems(Update, publish_operations_blackboard);
+        let ship = app
+            .world_mut()
+            .spawn((
+                ShipOperations {
+                    capabilities: OperationsConfig {
+                        capabilities: OperationVerb::ALL
+                            .iter()
+                            .map(|verb| CapabilityConfig {
+                                target_requirement: Some(TargetRequirement::Present),
+                                ..capability_of(*verb)
+                            })
+                            .collect(),
+                    },
+                    ..Default::default()
+                },
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id();
+        app.update();
+        let blackboards = app
+            .world()
+            .get::<crate::server_app::ShipSystemBlackboards>(ship)
+            .unwrap();
+        let Some(SystemBlackboard::Operations(bb)) =
+            blackboards.0.get(&operations_blackboard_key())
+        else {
+            panic!("the blackboard is published");
+        };
+        assert_eq!(
+            bb.capabilities
+                .iter()
+                .map(|c| (c.verb.as_str(), c.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("stabilise", "operation.verb.stabilise"),
+                ("tow", "operation.verb.tow"),
+                ("escort", "operation.verb.escort"),
+                ("transfer", "operation.verb.transfer"),
+                ("field_repair", "operation.verb.field_repair"),
+            ],
+            "a tender that can do everything offers everything, in authored order, each with a \
+             strings id rather than English — the console renders the list without knowing what \
+             any of them mean"
+        );
+    }
+
+    // ── Determinism ──
+
+    #[test]
+    fn two_tugs_claiming_one_load_resolve_it_the_same_way_on_every_host() {
+        // Contention is the case that can diverge: with a load each, the order
+        // the rigs are applied in cannot matter. With two tugs on ONE load, the
+        // last write wins — so which one wins must be a function of the UUIDs
+        // and not of whichever entity a query happened to yield first.
+        fn run(order: [(&str, f32); 2]) -> Vec3 {
+            let mut app = App::new();
+            app.init_resource::<WorldContentRuntime>();
+            app.add_systems(Update, (tick_operations, move_towed_targets).chain());
+            app.world_mut()
+                .spawn((EntityUuid("hulk".to_string()), Transform::default()));
+            for (uuid, x) in order {
+                let ops = ops_with(CapabilityConfig {
+                    duration_secs: 60,
+                    range: 100_000.0,
+                    tow_offset: [0.0, 0.0, -10.0],
+                    ..capability_of(OperationVerb::Tow)
+                });
+                app.world_mut().spawn((
+                    EntityUuid(uuid.to_string()),
+                    Transform::from_xyz(x, 0.0, 0.0),
+                    ops,
+                ));
+                app.world_mut()
+                    .resource_mut::<WorldContentRuntime>()
+                    .pending_operation_starts
+                    .push(PendingOperationStart {
+                        ship_uuid: uuid.to_string(),
+                        verb: OperationVerb::Tow,
+                        target_uuid: "hulk".to_string(),
+                    });
+            }
+            app.update();
+            app.world_mut()
+                .query::<(&EntityUuid, &Transform)>()
+                .iter(app.world())
+                .find(|(uuid, _)| uuid.0 == "hulk")
+                .map(|(_, tf)| tf.translation)
+                .expect("the hulk is in the world")
+        }
+        let forwards = run([("tug-a", 100.0), ("tug-b", 900.0)]);
+        let backwards = run([("tug-b", 900.0), ("tug-a", 100.0)]);
+        assert_eq!(
+            forwards, backwards,
+            "two tugs claiming one hulk must put it in the same place on every host — the rigs \
+             are applied in the operators' UUID order, not in archetype order"
+        );
+        assert_eq!(
+            forwards,
+            Vec3::new(900.0, 0.0, -10.0),
+            "…and the resolution is the LAST rig in UUID order, which is a rule someone can read \
+             off the sort rather than a coin toss"
+        );
     }
 }

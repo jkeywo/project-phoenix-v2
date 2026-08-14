@@ -24,11 +24,14 @@ pub mod hold;
 pub mod server;
 
 pub use hold::{
-    eligibility, CapabilityConfig, HoldState, Ineligibility, OperationConditions, OperationHold,
-    OperationVerb, OperationsConfig, Settlement,
+    eligibility, interrupt_outcome, verdict, CapabilityConfig, CapacityReading, HoldState,
+    Ineligibility, InterruptCause, InterruptResponse, InterruptRule, Interruption,
+    OperationConditions, OperationHold, OperationVerb, OperationsConfig, ProgressRate,
+    RegionEffectName, Settlement, TargetRequirement, TickVerdict, TransferDirection, TransferTerms,
 };
 pub use server::{
-    handle_operation_commands, operations_blackboard_key, publish_operations_blackboard,
-    tick_operations, verb_label, OperationsPlugin, OperationsSaveState, PendingOperationStart,
-    ShipOperations, OPERATIONS_BLACKBOARD_KEY,
+    handle_operation_commands, move_towed_targets, operations_blackboard_key,
+    publish_operations_blackboard, region_effect_name, tick_operations, verb_label,
+    OperationsPlugin, OperationsSaveState, PendingOperationStart, ShipOperations,
+    OPERATIONS_BLACKBOARD_KEY,
 };

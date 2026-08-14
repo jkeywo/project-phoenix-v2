@@ -1056,3 +1056,35 @@ world.probe_strike.entity.sister_struck.name,assets/worlds/probe_strike.toml -> 
 world.probe_strike.entity.rig_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck Rig]
 world.probe_strike.entity.sister_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Clear-side Sister]
 world.probe_strike.entity.rig_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Unworked Rig]
+world.falling_skyway.objective.line.text,Objective text — the Act 2 dispute in Falling Skyway,[Get the line at Ladder Depot B working again.]
+world.falling_skyway.objective.corroborate.text,Objective text — the optional Act 2 corroboration route in Falling Skyway,[Get a worker on the record about the Ladder B maintenance file.]
+world.falling_skyway.commitment.safe_passage.terms,"Commitment terms — the captain's promise to the strike committee, Falling Skyway","[The corridor stays clear for the workers' craft through the final transfer window.]"
+world.falling_skyway.commitment.safe_passage.resolves,Commitment resolution condition — the safe-passage promise in Falling Skyway,[Settled when the transfer window closes.]
+world.falling_skyway.commitment.surface_records.terms,"Commitment terms — the captain's promise to surface the maintenance file, Falling Skyway","[The Ladder B maintenance file goes to Skyway Control, unedited.]"
+world.falling_skyway.commitment.surface_records.resolves,Commitment resolution condition — the maintenance-file promise in Falling Skyway,[Settled when the survey report reaches Control.]
+world.falling_skyway.evidence.ladder_b_maintenance_file,"Evidence text — the operator's own maintenance file on Ladder B, Falling Skyway","[Operator's file on Ladder B: every inspection signed off, none of them by anyone who was on the rung that day.]"
+world.falling_skyway.evidence.picket_cleared_hurt,"Evidence text — what clearing the picket by force cost, Falling Skyway","[The Ladder B picket was cleared by Havelock security on our authorisation. There were casualties.]"
+world.falling_skyway.comms.committee_hails,Dialogue body — the strike committee open the negotiation in Falling Skyway,"[Destroyer, this is the committee at Ladder B. Before you ask: nobody is going back up that rung until somebody fixes what is wrong down here.]"
+world.falling_skyway.comms.listen,Response text — hearing the strike committee out in Falling Skyway,[I am listening. Tell me what is wrong down there.]
+world.falling_skyway.comms.dismiss,Response text — talking down to the strike committee in Falling Skyway,[There are forty million people under that tether. Stand your people down.]
+world.falling_skyway.comms.committee_terms,Dialogue body — the strike committee's two demands in Falling Skyway,"[Two things. Nobody works that rung while the tether is slipping, so the corridor is clear when the transfer runs. And the maintenance file on Ladder B goes to Control — not back to the operator who wrote it.]"
+world.falling_skyway.comms.committee_ready,Dialogue body — the strike committee have enough to take to the floor in Falling Skyway,[That is more than anyone has offered us in six weeks. Say the word and I will put it to the floor.]
+world.falling_skyway.comms.promise_passage,Response text — promising the workers safe passage in the transfer window in Falling Skyway,[You have my word. The corridor is clear when the transfer runs.]
+world.falling_skyway.comms.promise_records,Response text — promising to surface the maintenance file in Falling Skyway,[I will put the file in front of Control myself.]
+world.falling_skyway.comms.show_file,Response text — showing the committee the crew have already read the file in Falling Skyway,[I have read the file. It does not say what they told you it says.]
+world.falling_skyway.comms.call_the_vote,Response text — asking the strike committee to put the offer to their floor in Falling Skyway,[Then put it to the floor.]
+world.falling_skyway.comms.stall,Response text — keeping the committee's channel open without answering in Falling Skyway,[Give me a minute.]
+world.falling_skyway.comms.committee_settles,Dialogue body — the strike committee's floor carries the vote in Falling Skyway,[The vote is carried. Twenty minutes to get the gear back on and the rung is yours.]
+world.falling_skyway.comms.committee_signs_off,"Dialogue body — the strike committee's last word after the picket is forced, Falling Skyway",[We watched them come over the rail. Do not call this channel again.]
+world.falling_skyway.comms.committee_no_longer_talking,Dialogue body — the strike committee refusing to negotiate after the force-open in Falling Skyway,[There is nothing to talk about now. You know what you did.]
+world.falling_skyway.comms.havelock_hails,Dialogue body — Havelock security offer to clear the picket in Falling Skyway,"[Destroyer, Havelock Cutter. Company asset. That picket is costing the ladder a berth a minute and Control will not touch it. We can have the rung clear in ten minutes on your authorisation. Or you can go and talk to them.]"
+world.falling_skyway.comms.ask_for_file,Response text — asking Havelock for the Ladder B maintenance file in Falling Skyway,[Send me the maintenance file on Ladder B. All of it.]
+world.falling_skyway.comms.havelock_sends_file,Dialogue body — Havelock hand over the maintenance file in Falling Skyway,[Sending it now. You will find it is all in order.]
+world.falling_skyway.comms.force_warned,Response text — authorising the force-open with a warning first in Falling Skyway,[Clear it. But you give them ten minutes on the open channel first.]
+world.falling_skyway.comms.force_now,Response text — authorising the force-open immediately in Falling Skyway,[Clear it. My authorisation.]
+world.falling_skyway.comms.refuse_force,Response text — refusing Havelock the authorisation in Falling Skyway,[Nobody goes near that picket. I will deal with it.]
+world.falling_skyway.comms.havelock_stands_off,Dialogue body — Havelock standing off in Falling Skyway,[Your call. We will be here when it stops being your call.]
+world.falling_skyway.comms.havelock_acknowledges,Dialogue body — Havelock acknowledging the authorisation in Falling Skyway,[Copy that. Boarding party away.]
+world.falling_skyway.comms.force_report_clean,Dialogue body — the force-open outcome with nobody hurt in Falling Skyway,"[Rung is clear. They stood off when they saw us coming — nobody hurt, gear mostly still on it.]"
+world.falling_skyway.comms.force_report_one,Dialogue body — the force-open outcome with one casualty in Falling Skyway,[Rung is clear. One of theirs went over the rail and came up wrong. He is breathing. Transfers can run.]
+world.falling_skyway.comms.force_report_hurt,Dialogue body — the force-open outcome with several casualties in Falling Skyway,[Rung is clear. Three of theirs are in our sick bay and one of ours with them. You will want that off the log.]

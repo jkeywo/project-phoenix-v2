@@ -77,14 +77,10 @@ describe('rowLineNumbers', () => {
       expect(physical[lines[i] - 1].startsWith(row[0])).toBe(true);
     });
 
-    // Physical line numbers never run BEHIND row count — every multi-line
-    // quoted value the file happens to carry only pushes later rows further
-    // down, never up. Not `toBeGreaterThan`: that would assert the file
-    // currently contains at least one multi-line value, which is a fact
-    // about today's content rather than about `rowLineNumbers` and drifts
-    // whenever strings.csv's data changes shape (as of this writing the file
-    // has none, so `lines` equals `rows.length` one-for-one). The dedicated
-    // synthetic cases above already exercise the swallowed-lines behaviour.
+    // The drift USED to be real (embedded-newline rows made the file longer
+    // than its row count) until the strings consolidation (9b89a37b) removed
+    // the last multi-line row; equality is legitimate now, and the synthetic
+    // cases above own the multi-line resolution coverage.
     expect(lines[lines.length - 1]).toBeGreaterThanOrEqual(rows.length);
   });
 });

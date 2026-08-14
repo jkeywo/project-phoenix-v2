@@ -359,7 +359,13 @@ pub fn eligibility(
     if !conditions.target_applicable {
         return Err(Ineligibility::TargetNotApplicable);
     }
-    if !(conditions.distance <= capability.range) {
+    // Fail-closed on an incomparable distance: a NaN reading refuses rather
+    // than passes, which is why this is spelled via partial_cmp instead of
+    // `distance > range` (that flips the NaN outcome to "in range").
+    if !matches!(
+        conditions.distance.partial_cmp(&capability.range),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    ) {
         return Err(Ineligibility::OutOfRange);
     }
     if conditions.power_locked || conditions.power_level < capability.min_power_level {

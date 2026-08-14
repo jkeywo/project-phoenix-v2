@@ -177,7 +177,10 @@ pub fn broadcast_to_ship(sender_origin: ControlSource, seats: &[ShipSeat]) -> Ve
 /// EXCLUDED from every seat's [`seat_control_source`] reduction: folding the
 /// seek's own not-yet-decided control source back into its input is a
 /// fixpoint over this function's own output, not an independent seat.
-pub fn seek_human_host<'a>(owner: Option<&StationId>, seats: &'a [ShipSeat]) -> Option<&'a ShipSeat> {
+pub fn seek_human_host<'a>(
+    owner: Option<&StationId>,
+    seats: &'a [ShipSeat],
+) -> Option<&'a ShipSeat> {
     fn is_human_and_connected(seat: &ShipSeat) -> bool {
         seat.control == ControlSource::Human && seat.holder.is_some()
     }

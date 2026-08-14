@@ -7264,6 +7264,200 @@ fn every_operating_ship_publishes_its_verb_and_its_rate_on_the_wire() {
     );
 }
 
+// ── Issue #1035: the strike gates a depot and un-assists a repair ────────────
+
+const T_STRUCK: &str = "world.probe_strike.entity.tender_struck.name";
+const D_STRUCK: &str = "world.probe_strike.entity.depot_struck.name";
+const T_WORKING: &str = "world.probe_strike.entity.tender_working.name";
+const D_WORKING: &str = "world.probe_strike.entity.depot_working.name";
+const S_STRUCK: &str = "world.probe_strike.entity.sister_struck.name";
+const S_CLEAR: &str = "world.probe_strike.entity.sister_clear.name";
+const RIG_STRUCK: &str = "world.probe_strike.entity.rig_struck.name";
+const RIG_CLEAR: &str = "world.probe_strike.entity.rig_clear.name";
+
+fn strike_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_strike.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// The operations blackboard the console would render for the named ship, as
+/// `(state, reason)` — the exact pair `ph-operation-panel.js` resolves through
+/// `t()`.
+fn operations_readout(app: &mut bevy::prelude::App, name: &str) -> (String, Option<String>) {
+    use project_phoenix::messages::SystemBlackboard;
+    let key = project_phoenix::operations::operations_blackboard_key();
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::server_app::ShipSystemBlackboards,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .and_then(|(_, boards)| match boards.0.get(&key) {
+            Some(SystemBlackboard::Operations(bb)) => bb
+                .active
+                .as_ref()
+                .map(|active| (active.state.clone(), active.reason.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{name} publishes no operations blackboard"))
+}
+
+/// **Issue #1035.** `probe_strike.toml` driven for thirty mission seconds: the
+/// strike refuses a transfer at the depot its people staff, un-assists a repair
+/// on the rig they work, and lets go of both when it is settled — each claim
+/// measured against a control that differs in exactly one authored word.
+///
+/// Every number the run is asserted against comes off a comparison rather than
+/// off arithmetic in this file. "The strike slowed the repair" is `struck <
+/// clear` at the same instant on two rigs that spawned identical; "the strike
+/// refused the transfer" is one depot empty and its twin filled by the same
+/// cargo on the same tick.
+#[test]
+fn a_strike_refuses_a_depot_transfer_and_unassists_a_repair_until_it_is_settled() {
+    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&strike_args(dt, 30.0)).expect("app should build");
+
+    // ── The world opens with the dispute already under way (AC1) ────────────
+    //
+    // Sampled on the mission's opening ticks — after the register is armed and
+    // well before the t=1 s handler opens anything, so what is being read is
+    // the world's authored state and not the consequence of a script.
+    run(&mut app, 20);
+    {
+        let register = &app.world().resource::<WorldContentRuntime>().workforce;
+        assert!(
+            register.on_strike("probe_workers"),
+            "the strike is AUTHORED, not scripted on tick one — it was happening before \
+             anybody arrived"
+        );
+        assert!(!register.on_strike("probe_operator"));
+        assert_eq!(register.disposition("probe_workers"), Some(20));
+        assert_eq!(
+            register.disposition("probe_operator"),
+            Some(60),
+            "each side carries its own opinion of the crew, and they are different"
+        );
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        assert!(
+            flags.flag("workforce.probe_workers.on_strike"),
+            "…mirrored into an ordinary world flag, which is how a script condition reads \
+             it and how a later slice chains a trigger off the settlement"
+        );
+        assert!(!flags.flag("workforce.probe_operator.on_strike"));
+        assert_eq!(flags.counter("workforce.probe_workers.disposition"), 20);
+    }
+
+    // ── AC2: the transfer is REFUSED, in words, and its twin is not ─────────
+    run(&mut app, 80); // t ≈ 1.7 s — both transfers opened at t=1.
+    assert_eq!(
+        hold_of(&mut app, T_STRUCK).state(),
+        HoldState::Failed(Ineligibility::WorkStopped),
+        "the delivery came back refused rather than stalling, timing out, or quietly \
+         doing nothing"
+    );
+    assert_eq!(
+        operations_readout(&mut app, T_STRUCK),
+        (
+            "failed".to_string(),
+            Some("operation.refused.work_stopped".to_string())
+        ),
+        "and the console has the REASON, as a strings.csv id — the crew can tell why they \
+         are blocked without reading the world file"
+    );
+    assert_eq!(
+        hold_of(&mut app, T_WORKING).state(),
+        HoldState::Holding,
+        "the control: same hull, same verb, same cargo, same interrupt rule, a depot whose \
+         people are at work — so the refusal is about the STRIKE and not about transfers"
+    );
+
+    // ── AC3: the repair is measurably degraded, against a live control ──────
+    let struck = hold_of(&mut app, S_STRUCK);
+    let clear = hold_of(&mut app, S_CLEAR);
+    assert_eq!(struck.verb(), OperationVerb::FieldRepair);
+    assert_eq!(struck.state(), HoldState::Holding, "still working — the ship's own team can \
+         climb the spine; they are simply on their own");
+    assert_eq!(
+        (struck.rate().as_percent(), clear.rate().as_percent()),
+        (40, 100),
+        "at the rate the CAPABILITY authored, not one this slice invented at the call site"
+    );
+    assert!(
+        struck.elapsed_ticks() * 2 < clear.elapsed_ticks(),
+        "…so it has banked well under half the control's time: {} against {}",
+        struck.elapsed_ticks(),
+        clear.elapsed_ticks()
+    );
+    assert!(
+        condition_of(&mut app, RIG_STRUCK) < condition_of(&mut app, RIG_CLEAR),
+        "and the WORK is degraded, not just the bar: the payout is scaled by the same rate, \
+         so the two cannot come apart"
+    );
+
+    // The working transfer lands. Its depot fills; the struck one does not.
+    run(&mut app, 400); // t ≈ 8.3 s
+    assert_eq!(hold_of(&mut app, T_WORKING).state(), HoldState::Completed);
+    assert_eq!(
+        (
+            capacity_of(&mut app, D_WORKING, "working_depot_load"),
+            capacity_of(&mut app, D_STRUCK, "struck_depot_load"),
+        ),
+        (20, 0),
+        "the goods moved at the depot whose people were there, and nowhere else"
+    );
+
+    // ── AC4: the settlement, through the flag lever a dialogue will pull ────
+    run(&mut app, 180); // t ≈ 11.3 s — the t=10 s handler has set the flag.
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            !runtime.workforce.on_strike("probe_workers"),
+            "the settlement went through `ctx.effects.settle_strike`, chained off an \
+             ordinary `on_flag_set` — the same seam #1036's negotiation pulls"
+        );
+        assert_eq!(
+            runtime.workforce.disposition("probe_workers"),
+            Some(70),
+            "and the other half of a side's state moved with it"
+        );
+        assert_eq!(runtime.flags.counter("strike_settled_handled"), 1);
+        assert!(
+            !runtime.flags.flag("workforce.probe_workers.on_strike"),
+            "the mirror followed the register rather than drifting from it"
+        );
+        assert_eq!(runtime.flags.counter("workforce.probe_workers.disposition"), 70);
+    }
+    assert_eq!(
+        hold_of(&mut app, S_STRUCK).rate(),
+        project_phoenix::operations::ProgressRate::FULL,
+        "the assisted rate is back on the next tick, with no restoration path anywhere: \
+         the rule simply stopped firing"
+    );
+
+    // ── AC4, the other bite: the same delivery, to the same depot ───────────
+    run(&mut app, 500); // t ≈ 19.6 s — re-opened at t=12, six seconds to run.
+    assert_eq!(
+        hold_of(&mut app, T_STRUCK).state(),
+        HoldState::Completed,
+        "the depot that refused a delivery eight seconds ago has taken one"
+    );
+    assert_eq!(
+        capacity_of(&mut app, D_STRUCK, "struck_depot_load"),
+        20,
+        "and the cargo is really in it — reversibility is the goods moving, not a flag"
+    );
+}
+
 // ── The dossier projection (issue #1030, parent #851) ───────────────────────
 
 /// `probe_dossier.toml`, driven for four mission seconds: four subjects on the
@@ -7963,4 +8157,191 @@ fn a_scan_and_a_dialogue_admission_both_land_on_one_fact_sheet_with_their_proven
             );
         }
     }
+}
+
+/// **Issue #1035, in the scenario rather than in a probe.** The strike the
+/// skeleton world left as prose is authored state, and the crew's own hull
+/// meets both of its bites: a transfer stood up at Ladder Depot B comes back
+/// refused in words, and a field-repair on the head runs at the unassisted rate
+/// while the same repair on the depot the strike does not touch runs at full.
+///
+/// The ship is moved by hand to each structure in turn. That is the honest
+/// analogue of helm flying it there — the two operations are authored 500 and
+/// 400 units of range, the mission opens the crew a kilometre off both, and
+/// closing is helm's job rather than this test's subject.
+#[test]
+fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
+    use project_phoenix::entities::spawner::EntityName;
+    use project_phoenix::infrastructure::InfrastructureCondition;
+    use project_phoenix::operations::{
+        HoldState, Ineligibility, OperationVerb, PendingOperationStart, ProgressRate, ShipOperations,
+    };
+    use project_phoenix::ship::state::ShipPhysics;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    const SKYHOOK: &str = "world.falling_skyway.entity.skyhook.name";
+    const DEPOT_B: &str = "world.falling_skyway.entity.depot_ladder_b.name";
+    const DEPOT_A: &str = "world.falling_skyway.entity.depot_ladder_a.name";
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/falling_skyway.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(120.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+
+    // ── AC1: two sides, in the world, with the workers already out ──────────
+    {
+        let register = &app.world().resource::<WorldContentRuntime>().workforce;
+        assert_eq!(
+            register
+                .records
+                .iter()
+                .map(|r| (r.id.clone(), r.on_strike))
+                .collect::<Vec<_>>(),
+            vec![
+                ("skyway_workers".to_string(), true),
+                ("havelock_operations".to_string(), false),
+            ],
+            "the worker and corporate sides are both in the world from the first tick, \
+             and only one of them has walked out"
+        );
+        assert_eq!(register.disposition("skyway_workers"), Some(25));
+        assert_eq!(register.disposition("havelock_operations"), Some(55));
+        let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        assert!(flags.flag("workforce.skyway_workers.on_strike"));
+        assert!(!flags.flag("workforce.havelock_operations.on_strike"));
+    }
+
+    // Which structures each side staffs — the other half of the pairing, read
+    // off the live condition tracks rather than off the file.
+    let staffed: std::collections::BTreeMap<String, Option<String>> = app
+        .world_mut()
+        .query::<(&EntityName, &InfrastructureCondition)>()
+        .iter(app.world())
+        .map(|(name, condition)| {
+            (
+                name.0.clone(),
+                condition.0.workforce().map(str::to_string),
+            )
+        })
+        .collect();
+    assert_eq!(
+        staffed.get(SKYHOOK).cloned().flatten(),
+        Some("skyway_workers".to_string())
+    );
+    assert_eq!(
+        staffed.get(DEPOT_B).cloned().flatten(),
+        Some("skyway_workers".to_string())
+    );
+    assert_eq!(
+        staffed.get(DEPOT_A).cloned().flatten(),
+        Some("havelock_operations".to_string()),
+        "the rung that still works is the rung whose crews are still there — which is why \
+         A pumps and B does not, and it is authored rather than implied"
+    );
+
+    // The crew's hull, and the two verbs it works the skyway with. Found by its
+    // capability table because the player row carries no authored name: its
+    // config comes from the lobby-selected template wholesale.
+    let (ship, ship_uuid) = app
+        .world_mut()
+        .query::<(
+            bevy::prelude::Entity,
+            &project_phoenix::entities::spawner::EntityUuid,
+            &ShipOperations,
+        )>()
+        .iter(app.world())
+        .map(|(entity, uuid, _)| (entity, uuid.0.clone()))
+        .next()
+        .expect("the destroyer authors an [operations] table");
+    let uuid_of = |app: &bevy::prelude::App, name: &str| {
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| panic!("{name} is not in this world"))
+    };
+    let move_ship = |app: &mut bevy::prelude::App, to: bevy::prelude::Vec3| {
+        let mut physics = app.world_mut().get_mut::<ShipPhysics>(ship).expect("a ship");
+        physics.x = to.x;
+        physics.y = to.y;
+        physics.z = to.z;
+    };
+    // The same queue a scripted `ctx.effects.transfer(…)` fills — the applier
+    // resolves the names and `tick_operations` decides, which is the whole path
+    // a console's `start_operation` reaches by a different door.
+    let order = |app: &mut bevy::prelude::App, verb, target: &str| {
+        let target_uuid = uuid_of(app, target);
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_operation_starts
+            .push(PendingOperationStart {
+                ship_uuid: ship_uuid.clone(),
+                verb,
+                target_uuid,
+            });
+    };
+
+    // ── AC2: a transfer at Ladder Depot B is refused, with the reason ───────
+    move_ship(&mut app, bevy::prelude::Vec3::new(1180.0, 0.0, 300.0));
+    order(&mut app, OperationVerb::Transfer, DEPOT_B);
+    run(&mut app, 4);
+    let refused = app
+        .world()
+        .get::<ShipOperations>(ship)
+        .and_then(|ops| ops.active.clone())
+        .expect("the transfer opened");
+    assert_eq!(refused.verb(), OperationVerb::Transfer);
+    assert_eq!(
+        refused.state(),
+        HoldState::Failed(Ineligibility::WorkStopped),
+        "alongside, in range, powered — and refused, because nobody down there is \
+         authorising anything"
+    );
+    assert_eq!(
+        refused.state().reason().map(|r| r.string_id()),
+        Some("operation.refused.work_stopped"),
+        "the crew are told WHY on the operations panel, in words, without reading the \
+         world file"
+    );
+
+    // ── AC3: the head repair runs, and runs un-assisted ─────────────────────
+    move_ship(&mut app, bevy::prelude::Vec3::new(200.0, 0.0, 0.0));
+    order(&mut app, OperationVerb::FieldRepair, SKYHOOK);
+    run(&mut app, 4);
+    let unassisted = app
+        .world()
+        .get::<ShipOperations>(ship)
+        .and_then(|ops| ops.active.clone())
+        .expect("the repair opened");
+    assert_eq!(unassisted.verb(), OperationVerb::FieldRepair);
+    assert_eq!(unassisted.state(), HoldState::Holding, "the ship's own team \
+         can still work the spine — they are simply on their own");
+    assert_eq!(
+        unassisted.rate().as_percent(),
+        35,
+        "at the unassisted rate the hull's capability authors. The same job on a structure \
+         the strike does not touch runs at {}%, which is the measurement",
+        ProgressRate::FULL.as_percent()
+    );
+
+    // The control, in the same world on the same tick: Ladder Depot A is worked
+    // by people who are not out, so the identical capability runs at full rate.
+    move_ship(&mut app, bevy::prelude::Vec3::new(620.0, 0.0, -180.0));
+    order(&mut app, OperationVerb::FieldRepair, DEPOT_A);
+    run(&mut app, 4);
+    let assisted = app
+        .world()
+        .get::<ShipOperations>(ship)
+        .and_then(|ops| ops.active.clone())
+        .expect("the control repair opened");
+    assert_eq!(assisted.rate(), ProgressRate::FULL);
 }

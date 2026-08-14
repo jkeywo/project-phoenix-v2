@@ -106,6 +106,36 @@ seed = 1034
 title = "world.falling_skyway.global.title"
 description = "world.falling_skyway.global.description"
 
+# ── The dispute (issue #1035) ────────────────────────────────────────────────
+#
+# THE STRIKE IS ALREADY HAPPENING WHEN THE CREW ARRIVE. It is authored here
+# rather than scripted on tick one for the reason the skyhook's 48 points are
+# authored: the situation was under way before anybody sent a destroyer, and a
+# world that had to script its own opening state would be describing a change
+# nobody was there for.
+#
+# Two sides, and they are NOT factions. Both parties are Federation, neither
+# will ever fire on the other, and the whole crisis is between them — folding a
+# strike into the enemies list would have made "the line is down" mean "the
+# depot is hostile" on every console that reads a faction.
+#
+# `disposition` is what each side makes of the crew, 0..=100. Nothing in Act 1
+# branches on it; it is the state the negotiation (#1036) moves and the acts
+# after it read. [ai] Both numbers unratified — the workers arrive suspicious
+# and the operator arrives correct-but-cold, which is the opening the
+# negotiation is written against.
+
+[[workforce]]
+id = "skyway_workers"
+label = "world.falling_skyway.workforce.skyway_workers.label"
+on_strike = true
+disposition = 25
+
+[[workforce]]
+id = "havelock_operations"
+label = "world.falling_skyway.workforce.havelock_operations.label"
+disposition = 55
+
 # ── Anchors ──────────────────────────────────────────────────────────────────
 #
 # The corridor runs north-south past the skyhook; the depot ladder runs out to
@@ -244,6 +274,11 @@ transform = { anchor = "skyway_head" }
 
 [entity.overrides.infrastructure]
 condition = 48.0
+# The head is worked by the people who are out (issue #1035). A field-repair
+# here is still possible — the ship's own team can climb the spine — but it runs
+# at the unassisted rate the destroyer's capability authors, which is the strike
+# arriving in the crew's work queue rather than in a briefing.
+workforce = "skyway_workers"
 
 # Ladder Depot A — the rung that still works. Its capacity and threshold tables
 # are replaced wholesale by this instance (arrays replace at the instance
@@ -258,6 +293,11 @@ transform = { anchor = "depot_a_berth" }
 
 [entity.overrides.infrastructure]
 condition = 62.0
+# Company people, and they are not the ones who walked out (issue #1035). This
+# is why A goes on pumping while B does not, and it is authored on the depot
+# rather than implied by which one the mission happens to gate: the rung that
+# still works is the rung whose crews are still there.
+workforce = "havelock_operations"
 
 [[entity.overrides.infrastructure.capacity]]
 id = "depot_a_fuel_lift"
@@ -282,6 +322,12 @@ transform = { anchor = "depot_b_berth" }
 
 [entity.overrides.infrastructure]
 condition = 34.0
+# The rung the strike sits on (issue #1035). Two separate things are wrong with
+# Depot B and the crew have to be able to tell them apart: its CONDITION is
+# under its own line, which the panel shows without anybody speaking, and its
+# PEOPLE are out, which the panel cannot show and which a refused transfer says
+# in words. Repairing the first does not fix the second, and that is the point.
+workforce = "skyway_workers"
 
 [[entity.overrides.infrastructure.capacity]]
 id = "depot_b_fuel_lift"
@@ -407,6 +453,14 @@ on_deadline("skyway_survey_due", "on_survey_due");
 on_flag_cleared("skyhook_lift_capable", "on_lift_tolerance_lost");
 on_waypoint_reached("world.falling_skyway.entity.hauler_lark.name", "corridor_gate", "on_lane_open");
 
+// THE SETTLEMENT SEAM (#1035). The strike ends here and only here, and it is
+// chained off an ordinary world flag rather than wired into a dialogue: the
+// negotiation is #1036's and the CONSEQUENCE is this slice's, so whoever sets
+// `skyway_strike_settled` — a comms answer, a deadline, a later act — gets the
+// same settlement applied in one place. Nothing in Act 1 sets it, which is why
+// the strike holds for the whole of the skeleton run.
+on_flag_set("skyway_strike_settled", "on_strike_settled");
+
 // Posted at world load rather than on a timer, so the objectives list is
 // populated before the crew are out of the lobby.
 fn on_arrival(ctx) {
@@ -451,6 +505,16 @@ fn on_tether_slip(ctx) {
 fn on_lift_tolerance_lost(ctx) {
     ctx.flags.increment("a1_priority_set", 1);
     ctx.effects.complete_objective("obj-a1-triage");
+}
+
+// The workers go back (#1035). One call, and both bites let go at once: Depot
+// B stops refusing transfers and the skyhook's field-repairs come off the
+// unassisted rate, on the next tick, with nothing to un-latch. What they make
+// of the crew afterwards is #1036's — the two resolution paths part company
+// exactly there, and this handler deliberately takes no view.
+fn on_strike_settled(ctx) {
+    ctx.effects.settle_strike("skyway_workers");
+    ctx.flags.increment("strike_resolved", 1);
 }
 
 // The lane, proving itself: the lead hauler clears the throat.

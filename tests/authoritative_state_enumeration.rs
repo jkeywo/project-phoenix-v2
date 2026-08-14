@@ -223,6 +223,11 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     // Derived — the shared AI base-cadence interval `tick_ai_cadence` writes
     // alongside the two latches above, same tick-derivation, same family.
     ("AiBaseInterval", "derived"),
+    // Derived — human-seeking host routing (issue #984 S7): recomputed every
+    // tick as a pure function of ShipConfig + Sessions + control sources, none
+    // of which is digest-folded; spawn-required on LocalShip so it never causes
+    // a mid-run archetype move (the S7 digest-regression fix).
+    ("HumanSeekingHosts", "derived"),
 
     // Cleared-at-fold (the one new classification term this issue adds,
     // deterministic-simulation.yaml's `digest-exclusion-classes`):

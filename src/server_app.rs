@@ -63,7 +63,25 @@ pub struct Ship;
 ///
 /// It must never gate shared gameplay mechanics (damage, physics, AI) — those
 /// run on `With<Ship>` so the local ship and NPCs behave identically.
+///
+/// # Why it REQUIRES `HumanSeekingHosts` (issue #984)
+///
+/// `resolve_human_seeking_hosts` is the only writer of that map, and it runs on
+/// exactly this marker. If it had to `Commands::insert` the component the first
+/// time it ran, the player ship would perform an ARCHETYPE MOVE on a mid-run
+/// tick — long after the world settled — and that is not a private bookkeeping
+/// detail: Bevy allocates archetype ids in creation order and every query
+/// iterates its matched archetypes in that order, so one extra archetype
+/// created at that moment re-orders the archetype ids the NPC hulls land in.
+/// Two NPC hull groups then swap places in every query that matches both, the
+/// per-entity RNG draws and command inserts interleave differently, and the
+/// authoritative digest moves — measured: `duel` and `rng_coverage` both moved
+/// on nothing but the move itself (a zero-sized dummy marker inserted in the
+/// same place reproduced it byte for byte). Requiring the component makes it
+/// arrive in the SAME transition as the marker, during the spawn burst, so no
+/// mid-run archetype move ever happens and the resolver needs no `Commands`.
 #[derive(Component)]
+#[require(crate::ship_plugin::HumanSeekingHosts)]
 pub struct LocalShip;
 
 /// Marker component on the scene-root child entity of the local ship's GLB

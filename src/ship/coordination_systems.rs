@@ -202,24 +202,35 @@ fn ship_seats(
 /// of which is folded into `state_digest`. A headless or replayed run has an
 /// EMPTY `Sessions` (`headless/app.rs`), so no seat ever has a holder, every
 /// seek returns `None`, and this system writes the `Ai` that
-/// `seed_boot_ratings` already set. The digest is unchanged by construction,
-/// not by measurement.
+/// `seed_boot_ratings` already set.
+///
+/// That argument is only half the story, and the missing half cost two digests.
+/// The VALUES this system writes are indeed digest-free, but the SHAPE of the
+/// entity it writes them to is not: a `Commands::insert` of
+/// [`HumanSeekingHosts`] on the first tick moved the player ship to a fresh
+/// archetype mid-run, which shifted the archetype ids every LATER-created
+/// archetype received, which swapped the order two NPC hull groups are iterated
+/// in by every query that matches both — and `duel` and `rng_coverage` both
+/// moved on that alone. (Proven, not inferred: substituting an unrelated
+/// zero-sized marker for the real component reproduced both digests exactly.)
+/// So the component is NOT inserted here. `LocalShip` `#[require]`s it, so it
+/// arrives in the same archetype transition as the marker during the spawn
+/// burst, this system takes it as a plain `&mut`, and there is no `Commands`
+/// parameter left through which a mid-run move could be reintroduced.
 pub fn resolve_human_seeking_hosts(
-    mut commands: Commands,
     mut ships: Query<
         (
-            Entity,
             &ShipConfigComponent,
             &mut ShipSystemControlSources,
             Option<&ActiveStationRatings>,
-            Option<&mut HumanSeekingHosts>,
+            &mut HumanSeekingHosts,
         ),
         With<LocalShip>,
     >,
     sessions: Res<Sessions>,
 ) {
     let no_ratings = std::collections::HashMap::new();
-    for (entity, ship_config, mut control_sources, ratings, hosts) in ships.iter_mut() {
+    for (ship_config, mut control_sources, ratings, mut hosts) in ships.iter_mut() {
         let config = &ship_config.0;
         if !config.systems.iter().any(|s| s.human_seeking) {
             continue;
@@ -254,15 +265,8 @@ pub fn resolve_human_seeking_hosts(
                 control_sources.0.set(id.clone(), *source);
             }
         }
-        match hosts {
-            Some(mut existing) => {
-                if existing.0 != resolved {
-                    existing.0 = resolved;
-                }
-            }
-            None => {
-                commands.entity(entity).insert(HumanSeekingHosts(resolved));
-            }
+        if hosts.0 != resolved {
+            hosts.0 = resolved;
         }
     }
 }

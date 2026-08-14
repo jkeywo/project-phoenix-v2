@@ -841,9 +841,7 @@ fn sync_comms_overlay(
     let panel = commands
         .spawn((
             Node {
-                // 50% wider than the original 80% (issue: viewscreen messages
-                // should be wider and allowed to wrap to multiple lines).
-                width: Val::Percent(120.0),
+                width: Val::Percent(80.0),
                 height: Val::Percent(70.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(16.0)),
@@ -891,10 +889,6 @@ fn sync_comms_overlay(
             },
             TextColor(Color::srgb(0.9, 0.9, 1.0)),
             Node {
-                // Explicit width (rather than relying only on cross-axis
-                // stretch) so long message bodies reliably wrap to multiple
-                // lines instead of overflowing the panel on one line.
-                width: Val::Percent(100.0),
                 flex_grow: 1.0,
                 ..default()
             },

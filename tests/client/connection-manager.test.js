@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   defaultIceServers,
+  openRelayFallbackServers,
   fetchIceServers,
   hasRelayServer,
   nextBackoffDelay,
@@ -45,45 +46,67 @@ describe('hasRelayServer', () => {
   });
 });
 
+describe('openRelayFallbackServers', () => {
+  it('uses the staticauth. hostname (the bare openrelay.metered.ca has no DNS records)', () => {
+    const servers = openRelayFallbackServers();
+    expect(servers.length).toBeGreaterThan(0);
+    for (const s of servers) {
+      expect(s.urls).toContain('staticauth.openrelay.metered.ca');
+      expect(s.username).toBe('openrelayproject');
+      expect(s.credential).toBe('openrelayproject');
+    }
+    expect(hasRelayServer(servers)).toBe(true);
+  });
+
+  it('includes a turns: (TLS) variant for networks that block plain UDP/TCP TURN', () => {
+    expect(openRelayFallbackServers().some(s => s.urls.startsWith('turns:'))).toBe(true);
+  });
+});
+
 describe('fetchIceServers', () => {
-  it('returns STUN base with relayAvailable=false when fetch fails (network error)', async () => {
+  it('falls back to OpenRelay TURN with relaySource=openrelay when fetch fails (network error)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
-    const { servers, relayAvailable } = await fetchIceServers();
-    expect(servers).toHaveLength(2);
+    const { servers, relayAvailable, relaySource } = await fetchIceServers();
     expect(servers[0].urls).toBe('stun:stun.l.google.com:19302');
-    expect(relayAvailable).toBe(false);
+    expect(servers.some(s => String(s.urls).includes('staticauth.openrelay.metered.ca'))).toBe(true);
+    expect(relayAvailable).toBe(true);
+    expect(relaySource).toBe('openrelay');
     vi.unstubAllGlobals();
   });
 
-  it('returns STUN base with relayAvailable=false when fetch returns non-ok status', async () => {
+  it('falls back to OpenRelay TURN when fetch returns non-ok status', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
-    const { servers, relayAvailable } = await fetchIceServers();
-    expect(servers).toHaveLength(2);
-    expect(relayAvailable).toBe(false);
+    const { servers, relayAvailable, relaySource } = await fetchIceServers();
+    expect(servers.some(s => String(s.urls).includes('staticauth.openrelay.metered.ca'))).toBe(true);
+    expect(relayAvailable).toBe(true);
+    expect(relaySource).toBe('openrelay');
     vi.unstubAllGlobals();
   });
 
-  it('appends worker servers and reports relayAvailable=true when they include TURN', async () => {
+  it('appends worker servers with relaySource=worker when they include TURN', async () => {
     const extra = [{ urls: 'turn:example.com:3478', username: 'test', credential: 'pass' }];
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue(extra),
     }));
-    const { servers, relayAvailable } = await fetchIceServers();
+    const { servers, relayAvailable, relaySource } = await fetchIceServers();
     expect(servers).toHaveLength(3);
     expect(servers[2].urls).toBe('turn:example.com:3478');
     expect(relayAvailable).toBe(true);
+    expect(relaySource).toBe('worker');
     vi.unstubAllGlobals();
   });
 
-  it('reports relayAvailable=false when the worker returns only STUN entries', async () => {
+  it('does not add OpenRelay when the worker responds ok with only STUN entries', async () => {
     const extra = [{ urls: 'stun:stun.example.com:80' }];
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue(extra),
     }));
-    const { relayAvailable } = await fetchIceServers();
+    const { servers, relayAvailable, relaySource } = await fetchIceServers();
+    expect(servers.some(s => String(s.urls).includes('openrelay'))).toBe(false);
     expect(relayAvailable).toBe(false);
+    expect(relaySource).toBe(null);
     vi.unstubAllGlobals();
   });
 });

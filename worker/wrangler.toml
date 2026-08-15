@@ -13,5 +13,8 @@ METERED_APP = "projectphoenix"
 # strips TURN from every client (2026-08 hotspot field failure).
 ALLOWED_ORIGIN = "https://pp-dev.kiwigamedesign.co.uk,https://jkeywo.github.io,http://localhost:3911"
 
-# METERED_KEY is NOT here — set it with:
-#   wrangler secret put METERED_KEY
+# Secrets are NOT here — set each with `wrangler secret put <NAME>`:
+#   METERED_KEY        — Metered.ca API key (Metered source)
+#   CF_TURN_KEY_ID     — Cloudflare Realtime TURN key id (Cloudflare source)
+#   CF_TURN_API_TOKEN  — Cloudflare Realtime TURN key API token
+# Either source alone is enough; both = relay redundancy.

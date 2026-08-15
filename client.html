@@ -1999,19 +1999,24 @@
         }
 
         console.log('[PeerJS] fetching ICE servers');
-        const { servers: iceServers, relayAvailable } = await window.fetchIceServers();
+        const { servers: iceServers, relayAvailable, relaySource } = await window.fetchIceServers();
         console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
 
         // Connection diagnostics readout (#conn-diag). A phone stuck behind
         // CGNAT shows "connecting…" forever with the real story buried in an
         // unreachable console — this mirrors the relay + ICE stage on screen.
         const diagEl = document.getElementById('conn-diag');
-        const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable };
+        const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable, relaySource };
         function renderDiag() {
           if (!diagEl) return;
           const lines = [];
           if (!diag.relayAvailable) lines.push(t('client.diag_no_relay'));
           else if (diag.probe === 'unreachable') lines.push(t('client.diag_relay_fail'));
+          else if (diag.relaySource === 'openrelay') {
+            lines.push(diag.probe === 'reachable'
+              ? t('client.diag_relay_fallback_ok')
+              : t('client.diag_relay_fallback'));
+          }
           else if (diag.probe === 'reachable') lines.push(t('client.diag_relay_ok'));
           if (diag.attempt > 0) {
             lines.push(t('client.diag_stage', {

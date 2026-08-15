@@ -87,11 +87,11 @@ Both pages show a coloured dot in the top-right:
 
 ## ICE servers, TURN relay, and on-device diagnostics (2026-08 hotspot fix)
 
-The base ICE list (`defaultIceServers()`) is **STUN-only**; TURN relay credentials come exclusively from the Cloudflare worker (`worker/`, deployed per-target as `phoenix-turn-credentials` / `phoenix-turn-credentials-demo`). The dead OpenRelay fallbacks were removed — Metered discontinued the free service, so they only stalled gathering while pretending relay existed.
+The base ICE list (`defaultIceServers()`) is **STUN-only**; TURN relay credentials come primarily from the Cloudflare worker (`worker/`, deployed per-target as `phoenix-turn-credentials` / `phoenix-turn-credentials-demo`). If the worker is unreachable, `fetchIceServers()` falls back to Metered's free shared OpenRelay TURN (`openRelayFallbackServers()`) and reports `relaySource: 'openrelay'`, which both pages surface as a mild "using free fallback relay" notice. Note the hostname: OpenRelay lives at `staticauth.openrelay.metered.ca` — the bare `openrelay.metered.ca` the code used pre-2026-08 has **no DNS records** (NODATA from public resolvers), which is why the old hardcoded entries could never connect and only stalled gathering while pretending relay existed.
 
 **Relay is mandatory on hotspot/CGNAT networks** (phone tethering, two phones on separate mobile data): STUN hairpinning through carrier NAT essentially never works, and host candidates are mDNS-obfuscated. Three things therefore surface degraded relay instead of failing silently:
 
-- `fetchIceServers()` returns `{ servers, relayAvailable }`; both pages show a warning (`client.diag_no_relay` / `server.no_relay_warning`) when `relayAvailable` is false.
+- `fetchIceServers()` returns `{ servers, relayAvailable, relaySource }`; both pages show a warning (`client.diag_no_relay` / `server.no_relay_warning`) when `relayAvailable` is false, and a milder notice (`client.diag_relay_fallback` / `server.relay_fallback_notice`) when running on the shared OpenRelay fallback.
 - The client join screen shows a live diagnostics readout (`#conn-diag`): relay probe verdict (`probeTurnRelay()`, an `iceTransportPolicy:'relay'` throwaway connection) plus per-attempt ICE state and gathered candidate types. "candidates: host, srflx" with no relay on a failing network is the TURN smoking gun.
 - The host lobby mirrors any inbound client stuck mid-ICE under the QR code (listeners attach at `peer.on('connection')` time, because `conn.on('open')` never fires on a failed connection).
 

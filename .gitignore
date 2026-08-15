@@ -55,3 +55,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+
+# wrangler local dev state + local-only worker secrets
+worker/.wrangler/
+worker/.dev.vars

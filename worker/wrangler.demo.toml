@@ -12,7 +12,9 @@ METERED_APP = "projectphoenix"
 # worker (wrangler.toml) has its own origin and is untouched by this file.
 ALLOWED_ORIGIN = "https://pp-demo.kiwigamedesign.co.uk"
 
-# METERED_KEY is NOT here — it is a secret, scoped per worker name. Set it
-# once, before the first deploy of this worker, with:
+# Secrets are NOT here — they are scoped per worker name, so set them for
+# this worker separately (owner action — this repo cannot set secrets from CI):
 #   wrangler secret put METERED_KEY --config wrangler.demo.toml
-# (owner action — this repo cannot set secrets from CI)
+#   wrangler secret put CF_TURN_KEY_ID --config wrangler.demo.toml
+#   wrangler secret put CF_TURN_API_TOKEN --config wrangler.demo.toml
+# Either source (Metered / Cloudflare TURN) alone is enough.

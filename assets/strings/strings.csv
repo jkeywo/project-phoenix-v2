@@ -796,6 +796,7 @@ server.slots_reserved.one,"Host lobby compact chip, exactly one reserved station
 server.slots_reserved.other,"Host lobby compact chip, zero or several reserved station slots. {n} is the count, {max} the total slots",[↻ {n} station slots reserved (max {max})]
 server.spectator_waiting,Host lobby pill for a connected player holding no station yet. {name} is the player name,[{name} (waiting)]
 server.no_relay_warning,Host lobby warning under the QR when no TURN relay credentials could be fetched,[⚠ No relay server — players on mobile networks may fail to connect]
+server.relay_fallback_notice,Host lobby notice under the QR when the credential worker is down and the free shared OpenRelay TURN is in use,[Using free fallback relay — connections may be slower than usual]
 server.client_ice_state,"Host lobby line for an inbound client stuck mid-connection. {id} is the client short id, {state} the ICE state",[client {id}…: connection {state}]
 client.status_connected,Connection status once the WebRTC link is up,Connected
 client.status_no_host_id,Connection status when the URL carries no host id,[No host ID in URL. Scan the QR code on the view screen.]
@@ -807,6 +808,8 @@ client.status_host_not_found,Connection status when the host peer id is unknown,
 client.status_peer_error,Connection status on an unexpected peer error. {type} is the error kind,[Peer error: {type}]
 client.diag_no_relay,Connection diagnostics line when no TURN relay credentials could be fetched,[⚠ No relay server — connection may fail on mobile networks]
 client.diag_relay_ok,Connection diagnostics line when the TURN relay probe succeeds,[Relay server: reachable]
+client.diag_relay_fallback,Connection diagnostics line when the credential worker is down and the free shared OpenRelay TURN is in use,[Using free fallback relay — connection may be slower than usual]
+client.diag_relay_fallback_ok,Connection diagnostics line when the free fallback relay is in use and the probe confirmed it reachable,[Free fallback relay: reachable — connection may be slower than usual]
 client.diag_relay_fail,Connection diagnostics line when the TURN relay probe fails,[⚠ Relay server unreachable — this network may block relay traffic]
 client.diag_stage,"Connection diagnostics stage line. {attempt} is the attempt number, {ice} the ICE connection state, {types} the candidate types gathered",[attempt {attempt} — ICE: {ice} — candidates: {types}]
 client.diag_none,Connection diagnostics placeholder when no ICE candidates have been gathered yet,[none]

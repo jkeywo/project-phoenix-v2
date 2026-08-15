@@ -1952,11 +1952,11 @@
     const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
 
     async function getIceServers() {
-      // STUN-only base. The dead OpenRelay TURN fallbacks were removed —
-      // Metered discontinued the free service and the hostname no longer
-      // resolves, so they only stalled ICE gathering. Relay comes exclusively
-      // from the credential worker; a failed fetch is a degraded state we
-      // surface in the lobby rather than a silent fallback.
+      // Mirrors gui/connection-manager.js fetchIceServers(): worker
+      // credentials first; if the worker is unreachable, fall back to
+      // Metered's free shared OpenRelay TURN (staticauth. hostname — the
+      // bare openrelay.metered.ca has no DNS records any more). relaySource
+      // 'openrelay' gets a mild degraded notice in the lobby.
       const base = [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
@@ -1971,19 +1971,24 @@
             const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
             return urls.some(u => typeof u === 'string' && (u.startsWith('turn:') || u.startsWith('turns:')));
           });
-          return { servers, relayAvailable };
+          return { servers, relayAvailable, relaySource: relayAvailable ? 'worker' : null };
         }
-        console.warn('[ICE] Metered.ca fetch returned', r.status, '— STUN only, no relay');
+        console.warn('[ICE] Metered.ca fetch returned', r.status, '— falling back to shared OpenRelay TURN');
       } catch (e) {
-        console.warn('[ICE] Metered.ca fetch failed — STUN only, no relay:', e.message);
+        console.warn('[ICE] Metered.ca fetch failed — falling back to shared OpenRelay TURN:', e.message);
       }
-      return { servers: base, relayAvailable: false };
+      const openRelay = [
+        { urls: 'turn:staticauth.openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:staticauth.openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turns:staticauth.openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+      ];
+      return { servers: [...base, ...openRelay], relayAvailable: true, relaySource: 'openrelay' };
     }
 
     async function initPeerJS() {
       setConnectionStatus('connecting');
       console.log('[PeerJS] fetching ICE servers…');
-      const { servers: iceServers, relayAvailable } = await getIceServers();
+      const { servers: iceServers, relayAvailable, relaySource } = await getIceServers();
       console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
       console.log(`[PeerJS] host peer ID: ${hostPeerId}`);
 
@@ -1997,6 +2002,7 @@
         if (!connDiagEl) return;
         const lines = [];
         if (!relayAvailable) lines.push(t('server.no_relay_warning'));
+        else if (relaySource === 'openrelay') lines.push(t('server.relay_fallback_notice'));
         for (const [id, state] of clientIceStages) {
           lines.push(t('server.client_ice_state', { id, state }));
         }

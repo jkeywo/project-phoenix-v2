@@ -6,9 +6,10 @@
 # slices that fill it band their own content in below rather than reflowing this
 # one: the strike (#1035), the negotiation (#1036), the storm and the rescue
 # (#1037), the scan-versus-dossier evidence (#1038), the worker who corroborates
-# it (#1039), the restraint lever (#1041), the collapse and its epilogue (#1040)
-# and the transfer window itself (#1042) have landed. What is left is the choice
-# all of them were built for (#1043) and the tuning pass (#1044).
+# it (#1039), the restraint lever (#1041), the collapse and its epilogue (#1040),
+# the transfer window itself (#1042) and the choice all of them were built for
+# (#1043) have landed. The mission is authored whole; what is left is the tuning
+# pass (#1044).
 #
 # ── The place ────────────────────────────────────────────────────────────────
 #
@@ -161,8 +162,35 @@
 # script that does the sum. The CHOICE is #1043's; what #1042 owns is the ledger
 # that choice has to obey.
 #
-# BASELINE. CURRENT VALUE: 0x1341ba04afa6feeb (1387594689496415979), last moved
-# by #1042 — the paragraphs below are the history of how it got there, oldest
+# ── Act 3's choice, and what the mission hands on (issue #1043) ──────────────
+#
+# THE SCENE THE WHOLE MISSION EXISTS FOR. Three claimants call the ship on three
+# channels from three real hulls, the lift covers two of them, and the third
+# rides the storm out where the crew can hear it happen. Nothing in that scene
+# counts to two: every "take them up" line exists only while #1042's banked
+# ledger still covers that claimant's authored claim, and picking it pulls that
+# slice's booking seam rather than doing anything itself.
+#
+# The commitments the earlier acts collected are settled HERE, against facts
+# rather than moods — and a captain who gave the workers their word about this
+# very window and then left them on the rung hears the terms of it read back by
+# the people who voted on them.
+#
+# A crew who arrive with no lift at all get a smaller and worse scene rather than
+# a quieter one: one mooring on the rung that still works, allocated by giving
+# Skyway Control a name. It is keyed on the window's published figure and not on
+# the head's fate, so it is also where a crew end up who kept the structure
+# standing and let it fall out of lift certification.
+#
+# Six campaign flag families come out the far side under `campaign.skyway.` —
+# passage, strike, evidence, casualties, skyhook, commitments — and they live in
+# the ordinary flag store, which is censused and snapshotted already. The slice
+# registers no new authoritative state and adds no Rust;
+# `pasm/spec/architecture/world-files.yaml`'s `campaign-flag-handoff-state`
+# describes the handoff and names the types that carry it.
+#
+# BASELINE. CURRENT VALUE: 0xad71760f8a82a5ee (12497900250050242030), last moved
+# by #1043 — the paragraphs below are the history of how it got there, oldest
 # first, and the first number in them is NOT the one to A/B against.
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
@@ -377,6 +405,55 @@
 # head, which overrides no thresholds at all, inherits all five; that is exactly
 # why #1040's own paragraph above is the one that moved this number and this
 # paragraph is not.
+#
+# MOVED AGAIN IN #1043, to 0xad71760f8a82a5ee (12497900250050242030), with
+# 3135162069797578640 at tick 0. TWO mechanisms this time, and each is one of the
+# two classes every paragraph above names — an authored capacity row, and two
+# hulls that move differently.
+#
+#   THE SHELTER BERTH. Ladder Depot A gains a second
+#       `[[entity.overrides.infrastructure.capacity]]`, `depot_a_shelter_berths`,
+#       and `fold_infrastructure_namespace` folds every published level on every
+#       condition track — so the depot's fold row is one entry longer from its
+#       first tick. Exactly #1038's extra threshold and #1042's manifest table.
+#   `moor_the_claimants`. The committee's picket boat and the rigger's skiff are
+#       civilian haulers with no `[civilian] route` and no `[behaviour]` block, so
+#       until this slice they DRIFTED — 1,631 units up the corridor by the time
+#       the transfer window opened, which put the workers outside the smaller of
+#       their 900-unit channel and the destroyer's 1000 and made the mission's own
+#       choice scene unanswerable. Two `order_divert_anchor` orders at world load
+#       point them at the moorings they are sitting on. Two hulls that used to
+#       creep now hold station, and the digest folds every hull's transform every
+#       tick, so it sees that from about the first frame.
+#
+# ALL FOUR CORNERS OF THE A/B ARE RECORDED, because two movers need a matrix
+# rather than a pair —
+#
+#   both present                              0xad71760f8a82a5ee
+#   the capacity row alone removed            0x094df1803bf81f3e
+#   the whole #1043 script band removed       0xffb700046546cca3
+#   `moor_the_claimants` alone removed        0xffb700046546cca3  ← IDENTICAL
+#   both removed                              0x1341ba04afa6feeb  ← #1042's, exactly
+#
+# The fourth row is the interesting one. Deleting the two mooring orders gives
+# the same number as deleting the ENTIRE script band, so everything else #1043
+# authors folds nothing at all: three comms trees, seven objectives' worth of
+# posting and resolution, the booking and berth seams, the commitments settled at
+# the close, the casualty arithmetic, the debrief and all six campaign flag
+# families. That is the same authoritative-but-unfolded bucket #1039, #1040,
+# #1041 and #1042 each put a script band in, and this slice is the largest test
+# of the claim so far.
+#
+# The anchors were re-measured on the same clean tree and are UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, probe_strike
+# (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
+# 11434311098359716284, probe_scandiff 2488189563210329022, probe_corroborate
+# 6231558379626882143, probe_restraint 1078282553163286478, probe_collapse
+# (--ticks 3600) 5992449400465842350, probe_window (--ticks 2400)
+# 8563713307821982951, and probe_destroy 14665104268980394769. None of them
+# fields a moored civilian with nothing to do, and the shelter berth is authored
+# per instance on a depot only this world spawns.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls
@@ -658,6 +735,33 @@ id = "depot_a_fuel_lift"
 amount = 40
 label = "world.falling_skyway.capacity.fuel_lift.label"
 
+# ── THE BERTH THAT IS LEFT WHEN THERE IS NO LIFT (issue #1043) ───────────────
+#
+# ONE mooring on the working rung, and it is the whole of what the corridor can
+# offer a crew who reach the transfer window with nothing in it — a head that is
+# no longer certified to run a climber, or a head that is no longer there. It is
+# not passage. Nobody leaves the rock; somebody sits the weather out alongside a
+# structure that still has power on it and a rung that is still pumping.
+#
+# It is authored on the RUNG rather than on Control's manifest, which is the
+# opposite call to the one the window's seven rows make and for the same reason
+# they make theirs: the window's figure is a property of the whole CHAIN, and a
+# berth is a property of THIS depot. Control publishes what the corridor can
+# lift; Ladder A publishes what Ladder A can tie up alongside it.
+#
+# ONE against three claims, so the smaller scene is short by two exactly as the
+# window is short by one — and it is a capacity row rather than a rule in the
+# script for the reason the three claims are. "Who gets it" is then arithmetic a
+# crew can read off a panel, `shelter_supply` refuses it outright when the rung
+# is under its own line or its people have walked out, and a tuning pass that
+# authors a second berth changes the ending without touching a handler.
+#
+# [ai] Unratified, and it is the whole tuning surface of the collapse variant.
+[[entity.overrides.infrastructure.capacity]]
+id = "depot_a_shelter_berths"
+amount = 1
+label = "world.falling_skyway.capacity.shelter_berths.label"
+
 [[entity.overrides.infrastructure.threshold]]
 flag = "depot_a_pumping"
 fails_below = 0.4
@@ -841,6 +945,9 @@ label = "world.falling_skyway.capacity.window_committed.label"
 # The workers. A hauler hull because that is what they crew, moored off Depot B
 # rather than on a lane: they have stopped working, and the world should look
 # like it.
+#
+# MOORED MEANS MOORED, and the script's `moor_the_claimants` is what makes it
+# true (issue #1043) — see that handler for the measurement and the reasoning.
 [[entity]]
 template_path = "assets/entities/ship_civilian_hauler.toml"
 id = "strike_committee"
@@ -924,6 +1031,12 @@ overrides = { civilian = { route = "ladder_run" } }
 # the top of this file carries that A/B — and a civilian hauler is the hull
 # because it is what `probe_evidence.toml`'s own witness flies and what the
 # committee are moored in. There is no smaller civilian template.
+#
+# Held on her mooring by `moor_the_claimants` alongside the committee, and for
+# the reason #1039's own note gives for where that mooring IS: her channel has to
+# be answerable from the ladder leg the mission already sends helm to. A skiff
+# that flew off up the corridor for six minutes would make that note false
+# without contradicting a word of it.
 [[entity]]
 template_path = "assets/entities/ship_civilian_hauler.toml"
 id = "rigger_tacket"
@@ -3467,4 +3580,1223 @@ fn on_transfer_window_closes(ctx) {
 }
 
 fn window_closes(ctx) { #{ message: "world.falling_skyway.comms.window_closes", responses: [] } }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ACT 3 — WHO GOES UP, WHO STAYS, AND WHAT THE MISSION HANDS ON (issue #1043)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// THE SCENE THE WHOLE MISSION EXISTS FOR. Everything above this line is the
+// situation: a slipping tether, a rung nobody will work, a storm, a file that
+// does not say what it claims to say, and a window whose arithmetic does not
+// come out. This band is the captain being asked to decide which of three
+// parties is left on the rock, and then being shown what that cost.
+//
+// ── THE CONSTRAINT IS THE LEDGER, NOT THE DIALOGUE ──────────────────────────
+//
+// Nothing below counts to two. Every "take them up" line in these trees EXISTS
+// only while `window_room` — #1042's banked `skyway_window_supply` minus its
+// `skyway_window_reserved` — still covers that claimant's authored claim, and
+// picking it pulls that slice's own booking seam rather than doing anything
+// itself. So the option disappears when the lift runs out, the seam refuses it
+// again on the far side if it somehow got through (#1042 keeps two refusal
+// counters for exactly that), and re-authoring the three claims or the ladder's
+// throughput changes how many fit with not one line of this band edited. "Pick
+// two" is nowhere in this file, in either half of it.
+//
+// ── THREE CLAIMANTS, THREE CHANNELS ─────────────────────────────────────────
+//
+// Each party asks for itself, from its own hull, in its own words: the workers
+// who know what the record says, the operator's people who will still be
+// running the depot chain next time anybody comes through here, and a civilian
+// convoy with a bigger claim than either and nothing at all to trade. The three
+// threads are independent — none is behind another's answer — and each carries
+// the same three shapes of reply: hold, take them up, leave them.
+//
+// ORDER IS LOAD-BEARING, for `havelock_offer`'s reason and `head_node`'s. A hull
+// whose Tactical seat is AI-backfilled answers an open thread with its FIRST
+// response, so index 0 has to be the answer an officer who is not there should
+// give. Here that is HOLD: an empty chair must not be able to decide who rides
+// the storm out. A hold is answered with a terminal node and ONE call-back
+// twenty-two seconds later, so a backfilled bridge produces at most two
+// messages per claimant and then stops asking.
+//
+// ── THE OPERATOR'S CHANNEL CARRIES THE OTHER CONVERSATION ───────────────────
+//
+// Havelock's thread is where the evidence lands, because Havelock are who the
+// evidence is about. Two options, and the second is behind #1039's gate:
+//
+//   PUT THE FILE     available to any crew whose sheet holds the records
+//                    comparison, whichever route filed it. It goes onto the
+//                    OPEN CHANNEL, which is what makes it reach Control — the
+//                    corridor is one net, Control are on it, and that is how
+//                    `skyway_surface_records` gets kept.
+//   CONFRONT         available only when `skyway_confront_unlocked` is up: the
+//                    record AND somebody who was on the arm. It comes in two
+//                    forms, and the difference between them is a promise. A
+//                    captain who names Tacket to the operator she works for
+//                    breaks `skyway_protect_witness`; a captain who says "I have
+//                    a witness and you do not get their name" keeps it.
+//
+// Both outlive the lift decision — the node re-presents itself after every pick
+// — because "are you giving us a berth" and "do you know what your own file
+// says" are two different conversations that happen to be on one channel.
+//
+// ── THE SMALLER, WORSE SCENE (the early collapse) ───────────────────────────
+//
+// A crew who arrive at the window with no lift in it get a DIFFERENT scene, not
+// a quieter version of this one. There is no parley at the ladder, because there
+// is nothing at the ladder to parley about and — on the collapse road — the ship
+// is in a debris field pulling people out of it at priority 85. What there is
+// instead is Ladder A's one mooring, and the captain does not talk to the three
+// of them about it: the three of them send one short plea each, delivered
+// wherever the ship happens to be, and the ALLOCATION is a name given to Skyway
+// Control on Control's own channel. One node, one berth, and the fourth option
+// on it is giving it to nobody.
+//
+// That is the shape the situation actually has. It is shorter, it is colder, it
+// costs the captain a conversation they do not get to have, and the difference
+// is authored rather than described.
+//
+// [ai] IT KEYS ON THE NUMBER, NOT ON THE COLLAPSE. `skyway_window_supply <= 0`
+// is the seam, so the scene is also what a crew get who kept the head standing
+// and let it fall out of lift certification — the head is still there, still
+// talking, and still cannot run a climber. Naming `skyway_skyhook_lost` here
+// would have made the head's fate the gate; the fate is a separate campaign
+// family, and the endings say it separately.
+//
+// ── WHAT RIDING IT OUT COSTS: READ, NEVER ROLLED ────────────────────────────
+//
+// `storm_cost` is #1036's casualty rule and #1040's, applied a third time. Every
+// term is a fact the crew could have known at the time and every one of them is
+// a flag something earlier in this mission wrote — the head's fate, whether the
+// rung is moving, how the strike ended, whether the picket is still a hull, and
+// whether the corridor's shelter run has already failed once. Nothing is
+// randomised, because this script has no RNG and should not have one.
+//
+// The result reaches the crew on the LEFT-BEHIND PARTY'S OWN CHANNEL, not in a
+// closing crawl. A crew who left the workers behind after promising them the
+// corridor hear it from the workers, and hear the promise said back to them in
+// its own terms.
+//
+// ── THE ENDING IS COMPOSED, NOT ENUMERATED ──────────────────────────────────
+//
+// [ai] JUDGEMENT CALL, and the same one `head_casualties` makes. A literal
+// cross-product of pair-choice x strike path x evidence state x skyhook fate is
+// thirty-six bodies of copy, most of which no run would ever reach, and every
+// one of them would have to be re-written by hand when the tuning pass moves a
+// number. So the ending is a SEQUENCE of statements, each read off the state
+// that produced it and each authored once: the headline says which pair went up,
+// the left-behind channels say what that cost and to whom, the fact sheet says
+// what became of the record and what became of the captain's word, and #1040's
+// own epilogue has already said what became of the structure. Every combination
+// produces a distinct set of statements; no combination needs its own string.
+//
+// ── THE SIX FAMILIES THIS MISSION HANDS FORWARD ─────────────────────────────
+//
+// Written in ONE place, `write_the_campaign_record`, under a `campaign.skyway.`
+// prefix so a later mission can find them without knowing this file:
+//
+//   passage      who went up, who was left, who was refused to their face, and
+//                how many the window carried
+//   strike       negotiated / forced / never resolved — exactly one
+//   evidence     none / records / corroborated — exactly one — plus whether it
+//                was filed, put to Havelock, and whether a name went with it
+//   casualties   the picket, the head and the storm, and their sum
+//   skyhook      held / lost, mirroring the pair #1040 guarantees
+//   commitments  how many promises were kept and how many broken
+//
+// They live in the ordinary `FlagStore`, which is censused and snapshotted
+// already, so this slice registers no new authoritative state and adds no Rust.
+// `pasm/spec/architecture/world-files.yaml`'s `campaign-flag-handoff-state`
+// describes the handoff and names the types that carry it.
+//
+// ── [ai] THE BAND'S REMAINING TUNABLES, ALL UNRATIFIED ──────────────────────
+//
+//   [22] s   how long a claimant waits before calling back once, on a window
+//            that is 70 seconds long. Long enough that holding is a real
+//            decision with a cost, short enough that a captain who put them off
+//            to deal with something else gets one more chance.
+//   [3] s    the pause before a granted lift reprices the other two screens. It
+//            has to clear the seam's own one-tick booking; everything past that
+//            is pacing.
+//   [26] s   how long the endings wait after the shutters come down. This one
+//            is DERIVED rather than chosen — #1042 gives a climber 24 seconds to
+//            reach the top — and it moves with that number rather than on its
+//            own.
+//   [68]/[66]  the parley's and the choice's objective priorities, one and two
+//            rungs above #1042's window objective (65). The tether ladder's
+//            60/70/80 are resolved eighteen seconds before the window opens, so
+//            nothing live outranks them; a tuning pass that lengthens Act 3 has
+//            to check that again.
+//   [75]/[5] what the workers make of a captain who carries them and of one who
+//            tells them to their face that they are staying. The second is
+//            #1036's force-open floor deliberately: being told is not a smaller
+//            thing than being cleared off a rung.
+//   [5]      what Havelock make of a captain who reads their own file back to
+//            them in front of the authority that licenses them.
+
+on_world_loaded("moor_the_claimants");
+on_flag_set("skyway_storm_passed", "on_the_corridor_marshals");
+on_flag_set("skyway_window_open", "on_the_choice_opens");
+on_flag_set("skyway_window_closed", "on_the_window_shuts_for_good");
+
+// The convoy's own hull, watched apart from #1037's four-craft canary: this band
+// asks a question about THIS craft — can it still speak for itself — and
+// `a2_traffic_lost` cannot answer it, because a dead hauler somewhere else in
+// the corridor would suppress a claimant who is perfectly fine.
+on_destroyed("world.falling_skyway.entity.convoy_meridian.name", "on_convoy_lost");
+
+// The berth's three seams, on #1042's booking pattern and for its reasons: one
+// flag per claimant rather than one taking a name, single-shot because an
+// allocation IS the decision, and one place where the request is granted or
+// refused against the live ledger.
+on_flag_set("skyway_berth_ask_committee", "on_berth_ask_committee");
+on_flag_set("skyway_berth_ask_havelock", "on_berth_ask_havelock");
+on_flag_set("skyway_berth_ask_convoy", "on_berth_ask_convoy");
+
+fn on_convoy_lost(ctx) { ctx.flags.skyway_convoy_lost = 1; }
+
+// ── Moored means moored ─────────────────────────────────────────────────────
+//
+// TWO HULLS THAT ARE NOT GOING ANYWHERE, told so on the first tick.
+//
+// The committee's picket boat and the rigger's skiff are civilian haulers with
+// no `[civilian] route` and no `[behaviour]` block of their own, and a hull with
+// neither drifts: measured off this world's own trace, the committee were 1,631
+// units up the corridor from their mooring by the time the transfer window
+// opened. That is not cosmetic. The destroyer's authored comms range is 1000 and
+// a hauler's is 900, a transmission goes through at the SMALLER of the two, and
+// #1043's scene is a captain standing off the ladder answering these people. A
+// claimant who has quietly flown out of range cannot be answered, cannot be
+// refused, and cannot be told what was decided about them.
+//
+// THE VERB IS `order_divert_anchor` AND NOT `order_hold`, and the difference is
+// the whole fix rather than a preference. `Hold` is "no helm-relevant directive
+// at all", which is EXACTLY the state these two are already in and exactly what
+// they drift out of; measured, it moves them not one unit. An anchor order is an
+// `AiDirective::Reach` at the mooring they are sitting on, so the helm has
+// something to actuate to zero against — the same thing the shipped combat hulls
+// get from a `hold-station` doctrine entry and that a template with no
+// `[behaviour]` block cannot give. It is also why this is authored in script
+// rather than as an `[entity.overrides] behaviour` on the two rows: the hauler
+// template declares no `[behaviour]`, so there is no section for an instance
+// override to edit, and the civilian traffic tick is the thing that owns these
+// hulls' one doctrine entry in any case.
+//
+// Issued at WORLD LOAD rather than when the scene needs it, because these two
+// are moored in Act 1's fiction and were moored before anybody sent a destroyer.
+// It is the same reading `file_the_ladder_b_record` takes of the operator's
+// file: the world stating its own opening state on the tick it loads.
+//
+// It is a REQUEST like any other civilian order, so it runs through the same
+// acknowledge-and-decide delay and the same authored disposition — a hauler that
+// refused orders would refuse this one, and the honest consequence would be a
+// claimant who really did wander off.
+fn moor_the_claimants(ctx) {
+    ctx.effects.order_divert_anchor(
+        "world.falling_skyway.entity.strike_committee.name", "worker_mooring");
+    ctx.effects.order_divert_anchor(
+        "world.falling_skyway.entity.rigger_tacket.name", "rigger_mooring");
+}
+
+// ── The corridor marshals ───────────────────────────────────────────────────
+//
+// The window is announced, so the traffic that wants a lift comes to where the
+// lift is. One ordinary #1028 divert onto the LADDER RUN — the route the depot
+// shuttle already flies, so no new lane is authored for a queue — and it is the
+// convoy alone, because the other two claimants have been moored at Ladder B
+// since before the crew arrived.
+//
+// Twenty seconds after the act opens rather than on the same beat, so #1037's
+// close gets to put the corridor back to work first and this is a craft peeling
+// off a working lane rather than two orders arguing on one tick. That leaves it
+// a hundred and twelve seconds to close, which is comfortably more than the
+// sixty-odd a bulk hauler at its authored twelve units a second needs to get
+// from the far end of the lane to inside comms range of the ladder.
+fn on_the_corridor_marshals(ctx) {
+    ctx.schedule.after(20, |ctx| { marshal_the_convoy(ctx); });
+}
+
+fn marshal_the_convoy(ctx) {
+    if ctx.flags.skyway_convoy_lost > 0 { return; }
+    ctx.effects.order_divert_route("world.falling_skyway.entity.convoy_meridian.name", "ladder_run");
+    ctx.flags.increment("a3_convoy_marshalled", 1);
+}
+
+// ── The window opens, and the choice with it ────────────────────────────────
+//
+// Chained off the flag #1042's deadline handler writes rather than off the
+// deadline itself, which is the `skyway_strike_settled` device again: the supply
+// figure this band reads is banked by that handler, and a flag transition is a
+// tick behind the call that wrote it, so by the time this runs the arithmetic is
+// done and on the panel.
+//
+// TWO SECONDS LATER, and the delay is doing two jobs. Control's own announcement
+// gets to be the news before three parties start asking, which is the order the
+// scene reads in; and a beat that opened threads on the same tick as that
+// announcement would be racing it on every console that shows the newest message
+// first.
+fn on_the_choice_opens(ctx) {
+    ctx.schedule.after(2, |ctx| { the_claimants_ask(ctx); });
+}
+
+fn the_claimants_ask(ctx) {
+    // Whatever is left of the corridor's traffic is called back in. #1040's
+    // collapse handler puts the lane onto the holding run when the head goes,
+    // which is right — there is nothing to queue for — and this is the answer
+    // to that: there is one thing left to queue for, and it is down here.
+    marshal_the_convoy(ctx);
+
+    if ctx.flags.skyway_window_supply > 0 {
+        the_parley_at_the_ladder(ctx);
+    } else {
+        the_last_berth(ctx);
+    }
+}
+
+// ── The full scene: three claimants, and lift for two ───────────────────────
+
+fn the_parley_at_the_ladder(ctx) {
+    // TWO OBJECTIVES FOR ONE BEAT, split on the approach/work line for the
+    // fourth time in this file and for the same reason every time:
+    // `detect_reached_objective_completion` completes any objective whose Reach
+    // anchor an AI-flown helm arrives at, so the one that carries the flying
+    // cannot also be the one that records the deciding.
+    //
+    // `ladder_transit` is where the ship has to be, and that is arithmetic
+    // rather than staging: the destroyer's authored comms range is 1000, a
+    // civilian hauler's is 900 and the operator's cutter's is 800, and a
+    // transmission goes through at the SMALLER of the two. From the act's own
+    // station-keeping berth the committee are 947 units off and the cutter 1097
+    // — so a crew who never close cannot answer either of them. From the transit
+    // leg all three claimants and the witness are inside every one of those
+    // numbers. Closing is helm's job, the objective names it, and a backfilled
+    // helm flies it.
+    //
+    // Priority 68, above #1042's window objective (65) and below nothing that is
+    // still live: the tether ladder's rungs resolved with the head's fate
+    // eighteen seconds before the window opened, which is the whole point of the
+    // order those two deadlines are authored in.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-parley",
+        text: "world.falling_skyway.objective.parley.text",
+        source: "mission",
+        base_priority: 68,
+        directive_kind: "Reach",
+        directive_anchor: "ladder_transit",
+        targets: ["world.falling_skyway.entity.strike_committee.name"],
+    });
+    // …and the decision carries NO directive, for #1042's reason: there is
+    // nowhere to fly in order to choose who is left behind.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-choice",
+        text: "world.falling_skyway.objective.choice.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 66,
+        targets: [
+            "world.falling_skyway.entity.strike_committee.name",
+            "world.falling_skyway.entity.havelock_cutter.name",
+            "world.falling_skyway.entity.convoy_meridian.name",
+        ],
+    });
+
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.strike_committee.name",
+        node_fn: "committee_claims",
+        urgent: true,
+    });
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "havelock_claims",
+        urgent: true,
+    });
+    if ctx.flags.skyway_convoy_lost == 0 {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.convoy_meridian.name",
+            node_fn: "convoy_claims",
+            urgent: true,
+        });
+    }
+    ctx.flags.increment("a3_parley_open", 1);
+}
+
+// What is still unspoken for, read off #1042's ledger rather than off Control's
+// panel row — the counter a capacity mirrors onto is re-published by the
+// infrastructure tick, so a row read inside the same tick as a booking is a tick
+// stale. These two flags land between calls.
+fn window_room(ctx) {
+    ctx.flags.skyway_window_supply - ctx.flags.skyway_window_reserved
+}
+
+fn claim_decided(ctx, granted_flag, refused_flag) {
+    ctx.flags[granted_flag] > 0 || ctx.flags[refused_flag] > 0
+}
+
+// A DIALOGUE NODE IS BUILT ONCE AND ANSWERED LATER, and this act is the first
+// place in the mission where that matters: three threads open together against
+// one ledger, so the moment a lift is granted, whatever is still on the other
+// two screens is describing a window that has moved. The parties notice — they
+// are watching the same manifest the captain is — and say so, and the node they
+// say it on is rebuilt from the ledger as it stands now.
+//
+// Three seconds out, because the seam's booking lands a tick after the pick that
+// set it and `skyway_window_reserved` has to have moved before a repricing can
+// mean anything. The claimant who was just granted is skipped by `claim_decided`,
+// so this only ever reaches parties who are still waiting on an answer, and two
+// grants is the most a window can ever hold — the message count is bounded at
+// four whether a person or a backfilled console is answering.
+fn reprice_the_other_claims(ctx) {
+    if ctx.flags.skyway_window_open == 0 { return; }
+    if !claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.strike_committee.name",
+            node_fn: "committee_reprices",
+        });
+    }
+    if !claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.havelock_cutter.name",
+            node_fn: "havelock_reprices",
+        });
+    }
+    if ctx.flags.skyway_convoy_lost == 0 &&
+       !claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.convoy_meridian.name",
+            node_fn: "convoy_reprices",
+        });
+    }
+}
+
+fn committee_reprices(ctx) { committee_node(ctx, "world.falling_skyway.comms.committee_reprices") }
+fn havelock_reprices(ctx)  { havelock_node(ctx, "world.falling_skyway.comms.havelock_reprices") }
+fn convoy_reprices(ctx)    { convoy_node(ctx, "world.falling_skyway.comms.convoy_reprices") }
+
+// ── The workers ─────────────────────────────────────────────────────────────
+
+fn committee_claims(ctx) { committee_node(ctx, "world.falling_skyway.comms.committee_claims") }
+
+fn committee_node(ctx, body) {
+    let responses = [];
+    if !claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") {
+        responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_committee_hold" });
+        if window_room(ctx) >= ctx.flags["skyway_claim_committee"] {
+            responses.push(#{
+                text: "world.falling_skyway.comms.lift_committee",
+                on_pick: "on_lift_committee",
+                important: true,
+            });
+        }
+        responses.push(#{
+            text: "world.falling_skyway.comms.deny_committee",
+            on_pick: "on_deny_committee",
+            important: true,
+        });
+    }
+    #{ message: body, responses: responses }
+}
+
+fn on_committee_hold(ctx) {
+    ctx.flags.increment("skyway_held_committee", 1);
+    if ctx.flags.skyway_held_committee == 1 {
+        ctx.schedule.after(22, |ctx| { call_the_committee_back(ctx); });
+    }
+    #{ message: "world.falling_skyway.comms.committee_waits", responses: [] }
+}
+
+fn call_the_committee_back(ctx) {
+    if ctx.flags.skyway_window_open == 0 { return; }
+    if claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") { return; }
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.strike_committee.name",
+        node_fn: "committee_claims",
+        urgent: true,
+    });
+}
+
+fn on_lift_committee(ctx) {
+    // The guard for the seconds between a ledger moving and the repricing above
+    // reaching this screen. It re-reads the ledger rather than trusting the
+    // options this node was rendered with, and the body it falls back to is the
+    // repricing's own — which is the right sentence either way: the board moved.
+    if window_room(ctx) < ctx.flags["skyway_claim_committee"] {
+        return committee_node(ctx, "world.falling_skyway.comms.committee_reprices");
+    }
+    ctx.flags.skyway_granted_committee = 1;
+    // #1042's seam. The booking is granted or refused against the live ledger in
+    // ONE place, a tick from now; this pick does not move a capacity itself.
+    ctx.flags.skyway_book_committee = 1;
+    // [ai] Unratified. Giving these people the corridor after six weeks of
+    // nobody giving them anything is worth more than either promise was.
+    ctx.effects.set_workforce_disposition("skyway_workers", 75);
+    ctx.schedule.after(3, |ctx| { reprice_the_other_claims(ctx); });
+    committee_node(ctx, "world.falling_skyway.comms.committee_lifting")
+}
+
+fn on_deny_committee(ctx) {
+    ctx.flags.skyway_refused_committee = 1;
+    // [ai] Unratified, and it is the floor #1036's force-open uses: told to
+    // their faces that they are staying is not a smaller thing than being
+    // cleared off a rung.
+    ctx.effects.set_workforce_disposition("skyway_workers", 5);
+    committee_node(ctx, "world.falling_skyway.comms.committee_denied")
+}
+
+// ── The operator ────────────────────────────────────────────────────────────
+
+fn havelock_claims(ctx) { havelock_node(ctx, "world.falling_skyway.comms.havelock_claims") }
+
+fn havelock_node(ctx, body) {
+    let decided = claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock");
+    // The record is a different conversation and it outlives the lift decision.
+    let can_file = ctx.flags.skyway_records_put == 0 &&
+        ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" });
+    let can_confront = ctx.flags.skyway_confront_unlocked > 0 && ctx.flags.skyway_confronted == 0;
+
+    let responses = [];
+    // Index 0 stays the hold for as long as there is anything on this node at
+    // all — including a node whose only remaining options are the confrontation,
+    // which is the last thing a backfilled console should be able to reach for.
+    if !decided || can_file || can_confront {
+        responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_havelock_hold" });
+    }
+    if !decided {
+        if window_room(ctx) >= ctx.flags["skyway_claim_havelock"] {
+            responses.push(#{
+                text: "world.falling_skyway.comms.lift_havelock",
+                on_pick: "on_lift_havelock",
+                important: true,
+            });
+        }
+        responses.push(#{
+            text: "world.falling_skyway.comms.deny_havelock",
+            on_pick: "on_deny_havelock",
+            important: true,
+        });
+    }
+    if can_file {
+        responses.push(#{ text: "world.falling_skyway.comms.put_the_file", on_pick: "on_put_the_file" });
+    }
+    if can_confront {
+        responses.push(#{
+            text: "world.falling_skyway.comms.confront_unnamed",
+            on_pick: "on_confront_unnamed",
+            important: true,
+        });
+        responses.push(#{
+            text: "world.falling_skyway.comms.confront_named",
+            on_pick: "on_confront_named",
+            important: true,
+        });
+    }
+    #{ message: body, responses: responses }
+}
+
+fn on_havelock_hold(ctx) {
+    ctx.flags.increment("skyway_held_havelock", 1);
+    if ctx.flags.skyway_held_havelock == 1 {
+        ctx.schedule.after(22, |ctx| { call_havelock_back(ctx); });
+    }
+    #{ message: "world.falling_skyway.comms.havelock_waits", responses: [] }
+}
+
+fn call_havelock_back(ctx) {
+    if ctx.flags.skyway_window_open == 0 { return; }
+    if claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") { return; }
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "havelock_claims",
+        urgent: true,
+    });
+}
+
+fn on_lift_havelock(ctx) {
+    if window_room(ctx) < ctx.flags["skyway_claim_havelock"] {
+        return havelock_node(ctx, "world.falling_skyway.comms.havelock_reprices");
+    }
+    ctx.flags.skyway_granted_havelock = 1;
+    ctx.flags.skyway_book_havelock = 1;
+    ctx.schedule.after(3, |ctx| { reprice_the_other_claims(ctx); });
+    havelock_node(ctx, "world.falling_skyway.comms.havelock_lifting")
+}
+
+fn on_deny_havelock(ctx) {
+    ctx.flags.skyway_refused_havelock = 1;
+    havelock_node(ctx, "world.falling_skyway.comms.havelock_denied")
+}
+
+// THE FILE, ON THE OPEN CHANNEL. The corridor is one net and Control are on it,
+// which is what makes this the thing that KEEPS `skyway_surface_records` rather
+// than a second private conversation about a document. It costs the captain
+// nothing they were not already holding and it is available to any crew whose
+// sheet carries the comparison, whichever of the two routes filed it.
+fn on_put_the_file(ctx) {
+    ctx.flags.skyway_records_put = 1;
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.skyway_control.name",
+        text:       "world.falling_skyway.evidence.record_on_the_open_channel",
+        provenance: "dialogue",
+    });
+    havelock_node(ctx, "world.falling_skyway.comms.havelock_file_put")
+}
+
+// THE CONFRONTATION, and the promise inside it. #1039 left `obj-a3-confront`
+// posted and Active for this beat to resolve; both forms resolve it, and the
+// difference between them is whose name is on the record when it lands.
+fn on_confront_unnamed(ctx) { confront_havelock(ctx, false) }
+fn on_confront_named(ctx)   { confront_havelock(ctx, true) }
+
+fn confront_havelock(ctx, name_the_witness) {
+    ctx.flags.skyway_confronted = 1;
+    ctx.flags.skyway_records_put = 1;
+    ctx.effects.complete_objective("obj-a3-confront");
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.havelock_cutter.name",
+        text:       "world.falling_skyway.evidence.havelock_confronted",
+        provenance: "dialogue",
+    });
+    // [ai] Unratified. Putting an operator's own file to them in front of the
+    // authority that licenses them is the most expensive thing a captain can do
+    // to this party, and the number says so.
+    ctx.effects.set_workforce_disposition("havelock_operations", 5);
+    ctx.flags["relationship.havelock_operations.damaged"] = 1;
+
+    if name_the_witness {
+        ctx.flags.skyway_witness_named = 1;
+        return havelock_node(ctx, "world.falling_skyway.comms.havelock_confronted_named");
+    }
+    havelock_node(ctx, "world.falling_skyway.comms.havelock_confronted")
+}
+
+// ── The convoy ──────────────────────────────────────────────────────────────
+
+fn convoy_claims(ctx) { convoy_node(ctx, "world.falling_skyway.comms.convoy_claims") }
+
+fn convoy_node(ctx, body) {
+    let responses = [];
+    if !claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") {
+        responses.push(#{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_convoy_hold" });
+        if window_room(ctx) >= ctx.flags["skyway_claim_convoy"] {
+            responses.push(#{
+                text: "world.falling_skyway.comms.lift_convoy",
+                on_pick: "on_lift_convoy",
+                important: true,
+            });
+        }
+        responses.push(#{
+            text: "world.falling_skyway.comms.deny_convoy",
+            on_pick: "on_deny_convoy",
+            important: true,
+        });
+    }
+    #{ message: body, responses: responses }
+}
+
+fn on_convoy_hold(ctx) {
+    ctx.flags.increment("skyway_held_convoy", 1);
+    if ctx.flags.skyway_held_convoy == 1 {
+        ctx.schedule.after(22, |ctx| { call_the_convoy_back(ctx); });
+    }
+    #{ message: "world.falling_skyway.comms.convoy_waits", responses: [] }
+}
+
+fn call_the_convoy_back(ctx) {
+    if ctx.flags.skyway_window_open == 0 { return; }
+    if ctx.flags.skyway_convoy_lost > 0 { return; }
+    if claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") { return; }
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.convoy_meridian.name",
+        node_fn: "convoy_claims",
+        urgent: true,
+    });
+}
+
+fn on_lift_convoy(ctx) {
+    if window_room(ctx) < ctx.flags["skyway_claim_convoy"] {
+        return convoy_node(ctx, "world.falling_skyway.comms.convoy_reprices");
+    }
+    ctx.flags.skyway_granted_convoy = 1;
+    ctx.flags.skyway_book_convoy = 1;
+    ctx.schedule.after(3, |ctx| { reprice_the_other_claims(ctx); });
+    convoy_node(ctx, "world.falling_skyway.comms.convoy_lifting")
+}
+
+fn on_deny_convoy(ctx) {
+    ctx.flags.skyway_refused_convoy = 1;
+    convoy_node(ctx, "world.falling_skyway.comms.convoy_denied")
+}
+
+// ── The smaller, worse scene: one berth on the working rung ─────────────────
+
+// What Ladder A can tie up alongside it, under the rule every other supply
+// figure in this act obeys: a rung has to be above its own operational line AND
+// staffed by people who are at work. A crew who let the working rung go under,
+// or who somehow have Havelock's own people out, get nothing at all — which is
+// the fourth and worst reading of the act.
+fn shelter_supply(ctx) {
+    if ctx.flags.depot_a_pumping == 0 { return 0; }
+    if ctx.flags["workforce.havelock_operations.on_strike"] > 0 { return 0; }
+    ctx.flags["depot_a_shelter_berths"]
+}
+
+fn the_last_berth(ctx) {
+    ctx.flags.skyway_shelter_only = 1;
+    ctx.flags.skyway_shelter_supply = shelter_supply(ctx);
+
+    // No approach objective. There is nowhere to go: on the collapse road the
+    // ship is in a debris field at priority 85 with people in it, and Skyway
+    // Control is inside its own authored 800-unit range of both that field and
+    // the act's station-keeping berth. The captain does not have to fly anywhere
+    // to give a name over the corridor's own net, and telling them to would be
+    // pulling a destroyer off a rescue to attend a formality.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-berth",
+        text: "world.falling_skyway.objective.berth.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 66,
+        targets: ["world.falling_skyway.entity.skyway_control.name"],
+    });
+
+    // Each of them asks once, from their own hull, and none of them is answered.
+    // A message is DELIVERED whatever the range; only a reply has to reach back.
+    // That is the scene: three parties calling a ship that is somewhere else,
+    // doing something else, with one berth to give away.
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.strike_committee.name",
+        node_fn: "committee_pleads",
+        urgent: true,
+    });
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "havelock_pleads",
+        urgent: true,
+    });
+    if ctx.flags.skyway_convoy_lost == 0 {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.convoy_meridian.name",
+            node_fn: "convoy_pleads",
+            urgent: true,
+        });
+    }
+
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyway_control.name",
+        node_fn: "control_berth_offer",
+        urgent: true,
+    });
+    ctx.flags.increment("a3_berth_open", 1);
+}
+
+fn committee_pleads(ctx) { #{ message: "world.falling_skyway.comms.committee_pleads", responses: [] } }
+fn havelock_pleads(ctx)  { #{ message: "world.falling_skyway.comms.havelock_pleads", responses: [] } }
+fn convoy_pleads(ctx)    { #{ message: "world.falling_skyway.comms.convoy_pleads", responses: [] } }
+
+// ONE node, one berth, four names to put on it — and the fourth is nobody.
+// Index 0 is the hold, for the whole band's reason.
+fn control_berth_offer(ctx) {
+    if ctx.flags.skyway_shelter_supply <= 0 {
+        return #{ message: "world.falling_skyway.comms.control_no_berth", responses: [] };
+    }
+    if ctx.flags.skyway_berth_decided > 0 {
+        return #{ message: "world.falling_skyway.comms.control_berth_settled", responses: [] };
+    }
+    #{
+        message: "world.falling_skyway.comms.control_berth_offer",
+        responses: [
+            #{ text: "world.falling_skyway.comms.claim_stand_by", on_pick: "on_berth_hold" },
+            #{ text: "world.falling_skyway.comms.berth_to_committee", on_pick: "on_berth_to_committee", important: true },
+            #{ text: "world.falling_skyway.comms.berth_to_havelock", on_pick: "on_berth_to_havelock", important: true },
+            #{ text: "world.falling_skyway.comms.berth_to_convoy", on_pick: "on_berth_to_convoy", important: true },
+            #{ text: "world.falling_skyway.comms.berth_to_nobody", on_pick: "on_berth_to_nobody", important: true },
+        ],
+    }
+}
+
+fn on_berth_hold(ctx) {
+    ctx.flags.increment("skyway_held_berth", 1);
+    if ctx.flags.skyway_held_berth == 1 {
+        ctx.schedule.after(22, |ctx| {
+            if ctx.flags.skyway_window_open == 0 { return; }
+            if ctx.flags.skyway_berth_decided > 0 { return; }
+            ctx.effects.open_comms(#{
+                from: "world.falling_skyway.entity.skyway_control.name",
+                node_fn: "control_berth_offer",
+                urgent: true,
+            });
+        });
+    }
+    #{ message: "world.falling_skyway.comms.berth_waits", responses: [] }
+}
+
+// The three names, each pulling its own seam. `skyway_granted_*` is written here
+// because the CAPTAIN's answer is what `obj-a3-choice`'s twin records; whether
+// the berth was actually free is the seam's business, a tick from now.
+fn on_berth_to_committee(ctx) {
+    ctx.flags.skyway_berth_decided = 1;
+    ctx.flags.skyway_granted_committee = 1;
+    ctx.flags.skyway_refused_havelock = 1;
+    ctx.flags.skyway_refused_convoy = 1;
+    ctx.flags.skyway_berth_ask_committee = 1;
+    #{ message: "world.falling_skyway.comms.berth_given_committee", responses: [] }
+}
+
+fn on_berth_to_havelock(ctx) {
+    ctx.flags.skyway_berth_decided = 1;
+    ctx.flags.skyway_granted_havelock = 1;
+    ctx.flags.skyway_refused_committee = 1;
+    ctx.flags.skyway_refused_convoy = 1;
+    ctx.flags.skyway_berth_ask_havelock = 1;
+    #{ message: "world.falling_skyway.comms.berth_given_havelock", responses: [] }
+}
+
+fn on_berth_to_convoy(ctx) {
+    ctx.flags.skyway_berth_decided = 1;
+    ctx.flags.skyway_granted_convoy = 1;
+    ctx.flags.skyway_refused_committee = 1;
+    ctx.flags.skyway_refused_havelock = 1;
+    ctx.flags.skyway_berth_ask_convoy = 1;
+    #{ message: "world.falling_skyway.comms.berth_given_convoy", responses: [] }
+}
+
+// Refusing all three is a decision somebody made, and it is recorded as three
+// refusals rather than as an absence — the mission has to be able to tell a
+// captain who said no from a captain who never picked up the channel.
+fn on_berth_to_nobody(ctx) {
+    ctx.flags.skyway_berth_decided = 1;
+    ctx.flags.skyway_berth_withheld = 1;
+    ctx.flags.skyway_refused_committee = 1;
+    ctx.flags.skyway_refused_havelock = 1;
+    ctx.flags.skyway_refused_convoy = 1;
+    #{ message: "world.falling_skyway.comms.berth_withheld", responses: [] }
+}
+
+fn on_berth_ask_committee(ctx) { book_berth(ctx, "skyway_berth_committee") }
+fn on_berth_ask_havelock(ctx)  { book_berth(ctx, "skyway_berth_havelock") }
+fn on_berth_ask_convoy(ctx)    { book_berth(ctx, "skyway_berth_convoy") }
+
+// The one place a berth is granted or refused, on `book_lift`'s pattern: the
+// ledger flags rather than the panel row, because a capacity's mirrored counter
+// is re-published by the infrastructure tick and would be a tick stale here.
+// The row itself is moved by an exact delta, so the crew watch the berth leave
+// the manifest as it is spoken for.
+fn book_berth(ctx, taken_flag) {
+    if ctx.flags.skyway_window_open == 0 {
+        ctx.flags.increment("skyway_berth_refused_shut", 1);
+        return;
+    }
+    if ctx.flags.skyway_shelter_reserved >= ctx.flags.skyway_shelter_supply {
+        ctx.flags.increment("skyway_berth_refused_short", 1);
+        return;
+    }
+    ctx.flags.increment("skyway_shelter_reserved", 1);
+    ctx.flags[taken_flag] = 1;
+    ctx.effects.adjust_capacity(
+        "world.falling_skyway.entity.depot_ladder_a.name", "depot_a_shelter_berths", -1);
+}
+
+// ── The mission closes ──────────────────────────────────────────────────────
+//
+// Twenty-six seconds after the shutters come down, because #1042 gives a climber
+// twenty-four to reach the top and a lift booked on the last tick of the window
+// has not landed or stood down yet. Reading the manifest before that would score
+// the mission on a climber still on the ribbon.
+fn on_the_window_shuts_for_good(ctx) {
+    ctx.schedule.after(26, |ctx| { the_mission_closes(ctx); });
+}
+
+fn the_mission_closes(ctx) {
+    resolve_the_choice(ctx);
+    // The ledger first: the left-behind beat below reads the promise's SETTLED
+    // state, and `ctx.commitments.state` answers with what this call has already
+    // written to it.
+    resolve_the_promises(ctx);
+    the_left_behind_ride_it_out(ctx);
+    write_the_campaign_record(ctx);
+    file_the_debrief(ctx);
+    ctx.flags.skyway_mission_resolved = 1;
+    ctx.flags.act3_resolved = 1;
+    ctx.flags.increment("a3_endings_written", 1);
+}
+
+// Whether a claimant actually got off the rock — by lift or by berth. The
+// window's own `served` flag rather than the captain's `granted`, because a
+// climber the shutters came down on is a claimant who is still here.
+fn got_out(ctx, served_flag, berth_flag) {
+    ctx.flags[served_flag] > 0 || ctx.flags[berth_flag] > 0
+}
+
+fn lifted_count(ctx) {
+    let n = 0;
+    if got_out(ctx, "skyway_window_served_committee", "skyway_berth_committee") { n += 1; }
+    if got_out(ctx, "skyway_window_served_havelock", "skyway_berth_havelock") { n += 1; }
+    if got_out(ctx, "skyway_window_served_convoy", "skyway_berth_convoy") { n += 1; }
+    n
+}
+
+// The crew's own job, scored: did the captain answer all three of them. A
+// claimant who was never told anything is the failure this objective exists to
+// name — not a claimant who was told no.
+fn resolve_the_choice(ctx) {
+    let answered = 0;
+    if claim_decided(ctx, "skyway_granted_committee", "skyway_refused_committee") { answered += 1; }
+    if claim_decided(ctx, "skyway_granted_havelock", "skyway_refused_havelock") { answered += 1; }
+    if claim_decided(ctx, "skyway_granted_convoy", "skyway_refused_convoy") { answered += 1; }
+    ctx.flags.skyway_claims_answered = answered;
+
+    let id = "obj-a3-choice";
+    if ctx.flags.skyway_shelter_only > 0 { id = "obj-a3-berth"; }
+    if answered >= 3 {
+        ctx.effects.complete_objective(id);
+    } else {
+        ctx.effects.fail_objective(id);
+    }
+    ctx.effects.complete_objective("obj-a3-parley");
+
+    // The lead #1039 handed this scene, and what happens to it if the scene
+    // never uses it. An optional objective going red is this file's own way of
+    // saying "that route is shut now" without a line of prose about it.
+    if ctx.flags.skyway_confront_unlocked > 0 && ctx.flags.skyway_confronted == 0 {
+        ctx.effects.fail_objective("obj-a3-confront");
+    }
+}
+
+// ── The ledger, settled ─────────────────────────────────────────────────────
+//
+// Every promise this mission can make is resolved HERE, one way or the other,
+// and each one is settled against a fact rather than against a mood. Guarded on
+// `open` throughout, so a promise #1036's force-open already broke is not
+// re-resolved and a promise that was never made is left `unknown` rather than
+// counted as broken — "not yet" and "failed" are different facts about a
+// captain, which is the rule the ledger itself is built on.
+fn resolve_the_promises(ctx) {
+    if ctx.commitments.state("skyway_safe_passage") == "open" {
+        if got_out(ctx, "skyway_window_served_committee", "skyway_berth_committee") {
+            ctx.commitments.keep("skyway_safe_passage");
+        } else {
+            ctx.commitments.break_promise("skyway_safe_passage");
+        }
+    }
+    if ctx.commitments.state("skyway_surface_records") == "open" {
+        if ctx.flags.skyway_records_put > 0 {
+            ctx.commitments.keep("skyway_surface_records");
+        } else {
+            ctx.commitments.break_promise("skyway_surface_records");
+        }
+    }
+    // Hers is the one that is kept by NOT doing something, which is why it is
+    // settled here rather than at the beat that would have broken it: a captain
+    // who never confronted anybody has still kept her name back.
+    if ctx.commitments.state("skyway_protect_witness") == "open" {
+        if ctx.flags.skyway_witness_named > 0 {
+            ctx.commitments.break_promise("skyway_protect_witness");
+        } else {
+            ctx.commitments.keep("skyway_protect_witness");
+        }
+    }
+}
+
+// ── What riding it out costs, and who says so ───────────────────────────────
+//
+// READ, NEVER ROLLED. Every term is a flag something earlier in this mission
+// wrote, and the two shared ones are the two facts that decide whether there is
+// anywhere at all to shelter in this corridor tonight.
+//
+// [ai] Every number here is unratified. The spread runs 0..5 and the terms are
+// chosen so that no party's outcome is fixed: each of the three has one thing
+// the crew could have done for them that is not the lift.
+fn storm_cost(ctx, claimant) {
+    // A party with no berth rides the corridor out in the open.
+    let hurt = 2;
+    // The head is gone, so there is no lee anywhere in the corridor and the
+    // debris is still coming down through it.
+    if ctx.flags.skyway_skyhook_lost > 0 { hurt += 1; }
+    // The rung is not moving, so nothing on the ladder has power at it or a
+    // pumped berth to tie up against.
+    if ctx.flags.skyway_strike_settled == 0 { hurt += 1; }
+
+    if claimant == "committee" {
+        // Their own people were cleared off that rung at somebody else's
+        // authorisation, and their gear went over the rail with them.
+        if ctx.flags.skyway_forced_open > 0 { hurt += 1; }
+        // …or they have the rung back, the gear back, and a full shift's rigs.
+        else if ctx.flags.skyway_settled_by_negotiation > 0 { hurt -= 1; }
+    }
+    if claimant == "havelock" {
+        // The cutter and the picket are two hulls with power on them. Take one
+        // out of the world and that is one fewer place to put people.
+        if ctx.flags.havelock_enforcer_destroyed > 0 { hurt += 1; }
+        else if ctx.flags.picket_engaged == 0 { hurt -= 1; }
+    }
+    if claimant == "convoy" {
+        // They are the only claimant with no ground of their own, so the
+        // corridor's shelter run is the whole of their cover. If it has already
+        // failed once tonight it is not going to hold now.
+        if ctx.flags.a2_traffic_lost > 0 { hurt += 1; }
+        // …and a crew who pulled the Lyra out of the lane proved to them that
+        // the lane can be worked in weather.
+        else if ctx.flags.skyway_lyra_recovered > 0 { hurt -= 1; }
+    }
+    if hurt < 0 { hurt = 0; }
+    hurt
+}
+
+fn the_left_behind_ride_it_out(ctx) {
+    let toll = 0;
+
+    if !got_out(ctx, "skyway_window_served_committee", "skyway_berth_committee") {
+        let hurt = storm_cost(ctx, "committee");
+        toll += hurt;
+        ctx.flags.skyway_left_committee = 1;
+        ctx.flags.skyway_left_committee_cost = hurt;
+        // THE PROMISE, SAID BACK IN ITS OWN TERMS. It supersedes the severity
+        // bodies because it is the louder fact: what these people are telling
+        // the captain is not how bad it was, it is what they were told.
+        let node = "committee_rides_it_out";
+        if ctx.commitments.state("skyway_safe_passage") == "broken" {
+            node = "committee_rides_it_out_promised";
+        } else if hurt >= 3 {
+            node = "committee_rides_it_out_hurt";
+        }
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.strike_committee.name",
+            node_fn: node,
+            urgent: true,
+        });
+        if hurt > 0 {
+            ctx.dossier.append(#{
+                subject:    "world.falling_skyway.entity.strike_committee.name",
+                text:       "world.falling_skyway.evidence.committee_rode_it_out",
+                provenance: "dialogue",
+            });
+        }
+    }
+
+    if !got_out(ctx, "skyway_window_served_havelock", "skyway_berth_havelock") {
+        let hurt = storm_cost(ctx, "havelock");
+        toll += hurt;
+        ctx.flags.skyway_left_havelock = 1;
+        ctx.flags.skyway_left_havelock_cost = hurt;
+        let node = "havelock_rides_it_out";
+        if hurt >= 3 { node = "havelock_rides_it_out_hurt"; }
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.havelock_cutter.name",
+            node_fn: node,
+            urgent: true,
+        });
+        if hurt > 0 {
+            ctx.dossier.append(#{
+                subject:    "world.falling_skyway.entity.havelock_cutter.name",
+                text:       "world.falling_skyway.evidence.havelock_rode_it_out",
+                provenance: "dialogue",
+            });
+        }
+    }
+
+    if !got_out(ctx, "skyway_window_served_convoy", "skyway_berth_convoy") {
+        let hurt = storm_cost(ctx, "convoy");
+        toll += hurt;
+        ctx.flags.skyway_left_convoy = 1;
+        ctx.flags.skyway_left_convoy_cost = hurt;
+        // A convoy that is not in the world any more does not get to report; the
+        // toll is still theirs and still counted.
+        if ctx.flags.skyway_convoy_lost == 0 {
+            let node = "convoy_rides_it_out";
+            if hurt >= 3 { node = "convoy_rides_it_out_hurt"; }
+            ctx.effects.open_comms(#{
+                from: "world.falling_skyway.entity.convoy_meridian.name",
+                node_fn: node,
+                urgent: true,
+            });
+        }
+        if hurt > 0 {
+            ctx.dossier.append(#{
+                subject:    "world.falling_skyway.entity.convoy_meridian.name",
+                text:       "world.falling_skyway.evidence.convoy_rode_it_out",
+                provenance: "dialogue",
+            });
+        }
+    }
+
+    ctx.flags.skyway_storm_casualties = toll;
+}
+
+fn committee_rides_it_out(ctx)          { #{ message: "world.falling_skyway.comms.committee_rides_it_out", responses: [] } }
+fn committee_rides_it_out_hurt(ctx)     { #{ message: "world.falling_skyway.comms.committee_rides_it_out_hurt", responses: [] } }
+fn committee_rides_it_out_promised(ctx) { #{ message: "world.falling_skyway.comms.committee_rides_it_out_promised", responses: [] } }
+fn havelock_rides_it_out(ctx)           { #{ message: "world.falling_skyway.comms.havelock_rides_it_out", responses: [] } }
+fn havelock_rides_it_out_hurt(ctx)      { #{ message: "world.falling_skyway.comms.havelock_rides_it_out_hurt", responses: [] } }
+fn convoy_rides_it_out(ctx)             { #{ message: "world.falling_skyway.comms.convoy_rides_it_out", responses: [] } }
+fn convoy_rides_it_out_hurt(ctx)        { #{ message: "world.falling_skyway.comms.convoy_rides_it_out_hurt", responses: [] } }
+
+// ── The six families ────────────────────────────────────────────────────────
+
+fn write_the_campaign_record(ctx) {
+    // 1. SAFE PASSAGE. One of the pair per claimant, always, so a later mission
+    // reads a fact rather than an absence (#1037's invariant, three times over).
+    // The refusals are recorded apart, because a party told to their face that
+    // they were staying is a different neighbour from one nobody called.
+    if got_out(ctx, "skyway_window_served_committee", "skyway_berth_committee") {
+        ctx.flags["campaign.skyway.passage.committee"] = 1;
+    } else {
+        ctx.flags["campaign.skyway.passage.left_committee"] = 1;
+    }
+    if got_out(ctx, "skyway_window_served_havelock", "skyway_berth_havelock") {
+        ctx.flags["campaign.skyway.passage.havelock"] = 1;
+    } else {
+        ctx.flags["campaign.skyway.passage.left_havelock"] = 1;
+    }
+    if got_out(ctx, "skyway_window_served_convoy", "skyway_berth_convoy") {
+        ctx.flags["campaign.skyway.passage.convoy"] = 1;
+    } else {
+        ctx.flags["campaign.skyway.passage.left_convoy"] = 1;
+    }
+    if ctx.flags.skyway_refused_committee > 0 { ctx.flags["campaign.skyway.passage.refused_committee"] = 1; }
+    if ctx.flags.skyway_refused_havelock > 0  { ctx.flags["campaign.skyway.passage.refused_havelock"] = 1; }
+    if ctx.flags.skyway_refused_convoy > 0    { ctx.flags["campaign.skyway.passage.refused_convoy"] = 1; }
+    ctx.flags["campaign.skyway.passage.taken"] = lifted_count(ctx);
+    if ctx.flags.skyway_shelter_only > 0 { ctx.flags["campaign.skyway.passage.berth_only"] = 1; }
+
+    // 2. THE STRIKE. Exactly one, and the third is a real reading: a crew who
+    // neither talked to the committee nor authorised the cutter leave the rung
+    // stopped, and the next mission through here inherits that.
+    if ctx.flags.skyway_settled_by_negotiation > 0 {
+        ctx.flags["campaign.skyway.strike.negotiated"] = 1;
+    } else if ctx.flags.skyway_forced_open > 0 {
+        ctx.flags["campaign.skyway.strike.forced"] = 1;
+    } else {
+        ctx.flags["campaign.skyway.strike.unresolved"] = 1;
+    }
+
+    // 3. THE EVIDENCE. The exclusive three say what the crew HOLD; the three
+    // beside them say what they did with it. `holds` reads the fact sheet rather
+    // than a flag beside one route's append, which is the rule #1039 set.
+    if ctx.flags.skyway_worker_corroboration_obtained > 0 {
+        ctx.flags["campaign.skyway.evidence.corroborated"] = 1;
+    } else if ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" }) {
+        ctx.flags["campaign.skyway.evidence.records"] = 1;
+    } else {
+        ctx.flags["campaign.skyway.evidence.none"] = 1;
+    }
+    if ctx.flags.skyway_records_put > 0   { ctx.flags["campaign.skyway.evidence.filed"] = 1; }
+    if ctx.flags.skyway_confronted > 0    { ctx.flags["campaign.skyway.evidence.confronted"] = 1; }
+    if ctx.flags.skyway_witness_named > 0 { ctx.flags["campaign.skyway.evidence.witness_named"] = 1; }
+
+    // 4. THE CASUALTIES, itemised and summed. Three separate beats of this
+    // mission can hurt somebody and the campaign wants both readings: which beat
+    // it was, and how many people it came to.
+    let total = ctx.flags.skyway_force_casualties
+        + ctx.flags.skyway_head_casualties
+        + ctx.flags.skyway_storm_casualties;
+    ctx.flags["campaign.skyway.casualties.picket"] = ctx.flags.skyway_force_casualties;
+    ctx.flags["campaign.skyway.casualties.head"] = ctx.flags.skyway_head_casualties;
+    ctx.flags["campaign.skyway.casualties.storm"] = ctx.flags.skyway_storm_casualties;
+    ctx.flags["campaign.skyway.casualties.total"] = total;
+    if total == 0 { ctx.flags["campaign.skyway.casualties.none"] = 1; }
+
+    // 5. THE STRUCTURE. Mirrored off the pair #1040 guarantees rather than
+    // re-derived, and written as two tests rather than an if/else, so a run that
+    // somehow reached neither says neither instead of quietly claiming the head
+    // is standing.
+    if ctx.flags.skyway_skyhook_lost > 0 { ctx.flags["campaign.skyway.skyhook.lost"] = 1; }
+    if ctx.flags.skyway_skyhook_held > 0 { ctx.flags["campaign.skyway.skyhook.held"] = 1; }
+
+    // 6. THE CAPTAIN'S WORD. Counted off the ledger itself — which by now has
+    // been settled — so a promise broken back in Act 2 by the force-open counts
+    // here beside one broken tonight by a refusal.
+    let kept = 0;
+    let broken = 0;
+    if ctx.commitments.state("skyway_safe_passage") == "kept" { kept += 1; }
+    if ctx.commitments.state("skyway_safe_passage") == "broken" { broken += 1; }
+    if ctx.commitments.state("skyway_surface_records") == "kept" { kept += 1; }
+    if ctx.commitments.state("skyway_surface_records") == "broken" { broken += 1; }
+    if ctx.commitments.state("skyway_protect_witness") == "kept" { kept += 1; }
+    if ctx.commitments.state("skyway_protect_witness") == "broken" { broken += 1; }
+    ctx.flags["campaign.skyway.commitments.kept"] = kept;
+    ctx.flags["campaign.skyway.commitments.broken"] = broken;
+    if kept + broken == 0 {
+        ctx.flags["campaign.skyway.commitments.none"] = 1;
+    } else if broken == 0 {
+        ctx.flags["campaign.skyway.commitments.clean"] = 1;
+    }
+}
+
+// ── The debrief ─────────────────────────────────────────────────────────────
+//
+// Control reads the manifest closed. The headline is the pairing, because the
+// pairing is what the mission was about; everything else the crew need in order
+// to read this run as finished is on the fact sheet beside it, filed under the
+// provenance that says where it came from.
+fn file_the_debrief(ctx) {
+    let node = "debrief_none";
+    let lifted = lifted_count(ctx);
+    if ctx.flags.skyway_shelter_only > 0 {
+        node = "debrief_berth_none";
+        if lifted > 0 { node = "debrief_berth"; }
+    } else if lifted >= 2 {
+        node = "debrief_operator_and_convoy";
+        if got_out(ctx, "skyway_window_served_committee", "skyway_berth_committee") {
+            node = "debrief_workers_and_operator";
+            if got_out(ctx, "skyway_window_served_convoy", "skyway_berth_convoy") {
+                node = "debrief_workers_and_convoy";
+            }
+        }
+    } else if lifted == 1 {
+        node = "debrief_one";
+    }
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyway_control.name",
+        node_fn: node,
+        urgent: true,
+    });
+
+    // What became of the record.
+    if ctx.flags.skyway_witness_named > 0 {
+        ctx.dossier.append(#{
+            subject:    "world.falling_skyway.entity.skyway_control.name",
+            text:       "world.falling_skyway.evidence.record_named_witness",
+            provenance: "records",
+        });
+    } else if ctx.flags.skyway_records_put > 0 {
+        ctx.dossier.append(#{
+            subject:    "world.falling_skyway.entity.skyway_control.name",
+            text:       "world.falling_skyway.evidence.record_filed",
+            provenance: "records",
+        });
+    } else if ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" }) {
+        ctx.dossier.append(#{
+            subject:    "world.falling_skyway.entity.skyway_control.name",
+            text:       "world.falling_skyway.evidence.record_buried",
+            provenance: "records",
+        });
+    } else {
+        ctx.dossier.append(#{
+            subject:    "world.falling_skyway.entity.skyway_control.name",
+            text:       "world.falling_skyway.evidence.record_never_found",
+            provenance: "records",
+        });
+    }
+
+    // What became of the captain's word.
+    let entry = "world.falling_skyway.evidence.word_none";
+    if ctx.flags["campaign.skyway.commitments.broken"] > 0 {
+        entry = "world.falling_skyway.evidence.word_broken";
+    } else if ctx.flags["campaign.skyway.commitments.kept"] > 0 {
+        entry = "world.falling_skyway.evidence.word_kept";
+    }
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.skyway_control.name",
+        text:       entry,
+        provenance: "dialogue",
+    });
+}
+
+fn debrief_workers_and_convoy(ctx)   { #{ message: "world.falling_skyway.comms.debrief_workers_and_convoy", responses: [] } }
+fn debrief_workers_and_operator(ctx) { #{ message: "world.falling_skyway.comms.debrief_workers_and_operator", responses: [] } }
+fn debrief_operator_and_convoy(ctx)  { #{ message: "world.falling_skyway.comms.debrief_operator_and_convoy", responses: [] } }
+fn debrief_one(ctx)                  { #{ message: "world.falling_skyway.comms.debrief_one", responses: [] } }
+fn debrief_none(ctx)                 { #{ message: "world.falling_skyway.comms.debrief_none", responses: [] } }
+fn debrief_berth(ctx)                { #{ message: "world.falling_skyway.comms.debrief_berth", responses: [] } }
+fn debrief_berth_none(ctx)           { #{ message: "world.falling_skyway.comms.debrief_berth_none", responses: [] } }
 """

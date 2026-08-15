@@ -180,6 +180,20 @@ jobs:
       - name: Swap in the curated demo scenario manifest
         run: cp assets/scenarios.demo.toml dist/assets/scenarios.toml
 
+      # Caching rules for the deployed site (PRD #855). Pages reads `_headers`
+      # from the root of the uploaded directory; GitHub Pages (ci.yml, the dev
+      # host) ignores it, which is why this is a demo-deploy step and not part
+      # of the shared build. What it actually buys is the ~11-13 MiB gzipped
+      # WASM being cached for a year instead of revalidated on every load —
+      # everything the file does NOT name keeps Pages' revalidating default on
+      # purpose. See the file's own header for why no two rules overlap.
+      - name: Install the Cloudflare caching rules
+        run: |
+          set -euo pipefail
+          cp deploy/cloudflare/_headers dist/_headers
+          echo "installed dist/_headers:"
+          sed -n '/^\//,$p' dist/_headers
+
       # The compiled-in PHOENIX_DEMO_BUILD above is only readable once WASM has
       # instantiated, and the settings cog can be opened before then — so the
       # answer also has to be in the HTML itself. server.html ships the tag with

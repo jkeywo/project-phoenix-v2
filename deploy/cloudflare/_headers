@@ -1,0 +1,60 @@
+# Cloudflare Pages header rules for the public Phoenix build (PRD #855).
+#
+# Copied to `dist/_headers` by .github/workflows/deploy-demo.yml. Pages reads it
+# from the root of the uploaded directory; GitHub Pages (the dev host, ci.yml)
+# ignores it entirely, which is why the dev site's caching is not this file's
+# business.
+#
+# Asserted by `scripts/check-deploy-headers.mjs` against a deployed URL, and by
+# `tests/client/deploy-headers.test.js` against canned fixtures. The same
+# contract is served by the native host (`src/delivery/http.rs`); two
+# implementations, one contract.
+#
+# ── The rule about rules ────────────────────────────────────────────────────
+#
+# NO TWO PATTERNS HERE MAY SET THE SAME HEADER. Pages applies every matching
+# rule, and this repository has no way to test which one wins when two set
+# `Cache-Control` — so the file is written to make the question not arise. That
+# is why `/*` carries only security headers, and why the media directories are
+# listed one by one instead of as `/assets/*` (which would overlap
+# `/assets/scenarios.toml`, the one asset under there that must never be held).
+#
+# Everything not named below keeps Pages' own default — `public, max-age=0,
+# must-revalidate`. That is already correct for the two entry points and for the
+# scenario manifest, and merely conservative (a 304 round-trip) for anything
+# else, so silence here is safe in a way an over-broad rule would not be.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# The content-addressed bundle: `project-phoenix-<hash>.js` and
+# `project-phoenix-<hash>_bg.wasm` (`.wasm.gz` on the demo, which ships the
+# binary gzipped under the Pages 25 MiB file cap and decompresses it in the
+# page). The filename changes when the bytes do, which is the whole licence for
+# caching it for a year — and it is the single largest download on the site, so
+# it is where nearly all of the caching win lives.
+#
+# Deliberately NOT `/*.js`: `dist/phoenix.js` (scripts/wasm-editor-alias.mjs) is
+# a STABLE name re-exporting the hashed glue, and `gui/*.js` are copied
+# verbatim. Caching either for a year would strand a deploy.
+/project-phoenix-*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Media: stable within a deploy, not content-addressed, so an hour — long enough
+# to spare a returning player the round-trips, short enough that a deploy is
+# live within one.
+/assets/models/*
+  Cache-Control: public, max-age=3600
+
+/assets/skybox/*
+  Cache-Control: public, max-age=3600
+
+/assets/planets/*
+  Cache-Control: public, max-age=3600
+
+/assets/sounds/*
+  Cache-Control: public, max-age=3600
+
+/assets/fonts/*
+  Cache-Control: public, max-age=3600

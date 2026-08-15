@@ -1,0 +1,75 @@
+name: Check Deploy Headers
+
+# Manual only, and deliberately so (PRD #855, story 5).
+#
+# This job talks to a LIVE origin. Wiring it into ci.yml would make every push
+# depend on someone else's uptime, on a deploy having already happened, and on
+# the pushed commit being the one that is deployed — three ways for a green
+# branch to go red for reasons the push did not cause. The header contract that
+# CAN be checked without a network is checked on every push already:
+# `tests/client/deploy-headers.test.js` (the rules, over canned fixtures) in the
+# editor-test job, and `src/delivery/http.rs`'s unit tests (the same contract as
+# the native host serves it) in the test job. This workflow is the third leg —
+# what a CDN actually did with them — and it is run by a human after a deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: >
+          Site root to check, e.g. https://pp-demo.kiwigamedesign.co.uk/ or
+          https://pp-dev.kiwigamedesign.co.uk/. Nothing is deployed or changed —
+          the run only issues GETs and reports.
+        required: true
+        type: string
+      require_isolation:
+        description: >
+          Also require cross-origin isolation (COOP/COEP). Leave FALSE for the
+          current single-threaded build: isolation buys it nothing and breaks the
+          cross-origin PeerJS and TURN requests. Turn it on only once the
+          worker-thread benchmark spike has said yes.
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  check-headers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No `npm install`: the checker imports only its own pure module and the
+      # global `fetch` Node 20 ships. Keeping it dependency-free is what lets it
+      # be run from a laptop against a staging URL with nothing installed.
+      - name: Check the deployed headers
+        id: check
+        env:
+          TARGET_URL: ${{ inputs.url }}
+          REQUIRE_ISOLATION: ${{ inputs.require_isolation }}
+        run: |
+          set -euo pipefail
+          ARGS=("$TARGET_URL")
+          if [ "$REQUIRE_ISOLATION" = "true" ]; then
+            ARGS+=(--require-isolation)
+          fi
+          # Report to the job summary as well as the log: this workflow exists
+          # to be read by a human deciding whether a deploy is good.
+          {
+            echo "## Deploy header check"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          node scripts/check-deploy-headers.mjs "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          {
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$STATUS"

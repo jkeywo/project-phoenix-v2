@@ -1,11 +1,24 @@
 /* ───────────────────────────────────────────────────────────────
-   Weapons Console — shared styles
-   Design system reused from /src_assets:
+   Console — shared styles for every console document.
    - Navy chamfered panels (captain_console/panel-bg)
-   - Pill buttons with LED dots (gui/button-*, captain_console/red-alert-*)
    - Tactical radar (helm_console/radar-bg)
    - Type: Chakra Petch SemiBold (display), JetBrains Mono (readouts)
+
+   The VOCABULARY — colours, edges, ink, accents, space, type ramp, control
+   sizes — is not here. It is in gui/tokens.css, shared with the lobby and the
+   host viewscreen so all three read as one product. This file styles the
+   console shell in terms of it.
+
+   The CONTROL FAMILY is not here either. Shadow DOM blocks a class rule from
+   reaching inside a component, so the buttons live in
+   gui/components/ph-console-styles.js as a constructable stylesheet, which
+   gui/console-core.js adopts into this document as well. One definition, both
+   sides of the boundary.
    ─────────────────────────────────────────────────────────────── */
+
+/* Must precede every rule below: @import is only valid at the top of a
+   stylesheet (after @charset/@layer). */
+@import url("tokens.css");
 
 @font-face {
   font-family: "Chakra Petch";
@@ -20,51 +33,10 @@
   font-display: block;
 }
 
-:root {
-  /* Surface colours, picked from panel-bg.png */
-  --bg-deep:        #050818;
-  --bg-mid:         #0a1028;
-  --bg-up:          #131a3a;
-  --bg-card:        #0d1430;
-  --bg-card-up:     #161e44;
-
-  /* Stroke / line work */
-  --line:           #6a7ca4;
-  --line-soft:      #3a4674;
-  --line-faint:     #1f2750;
-
-  /* The border every console document draws around its content columns
-     (`border: 1px solid var(--edge)`, ~40 declarations across gui/*/*.html).
-     It was only ever defined in client.html's lobby `:root`, and a console is
-     an IFRAME — a separate document, inheriting nothing from its parent — so
-     inside a console the reference was invalid at computed-value time and the
-     whole `border` shorthand fell back to its initial value (`medium none
-     currentcolor`). Every panel column therefore rendered with NO border.
-     The value is `--line-soft` because that is what the one component which
-     bothered to write a fallback already resolved to (ph-dossier-panel.js:
-     `var(--edge, var(--line-soft))`). tests/client/console-tokens.test.js
-     fails if a console document or component references a custom property
-     that neither this block nor the file itself defines. */
-  --edge:           var(--line-soft);
-
-  /* Text */
-  --ink:            #d8e2ff;
-  --ink-dim:        #8a98c4;
-  --ink-faint:      #5a6694;
-
-  /* Accents */
-  --tactical:       #f08438;   /* weapons orange */
-  --tactical-dim:   #8c4818;
-  --fire:           #e0402c;   /* danger red */
-  --fire-bright:    #ff5a3a;
-  --fire-dim:       #6c1a14;
-  --loaded:         #4ec870;   /* armed/ready green */
-  --loaded-dim:     #1e5028;
-  --reloading:      #d8a040;   /* amber */
-  --reloading-dim:  #5a3c10;
-  --cyan:           #6cb6d0;
-  --cyan-dim:       #1a3848;
-}
+/* The vocabulary this file styles against lives in gui/tokens.css, imported
+   above. It used to be a `:root` block right here — one of three such blocks
+   in the codebase, which is how `--edge` came to be defined in the lobby and
+   nowhere else while forty console declarations referenced it. */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -244,122 +216,20 @@ body .frame { height: 100dvh; }
   border: 1px solid var(--line-faint);
 }
 
-/* ── Pill button (chamfered like gui/button-normal) ─────────── */
-.btn {
-  --h: 5.5rem;
-  --cham: 0.875rem;
-  position: relative;
-  height: var(--h);
-  padding: 0 1.75rem 0 4rem;
-  display: flex; align-items: center;
-  font-family: "Chakra Petch", sans-serif;
-  font-weight: 600;
-  font-size: 1.75rem;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-  background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
-  clip-path: polygon(
-    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
-    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
-    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
-  );
-  border: none;
-  cursor: default;
-  user-select: none;
-  touch-action: manipulation;
-}
-.btn > .btn-bg {
-  position: absolute; inset: 1.5px;
-  --cham: 0.8125rem;
-  background: linear-gradient(180deg, #1a2148 0%, #0e1432 50%, #070b22 100%);
-  clip-path: polygon(
-    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
-    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
-    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
-  );
-  z-index: 0;
-}
-.btn > .led,
-.btn > .label {
-  position: relative; z-index: 1;
-}
-.btn .led {
-  position: absolute;
-  left: 1.375rem; top: 50%;
-  transform: translateY(-50%);
-  width: 1.375rem; height: 1.375rem;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #34406a 0%, #0a1028 70%);
-  box-shadow: inset 0 0 4px rgba(0,0,0,0.6);
-}
-.btn .led.on            { background: radial-gradient(circle at 35% 30%, #aef0c0 0%, var(--loaded) 35%, #1e5028 80%); box-shadow: 0 0 16px var(--loaded), inset 0 0 3px rgba(255,255,255,0.5); }
-.btn .led.fire          { background: radial-gradient(circle at 35% 30%, #ffb89a 0%, var(--fire) 35%, var(--fire-dim) 80%); box-shadow: 0 0 16px var(--fire), inset 0 0 3px rgba(255,255,255,0.5); }
-.btn .led.amber         { background: radial-gradient(circle at 35% 30%, #ffd896 0%, var(--reloading) 35%, var(--reloading-dim) 80%); box-shadow: 0 0 14px var(--reloading), inset 0 0 3px rgba(255,255,255,0.5); }
-.btn .led.cyan          { background: radial-gradient(circle at 35% 30%, #d0f0ff 0%, var(--cyan) 35%, var(--cyan-dim) 80%); box-shadow: 0 0 14px var(--cyan), inset 0 0 3px rgba(255,255,255,0.5); }
+/* ── Controls ────────────────────────────────────────────────
+   The pill button, its LED, its colour variants and the stepper used to be
+   written out here AND again in gui/components/ph-console-styles.js — the
+   same design at 2.9x the scale, under the same class name, already drifting
+   apart. They are now one family with size variants, defined once in that
+   module, which gui/console-core.js adopts into this document so a console
+   writing `class="btn"` in light DOM gets the identical control.
 
-.btn.large { --h: 7.5rem; padding: 0 2.25rem 0 5.25rem; font-size: 2.25rem; }
-.btn.large .led { left: 1.75rem; width: 1.875rem; height: 1.875rem; }
+   A console that wants the old full-screen scale asks for it by name:
+   `class="btn btn--lg"`.
 
-/* Variant colors */
-.btn.armed         { color: var(--loaded); }
-.btn.armed > .btn-bg { background: linear-gradient(180deg, #0e3422 0%, #082014 50%, #04120a 100%); }
-.btn.armed         { background: linear-gradient(180deg, #4ec870 0%, #1e5028 60%, #0e2818 100%); }
-
-.btn.danger        { color: var(--fire-bright); }
-.btn.danger > .btn-bg { background: linear-gradient(180deg, #3a0e0e 0%, #200808 50%, #100404 100%); }
-.btn.danger        { background: linear-gradient(180deg, #ff5a3a 0%, #6c1a14 60%, #2c0a08 100%); }
-
-.btn.tactical      { color: var(--tactical); }
-.btn.tactical > .btn-bg { background: linear-gradient(180deg, #2a1408 0%, #180a04 50%, #0a0402 100%); }
-.btn.tactical      { background: linear-gradient(180deg, #f08438 0%, #8c4818 60%, #3a1e0c 100%); }
-
-.btn.disabled      { color: var(--ink-faint); }
-.btn.disabled > .btn-bg { background: linear-gradient(180deg, #0a0f28 0%, #050918 100%); }
-.btn.disabled      { background: linear-gradient(180deg, #2a3050 0%, #14182c 100%); }
-
-/* small chip button (tube selector) */
-.chip {
-  --h: 4.25rem;
-  --cham: 0.625rem;
-  height: var(--h);
-  padding: 0 1.375rem;
-  display: flex; align-items: center; justify-content: center;
-  font-family: "Chakra Petch", sans-serif;
-  font-weight: 600;
-  font-size: 1.25rem;
-  letter-spacing: 0.22em;
-  color: var(--ink-dim);
-  background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
-  clip-path: polygon(
-    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
-    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
-    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
-  );
-  position: relative;
-  text-transform: uppercase;
-  flex: 1 1 0;
-  touch-action: manipulation;
-}
-.chip > .chip-bg {
-  position: absolute; inset: 1.5px;
-  --cham: 0.5625rem;
-  background: linear-gradient(180deg, #0e1432 0%, #060b1f 100%);
-  clip-path: polygon(
-    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
-    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
-    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
-  );
-  z-index: 0;
-}
-.chip > .lbl { position: relative; z-index: 1; }
-.chip.selected      { color: #cde6ff; }
-.chip.selected      { background: linear-gradient(180deg, #6cb6d0 0%, #1a3848 60%, #0a1c24 100%); }
-.chip.selected > .chip-bg { background: linear-gradient(180deg, #1a3848 0%, #0a1c24 100%); border: 1px solid var(--cyan); clip-path: polygon(
-    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
-    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
-    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
-  ); }
+   The `.chip` tube selector that also lived here was a fourth scale of the
+   same design that no markup in the repo used. Its one distinguishing state
+   survives as `.btn.selected`. */
 
 /* ── Readout pill ────────────────────────────────────────────── */
 .readout {

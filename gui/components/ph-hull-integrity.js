@@ -7,6 +7,7 @@ import { t } from '../strings.js';
 
 import './ph-damage-bar.js';
 import './ph-damage-detail.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhHullIntegrity extends HTMLElement {
   #state = null;
@@ -16,6 +17,9 @@ export class PhHullIntegrity extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>

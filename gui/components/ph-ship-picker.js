@@ -21,6 +21,7 @@
 // under vitest, where setup-strings.js owns the table.
 import '../strings-boot.js';
 import { t, has } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 /**
  * Resolve `value` when it is a known string id; pass anything else through.
@@ -38,6 +39,9 @@ export class PhShipPicker extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>

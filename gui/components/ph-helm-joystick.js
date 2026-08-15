@@ -4,6 +4,7 @@
 // table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 /** Half-width of the gamepad stick's centre deadzone, in axis units. */
 export const GAMEPAD_DEADZONE = 0.1;
@@ -39,6 +40,9 @@ export class PhHelmJoystick extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>

@@ -127,7 +127,9 @@ describe('PhDamageBar', () => {
     expect(lost.style.display).toBe('block');
     expect(lost.style.width).toBe('25%');
     // Anchored right, so it is the top of the bar that is shown as lost.
-    const css = el.shadowRoot.querySelector('style').textContent;
+    // The component's OWN sheet — the shared control family is adopted first
+    // and carries data-ph-shared.
+    const css = el.shadowRoot.querySelector('style:not([data-ph-shared])').textContent;
     expect(css).toMatch(/\.lost\s*\{[^}]*right:\s*0/);
   });
 

@@ -1,9 +1,13 @@
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 export class PhDamageBar extends HTMLElement {
   #state = null;
 
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>

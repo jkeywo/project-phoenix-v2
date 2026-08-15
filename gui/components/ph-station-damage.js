@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import './ph-damage-detail.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 /**
  * ph-station-damage — compact per-station hull bar for a console footer.
@@ -35,6 +36,9 @@ export class PhStationDamage extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const label = defaultLabel();
     const tpl = document.createElement('template');
     tpl.innerHTML = `

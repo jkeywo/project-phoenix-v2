@@ -2,9 +2,9 @@
  * tests/client/console-tokens.test.js — the console token vocabulary.
  *
  * A console page is an IFRAME: a separate document that inherits nothing from
- * client.html. Its only shared vocabulary is the `:root` block in
- * gui/console.css, which custom properties DO carry across the shadow-DOM
- * boundary into every `ph-*` component.
+ * client.html. Its shared vocabulary is the `:root` block in gui/tokens.css,
+ * which gui/console.css imports and which custom properties DO carry across
+ * the shadow-DOM boundary into every `ph-*` component.
  *
  * That makes an undefined custom property invisible until someone looks at the
  * right console: `border: 1px solid var(--edge)` with no `--edge` anywhere is
@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GUI = path.join(REPO_ROOT, 'gui');
-const CONSOLE_CSS = path.join(GUI, 'console.css');
+const TOKENS_CSS = path.join(GUI, 'tokens.css');
 
 /** Every file under gui/ that carries CSS: console documents and components. */
 function styledFiles() {
@@ -80,11 +80,11 @@ function setAtRuntime(source) {
   return names;
 }
 
-const consoleCssSource = fs.readFileSync(CONSOLE_CSS, 'utf8');
-const rootBlock = consoleCssSource.match(/:root\s*\{([\s\S]*?)\}/);
+const tokensSource = fs.readFileSync(TOKENS_CSS, 'utf8');
+const rootBlock = tokensSource.match(/:root\s*\{([\s\S]*)\}/);
 const SHARED_TOKENS = definedProps(rootBlock ? rootBlock[1] : '');
 
-describe('console.css :root token vocabulary', () => {
+describe('gui/tokens.css :root token vocabulary', () => {
   it('is the shared vocabulary every console document and component inherits', () => {
     expect(SHARED_TOKENS.size).toBeGreaterThan(10);
   });

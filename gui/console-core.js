@@ -53,11 +53,24 @@ import { applyToDom } from './strings.js';
 // contextual tutorial overlay without per-file HTML; Node-safe (guarded
 // definition), so plain-Node test imports of this module stay fine.
 import './components/ph-tutorial-overlay.js';
+// The console control family (gui/components/ph-console-styles.js). Adopted
+// into the document below as well as into every component's shadow root.
+import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 
 export function initConsole({ name, render }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
   // Evaluated at call-time so tests can set global.window before calling initConsole.
   var _root = (typeof window !== 'undefined') ? window : globalThis;
+
+  // The control family reaches this DOCUMENT, not only its components.
+  //
+  // Shadow DOM blocks class rules, so the buttons live in a constructable
+  // stylesheet each ph-* component adopts. A few consoles also write
+  // `class="btn"` in their own light DOM, and console.css used to answer that
+  // with a second, differently scaled copy of the same design. Adopting the
+  // one sheet into the document means both sides of every shadow boundary
+  // draw the same control. Idempotent, and a no-op where there is no document.
+  if (typeof document !== 'undefined') phAdoptConsoleStyles(document);
 
   // The console can run in four contexts (ADR-0001 §3 transport targets):
   //   1. Inside a `client.html` iframe — parent owns the push contract

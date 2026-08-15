@@ -1,0 +1,49 @@
+# Fixture world for the player-ship override defect (found in #1036).
+#
+# A world's `player-ship` row says two things, and they answer to different
+# authorities: `template_path` is a PLACEHOLDER the lobby overrules, while
+# `[entity.overrides.*]` is the world's own per-mission tuning of whatever hull
+# the crew turn up in. `spawn_game_start_entities` used to honour the first and
+# silently discard the second — after the composition validator had already
+# merged and approved it.
+#
+# So this world is authored to make the two visibly disagree:
+#
+#   * the row names the **Destroyer**, and the test boots it with
+#     `--ship assets/entities/alliance_cruiser.toml`, so the hull that spawns is
+#     the one the LOBBY picked;
+#   * the override reaches for `hold-station`, a doctrine id BOTH hulls declare,
+#     and moves its priority to a value neither template authors (20.0 on each).
+#
+# One run therefore answers both halves. `hold-station` at 77 says the override
+# survived the hull swap; `destroy-hostiles` still carrying the CRUISER's text
+# key (and the cruiser's 30-unit `maintain_range`, against the destroyer's 24)
+# says it was merged onto the picked hull rather than onto the placeholder — and
+# says, of every field the override does not name, that it is exactly what the
+# picked template authored.
+#
+# Nothing plays this world; it exists to be booted by `tests/headless_runner.rs`.
+# It stays a fixture rather than a shipped world for the reason
+# `declarative_resume.toml` gives: a shipped world is content, and content is
+# tuned for its mission, not for the one claim a test needs pinned.
+
+[global]
+seed = 1036
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The world's per-instance intent. `behaviour.doctrine` is the one array that
+# reconciles by `id` at the instance layer (see `entity_override::MergePolicy`),
+# so this edits the picked hull's own `hold-station` entry in place and leaves
+# every other field of it — and every other doctrine — alone.
+[[entity.overrides.behaviour.doctrine]]
+id = "hold-station"
+base_priority = 77.0

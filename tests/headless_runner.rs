@@ -156,6 +156,92 @@ fn player_game_start_spawn_attaches_the_comms_and_repair_ai_components() {
     );
 }
 
+/// A world's `player-ship` overrides apply to the hull the LOBBY picked
+/// (defect found in #1036).
+///
+/// `spawn_game_start_entities` replaces the world row's config with the
+/// lobby-selected template, because the row's `template_path` is only a
+/// placeholder for position and identity. It used to replace it WHOLESALE —
+/// discarding the `[entity.overrides.*]` the same row authored, after the
+/// composition validator had already merged and approved them. Every world's
+/// player-ship tuning was therefore decorative.
+///
+/// `tests/fixtures/worlds/player_ship_override.toml` is built to make the two
+/// authorities visibly disagree: its row names the **Destroyer** and tunes
+/// `hold-station` to a priority neither hull authors, and this boots it with
+/// `--ship` on the **Cruiser**. So one run answers both halves — the tuning
+/// survived the swap, and it was merged onto the picked hull rather than onto
+/// the placeholder.
+///
+/// The last two assertions double as the no-override control: every field the
+/// override does not name comes back exactly as the Cruiser template authored
+/// it, which is the property the shipped worlds' unmoved digests rest on.
+#[test]
+fn a_worlds_player_ship_overrides_apply_to_the_lobby_selected_hull() {
+    use project_phoenix::entity_config::{DoctrineObjective, EntityConfig};
+    use project_phoenix::entity_spawner::BehaviourSection;
+
+    fn doctrine<'a>(pool: &'a [DoctrineObjective], id: &str) -> &'a DoctrineObjective {
+        pool.iter()
+            .find(|d| d.id == id)
+            .unwrap_or_else(|| panic!("a `{id}` doctrine must be present"))
+    }
+
+    let args = HeadlessArgs {
+        world_path: "tests/fixtures/worlds/player_ship_override.toml".into(),
+        // The lobby's pick, and deliberately NOT the hull the world's row names.
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&BehaviourSection, With<LocalShip>>();
+    let flown = q
+        .single(app.world())
+        .expect("exactly one LocalShip should exist")
+        .0
+        .doctrine
+        .clone();
+
+    assert_eq!(
+        doctrine(&flown, "hold-station").base_priority,
+        77.0,
+        "the world tuned its player ship and the tuning has to reach the hull \
+         the crew actually fly — both templates author 20.0, so this number can \
+         only have come from the world's `[entity.overrides.*]`"
+    );
+
+    let cruiser: EntityConfig = project_phoenix::entity_includes::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .expect("the cruiser template must compose and parse");
+    let cruiser_doctrine = cruiser
+        .behaviour
+        .as_ref()
+        .expect("the cruiser authors [behaviour]")
+        .doctrine
+        .clone();
+    assert_eq!(
+        doctrine(&flown, "destroy-hostiles"),
+        doctrine(&cruiser_doctrine, "destroy-hostiles"),
+        "…merged onto the LOBBY's hull: an untouched doctrine comes back exactly \
+         as the Cruiser authored it, not as the placeholder Destroyer did (whose \
+         entry differs in text, target_speed and maintain_range)"
+    );
+    assert_eq!(
+        DoctrineObjective {
+            base_priority: 77.0,
+            ..doctrine(&cruiser_doctrine, "hold-station").clone()
+        },
+        *doctrine(&flown, "hold-station"),
+        "…and the override edited the Cruiser's own entry IN PLACE: one field \
+         changed, every other field of it untouched"
+    );
+}
+
 /// Sim time is a function of tick count alone, and `HeadlessArgs::sim_seconds`
 /// is the authority on the conversion.
 #[test]

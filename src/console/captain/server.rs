@@ -68,10 +68,7 @@ impl Plugin for CaptainPlugin {
                 // mirrored in the same tick, so an `on_flag_set` handler
                 // chaining off it fires on the next pipeline pass exactly as a
                 // captain's press does.
-                (
-                    apply_scripted_weapons_holds,
-                    mirror_weapons_hold_flags,
-                )
+                (apply_scripted_weapons_holds, mirror_weapons_hold_flags)
                     .chain()
                     .in_set(crate::sim_sets::SimSet::Modifiers),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
@@ -302,19 +299,17 @@ pub fn mirror_weapons_hold_flags(
         } else {
             runtime.flags.clear_flag(&flag);
         }
-        runtime
-            .pending_world_events
-            .push(if held {
-                crate::world::content::WorldEvent::FlagSet {
-                    name: flag,
-                    origin_layer: None,
-                }
-            } else {
-                crate::world::content::WorldEvent::FlagCleared {
-                    name: flag,
-                    origin_layer: None,
-                }
-            });
+        runtime.pending_world_events.push(if held {
+            crate::world::content::WorldEvent::FlagSet {
+                name: flag,
+                origin_layer: None,
+            }
+        } else {
+            crate::world::content::WorldEvent::FlagCleared {
+                name: flag,
+                origin_layer: None,
+            }
+        });
     }
 }
 

@@ -253,10 +253,7 @@ pub enum ActionCmd {
     /// mirror, and a scenario's order gets the same `FlagSet`/`FlagCleared`
     /// transition a captain's press does. A flag written here would have been
     /// written for the scenario's orders and silently absent for the crew's.
-    SetWeaponsHold {
-        entity: String,
-        held: bool,
-    },
+    SetWeaponsHold { entity: String, held: bool },
     /// Order the named civilian to hold, divert or dock (issue #1028).
     ///
     /// `entity` is the world's authored entity NAME, not a UUID, and the applier

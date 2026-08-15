@@ -304,11 +304,10 @@ pub(crate) fn tick_blaster_auto_fire(
         // consults it — the gate is the bank's authored predicate (#872), and
         // the weapons hold folded in beside it rides that same predicate
         // (#1041).
-        let posture =
-            crate::weapons_plugin::WeaponsAlertPosture::from_components(
-                red_alert_opt,
-                weapons_hold_opt,
-            );
+        let posture = crate::weapons_plugin::WeaponsAlertPosture::from_components(
+            red_alert_opt,
+            weapons_hold_opt,
+        );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = crate::world::server::entity_flag_chain(

@@ -881,8 +881,7 @@ pub(crate) fn ai_phaser_auto_fire(
         // predicate's business (issue #872), and so is whether a weapons hold
         // does (issue #1041) — the hold rides the same fact and the same
         // authored predicate, which is exactly why no Rust branch appears here.
-        let posture =
-            super::WeaponsAlertPosture::from_components(red_alert_opt, weapons_hold_opt);
+        let posture = super::WeaponsAlertPosture::from_components(red_alert_opt, weapons_hold_opt);
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = crate::world::server::entity_flag_chain(

@@ -252,7 +252,14 @@ export class PhOperationPanel extends HTMLElement {
     picker.hidden = !choosing;
     if (choosing) {
       const selected = action.verb;
-      const rendered = capabilities.map((c) => c && c.verb).join(' ');
+      // '\u001f' (ASCII unit separator) written as an ESCAPE SEQUENCE, not as a
+      // raw byte. A literal control character in the source is legal JS and the
+      // component worked, but it made every byte-sniffing tool — ripgrep, git
+      // diff, GitHub's blob view — classify this file as binary, so it answered
+      // no content search in the repo. It escaped PRD #1023's module-1 literal
+      // sweep that way. The separator only has to be a character no verb id can
+      // contain; it does not have to be unprintable in the file.
+      const rendered = capabilities.map((c) => c && c.verb).join('\u001f');
       if (picker.dataset.rendered !== rendered) {
         picker.textContent = '';
         for (const capability of capabilities) {

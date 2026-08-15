@@ -176,7 +176,14 @@ describe('shared display-text ids', () => {
 
     expect(slots.length, 'no arc labels or weapon mounts found — the walk is broken').toBeGreaterThan(0);
 
-    /** `${family} ${text}` → the first id that rendered it. */
+    /**
+     * `${family}\u0000${text}` -> the first id that rendered it.
+     *
+     * The separator is written as an ESCAPE SEQUENCE, never as a raw byte. A
+     * literal NUL in the source makes ripgrep and git classify the whole file
+     * as binary, after which it answers no content search in the repo at all:
+     * gui/components/ph-operation-panel.js hid from an entire audit that way.
+     */
     const idForText = new Map();
     /** id → the arc or mount it names. */
     const slotForId = new Map();
@@ -194,7 +201,7 @@ describe('shared display-text ids', () => {
       const text = table.get(id);
       expect(text, `${where}: ${family} '${slot}' → '${id}' has no strings.csv row`).toBeTruthy();
 
-      const textKey = `${family} ${text}`;
+      const textKey = `${family}\u0000${text}`;
       const first = idForText.get(textKey);
       if (first) {
         expect(

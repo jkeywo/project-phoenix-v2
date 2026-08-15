@@ -246,7 +246,7 @@ fn the_native_hosts_catalogue_is_the_browser_hosts_catalogue_with_no_packs_appli
     let native = codec::encode_delivery_manifest(&DeliveryManifest {
         stamp: DeliveryStamp::for_manifest(&manifest_toml),
         manifest_path: BASE_MANIFEST.to_string(),
-        scenarios: catalog_payload(&build_catalog(&manifest, &resolve)),
+        scenarios: catalog_payload(&build_catalog(&manifest, resolve)),
     });
 
     // What the browser host publishes: `build_merged_catalog` with an empty
@@ -255,7 +255,7 @@ fn the_native_hosts_catalogue_is_the_browser_hosts_catalogue_with_no_packs_appli
     let browser = codec::encode_delivery_manifest(&DeliveryManifest {
         stamp: DeliveryStamp::for_manifest(&manifest_toml),
         manifest_path: BASE_MANIFEST.to_string(),
-        scenarios: catalog_payload(&build_merged_catalog(&manifest, &[], &resolve).catalog),
+        scenarios: catalog_payload(&build_merged_catalog(&manifest, &[], resolve).catalog),
     });
 
     assert_eq!(

@@ -60,12 +60,12 @@ pub fn load_content(content_dir: &str, manifest_rel: &str) -> Result<LoadedConte
     })?;
 
     let resolve_world = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-    let findings = validate_manifest(&manifest, &manifest_toml, &resolve_world)
+    let findings = validate_manifest(&manifest, &manifest_toml, resolve_world)
         .into_iter()
         .map(|f| format!("[{}] {}: {}", f.category, f.source.reference, f.message))
         .collect();
 
-    let catalog = build_catalog(&manifest, &resolve_world);
+    let catalog = build_catalog(&manifest, resolve_world);
     Ok(LoadedContent {
         manifest: DeliveryManifest {
             stamp: DeliveryStamp::for_manifest(&manifest_toml),

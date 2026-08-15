@@ -65,6 +65,18 @@
 # are the shipped worlds — combat_test 14942520827746055774 and patrol
 # 11531679067393217131 — because a lever nobody in those worlds pulls folds
 # nothing at all.
+#
+# That last sentence was WRONG for two builds, and the corrections are worth
+# recording because they are what the probe fleet is for. The lever's engine
+# half moved `probe_storm.toml` — a world with no hold in it anywhere — twice
+# over, and neither time through the fold: first because the flag mirror wrote
+# through `DerefMut` on every ship's spawn tick and so marked
+# `WorldContentRuntime` changed, and then because the new component arrived as a
+# SECOND `insert` on the ship spawn path, whose extra queued command and
+# archetype move reordered everything spawned after it. The mirror now reads
+# before it writes and the component rides the existing bundle nested. Both
+# fixes were confirmed the only way they can be: by putting
+# 11434311098359716284 back.
 
 [global]
 seed = 1041

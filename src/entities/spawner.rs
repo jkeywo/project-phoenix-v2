@@ -322,20 +322,29 @@ pub fn spawn_entity(
             crate::weapons_plugin::ActiveBeam::default(),
             crate::weapons_plugin::PhaserCooldown::default(),
             crate::sensors_plugin::SensorRadarSelection::default(),
-            crate::ship_state::ShipRedAlert::default(),
+            // The restraint lever (issue #1041) rides in the SAME bundle as the
+            // alert it layers under, nested rather than added as a second
+            // `insert`. Every ship carries it, player and NPC alike, so the
+            // captain's order and a scenario's order land on the same state and
+            // the fire hosts need no "is this an NPC?" branch; it defaults to
+            // released, so a hull nobody orders behaves exactly as it did
+            // before this issue.
+            //
+            // The nesting is load-bearing, not tidiness. A second `insert` is a
+            // second queued command and a second archetype move per ship, which
+            // shifts what the command queue does afterwards — and a world that
+            // never pulls this lever must be byte-identical, which is the
+            // acceptance criterion this whole slice is built to. Bundles nest,
+            // so pairing it with `ShipRedAlert` keeps the tuple inside Bevy's
+            // 15-element ceiling without paying for a second command.
+            (
+                crate::ship_state::ShipRedAlert::default(),
+                crate::ship_state::ShipWeaponsHold::default(),
+            ),
             crate::ship_state::ShipViewMode::default(),
             crate::ship_state::ShipPhaserFrequency::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
         ));
-        // The restraint lever (issue #1041), beside the alert it layers under.
-        // Every ship carries it, player and NPC alike, so the captain's order
-        // and a scenario's order land on the same state and the fire hosts need
-        // no "is this an NPC?" branch. Defaults to released, so a hull that is
-        // never ordered to hold behaves exactly as it did before this issue.
-        //
-        // Its own `insert` because the bundle above is at Bevy's 15-element
-        // tuple ceiling.
-        entity_commands.insert(crate::ship_state::ShipWeaponsHold::default());
         // Per-entity helm intent (audit follow-up). Every ship carries
         // its own `LastHelmInput` so systems that iterate `With<Ship>`
         // and read `Option<&LastHelmInput>` see a real value on NPCs

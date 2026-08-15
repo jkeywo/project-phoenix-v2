@@ -273,18 +273,38 @@ pub fn mirror_weapons_hold_flags(
         }
     }
     writes.sort();
-    for (flag, held) in writes {
-        let (before, after) = if held {
-            runtime.flags.set_flag(&flag)
+    // The store is READ first and written only on a real transition, and that
+    // is not an optimisation — it is what keeps a world nobody pulls the lever
+    // in byte-identical.
+    //
+    // `Changed<ShipWeaponsHold>` fires on INSERTION as well as on assignment,
+    // so every ship in the world reaches this loop on the tick it spawns. The
+    // first draft wrote each of those through `DerefMut`, which marked
+    // `WorldContentRuntime` changed on every spawn — and change detection on
+    // that resource is read elsewhere, so a world that spawns anything
+    // mid-run saw its behaviour move. `probe_storm.toml`, which spawns three
+    // radiation bands and a stricken hauler while a tow is running, is where
+    // that showed up: its committed digest moved with the lever untouched.
+    //
+    // Reading first costs a hash lookup and means the overwhelmingly common
+    // case — a released hold whose flag is already absent — takes no mutable
+    // borrow at all.
+    let pending: Vec<(String, bool)> = writes
+        .into_iter()
+        .filter(|(flag, held)| runtime.flags.flag(flag) != *held)
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    for (flag, held) in pending {
+        if held {
+            runtime.flags.set_flag(&flag);
         } else {
-            runtime.flags.clear_flag(&flag)
-        };
-        if (before != 0) == (after != 0) {
-            continue;
+            runtime.flags.clear_flag(&flag);
         }
         runtime
             .pending_world_events
-            .push(if after != 0 {
+            .push(if held {
                 crate::world::content::WorldEvent::FlagSet {
                     name: flag,
                     origin_layer: None,

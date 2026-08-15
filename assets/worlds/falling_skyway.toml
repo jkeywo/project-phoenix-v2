@@ -462,6 +462,18 @@
 # 14942520827746055774 and patrol 11531679067393217131 — because a world that
 # adds entities of its own has no business touching a simulation it never
 # enters.
+#
+# STILL 12497900250050242030 AFTER the AI-thrust-burst fix, and that is a claim
+# rather than an oversight: this world fields two of the eight banded hulls
+# (`ship_requiem_courier` and `ship_harrow_patrol`) as well as the player
+# cruiser's inherited `fragments/ai/fleet_baseline.toml`. MEASURED: 0 helm power
+# changes across the 900-tick window, banded or not. The band changes WHEN a helm
+# channel gives its point back, and `ai_power_allocation` is
+# `With<AiHighFidelity>`; the civilian traffic and the Havelock picket here are
+# either low-LOD or under a doctrine throttle that never reaches the band, so the
+# rule whose text changed never resolves. Every scenario assertion this world
+# owns — the civilian arrivals, the tow completion, the storm crossings — is
+# likewise unmoved, because none of them is timed off a helm power level.
 
 [global]
 seed = 1034

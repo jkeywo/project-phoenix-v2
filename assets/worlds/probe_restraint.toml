@@ -77,6 +77,17 @@
 # before it writes and the component rides the existing bundle nested. Both
 # fixes were confirmed the only way they can be: by putting
 # 11434311098359716284 back.
+#
+# STILL 1078282553163286478 AFTER the AI-thrust-burst fix, and this one is worth
+# stating precisely because — unlike combat_test, patrol and falling_skyway,
+# which record 0 helm power changes — this world's `ship_harrow_patrol` picket
+# DOES resolve the banded rule. It makes exactly two helm power changes across
+# the window, and they are BYTE-IDENTICAL banded or not: an elevate, and a shed
+# driven by a throttle that falls clean past BOTH edges of the band rather than
+# dithering between them. A band only changes an outcome where the throttle
+# lingers inside it, so a world whose throttle crosses it outright folds the
+# digest it always did. That is a stronger hold than the low-LOD ones above: the
+# rule ran, and still decided the same thing.
 
 [global]
 seed = 1041

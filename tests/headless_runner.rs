@@ -12568,3 +12568,1032 @@ fn a_condition_floor_collapses_a_structure_and_a_reaction_inside_the_last_window
          still adrift when the window closes"
     );
 }
+
+// ── Falling Skyway, Act 3: the transfer window (issue #1042, parent #852) ────
+
+/// The authority that runs the window, and the one console surface its whole
+/// arithmetic lands on.
+const WINDOW_CONTROL: &str = "world.falling_skyway.entity.skyway_control.name";
+/// The head. Its lift certification is the whole of its contribution.
+const WINDOW_HEAD: &str = "world.falling_skyway.entity.skyhook.name";
+/// The rung that still works.
+const WINDOW_DEPOT_A: &str = "world.falling_skyway.entity.depot_ladder_a.name";
+/// Where the act's own objective sends helm, and — not by accident — inside
+/// Control's authored 800-unit comms range, which is what makes the window's
+/// hail land.
+const WINDOW_STATION: bevy::prelude::Vec3 = bevy::prelude::Vec3::new(180.0, 0.0, 170.0);
+
+/// Mission seconds elapsed in this run.
+fn window_now(app: &bevy::prelude::App) -> f64 {
+    app.world()
+        .resource::<bevy::prelude::Time>()
+        .elapsed_secs_f64()
+}
+
+/// Step in blocks until the run reaches `secs`. Coarse on purpose: the beats
+/// this group asserts ON are found tick by tick, and everything between them is
+/// the mission running.
+fn window_run_to(app: &mut bevy::prelude::App, secs: f64) {
+    while window_now(app) < secs {
+        run(app, 10);
+    }
+}
+
+/// Skyway Control's manifest as the live condition track carries it — every
+/// authored capacity id against its current level.
+fn window_manifest(app: &mut bevy::prelude::App) -> std::collections::BTreeMap<String, i64> {
+    use project_phoenix::entities::spawner::EntityName;
+    use project_phoenix::infrastructure::InfrastructureCondition;
+
+    let mut q = app
+        .world_mut()
+        .query::<(&EntityName, &InfrastructureCondition)>();
+    let found = q
+        .iter(app.world())
+        .find(|(name, _)| name.0 == WINDOW_CONTROL)
+        .map(|(_, condition)| {
+            condition
+                .0
+                .capacities()
+                .iter()
+                .map(|c| (c.id.clone(), c.level))
+                .collect::<std::collections::BTreeMap<String, i64>>()
+        });
+    found.expect("Skyway Control carries the window manifest")
+}
+
+/// One structure's published capacity level, read off its own live track.
+fn window_capacity_of(app: &mut bevy::prelude::App, entity: &str, id: &str) -> i64 {
+    use project_phoenix::entities::spawner::EntityName;
+    use project_phoenix::infrastructure::InfrastructureCondition;
+
+    let mut q = app
+        .world_mut()
+        .query::<(&EntityName, &InfrastructureCondition)>();
+    let found = q
+        .iter(app.world())
+        .find(|(name, _)| name.0 == entity)
+        .and_then(|(_, condition)| condition.0.capacity(id));
+    found.unwrap_or_else(|| panic!("{entity} publishes no capacity '{id}'"))
+}
+
+/// What the crew can actually READ: Control's fact sheet, as `(label, count)`
+/// pairs off the dossier blackboard the tactical panel renders.
+///
+/// This is the AC that matters most about the manifest — a number the
+/// simulation holds and no console shows is not a number the crew have — so it
+/// is read through the published projection rather than off the component.
+fn window_panel_rows(app: &mut bevy::prelude::App) -> Vec<(String, i64)> {
+    use project_phoenix::dossier::dossier_blackboard_key;
+    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
+    use project_phoenix::server_app::ShipSystemBlackboards;
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let blackboards = q
+        .iter(app.world())
+        .next()
+        .expect("the crew own ship publishes its blackboards");
+    let bb: DossierBlackboard = match blackboards.0.get(&dossier_blackboard_key()) {
+        Some(SystemBlackboard::Dossiers(bb)) => bb.clone(),
+        other => panic!("expected a dossier blackboard, got {other:?}"),
+    };
+    bb.subjects
+        .iter()
+        .find(|s| s.name == WINDOW_CONTROL)
+        .map(|s| {
+            s.facts
+                .iter()
+                .filter_map(|f| match f.value {
+                    DossierValue::Count(n) => Some((f.label.clone(), n)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Run one external operation on `target` from alongside, holding station for
+/// `seconds` — long enough that the authored duration has expired and the payout
+/// has landed.
+///
+/// The ship is pinned by hand for the length of the job, and that is the honest
+/// analogue of helm holding position rather than a shortcut: an operation
+/// re-tests its authored range every tick, and the mission's own Reach
+/// directives would otherwise fly the hull off the job mid-run. Which is helm's
+/// problem, and not this test's subject.
+fn window_operation(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    ship_uuid: &str,
+    verb: project_phoenix::operations::OperationVerb,
+    target: &str,
+    alongside: bevy::prelude::Vec3,
+    seconds: f64,
+) {
+    use project_phoenix::operations::PendingOperationStart;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let target_uuid = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .name_to_uuid
+        .get(target)
+        .cloned()
+        .unwrap_or_else(|| panic!("{target} is not in this world"));
+    skyway_move(app, ship, alongside);
+    run(app, 2);
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .pending_operation_starts
+        .push(PendingOperationStart {
+            ship_uuid: ship_uuid.to_string(),
+            verb,
+            target_uuid,
+        });
+    let blocks = ticks_for_sim_seconds(seconds, SKYWAY_DT) / 10;
+    for _ in 0..blocks {
+        skyway_move(app, ship, alongside);
+        run(app, 10);
+    }
+}
+
+/// A 30-second field repair on `target`, from alongside.
+fn window_field_repair(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    ship_uuid: &str,
+    target: &str,
+    alongside: bevy::prelude::Vec3,
+) {
+    window_operation(
+        app,
+        ship,
+        ship_uuid,
+        project_phoenix::operations::OperationVerb::FieldRepair,
+        target,
+        alongside,
+        34.0,
+    );
+}
+
+/// Catch the tether: one 18-second stabilise on the skyhook head, run from the
+/// station-keeping berth #1040's own approach objective points helm at.
+///
+/// This is the Act-3 work a crew who are paying attention do, and it is what
+/// keeps the head CERTIFIED as well as standing — a stabilise pays a lump into
+/// the condition track, and the transfer window reads that track's lift
+/// threshold. Unlike a field repair it carries no `work_stoppage` interrupt, so
+/// it pays in full whether or not the strike was ever settled.
+fn window_stabilise_head(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    ship_uuid: &str,
+) {
+    window_operation(
+        app,
+        ship,
+        ship_uuid,
+        project_phoenix::operations::OperationVerb::Stabilise,
+        WINDOW_HEAD,
+        WINDOW_STATION,
+        22.0,
+    );
+}
+
+/// Hold the head up until the tether's projection has fallen due, then leave the
+/// ship on station.
+///
+/// The strain #1040 authors walks the head down 2 points every 10 seconds for as
+/// long as the watch is open, and it opens the moment the storm clears. A crew
+/// who want anything to lift through the transfer window have to catch it more
+/// than once — a single stabilise buys about a hundred seconds before the head
+/// falls back under its lift line — so this runs them until the projection
+/// resolves the act, which is what a crew who never stopped watching look like.
+fn window_hold_the_tether(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    ship_uuid: &str,
+    until: f64,
+) {
+    // The last one has to LAND before the projection: an 18-second job started
+    // at t-10 is a job the act resolves out from under.
+    while window_now(app) < until - 24.0 {
+        window_stabilise_head(app, ship, ship_uuid);
+    }
+    window_run_to(app, until + 3.0);
+    skyway_move(app, ship, WINDOW_STATION);
+}
+
+/// The crew's own hull and its minted uuid.
+fn window_ship(app: &mut bevy::prelude::App) -> (bevy::prelude::Entity, String) {
+    use project_phoenix::entities::spawner::EntityUuid;
+    let mut q = app
+        .world_mut()
+        .query_filtered::<(bevy::prelude::Entity, &EntityUuid), With<LocalShip>>();
+    let found = q
+        .iter(app.world())
+        .next()
+        .map(|(entity, uuid)| (entity, uuid.0.clone()));
+    found.expect("the crew hull")
+}
+
+/// One row off the captain's countdown, by deadline id.
+fn window_countdown(
+    app: &mut bevy::prelude::App,
+    id: &str,
+) -> Option<project_phoenix::messages::DeadlineSnapshot> {
+    let mut q = app
+        .world_mut()
+        .query::<&project_phoenix::server_app::ShipSystemBlackboards>();
+    let rows: Vec<_> = q
+        .iter(app.world())
+        .filter_map(|bbs| {
+            bbs.0
+                .values()
+                .find_map(|bb| match bb {
+                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    _ => None,
+                })
+                .filter(|c| !c.deadlines.is_empty())
+                .map(|c| c.deadlines.clone())
+        })
+        .collect();
+    rows.first()
+        .and_then(|list| list.iter().find(|d| d.id == id).cloned())
+}
+
+/// Pull one of the act's booking seams: ask for a lift for that claimant.
+///
+/// A flag write AND the `WorldEvent::FlagSet` that makes it an event, which is
+/// the same pair every other writer of a world flag emits — the script applier
+/// for `ctx.flags.x = 1`, the infrastructure mirror for a threshold crossing.
+/// Writing the store alone would move the number and chain nothing, which is
+/// the bug this pairing exists to prevent.
+///
+/// Cleared first so a second ask on the same seam is a fresh EDGE. That is what
+/// a captain asking twice looks like, and `on_flag_set` fires on transitions.
+fn window_book(app: &mut bevy::prelude::App, seam: &str) {
+    use project_phoenix::world::server::WorldContentRuntime;
+    let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+    runtime.flags.clear_flag(seam);
+    runtime.flags.set_flag(seam);
+    runtime
+        .pending_world_events
+        .push(project_phoenix::world::content::WorldEvent::FlagSet {
+            name: seam.to_string(),
+            origin_layer: None,
+        });
+    run(app, 4);
+}
+
+/// Tick until the window opens, and return the mission time it opened at.
+fn window_open_time(app: &mut bevy::prelude::App, give_up_at: f64) -> f64 {
+    while window_now(app) < give_up_at {
+        run(app, 1);
+        if skyway_flag(app, "skyway_window_open") == 1 {
+            return window_now(app);
+        }
+    }
+    panic!("the transfer window never opened by {give_up_at} s");
+}
+
+/// **Issue #1042, AC6 — the claim that is about EVERY run, asserted from the
+/// authored numbers rather than from one of them.**
+///
+/// A headless run can only ever show that one mission state is short. What the
+/// slice actually promises is that no mission state is sufficient, and that is
+/// arithmetic over what the world authors: the ladder's two rungs are the
+/// chain's ceiling, nothing the crew can do raises either, and the three claims
+/// together are larger than the pair of them. The companion tests below prove a
+/// crew can REACH that ceiling; this one proves reaching it is not enough.
+#[test]
+fn no_state_of_falling_skyway_covers_all_three_claimants() {
+    use project_phoenix::operations::{OperationVerb, ShipOperations};
+
+    let mut app = build_headless_app(&skyway_args(SKYWAY_DT, 2.0)).expect("the world must load");
+    run(&mut app, 30);
+
+    // The supply side, as the world authors it: the head's two published
+    // numbers and the two rungs' throughput, read off the live tracks on the
+    // mission's opening tick.
+    let berths = window_capacity_of(&mut app, WINDOW_HEAD, "skyhook_transfer_berths");
+    let climber = window_capacity_of(&mut app, WINDOW_HEAD, "skyhook_climber_load");
+    let rung_a = window_capacity_of(&mut app, WINDOW_DEPOT_A, "depot_a_fuel_lift");
+    let rung_b = window_capacity_of(&mut app, SKYWAY_DEPOT_B, "depot_b_fuel_lift");
+    let head_ceiling = berths * climber;
+    let ladder_ceiling = rung_a + rung_b;
+    let best_possible = head_ceiling.min(ladder_ceiling);
+
+    // The demand side, off Control's manifest.
+    let manifest = window_manifest(&mut app);
+    let demand = manifest["skyway_claim_committee"]
+        + manifest["skyway_claim_havelock"]
+        + manifest["skyway_claim_convoy"];
+
+    assert!(
+        best_possible < demand,
+        "THE WHOLE ACT: the best the chain can ever do is {best_possible} (the head offers \
+         {berths} berths at {climber} a climber, the ladder puts in {rung_a} + {rung_b}), and \
+         the three claims come to {demand}. If this ever passes, the window is a puzzle \
+         rather than a choice"
+    );
+
+    // …and that ceiling is a CEILING rather than today's reading, because
+    // nothing the crew fly can put anything into a rung. A real transfer moves
+    // an authored `[transfer]` cargo between two ends carrying the same capacity
+    // id, and the mission's hull authors none — its `transfer` verb stands a
+    // berth up, it does not deliver into one.
+    let (ship, _) = window_ship(&mut app);
+    let transfer_terms_exist = app
+        .world()
+        .get::<ShipOperations>(ship)
+        .expect("the destroyer authors an [operations] table")
+        .capabilities
+        .capabilities
+        .iter()
+        .any(|c| c.verb == OperationVerb::Transfer && c.transfer.is_some());
+    assert!(
+        !transfer_terms_exist,
+        "the crew's hull must carry no [transfer] terms: a hull that could deliver cargo \
+         into a rung could raise the ladder's ceiling, and the assertion above would stop \
+         being about every run"
+    );
+
+    // A structural double-check on the pairing the claims are tuned for: ANY
+    // TWO fit, and that is what makes the window a choice rather than a
+    // disaster. #1043 enforces it by reading these numbers.
+    let mut claims = [
+        manifest["skyway_claim_committee"],
+        manifest["skyway_claim_havelock"],
+        manifest["skyway_claim_convoy"],
+    ];
+    claims.sort();
+    assert!(
+        claims[1] + claims[2] <= best_possible,
+        "the two most expensive claims must fit inside the best the chain can do, or \
+         'capacity for two' is not what the numbers say: {} + {} against {best_possible}",
+        claims[1],
+        claims[2]
+    );
+}
+
+/// **Issue #1042, AC1/AC2/AC3/AC4/AC5/AC7 — the window end to end, for a crew
+/// who did everything the mission had to offer.**
+///
+/// The strike talked down at the table, Ladder B mended back over its own line,
+/// and the tether caught and held all the way to its projection — so this crew
+/// reach the window with a certified head and both rungs pumping, which is the
+/// most the chain can give. It is still not enough, Control says so when the
+/// window opens, the three figures are on Control's fact sheet while it is open,
+/// and the window shuts on its own deadline.
+///
+/// KEEPING THE HEAD IS PART OF "EVERYTHING" NOW, and that is the interlock
+/// between the two halves of Act 3 (#1040 and this slice): the strain walks the
+/// head down through its lift certification long before the window opens, so a
+/// crew who stop watching arrive with nothing to lift however well they did in
+/// Acts 1 and 2.
+#[test]
+fn a_crew_who_did_everything_still_reach_the_window_short() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    let (_, ship_uuid) = window_ship(&mut app);
+
+    // ── Act 2's work: the strike ends at the table ──────────────────────────
+    skyway_negotiate_to_a_vote(&mut app);
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
+    // The committee put it to the floor; the rung starts moving twenty seconds
+    // later, which is #1036's authored pace and not this test's to shortcut.
+    let settled_by = window_now(&app) + 24.0;
+    window_run_to(&mut app, settled_by);
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_settled"),
+        1,
+        "precondition: the workers are back before anything gets repaired at full rate"
+    );
+
+    // ── Act 2's other work: mend the rung the dispute was about ─────────────
+    window_field_repair(
+        &mut app,
+        ship,
+        &ship_uuid,
+        SKYWAY_DEPOT_B,
+        bevy::prelude::Vec3::new(1180.0, 0.0, 300.0),
+    );
+    assert_eq!(
+        skyway_flag(&app, "depot_b_pumping"),
+        1,
+        "a full-rate repair must put the rung back over its own line. Mending it while the \
+         strike was still on would not have been enough, which is the pairing #1035 authored"
+    );
+
+    // ── Act 3's work: hold the tether up until its projection resolves ──────
+    let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
+    let watch_opens = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    window_run_to(&mut app, watch_opens + 4.0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_tether_watch"),
+        1,
+        "precondition: #1040's Act-3 watch is open and the head is under load"
+    );
+    window_hold_the_tether(&mut app, ship, &ship_uuid, projection);
+    assert_eq!(
+        skyway_flag(&app, "skyway_skyhook_held"),
+        1,
+        "this crew kept the structure"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_skyhook_lost"), 0);
+    assert_eq!(
+        skyway_flag(&app, "skyhook_lift_capable"),
+        1,
+        "…and kept it CERTIFIED, which is a stronger claim than kept it standing: a head \
+         caught at the last rung is a head that holds and cannot lift"
+    );
+
+    // ── AC1: the countdown is on the panel BEFORE the window opens ──────────
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    let closes_at = skyway_deadline_secs(&app, "skyway_window_closes") as f64;
+    window_run_to(&mut app, opens_at - 6.0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_open"),
+        0,
+        "the window is not open until its deadline says so"
+    );
+    let pending = window_countdown(&mut app, "skyway_transfer_window")
+        .expect("the transfer window is a VISIBLE deadline on the captain's countdown");
+    assert!(
+        pending.remaining_secs > 0 && pending.remaining_secs <= 8,
+        "…and it is counting DOWN: {} s left six seconds out",
+        pending.remaining_secs
+    );
+    assert_eq!(
+        pending.label, "world.falling_skyway.deadline.transfer_window.label",
+        "the crew-facing label is a strings.csv id, never English"
+    );
+    // Nothing has been published onto the manifest yet: a figure the mission has
+    // not earned is not a figure on a panel.
+    let before = window_manifest(&mut app);
+    assert_eq!(before["skyway_window_available"], 0);
+    assert_eq!(before["skyway_window_demand"], 0);
+    assert_eq!(before["skyway_window_shortfall"], 0);
+
+    // ── AC1: it opens ON the deadline ───────────────────────────────────────
+    let opened = window_open_time(&mut app, opens_at + 10.0);
+    assert!(
+        (opened - opens_at).abs() < 1.5,
+        "the window opens on its authored deadline, not near it: {opened:.1} s against an \
+         authored {opens_at:.0} s"
+    );
+
+    // ── AC2: the capacity is COMPUTED, and this crew earned all of it ───────
+    let berths = window_capacity_of(&mut app, WINDOW_HEAD, "skyhook_transfer_berths");
+    let climber = window_capacity_of(&mut app, WINDOW_HEAD, "skyhook_climber_load");
+    let rung_a = window_capacity_of(&mut app, WINDOW_DEPOT_A, "depot_a_fuel_lift");
+    let rung_b = window_capacity_of(&mut app, SKYWAY_DEPOT_B, "depot_b_fuel_lift");
+    let supply = skyway_flag(&app, "skyway_window_supply");
+    assert_eq!(
+        supply,
+        (berths * climber).min(rung_a + rung_b),
+        "a crew with a certified head, both rungs pumping and nobody out get the whole \
+         chain: the smaller of what the head lifts and what the ladder puts in it"
+    );
+    assert_eq!(
+        supply,
+        rung_a + rung_b,
+        "…and with the head certified the LADDER is what binds, which is why mending the \
+         rung was worth doing"
+    );
+
+    // ── AC3/AC4: both figures, and the shortfall, on the panel and out loud ─
+    let demand = skyway_flag(&app, "skyway_window_demand_total");
+    let short = skyway_flag(&app, "skyway_window_shortfall_at_open");
+    assert_eq!(short, demand - supply);
+    assert!(
+        short > 0,
+        "THE ACCEPTANCE CRITERION: even this crew are short. supply {supply}, demand \
+         {demand}"
+    );
+    let manifest = window_manifest(&mut app);
+    assert_eq!(manifest["skyway_window_available"], supply);
+    assert_eq!(manifest["skyway_window_demand"], demand);
+    assert_eq!(manifest["skyway_window_shortfall"], short);
+    assert_eq!(
+        manifest["skyway_window_committed"], 0,
+        "nothing has been put on the ribbon yet"
+    );
+
+    // …and the same three, on a console, through the projection the tactical
+    // dossier panel renders.
+    let rows: std::collections::BTreeMap<String, i64> =
+        window_panel_rows(&mut app).into_iter().collect();
+    assert_eq!(
+        rows.get("world.falling_skyway.capacity.window_available.label"),
+        Some(&supply),
+        "capacity AVAILABLE has to be readable from a console, not inferred: Control's \
+         sheet carried {rows:?}"
+    );
+    assert_eq!(
+        rows.get("world.falling_skyway.capacity.window_demand.label"),
+        Some(&demand),
+        "…and so does capacity DEMANDED"
+    );
+    assert_eq!(
+        rows.get("world.falling_skyway.capacity.window_shortfall.label"),
+        Some(&short)
+    );
+
+    // AC4: the shortfall is STATED, in mission copy, at the moment it opens.
+    let said = skyway_messages(&app, WINDOW_CONTROL)
+        .last()
+        .map(|m| m.body.clone())
+        .expect("Control hails the crew when the window opens");
+    assert_eq!(
+        said, "world.falling_skyway.comms.window_opens_short",
+        "a crew who did everything get the 'short by a workable margin' body, and it says \
+         they can put two up and not three"
+    );
+
+    // The act's objective is on the list while the window is open.
+    assert_eq!(
+        objective_status(&app, "obj-a3-window"),
+        ObjectiveStatus::Active
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-window-ready"),
+        ObjectiveStatus::Completed,
+        "the run-up beat resolves when the thing it was a run-up to arrives"
+    );
+
+    // The duration is on the panel for as long as the window lasts — the second
+    // half of AC1, and the reason the pair of deadlines is authored rather than
+    // one deadline and a hidden timer.
+    let running = window_countdown(&mut app, "skyway_window_closes")
+        .expect("the closing deadline is visible too");
+    assert!(
+        running.remaining_secs > 0
+            && (running.remaining_secs as f64) <= (closes_at - opens_at) + 2.0,
+        "with the window open, the closing deadline IS its duration: {} s of an authored \
+         {} s window",
+        running.remaining_secs,
+        closes_at - opens_at
+    );
+
+    // ── The ledger the choice scene has to obey (issue #1043's AC1) ─────────
+    //
+    // A lift asked for early, and it lands well inside the window.
+    let committee_claim = manifest["skyway_claim_committee"];
+    window_book(&mut app, "skyway_book_committee");
+    assert_eq!(skyway_flag(&app, "skyway_window_lifts_started"), 1);
+    assert_eq!(
+        window_manifest(&mut app)["skyway_window_available"],
+        supply - committee_claim,
+        "booking a lift spends the window's lift, on the panel, the moment it is booked"
+    );
+    assert_eq!(
+        window_manifest(&mut app)["skyway_window_committed"],
+        committee_claim
+    );
+    let lands_by = window_now(&app) + 28.0;
+    window_run_to(&mut app, lands_by);
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_served_committee"),
+        1,
+        "a climber that reaches the top inside the window LANDS"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_window_lifts_landed"), 1);
+
+    // A second one, booked with twelve seconds left — so it is on the ribbon
+    // when the window shuts.
+    window_run_to(&mut app, closes_at - 12.0);
+    let convoy_claim = manifest["skyway_claim_convoy"];
+    window_book(&mut app, "skyway_book_convoy");
+    assert_eq!(skyway_flag(&app, "skyway_window_lifts_started"), 2);
+    assert_eq!(
+        window_manifest(&mut app)["skyway_window_committed"],
+        committee_claim + convoy_claim
+    );
+
+    // And a third, which the ARITHMETIC refuses: what is left of the window is
+    // less than this claimant asked for. This is the constraint #1043's dialogue
+    // is required to be enforced by rather than to hard-code.
+    let left = window_manifest(&mut app)["skyway_window_available"];
+    assert!(
+        left < manifest["skyway_claim_havelock"],
+        "precondition: the window has {left} left against a {} claim",
+        manifest["skyway_claim_havelock"]
+    );
+    window_book(&mut app, "skyway_book_havelock");
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_refused_short"),
+        1,
+        "three claimants and lift for two: the third is refused by the numbers"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_lifts_started"),
+        2,
+        "…and refusing is refusing — nothing was booked"
+    );
+
+    // ── AC5: it shuts on schedule, and the lift on the ribbon stands down ───
+    window_run_to(&mut app, closes_at + 3.0);
+    assert_eq!(skyway_flag(&app, "skyway_window_closed"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_window_open"), 0);
+    assert_eq!(
+        window_manifest(&mut app)["skyway_window_available"],
+        0,
+        "the lift on offer goes with the window"
+    );
+    // THE AUTHORED CLOSE RULE: abort, not complete and not partial.
+    window_run_to(&mut app, closes_at + 18.0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_stood_down_convoy"),
+        1,
+        "a lift still on the ribbon when the window shuts is STOOD DOWN — the authored \
+         rule, not an accident of what happened to be running"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_window_served_convoy"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_window_lifts_aborted"), 1);
+    assert_eq!(
+        window_manifest(&mut app)["skyway_window_committed"],
+        committee_claim,
+        "…and the manifest ends the act saying what actually went up, not what was booked"
+    );
+
+    // The OTHER refusal — asking after the shutters are down — is not reachable
+    // here, and that is a fact about the act rather than a gap in the test: a
+    // claimant's seam is ONE ask, and all three have now been spent. It is
+    // `probe_window.toml`'s rung, which fields a spare claimant for the purpose.
+    assert_eq!(skyway_flag(&app, "skyway_window_refused_shut"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_window_refused_short"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a3-window"),
+        ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        skyway_messages(&app, WINDOW_CONTROL)
+            .last()
+            .map(|m| m.body.clone()),
+        Some("world.falling_skyway.comms.window_closes".to_string())
+    );
+}
+
+/// **Issue #1042, AC2/AC7 — the same window, a different mission behind it.**
+///
+/// This crew caught the tether and nothing else. The strike is still on and
+/// Ladder B is still under its own line, so the ladder delivers one rung's worth
+/// instead of two: the supply figure is DIFFERENT from the run above, the
+/// shortfall is bigger, and both are non-zero. Capacity is a function of the
+/// mission, and two missions produce two numbers.
+///
+/// It is also the control on the OTHER pairing. A stabilise carries no
+/// `work_stoppage` interrupt where a field repair does, so this crew keep the
+/// head certified with the picket still up — proving that what the ladder is
+/// short of here is the RUNG and not the catch.
+#[test]
+fn a_crew_who_saved_the_head_and_nothing_else_reach_the_window_shorter() {
+    let (mut app, ship) = skyway_at_act_two();
+    let (_, ship_uuid) = window_ship(&mut app);
+
+    let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
+    let watch_opens = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    window_run_to(&mut app, watch_opens + 4.0);
+    window_hold_the_tether(&mut app, ship, &ship_uuid, projection);
+
+    assert_eq!(
+        skyway_flag(&app, "skyhook_lift_capable"),
+        1,
+        "the head is held and still certified to lift, with nobody having settled anything"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_settled"),
+        0,
+        "…and nothing else was done: the workers are still out"
+    );
+    assert_eq!(
+        skyway_flag(&app, "depot_b_pumping"),
+        0,
+        "…and the rung is still under its own line"
+    );
+
+    skyway_move(&mut app, ship, WINDOW_STATION);
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    window_run_to(&mut app, opens_at - 4.0);
+    let _ = window_open_time(&mut app, opens_at + 10.0);
+
+    let rung_a = window_capacity_of(&mut app, WINDOW_DEPOT_A, "depot_a_fuel_lift");
+    let supply = skyway_flag(&app, "skyway_window_supply");
+    let demand = skyway_flag(&app, "skyway_window_demand_total");
+    let short = skyway_flag(&app, "skyway_window_shortfall_at_open");
+
+    assert_eq!(
+        supply, rung_a,
+        "ONE rung delivers. Ladder A is above its line and its people never walked out; \
+         Ladder B fails both halves of the same rule"
+    );
+    assert!(short > 0, "and it is short: {supply} against {demand}");
+    assert_eq!(
+        window_manifest(&mut app)["skyway_window_available"],
+        supply,
+        "the panel says the same thing"
+    );
+    assert_eq!(
+        skyway_messages(&app, WINDOW_CONTROL)
+            .last()
+            .map(|m| m.body.clone()),
+        Some("world.falling_skyway.comms.window_opens_short".to_string()),
+        "there is lift in this window and it is not enough — the same news as the run \
+         above, told against a different number"
+    );
+}
+
+/// **Issue #1042, AC2/AC4 — the third outcome, and the one an unattended bridge
+/// produces.**
+///
+/// Nobody mended anything and nobody caught the tether, so #1040's strain walks
+/// the head to its structural floor and `destroy_entity` takes it out of the
+/// world a little over twenty seconds before this window opens. THE SKYHOOK
+/// FELL, so there is no lift — whatever the ladder is doing, and Ladder A is
+/// pumping perfectly well throughout.
+///
+/// That is the skyhook's fate entering the window's arithmetic at full strength,
+/// and it arrives through one flag this act already read before the collapse
+/// slice existed: `skyhook_lift_capable`. Nothing here names a collapse flag, a
+/// warning rung or a debris anchor. The two halves of Act 3 meet at a number.
+///
+/// Supply zero is a third distinct reading off a third distinct mission, and the
+/// crew are told about it in its own words rather than in the ones written for a
+/// window that has something in it.
+#[test]
+fn a_crew_who_mended_nothing_reach_a_window_with_no_lift_in_it_at_all() {
+    let probe = build_headless_app(&skyway_args(SKYWAY_DT, 1.0)).expect("the world must load");
+    let opens_at = skyway_deadline_secs(&probe, "skyway_transfer_window") as f64;
+    drop(probe);
+
+    let mut app =
+        build_headless_app(&skyway_args(SKYWAY_DT, opens_at + 12.0)).expect("the world must load");
+    run(&mut app, 10);
+    let (ship, _) = window_ship(&mut app);
+    window_run_to(&mut app, opens_at - 20.0);
+    // On station, so the hail reaches them. Nothing else about this run is
+    // steered: it is the mission running with nobody at the consoles.
+    skyway_move(&mut app, ship, WINDOW_STATION);
+    let _ = window_open_time(&mut app, opens_at + 10.0);
+
+    assert_eq!(
+        skyway_flag(&app, "skyway_skyhook_lost"),
+        1,
+        "precondition: nobody caught the tether, so #1040's floor took the head"
+    );
+    assert!(
+        !named_entity_present(&mut app, WINDOW_HEAD),
+        "…and it is out of the world, not merely broken"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyhook_lift_capable"),
+        0,
+        "a head that is gone is certified for nothing"
+    );
+    assert_eq!(
+        skyway_flag(&app, "depot_a_pumping"),
+        1,
+        "…while the working rung went on working, which is what makes this a fact about \
+         the HEAD rather than about the ladder"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_supply"),
+        0,
+        "a chain delivers what its worst link delivers, and this one is not certified to \
+         lift anything at all"
+    );
+    let demand = skyway_flag(&app, "skyway_window_demand_total");
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_shortfall_at_open"),
+        demand,
+        "every unit of it is short"
+    );
+    let manifest = window_manifest(&mut app);
+    assert_eq!(manifest["skyway_window_available"], 0);
+    assert_eq!(manifest["skyway_window_shortfall"], demand);
+    assert_eq!(
+        skyway_messages(&app, WINDOW_CONTROL)
+            .last()
+            .map(|m| m.body.clone()),
+        Some("world.falling_skyway.comms.window_opens_dead".to_string()),
+        "a window with nothing in it gets its own body: the crew are not read a line \
+         about picking two"
+    );
+}
+
+/// **Issue #1042 — the mechanism under the scene.**
+///
+/// `probe_window.toml` driven for forty mission seconds. Its own header carries
+/// the four chains, the timeline and what each rung isolates; what this test
+/// asserts is that the four chains price DIFFERENTLY from the same function,
+/// that the `min` binds on both sides across the matrix, and that the window's
+/// ledger grants, refuses twice for two different reasons, lands one climber
+/// and stands the other down.
+///
+/// It is also the only test of `ctx.effects.adjust_capacity` as a verb: every
+/// register below starts at an authored zero and is written by script, so a run
+/// where they stay at zero is a run where the new host function did nothing.
+#[test]
+fn probe_window_prices_four_chains_and_stands_down_what_it_cannot_finish() {
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_window.toml".into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(40.0, dt),
+        deterministic: true,
+        seed: Some(1042),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the probe world must load and build");
+
+    // The first mission second at which each marker went up, sampled tick by
+    // tick — so the ORDER below is causal rather than arithmetic on a schedule
+    // this test wrote out again.
+    let mut first: std::collections::BTreeMap<String, f64> = Default::default();
+    // The four supplies as they stood on the tick the window opened, before any
+    // booking had spent one of them.
+    let mut at_open: std::collections::BTreeMap<String, i64> = Default::default();
+    let markers = [
+        "probe_window_open",
+        "probe_window_closed",
+        "probe_lifts_started",
+        "served_alpha",
+        "stood_down_beta",
+        "probe_refused_short",
+        "probe_refused_shut",
+        "probe_lifts_aborted",
+    ];
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let now = (tick + 1) as f64 * dt;
+        for marker in markers {
+            if skyway_flag(&app, marker) > 0 {
+                first.entry(marker.to_string()).or_insert(now);
+            }
+        }
+        if at_open.is_empty() && skyway_flag(&app, "probe_window_open") > 0 {
+            // One tick later: the publish is queued by the deadline handler and
+            // applied by `tick_infrastructure_condition`, which is the same
+            // one-tick bridge every condition move in this engine rides.
+            run(&mut app, 2);
+            for row in [
+                "full_available",
+                "full_demand",
+                "full_shortfall",
+                "struck_available",
+                "low_available",
+                "dead_available",
+            ] {
+                at_open.insert(row.to_string(), skyway_flag(&app, row));
+            }
+        }
+    }
+
+    let at = |name: &str| {
+        *first
+            .get(name)
+            .unwrap_or_else(|| panic!("'{name}' never happened; the run recorded {first:?}"))
+    };
+
+    // ── The window is a window ──────────────────────────────────────────────
+    assert!(
+        (at("probe_window_open") - 10.0).abs() < 0.5,
+        "the window opens on its authored deadline: {:.2} s",
+        at("probe_window_open")
+    );
+    assert!(
+        (at("probe_window_closed") - 30.0).abs() < 0.5,
+        "…and shuts on its own: {:.2} s",
+        at("probe_window_closed")
+    );
+
+    // ── AC2: four chains, four prices, from one function ────────────────────
+    //
+    // The two heads and the four rungs are read back off their own counters, so
+    // the expected numbers below are the world's arithmetic rather than this
+    // test's copy of it.
+    let berths = skyway_flag(&app, "berths_certified");
+    let load = skyway_flag(&app, "load_certified");
+    let up = skyway_flag(&app, "rung_up_lift");
+    let worked = skyway_flag(&app, "rung_worked_lift");
+    assert_eq!(
+        at_open["full_available"],
+        (berths * load).min(up + worked),
+        "the full chain is priced at the smaller of the head and the ladder"
+    );
+    assert_eq!(
+        at_open["full_available"],
+        berths * load,
+        "…and on THIS chain the HEAD is the smaller of the two, which is the half of the \
+         `min` a ladder-always world would never exercise"
+    );
+    assert_eq!(
+        at_open["struck_available"], up,
+        "the struck chain loses its second rung entirely: above its own line, and nobody \
+         down there is signing anything"
+    );
+    assert_eq!(
+        at_open["low_available"], up,
+        "…and the under-line chain loses its second rung for the OTHER reason, with the \
+         same people at work on it"
+    );
+    assert_eq!(
+        at_open["dead_available"], 0,
+        "a head that is not certified to lift lifts nothing, whatever the ladder is doing"
+    );
+    assert!(
+        at_open["struck_available"] < at_open["full_available"],
+        "the three chains must actually differ, or the matrix is measuring nothing"
+    );
+
+    // AC3/AC4: demand and the shortfall, published beside the supply.
+    let demand = skyway_flag(&app, "claim_alpha")
+        + skyway_flag(&app, "claim_beta")
+        + skyway_flag(&app, "claim_gamma")
+        + skyway_flag(&app, "claim_delta");
+    assert_eq!(at_open["full_demand"], demand);
+    assert_eq!(
+        at_open["full_shortfall"],
+        demand - at_open["full_available"]
+    );
+    assert!(at_open["full_shortfall"] > 0);
+
+    // ── The ledger: two grants and two refusals, for two different reasons ──
+    assert!(
+        at("probe_lifts_started") > at("probe_window_open"),
+        "nothing is booked before there is a window to book it in"
+    );
+    assert_eq!(
+        skyway_flag(&app, "probe_lifts_started"),
+        2,
+        "alpha and beta were granted; gamma and delta were not"
+    );
+    assert_eq!(
+        skyway_flag(&app, "probe_refused_short"),
+        1,
+        "gamma asked for more than the window had left — refused by the ARITHMETIC"
+    );
+    assert!(
+        at("probe_refused_short") < at("probe_window_closed"),
+        "…and refused while the window was still open, so it is a refusal about capacity \
+         and not about the clock"
+    );
+    assert_eq!(
+        skyway_flag(&app, "probe_refused_shut"),
+        1,
+        "delta asked after the shutters were down — the other refusal, counted apart"
+    );
+    assert!(
+        at("probe_refused_shut") > at("probe_window_closed"),
+        "…and that one IS about the clock"
+    );
+
+    // ── AC5: the authored close rule ────────────────────────────────────────
+    assert_eq!(
+        skyway_flag(&app, "served_alpha"),
+        1,
+        "a climber that reaches the top inside the window LANDS"
+    );
+    assert!(at("served_alpha") < at("probe_window_closed"));
+    assert_eq!(
+        skyway_flag(&app, "served_beta"),
+        0,
+        "beta's climber was still on the ribbon when the window shut"
+    );
+    assert_eq!(
+        skyway_flag(&app, "stood_down_beta"),
+        1,
+        "…so it is STOOD DOWN — the authored rule, and neither completed nor part-paid"
+    );
+    assert!(
+        at("stood_down_beta") > at("probe_window_closed"),
+        "the abort happens at the landing that would have been, not at the close"
+    );
+    assert_eq!(skyway_flag(&app, "probe_lifts_landed"), 1);
+    assert_eq!(skyway_flag(&app, "probe_lifts_aborted"), 1);
+
+    // ── The registers end the run saying what happened ──────────────────────
+    assert_eq!(
+        skyway_flag(&app, "full_committed"),
+        skyway_flag(&app, "claim_alpha"),
+        "what actually went up, not what was booked: beta's share came back off"
+    );
+    assert_eq!(
+        skyway_flag(&app, "full_available"),
+        0,
+        "the lift on offer went with the window"
+    );
+    assert_eq!(
+        skyway_flag(&app, "full_demand"),
+        demand,
+        "…and what was asked for is still on the manifest, because that is a fact about \
+         the run rather than a fact about the window"
+    );
+}

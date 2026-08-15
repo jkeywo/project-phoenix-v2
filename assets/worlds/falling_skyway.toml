@@ -6,8 +6,9 @@
 # slices that fill it band their own content in below rather than reflowing this
 # one: the strike (#1035), the negotiation (#1036), the storm and the rescue
 # (#1037), the scan-versus-dossier evidence (#1038), the worker who corroborates
-# it (#1039), the restraint lever (#1041) and the collapse and its epilogue
-# (#1040) have landed; the transfer window itself (#1042) is still to come.
+# it (#1039), the restraint lever (#1041), the collapse and its epilogue (#1040)
+# and the transfer window itself (#1042) have landed. What is left is the choice
+# all of them were built for (#1043) and the tuning pass (#1044).
 #
 # ── The place ────────────────────────────────────────────────────────────────
 #
@@ -124,12 +125,44 @@
 # surfaces come first; a crew who stabilise at any of them — including the last —
 # keep the structure; a crew who do not watch `destroy_entity` take it out of the
 # world mid-mission and the mission BRANCH into a survivor-rescue epilogue. All
-# of it is authored in its own banded section further down this file. #1042 still
-# authors its own `[[deadline]]` blocks (the transfer window) against the same
-# counter.
+# of it is authored in its own banded section further down this file.
 #
-# BASELINE. CURRENT VALUE: 0x07cf71231e2a6c05 (562792874088492037), last moved
-# by #1040 — the paragraphs below are the history of how it got there, oldest
+# ── Act 3's arithmetic (issue #1042) ─────────────────────────────────────────
+#
+# THE TRANSFER WINDOW OPENS ON A DEADLINE THE CREW HAVE BEEN WATCHING SINCE THE
+# FIRST TICK, and what the chain can lift in it does not cover what the three
+# claimants have asked for. Demand is authored — three labelled capacity rows on
+# Skyway Control's own manifest — and supply is COMPUTED at the moment the
+# window opens, from the head's lift certification, each rung's operational line
+# and whether the people who staff it are at work. So a crew who settled the
+# strike and mended the rung arrive with more to give than a crew who did
+# neither, and neither arrives with enough: the ladder's ceiling is 52 against
+# 66 of claims, and nothing in the mission can raise it.
+#
+# THE TWO ACT-3 SECTIONS ARE ONE ACT, and they meet at a NUMBER rather than at a
+# name. The head's `skyhook_lift_capable` — the lift certification Act 1 knocked
+# it under — is the whole of its contribution to the window's supply, so a tether
+# the crew let walk down toward the floor takes the transfer window's lift with
+# it on the way past, and a head that comes out of the world takes all of it.
+# The window is deliberately priced AFTER the tether's projection falls due, so
+# what it publishes is the fate rather than a forecast of it; the two ends of the
+# act are read in the order they happen. Nothing in the window's arithmetic names
+# anything the collapse slice authors — not a rung of its warning ladder, not one
+# of its flags — and it does not need to.
+#
+# The consequence is a ladder the crew feel rather than are told: let the head
+# go and the window has nothing in it; catch it at the last rung and it still
+# cannot lift, because a stabilise carries a head back over its FIRST warning and
+# not back over its certification; keep it certified and the window is worth
+# everything the ladder can give — which is still not enough for three.
+#
+# The window is authored in its own banded section too: two more visible
+# deadlines, one `[entity.overrides.infrastructure]` block on Control, and the
+# script that does the sum. The CHOICE is #1043's; what #1042 owns is the ledger
+# that choice has to obey.
+#
+# BASELINE. CURRENT VALUE: 0xPENDING (PENDING), last moved
+# by #1042 — the paragraphs below are the history of how it got there, oldest
 # first, and the first number in them is NOT the one to A/B against.
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
@@ -308,6 +341,30 @@
 # 1078282553163286478 and probe_collapse (--ticks 3600) 5992449400465842350.
 # None of them fields a skyhook; the two that fly the destroyer never run an
 # operation on it, and the one this slice added never pulls a weapons hold.
+#
+# MOVED AGAIN IN #1042, to 0x9e3c07f4e6290a46 (11401997105010117190), with
+# 13991704457914341324 (0xc22c8512c03bd7cc) at tick 0. The mechanism is ONE
+# authored block and it is the same class as #1038's extra threshold rather than
+# #1039's extra hull: Skyway Control gains an
+# `[entity.overrides.infrastructure]` table — the transfer window's manifest —
+# and `station_axiom.toml` authored none, so a station that folded nothing now
+# folds a condition track and seven capacity levels every tick.
+#
+# BOTH HALVES OF THE A/B ARE RECORDED, on the same terms as the two above.
+# Delete that one manifest block alone and the digest returns to #1039's
+# 10003863579080559501 exactly; delete the Act-3 clock and the whole #1042 script
+# block instead — two `[[deadline]]`s, the window's arithmetic, its objectives,
+# its comms and the booking ledger — and it stays at 11401997105010117190. So a
+# deadline table, a script band, an objective and a comms thread fold NOTHING,
+# which is the same bucket #1039 put them in, and the ONLY thing this slice does
+# that the digest can see is give a structure numbers to publish.
+#
+# The anchors were re-measured on the same clean tree and are UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, probe_strike
+# (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
+# 11434311098359716284, probe_scandiff 2488189563210329022, and
+# probe_corroborate 6231558379626882143.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls
@@ -658,6 +715,109 @@ template_path = "assets/entities/station_axiom.toml"
 id = "skyway_control"
 name = "world.falling_skyway.entity.skyway_control.name"
 transform = { position = [-320.0, 0.0, -120.0] }
+
+# ── THE WINDOW MANIFEST (issue #1042) ────────────────────────────────────────
+#
+# Control runs the transfer window, so Control keeps the paperwork for it. This
+# block is that paperwork, and it is the ONE console surface the whole of Act 3's
+# arithmetic lands on: seven labelled rows on the authority's own fact sheet,
+# where a crew already goes to ask what the corridor is doing.
+#
+# It is here rather than on the skyhook head for two reasons and neither is
+# fiction. First, the number the crew need is a property of the CHAIN — the head
+# and both rungs and the people who staff them — and hanging it off one of the
+# three links would say the head decides it. Second, an `[[entity.overrides…]]`
+# capacity array REPLACES the template's wholesale at the instance layer (see
+# the depots, which restate theirs for exactly that reason), so putting these on
+# the head would mean restating `skyhook_transfer_berths` and
+# `skyhook_climber_load` in this file — and the head's own template says at
+# length that those two numbers belong on the structure.
+#
+# `station_axiom.toml` authors no `[infrastructure]` at all, so this creates the
+# track rather than editing one. That is the whole cost of the choice: Control
+# gains a condition bar it did not have. It is authored full and NOTHING in this
+# mission moves it — the manifest needed somewhere to live, and a published
+# capacity has to hang on a structure that publishes.
+#
+# ── The three claims: DEMAND IS AUTHORED ─────────────────────────────────────
+#
+# What each party has asked for, in lift units, filed before the crew arrived.
+# These do not move: a claimant does not want less because the ladder is broken.
+# Supply is computed from the mission (the Act 3 script does the arithmetic);
+# demand is data, and this is the data.
+#
+# [ai] EVERY NUMBER HERE IS UNRATIFIED, and the three of them together are the
+# tuning surface of the whole act. They are sized against what the chain can
+# ever deliver — 40 from Ladder A plus 12 from Ladder B is 52, and nothing in
+# the mission can raise either — so that:
+#
+#   any TWO fit          18+22 = 40, 18+26 = 44, 22+26 = 48, all under 52
+#   all THREE never do   66 against 52, so the window is short by 14 even for a
+#                        crew who did everything right
+#
+# "Capacity for two" is therefore arithmetic rather than a rule written down
+# anywhere, which is what #1043's choice scene needs: it enforces the constraint
+# by reading these numbers, not by hard-coding "pick two".
+[[entity.overrides.infrastructure.capacity]]
+id = "skyway_claim_committee"
+amount = 18
+label = "world.falling_skyway.capacity.claim_committee.label"
+
+[[entity.overrides.infrastructure.capacity]]
+id = "skyway_claim_havelock"
+amount = 22
+label = "world.falling_skyway.capacity.claim_havelock.label"
+
+# The largest claim, and the party with no leverage at all. That is deliberate:
+# the sympathetic option is also the expensive one, so a captain who takes it
+# takes it knowing what it costs the other two.
+[[entity.overrides.infrastructure.capacity]]
+id = "skyway_claim_convoy"
+amount = 26
+label = "world.falling_skyway.capacity.claim_convoy.label"
+
+# ── The four computed rows ───────────────────────────────────────────────────
+#
+# All four start EMPTY and are written by the Act 3 script at the moment the
+# window opens, through `ctx.effects.adjust_capacity` (issue #1042). A row that
+# read 52 from the first tick of the mission would be answering a question the
+# crew have not asked yet with a number the mission has not earned yet.
+#
+# `ceiling = 400` on each: the clamp in `adjust_capacity` is a real clamp, so a
+# ceiling under anything the arithmetic can produce would silently truncate the
+# answer. 400 clears the largest figure the chain can express — the head's
+# theoretical two berths at 180 a climber, 360 — with room for the tuning pass
+# to move things. [ai] Unratified, and it is headroom rather than a design
+# number.
+[[entity.overrides.infrastructure.capacity]]
+id = "skyway_window_available"
+amount = 0
+ceiling = 400
+label = "world.falling_skyway.capacity.window_available.label"
+
+[[entity.overrides.infrastructure.capacity]]
+id = "skyway_window_demand"
+amount = 0
+ceiling = 400
+label = "world.falling_skyway.capacity.window_demand.label"
+
+# The number this act is about, on the panel, in a row of its own. The crew are
+# told out loud that they are short when the window opens; this is the figure
+# behind the sentence.
+[[entity.overrides.infrastructure.capacity]]
+id = "skyway_window_shortfall"
+amount = 0
+ceiling = 400
+label = "world.falling_skyway.capacity.window_shortfall.label"
+
+# What has actually been put on the ribbon and stayed there. A booking raises
+# it; a lift the window shuts on takes its share back off, which is the close
+# rule made visible rather than described.
+[[entity.overrides.infrastructure.capacity]]
+id = "skyway_window_committed"
+amount = 0
+ceiling = 400
+label = "world.falling_skyway.capacity.window_committed.label"
 
 # ── The three claimants ──────────────────────────────────────────────────────
 #
@@ -1173,6 +1333,59 @@ visible = true
 id = "skyhook_failure_due"
 label = "world.falling_skyway.deadline.skyhook_failure.label"
 due_secs = 382
+visible = true
+
+# ── Act 3's clock (issue #1042) ──────────────────────────────────────────────
+#
+# THE TWO DEADLINES THE WHOLE MISSION HAS BEEN WATCHING. Both are authored here,
+# beside Act 1's and Act 2's, and both are `visible` — so they are on the
+# captain's countdown from the mission's first tick, not posted when the act
+# that uses them opens. That is the point: the transfer window is the thing the
+# crew are working towards from the moment they arrive, and a deadline that
+# appeared at t=268 would be news rather than a schedule.
+#
+# The pair reads as ONE window on the panel. Before `skyway_transfer_window`
+# fires, its remaining time is how long the crew have to make the chain better.
+# After it fires it is spent, and the row beneath it — `skyway_window_closes` —
+# is the window's own duration running down. Two named deadlines rather than one
+# deadline and a scripted duration, because the panel already renders a
+# countdown per deadline and a duration nobody could see coming would be a
+# stopwatch the crew are not holding.
+#
+# THE WINDOW OPENS AFTER THE TETHER'S FATE IS SETTLED, and eighteen seconds is
+# the whole of the gap. `skyhook_failure_due` above falls at 382 — the projection
+# the collapse slice (#1040) either beats or does not — so by 400 the head has
+# either held or come out of the world, and the supply this window is priced at
+# is a fact rather than a forecast. Pricing it while the tether was still walking
+# down would have published a figure that stopped being true a minute later, and
+# the alternative — re-pricing the window mid-flight — would mean a captain could
+# book a lift against capacity that evaporated under it.
+#
+# THAT ORDERING IS THE WHOLE INTERLOCK BETWEEN THE TWO HALVES OF ACT 3. A crew
+# who let the head go arrive at a window with nothing in it; a crew who caught it
+# late arrive at one that cannot lift, because a stabilise carries the head back
+# over its FIRST warning rung and not back over its lift certification; a crew
+# who kept it certified arrive with everything the ladder can give. Three
+# outcomes, one number, and the window's arithmetic names nothing the collapse
+# authors.
+#
+# [ai] BOTH NUMBERS UNRATIFIED, and they are the act's whole pacing surface.
+# 400 is 18 seconds past the projection: long enough that the fate has landed and
+# its consequence has been mirrored, short enough that the crew are still in the
+# middle of it. 470 gives the window 70 seconds, which is two climber runs at the
+# 24 seconds a lift takes and change — so a captain who dithers loses a claimant
+# to the clock rather than to the arithmetic, and "capacity for two" is what the
+# clock says as well as what the numbers say.
+[[deadline]]
+id = "skyway_transfer_window"
+label = "world.falling_skyway.deadline.transfer_window.label"
+due_secs = 400
+visible = true
+
+[[deadline]]
+id = "skyway_window_closes"
+label = "world.falling_skyway.deadline.window_closes.label"
+due_secs = 470
 visible = true
 
 # ── Act 1 ────────────────────────────────────────────────────────────────────
@@ -2860,4 +3073,386 @@ fn head_stands_down(ctx) {
     }
     #{ message: "world.falling_skyway.comms.head_holds", responses: [] }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ACT 3 — THE TRANSFER WINDOW, AND THE SUM THAT DOES NOT COME OUT (issue #1042)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Act 1 was a survey. Act 2 was weather and a dispute. Act 3's crisis is
+// ARITHMETIC, and the arithmetic is the scene: a window opens on a deadline the
+// crew have been watching since the first tick, and what the chain can lift in
+// it does not cover what the three parties on Control's manifest have asked
+// for. Nobody has to work that out. Control says it out loud, and the three
+// figures — available, claimed, short by — are rows on Control's own fact sheet
+// while the window is open.
+//
+// ── DEMAND IS AUTHORED, SUPPLY IS COMPUTED ──────────────────────────────────
+//
+// The asymmetry is the design. What the claimants want is data (three
+// `[[infrastructure.capacity]]` rows on Control, filed before the crew arrived,
+// and they do not shrink because the ladder is broken). What the corridor can
+// deliver is a FUNCTION OF THE MISSION SO FAR, worked out here from live world
+// state at the moment the window opens:
+//
+//   the head       `skyhook_lift_capable` — the 45 % threshold Act 1 knocks it
+//                  under, and which a field-repair can put back. Certified, the
+//                  head offers its authored berths at its authored climber
+//                  load; uncertified, it offers nothing, because a head that is
+//                  not signed off to run a climber does not run one.
+//   each rung      above its OWN operational line, AND staffed by people who
+//                  are at work. One rule, applied twice, and both halves are
+//                  needed: repairing Ladder B does not end the strike and
+//                  ending the strike does not mend Ladder B (#1035 says so on
+//                  the depot itself).
+//   the smaller    of what the head can lift and what the ladder can put in it.
+//                  A chain delivers what its worst link delivers.
+//
+// So a crew who settled the strike and mended the rung arrive with more to give
+// than a crew who did neither, and neither arrives with enough. THE CEILING IS
+// STRUCTURAL: 40 from Ladder A plus 12 from Ladder B is 52, nothing in this
+// mission can raise either capacity — the crew's hull authors no `[transfer]`
+// terms and therefore cannot pump anything INTO a rung — and the three claims
+// total 66. There is no state of this world in which the window covers all
+// three, and the headless test asserts that from the authored numbers rather
+// than from a run, because it is a claim about every run.
+//
+// ── THE SKYHOOK'S FATE IS ALREADY WIRED IN ──────────────────────────────────
+//
+// `skyhook_lift_capable` is the whole of the head's contribution, and it is a
+// threshold on the head's live condition track. Anything that takes the head
+// down takes the window's supply with it — the tether slip does it today, a
+// field-repair undoes it, and the collapse slice (#1040) will do it for good
+// without touching a line of this block. This file deliberately reads the
+// EXISTING flag rather than any collapse state, so the two slices meet at a
+// number instead of at a name.
+//
+// ── WHY THE NUMBERS LAND ON A CAPACITY ROW ──────────────────────────────────
+//
+// [ai] JUDGEMENT CALL, and the honest surface rather than the ideal one.
+// Nothing in this engine's crew-facing text can carry a computed number:
+// objective text, a comms body and a dossier finding are all `strings.csv` ids
+// resolved whole, with no parameter table anywhere on the wire. The only place
+// a runtime figure reaches a player is as a labelled `[[infrastructure.capacity]]`
+// row on a fact sheet. So the three figures are published as capacity rows on
+// Control — which is where a crew already goes to ask what the corridor is
+// doing — and the mission COPY states, in words, that the window is short and
+// that this makes it a choice. The digits are on the panel; the sentence about
+// them is in the dialogue. The real fix is parameterised strings, and it is
+// nobody's slice yet.
+//
+// ── THE CLOSE RULE: ABORT ───────────────────────────────────────────────────
+//
+// The window shuts on its deadline whatever is happening. A lift still on the
+// ribbon when it does is STOOD DOWN: it does not land, its claimant is not
+// served, and its share comes back off the committed row. [ai] Chosen over
+// "complete" and over "partial", and for reasons rather than taste.
+//
+//   COMPLETE would make the closing deadline advisory. A captain who booked at
+//   the last second would get a free lift out of the clock, and the pressure the
+//   window exists to create would be pressure to dither.
+//   PARTIAL has no fiction behind it. Half a climber-load is not half a rescue;
+//   the people on it are still on the rock. It is also the call this engine
+//   already makes everywhere else — `tow` and `stabilise` pay
+//   `condition_on_complete` as a LUMP precisely because a job half-run has moved
+//   nobody anywhere.
+//
+// ── WHO BOOKS A LIFT ────────────────────────────────────────────────────────
+//
+// Not this slice. The choice is #1043's scene, and what this block owns is the
+// LEDGER it has to obey. Each claimant has a seam flag; setting it asks for a
+// lift, and the request is granted or refused against the live window state in
+// one place, exactly as #1035 put the settlement behind `skyway_strike_settled`
+// so that a dialogue pick, a deadline or a later act would all get the same
+// consequence applied once. Nothing in this file sets them, so the window
+// currently opens, states its shortfall and closes unspent — which is the
+// honest state of the act until the choice lands on top of it.
+
+on_flag_set("skyway_storm_passed", "on_act_three_opens");
+on_deadline("skyway_transfer_window", "on_transfer_window_opens");
+on_deadline("skyway_window_closes", "on_transfer_window_closes");
+
+// The three booking seams. One per claimant rather than one taking a name,
+// for the reason this file's other vocabularies are split by verb: a flag store
+// cannot carry an argument, and a misspelt claimant would otherwise be a silent
+// no-op instead of a seam nobody wired.
+//
+// ONE ASK PER CLAIMANT, because a trigger is single-shot and this one is never
+// re-armed. That is an authored rule rather than a limitation worked around: an
+// allocation IS the decision, and a captain who could ask for the same party
+// over and over until the ledger happened to allow it would be shopping rather
+// than choosing. #1043's tree is expected to gate its options on the ledger
+// below — `skyway_window_supply` minus `skyway_window_reserved`, against the
+// claim — so a refusal is something the crew are shown BEFORE they can pick it,
+// and the two refusal counters here are the backstop for anything that gets
+// past that.
+on_flag_set("skyway_book_committee", "on_book_committee");
+on_flag_set("skyway_book_havelock", "on_book_havelock");
+on_flag_set("skyway_book_convoy", "on_book_convoy");
+
+// Act 3 opens on the corridor clearing, chained off the flag `on_storm_passed`
+// already writes rather than off the deadline it writes it from — so this block
+// is additive to Act 2 rather than an edit of it. The collapse slice (#1040)
+// registers a second handler on the SAME flag for the same reason: two slices
+// opening one act is two registrations, not an edit of somebody else's function.
+fn on_act_three_opens(ctx) {
+    // The readiness beat, and it deliberately points helm at the anchor #1040's
+    // own `obj-a3-standoff` already points it at. Two objectives naming one
+    // place is not a conflict — it is two reasons to be there, and the ship
+    // cannot be sent to both by being asked twice. `station_keeping` is 247
+    // units off the head, inside the destroyer's stabilise range, and 578 from
+    // Control, inside its authored 800-unit comms range: the same berth saves
+    // the tether and hears the window open.
+    //
+    // Priority 56, one above that standoff, because they share an anchor and
+    // being one rung apart costs nothing; every rung of the tether ladder above
+    // it (60/70/80) still outranks this, which is right — a head about to come
+    // down is more urgent than being ready for a window that has not opened.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-window-ready",
+        text: "world.falling_skyway.objective.window_ready.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 56,
+        directive_kind: "Reach",
+        directive_anchor: "station_keeping",
+        targets: ["world.falling_skyway.entity.skyway_control.name"],
+    });
+}
+
+// ── The arithmetic ──────────────────────────────────────────────────────────
+
+// What ONE rung delivers into the window. Two questions, and a rung has to pass
+// both: is it above its own operational line, and are the people who work it at
+// work. Read from mirrored world counters — a threshold flag (#1025), a
+// workforce flag (#1035) and the rung's own published capacity — so a tuning
+// pass that moves any of the three moves this without editing it.
+fn rung_delivers(ctx, operational_flag, capacity_id, stoppage_flag) {
+    if ctx.flags[operational_flag] == 0 { return 0; }
+    if ctx.flags[stoppage_flag] > 0 { return 0; }
+    ctx.flags[capacity_id]
+}
+
+// What the whole chain can put through this window.
+fn window_supply(ctx) {
+    // The head. Its two published capacities are what it offers when it is
+    // certified to offer anything, and this is the first thing in the mission to
+    // USE the numbers the skyhook template publishes "so the crew can do the
+    // arithmetic themselves".
+    let head = 0;
+    if ctx.flags.skyhook_lift_capable > 0 {
+        head = ctx.flags["skyhook_transfer_berths"] * ctx.flags["skyhook_climber_load"];
+    }
+    // The ladder. Same rule twice, over the two rungs and the two sides that
+    // staff them.
+    let ladder =
+        rung_delivers(ctx, "depot_a_pumping", "depot_a_fuel_lift",
+                      "workforce.havelock_operations.on_strike") +
+        rung_delivers(ctx, "depot_b_pumping", "depot_b_fuel_lift",
+                      "workforce.skyway_workers.on_strike");
+    // A chain delivers what its worst link delivers.
+    if head < ladder { head } else { ladder }
+}
+
+// What the three of them have asked for. Read off the manifest rows rather than
+// restated here, so the claims are authored data in exactly one place.
+fn window_demand(ctx) {
+    ctx.flags["skyway_claim_committee"] +
+    ctx.flags["skyway_claim_havelock"] +
+    ctx.flags["skyway_claim_convoy"]
+}
+
+// Publish an absolute figure onto one of Control's manifest rows.
+//
+// `adjust_capacity` moves a level by a DELTA, so an absolute publish is
+// `want - what is there`. That is safe here and would not be everywhere: the
+// counter this reads is re-published by the infrastructure tick, so two
+// absolute publishes of the same row inside ONE tick would both compute their
+// delta from the same stale level. Every caller below either publishes a row
+// once (the window opening, the window closing) or moves it by an exact delta
+// it worked out itself (a booking, a lift stood down), and exact deltas compose.
+fn publish_manifest(ctx, capacity_id, want) {
+    let live = ctx.flags[capacity_id];
+    if want != live {
+        ctx.effects.adjust_capacity(
+            "world.falling_skyway.entity.skyway_control.name",
+            capacity_id,
+            want - live,
+        );
+    }
+}
+
+// ── The window opens ────────────────────────────────────────────────────────
+
+fn on_transfer_window_opens(ctx) {
+    let supply = window_supply(ctx);
+    let demand = window_demand(ctx);
+    let short = demand - supply;
+    if short < 0 { short = 0; }
+
+    // The ledger the bookings are decided against. Banked as flags rather than
+    // re-derived per booking, because what a claimant is measured against is
+    // what the chain COULD do when the window opened — a rung that fails while a
+    // climber is on it does not un-book the climber.
+    ctx.flags.skyway_window_open = 1;
+    ctx.flags.skyway_window_supply = supply;
+    ctx.flags.skyway_window_demand_total = demand;
+    ctx.flags.skyway_window_shortfall_at_open = short;
+
+    // The manifest, on the panel, from this tick. `skyway_window_committed`
+    // stays at its authored zero: nothing has been put on the ribbon yet.
+    publish_manifest(ctx, "skyway_window_available", supply);
+    publish_manifest(ctx, "skyway_window_demand", demand);
+    publish_manifest(ctx, "skyway_window_shortfall", short);
+
+    ctx.effects.complete_objective("obj-a3-window-ready");
+    // NO DIRECTIVE, and priority 65 rather than the top of the act. This beat is
+    // a DECISION and not a place: there is nowhere to fly to in order to choose
+    // who goes up, and an objective carrying a Reach anchor would have a
+    // backfilled helm complete the mission's hardest call by arriving somewhere.
+    // 65 sits between the tether ladder's first warning (60) and its second
+    // (70), which is the honest ordering — the window matters more than a rung
+    // nobody has acted on yet, and less than a head that has ignored one.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-window",
+        text: "world.falling_skyway.objective.window.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 65,
+        targets: ["world.falling_skyway.entity.skyway_control.name"],
+    });
+
+    // THE SHORTFALL, SAID OUT LOUD. Two bodies rather than one, picked by the
+    // arithmetic that just ran, because "you have lift for two of them and not
+    // for three" and "the head is not lifting anything at all" are different
+    // pieces of news and a crew who got one should not be read the other.
+    // Terminal — no responses — so the beat cannot be answered by a backfilled
+    // Comms policy picking index 0 (this file's other two trees carry that
+    // hazard at length).
+    //
+    // TWO rather than a ladder of severities, and that is a claim about the
+    // authored numbers rather than a shrug: any two of the three claims fit
+    // inside anything the chain can deliver at all, so "you can take two" is
+    // true for every non-zero supply this world can produce. A third body for a
+    // case the mission cannot reach would be copy nobody ever hears.
+    let node = "window_opens_short";
+    if supply <= 0 {
+        node = "window_opens_dead";
+    }
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyway_control.name",
+        node_fn: node,
+        urgent: true,
+    });
+}
+
+// The two bodies. Each is its own node function because `open_comms` names a
+// FUNCTION, and both say the same thing at a different volume: the window is
+// open, it is short, and that makes it a decision.
+fn window_opens_short(ctx) { #{ message: "world.falling_skyway.comms.window_opens_short", responses: [] } }
+fn window_opens_dead(ctx)  { #{ message: "world.falling_skyway.comms.window_opens_dead", responses: [] } }
+
+// ── Booking a lift ──────────────────────────────────────────────────────────
+
+fn on_book_committee(ctx) {
+    if book_lift(ctx, "skyway_claim_committee") {
+        ctx.schedule.after(24, |ctx| {
+            land_lift(ctx, "skyway_claim_committee",
+                      "skyway_window_served_committee",
+                      "skyway_window_stood_down_committee");
+        });
+    }
+}
+
+fn on_book_havelock(ctx) {
+    if book_lift(ctx, "skyway_claim_havelock") {
+        ctx.schedule.after(24, |ctx| {
+            land_lift(ctx, "skyway_claim_havelock",
+                      "skyway_window_served_havelock",
+                      "skyway_window_stood_down_havelock");
+        });
+    }
+}
+
+fn on_book_convoy(ctx) {
+    if book_lift(ctx, "skyway_claim_convoy") {
+        ctx.schedule.after(24, |ctx| {
+            land_lift(ctx, "skyway_claim_convoy",
+                      "skyway_window_served_convoy",
+                      "skyway_window_stood_down_convoy");
+        });
+    }
+}
+
+// The one place a request for lift is granted or refused. Two refusals, and
+// both are recorded rather than silent: a captain who asks for something the
+// window cannot give is told which of the two walls they hit.
+fn book_lift(ctx, claim_id) {
+    if ctx.flags.skyway_window_open == 0 {
+        ctx.flags.increment("skyway_window_refused_shut", 1);
+        return false;
+    }
+    let need = ctx.flags[claim_id];
+    // The ledger, not the panel row: the counter a capacity mirrors onto is
+    // re-published by the infrastructure tick, so a second booking in the same
+    // tick would read the first one's row before it had moved. These two flags
+    // land between calls.
+    let left = ctx.flags.skyway_window_supply - ctx.flags.skyway_window_reserved;
+    if left < need {
+        ctx.flags.increment("skyway_window_refused_short", 1);
+        return false;
+    }
+    ctx.flags.increment("skyway_window_reserved", need);
+    ctx.flags.increment("skyway_window_lifts_started", 1);
+    // Exact deltas, so two bookings landing in one tick both count.
+    ctx.effects.adjust_capacity(
+        "world.falling_skyway.entity.skyway_control.name", "skyway_window_available", -need);
+    ctx.effects.adjust_capacity(
+        "world.falling_skyway.entity.skyway_control.name", "skyway_window_committed", need);
+    true
+}
+
+// A climber reaching the top — or not. THE CLOSE RULE IS THIS BRANCH, and it is
+// one `if`: the window's state at the moment the lift would land is what decides
+// whether it landed.
+fn land_lift(ctx, claim_id, served_flag, stood_down_flag) {
+    if ctx.flags.skyway_window_open > 0 {
+        ctx.flags[served_flag] = 1;
+        ctx.flags.increment("skyway_window_lifts_landed", 1);
+        return;
+    }
+    // Stood down at the head. The claimant is not served, and the committed row
+    // gives their share back — the manifest at the end of the act says what
+    // actually went up, not what was asked for.
+    ctx.flags[stood_down_flag] = 1;
+    ctx.flags.increment("skyway_window_lifts_aborted", 1);
+    ctx.effects.adjust_capacity(
+        "world.falling_skyway.entity.skyway_control.name",
+        "skyway_window_committed",
+        -ctx.flags[claim_id],
+    );
+}
+
+// ── The window closes ───────────────────────────────────────────────────────
+
+fn on_transfer_window_closes(ctx) {
+    ctx.flags.skyway_window_open = 0;
+    ctx.flags.skyway_window_closed = 1;
+
+    // The lift on offer goes with the window. Computed off the ledger rather
+    // than off the row, for `book_lift`'s reason, and it is the row's own last
+    // move — nothing raises it again.
+    let left = ctx.flags.skyway_window_supply - ctx.flags.skyway_window_reserved;
+    if left > 0 {
+        ctx.effects.adjust_capacity(
+            "world.falling_skyway.entity.skyway_control.name", "skyway_window_available", -left);
+    }
+
+    ctx.effects.complete_objective("obj-a3-window");
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyway_control.name",
+        node_fn: "window_closes",
+    });
+}
+
+fn window_closes(ctx) { #{ message: "world.falling_skyway.comms.window_closes", responses: [] } }
 """

@@ -11650,3 +11650,921 @@ fn falling_skyways_picket_sits_there_until_somebody_starts_something() {
          the premise the whole lever rests on"
     );
 }
+// ── Falling Skyway, Act 3: the collapse and the epilogue (issue #1040) ───────
+
+/// The structure the act is about, by the name the world authors it under.
+const SKYWAY_HEAD: &str = "world.falling_skyway.entity.skyhook.name";
+/// The two craft the collapse handler spawns into the debris.
+const SKYWAY_LIGHTER: &str = "world.falling_skyway.entity.head_lighter.name";
+const SKYWAY_POD: &str = "world.falling_skyway.entity.head_pod.name";
+/// The three warning rungs, in the order the ladder crosses them, paired with
+/// the objective each one posts and the dialogue body each one speaks. Read as a
+/// table by every assertion below, so "the warnings fire in order on all three
+/// surfaces" is one loop rather than three copies of one.
+const SKYWAY_WARNINGS: [(&str, &str, &str); 3] = [
+    (
+        "a3_warning_one",
+        "obj-a3-tether-1",
+        "world.falling_skyway.comms.head_warns_one",
+    ),
+    (
+        "a3_warning_two",
+        "obj-a3-tether-2",
+        "world.falling_skyway.comms.head_warns_two",
+    ),
+    (
+        "a3_warning_three",
+        "obj-a3-tether-3",
+        "world.falling_skyway.comms.head_warns_three",
+    ),
+];
+
+/// One deadline as the CAPTAIN'S PANEL sees it — off the published blackboard
+/// rather than off the runtime table, because "the crew can see it coming" is a
+/// claim about the wire.
+fn skyway_captain_deadline(
+    app: &mut bevy::prelude::App,
+    id: &str,
+) -> project_phoenix::messages::DeadlineSnapshot {
+    let mut q = app
+        .world_mut()
+        .query::<&project_phoenix::server_app::ShipSystemBlackboards>();
+    q.iter(app.world())
+        .find_map(|bbs| {
+            bbs.0
+                .values()
+                .find_map(|bb| match bb {
+                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    _ => None,
+                })
+                .and_then(|c| c.deadlines.iter().find(|d| d.id == id).cloned())
+        })
+        .unwrap_or_else(|| panic!("the captain's countdown carries no '{id}'"))
+}
+
+/// The crew's own hull and its uuid.
+fn skyway_crew_hull(app: &mut bevy::prelude::App) -> (bevy::prelude::Entity, String) {
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull is in the world");
+    let uuid = app
+        .world()
+        .get::<project_phoenix::entities::spawner::EntityUuid>(ship)
+        .expect("the hull carries a uuid")
+        .0
+        .clone();
+    (ship, uuid)
+}
+
+/// Queue one operation on the crew's hull through the queue a scripted
+/// `ctx.effects.stabilise(…)` fills — the route every operations test in this
+/// file uses, and the only place range, power and capability are decided.
+fn skyway_start_op(
+    app: &mut bevy::prelude::App,
+    ship_uuid: &str,
+    verb: project_phoenix::operations::OperationVerb,
+    target: &str,
+) {
+    use project_phoenix::operations::PendingOperationStart;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let target_uuid = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .name_to_uuid
+        .get(target)
+        .cloned()
+        .unwrap_or_else(|| panic!("{target} is not in this world"));
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .pending_operation_starts
+        .push(PendingOperationStart {
+            ship_uuid: ship_uuid.to_string(),
+            verb,
+            target_uuid,
+        });
+}
+
+/// The floor crossing the world's authored strain rate reaches, derived from the
+/// projection deadline rather than restated: `falling_skyway.toml`'s Act-3 band
+/// authors `skyhook_failure_due` four seconds past it and says so. The tuning
+/// pass (#1044) moves the deadline and this follows it.
+fn skyway_projected_floor(app: &bevy::prelude::App) -> f64 {
+    skyway_deadline_secs(app, "skyhook_failure_due") as f64 - 4.0
+}
+
+/// **Issue #1040, AC1/AC2/AC4/AC5/AC6/AC7.** Act 3 driven end to end with nobody
+/// at the consoles: the head warns three times on three surfaces, crosses its
+/// authored structural floor, is REMOVED FROM THE WORLD, and the mission carries
+/// on into a survivor-rescue epilogue that reaches its own resolution.
+///
+/// The neglect branch is the one an unattended run produces, and that is the
+/// honest default: opening an operation is a crew verb, so a backfilled bridge
+/// never stabilises anything. The companion tests below drive the same act with
+/// a crew that reacts, and the epilogue with a crew that tows.
+#[test]
+fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_epilogue() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = SKYWAY_DT;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let projected = skyway_deadline_secs(&probe, "skyhook_failure_due") as f64;
+    drop(probe);
+
+    // The act's own clock decides the run length: the projection, plus the
+    // epilogue's authored window, plus a margin. Lengthening Act 3 in the TOML
+    // must not silently turn this into a test of an act that never finished.
+    let args = skyway_args(dt, projected + 100.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+
+    let mut first: std::collections::BTreeMap<String, f64> = Default::default();
+    // What each surface said on the tick each warning fired. Sampled AT THE
+    // EVENT rather than at the end of the run, because "the crew were told"
+    // is a claim about the moment, and an inbox can be cleared afterwards.
+    let mut at_warning: std::collections::BTreeMap<String, (String, usize, String, i64)> =
+        Default::default();
+    let mut condition_at: std::collections::BTreeMap<String, f32> = Default::default();
+    let mut bodies_seen: std::collections::BTreeSet<String> = Default::default();
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        for message in skyway_messages(&app, SKYWAY_HEAD) {
+            bodies_seen.insert(message.body.clone());
+        }
+
+        for (counter, objective, _body) in SKYWAY_WARNINGS {
+            if skyway_flag(&app, counter) > 0 && !first.contains_key(counter) {
+                first.insert(counter.to_string(), sim_t);
+                condition_at.insert(counter.to_string(), condition_of(&mut app, SKYWAY_HEAD));
+                let snapshot = skyway_captain_deadline(&mut app, "skyhook_failure_due");
+                at_warning.insert(
+                    counter.to_string(),
+                    (
+                        format!("{:?}", objective_status_opt(&app, objective)),
+                        skyway_messages(&app, SKYWAY_HEAD).len(),
+                        snapshot.state.clone(),
+                        snapshot.remaining_secs,
+                    ),
+                );
+            }
+        }
+        for flag in [
+            "a3_watch_open",
+            "a3_floor_crossed",
+            "a3_head_lost",
+            "a3_epilogue_open",
+            "a3_epilogue_resolved",
+        ] {
+            if skyway_flag(&app, flag) > 0 {
+                first.entry(flag.to_string()).or_insert(sim_t);
+            }
+        }
+        if !named_entity_present(&mut app, SKYWAY_HEAD) {
+            first.entry("head_gone".to_string()).or_insert(sim_t);
+        }
+    }
+
+    let at = |key: &str| -> f64 {
+        *first
+            .get(key)
+            .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
+    };
+
+    // ── AC2: three warnings, in ladder order, each on all three surfaces ──
+    let mut previous = at("a3_watch_open");
+    let mut previous_condition = f32::MAX;
+    for (counter, objective, body) in SKYWAY_WARNINGS {
+        let fired = at(counter);
+        assert!(
+            fired > previous,
+            "the warnings fire IN ORDER — {counter} at {fired:.1} s must follow the beat \
+             before it at {previous:.1} s: {first:?}"
+        );
+        let condition = condition_at[counter];
+        assert!(
+            condition < previous_condition,
+            "…and each one is a LOWER rung of the same authored ladder: {counter} fired on \
+             {condition} points, which is not below the {previous_condition} of the rung \
+             before it"
+        );
+        let (objective_state, message_count, deadline_state, remaining) = &at_warning[counter];
+
+        // SURFACE ONE: the objectives list.
+        assert_eq!(
+            objective_state, "Some(Active)",
+            "{counter} must post {objective} on the crew's own list, naming what happens \
+             next — got {objective_state}"
+        );
+        // SURFACE TWO: the captain's countdown, still counting toward failure.
+        assert_eq!(
+            deadline_state, "pending",
+            "{counter}: the captain's projected-failure countdown must still be live when \
+             a warning fires"
+        );
+        assert!(
+            *remaining > 0,
+            "{counter}: …and counting DOWN to something that has not happened yet, not \
+             sitting at {remaining}"
+        );
+        // SURFACE THREE: the people on the structure, on an open channel.
+        assert!(
+            bodies_seen.contains(body),
+            "{counter} must put the gang on the head on the channel: '{body}' never reached \
+             the inbox. Seen: {bodies_seen:?}"
+        );
+        assert!(
+            *message_count > 0,
+            "{counter}: the head's thread is open when the warning lands"
+        );
+
+        previous = fired;
+        previous_condition = condition;
+    }
+    // The rungs the crew let go stay RED, which is what lets a crew say which
+    // warning they ignored.
+    assert_eq!(
+        objective_status(&app, "obj-a3-tether-1"),
+        ObjectiveStatus::Failed
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-tether-2"),
+        ObjectiveStatus::Failed
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-tether-3"),
+        ObjectiveStatus::Failed
+    );
+
+    // ── AC1: the authored floor triggers the collapse, and the entity GOES ──
+    let crossed = at("a3_floor_crossed");
+    let gone = at("head_gone");
+    assert!(
+        (crossed - skyway_projected_floor(&app)).abs() < 2.0,
+        "the head crosses its floor when the authored strain rate says it will \
+         ({crossed:.1} s against the world's own projection)"
+    );
+    assert!(
+        gone >= crossed && gone - crossed < 1.0,
+        "…and crossing it REMOVES THE STRUCTURE, on the same beat: crossed at \
+         {crossed:.1} s, gone at {gone:.1} s"
+    );
+    assert!(
+        !named_entity_present(&mut app, SKYWAY_HEAD),
+        "the skyhook is not in the world at the end of a run that lost it — this is a \
+         structural loss on screen, not a score penalty"
+    );
+    assert!(
+        (at("a3_head_lost") - crossed).abs() < 0.5,
+        "the consequences are chained off the REMOVAL's own Destroyed event, in the same \
+         tick — a scripted destruction chains exactly as a kill does"
+    );
+    assert_eq!(
+        skyway_captain_deadline(&mut app, "skyhook_failure_due").state,
+        "cancelled",
+        "the captain's countdown is called off once the thing it was counting to has \
+         happened; a panel counting down to a structure that is already gone is worse \
+         than no panel"
+    );
+
+    // ── AC4: the consequences are authored, on screen and derived from state ──
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        (
+            flags.counter("skyway_skyhook_lost"),
+            flags.counter("skyway_skyhook_held"),
+        ),
+        (1, 0),
+        "exactly one of the two fate flags is written, so a later mission reads a fact \
+         rather than an absence"
+    );
+    assert_eq!(
+        (
+            flags.counter("skyway_transfer_capacity_lost"),
+            flags.counter("skyhook_transfer_berths"),
+        ),
+        (1, 0),
+        "the corridor's only two transfer berths left the world with the structure \
+         that carried them — the named flag says so to the next act, and the \
+         capacity's own mirrored counter says so to any predicate that asks. A \
+         structure that has stopped ticking cannot correct its own last reading."
+    );
+    // The count is READ off authored state, never rolled. In an unattended run
+    // #1036's comms backfill answers the committee (settling the strike, so a
+    // FULL shift is back on the head) and answers the head's own channel (so the
+    // gang were told, and braced): six, less one, is five.
+    assert_eq!(
+        (
+            flags.counter("skyway_strike_settled"),
+            flags.counter("skyway_head_told"),
+            flags.counter("skyway_head_cleared"),
+        ),
+        (1, 1, 0),
+        "precondition: the state the casualty count is derived FROM"
+    );
+    assert_eq!(
+        flags.counter("skyway_head_casualties"),
+        5,
+        "…and the count is that state, arithmetically: a full shift of six because the \
+         strike settled, less one because somebody answered when they called"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-head-report"),
+        ObjectiveStatus::Active,
+        "somebody has to tell Control, and it sits on the panel until they do"
+    );
+
+    // ── AC5: the mission BRANCHES rather than ending ──
+    let opened = at("a3_epilogue_open");
+    assert!(
+        opened > gone && opened - gone < 4.0,
+        "the epilogue opens a beat behind the collapse ({gone:.1} s, {opened:.1} s)"
+    );
+    assert!(
+        at("a3_epilogue_resolved") > opened,
+        "…and reaches its own resolution: an epilogue that never resolves is not a branch, \
+         it is a loose end"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-survivors"),
+        ObjectiveStatus::Failed,
+        "a rescue nobody ran fails, exactly as the Lyra's did — the epilogue is playable, \
+         which means it is also losable"
+    );
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        (
+            flags.counter("skyway_survivors_recovered"),
+            flags.counter("skyway_survivors_lost"),
+        ),
+        (0, 2),
+        "and the epilogue writes its own campaign state"
+    );
+
+    // ── AC6: this is NOT the hard-fail path ──
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "losing the skyhook is a worse ending, not a game over: the run is still going"
+    );
+    assert!(
+        app.world()
+            .resource::<project_phoenix::simulation::GameOverReason>()
+            .0
+            .is_none(),
+        "…and nothing latched a game-over reason. The crew's hull dying is the other \
+         path entirely, and it writes that reason and none of these flags."
+    );
+}
+
+/// **Issue #1040, AC3.** THE PLAYTEST. The final warning window is long enough
+/// that a crew who react to the LAST rung still save the structure — driven on
+/// the tick that rung actually fires, not at a time this test knows.
+///
+/// The margin it measures is the tuned value the world file records: the
+/// stabilise is authored at 18 seconds against a 30-second window, and what is
+/// left over is what a crew get to notice, decide and give the order in.
+#[test]
+fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::operations::{HoldState, OperationVerb, ShipOperations};
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = SKYWAY_DT;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let projected = skyway_deadline_secs(&probe, "skyhook_failure_due") as f64;
+    drop(probe);
+
+    let args = skyway_args(dt, projected + 20.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let (ship, ship_uuid) = skyway_crew_hull(&mut app);
+    // Where Act 3's own approach objective sends a helm, and 247 units off the
+    // head — inside the destroyer's authored 500-unit stabilise range.
+    let station = bevy::prelude::Vec3::new(180.0, 0.0, 170.0);
+
+    let mut ordered_at: Option<f64> = None;
+    let mut completed_at: Option<f64> = None;
+
+    for tick in 0..args.max_ticks {
+        // Helm holding station, done by hand for the reason every operations
+        // test in this file moves a ship by hand: this is a test of the warning
+        // window, not of station-keeping.
+        if ordered_at.is_some() && completed_at.is_none() {
+            skyway_move(&mut app, ship, station);
+        }
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        // ON THE TICK THE LAST WARNING FIRES. Not at an authored second this
+        // test restates — a crew react to the warning, so the test does too.
+        if ordered_at.is_none() && skyway_flag(&app, "a3_warning_three") > 0 {
+            skyway_move(&mut app, ship, station);
+            skyway_start_op(&mut app, &ship_uuid, OperationVerb::Stabilise, SKYWAY_HEAD);
+            ordered_at = Some(sim_t);
+        }
+        if completed_at.is_none() {
+            if let Some(hold) = app
+                .world()
+                .get::<ShipOperations>(ship)
+                .and_then(|ops| ops.active.clone())
+            {
+                if hold.state() == HoldState::Completed {
+                    completed_at = Some(sim_t);
+                }
+            }
+        }
+    }
+
+    let ordered = ordered_at.expect("the third warning must fire in this run at all");
+    let done = completed_at.expect(
+        "a stabilise opened on the last warning must COMPLETE — if it cannot, the final \
+         warning is decoration and the act is unwinnable rather than hard",
+    );
+    let floor = skyway_projected_floor(&app);
+
+    // ── AC3: the margin, measured rather than asserted ──
+    let slack = floor - done;
+    assert!(
+        slack >= 10.0,
+        "the final warning window must leave real room: the order went in at {ordered:.1} s, \
+         the work landed at {done:.1} s, and the head would have crossed its floor at \
+         {floor:.1} s — {slack:.1} s of margin, against the 12 the world file records"
+    );
+    assert!(
+        named_entity_present(&mut app, SKYWAY_HEAD),
+        "…and the structure is STILL THERE, past the tick that would otherwise have taken it"
+    );
+    assert!(
+        condition_of(&mut app, SKYWAY_HEAD) >= 42.0,
+        "because the authored 22-point payout carried the head back over the FIRST rung's \
+         42 % restore line from the last one — one run stands the whole ladder down, which \
+         is what makes a late reaction a save rather than a stay of execution"
+    );
+
+    // ── The other ending, on the same surfaces ──
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        (
+            flags.counter("skyway_skyhook_held"),
+            flags.counter("skyway_skyhook_lost"),
+        ),
+        (1, 0),
+        "exactly one of the two fate flags is written, and it is the other one this time"
+    );
+    assert_eq!(
+        (
+            flags.counter("a3_floor_crossed"),
+            flags.counter("a3_epilogue_open"),
+        ),
+        (0, 0),
+        "the floor was never crossed, so there is no collapse and no epilogue — the two \
+         branches are exclusive"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-tether-3"),
+        ObjectiveStatus::Completed,
+        "the rung the crew acted on completes"
+    );
+    for ignored in ["obj-a3-tether-1", "obj-a3-tether-2"] {
+        assert_eq!(
+            objective_status(&app, ignored),
+            ObjectiveStatus::Failed,
+            "…and the two they let go stay red. Saving the structure does not un-ignore a \
+             warning, and the panel is the record of which ones went by."
+        );
+    }
+    assert_eq!(
+        objective_status(&app, "obj-a3-head"),
+        ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        skyway_captain_deadline(&mut app, "skyhook_failure_due").state,
+        "cancelled",
+        "and the countdown is called off, because the projection has been beaten"
+    );
+}
+
+/// **Issue #1040, AC5.** The epilogue is PLAYABLE, and playable means winnable:
+/// a crew who lose the head and then go and do the work pull both craft out of
+/// the debris inside the epilogue's own window.
+///
+/// Both rescues run through the tow the Lyra's did, against condition thresholds
+/// the payout is sized to cross — so the epilogue reuses the act before it
+/// rather than inventing a second rescue mechanic.
+#[test]
+fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::operations::{HoldState, OperationVerb, ShipOperations};
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = SKYWAY_DT;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let projected = skyway_deadline_secs(&probe, "skyhook_failure_due") as f64;
+    drop(probe);
+
+    let args = skyway_args(dt, projected + 100.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let (ship, ship_uuid) = skyway_crew_hull(&mut app);
+
+    // The two craft, taken in the order the collapse handler spawns them.
+    let mut queue = vec![SKYWAY_LIGHTER, SKYWAY_POD];
+    let mut towing: Option<&str> = None;
+    let mut recovered: Vec<(String, f64)> = Vec::new();
+
+    for tick in 0..args.max_ticks {
+        // Alongside whatever is on the line, every tick — a tow is run from
+        // close aboard and the crew are holding it. Done by hand for the reason
+        // every operations test in this file moves a ship by hand.
+        if let Some(target) = towing {
+            let alongside = position_of(&mut app, target);
+            skyway_move(
+                &mut app,
+                ship,
+                bevy::prelude::Vec3::new(alongside.x + 40.0, alongside.y, alongside.z + 40.0),
+            );
+        }
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        let settled = app
+            .world()
+            .get::<ShipOperations>(ship)
+            .and_then(|ops| ops.active.clone())
+            .map(|hold| hold.state() == HoldState::Completed)
+            .unwrap_or(true);
+
+        // Take the next craft the moment the line is free and there is one in
+        // the world to take.
+        if settled {
+            if let Some(next) = queue.first().copied() {
+                if named_entity_present(&mut app, next) {
+                    if towing == Some(next) {
+                        recovered.push((next.to_string(), sim_t));
+                        queue.remove(0);
+                        towing = None;
+                    } else {
+                        let alongside = position_of(&mut app, next);
+                        skyway_move(
+                            &mut app,
+                            ship,
+                            bevy::prelude::Vec3::new(
+                                alongside.x + 40.0,
+                                alongside.y,
+                                alongside.z + 40.0,
+                            ),
+                        );
+                        skyway_start_op(&mut app, &ship_uuid, OperationVerb::Tow, next);
+                        towing = Some(next);
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        recovered.len(),
+        2,
+        "both craft must be recoverable inside the epilogue's authored window — an \
+         epilogue that cannot be completed is a cut scene, not a branch. Got {recovered:?}"
+    );
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        (
+            flags.counter("skyway_skyhook_lost"),
+            flags.counter("a3_epilogue_resolved"),
+        ),
+        (1, 1),
+        "precondition: this is the branch that lost the head, and its epilogue closed"
+    );
+    assert_eq!(
+        (
+            flags.counter("skyway_survivors_recovered"),
+            flags.counter("skyway_survivors_lost"),
+        ),
+        (2, 0),
+        "both craft are on the record as recovered"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-survivors"),
+        ObjectiveStatus::Completed,
+        "and the epilogue's own mandatory objective completes"
+    );
+    for craft in [SKYWAY_LIGHTER, SKYWAY_POD] {
+        assert!(
+            named_entity_present(&mut app, craft),
+            "{craft} is still in the world: the debris takes what is still adrift when the \
+             window closes, and neither of these was"
+        );
+    }
+}
+
+/// **Issue #1040, AC6.** Ship destruction is a DIFFERENT path, and the two are
+/// told apart by what they write rather than by tone.
+///
+/// The crew's hull dies the way the mission already makes possible — living in a
+/// radiation band it was warned about — and the run ends: the engine latches its
+/// own game-over reason, and neither of Act 3's fate flags is written by
+/// anybody, because the act the collapse belongs to was never reached.
+#[test]
+fn falling_skyway_losing_the_ship_is_a_hard_fail_and_writes_none_of_the_head_s_flags() {
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = SKYWAY_DT;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let band_at = skyway_deadline_secs(&probe, "storm_band_one_due") as f64;
+    drop(probe);
+
+    let args = skyway_args(dt, band_at + 60.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let (ship, _) = skyway_crew_hull(&mut app);
+
+    let mut rng = vellum_rng::Pcg32::seeded(1040, 0);
+    let mut spent = false;
+    let mut over_at: Option<f64> = None;
+    for tick in 0..args.max_ticks {
+        // Standing in the front, at the anchor the world authors the first band
+        // over. The band arrives on its own authored deadline and burns whatever
+        // is under it; helm is doing the one thing every warning in this mission
+        // tells a crew not to do.
+        if over_at.is_none() {
+            skyway_move(&mut app, ship, bevy::prelude::Vec3::new(0.0, 0.0, -760.0));
+        }
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        // A destroyer that has already taken a beating. The hull is spent by
+        // hand rather than shot off, because what this test is about is what the
+        // DEATH writes, not how a hull gets to zero — and it is spent once the
+        // band is overhead, so the ship's own repair sweep has no hundred and
+        // forty seconds to undo it. The last twelve points are taken by
+        // `region_radiation_band.toml`'s own authored damage, through the
+        // ordinary region path that latches the reason.
+        if !spent && sim_t > band_at + 1.0 {
+            let mut hull = app
+                .world_mut()
+                .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(ship)
+                .expect("the crew's hull has systems");
+            let spend = hull.0.total_current() - 12.0;
+            hull.0.apply_damage(spend, &mut rng);
+            spent = true;
+        }
+        if over_at.is_none()
+            && app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver
+        {
+            over_at = Some(sim_t);
+            break;
+        }
+    }
+
+    let over = over_at.expect(
+        "a spent hull living in an authored radiation band must die — this is the mission's \
+         own hard-fail path, not a hypothetical one",
+    );
+    assert!(
+        over > band_at,
+        "…and it dies to the band, which does not exist before its deadline ({band_at} s, \
+         {over:.1} s)"
+    );
+    // The OUTCOME half of the latch, not the reason string: `on_game_over_enter`
+    // takes the string on its way out to the clients, and what survives in the
+    // record is the verdict. That verdict is the engine's own — no scenario
+    // handler wrote it, and no scenario handler could.
+    assert_eq!(
+        app.world()
+            .resource::<project_phoenix::simulation::GameOverReason>()
+            .1,
+        Some(project_phoenix::balance::Outcome::Defeat),
+        "the hard fail latches the ENGINE's own defeat"
+    );
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    assert_eq!(
+        (
+            flags.counter("skyway_skyhook_lost"),
+            flags.counter("skyway_skyhook_held"),
+            flags.counter("a3_epilogue_open"),
+        ),
+        (0, 0, 0),
+        "and it writes NONE of the collapse branch's state. The two endings are \
+         distinguishable by what is in the record, not by how they read: a crew who lost \
+         their ship did not lose the skyhook, and a crew who lost the skyhook are still \
+         flying."
+    );
+    assert!(
+        named_entity_present(&mut app, SKYWAY_HEAD),
+        "the head is still standing when the ship goes — which is the whole distinction"
+    );
+}
+
+// ── The collapse mechanism, end to end (issue #1040) ─────────────────────────
+
+const PROBE_COLLAPSE_WORLD: &str = "assets/worlds/probe_collapse.toml";
+const PROBE_HOOK_SAVED: &str = "world.probe_collapse.entity.hook_saved.name";
+const PROBE_HOOK_LOST: &str = "world.probe_collapse.entity.hook_lost.name";
+const PROBE_SURVIVOR: &str = "world.probe_collapse.entity.survivor.name";
+
+/// **Issue #1040, AC1/AC2/AC3/AC5.** The whole collapse mechanism in one
+/// twenty-five-second run: a ladder of authored thresholds warns three times as
+/// two identical heads walk down toward their floor, the one with a tender that
+/// ACTS ON THE THIRD WARNING is saved, the one without it is taken out of the
+/// world by `destroy_entity`, and the removal branches into a rescue that
+/// completes.
+///
+/// The two heads are the assertion. They are the same template on the same
+/// strain beat with the same ladder shape, so nothing about their fates can be
+/// coincidence — the only thing that differs is one `ctx.effects.stabilise(…)`
+/// on one `on_flag_cleared` handler.
+#[test]
+fn a_condition_floor_collapses_a_structure_and_a_reaction_inside_the_last_window_prevents_it() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: PROBE_COLLAPSE_WORLD.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(45.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the probe world must load and build");
+
+    let mut first: std::collections::BTreeMap<String, f64> = Default::default();
+    let mut saved_at_warning_three: Option<f32> = None;
+    let mut lost_at_warning_three: Option<f32> = None;
+
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        let sim_t = (tick + 1) as f64 * dt;
+
+        for flag in [
+            "saved_warning_one",
+            "saved_warning_two",
+            "saved_warning_three",
+            "saved_op_started",
+            "saved_stood_down",
+            "saved_floor_crossed",
+            "lost_warning_one",
+            "lost_warning_two",
+            "lost_warning_three",
+            "lost_stood_down",
+            "lost_floor_crossed",
+            "lost_head_gone",
+            "projection_fired",
+            "epilogue_open",
+            "rescue_started",
+            "survivor_recovered",
+            "epilogue_resolved",
+        ] {
+            if app
+                .world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter(flag)
+                > 0
+            {
+                first.entry(flag.to_string()).or_insert(sim_t);
+            }
+        }
+        if saved_at_warning_three.is_none() && first.contains_key("saved_warning_three") {
+            saved_at_warning_three = Some(condition_of(&mut app, PROBE_HOOK_SAVED));
+            lost_at_warning_three = Some(condition_of(&mut app, PROBE_HOOK_LOST));
+        }
+        if !named_entity_present(&mut app, PROBE_HOOK_LOST) {
+            first.entry("lost_gone".to_string()).or_insert(sim_t);
+        }
+    }
+
+    let at = |key: &str| -> f64 {
+        *first
+            .get(key)
+            .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
+    };
+    let never = |key: &str| {
+        assert!(
+            !first.contains_key(key),
+            "'{key}' must NEVER happen in this run, and it did at {:.2} s",
+            first[key]
+        );
+    };
+
+    // ── AC2: the ladder warns three times, in order, on BOTH heads ──
+    for side in ["saved", "lost"] {
+        let one = at(&format!("{side}_warning_one"));
+        let two = at(&format!("{side}_warning_two"));
+        let three = at(&format!("{side}_warning_three"));
+        assert!(
+            one < two && two < three,
+            "{side}: the rungs fire in ladder order ({one:.2}, {two:.2}, {three:.2})"
+        );
+        assert!(
+            (two - one - (three - two)).abs() < 0.5,
+            "{side}: …and evenly, because the strain rate and the rung spacing are both \
+             authored — a scenario derives its warning window from that arithmetic"
+        );
+    }
+    assert!(
+        (at("saved_warning_three") - at("lost_warning_three")).abs() < 0.1,
+        "the two heads reach their last warning together: they are the same template on \
+         the same beat, and everything after this point is the tender"
+    );
+    assert_eq!(
+        (saved_at_warning_three, lost_at_warning_three),
+        (Some(12.0), Some(12.0)),
+        "…on the same authored condition, which is what makes the ladder a reading of the \
+         structure rather than a timer beside it"
+    );
+
+    // ── AC3: the reaction lands inside the final window and prevents it ──
+    assert!(
+        (at("saved_op_started") - at("saved_warning_three")).abs() < 0.1,
+        "the tender opens its stabilise ON the third warning — the event a crew would be \
+         reacting to, not a second this file also has to keep in step"
+    );
+    let stood_down = at("saved_stood_down");
+    let floor = at("lost_floor_crossed");
+    assert!(
+        stood_down < floor,
+        "and it lands BEFORE the floor the other head crosses ({stood_down:.2} s against \
+         {floor:.2} s). If the final window is ever tuned shorter than the operation, \
+         this is the assertion that says so."
+    );
+    assert!(
+        named_entity_present(&mut app, PROBE_HOOK_SAVED),
+        "the saved head is still in the world"
+    );
+    assert!(
+        condition_of(&mut app, PROBE_HOOK_SAVED) >= 30.0,
+        "…back over its own top rung's restore line, which is what standing the ladder \
+         down means"
+    );
+    never("saved_floor_crossed");
+    never("lost_stood_down");
+
+    // ── AC1: the floor removes the structure, and the removal chains ──
+    let gone = at("lost_gone");
+    assert!(
+        gone >= floor && gone - floor < 0.5,
+        "crossing the floor REMOVES the head, on the same beat ({floor:.2} s, {gone:.2} s)"
+    );
+    assert!(
+        !named_entity_present(&mut app, PROBE_HOOK_LOST),
+        "…and it is not in the world afterwards"
+    );
+    assert!(
+        (at("lost_head_gone") - floor).abs() < 0.5,
+        "the consequences are chained off the removal's own Destroyed event, which is what \
+         makes a scripted collapse indistinguishable from any other loss downstream"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-probe-lost"),
+        ObjectiveStatus::Failed
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("probe_lost_berths"),
+        0,
+        "…and the berths the head carried are gone from the flag store with it, \
+         rather than left saying two forever"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-probe-saved"),
+        ObjectiveStatus::Completed
+    );
+    never("projection_fired");
+
+    // ── AC5: the removal branches into a rescue, and the rescue completes ──
+    assert!(
+        at("epilogue_open") > gone,
+        "the epilogue opens after the collapse, not beside it"
+    );
+    assert!(
+        at("survivor_recovered") > at("rescue_started"),
+        "the recovery is read off the tow's own payout crossing the craft's authored \
+         threshold — the only completion signal an operation leaves behind"
+    );
+    assert!(
+        at("epilogue_resolved") > at("survivor_recovered"),
+        "…and the epilogue resolves on its own clock, after the work"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-probe-survivors"),
+        ObjectiveStatus::Completed
+    );
+    assert!(
+        named_entity_present(&mut app, PROBE_SURVIVOR),
+        "the craft that was recovered is still in the world; the debris takes only what is \
+         still adrift when the window closes"
+    );
+}

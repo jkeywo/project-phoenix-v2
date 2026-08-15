@@ -68,8 +68,16 @@ export class PhSensorRadar extends HTMLElement {
         range: val?.scan_range || 0,
         ship_heading: val?.ship_heading || 0,
         config: val?.config || {},
+        // ph-radar draws TWO independent rings: a cyan one around
+        // `selected_target_uuid` (this console's own selection) and a red one
+        // around `target_uuid` (the ship's weapons lock). Sensors handed its
+        // one scan target to both, so every contact the sensors officer picked
+        // came up double-ringed — and the red ring is a weapons lock the
+        // sensors console has no business asserting, since weapons may be
+        // holding fire or aimed at something else entirely.
+        //
+        // Sensors owns a selection, not a lock. Cyan only.
         selected_target_uuid: val?.target_uuid || null,
-        target_uuid: val?.target_uuid || null,
       };
     }
 

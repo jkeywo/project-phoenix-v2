@@ -93,11 +93,19 @@ describe('PhSensorRadar', () => {
       ship_heading: 90,
       config: { max_range: 5000 },
       selected_target_uuid: null,
-      target_uuid: null,
     });
   });
 
-  it('passes science_target_uuid as selected_target_uuid and target_uuid to inner radar', () => {
+  // ── One ring, not two (PRD #1023's defect list) ────────────────────
+  //
+  // ph-radar draws two independent rings: cyan around `selected_target_uuid`
+  // (this console's own selection) and red around `target_uuid` (the ship's
+  // weapons lock). Sensors handed its one scan target to BOTH keys, so every
+  // contact the sensors officer picked came up double-ringed — and the red
+  // ring asserted a weapons lock this console cannot know about, since
+  // weapons may be holding fire or aimed somewhere else entirely.
+
+  it('marks its scan target as a selection, not as a weapons lock', () => {
     const { el, innerRadar } = setup();
     el.state = {
       blips: [{ uuid: 'abc', bearing_deg: 45, range: 300 }],
@@ -105,7 +113,19 @@ describe('PhSensorRadar', () => {
       target_uuid: 'abc',
     };
     expect(innerRadar.state.selected_target_uuid).toBe('abc');
-    expect(innerRadar.state.target_uuid).toBe('abc');
+    expect(innerRadar.state.target_uuid).toBeUndefined();
+  });
+
+  it('gives the scanned contact exactly one of the scope’s two rings', () => {
+    const { el, innerRadar } = setup();
+    el.state = {
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0 }],
+      scan_range: 2000,
+      target_uuid: 'abc',
+    };
+    const s = innerRadar.state;
+    const ringed = ['selected_target_uuid', 'target_uuid'].filter((key) => s[key] === 'abc');
+    expect(ringed).toEqual(['selected_target_uuid']);
   });
 
   it('blip click on inner radar dispatches set_sensors_target directly', () => {

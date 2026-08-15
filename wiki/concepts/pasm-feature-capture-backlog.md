@@ -175,7 +175,7 @@ Red Alert's selected-target display remains an extension of the Red Alert
 slice.
 
 Sources: `src/radar.rs`, `src/radar_config.rs`, `src/ship/sensors.rs`,
-`src/server/radar.rs`, `gui/radar-widget.js`.
+`src/server/radar.rs`, `gui/components/ph-radar.js`.
 
 ## 14. Navigation — Captured
 

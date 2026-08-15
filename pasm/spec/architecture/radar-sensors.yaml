@@ -14,7 +14,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/radar.rs, src/radar_config.rs, src/gui/radar.rs, src/server/radar.rs, gui/radar-widget.js]
+      paths: [src/radar.rs, src/radar_config.rs, src/gui/radar.rs, src/server/radar.rs, gui/components/ph-radar.js, gui/components/ph-scope-chrome.js]
       tests: [cargo test, npx vitest run]
 
   - state: radar-contact-projection-state
@@ -29,7 +29,7 @@ entities:
       derived_from: [authoritative-ship-motion-state, ship-modifier-state]
     implementation:
       status: declared
-      paths: [src/radar.rs, src/radar_config.rs, src/core/messages.rs, gui/radar-widget.js]
+      paths: [src/radar.rs, src/radar_config.rs, src/core/messages.rs, gui/console-state.js]
 
   - component: sensors-target-controller
     core:

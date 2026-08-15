@@ -428,7 +428,9 @@ export class PhNavigationMap extends HTMLElement {
    * gold instead of its own colour: for a sphere or box that gold outline
    * sits around the region's own fill, but a torus never has a fill to
    * begin with, so its single stroked ring renders entirely gold. That is
-   * exact parity with `gui/radar-widget.js`. The Rust viewscreen renderer
+   * exact parity with the scope in `gui/components/ph-radar.js`, which is where
+   * that rule survived the deletion of the dormant radar widget. The Rust
+   * viewscreen renderer
    * differs: it keeps a region's own authored colour and adds a small gold
    * ring only to icon-carrying objective entities, so gold-marking region
    * shapes is a chart-side extension (known parity gap), not shared

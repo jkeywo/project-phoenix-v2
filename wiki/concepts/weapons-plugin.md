@@ -532,7 +532,7 @@ not happen in practice because the lobby producer always falls back to
 the per-bank peak `cooldown_remaining` it has observed and uses that as
 the denominator instead.
 
-Radar fire arcs are drawn by `gui/radar-widget.js` from the
+Radar fire arcs are drawn by `gui/components/ph-tactical-radar.js` from the
 `phaser_arcs` (per-bank) and `torpedo_arcs` (per-tube) lists projected
 into render state by `gui/console-state.js`.
 

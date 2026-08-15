@@ -51,7 +51,6 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `coordination-popup.js` | CoordinationPopup payload → `{ sender, title, body }` normaliser |
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |
 | `phone-bezel.js` | Diegetic phone bezel chrome |
-| `radar-math.js` | Client-side radar blip projection |
 | `console-ui.js` | Shared iframe UI primitives (`reconcileRows`, `setBtn`, `setBar`, `setAutoState`, `setText`, keyed rebuild) |
 | `console-core.js`, `device-orientation.js`, `help-panel.js`, `manual-panel.js`, `settings-panel.js` | Iframe boot glue, orientation handling, and the phone Settings menu, including current-station help and the ship manual |
 

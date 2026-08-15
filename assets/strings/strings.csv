@@ -1168,3 +1168,6 @@ world.probe_corroborate.evidence.account_quiet,"Evidence text — the account no
 world.probe_corroborate.comms.witness_hails,"Dialogue body — a witness opening the corroboration channel, probe_corroborate",[I worked that rung. I hear you have the file on it.]
 world.probe_corroborate.comms.witness_ask,"Response text — asking the witness what happened, probe_corroborate",[Tell me what happened up there.]
 world.probe_corroborate.comms.witness_account,"Dialogue body — the witness's account, probe_corroborate",[Nobody came up. Put that where it will be read.]
+entity.skyhook.threshold.load_bearing.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Load bearing]
+entity.skyhook.threshold.tether_tensioned.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Tether tension]
+entity.skyhook.threshold.station_holding.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Station holding]

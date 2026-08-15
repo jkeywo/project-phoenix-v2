@@ -24,12 +24,33 @@
 # structurally worse off at half a condition point per hull point, without hull
 # damage BEING condition damage.
 #
-# THE TWO THRESHOLDS ARE A LADDER, not a pair of alternatives. The upper one is
-# an operational limit a crew can trade against — below it the head stops being
-# certified to lift, and the mission's transfer window is in trouble. The lower
-# one is structural, and it is the one a later slice (#1040) hangs the collapse
-# off. A world that wants the collapse authors the condition low enough to reach
-# it; nothing here decides that.
+# THE THRESHOLDS ARE A LADDER, not a set of alternatives. The top one is an
+# operational limit a crew can trade against — below it the head stops being
+# certified to lift, and the mission's transfer window is in trouble. The bottom
+# one is structural, and it is the one #1040 hangs the collapse off. A world that
+# wants the collapse authors the condition low enough to reach it; nothing here
+# decides that.
+#
+# THE THREE RUNGS BETWEEN THEM ARE THE WARNING LADDER (issue #1040), and they
+# are on the template rather than in the world for one reason: a skyhook that
+# falls without telling anybody first is bad design in EVERY scenario, not just
+# in Falling Skyway. Each rung is a distinct physical failure with its own name,
+# so a crew reading an operations panel can see which one they are on and a
+# scenario hanging `on_flag_cleared` off one is hanging it off a fact rather than
+# off an arbitrary percentage:
+#
+#   45 %  lift tolerance     not certified to run a climber
+#   37 %  load bearing       cannot carry the traffic already on it; trim going
+#   31 %  tether tension     the ribbon's tension control is failing
+#   25 %  station holding    the head can no longer hold its own station
+#   20 %  STRUCTURAL         the tether is coming apart — the floor
+#
+# THE SPACING IS THE WARNING WINDOW. Six condition points between each warning
+# rung and five between the last rung and the floor, so a scenario driving the
+# head down at a constant rate gets evenly-spaced warnings and a final window it
+# can compute from its own decay rate rather than from a number invented here.
+# Falling Skyway's Act-3 header does that arithmetic out loud. [ai] Every
+# fraction below is unratified.
 
 name = "entity.skyhook.name"
 tags = ["station", "infrastructure"]
@@ -108,9 +129,34 @@ flag = "skyhook_lift_capable"
 fails_below = 0.45
 label = "entity.skyhook.threshold.lift_capable.label"
 
-# The structural one. Nothing in the skeleton scenario reaches it; it is here so
-# the collapse slice has an authored line to cross rather than a number invented
-# at the point of use.
+# WARNING ONE. The head can no longer carry the traffic already on it: ballast
+# trim starts going and the transfer schedule has to be shed. First rung a
+# scenario can say "this is going to fall" from.
+[[infrastructure.threshold]]
+flag = "skyhook_load_bearing"
+fails_below = 0.37
+label = "entity.skyhook.threshold.load_bearing.label"
+
+# WARNING TWO. Tension control on the ribbon is failing and the head has begun
+# to oscillate on it. Worse than the first in a way anybody on the structure can
+# feel, which is what makes it worth a second, louder beat.
+[[infrastructure.threshold]]
+flag = "skyhook_tether_tensioned"
+fails_below = 0.31
+label = "entity.skyhook.threshold.tether_tensioned.label"
+
+# WARNING THREE — the last one. The head can no longer hold its own station and
+# is riding down the ribbon. Everything past here is the floor.
+[[infrastructure.threshold]]
+flag = "skyhook_station_holding"
+fails_below = 0.25
+label = "entity.skyhook.threshold.station_holding.label"
+
+# The structural one — THE FLOOR. Nothing in the skeleton scenario reached it;
+# #1040's Act 3 does, and a world whose condition crosses this line is a world
+# whose skyhook comes apart. It is a line to cross rather than a number invented
+# at the point of use, which is what lets a scenario hang `destroy_entity` off an
+# `on_flag_cleared` and nothing else.
 [[infrastructure.threshold]]
 flag = "skyhook_tether_stable"
 fails_below = 0.2

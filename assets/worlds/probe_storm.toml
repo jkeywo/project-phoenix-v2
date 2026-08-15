@@ -121,6 +121,60 @@
 # other twelve anchors and duel and rng_coverage were re-measured across the
 # same change and are unmoved.
 #
+# STILL 0xc1034cdf5e40d79c AFTER THE SLOW-ZONE SIGN FIX, and this world spawns
+# two of the template that changed, so the hold is a claim rather than an
+# oversight. `region_radiation_band.toml`'s `[effects.slow_zone]` went from
+# `thrust_modifier = 0.6` / `yaw_rate_modifier = 0.7` to `-0.6666667` /
+# `-0.4285714` — from multipliers of 1.6x and 1.7x to 0.6 and 0.7, which is to
+# say from a radiation front that made ships FASTER and more agile to one that
+# slows them, which is what the band always claimed to do. It is the sister of
+# the radar-dampening sign fix, on the neighbouring field pair.
+#
+# THE MECHANISM IS THAT A SPEED CAP ONLY BINDS ON A SHIP THAT IS PUSHING IT.
+# Unlike radar range, `MaxSpeed` IS folded — it reaches `ShipPhysics` through
+# `ship::physics_systems`, which multiplies the hull's authored `max_speed` by
+# the slot before the helm integrates. But a cap changes nothing for a ship
+# flying below it, and nothing in this world flies at all: the three couriers
+# hold station (`hold-station` at priority 20, no standing Reach, and nothing
+# here is hostile to anything), and the tugs and hulks are station-keeping on a
+# tow whose ranges are deliberately generous for exactly that reason.
+#
+# BOTH HALVES OF THE A/B ARE RECORDED, and this pair is stronger than an
+# argument. Re-authoring BOTH bands' `thrust_modifier` and `yaw_rate_modifier`
+# to `-999.0` (a ship in a band reduced to a thousandth of its speed, i.e.
+# frozen) and to `+999.0` (a thousandfold, i.e. uncapped) BOTH reproduce
+# 13908044596492949404 exactly. The digest FOLDS `ShipPhysics`, so if any hull
+# in a band were ever cap-limited, a thousandfold swing in that cap would have
+# moved its position or its speed and therefore this number. It did not move,
+# which is a measurement that no ship in this world is ever at its cap rather
+# than an inference that none should be.
+#
+# Deleting `[effects.slow_zone]` from `region_radiation_band.toml` outright
+# moves nothing here either — the tow interrupts that name it run at full rate
+# instead of half, and both tows still finish long before tick 6,480 with their
+# hulks in the same authored places. `probe_operations` is where that same
+# deletion DOES move a digest (to 16965844278809164686, the figure the radar
+# fix recorded), which is what keeps "the slow-zone numbers fold nothing" a
+# fact about the two numbers rather than about the band standing unused.
+#
+# The full anchor set was re-measured on the same tree and is UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131,
+# falling_skyway 12497900250050242030, probe_evidence 5001167740764356580,
+# probe_strike (--ticks 1800) 535291289754814419, probe_scan
+# 7851858877582205234, probe_scandiff 2488189563210329022, probe_corroborate
+# 6231558379626882143, probe_restraint 1078282553163286478, probe_collapse
+# (--ticks 3600) 5992449400465842350, probe_window (--ticks 2400)
+# 8563713307821982951, probe_destroy 14665104268980394769, probe_operations
+# 14238567263822110364, duel 95852357729946676 and rng_coverage
+# 8393867315677906854.
+#
+# WHAT DID MOVE is this world's authored CROSSING TIME, which is a test
+# constant rather than a digest: `a_storm_band_is_survivable_to_cross_and_fatal
+# _to_live_in` flies the crosser out at t=42 instead of t=32, because a courier
+# inside a band now makes 13.2 u/s rather than 35.2 and a 520-unit crossing
+# takes 39 seconds rather than 15. The test's own comment carries that
+# arithmetic.
+#
 # No `--ship`: the player row is the headless default hull, parked 6 km from
 # anything, exactly as the other probes leave it.
 

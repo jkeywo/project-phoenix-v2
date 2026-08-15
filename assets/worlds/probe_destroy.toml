@@ -74,6 +74,24 @@
 # outright — which is the sharper half of the evidence, because in
 # `probe_operations` that same deletion DOES move the number. Nothing here is
 # inside a band.
+#
+# STILL 0xcb84eaa232a41b11 AFTER THE SLOW-ZONE SIGN FIX as well, the sister
+# defect on the neighbouring field pair of the same block:
+# `region_storm_band.toml`'s `thrust_modifier` and `yaw_rate_modifier` went
+# from `0.5` / `0.6` to `-1.0` / `-0.6666667`, from a band that made ships half
+# again as fast to one that halves their speed. This world holds for the
+# BLUNTEST of the available reasons and it is the same one as last time:
+# nothing is inside a band. The bands are here to be destroyed by name on a
+# script timer, and both cruisers are parked well clear of them.
+#
+# That makes this the weakest of the four attributions and it is worth saying
+# so. `MaxSpeed` is genuinely folded — it reaches `ShipPhysics` before the helm
+# integrates, unlike radar range, which is folded nowhere — so this world's
+# hold proves only that its own ships never enter a band. The claim that the
+# NUMBERS fold nothing even for a ship standing in one is made where there is a
+# ship standing in one, in `probe_operations` and `probe_storm`. Measured here
+# anyway, for completeness: `-999.0` and `+999.0` on both fields each reproduce
+# 14665104268980394769 exactly.
 
 [global]
 seed = 1033

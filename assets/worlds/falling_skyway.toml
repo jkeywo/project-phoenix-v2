@@ -474,6 +474,32 @@
 # rule whose text changed never resolves. Every scenario assertion this world
 # owns — the civilian arrivals, the tow completion, the storm crossings — is
 # likewise unmoved, because none of them is timed off a helm power level.
+#
+# STILL 12497900250050242030 AFTER THE SLOW-ZONE SIGN FIX, and this world
+# spawns three of the template that changed, so once again the hold is a claim.
+# `region_radiation_band.toml`'s `[effects.slow_zone]` went from
+# `thrust_modifier = 0.6` / `yaw_rate_modifier = 0.7` to `-0.6666667` /
+# `-0.4285714`, from a radiation front that made ships 60% faster and 70% more
+# agile to one that slows them to three fifths and seven tenths.
+#
+# THE MECHANISM HERE IS THE CLOCK, and it is the simplest of the four. The
+# digest window is 900 ticks — fifteen mission seconds — and the first band
+# does not exist until `storm_band_one_due` at t=145. There is no band in this
+# world for the whole of the measured run, so no ship can be standing in one.
+# The `-999.0` / `+999.0` A/B was run here as well and both reproduce
+# 12497900250050242030 exactly, which is what that argument predicts.
+#
+# WHAT THE FIX DOES CHANGE HERE, past the digest window, is the corridor
+# arithmetic this file's Act-2 prose is written against: a destroyer inside a
+# band now makes 10.8 u/s rather than 28.8, so a 520-unit crossing costs 48
+# seconds and 120 hull points instead of 18 and 45.
+# `region_radiation_band.toml` carries the corrected table. The short form this
+# file states — the destroyer survives crossing a band and does not survive
+# living in one, and a 60-point hauler cannot cross one at all — is unchanged
+# and, on the hauler, is now true by a factor of three rather than by three
+# seconds. The full headless suite was re-run across the fix and every
+# assertion this world owns still holds, including the Act-3 save margin
+# (#1040) and the civilian divert.
 
 [global]
 seed = 1034

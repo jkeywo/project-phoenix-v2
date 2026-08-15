@@ -20,21 +20,21 @@ export class PhRedAlert extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
-    .alert-btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: all 0.15s ease; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .alert-btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: var(--text-md); font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: all 0.15s ease; }
     .alert-btn.standby { background: var(--bg-card); border-color: var(--line-faint); color: var(--ink-dim); }
-    .alert-btn.standby:hover:not(:disabled) { background: #161b24; color: #aab; }
-    .alert-btn.active { background: #3a0a0a; border-color: var(--fire); color: var(--fire); text-shadow: 0 0 8px rgba(224,64,44,0.5); }
-    .alert-btn.active:hover:not(:disabled) { background: #4a0e0e; }
+    .alert-btn.standby:hover:not(:disabled) { background: var(--cyan-deep); color: var(--ink-dim); }
+    .alert-btn.active { background: var(--fire-deep); border-color: var(--fire); color: var(--fire); text-shadow: 0 0 8px rgba(var(--rgb-fire), 0.5); }
+    .alert-btn.active:hover:not(:disabled) { background: var(--tactical-deep); }
     .alert-btn:disabled { opacity: 0.4; cursor: default; }
     /* The restraint lever (issue #1041). Deliberately quieter than the alert
        button above it: holding fire is a posture, not an emergency. */
-    .hold-btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.7rem; font-weight: 700; padding: 0.4rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 1px solid; transition: all 0.15s ease; }
+    .hold-btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: var(--text-sm); font-weight: 700; padding: 0.4rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 1px solid; transition: all 0.15s ease; }
     .hold-btn.free { background: var(--bg-card); border-color: var(--line-faint); color: var(--ink-dim); }
-    .hold-btn.free:hover:not(:disabled) { background: #161b24; color: #aab; }
-    .hold-btn.held { background: #2a2410; border-color: var(--reloading); color: var(--reloading); }
-    .hold-btn.held:hover:not(:disabled) { background: #3a3216; }
+    .hold-btn.free:hover:not(:disabled) { background: var(--cyan-deep); color: var(--ink-dim); }
+    .hold-btn.held { background: var(--reloading-deep); border-color: var(--reloading); color: var(--reloading); }
+    .hold-btn.held:hover:not(:disabled) { background: var(--reloading-deep); }
     .hold-btn:disabled { opacity: 0.4; cursor: default; }
   </style>
   <div class="header">

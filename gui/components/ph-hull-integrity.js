@@ -25,9 +25,9 @@ export class PhHullIntegrity extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .placeholder { font-size: 0.65rem; color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
-    .systems-label { font-size: 0.65rem; letter-spacing: 0.2em; color: var(--ink-dim); margin-top: 0.25rem; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .placeholder { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
+    .systems-label { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); margin-top: 0.25rem; }
   </style>
   <div class="header"><span>${t('component.hull_integrity.title')}</span></div>
   <div id="bar-container"></div>

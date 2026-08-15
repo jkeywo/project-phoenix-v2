@@ -6,24 +6,24 @@
   <title data-i18n="console.sensors.doc_title">Project Phoenix - Sensors Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
-    body { margin: 0; background: #000; overflow: hidden; }
+    body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
     .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; align-self: flex-start; }
-    .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
-    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+    .hero h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); }
+    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); color: var(--ink-faint); }
     .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: auto 1fr; gap: 16px; }
     .radar-col { height: 100%; aspect-ratio: 1 / 1; }
     .data-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
-    .data-panel { display: flex; flex-direction: column; gap: 8px; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; }
-    .data-panel h2 { margin: 0; font-family: "Chakra Petch", sans-serif; font-size: 12px; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
-    .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); }
-    .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 16px; }
+    .data-panel { display: flex; flex-direction: column; gap: 8px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
+    .data-panel h2 { margin: 0; font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
+    .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-lg); }
     #btn-cancel-impulse[hidden] { display: none; }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; } .radar-col { width: 100%; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; } .radar-col { width: 100%; } }
   </style>
 </head>
 <body>

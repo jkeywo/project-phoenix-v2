@@ -5,7 +5,7 @@ import './ph-radar.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
 
 export class PhHelmRadar extends HTMLElement {
   #state = null;
@@ -24,12 +24,12 @@ export class PhHelmRadar extends HTMLElement {
       '.container { position: relative; width: 100%; height: 100%; }',
       'ph-radar { display: block; width: 100%; height: 100%; }',
       '.svg-overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
-      '.thrust-arc { fill: none; stroke: #6cb6d0; stroke-width: 4; stroke-linecap: round; }',
+      '.thrust-arc { fill: none; stroke: var(--cyan); stroke-width: 4; stroke-linecap: round; }',
       '.hostile-arc { stroke: none; }',
       '.corner-label {',
       '  position: absolute; pointer-events: none; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.6rem;',
-      '  letter-spacing: 0.1em; color: #5a6a7e;',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
+      '  letter-spacing: 0.1em; color: var(--edge-strong);',
       '}',
       '.corner-label.top-left { top: 4%; left: 6%; }',
       '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
@@ -37,14 +37,14 @@ export class PhHelmRadar extends HTMLElement {
       '.on-screen-btn {',
       '  position: absolute; bottom: 6%; right: 6%;',
       '  pointer-events: auto; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.65rem;',
-      '  letter-spacing: 0.15em; color: #8899b0; background: rgba(5,8,22,0.85);',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
+      '  letter-spacing: 0.15em; color: var(--ink-dim); background: rgba(var(--rgb-deep), 0.85);',
       '  border: 1px solid var(--line-faint); border-radius: 2px; padding: 2px 12px;',
       '  cursor: pointer; text-transform: uppercase;',
       '  transition: border-color 0.15s, color 0.15s, background 0.15s;',
       '}',
-      '.on-screen-btn:hover { border-color: #6cb6d0; }',
-      '.on-screen-btn.active { border-color: #6cb6d0; color: #6cb6d0; background: rgba(108,182,208,0.18); }',
+      '.on-screen-btn:hover { border-color: var(--cyan); }',
+      '.on-screen-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--rgb-cyan), 0.18); }',
       '</style>',
       '<div class="container">',
       '  <ph-radar id="inner-radar"></ph-radar>',
@@ -223,7 +223,7 @@ export class PhHelmRadar extends HTMLElement {
         g.appendChild(path);
       }
       path.setAttribute('d', d);
-      path.setAttribute('fill', fill);
+      path.setAttribute('fill', phColor(this, fill));
       path.setAttribute('fill-opacity', String(opacity));
     });
   }

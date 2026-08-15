@@ -49,32 +49,32 @@ export class PhShipPicker extends HTMLElement {
     :host * { box-sizing: border-box; }
     .ship-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; padding: 4px 0; }
     .ship-card {
-      background: #111; border: 1px solid #334; border-radius: 6px;
+      background: var(--surface-panel); border: 1px solid var(--cyan-dim); border-radius: 6px;
       padding: 12px 14px; cursor: pointer; transition: all 0.15s ease;
       display: flex; flex-direction: column; gap: 6px;
     }
-    .ship-card:hover { background: #1a1a2e; border-color: #558; }
-    .ship-card:active { background: #1c2438; border-color: #66c; }
+    .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-control); }
+    .ship-card:active { background: var(--surface-panel-up); border-color: var(--violet); }
     .ship-name {
-      font-family: 'Chakra Petch', sans-serif; font-size: 1rem; font-weight: 600;
-      color: #d8e2ff; letter-spacing: 0.06em; white-space: nowrap; overflow: hidden;
+      font-family: 'Chakra Petch', sans-serif; font-size: var(--text-lg); font-weight: 600;
+      color: var(--ink); letter-spacing: 0.06em; white-space: nowrap; overflow: hidden;
       text-overflow: ellipsis;
     }
     .ship-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .ship-badge {
-      font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase;
+      font-size: var(--text-xs); letter-spacing: 0.18em; text-transform: uppercase;
       padding: 2px 7px; border-radius: 3px; font-weight: 600;
     }
-    .ship-badge.battleship { background: rgba(208,160,48,0.15); border: 1px solid #d4a030; color: #d4a030; }
-    .ship-badge.courier { background: rgba(96,190,140,0.15); border: 1px solid #60be8c; color: #60be8c; }
-    .ship-badge.cruiser { background: rgba(108,182,208,0.15); border: 1px solid #6cb6d0; color: #6cb6d0; }
-    .ship-badge.destroyer { background: rgba(140,100,200,0.15); border: 1px solid #8c64c8; color: #8c64c8; }
-    .ship-badge.unknown { background: rgba(100,120,160,0.15); border: 1px solid #647ca0; color: #8a98c4; }
-    .ship-hull-id { font-size: 0.7rem; color: #5a6694; letter-spacing: 0.04em; }
+    .ship-badge.battleship { background: rgba(var(--rgb-reloading), 0.15); border: 1px solid var(--reloading); color: var(--reloading); }
+    .ship-badge.courier { background: rgba(var(--rgb-loaded), 0.15); border: 1px solid var(--loaded); color: var(--loaded); }
+    .ship-badge.cruiser { background: rgba(var(--rgb-cyan), 0.15); border: 1px solid var(--cyan); color: var(--cyan); }
+    .ship-badge.destroyer { background: rgba(var(--rgb-violet), 0.15); border: 1px solid var(--violet); color: var(--violet); }
+    .ship-badge.unknown { background: rgba(var(--rgb-edge-strong), 0.15); border: 1px solid var(--edge-bright); color: var(--ink-dim); }
+    .ship-hull-id { font-size: var(--text-sm); color: var(--edge-strong); letter-spacing: 0.04em; }
     .ship-stats { display: flex; gap: 12px; margin-top: 2px; }
     .ship-stat { display: flex; flex-direction: column; gap: 1px; }
-    .ship-stat-label { font-size: 0.55rem; letter-spacing: 0.15em; color: #5a6694; text-transform: uppercase; }
-    .ship-stat-value { font-size: 0.85rem; color: #8a98c4; }
+    .ship-stat-label { font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--edge-strong); text-transform: uppercase; }
+    .ship-stat-value { font-size: var(--text-md); color: var(--ink-dim); }
     @media (max-width: 500px) {
       .ship-grid { grid-template-columns: 1fr; }
     }
@@ -99,7 +99,7 @@ export class PhShipPicker extends HTMLElement {
     const grid = this.shadowRoot.getElementById('grid');
     const ships = this.#state?.ships ?? [];
     if (ships.length === 0) {
-      grid.innerHTML = `<div style="color:#5a6694;font-size:0.8rem;padding:8px 0;">${t('component.ship_picker.empty')}</div>`;
+      grid.innerHTML = `<div style="color:var(--edge-strong);font-size:var(--text-md);padding:8px 0;">${t('component.ship_picker.empty')}</div>`;
       return;
     }
     grid.innerHTML = ships.map(ship => {

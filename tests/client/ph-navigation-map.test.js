@@ -3,6 +3,13 @@ import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-navigation-map.js';
 
+// Canvas paint cannot resolve a CSS custom property, so the map names the
+// token and gui/components/ph-console-styles.js resolves it against the live
+// document. jsdom loads no stylesheet, so what reaches the stubbed context
+// here is the token expression itself — a better thing to assert than a hex
+// value, since it says WHICH colour the ring is meant to be.
+const GOLD = 'var(--gold)';
+
 function makeFakeCtx() {
   const calls = { fillRect: [], strokeRect: [], arc: [], fill: [], fillText: [], moveTo: [], lineTo: [], stroke: [], beginPath: [] };
   // Chronological op log. The style properties below are single-valued, so a
@@ -629,7 +636,7 @@ describe('PhNavigationMap', () => {
       };
       h.tickRaf();
       expect(findOp(h.fakeCtx, 'fill', (o) => o.fillStyle === 'rgba(51,102,204,0.3)')).toBeDefined();
-      const gold = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820');
+      const gold = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === GOLD);
       expect(gold).toBeDefined();
       expect(findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(51,102,204)')).toBeUndefined();
     });
@@ -649,7 +656,7 @@ describe('PhNavigationMap', () => {
       // Same ring geometry as the plain-torus case, but the stroke recolours
       // to the waypoint gold instead of the region's own [0.5,0.3,0.2] hue —
       // a torus has no fill to begin with, so the whole ring reads gold.
-      const stroke = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820');
+      const stroke = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === GOLD);
       expect(stroke).toBeDefined();
       expect(stroke.lineWidth).toBeCloseTo(30, 1);
       expect(findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === 'rgb(128,77,51)')).toBeUndefined();
@@ -728,7 +735,7 @@ describe('PhNavigationMap', () => {
       };
       h.tickRaf();
       const regionAt = h.fakeCtx._ops.findIndex((o) => o.op === 'fill' && o.fillStyle === 'rgba(51,102,204,0.3)');
-      const blipAt = h.fakeCtx._ops.findIndex((o) => o.op === 'fill' && o.fillStyle === '#7a90c0');
+      const blipAt = h.fakeCtx._ops.findIndex((o) => o.op === 'fill' && o.fillStyle === 'var(--ink-dim)');
       expect(regionAt).toBeGreaterThanOrEqual(0);
       expect(blipAt).toBeGreaterThan(regionAt);
     });
@@ -744,10 +751,10 @@ describe('PhNavigationMap', () => {
         blips: [{ uuid: 'a', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'neutral', objective_target: true }],
       };
       h.tickRaf();
-      const ring = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820' && o.lineWidth === 2);
+      const ring = findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === GOLD && o.lineWidth === 2);
       expect(ring).toBeDefined();
       // blipR = max(3, 300 * 0.015) = 4.5 → ring at 10.5px around (360, 300).
-      const arc = arcFor(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820' && o.lineWidth === 2);
+      const arc = arcFor(h.fakeCtx, 'stroke', (o) => o.strokeStyle === GOLD && o.lineWidth === 2);
       expect(arc.args[0]).toBeCloseTo(360, 1);
       expect(arc.args[1]).toBeCloseTo(300, 1);
       expect(arc.args[2]).toBeCloseTo(10.5, 1);
@@ -760,7 +767,7 @@ describe('PhNavigationMap', () => {
         blips: [{ uuid: 'a', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'neutral' }],
       };
       h.tickRaf();
-      expect(findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === '#d4a820' && o.lineWidth === 2)).toBeUndefined();
+      expect(findOp(h.fakeCtx, 'stroke', (o) => o.strokeStyle === GOLD && o.lineWidth === 2)).toBeUndefined();
     });
 
   });

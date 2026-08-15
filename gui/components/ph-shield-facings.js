@@ -4,7 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
 
 export class PhShieldFacings extends HTMLElement {
   #state = null;
@@ -26,8 +26,8 @@ export class PhShieldFacings extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
     .arc-container { position: relative; display: flex; justify-content: center; align-items: center; padding: 0.5rem 0; }
     svg { width: 100%; max-width: 200px; height: auto; overflow: visible; }
     .arc-path { cursor: pointer; transition: opacity 0.2s, filter 0.2s; }
@@ -49,17 +49,17 @@ export class PhShieldFacings extends HTMLElement {
     .hit-path { fill: transparent; cursor: pointer; pointer-events: all; }
     .hit-path.down { cursor: default; }
     .hp-fill, .hp-text { pointer-events: none; }
-    .facing-label { font-size: 0.55rem; fill: var(--ink-dim); text-anchor: middle; pointer-events: none; }
+    .facing-label { font-size: var(--text-xs); fill: var(--ink-dim); text-anchor: middle; pointer-events: none; }
     .facing-label.focused-label { fill: var(--ink); font-weight: 600; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
     /* AUTO-mode press feedback (#1009): a press on an arc while facing
        selection is unstaffed (auto) does nothing server-side, so this toast
        tells the player why instead of the press silently going nowhere. */
     .auto-hint {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      max-width: 85%; font-size: 0.5rem; line-height: 1.3; letter-spacing: 0.12em;
+      max-width: 85%; font-size: var(--text-xs); line-height: 1.3; letter-spacing: 0.12em;
       text-transform: uppercase; text-align: center; color: var(--reloading);
-      background: rgba(5,8,24,0.92); border: 1px solid var(--reloading);
+      background: rgba(var(--rgb-deep), 0.92); border: 1px solid var(--reloading);
       padding: 0.3rem 0.5rem; pointer-events: none; opacity: 0;
       transition: opacity 0.2s ease;
     }
@@ -169,7 +169,7 @@ export class PhShieldFacings extends HTMLElement {
 
       // Arc outline
       const outer = `M ${x0} ${y0} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} Z`;
-      const fillColor = !online ? '#282c38' : isFocused ? '#4ec870' : '#1a3a28';
+      const fillColor = !online ? 'var(--surface-panel-up)' : isFocused ? 'var(--loaded)' : 'var(--loaded-dim)';
       const opacity = online ? (isFocused ? 0.9 : 0.5) : 0.2;
       const outline = g.children[0];
       // A full render tick rewrites the class attribute wholesale below, which
@@ -178,9 +178,9 @@ export class PhShieldFacings extends HTMLElement {
       const keepHover = outline.classList.contains('hover');
       const keepFlash = outline.classList.contains('press-flash');
       outline.setAttribute('d', outer);
-      outline.setAttribute('fill', fillColor);
+      outline.setAttribute('fill', phColor(this, fillColor));
       outline.setAttribute('opacity', opacity);
-      outline.setAttribute('stroke', isFocused ? '#4ec870' : '#282c38');
+      outline.setAttribute('stroke', phColor(this, isFocused ? 'var(--loaded)' : 'var(--surface-panel-up)'));
       outline.setAttribute('stroke-width', isFocused ? '2' : '1');
       outline.setAttribute('data-facing-id', id);
       outline.setAttribute('class', 'arc-path'
@@ -220,9 +220,9 @@ export class PhShieldFacings extends HTMLElement {
         const xo1 = cx + ro * Math.cos(a1), yo1 = cy + ro * Math.sin(a1);
 
         const fillOuter = `M ${xi0} ${yi0} L ${xo0} ${yo0} A ${ro} ${ro} 0 ${largeArc} 1 ${xo1} ${yo1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} Z`;
-        const hpColor = pct > 0.6 ? '#4ec870' : pct > 0.25 ? '#d8a040' : '#e0402c';
+        const hpColor = pct > 0.6 ? 'var(--loaded)' : pct > 0.25 ? 'var(--reloading)' : 'var(--fire)';
         hpFill.setAttribute('d', fillOuter);
-        hpFill.setAttribute('fill', hpColor);
+        hpFill.setAttribute('fill', phColor(this, hpColor));
         hpFill.setAttribute('opacity', isFocused ? '0.85' : '0.55');
         hpFill.style.display = '';
       } else {
@@ -249,7 +249,7 @@ export class PhShieldFacings extends HTMLElement {
       hpText.setAttribute('x', ix);
       hpText.setAttribute('y', iy);
       hpText.setAttribute('dy', '0.35em');
-      hpText.setAttribute('fill', online ? '#cce' : '#6a7178');
+      hpText.setAttribute('fill', phColor(this, online ? 'var(--ink)' : 'var(--edge-strong)'));
       hpText.textContent = hpLabel;
     });
   }

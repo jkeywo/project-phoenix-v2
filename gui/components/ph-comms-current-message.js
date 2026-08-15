@@ -50,26 +50,26 @@ export class PhCommsCurrentMessage extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .placeholder { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .placeholder { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
     .thread { display: flex; flex-direction: column; gap: 0.5rem; }
-    .sender-label { font-size: 0.6rem; color: #4a5060; letter-spacing: 0.15em; text-transform: uppercase; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line-faint); }
+    .sender-label { font-size: var(--text-xs); color: var(--edge); letter-spacing: 0.15em; text-transform: uppercase; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line-faint); }
     .messages { display: flex; flex-direction: column; gap: 0.35rem; max-height: 10rem; overflow-y: auto; }
-    .msg { font-size: 0.7rem; line-height: 1.4; }
-    .msg .speaker { font-weight: 700; color: #8ab; }
+    .msg { font-size: var(--text-sm); line-height: 1.4; }
+    .msg .speaker { font-weight: 700; color: var(--ink-dim); }
     .msg .text { color: var(--ink); }
     .responses { display: flex; flex-wrap: wrap; gap: 0.35rem; padding-top: 0.35rem; border-top: 1px solid var(--line-faint); }
-    .resp-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: 0.65rem; font-weight: 600; padding: 0.35rem 0.6rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
-    .resp-btn:hover:not(:disabled) { background: #161b24; border-color: #4a5060; }
+    .resp-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 600; padding: 0.35rem 0.6rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
+    .resp-btn:hover:not(:disabled) { background: var(--cyan-deep); border-color: var(--edge); }
     .resp-btn:disabled { opacity: 0.35; cursor: default; }
     /* Unavailable (sender out of range): visible but greyed and disabled,
        mirroring ph-comms-contact-list's .out-of-range. */
     .resp-btn.unavailable { opacity: 0.45; }
     /* An armed important response awaiting a confirm click. */
-    .resp-btn.important { border-color: #c8a24a; color: #e8c874; }
+    .resp-btn.important { border-color: var(--reloading); color: var(--gold-bright); }
     /* Red flash when the host rejects an attempted submission (#761 AC3). */
     .resp-btn.rejected { animation: resp-reject-flash 0.6s ease; }
     @keyframes resp-reject-flash {
-      0%   { background: #4a1515; border-color: #e05555; color: #ffb0b0; }
+      0%   { background: var(--tactical-deep); border-color: var(--fire); color: var(--tactical-bright); }
       100% { background: var(--bg-card); border-color: var(--line-faint); color: var(--ink); }
     }
   </style>

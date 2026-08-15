@@ -6,16 +6,16 @@
   <title data-i18n="console.courier_tactical.doc_title">Project Phoenix — Courier Tactical</title>
   <link rel="stylesheet" href="../console.css">
   <style>
-    body { margin: 0; background: #000; overflow: hidden; }.frame { height: 100%; }
+    body { margin: 0; background: var(--surface-void); overflow: hidden; }.frame { height: 100%; }
     .panel-inner { height: 100%; box-sizing: border-box; padding: 18px 32px; display: flex; flex-direction: column; gap: 10px; }
-    h1 { margin: 0; color: var(--ink); font: 600 24px "Chakra Petch", sans-serif; letter-spacing: .2em; } h1 small { display:block; font: 11px "JetBrains Mono", monospace; color:var(--ink-faint); }
+    h1 { margin: 0; color: var(--ink); font: 600 var(--text-2xl) "Chakra Petch", sans-serif; letter-spacing: .2em; } h1 small { display:block; font: var(--text-xs) "JetBrains Mono", monospace; color:var(--ink-faint); }
     .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--edge); background: rgba(14,17,23,.6); }
-    h2 { margin: 0; padding-bottom:5px; border-bottom:1px solid var(--edge); color:var(--ink-dim); font:600 11px "Chakra Petch",sans-serif; letter-spacing:.24em; text-transform:uppercase; }
+    .col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--edge); background: rgba(var(--rgb-panel), .6); }
+    h2 { margin: 0; padding-bottom:5px; border-bottom:1px solid var(--edge); color:var(--ink-dim); font:600 var(--text-xs) "Chakra Petch",sans-serif; letter-spacing:.24em; text-transform:uppercase; }
     ph-tactical-radar, ph-sensor-radar { width: 100%; aspect-ratio: 1 / 1; flex-shrink: 0; }
     .sticks { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.buttons { display:flex; gap:8px; }.buttons > * { flex:1; }
-    footer { display:flex; align-items:center; gap:10px; color:var(--ink-faint); font:11px "JetBrains Mono",monospace; }.dot { width:7px;height:7px;border-radius:50%;background:var(--loaded); }.spacer{flex:1;}
-    @media (orientation: portrait) { .panel-inner { padding:10px; }.body { grid-template-columns:1fr; overflow:auto; } h1 { font-size:19px; } }
+    footer { display:flex; align-items:center; gap:10px; color:var(--ink-faint); font:var(--text-xs) "JetBrains Mono",monospace; }.dot { width:7px;height:7px;border-radius:50%;background:var(--loaded); }.spacer{flex:1;}
+    @media (orientation: portrait) { .panel-inner { padding:10px; }.body { grid-template-columns:1fr; overflow:auto; } h1 { font-size:var(--text-xl); } }
   </style>
 </head>
 <body>

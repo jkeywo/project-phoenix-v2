@@ -19,24 +19,24 @@ export class PhBlastersControls extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .bank-row { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.3rem 0; }
-    .bank-top { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
+    .bank-top { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); }
     .bank-top .lbl { min-width: 2.5rem; color: var(--ink-dim); }
     .bar-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .bar-fill { height: 100%; transition: width 0.15s ease; }
     .bar-fill.charge { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .bar-fill.cooldown { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
-    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
-    .status { font-size: 0.5rem; letter-spacing: 0.15em; min-width: 4.5rem; text-align: right; color: var(--ink-dim); }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
+    .status { font-size: var(--text-xs); letter-spacing: 0.15em; min-width: 4.5rem; text-align: right; color: var(--ink-dim); }
     .bank-row.blocked .status { color: var(--fire); }
     .bank-row.unavailable .status { color: var(--ink-faint); }
     .bank-row.ready .status { color: var(--loaded); }
     .bar-row { display: flex; align-items: center; gap: 0.4rem; padding-left: 2.9rem; }
-    .bar-label { font-size: 0.55rem; color: var(--ink-dim); min-width: 2rem; }
-    .pattern-row { display: flex; gap: 0.5rem; padding-left: 2.9rem; font-size: 0.5rem; letter-spacing: 0.15em; color: var(--reloading); }
+    .bar-label { font-size: var(--text-xs); color: var(--ink-dim); min-width: 2rem; }
+    .pattern-row { display: flex; gap: 0.5rem; padding-left: 2.9rem; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--reloading); }
     .pattern-row.idle { display: none; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header"><span>${t('component.blasters.title')}</span></div>
   <div id="banks"></div>

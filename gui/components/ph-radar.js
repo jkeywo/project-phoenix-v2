@@ -1,4 +1,4 @@
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
 export class PhRadar extends HTMLElement {
   #state = null;
   #canvas = null;
@@ -154,7 +154,7 @@ export class PhRadar extends HTMLElement {
       octx = this.#offscreen.getContext('2d');
     }
 
-    octx.fillStyle = '#07080c';
+    octx.fillStyle = phColor(this, 'var(--surface-abyss)');
     octx.fillRect(0, 0, W, H);
 
     // The surround is fixed console chrome. The radar screen is the rotating,
@@ -171,7 +171,7 @@ export class PhRadar extends HTMLElement {
       octx.drawImage(this.#backgroundImage, -R, -R, R * 2, R * 2);
       octx.restore();
     } else {
-      octx.fillStyle = 'rgba(5,8,22,0.52)';
+      octx.fillStyle = phColor(this, 'rgba(var(--rgb-deep), 0.52)');
       octx.beginPath();
       octx.arc(cx, cy, R, 0, Math.PI * 2);
       octx.fill();
@@ -190,14 +190,14 @@ export class PhRadar extends HTMLElement {
       const bx = cx + (b.radar_x != null ? b.radar_x : 0) * R;
       const by = cy - (b.radar_y != null ? b.radar_y : 0) * R;
       const dotR = Math.max(6 * px, (b.scaled_radius || 0) * R * 0.6);
-      const color = b.color || '#a8b0c0';
+      const color = b.color || 'var(--ink-dim)';
 
       if (b.kind === 'waypoint') {
-        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, '#d4a820');
+        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, 'var(--gold)');
       } else if (b.kind === 'tactical-target') {
-        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, '#ff3344');
+        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, 'var(--fire-hot)');
       } else if (b.kind === 'science-target') {
-        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, '#3399ff');
+        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, 'var(--science)');
       } else {
         const iconName = b.icon;
         const icon = iconName ? this.#getIconImage(iconName) : null;
@@ -209,22 +209,22 @@ export class PhRadar extends HTMLElement {
         } else {
           octx.beginPath();
           octx.arc(bx, by, dotR, 0, Math.PI * 2);
-          octx.fillStyle = color;
+          octx.fillStyle = phColor(this, color);
           octx.fill();
         }
       }
 
       if (b.label) {
         octx.font = Math.round(11 * px) + 'px "JetBrains Mono", monospace';
-        octx.fillStyle = 'rgba(153,255,217,0.9)';
+        octx.fillStyle = phColor(this, 'rgba(var(--rgb-loaded-bright), 0.9)');
         octx.fillText(b.label, bx + dotR + 4 * px, by + 4 * px);
       }
 
       if (state.selected_target_uuid && state.selected_target_uuid === b.uuid) {
-        this.#drawRing(octx, bx, by, dotR + 6 * px, 2 * px, '#5fd8e8');
+        this.#drawRing(octx, bx, by, dotR + 6 * px, 2 * px, 'var(--signal)');
       }
       if (state.target_uuid && state.target_uuid === b.uuid) {
-        this.#drawRing(octx, bx, by, dotR + 8 * px, 2 * px, '#ff3344');
+        this.#drawRing(octx, bx, by, dotR + 8 * px, 2 * px, 'var(--fire-hot)');
       }
 
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
@@ -240,7 +240,7 @@ export class PhRadar extends HTMLElement {
   #drawRing(ctx, x, y, r, lineWidth, color) {
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = phColor(this, color);
     ctx.lineWidth = lineWidth;
     ctx.stroke();
   }
@@ -250,7 +250,7 @@ export class PhRadar extends HTMLElement {
     const r = Math.max(7 * px, dotR + 3 * px);
     ctx.save();
     ctx.translate(bx, by);
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = phColor(this, color);
     ctx.lineWidth = (edge ? 2.5 : 2) * px;
 
     ctx.beginPath();
@@ -260,7 +260,7 @@ export class PhRadar extends HTMLElement {
     ctx.lineTo(-r, 0);
     ctx.closePath();
     ctx.globalAlpha = edge ? 0.15 : 0.26;
-    ctx.fillStyle = color;
+    ctx.fillStyle = phColor(this, color);
     ctx.fill();
     ctx.globalAlpha = 1.0;
     ctx.stroke();
@@ -275,7 +275,7 @@ export class PhRadar extends HTMLElement {
       ctx.lineTo(4 * px, -r - 1 * px);
       ctx.lineTo(-4 * px, -r - 1 * px);
       ctx.closePath();
-      ctx.fillStyle = color;
+      ctx.fillStyle = phColor(this, color);
       ctx.fill();
     }
     ctx.restore();

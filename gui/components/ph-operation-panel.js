@@ -78,26 +78,26 @@ export class PhOperationPanel extends HTMLElement {
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .heading { font-size: 0.6rem; letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
-    .row { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.7rem; line-height: 1.3; padding: 0.1rem 0.2rem; }
+    .heading { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
+    .row { display: flex; align-items: baseline; gap: 0.5rem; font-size: var(--text-sm); line-height: 1.3; padding: 0.1rem 0.2rem; }
     .row .verb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row .state { flex-shrink: 0; letter-spacing: 0.1em; color: var(--cyan); }
     .track { height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; margin: 0.25rem 0.2rem; }
     .fill { height: 100%; width: 0; background: var(--cyan); }
-    .reason { font-size: 0.62rem; color: var(--warn, var(--ink-dim)); padding: 0 0.2rem 0.2rem; letter-spacing: 0.05em; }
-    .slowed { font-size: 0.62rem; color: var(--warn, var(--ink-dim)); padding: 0 0.2rem 0.2rem; letter-spacing: 0.05em; }
-    select { width: 100%; font-family: inherit; font-size: 0.65rem; letter-spacing: 0.1em;
+    .reason { font-size: var(--text-xs); color: var(--reloading); padding: 0 0.2rem 0.2rem; letter-spacing: 0.05em; }
+    .slowed { font-size: var(--text-xs); color: var(--reloading); padding: 0 0.2rem 0.2rem; letter-spacing: 0.05em; }
+    select { width: 100%; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.1em;
              padding: 0.3rem; margin-top: 0.2rem; background: transparent; color: var(--ink);
              border: 1px solid var(--line-soft); border-radius: 2px; }
-    :host([data-state="stalled"]) .fill { background: var(--warn, var(--ink-dim)); }
-    :host([data-state="stalled"]) .state { color: var(--warn, var(--ink-dim)); }
+    :host([data-state="stalled"]) .fill { background: var(--reloading); }
+    :host([data-state="stalled"]) .state { color: var(--reloading); }
     :host([data-state="failed"]) .fill,
     :host([data-state="failed"]) .state { background: none; color: var(--ink-dim); }
     :host([data-state="failed"]) .fill { background: var(--ink-dim); }
-    :host([data-state="completed"]) .fill { background: var(--loaded, var(--cyan)); }
+    :host([data-state="completed"]) .fill { background: var(--loaded); }
     :host([data-state="aborted"]) .fill { background: var(--ink-dim); }
-    button { width: 100%; font-family: inherit; font-size: 0.65rem; letter-spacing: 0.15em;
+    button { width: 100%; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.15em;
              padding: 0.35rem; margin-top: 0.2rem; background: transparent; color: var(--ink);
              border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; }
     button:disabled { color: var(--ink-dim); cursor: default; }

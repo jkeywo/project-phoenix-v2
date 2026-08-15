@@ -28,25 +28,25 @@ export class PhLateralThrustJoystick extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.3rem; }
-    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.3rem; }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     .track {
       position: relative; width: 180px; height: 32px; border-radius: 16px;
-      background: linear-gradient(to right, #0a0d11 0%, #14171c 50%, #0a0d11 100%);
+      background: linear-gradient(to right, var(--surface-panel) 0%, var(--surface-panel) 50%, var(--surface-panel) 100%);
       border: 1px solid var(--line-faint); cursor: grab; touch-action: none; flex-shrink: 0;
     }
     .track:active { cursor: grabbing; }
     .track.auto { cursor: default; }
-    .center-line { position: absolute; left: 50%; top: 4px; bottom: 4px; width: 1px; background: rgba(108,182,208,0.25); pointer-events: none; }
-    .labels { position: absolute; inset: 0; display: flex; justify-content: space-between; align-items: center; padding: 0 8px; pointer-events: none; font-size: 9px; color: rgba(108,182,208,0.35); letter-spacing: 0.15em; }
+    .center-line { position: absolute; left: 50%; top: 4px; bottom: 4px; width: 1px; background: rgba(var(--rgb-cyan), 0.25); pointer-events: none; }
+    .labels { position: absolute; inset: 0; display: flex; justify-content: space-between; align-items: center; padding: 0 8px; pointer-events: none; font-size: var(--text-xs); color: rgba(var(--rgb-cyan), 0.35); letter-spacing: 0.15em; }
     .nub {
       position: absolute; left: 50%; top: 50%; width: 28px; height: 28px; border-radius: 50%;
-      background: radial-gradient(circle at 35% 30%, #3a4049 0%, #22262d 50%, #14171c 100%);
-      border: 1.5px solid rgba(108,182,208,0.8); box-shadow: 0 0 12px rgba(108,182,208,0.3);
+      background: radial-gradient(circle at 35% 30%, var(--cyan-dim) 0%, var(--surface-panel-up) 50%, var(--surface-panel) 100%);
+      border: 1.5px solid rgba(var(--rgb-cyan), 0.8); box-shadow: 0 0 12px rgba(var(--rgb-cyan), 0.3);
       transform: translate(-50%, -50%); pointer-events: none; transition: none;
       will-change: margin-left;
     }
-    .readout { font-size: 0.75rem; color: rgba(108,182,208,0.8); letter-spacing: 0.1em; margin-top: 0.25rem; }
+    .readout { font-size: var(--text-sm); color: rgba(var(--rgb-cyan), 0.8); letter-spacing: 0.1em; margin-top: 0.25rem; }
   </style>
   <div class="header">
     <span>${t('component.lateral.title')}</span>

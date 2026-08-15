@@ -40,6 +40,11 @@
   --surface-high:      #161e44;
   --surface-lift:      #1a2148;   /* chamfer stroke floor, pressed states */
   --surface-ridge:     #2a3568;
+  /* The neutral fill every console draws behind a content column. Warmer and
+     less saturated than the navy ramp, which is why it is its own rung rather
+     than being collapsed into --surface-base. */
+  --surface-panel:     #0e1117;
+  --surface-panel-up:  #1e2332;
 
   /* Legacy names for the same six rungs. The console documents and every
      component already speak these; they are aliases, not a second ramp. */
@@ -112,41 +117,48 @@
   --cyan-dim:          #1a3848;
   --cyan-deep:         #0a1c24;
 
+  --science:           #3399ff;   /*  5.55:1 — informational blue: science
+                                      targets, comms attention */
   --signal:            #5fd8e8;   /* 11.16:1 — the lobby's active accent */
   --gold-bright:       #e8c84a;
   --gold:              #d4a820;   /*  8.43:1 — waypoints, torpedo badges */
   --sky:               #88aaff;   /*  8.27:1 — links, "this is mine" */
   --violet:            #8c64c8;
 
-  /* Aliases the lobby used to define for itself. */
-  --signal-cyan:       var(--signal);
-  --alert-red:         var(--fire-bright);
-  --amber:             var(--reloading);
-  --warn:              var(--reloading);
-  --bg:                var(--surface-void);
-  --surface:           var(--surface-deep);
-  --surface2:          var(--surface-card);
-  --dim:               var(--ink-faint);
+  /* The lobby's parallel set — `--bg`, `--surface`, `--surface2`, `--dim`,
+     `--signal-cyan`, `--alert-red`, `--amber` — is deliberately NOT aliased
+     here. Keeping the old names alive as aliases would have let the two
+     vocabularies go on quietly coexisting, which is the state this file
+     exists to end; every call site now names a rung above.
+     tests/client/console-tokens.test.js fails if the lobby grows a `:root`
+     of its own again. */
 
   /* ── Channel triplets ───────────────────────────────────────────
      Alpha is genuinely per-use — a scrim, a glow, a translucent arc fill —
      but the COLOUR underneath it is not. These let a rule write
      `rgba(var(--rgb-cyan), 0.35)` and stay inside the vocabulary. */
-  --rgb-void:          0, 0, 0;
-  --rgb-white:         255, 255, 255;
-  --rgb-deep:          5, 8, 24;
-  --rgb-base:          10, 16, 40;
-  --rgb-ink:           216, 226, 255;
-  --rgb-edge:          58, 70, 116;
-  --rgb-edge-control:  77, 93, 155;
-  --rgb-tactical:      240, 132, 56;
-  --rgb-fire:          225, 67, 48;
-  --rgb-loaded:        78, 200, 112;
-  --rgb-reloading:     216, 160, 64;
-  --rgb-cyan:          108, 182, 208;
-  --rgb-signal:        95, 216, 232;
-  --rgb-gold:          212, 168, 32;
-  --rgb-sky:           136, 170, 255;
+  --rgb-void:            0, 0, 0;
+  --rgb-white:           255, 255, 255;
+  --rgb-deep:            5, 8, 24;
+  --rgb-base:            10, 16, 40;
+  --rgb-panel:           14, 17, 23;
+  --rgb-panel-up:        30, 35, 50;
+  --rgb-ink:             216, 226, 255;
+  --rgb-edge:            58, 70, 116;
+  --rgb-edge-control:    77, 93, 155;
+  --rgb-edge-strong:     90, 102, 148;
+  --rgb-tactical:        240, 132, 56;
+  --rgb-fire:            225, 67, 48;
+  --rgb-loaded:          78, 200, 112;
+  --rgb-loaded-bright:   153, 255, 217;
+  --rgb-reloading:       216, 160, 64;
+  --rgb-cyan:            108, 182, 208;
+  --rgb-cyan-dim:        26, 56, 72;
+  --rgb-signal:          95, 216, 232;
+  --rgb-gold:            212, 168, 32;
+  --rgb-sky:             136, 170, 255;
+  --rgb-science:         51, 153, 255;
+  --rgb-violet:          140, 100, 200;
 
   /* Scrims — a panel over a scene, in the one place each is used. */
   --scrim-panel:       rgba(var(--rgb-base), 0.60);
@@ -183,6 +195,19 @@
   --text-2xl:          max(24px, 1.75rem);
   --text-display:      max(28px, 2.625rem);             /* console title */
 
+  /* The console root itself, which is what every `rem` above is relative to.
+     Named here because it is the reason the ramp needs a floor at all: at
+     11px root, a bare `0.6rem` label renders at 6.6px. */
+  --root-size-portrait:   clamp(11px, 3vw, 15px);
+  --root-size-landscape:  clamp(13px, 1.65vw, 16px);
+
+  /* SVG user-space type. A radar overlay draws into `viewBox="0 0 100 100"`,
+     where a font-size is in VIEWBOX UNITS and scales with the element — so it
+     is not on the CSS ramp and the px floor above does not apply to it. Its
+     rendered size is a radar-module concern (PRD #1023 module 2); it is named
+     here so it is still a value with a home rather than a magic number. */
+  --svg-badge-size:       3.2px;
+
   --tracking-tight:    0.02em;
   --tracking:          0.12em;
   --tracking-wide:     0.18em;
@@ -206,8 +231,11 @@
   --control-h-md:      1.9rem;    /* the compact LED pill */
   --control-h-lg:      5.5rem;    /* the full-screen console pill */
 
-  --control-font-sm:   0.9rem;
-  --control-font-md:   0.62rem;
+  /* Control labels ride the ramp, so the legibility floor reaches them too —
+     `0.62rem` was 6.8px on a narrow phone. The control HEIGHTS above are
+     unchanged; raising those to --control-hit-min is module 3's sweep. */
+  --control-font-sm:   var(--text-sm);
+  --control-font-md:   var(--text-xs);
   --control-font-lg:   var(--text-2xl);
 
   --control-cham-sm:   0.22rem;

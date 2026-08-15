@@ -1,5 +1,5 @@
 /**
- * tests/client/console-tokens.test.js — the console token vocabulary.
+ * tests/client/console-tokens.test.js — no reference to a token nothing defines.
  *
  * A console page is an IFRAME: a separate document that inherits nothing from
  * client.html. Its shared vocabulary is the `:root` block in gui/tokens.css,
@@ -15,16 +15,16 @@
  * panel columns rendered borderless.
  *
  * So: every `var(--x)` written without a fallback must resolve to a property
- * something in scope defines.
+ * something in scope defines. The companion rule — that a stylesheet may not
+ * hardcode a value instead of naming a token — lives in design-tokens.test.js.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const GUI = path.join(REPO_ROOT, 'gui');
-const TOKENS_CSS = path.join(GUI, 'tokens.css');
+import {
+  GUI, TOKENS_CSS, REPO_ROOT, readStripped, definedProps,
+  referencedWithoutFallback, setAtRuntime, rel,
+} from './css-scan.js';
 
 /** Every file under gui/ that carries CSS: console documents and components. */
 function styledFiles() {
@@ -44,44 +44,7 @@ function styledFiles() {
   return out;
 }
 
-/** Custom-property DEFINITIONS in a source: `--name:` outside a `var(` call. */
-function definedProps(source) {
-  const names = new Set();
-  const re = /(^|[^-\w])(--[a-z0-9-]+)\s*:/gi;
-  let m;
-  while ((m = re.exec(source)) !== null) {
-    // `var(--x, ...)` never matches (the comma, not a colon, follows), but a
-    // `style.setProperty('--charge', v)` call does not match either — those are
-    // picked up by SET_AT_RUNTIME below.
-    names.add(m[2]);
-  }
-  return names;
-}
-
-/**
- * Custom-property REFERENCES with no fallback: `var(--name)` but not
- * `var(--name, something)`. A fallback is the author saying "this may be
- * absent", which is a deliberate, safe choice and not what this test polices.
- */
-function referencedWithoutFallback(source) {
-  const names = [];
-  const re = /var\(\s*(--[a-z0-9-]+)\s*\)/gi;
-  let m;
-  while ((m = re.exec(source)) !== null) names.push(m[1]);
-  return names;
-}
-
-/** Properties assigned from JS at runtime via setProperty('--x', …). */
-function setAtRuntime(source) {
-  const names = new Set();
-  const re = /setProperty\(\s*['"](--[a-z0-9-]+)['"]/gi;
-  let m;
-  while ((m = re.exec(source)) !== null) names.add(m[1]);
-  return names;
-}
-
-const tokensSource = fs.readFileSync(TOKENS_CSS, 'utf8');
-const rootBlock = tokensSource.match(/:root\s*\{([\s\S]*)\}/);
+const rootBlock = fs.readFileSync(TOKENS_CSS, 'utf8').match(/:root\s*\{([\s\S]*)\}/);
 const SHARED_TOKENS = definedProps(rootBlock ? rootBlock[1] : '');
 
 describe('gui/tokens.css :root token vocabulary', () => {
@@ -106,9 +69,8 @@ describe('no console document or component references an undefined token', () =>
   });
 
   for (const file of files) {
-    const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
-    it(`${rel} resolves every var(--x) it writes without a fallback`, () => {
-      const source = fs.readFileSync(file, 'utf8');
+    it(`${rel(file)} resolves every var(--x) it writes without a fallback`, () => {
+      const source = readStripped(file);
       // In scope: the shared :root tokens, anything this file defines itself
       // (component-local geometry like --btn-h, --cham, --hero-bar), and
       // anything it assigns from JS at runtime (--charge).
@@ -122,4 +84,23 @@ describe('no console document or component references an undefined token', () =>
       expect(missing).toEqual([]);
     });
   }
+});
+
+describe('the lobby speaks the shared vocabulary', () => {
+  it('no longer defines a parallel token set of its own', () => {
+    // client.html used to carry its own `:root`, with an `--edge` that was a
+    // different colour from the consoles' and a `--dim` below the contrast
+    // floor. Both retired into gui/tokens.css.
+    const lobby = readStripped(path.join(REPO_ROOT, 'client.html'));
+    const roots = lobby.match(/:root\s*\{[\s\S]*?\}/g) || [];
+    const defined = new Set();
+    for (const block of roots) for (const name of definedProps(block)) defined.add(name);
+    // The bezel keeps its own handful: they are that one animation's
+    // parameters, not vocabulary anything else speaks.
+    const allowed = new Set([
+      '--bezel-frame', '--bezel-glow-size', '--bezel-pulse-intensity',
+      '--bezel-red', '--bezel-inset',
+    ]);
+    expect([...defined].filter((n) => !allowed.has(n)).sort()).toEqual([]);
+  });
 });

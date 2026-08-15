@@ -20,6 +20,11 @@
   <meta name="phoenix-build-demo" content="false" />
   <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
+<!-- The shared design vocabulary (PRD #1023 module 1): colours, edges, ink,
+     accents, space, the type ramp and its legibility floor, and the control
+     sizes. Defined once and consumed by this page, the host viewscreen, and
+     every console document (which reaches it through gui/console.css). -->
+<link rel="stylesheet" href="gui/tokens.css" />
 
   <!-- CDN deps loaded before our script so they're in scope synchronously -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -595,7 +600,7 @@
     }
     .hud-value {
       font: 500 18px/1 "JetBrains Mono", monospace;
-      color: var(--signal-cyan);
+      color: var(--signal);
     }
     #hud-overlay.alert-on .hud-value { color: var(--alert); }
 

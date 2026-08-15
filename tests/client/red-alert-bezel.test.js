@@ -85,7 +85,7 @@ describe('reduced motion', () => {
     // information: a player on reduced motion must still be able to tell that
     // the ship is at red alert, so the bezel holds at the pulse's peak.
     const block = reducedMotionBlock(CLIENT_HTML);
-    expect(block).toMatch(/border-color:\s*#ff5a44/);
+    expect(block).toMatch(/border-color:\s*var\(--fire-hot\)/);
     expect(block).toContain('box-shadow');
     expect(block).not.toMatch(/display:\s*none/);
   });

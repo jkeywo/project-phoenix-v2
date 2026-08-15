@@ -199,6 +199,62 @@ try {
 export const phConsoleStyles = sheet;
 export const phConsoleStylesText = CSS;
 
+// ── Tokens where CSS cannot reach: canvas paint and SVG attributes ─────────
+//
+// A `<canvas>` 2D context takes colour STRINGS, and an SVG presentation
+// attribute takes an attribute VALUE. Neither is a CSS declaration, so neither
+// substitutes `var(--cyan)` — the radar would silently paint nothing. Those
+// call sites are why a codebase grows a second, hand-maintained copy of its
+// palette in JavaScript, which is the thing this module exists to prevent.
+//
+// So they keep naming tokens and resolve them here, against the live document,
+// once per (element, expression). A retint of gui/tokens.css therefore reaches
+// the radar as well as the chrome.
+//
+// Where nothing can resolve them — Node and jsdom, which load no stylesheet —
+// the expression is handed back unchanged. Canvas is stubbed in those tests
+// anyway, and an assertion that names the token is a better test than one that
+// repeats a hex value.
+const colourCache = typeof WeakMap === 'function' ? new WeakMap() : null;
+
+/**
+ * Resolve every `var(--x)` in a CSS colour expression against `el`'s computed
+ * style. Handles bare tokens (`var(--cyan)`) and channel triplets
+ * (`rgba(var(--rgb-cyan), 0.2)`) alike.
+ *
+ * @param {Element} el    the element whose computed style carries the tokens
+ * @param {string} expr   a colour expression naming tokens
+ * @returns {string}      the resolved colour, or `expr` if it cannot resolve
+ */
+export function phColor(el, expr) {
+  if (typeof expr !== 'string' || expr.indexOf('var(--') === -1) return expr;
+  if (!el || typeof getComputedStyle !== 'function') return expr;
+
+  let perEl = colourCache && colourCache.get(el);
+  if (perEl) {
+    const hit = perEl.get(expr);
+    if (hit !== undefined) return hit;
+  }
+
+  let style;
+  try { style = getComputedStyle(el); } catch (_) { return expr; }
+  if (!style || typeof style.getPropertyValue !== 'function') return expr;
+
+  let resolvable = true;
+  const out = expr.replace(/var\((--[a-z0-9-]+)\)/g, (whole, name) => {
+    const value = (style.getPropertyValue(name) || '').trim();
+    if (!value) { resolvable = false; return whole; }
+    return value;
+  });
+  const result = resolvable ? out : expr;
+
+  if (colourCache) {
+    if (!perEl) { perEl = new Map(); colourCache.set(el, perEl); }
+    perEl.set(expr, result);
+  }
+  return result;
+}
+
 /**
  * Adopt the shared control family into a shadow root — or into a document.
  *

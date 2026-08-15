@@ -200,7 +200,9 @@ describe('PhTacticalRadar', () => {
     const g = el.shadowRoot.getElementById('selected-highlight');
     const circles = g.querySelectorAll('circle');
     expect(circles.length).toBe(1);
-    expect(circles[0].getAttribute('stroke')).toBe('#6cb6d0');
+    // The scope names the token; phColor resolves it against the document.
+    // jsdom has no stylesheet, so the expression arrives unresolved.
+    expect(circles[0].getAttribute('stroke')).toBe('var(--cyan)');
     expect(circles[0].getAttribute('fill')).toBe('none');
     expect(circles[0].getAttribute('cx')).toBe('50.0');
     expect(circles[0].getAttribute('cy')).toBe('27.0');

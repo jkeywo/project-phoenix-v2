@@ -27,13 +27,13 @@ export class PhBoostBtn extends HTMLElement {
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
-    .binding { margin-left: auto; font-size: 0.55rem; letter-spacing: 0.15em; color: var(--ink-faint); }
-    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
-    .btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: all 0.15s ease; }
+    .header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .binding { margin-left: auto; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--ink-faint); }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: var(--text-md); font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: all 0.15s ease; }
     .btn.available { background: var(--bg-card); border-color: var(--loaded); color: var(--loaded); }
     .btn.available:hover:not(:disabled) { background: var(--loaded-dim); }
-    .btn.active { background: #0a2a1a; border-color: var(--loaded); color: var(--loaded); text-shadow: 0 0 8px rgba(78,200,112,0.5); }
+    .btn.active { background: var(--loaded-deep); border-color: var(--loaded); color: var(--loaded); text-shadow: 0 0 8px rgba(var(--rgb-loaded), 0.5); }
     .btn.recharging { background: var(--bg-card); border-color: var(--ink-dim); color: var(--ink-dim); }
     .btn:disabled { opacity: 0.4; cursor: default; }
     .recharge-wrap { width: 100%; height: 0.4rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; margin-bottom: 0.3rem; }

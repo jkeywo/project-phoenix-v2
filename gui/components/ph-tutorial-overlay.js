@@ -56,28 +56,28 @@ export class PhTutorialOverlay extends BaseElement {
     :host([hidden]) { display: none; }
     :host * { box-sizing: border-box; }
     .card {
-      background: rgba(10, 20, 34, 0.92); border: 1px solid var(--cyan-dim);
+      background: rgba(var(--rgb-base), 0.92); border: 1px solid var(--cyan-dim);
       padding: 0.7rem 0.9rem; display: flex; flex-direction: column; gap: 0.35rem;
     }
     .eyebrow-row { display: flex; align-items: baseline; gap: 0.5rem; }
     .eyebrow {
-      font-family: 'Chakra Petch', sans-serif; font-size: 0.6rem;
+      font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs);
       letter-spacing: 0.25em; color: var(--cyan); text-transform: uppercase;
     }
-    .more { margin-left: auto; font-size: 0.55rem; letter-spacing: 0.15em; color: var(--ink-faint); }
+    .more { margin-left: auto; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--ink-faint); }
     .title {
-      font-family: 'Chakra Petch', sans-serif; font-size: 0.85rem; font-weight: 600;
+      font-family: 'Chakra Petch', sans-serif; font-size: var(--text-md); font-weight: 600;
       letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink);
     }
-    .text { font-size: 0.7rem; line-height: 1.5; color: var(--ink-dim); }
+    .text { font-size: var(--text-sm); line-height: 1.5; color: var(--ink-dim); }
     .dismiss {
       align-self: flex-end; font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.18em;
+      font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.18em;
       text-transform: uppercase; color: var(--cyan); background: transparent;
       border: 1px solid var(--cyan-dim); padding: 0.3rem 0.8rem; cursor: pointer;
       touch-action: manipulation;
     }
-    .dismiss:hover { background: rgba(26, 56, 72, 0.55); }
+    .dismiss:hover { background: rgba(var(--rgb-cyan-dim), 0.55); }
   </style>
   <div class="card">
     <div class="eyebrow-row">

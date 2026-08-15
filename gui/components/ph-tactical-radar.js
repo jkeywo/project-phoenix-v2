@@ -5,7 +5,7 @@ import './ph-radar.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
 
 export class PhTacticalRadar extends HTMLElement {
   #state = null;
@@ -26,15 +26,15 @@ export class PhTacticalRadar extends HTMLElement {
       '.overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
       '.corner-label {',
       '  position: absolute; pointer-events: none; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.6rem;',
-      '  letter-spacing: 0.1em; color: #5a6a7e;',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
+      '  letter-spacing: 0.1em; color: var(--edge-strong);',
       '}',
       '.corner-label.top-left { top: 4%; left: 6%; }',
       '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
       '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
       '#torpedo-badges text {',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: 3.2px;',
-      '  letter-spacing: 0.08em; fill: #e8c84a;',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--svg-badge-size);',
+      '  letter-spacing: 0.08em; fill: var(--gold-bright);',
       '}',
       '</style>',
       '<div class="container">',
@@ -106,8 +106,8 @@ export class PhTacticalRadar extends HTMLElement {
 
   #renderOverlays(s) {
     const cx = 50, cy = 50, r = 46;
-    this.#renderArcGroup(s.phaser_arcs || [], 'phaser-arcs', cx, cy, r, '#4ec870', 0.3);
-    this.#renderArcGroup(s.torpedo_arcs || [], 'torpedo-arcs', cx, cy, r, '#e8c84a', 0.25);
+    this.#renderArcGroup(s.phaser_arcs || [], 'phaser-arcs', cx, cy, r, 'var(--loaded)', 0.3);
+    this.#renderArcGroup(s.torpedo_arcs || [], 'torpedo-arcs', cx, cy, r, 'var(--gold-bright)', 0.25);
     this.#renderHighlight(s, cx, cy, r);
     this.#renderTorpedoBadges(s, cx, cy, r);
   }
@@ -171,7 +171,7 @@ export class PhTacticalRadar extends HTMLElement {
       if (i < g.children.length) { path = g.children[i]; }
       else { path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); g.appendChild(path); }
       path.setAttribute('d', d);
-      path.setAttribute('fill', a.color || defaultColor);
+      path.setAttribute('fill', phColor(this, a.color || defaultColor));
       path.setAttribute('fill-opacity', String(a.opacity ?? defaultOpacity));
     });
   }
@@ -188,8 +188,8 @@ export class PhTacticalRadar extends HTMLElement {
     let circle = g.firstChild;
     if (!circle) {
       circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      circle.setAttribute('fill', 'none');
-      circle.setAttribute('stroke', '#6cb6d0');
+      circle.setAttribute('fill', phColor(this, 'none'));
+      circle.setAttribute('stroke', phColor(this, 'var(--cyan)'));
       circle.setAttribute('stroke-width', '1.5');
       g.appendChild(circle);
     }

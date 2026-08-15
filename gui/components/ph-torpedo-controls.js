@@ -30,12 +30,12 @@ export class PhTorpedoControls extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .magazine { font-size: 0.9rem; color: var(--tactical); font-weight: 600; font-family: 'Chakra Petch', sans-serif; }
-    .tube-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.65rem; padding: 0.3rem 0; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .magazine { font-size: var(--text-md); color: var(--tactical); font-weight: 600; font-family: 'Chakra Petch', sans-serif; }
+    .tube-row { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-xs); padding: 0.3rem 0; }
     .tube-row + .tube-row { border-top: 1px solid var(--line-faint); }
     .tube-row .lbl { min-width: 4rem; color: var(--ink-dim); flex-shrink: 0; }
-    .tube-row .status { font-size: 0.5rem; letter-spacing: 0.15em; color: var(--ink-dim); flex-shrink: 0; }
+    .tube-row .status { font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--ink-dim); flex-shrink: 0; }
     .tube-row.blocked .status { color: var(--fire); }
     .tube-row.unavailable .status { color: var(--ink-faint); }
     .tube-row.ready .status { color: var(--loaded); }
@@ -43,25 +43,25 @@ export class PhTorpedoControls extends HTMLElement {
     .torp-slots { display: flex; gap: 0.2rem; align-items: center; }
     .torp-slot {
       position: relative; width: 0.85rem; height: 1.4rem; border-radius: 2px; overflow: hidden; flex-shrink: 0;
-      background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.20);
+      background: rgba(var(--rgb-white), 0.10); border: 1px solid rgba(var(--rgb-white), 0.20);
     }
     .torp-slot[data-state="queued-to-fill"], .torp-slot[data-state="loading"] {
-      border-color: rgba(78,200,112,0.55); border-style: dashed;
+      border-color: rgba(var(--rgb-loaded), 0.55); border-style: dashed;
     }
     .torp-slot[data-state="filled"] {
-      border-color: var(--loaded); box-shadow: 0 0 4px rgba(78,200,112,0.5);
+      border-color: var(--loaded); box-shadow: 0 0 4px rgba(var(--rgb-loaded), 0.5);
     }
     .torp-slot[data-state="queued-to-empty"] {
-      border-color: rgba(255,255,255,0.45); border-style: dashed;
+      border-color: rgba(var(--rgb-white), 0.45); border-style: dashed;
     }
     .torp-slot .fill {
       position: absolute; bottom: 0; left: 0; right: 0; height: 0%;
-      background: linear-gradient(0deg, var(--loaded) 0%, #7ee29a 100%);
+      background: linear-gradient(0deg, var(--loaded) 0%, var(--loaded-bright) 100%);
       transition: height 0.15s linear;
     }
-    .pattern-row { display: flex; gap: 0.5rem; padding-left: 4.5rem; font-size: 0.5rem; letter-spacing: 0.15em; color: var(--reloading); }
+    .pattern-row { display: flex; gap: 0.5rem; padding-left: 4.5rem; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--reloading); }
     .pattern-row.idle { display: none; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>${t('component.torpedoes.title')}</span>

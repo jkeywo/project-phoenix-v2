@@ -22,15 +22,15 @@ export class PhCameraSelect extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     #container { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 0.35rem; }
-    .cam-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink-dim); font-family: 'Chakra Petch', sans-serif; font-size: 0.7rem; font-weight: 600; padding: 0.5rem 0; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; transition: all 0.15s ease; }
-    .cam-btn:hover:not(:disabled) { background: #161b24; color: #aab; }
-    .cam-btn.active { background: #1a2a3a; border-color: var(--cyan); color: var(--cyan); }
-    .cam-btn.active:hover { background: #1e2f42; }
+    .cam-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink-dim); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-sm); font-weight: 600; padding: 0.5rem 0; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; transition: all 0.15s ease; }
+    .cam-btn:hover:not(:disabled) { background: var(--cyan-deep); color: var(--ink-dim); }
+    .cam-btn.active { background: var(--surface-panel-up); border-color: var(--cyan); color: var(--cyan); }
+    .cam-btn.active:hover { background: var(--cyan-dim); }
     .cam-btn:disabled { opacity: 0.4; cursor: default; }
-    .placeholder { font-size: 0.7rem; color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
+    .placeholder { font-size: var(--text-sm); color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
   </style>
   <div class="header">
     <span>${t('component.camera_select.title')}</span>

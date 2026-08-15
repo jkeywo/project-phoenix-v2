@@ -110,42 +110,61 @@ exists, and no relay meant no CGNAT/hotspot connection at all. The repository's
 Pages deploy, so deployed configuration drifts from the file that describes it
 with nothing to notice.
 
+Since `e407bfd9` a client whose credential worker is unreachable falls back to
+the free shared OpenRelay TURN and says so (`relaySource: 'openrelay'`), so a
+broken worker is now a *degraded* connection rather than no connection at all.
+That is a safety net, not a fix: OpenRelay is shared, unmetered and nobody's
+promise. Everything below still needs doing.
+
 - [ ] **Redeploy the dev worker** to push the current CORS allowlist:
 
       ```
       cd worker && npx wrangler deploy
       ```
 
-      Until this is done `pp-dev` has no TURN at all.
-- [ ] **Fix the demo worker's Metered credentials.**
-      `phoenix-turn-credentials-demo` currently answers **401** from Metered.ca,
-      i.e. a wrong `METERED_KEY` or `METERED_APP` for that target, so `pp-demo`
-      has no TURN either. The key is a secret and must be set per worker name:
+      Until this is done `pp-dev` has no worker relay and every player is on the
+      shared fallback.
+- [ ] **Give each worker at least one working credential source.** The worker
+      now tries Metered.ca and Cloudflare Realtime TURN concurrently and needs
+      only one to succeed; the demo worker was last seen failing its Metered
+      source. Secrets are per worker name, so set them for each config
+      separately:
 
       ```
-      cd worker && npx wrangler secret put METERED_KEY --config wrangler.demo.toml
+      cd worker
+      npx wrangler secret put METERED_KEY                                  # dev
+      npx wrangler secret put CF_TURN_KEY_ID
+      npx wrangler secret put CF_TURN_API_TOKEN
+      npx wrangler secret put METERED_KEY       --config wrangler.demo.toml
+      npx wrangler secret put CF_TURN_KEY_ID    --config wrangler.demo.toml
+      npx wrangler secret put CF_TURN_API_TOKEN --config wrangler.demo.toml
       ```
 
-- [ ] **Verify each worker by hand after any domain or origin change.** The
-      failure is silent from the page's side, so check it from outside:
+      Configuring both sources is the cheap redundancy: either alone is enough,
+      and a source that starts failing then costs a header line rather than the
+      relay.
+- [ ] **Verify each worker by hand after any domain, origin or secret change.**
+      The failure is silent from the page's side, so check it from outside:
 
       ```
       curl -D - -o /dev/null -H "Origin: https://pp-demo.kiwigamedesign.co.uk" \
         https://phoenix-turn-credentials-demo.project-phoenix.workers.dev
       ```
 
-      Expect `200` and an `Access-Control-Allow-Origin` **equal to the Origin you
-      sent**. Anything else — a different origin echoed, a 401, a 502 — means
-      clients on mobile networks will fail to connect while the host page looks
-      healthy.
+      Expect **`200`**, an `Access-Control-Allow-Origin` **equal to the Origin
+      you sent**, and **no `X-Turn-Source-Errors` header**. A `502` means every
+      credential source failed. A `200` *with* `X-Turn-Source-Errors` means one
+      source is down and the other is carrying it — worth fixing before it is
+      the only one. A different origin echoed means the CORS allowlist is stale,
+      which is the 2026-08 failure exactly.
 - [ ] **Keep the two `ALLOWED_ORIGIN` lists in step with reality.**
       `worker/wrangler.toml` (dev) lists `pp-dev`, the `github.io` origin and
       `localhost:3911`; `worker/wrangler.demo.toml` (demo) lists `pp-demo` only.
       Adding a hostname to either file does nothing until that worker is
       redeployed.
-- [ ] **Record what you deployed.** Note the date and the `ALLOWED_ORIGIN` value
-      each worker was last deployed with, here or in the deploy notes. The
-      deployed value is otherwise invisible.
+- [ ] **Record what you deployed.** Note the date, the `ALLOWED_ORIGIN` value
+      and which credential sources were configured, for each worker, here or in
+      the deploy notes. The deployed values are otherwise invisible.
 
 ---
 
@@ -226,6 +245,8 @@ phones on a real network, so it stays here.
 - [ ] Host on the deployed public build, join from a phone on **mobile data**
       (not Wi-Fi) — this is the case the TURN relay exists for and the one the
       2026-08 outage broke. Confirm the host page's connection diagnostics report
-      a relay is available.
+      a relay is available **from the worker**, not the shared OpenRelay
+      fallback: the lobby shows a "using free fallback relay" notice when
+      `relaySource` is `openrelay`, and seeing it means §3 is not finished.
 - [ ] Load the public build twice from a cold cache and a warm one, and confirm
       the second load does not re-download the WASM.

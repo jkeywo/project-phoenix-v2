@@ -68,6 +68,58 @@ describe('lobbyViewModel — rows', () => {
   });
 });
 
+// PRD #1023 module 4 / user story 2: "I want to read what a station does
+// before I claim it". The contract is therefore about a row whose button is
+// 'claim' — an unclaimed seat that already carries its copy.
+describe('lobbyViewModel — station descriptions before the claim', () => {
+  it('carries a description on a free (claimable) row', () => {
+    const s = uiState({
+      stations: [helmRow({ description: 'Pilot the ship.' })],
+    });
+    const vm = lobbyViewModel(s, MY, null);
+    expect(vm.rows[0].button).toBe('claim');
+    expect(vm.rows[0].description).toBe('Pilot the ship.');
+  });
+
+  it('carries a description on taken and mine rows too', () => {
+    const s = uiState({
+      players: [{ token: MY, name: 'Ada', ready: false }],
+      stations: [
+        helmRow({ holder_name: 'Ada', holder_token: MY, description: 'Pilot the ship.' }),
+        helmRow({ id: 'captain', holder_name: 'Bob', holder_token: 'other', description: 'Command the ship.' }),
+      ],
+    });
+    const vm = lobbyViewModel(s, MY, null);
+    expect(vm.rows.map(r => r.button)).toEqual(['release', 'taken']);
+    expect(vm.rows.map(r => r.description)).toEqual(['Pilot the ship.', 'Command the ship.']);
+  });
+
+  it('resolves descriptions through the injected describeFor', () => {
+    // client.html injects a resolver that turns the wire's string id into
+    // authored copy; the view model must not assume the raw field is prose.
+    const s = uiState({ stations: [helmRow({ description: 'station.helm.description' })] });
+    const vm = lobbyViewModel(s, MY, null, { describeFor: st => 'D:' + st.description });
+    expect(vm.rows[0].description).toBe('D:station.helm.description');
+  });
+
+  it('is an empty string when the hull authored none', () => {
+    const vm = lobbyViewModel(uiState({ stations: [helmRow()] }), MY, null);
+    expect(vm.rows[0].description).toBe('');
+  });
+
+  it('restates the held station description on the detail panel', () => {
+    const s = uiState({
+      players: [{ token: MY, name: 'Ada', ready: false }],
+      stations: [helmRow({ holder_name: 'Ada', holder_token: MY, description: 'Pilot the ship.' })],
+    });
+    expect(lobbyViewModel(s, MY, null).detail.stationDescription).toBe('Pilot the ship.');
+    // Idle detail carries the field so the caller can clear the node
+    // unconditionally rather than branching on presence.
+    const idle = lobbyViewModel(uiState({ stations: [helmRow()] }), MY, null);
+    expect(idle.detail.stationDescription).toBe('');
+  });
+});
+
 describe('lobbyViewModel — has-station / detail panel', () => {
   const seated = () => uiState({
     players: [{ token: MY, name: 'Ada', ready: false }],

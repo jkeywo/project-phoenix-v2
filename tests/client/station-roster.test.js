@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { buildStationRoster } from '../../gui/station-roster.js';
 
 const DEFS = [
-  { id: 'captain', name: 'Captain', short_code: 'CPT', rank: 'Commander', ratings: ['Std'] },
-  { id: 'helm', name: 'Helm', short_code: 'HLM', rank: 'Lt', ratings: ['Std', 'Simplified'] },
+  { id: 'captain', name: 'Captain', short_code: 'CPT', rank: 'Commander',
+    description: 'entity.alliance_cruiser.station.captain.description', ratings: ['Std'] },
+  { id: 'helm', name: 'Helm', short_code: 'HLM', rank: 'Lt',
+    description: 'entity.alliance_cruiser.station.helm.description', ratings: ['Std', 'Simplified'] },
 ];
 
 describe('buildStationRoster', () => {
@@ -12,8 +14,10 @@ describe('buildStationRoster', () => {
     expect(out.maxPlayers).toBe(2);
     expect(out.stations).toEqual([
       { id: 'captain', name: 'Captain', short_code: 'CPT', rank: 'Commander',
+        description: 'entity.alliance_cruiser.station.captain.description',
         holder_name: null, holder_token: null, ratings: ['Std'] },
       { id: 'helm', name: 'Helm', short_code: 'HLM', rank: 'Lt',
+        description: 'entity.alliance_cruiser.station.helm.description',
         holder_name: null, holder_token: null, ratings: ['Std', 'Simplified'] },
     ]);
     expect(out.allFilled).toBe(false);
@@ -63,8 +67,21 @@ describe('buildStationRoster', () => {
   it('defaults missing def fields to empty strings / arrays', () => {
     const out = buildStationRoster([], [{ id: 'x' }]);
     expect(out.stations[0]).toEqual({
-      id: 'x', name: '', short_code: '', rank: '',
+      id: 'x', name: '', short_code: '', rank: '', description: '',
       holder_name: null, holder_token: null, ratings: [],
     });
+  });
+
+  // PRD #1023 module 4: the description has to survive the fold, and it has to
+  // survive it for a FREE station — a row whose description only appeared once
+  // someone held it would answer the question after it stopped being asked.
+  it('carries the station description onto every row, held or free', () => {
+    const players = [{ token: 't1', name: 'Ada', connected: true, station: 'helm' }];
+    const out = buildStationRoster(players, DEFS);
+    const captain = out.stations.find(st => st.id === 'captain');
+    const helm = out.stations.find(st => st.id === 'helm');
+    expect(captain.holder_name).toBeNull();
+    expect(captain.description).toBe('entity.alliance_cruiser.station.captain.description');
+    expect(helm.description).toBe('entity.alliance_cruiser.station.helm.description');
   });
 });

@@ -481,6 +481,11 @@
       display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
     .station-row .info .meta .cons { padding: 1px 5px; border-radius: 2px;
       background: var(--surface-panel-up); font-size: var(--text-xs); color: var(--ink-dim); }
+    /* What the seat does, read before it is claimed (PRD #1023 module 4).
+       --ink-dim rather than --ink-faint: this is copy meant to be read at
+       arm's length, not a de-emphasised label. */
+    .station-row .info .desc { font-size: var(--text-sm); color: var(--ink-dim);
+      margin-top: 2px; line-height: 1.4; }
     .station-row .info .occupant { font-size: var(--text-sm); color: var(--signal); }
     .station-row .action { flex-shrink: 0; }
     .station-row .action button { padding: 4px 12px; border-radius: 4px;
@@ -501,6 +506,9 @@
     #detail-panel .detail-header { display: flex; align-items: center; justify-content: space-between; }
     #detail-panel .detail-station-name { font-size: var(--text-md); font-weight: 600; color: var(--ink-faint); }
     #detail-panel.active .detail-station-name { color: var(--signal); }
+    #detail-panel .detail-station-desc:empty { display: none; }
+    #detail-panel .detail-station-desc { font-size: var(--text-sm); color: var(--ink-dim);
+      margin: 3px 0 0; line-height: 1.4; }
     #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
     #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
       font-size: var(--text-xs); background: var(--surface-panel-up); color: var(--ink-dim); border: 1px solid var(--edge);
@@ -854,6 +862,7 @@
         <div class="detail-header">
           <span class="detail-station-name" data-i18n="client.no_station">No station assigned</span>
         </div>
+        <div class="detail-station-desc"></div>
         <div id="detail-console-area">
           <div class="detail-consoles"></div>
           <div class="detail-ratings"></div>
@@ -951,6 +960,19 @@
       const key = 'station.' + st.id + '.name';
       if (window.phStrings && window.phStrings.has(key)) return window.phStrings.t(key);
       return st.name || st.id || '';
+    }
+    // What a station DOES, shown on its lobby row before the claim tap (PRD
+    // #1023 module 4). The copy is already authored per hull as
+    // `entity.<hull>.station.<id>.description` and rides the wire in
+    // StationDef.description — this reuses those ids rather than minting a
+    // second, diverging set. A phone's copy arrived through localiseTree and is
+    // already resolved text; the has()/t() pass is for the ids that did not
+    // (the same passthrough rule as gui/components/ph-ship-picker.js).
+    function stationDescription(st) {
+      if (!st || !st.description) return '';
+      const raw = st.description;
+      if (window.phStrings && window.phStrings.has(raw)) return window.phStrings.t(raw);
+      return raw;
     }
 
     // -- Click sound --------------------------------------------------------
@@ -1446,6 +1468,7 @@
       if (typeof window.lobbyViewModel !== 'function') return;
       const vm = window.lobbyViewModel(s, myToken, lobbyConsole, {
         labelFor: stationLabel,
+        describeFor: stationDescription,
         stationRatings: window.simState ? window.simState.stationRatings : null,
       });
       // Detail-panel console auto-select (and clear on release) is part of
@@ -1505,6 +1528,15 @@
           meta.appendChild(chip);
         }
         info.appendChild(meta);
+        // The job, before the claim (PRD #1023 module 4). Rendered for every
+        // row kind — free, taken and mine — so the roster reads as a crew
+        // manifest rather than a list of buttons.
+        if (row.description) {
+          const desc = document.createElement('div');
+          desc.className = 'desc';
+          desc.textContent = row.description;
+          info.appendChild(desc);
+        }
         if (row.occupant) {
           const occ = document.createElement('div');
           occ.className = 'occupant';
@@ -1554,6 +1586,10 @@
           releaseBtn.textContent = inProgress && releaseArmed ? t('client.release_confirm') : t('client.leave');
           releaseBtn.addEventListener('click', () => releaseStation());
           detailHeader.appendChild(releaseBtn);
+          // The same authored line the row carried, restated where the player
+          // now sits (PRD #1023 module 4).
+          const descEl = detail.querySelector('.detail-station-desc');
+          if (descEl) descEl.textContent = vm.detail.stationDescription || '';
           const consolesArea = detail.querySelector('.detail-consoles');
           consolesArea.innerHTML = '';
           for (const c of vm.detail.consoles) {
@@ -1591,6 +1627,8 @@
           nameSpan.className = 'detail-station-name';
           nameSpan.textContent = t('client.no_station');
           detailHeader.appendChild(nameSpan);
+          const idleDesc = detail.querySelector('.detail-station-desc');
+          if (idleDesc) idleDesc.textContent = '';
           detail.querySelector('.detail-consoles').innerHTML = '';
           detail.querySelector('.detail-ratings').innerHTML = '';
         }

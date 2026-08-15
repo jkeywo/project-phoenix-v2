@@ -12,10 +12,10 @@
  * @param {Array<{ token: string, name?: string, connected?: boolean,
  *                 ready?: boolean, station?: string|{id: string}|null }>} players
  * @param {Array<{ id: string, name?: string, short_code?: string,
- *                 rank?: string, ratings?: string[] }>} stationDefs
+ *                 rank?: string, description?: string, ratings?: string[] }>} stationDefs
  *        `uiState.shipStations.stations` from Welcome.
- * @returns {{ stations: Array<{ id, name, short_code, rank, holder_name,
- *                               holder_token, ratings }>,
+ * @returns {{ stations: Array<{ id, name, short_code, rank, description,
+ *                               holder_name, holder_token, ratings }>,
  *             maxPlayers: number, allFilled: boolean, allReady: boolean }}
  */
 export function buildStationRoster(players, stationDefs) {
@@ -34,6 +34,12 @@ export function buildStationRoster(players, stationDefs) {
       name: def.name || '',
       short_code: def.short_code || '',
       rank: def.rank || '',
+      // What the seat does, authored per hull as
+      // `entity.<hull>.station.<id>.description` and delivered on the wire in
+      // `StationDef.description` (PRD #1023 module 4). The lobby surfaces it
+      // on every row — including a free one — so a player reads the job
+      // BEFORE the claim tap rather than after it.
+      description: def.description || '',
       holder_name: holder ? holder.name : null,
       holder_token: holder ? holder.token : null,
       ratings: def.ratings || [],

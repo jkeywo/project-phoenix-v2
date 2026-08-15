@@ -245,6 +245,68 @@ describe('documentation tabs', () => {
     expect(doc.getElementById('manual-btn')).toBeNull();
     expect(doc.getElementById('manual-overlay')).toBeNull();
   });
+
+  // ── The reader's place is not a settings fact (PRD #1023's defect list) ──
+  //
+  // The panel keeps one tab slot, and the Ship Manual has a second tab strip
+  // inside it. That inner selection used to live only in a closure over the
+  // DOM the panel throws away on every repaint, so any settings-driven rebuild
+  // silently sent the reader back to the first station — including a
+  // `DebugState` push from the host, which is nothing to do with them.
+
+  const TWO_STATION_MANUAL = {
+    stations: [
+      { station_id: 'helm', overview: 'Fly the ship.', sections: [] },
+      { station_id: 'repair', overview: 'Patch the ship.', sections: [] },
+    ],
+  };
+
+  /** Click the manual's station tab at `index` in the open panel. */
+  function selectManualStation(doc, index) {
+    const host = bodyOf(doc).children.find((c) => c.className === 'settings-documentation');
+    const tabs = host.children.find((c) => c.className === 'manual-tabs');
+    tabs.children[index].click();
+  }
+
+  it('keeps the reader on their station when the host pushes new debug state', () => {
+    const doc = makeDoc();
+    const inst = mount(doc, { getManual: () => TWO_STATION_MANUAL });
+    inst.open();
+    inst.selectTab('ship-manual');
+    selectManualStation(doc, 1);
+    expect(allText(bodyOf(doc))).toContain('Patch the ship.');
+
+    // Exactly what client.html does when a DebugState frame arrives.
+    inst.rebuildContent();
+    expect(allText(bodyOf(doc))).toContain('Patch the ship.');
+    expect(allText(bodyOf(doc))).not.toContain('Fly the ship.');
+  });
+
+  it('keeps the reader on their station across a Settings tab round trip', () => {
+    const doc = makeDoc();
+    const inst = mount(doc, { getManual: () => TWO_STATION_MANUAL });
+    inst.open();
+    inst.selectTab('ship-manual');
+    selectManualStation(doc, 1);
+
+    inst.selectTab('audio');
+    inst.selectTab('ship-manual');
+    expect(allText(bodyOf(doc))).toContain('Patch the ship.');
+  });
+
+  it('does not strand the reader past the end of a shorter manual', () => {
+    const doc = makeDoc();
+    let manual = TWO_STATION_MANUAL;
+    const inst = mount(doc, { getManual: () => manual });
+    inst.open();
+    inst.selectTab('ship-manual');
+    selectManualStation(doc, 1);
+
+    // A one-station ship replaces the two-station one.
+    manual = { stations: [{ station_id: 'helm', overview: 'Fly the ship.', sections: [] }] };
+    inst.rebuildContent();
+    expect(allText(bodyOf(doc))).toContain('Fly the ship.');
+  });
 });
 
 // ── Painted from the host, never from the tap ────────────────────────────────

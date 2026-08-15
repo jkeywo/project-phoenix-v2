@@ -5,9 +5,9 @@
 # they are working against, and Act 1's triage. It began as a skeleton, and the
 # slices that fill it band their own content in below rather than reflowing this
 # one: the strike (#1035), the negotiation (#1036), the storm and the rescue
-# (#1037), the scan-versus-dossier evidence (#1038) and the worker who
-# corroborates it (#1039) have landed; the collapse (#1040), the restraint lever
-# (#1041) and the transfer window itself (#1042) are still to come.
+# (#1037), the scan-versus-dossier evidence (#1038), the worker who corroborates
+# it (#1039), the restraint lever (#1041) and the collapse and its epilogue
+# (#1040) have landed; the transfer window itself (#1042) is still to come.
 #
 # ── The place ────────────────────────────────────────────────────────────────
 #
@@ -116,8 +116,17 @@
 # its own banded section further down this file, from the anchors it needs to
 # the handlers that run it; `act` now counts 1 → 2 → 3.
 #
-# Act 3 is still a structural stub, and the slices that fill it author their own
-# `[[deadline]]` blocks (the transfer window) against the same counter.
+# ── Act 3, and the two ways the mission ends (issue #1040) ───────────────────
+#
+# THE SKYHOOK CAN FALL. Act 3 opens on the flag the storm's close writes, puts
+# the head back under the corridor's load, and walks its condition down toward
+# the structural floor `skyhook.toml` authors. Three escalating warnings on three
+# surfaces come first; a crew who stabilise at any of them — including the last —
+# keep the structure; a crew who do not watch `destroy_entity` take it out of the
+# world mid-mission and the mission BRANCH into a survivor-rescue epilogue. All
+# of it is authored in its own banded section further down this file. #1042 still
+# authors its own `[[deadline]]` blocks (the transfer window) against the same
+# counter.
 #
 # BASELINE. CURRENT VALUE: 0x8ad4dcec24908b8d (10003863579080559501), last moved
 # by #1039 — the paragraphs below are the history of how it got there, oldest
@@ -390,6 +399,19 @@ shelter_west = [-880.0, 0.0, -300.0]
 # again. [ai] Unratified, like every other coordinate in this table.
 rigger_mooring = [1050.0, 0.0, 430.0]
 
+# ── Act 3's places (issue #1040) ─────────────────────────────────────────────
+#
+# Where the head's own craft end up when it comes apart. Off the head rather than
+# at it, because the wreck is where the ribbon was and nobody survives sitting in
+# it; and inside the destroyer's authored 300-unit `tow` range of
+# `station_keeping`, so a crew who were doing their job in Act 3 are already
+# close enough to start pulling people out.
+head_debris_field = [120.0, 0.0, 140.0]
+
+# The second craft, about a hundred and forty units further out — one tow's
+# reposition away, which is what makes the epilogue a triage rather than a queue.
+head_debris_drift = [220.0, 0.0, 240.0]
+
 # ── Lanes ────────────────────────────────────────────────────────────────────
 
 # The corridor run. Loops, so a craft left alone flies it for the whole mission
@@ -495,6 +517,15 @@ condition = 48.0
 # at the unassisted rate the destroyer's capability authors, which is the strike
 # arriving in the crew's work queue rather than in a briefing.
 workforce = "skyway_workers"
+
+# There are people on the head, and Act 3 is them calling the ship (issue #1040).
+# The template gives the structure a 1,600-unit `[comms] range` and stops there —
+# a range is what a transfer head needs to talk to the corridor, and whether the
+# crew may call IT is a scenario's business. Falling Skyway says yes: a captain
+# who has just been warned three times that a structure is failing must be able
+# to call the people on it back.
+[entity.overrides.comms]
+hailable = true
 
 # Ladder Depot A — the rung that still works. Its capacity and threshold tables
 # are replaced wholesale by this instance (arrays replace at the instance
@@ -932,6 +963,178 @@ visible = true
 id = "storm_passed_due"
 label = "world.falling_skyway.deadline.storm_passed.label"
 due_secs = 268
+visible = true
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ACT 3 — THE HEAD COMES DOWN, OR IT DOES NOT (issue #1040)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# THE SKYHOOK CAN FALL. Not as a score penalty at the end of the mission: the
+# head's condition walks down to the structural floor its template authors, and
+# at that floor `destroy_entity` takes it out of the world mid-mission. Twenty-
+# six units of station silhouette stop being on anybody's radar. The mission does
+# not end there — it branches into a survivor-rescue epilogue — but the structure
+# the scenario is named after is gone, and this is what Act 1's triage was for.
+#
+# ── What drives it down ──────────────────────────────────────────────────────
+#
+# THE STRAIN. The storm has passed and the corridor is working again, which means
+# the head is carrying traffic on a ribbon that has been slipping since before
+# the crew arrived. That load costs it [2] condition points every [10] seconds,
+# for as long as the tether watch is open — a scripted beat that re-arms itself,
+# NOT the template's `decay_per_sec`, which the skyhook deliberately does not
+# author (its own header says why: decay ticks from world load and would charge
+# the mission for the lobby).
+#
+# So the rate is a point every five seconds — 0.2 points a second — and every
+# number below is derived from it rather than guessed.
+#
+# ── The warning ladder, and the window it buys ───────────────────────────────
+#
+# `skyhook.toml` authors five rungs; Act 3 crosses four of them. The head opens
+# the act on 42 points (48 on arrival, six spent by Act 1's `tether_slip`), so
+# the strain walks it down two points at a time through even numbers:
+#
+#   t=268   the storm passes, the watch opens, and its first beat lands with it:
+#           the head is on 42 and goes straight to 40
+#   t=288   36 — under 37 %: `skyhook_load_bearing` falls       WARNING ONE
+#   t=318   30 — under 31 %: `skyhook_tether_tensioned` falls   WARNING TWO
+#   t=348   24 — under 25 %: `skyhook_station_holding` falls    WARNING THREE
+#   t=378   18 — under 20 %: `skyhook_tether_stable` falls      THE FLOOR
+#
+# Those are MEASURED times, off the headless trace, not predicted ones — the
+# threshold fires a frame behind the beat that crosses it, and the act's opening
+# beat lands on the same tick the watch opens.
+#
+# THIRTY SECONDS BETWEEN EVERY RUNG, including the last one and the floor, and
+# that is not a coincidence — it is six condition points and five, over 0.2
+# points a second, discretised by a ten-second beat. Three warnings, evenly
+# spaced, each louder than the last, and half a minute after the third one the
+# head comes apart.
+#
+# ── THE SAVE MARGIN, derived rather than asserted ────────────────────────────
+#
+# The AC this slice is held to is that a crew who react to the LAST warning can
+# still save the structure. The arithmetic:
+#
+#   final warning window            30 s   (24 points → 18 points at 0.2 pt/s)
+#   destroyer's `stabilise`         18 s   (authored on the hull)
+#   ────────────────────────────────────
+#   SLACK FOR GIVING THE ORDER      12 s
+#
+# Twelve seconds is the tuned margin, and it is what a crew get to notice a
+# warning, decide, and open the operation in. The stabilise pays 22 points on
+# completion, which from a head sitting on 22 (one beat into the window) carries
+# it to 44 — back over the FIRST rung's 42 % restore line, so one run stands the
+# whole ladder down rather than buying another thirty seconds. That is the point
+# of the lump payout: a crew who react late are unambiguously a crew who saved
+# it.
+#
+# The travel term is zero on purpose. `stabilise` is authored at 500 units and
+# Act 3's own approach objective puts the ship at `station_keeping`, 247 units
+# off the head — so a crew flying the mission's own shape are already in range
+# when the first warning lands, and the margin is about DECIDING rather than
+# about flying. A crew who wandered off pay their own travel out of the twelve.
+#
+# `falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head` is
+# the playtest, and it is a playtest rather than an assertion about arithmetic:
+# it waits for the third warning to actually fire, opens the stabilise then, and
+# asserts the head is still in the world after the tick the floor would have been
+# crossed on. [ai] Twelve seconds is unratified — it is the number the tuning
+# pass moves to make "you can react to the last warning, but only if you were
+# paying attention" land exactly.
+#
+# ── The three surfaces a warning reaches ─────────────────────────────────────
+#
+# A first-time crew must not be ambushed, so every rung fires on all three:
+#
+#   THE OBJECTIVES LIST   each rung posts its own mandatory objective, at a
+#                         higher priority than the last, naming what happens
+#                         next. And each rung FAILS the previous one — so a crew
+#                         who lose the head can read the panel afterwards and see
+#                         exactly which warnings went red under them. That is the
+#                         `obj-a2-corroborate` device (an objective going red is
+#                         the loudest thing this scenario can say without prose)
+#                         pointed at the crew's own inattention.
+#   THE CAPTAIN'S CLOCK   `skyhook_failure_due` is authored `visible`, so the
+#                         countdown to structural failure is on the captain's
+#                         panel from the mission's first tick — the same doctrine
+#                         Act 2's six deadlines follow. It is CANCELLED the
+#                         moment the situation resolves either way, so the panel
+#                         never counts down to something that has already
+#                         happened.
+#   THE CHANNEL           the gang on the head call the ship, from the head's own
+#                         hull, three times, each more urgent. They are the
+#                         people who will be on it when it goes, and the last
+#                         call is them asking to be taken off.
+#
+# ── The countdown is a PROJECTION, not a fuse ────────────────────────────────
+#
+# `skyhook_failure_due` is authored at [382] seconds: four seconds after the
+# measured floor crossing above. Nothing about the head's fate is decided by it —
+# what takes the head is its CONDITION reaching the floor, and the deadline is
+# what that arithmetic says if nobody does anything. A crew who
+# neglect it watch the projection come true four seconds early. A crew who
+# stabilise beat it, and the deadline firing on a head that is still standing IS
+# the act's other ending: the load comes off, the corridor's own structural
+# people take over, and she held.
+#
+# ── What losing it costs ─────────────────────────────────────────────────────
+#
+# Three things, all on screen and all derived from authored state:
+#
+#   THE TRANSFER WINDOW   the head carried the only two berths in the corridor
+#                         (`skyhook_transfer_berths`), and they leave the world
+#                         with it. `skyway_transfer_capacity_lost` is the flag
+#                         #1042 reads; the corridor's traffic is put back on the
+#                         holding run, because there is nothing to queue for.
+#   THE PEOPLE ON IT      counted, never rolled — the same rule #1036's casualty
+#                         arithmetic follows. `head_casualties` reads the shift
+#                         that was up there (a settled strike means a FULL shift
+#                         working the transfer; a rung still stopped means a
+#                         skeleton watch), then subtracts what the captain did
+#                         about the warnings. Answering the head's channel at all
+#                         is worth one; ordering the head cleared at the first or
+#                         second warning is worth all of them; ordering it at the
+#                         THIRD is too late to get everyone off and the boss says
+#                         so. A crew who never picked up the channel lose the
+#                         whole shift.
+#   THE CAMPAIGN RECORD   exactly one of `skyway_skyhook_lost` and
+#                         `skyway_skyhook_held` is ALWAYS written, the invariant
+#                         #1037 set for the Lyra, so a later mission reads a fact
+#                         rather than an absence.
+#
+# ── The epilogue ─────────────────────────────────────────────────────────────
+#
+# Losing the skyhook is a worse ending, not a game over. Two craft come off the
+# head as it goes — its crew lighter and a work pod — spawned by the collapse
+# handler into the debris, adrift, with condition tracks the destroyer's `tow`
+# payout is sized to cross. That is the Lyra's machinery reused exactly: there is
+# no "operation completed" trigger, so what a completed tow LEAVES BEHIND is the
+# signal, and `on_flag_set` hangs off the threshold it crosses.
+#
+# The epilogue has [75] seconds, its own two objectives (an approach carrying the
+# Reach directive, and the rescue that records the work — split for the reason
+# Act 2's rescue is split), and its own resolution: both craft recovered
+# completes it, one completes it with the other's loss on the record, neither
+# fails it and the debris takes them both.
+#
+# SHIP DESTRUCTION IS A DIFFERENT PATH ENTIRELY and nothing here touches it. The
+# crew's own hull dying is the engine's `GameOver`, with no scenario flag written
+# and no epilogue: `skyway_skyhook_lost` and `skyway_skyhook_held` are both
+# absent from that run, which is what makes the branches distinguishable rather
+# than merely different in tone.
+
+# ── Act 3's clock ────────────────────────────────────────────────────────────
+#
+# One deadline, visible, and it is a PROJECTION rather than a fuse — the band
+# header above says at length why. [382] is four seconds past the floor crossing
+# the authored strain rate reaches, measured off the headless trace rather than
+# guessed at.
+[[deadline]]
+id = "skyhook_failure_due"
+label = "world.falling_skyway.deadline.skyhook_failure.label"
+due_secs = 382
 visible = true
 
 # ── Act 1 ────────────────────────────────────────────────────────────────────
@@ -2105,5 +2308,518 @@ fn on_crew_holds_fire(ctx) {
     // [ai] Unratified: a destroyer that came to the depot with its guns cold is
     // worth five points of the operator's goodwill.
     ctx.effects.set_workforce_disposition("havelock_operations", 60);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ACT 3 — the head comes down, or it does not (issue #1040)
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// The act's data — the two debris anchors, the projected-failure deadline and the
+// head's own hailability — is authored above this script, and the arithmetic that
+// ties it together is in that band's header. What is here is only the wiring.
+
+// THE ACT-3 SEAM. Chained off `skyway_storm_passed` rather than written into
+// #1037's `on_storm_passed`, deliberately: the storm slice closes its own act
+// and this one opens on the flag that closing wrote, so neither slice edits the
+// other's handler. It is the `skyway_strike_settled` device pointed at an act
+// boundary.
+on_flag_set("skyway_storm_passed", "on_head_watch_opens");
+
+// THE WARNING LADDER, and the floor under it — four rungs of the SAME ladder
+// `skyhook.toml` authors, read the only way a condition threshold can be read:
+// as a named flag falling. Nothing here knows what percentage any of them sits
+// at, which is what lets the tuning pass move the ladder without touching a
+// handler.
+on_flag_cleared("skyhook_load_bearing", "on_head_warning_one");
+on_flag_cleared("skyhook_tether_tensioned", "on_head_warning_two");
+on_flag_cleared("skyhook_station_holding", "on_head_warning_three");
+on_flag_cleared("skyhook_tether_stable", "on_head_gives_way");
+
+// THE SAVE, read off the same ladder from the other side. A completed stabilise
+// pays a lump into the condition track and the track carries the TOP rung back
+// over its restore line; the flag rising IS the save landing, exactly as the
+// Lyra's rising flag IS her tow landing. The top rung rather than the bottom
+// one, because a crew who react to the FIRST warning never cleared the lower
+// ones and would otherwise save the head into silence.
+//
+// THE `when` IS LOAD-BEARING, and an `if` at the top of the handler cannot do
+// its job. A condition track publishes its `initial_flags` on the structure's
+// first tick, so `skyhook_load_bearing` goes UP at world load — the head arrives
+// on 48 points — and a flag trigger is SINGLE-SHOT. Without a trigger-level
+// predicate this registration would be spent in the lobby and the real save, six
+// minutes later, would fire nothing. A `when` that reads false suppresses the
+// firing WITHOUT consuming the trigger, which is the distinction
+// `combat_test.toml` records at length and `probe_stabilise.toml` uses for this
+// same "restored after it broke" shape.
+on_flag_set("skyhook_load_bearing", "on_head_stands_down")
+    .when("counter(skyway_tether_watch) > 0");
+
+// The projection falling due, and the head leaving the world. The second is
+// chained off the removal rather than written beside it (#1033's rule): a
+// scripted destruction chains exactly as a kill does, so whatever takes the head
+// — this act's own floor today, something else tomorrow — lands in one place.
+on_deadline("skyhook_failure_due", "on_head_projection_expires");
+on_destroyed("world.falling_skyway.entity.skyhook.name", "on_head_lost");
+
+// The epilogue's two completion signals, on the Lyra's pattern and for her
+// reason: there is no "operation completed" trigger, so a scenario reads what a
+// completed tow LEAVES BEHIND.
+on_flag_set("skyway_lighter_secured", "on_lighter_recovered");
+on_flag_set("skyway_pod_secured", "on_pod_recovered");
+
+// Act 3 opens. The storm has gone and the corridor is working again, which is
+// exactly the problem: the head is carrying traffic on a ribbon that has been
+// slipping since before anybody sent a destroyer.
+fn on_head_watch_opens(ctx) {
+    ctx.flags.skyway_tether_watch = 1;
+    ctx.flags.increment("a3_watch_open", 1);
+
+    // TWO OBJECTIVES FOR ONE STRUCTURE, split for the reason Act 2's rescue is
+    // split: `detect_reached_objective_completion` completes any objective whose
+    // Reach anchor an AI-flown helm arrives at, so the one carrying the approach
+    // cannot also be the one recording the work. The approach points at
+    // `station_keeping` — 247 units off the head, inside the destroyer's authored
+    // 500-unit stabilise range — so a backfilled helm parks the ship where the
+    // save is possible from.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-standoff",
+        text: "world.falling_skyway.objective.head_standoff.text",
+        source: "mission",
+        base_priority: 55,
+        directive_kind: "Reach",
+        directive_anchor: "station_keeping",
+        targets: ["world.falling_skyway.entity.skyhook.name"],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a3-head",
+        text: "world.falling_skyway.objective.head_watch.text",
+        mandatory: true,
+        targets: ["world.falling_skyway.entity.skyhook.name"],
+    });
+
+    // The people on the head, checking in. Not a warning — this is the beat that
+    // establishes there ARE people up there, so the three that follow are
+    // somebody's voice rather than a console alarm.
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyhook.name",
+        node_fn: "head_reports_load",
+    });
+
+    tether_strain(ctx);
+}
+
+// One beat of the load the head is carrying: [2] condition points every [10]
+// seconds, re-arming itself for as long as the watch is open.
+//
+// A callback chain rather than the template's `decay_per_sec`, because that
+// ticks from world LOAD — i.e. through the lobby — and a skyhook's deterioration
+// is a mission beat rather than a lobby tax (the template says so at length).
+// And a chain rather than a ladder of `[[deadline]]` blocks because this is the
+// act's metronome, not a named thing in the world the crew can see or slip.
+//
+// It stops on exactly two conditions and both write `skyway_tether_watch`: the
+// head is saved, or the head is gone.
+fn tether_strain(ctx) {
+    if ctx.flags.skyway_tether_watch == 0 { return; }
+    ctx.effects.damage_infrastructure("world.falling_skyway.entity.skyhook.name", 2);
+    ctx.flags.increment("a3_strain_beats", 1);
+    ctx.schedule.after(10, |ctx| { tether_strain(ctx); });
+}
+
+// One rung of the warning ladder, on all three surfaces at once. Factored
+// because three rungs that differ only in their strings and their priority
+// should differ only in their strings and their priority: the SHAPE of a warning
+// — turn the rung they did not act on red, post a louder one, put the boss on
+// the channel — is what this slice is actually promising, and it belongs in one
+// place where it can be read.
+fn head_warning(ctx, supersedes, id, text, priority, node_fn) {
+    if supersedes != "" {
+        // THE PANEL SAYS WHICH ONE THEY IGNORED. An objective going red is the
+        // loudest thing this scenario can say without prose (`obj-a2-corroborate`
+        // set the device); here it is pointed at the crew's own inattention.
+        ctx.effects.fail_objective(supersedes);
+    }
+    ctx.effects.add_objective(#{
+        id: id,
+        text: text,
+        mandatory: true,
+        source: "mission",
+        base_priority: priority,
+        targets: ["world.falling_skyway.entity.skyhook.name"],
+    });
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyhook.name",
+        node_fn: node_fn,
+        urgent: true,
+    });
+}
+
+fn on_head_warning_one(ctx) {
+    if ctx.flags.skyway_tether_watch == 0 { return; }
+    ctx.flags.increment("a3_warning_one", 1);
+    head_warning(ctx, "", "obj-a3-tether-1",
+                 "world.falling_skyway.objective.tether_one.text", 60, "head_warns_one");
+}
+
+fn on_head_warning_two(ctx) {
+    if ctx.flags.skyway_tether_watch == 0 { return; }
+    ctx.flags.increment("a3_warning_two", 1);
+    head_warning(ctx, "obj-a3-tether-1", "obj-a3-tether-2",
+                 "world.falling_skyway.objective.tether_two.text", 70, "head_warns_two");
+}
+
+// The last one. From here the evacuation cannot be run cleanly — the flag below
+// is what `on_head_clear_it` reads to say so out loud rather than quietly
+// halving a number nobody was told about.
+fn on_head_warning_three(ctx) {
+    if ctx.flags.skyway_tether_watch == 0 { return; }
+    ctx.flags.increment("a3_warning_three", 1);
+    ctx.flags.skyway_head_last_warning = 1;
+    head_warning(ctx, "obj-a3-tether-2", "obj-a3-tether-3",
+                 "world.falling_skyway.objective.tether_three.text", 80, "head_warns_three");
+}
+
+// ── The gang on the head ─────────────────────────────────────────────────────
+//
+// Four bodies over one pair of answers, and that is the point: the SITUATION
+// escalates and the captain's options do not, because there are only ever two
+// things to say to somebody standing on a structure that is failing.
+//
+// ORDER IS LOAD-BEARING, for `havelock_offer`'s reason. A hull whose Tactical
+// seat is AI-backfilled answers an open thread with its FIRST response, so index
+// 0 has to be the answer an officer who is not there should give: acknowledge,
+// commit to nothing, keep the channel. Ordering people off a structure is a
+// decision, and a decision belongs to whoever is sitting in the chair.
+fn head_reports_load(ctx) { head_node(ctx, "world.falling_skyway.comms.head_reports_load") }
+fn head_warns_one(ctx)    { head_node(ctx, "world.falling_skyway.comms.head_warns_one") }
+fn head_warns_two(ctx)    { head_node(ctx, "world.falling_skyway.comms.head_warns_two") }
+fn head_warns_three(ctx)  { head_node(ctx, "world.falling_skyway.comms.head_warns_three") }
+
+fn head_node(ctx, body) {
+    // Nothing left to decide once the head is empty.
+    if ctx.flags.skyway_head_cleared > 0 {
+        return #{ message: "world.falling_skyway.comms.head_already_clear", responses: [] };
+    }
+    #{
+        message: body,
+        responses: [
+            #{ text: "world.falling_skyway.comms.head_acknowledge", on_pick: "on_head_acknowledge" },
+            #{ text: "world.falling_skyway.comms.head_clear_it", on_pick: "on_head_clear_it", important: true },
+        ],
+    }
+}
+
+// Being told is worth something, and it is worth something because it is TRUE: a
+// gang who have been talking to a destroyer are a gang wearing their rigs and
+// standing near the lift when the ribbon goes.
+fn on_head_acknowledge(ctx) {
+    ctx.flags.skyway_head_told = 1;
+    ctx.flags.increment("a3_head_acknowledged", 1);
+    #{ message: "world.falling_skyway.comms.head_stays_up", responses: [] }
+}
+
+// THE EVACUATION. It costs nothing the crew can feel today and everything in the
+// only currency this act has: it takes the shift off the structure, so the
+// transfer window the next slice is built around has nobody to work it. The flag
+// is the record a later act reads; the count below is what it buys.
+fn on_head_clear_it(ctx) {
+    ctx.flags.skyway_head_cleared = 1;
+    ctx.flags.increment("a3_head_cleared", 1);
+    if ctx.flags.skyway_head_last_warning > 0 {
+        ctx.flags.skyway_head_cleared_late = 1;
+        return #{ message: "world.falling_skyway.comms.head_clearing_late", responses: [] };
+    }
+    #{ message: "world.falling_skyway.comms.head_clearing", responses: [] }
+}
+
+// ── The floor ────────────────────────────────────────────────────────────────
+//
+// One call, and every consequence hangs off the REMOVAL rather than off this
+// handler — see `on_head_lost`.
+fn on_head_gives_way(ctx) {
+    if ctx.flags.skyway_tether_watch == 0 { return; }
+    ctx.flags.increment("a3_floor_crossed", 1);
+    ctx.effects.destroy_entity("world.falling_skyway.entity.skyhook.name");
+}
+
+// What was up there when it went. READ, never rolled — #1036's rule and for its
+// reason: script has no RNG and should not have one. Every term is a fact the
+// crew could have known at the time, and every one of them is a flag something
+// else in this act wrote.
+//
+// [ai] Every number here is unratified.
+fn head_casualties(ctx) {
+    // A settled strike means a full shift is back on the head working the
+    // transfer. That is not a punishment for settling — it is what settling DID,
+    // and the captain has a lever over it three warnings long.
+    let souls = 6;
+    if ctx.flags.skyway_strike_settled == 0 { souls = 3; }
+    if ctx.flags.skyway_head_told > 0 { souls -= 1; }
+    if ctx.flags.skyway_head_cleared > 0 { souls = 0; }
+    if ctx.flags.skyway_head_cleared_late > 0 { souls = 2; }
+    souls
+}
+
+// Chained off the head's own `Destroyed` event. Everything losing the skyhook
+// costs is here, in one place, so a later slice that finds another way to take
+// the structure gets the same consequences without re-deriving them.
+fn on_head_lost(ctx) {
+    // The strain has nothing left to strain and the projection nothing left to
+    // project. Cancelling is also what keeps `skyhook_failure_due` from firing
+    // four seconds later onto a head that is already gone.
+    ctx.flags.skyway_tether_watch = 0;
+    if ctx.deadlines.state("skyhook_failure_due") == "pending" {
+        ctx.deadlines.cancel("skyhook_failure_due");
+    }
+
+    // THE RECORD. Exactly one of `skyway_skyhook_lost` and `skyway_skyhook_held`
+    // is ALWAYS written (#1037's invariant), so a later mission reads a fact
+    // rather than an absence.
+    ctx.flags.skyway_skyhook_lost = 1;
+    // The two transfer berths left the world with the structure that carried
+    // them, and BOTH halves of that are written here. The named flag is what
+    // #1042's transfer window reads; the second line zeroes the capacity's own
+    // mirrored counter, which the infrastructure adapter republishes every tick a
+    // structure moves and which would otherwise keep saying "two berths" forever
+    // — a structure that no longer ticks cannot correct its own last reading, and
+    // a script predicate asking `counter(skyhook_transfer_berths)` deserves the
+    // truth rather than a fossil.
+    ctx.flags.skyway_transfer_capacity_lost = 1;
+    ctx.flags["skyhook_transfer_berths"] = 0;
+    ctx.flags.skyway_head_casualties = head_casualties(ctx);
+    ctx.flags.increment("a3_head_lost", 1);
+
+    // THE PANEL, GOING RED. Blanket rather than tracked: `fail_objective` moves
+    // an ACTIVE objective and nothing else, so the rungs the crew already let go
+    // stay exactly as they were and only the live one turns over. What is left on
+    // the list is the history of the warnings.
+    ctx.effects.fail_objective("obj-a3-tether-1");
+    ctx.effects.fail_objective("obj-a3-tether-2");
+    ctx.effects.fail_objective("obj-a3-tether-3");
+    ctx.effects.fail_objective("obj-a3-head");
+    ctx.effects.complete_objective("obj-a3-standoff");
+
+    // The corridor has nothing to queue for. The same holding run the storm used
+    // — west, then south, then hold — pointed at traffic with nowhere to go.
+    ctx.effects.order_divert_route("world.falling_skyway.entity.convoy_meridian.name", "storm_shelter_run");
+    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_lark.name", "storm_shelter_run");
+    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_pell.name", "storm_shelter_run");
+
+    // Somebody has to tell Control, and it is a MANDATORY objective rather than a
+    // line of prose so it sits on the panel until the crew deal with it —
+    // #1037's loss report, same device, bigger loss.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-head-report",
+        text: "world.falling_skyway.objective.head_report.text",
+        mandatory: true,
+        targets: ["world.falling_skyway.entity.skyway_control.name"],
+    });
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.skyhook.name",
+        text:       "world.falling_skyway.evidence.head_collapse",
+        provenance: "scan",
+    });
+
+    // THE BRANCH. Two seconds out, so the craft read as coming OUT of the wreck
+    // rather than as replacing the structure on the tick it left.
+    ctx.schedule.after(2, |ctx| { head_survivors(ctx); });
+}
+
+// ── The epilogue ─────────────────────────────────────────────────────────────
+//
+// Losing the skyhook is a worse ending, not a game over. Two craft come off the
+// head as it goes, adrift in the debris with condition tracks the destroyer's
+// `tow` payout is sized to cross — the Lyra's machinery, reused exactly.
+//
+// Spawned with `overrides` rather than authored as `[[entity]]` rows for the
+// obvious reason (they do not exist until the head comes apart), and each
+// carries its OWN threshold flag, because two entities declaring one flag are
+// declaring one flag and would overwrite each other's answer every tick — the
+// rule the two ladder depots follow above.
+//
+// [20] of [100] points each, under their own authored half-way line ([50] %), so
+// both flags are DOWN from their first tick and each one's rise is an event. The
+// destroyer's `tow` pays 45 on completion, which clears the [55] % restore line
+// with room — a survivor craft is a rescue, not a puzzle. `hull_damage_share = 0`
+// for the Lyra's reason: what is wrong with a survivor craft is that it has no
+// way home, not that its paint is scratched. [ai] All four unratified.
+fn head_survivors(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_civilian_hauler.toml",
+        name: "world.falling_skyway.entity.head_lighter.name",
+        anchor: "head_debris_field",
+        groups: ["head_survivors"],
+        overrides: #{
+            comms: #{ hailable: true },
+            infrastructure: #{
+                condition: 20,
+                hull_damage_share: 0,
+                threshold: [ #{
+                    flag: "skyway_lighter_secured",
+                    fails_below: flt("0.5"),
+                    label: "world.falling_skyway.threshold.under_tow.label",
+                } ],
+            },
+        },
+    });
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_civilian_hauler.toml",
+        name: "world.falling_skyway.entity.head_pod.name",
+        anchor: "head_debris_drift",
+        groups: ["head_survivors"],
+        overrides: #{
+            comms: #{ hailable: true },
+            infrastructure: #{
+                condition: 20,
+                hull_damage_share: 0,
+                threshold: [ #{
+                    flag: "skyway_pod_secured",
+                    fails_below: flt("0.5"),
+                    label: "world.falling_skyway.threshold.under_tow.label",
+                } ],
+            },
+        },
+    });
+
+    // The epilogue's own two objectives, split on the approach/work line for the
+    // third time in this file and for the same reason every time.
+    ctx.effects.add_objective(#{
+        id: "obj-a3-muster",
+        text: "world.falling_skyway.objective.muster.text",
+        source: "mission",
+        base_priority: 85,
+        directive_kind: "Reach",
+        directive_anchor: "head_debris_field",
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a3-survivors",
+        text: "world.falling_skyway.objective.survivors.text",
+        mandatory: true,
+        targets: [
+            "world.falling_skyway.entity.head_lighter.name",
+            "world.falling_skyway.entity.head_pod.name",
+        ],
+    });
+    ctx.flags.increment("a3_epilogue_open", 1);
+
+    // A second out, so the sender is in `name_to_uuid` before the comms router is
+    // asked to range-gate it. A thread opened on the tick its sender spawned
+    // would fall through the synthetic-sender escape and read as a message from
+    // nowhere.
+    ctx.schedule.after(1, |ctx| {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.head_lighter.name",
+            node_fn: "lighter_calls",
+            urgent: true,
+        });
+    });
+
+    // The epilogue's clock: [75] seconds, measured from the collapse rather than
+    // from the mission start, because WHEN the head fell is a fact about the run
+    // and an authored `[[deadline]]` could only ever have been right for one of
+    // them.
+    ctx.schedule.after(75, |ctx| { head_epilogue_resolves(ctx); });
+}
+
+fn lighter_calls(ctx) {
+    #{ message: "world.falling_skyway.comms.lighter_calls", responses: [] }
+}
+
+fn on_lighter_recovered(ctx) {
+    if ctx.flags.a3_epilogue_open == 0 { return; }
+    ctx.flags.skyway_lighter_safe = 1;
+    ctx.flags.increment("a3_survivors_recovered", 1);
+}
+
+fn on_pod_recovered(ctx) {
+    if ctx.flags.a3_epilogue_open == 0 { return; }
+    ctx.flags.skyway_pod_safe = 1;
+    ctx.flags.increment("a3_survivors_recovered", 1);
+}
+
+// The epilogue's resolution. Three outcomes rather than two, because "we got one
+// of them" is what actually happens to a crew who start late.
+fn head_epilogue_resolves(ctx) {
+    let saved = ctx.flags.a3_survivors_recovered;
+    ctx.flags.skyway_survivors_recovered = saved;
+    ctx.flags.skyway_survivors_lost = 2 - saved;
+
+    if saved > 0 {
+        ctx.effects.complete_objective("obj-a3-survivors");
+    } else {
+        ctx.effects.fail_objective("obj-a3-survivors");
+    }
+    ctx.effects.complete_objective("obj-a3-muster");
+
+    // What is still adrift when the window closes is taken by the debris. The
+    // same `destroy_entity` the head went to, and the same reading: a failure is
+    // a thing that happens, not a thing that quietly stops being mentioned.
+    if ctx.flags.skyway_lighter_safe == 0 {
+        ctx.effects.destroy_entity("world.falling_skyway.entity.head_lighter.name");
+    }
+    if ctx.flags.skyway_pod_safe == 0 {
+        ctx.effects.destroy_entity("world.falling_skyway.entity.head_pod.name");
+    }
+
+    ctx.flags.act3_complete = 1;
+    ctx.flags.increment("a3_epilogue_resolved", 1);
+}
+
+// ── The other ending ─────────────────────────────────────────────────────────
+//
+// The head standing back up. Guarded on the watch for TWO reasons and both
+// matter: this flag comes up once at world load, when the condition track is
+// first mirrored and the head is sitting on 48 points, and it can come up again
+// after the act has already resolved. The watch is what makes this handler mean
+// "a crew just saved it" rather than "a number went up".
+fn on_head_stands_down(ctx) {
+    if ctx.flags.skyway_tether_watch == 0 { return; }
+    ctx.flags.increment("a3_stood_down", 1);
+    head_holds(ctx);
+}
+
+// The projection falling due on a head that is still standing. The load comes
+// off, the corridor's own structural people take over, and she held — the act's
+// other road to the same ending, walked by a crew who stabilised late enough
+// that the ladder never fully stood down but early enough that the floor was
+// never crossed.
+fn on_head_projection_expires(ctx) {
+    if ctx.flags.skyway_tether_watch == 0 { return; }
+    ctx.flags.increment("a3_projection_beaten", 1);
+    head_holds(ctx);
+}
+
+fn head_holds(ctx) {
+    ctx.flags.skyway_tether_watch = 0;
+    if ctx.deadlines.state("skyhook_failure_due") == "pending" {
+        ctx.deadlines.cancel("skyhook_failure_due");
+    }
+    // The other half of the pair.
+    ctx.flags.skyway_skyhook_held = 1;
+    ctx.flags.increment("a3_head_held", 1);
+
+    // Only the LIVE rung turns over: `complete_objective` moves an Active
+    // objective and nothing else, so the rungs the crew let go stay red and the
+    // panel still says which ones they were. Saving the structure does not
+    // un-ignore a warning.
+    ctx.effects.complete_objective("obj-a3-tether-1");
+    ctx.effects.complete_objective("obj-a3-tether-2");
+    ctx.effects.complete_objective("obj-a3-tether-3");
+    ctx.effects.complete_objective("obj-a3-head");
+    ctx.effects.complete_objective("obj-a3-standoff");
+
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyhook.name",
+        node_fn: "head_stands_down",
+        urgent: true,
+    });
+    ctx.flags.act3_complete = 1;
+}
+
+fn head_stands_down(ctx) {
+    if ctx.flags.skyway_head_cleared > 0 {
+        return #{ message: "world.falling_skyway.comms.head_holds_empty", responses: [] };
+    }
+    #{ message: "world.falling_skyway.comms.head_holds", responses: [] }
 }
 """

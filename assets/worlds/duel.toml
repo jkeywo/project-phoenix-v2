@@ -8,6 +8,35 @@
 # five ships per side. Run without either flag and the authored default roster
 # below stands: a 5v5 of couriers against destroyers.
 #
+# ── BASELINE ─────────────────────────────────────────────────────────────────
+#
+# This world had no recorded digest until the AI-thrust-burst fix moved it, which
+# is exactly the case a baseline exists for. Measured on a clean tree with the
+# debug binary, on the DEFAULT roster (no --side-a/--side-b):
+#
+#   target/debug/phoenix-headless --world assets/worlds/duel.toml \
+#     --seed 42 --ticks 900 --record target/duel.ron --digest-every 0
+#
+# CURRENT VALUE: 95852357729946676, moved from 11542528846502171323 by the
+# `thrust_release_threshold` band (the thrust axis's mirror of the battery
+# axis's `min_reserve_*`/`min_restore_*` pair). 11542528846502171323 was itself
+# only ever measured, never written down here; it is recorded above as the
+# lineage rather than as a value this file once claimed.
+#
+# WHY THIS WORLD AND NOT THE OTHERS. Of the sixteen worlds measured either side
+# of that fix, exactly two move: this one and `rng_coverage`. The band changes
+# WHEN a helm power channel gives its point back, so it can only reach a digest
+# through a world that actually resolves the helm HOLD rule — which needs a
+# banded hull at HIGH LOD under a throttle that reaches the band.
+# `ai_power_allocation` is `With<AiHighFidelity>`, so a low-LOD NPC never runs it
+# at all. This world is a ten-ship close-quarters brawl in which every hull is
+# promoted and under way, and its default roster is `alliance_courier` against
+# `alliance_destroyer` — the courier authors the banded rule directly and the
+# destroyer inherits it from `fragments/ai/fleet_baseline.toml`. Measured: 24
+# helm power changes across the window here, against 0 in combat_test, patrol
+# and falling_skyway, all three of which field banded hulls but never promote or
+# never reach the band.
+#
 # ── Why the NPC slots are `spawn_entity` effects, not `[[entity]]` blocks ─────
 #
 # `on_all_destroyed group = "..."` only tracks membership registered through

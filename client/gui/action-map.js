@@ -167,6 +167,19 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Set the ship's weapons hold to an explicit desired state (issue #1041) —
+   *  the tactical restraint lever, layered UNDER Red Alert rather than
+   *  replacing it, so the crew need not unlearn the alert to hold fire. Same
+   *  `red-alert` target as the alert itself: one control source governs the
+   *  whole firing posture. Explicit like its sibling above, so a stale,
+   *  duplicated or retried command is idempotent. */
+  set_weapons_hold: (a, send) => {
+    send('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'SetWeaponsHold', data: { held: !!a.held } },
+    });
+  },
+
   /** Toggle Captain priority boost on an objective (issue #675). */
   set_objective_priority: (a, send) => {
     if (!a.id) return;

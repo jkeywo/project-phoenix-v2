@@ -1,0 +1,238 @@
+# Probe world for issue #1041 — the tactical restraint lever, and the one
+# interaction that turns it into a choice.
+#
+# Two things are under test here and they are deliberately kept apart.
+#
+#   THE LEVER      one always-armed hostile, held and then released, with its
+#                  own fire the only thing that moves. The hull is a Harrow
+#                  patrol boat on purpose: its gun line authors
+#                  `min_alert_to_fire = 0`, so it is the hull a hold has to beat
+#                  the hard way. An implementation that seeded a plain 0.0 for a
+#                  hold would pass every test written against an Alliance hull
+#                  and fail this one.
+#
+#   THE CHOICE     two claimants, spawned identical, taken out of the fight two
+#                  different ways. One is DISABLED — its condition track driven
+#                  below the threshold that owns its gun mount, which silences it
+#                  and leaves it alive — and one is DESTROYED. Each writes its
+#                  own campaign flags, and the pair is the control the other's
+#                  flags are read against: a run that wrote both sets of flags on
+#                  one claimant would have proved nothing about either.
+#
+# The comparison shape is `probe_strike.toml`'s and it is here for the same
+# reason: a single held ship that never fired would pass whatever the code did.
+# Every claim below is a BEFORE and an AFTER on the same hull, or a pair that
+# differs in exactly one authored fact.
+#
+# ── Timeline (60 Hz), in mission seconds ────────────────────────────────────
+#
+#   t=0    the Harrow and the Federation are made mutually hostile. The
+#          enforcer is always-armed and in range; it opens fire on its own.
+#   t=4    `hold_fire` on the enforcer. Its guns stop. Nothing else about the
+#          world changes — it is still hostile, still in range, still at
+#          whatever alert its own captain policy has it at.
+#   t=8    `release_fire` on the enforcer. Its guns resume.
+#   ~t=10  the CREW hold their own fire — their captain's order, not this
+#          script's, which is why no timer below issues it. The mirror flag
+#          `weapons_hold.own_ship` goes up, `on_flag_set` chains off it, and the
+#          operator watching the corridor reacts. That is the "an authored party
+#          reacts to the hold" half, proved through the flag rather than through
+#          a Rust hook.
+#   t=14   the disable branch: 80 points off `claimant_disabled`'s condition
+#          drops `probe_claimant_guns_online`, `on_flag_cleared` chains, and the
+#          handler holds its fire and writes the disabled flags. It is still in
+#          the world afterwards, and that is the point.
+#   t=18   the destroy branch: `claimant_destroyed` is destroyed outright,
+#          `on_destroyed` chains, and the handler writes the destroyed flags.
+#
+# BASELINE (this world is new in #1041, so this is its first recorded digest).
+# Recorded in the commit that added this line, on a clean tree:
+#
+#   target/release/phoenix-headless --world assets/worlds/probe_restraint.toml \
+#     --seed 42 --ticks 900 --record target/dig/probe_restraint.ron \
+#     --digest-every 0
+#
+# gives final digest 0x0ef4be7b7d18b64e (1078282553163286478), and
+# 18007679616836460502 at tick 0. It is a NEW number, not a preserved one —
+# nothing to compare it against yet — so it is written down here to be the thing
+# a later change is A/B'd against, the way the other probes' already are.
+#
+# What legitimately moves it: this file's entity list and positions, the
+# authored condition and threshold numbers, the script's timings, the hulls it
+# fields, and any engine change to what the authoritative digest folds — which
+# since this issue includes the weapons-hold namespace, and this is the first
+# world in the repository that puts anything in it. What must NOT move with it
+# are the shipped worlds — combat_test 14942520827746055774 and patrol
+# 11531679067393217131 — because a lever nobody in those worlds pulls folds
+# nothing at all.
+#
+# That last sentence was WRONG for two builds, and the corrections are worth
+# recording because they are what the probe fleet is for. The lever's engine
+# half moved `probe_storm.toml` — a world with no hold in it anywhere — twice
+# over, and neither time through the fold: first because the flag mirror wrote
+# through `DerefMut` on every ship's spawn tick and so marked
+# `WorldContentRuntime` changed, and then because the new component arrived as a
+# SECOND `insert` on the ship spawn path, whose extra queued command and
+# archetype move reordered everything spawned after it. The mirror now reads
+# before it writes and the component rides the existing bundle nested. Both
+# fixes were confirmed the only way they can be: by putting
+# 11434311098359716284 back.
+#
+# STILL 1078282553163286478 AFTER the AI-thrust-burst fix, and this one is worth
+# stating precisely because — unlike combat_test, patrol and falling_skyway,
+# which record 0 helm power changes — this world's `ship_harrow_patrol` picket
+# DOES resolve the banded rule. It makes exactly two helm power changes across
+# the window, and they are BYTE-IDENTICAL banded or not: an elevate, and a shed
+# driven by a throttle that falls clean past BOTH edges of the band rather than
+# dithering between them. A band only changes an outcome where the throttle
+# lingers inside it, so a world whose throttle crosses it outright folds the
+# digest it always did. That is a stronger hold than the low-LOD ones above: the
+# rule ran, and still decided the same thing.
+
+[global]
+seed = 1041
+ai_helm_tick_hz = 30.0
+
+# Every hull below is a Harrow patrol boat, whose template doctrine patrols the
+# Ironveil border. This world declares none of that, so each one's single
+# doctrine entry is re-pointed by id at a station of its own — the per-id edit
+# `falling_skyway.toml` uses on its corporate cutter, and for the same reason: a
+# world has to declare every anchor a hull steers to, and naming somebody else's
+# border here would be authoring a lie to satisfy a validator.
+
+[anchors]
+probe_enforcer_station = [40.0, 0.0, 0.0]
+probe_claimant_a_station = [0.0, 0.0, 1400.0]
+probe_claimant_b_station = [0.0, 0.0, 2800.0]
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The crew's own hull. Unnamed, like every other world's player entry: a
+# game-start ship is spawned by its own path and a reference name declared here
+# would be registered against a uuid that path never uses. The crew's OWN hold
+# is therefore ordered by their captain rather than by this script, and what the
+# script does with it is listen — `weapons_hold.own_ship` is keyed by role for
+# exactly this reason.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The lever's subject ─────────────────────────────────────────────────────
+#
+# Close enough that its beams reach on the opening ticks, so "it stopped firing"
+# is measured against a hull that was demonstrably firing a moment earlier.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_restraint.entity.enforcer.name"
+transform = { anchor = "probe_enforcer_station" }
+overrides = { behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "probe_enforcer_station" },
+] } }
+
+# ── The two claimants ───────────────────────────────────────────────────────
+#
+# Same hull, same distance, same condition track, same threshold, same gun
+# mount. Everything about them is identical except what happens to them, which
+# is what makes the flags each writes readable as a consequence of the choice.
+#
+# The `[infrastructure]` on a warship is the composition this slice leans on
+# rather than a new combat state: a condition track already falls with hull
+# damage (`observe_hull`) and already owns named operational flags with
+# hysteresis (#1025). Crossing one downward is what "disabled" MEANS here — the
+# mount is off, the ship is not — and the handler that hears the crossing uses
+# this issue's own lever to make the silence real.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_restraint.entity.claimant_disabled.name"
+transform = { anchor = "probe_claimant_a_station" }
+overrides = { infrastructure = { publish = false, condition = 100.0, condition_max = 100.0, threshold = [
+  { flag = "probe_claimant_guns_online", fails_below = 0.35 },
+] }, behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "probe_claimant_a_station" },
+] } }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_restraint.entity.claimant_destroyed.name"
+transform = { anchor = "probe_claimant_b_station" }
+overrides = { infrastructure = { publish = false, condition = 100.0, condition_max = 100.0, threshold = [
+  { flag = "probe_wreck_guns_online", fails_below = 0.35 },
+] }, behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "probe_claimant_b_station" },
+] } }
+
+[script]
+setup = """
+// Mutual enmity first, so the enforcer has something to shoot at. Neither
+// faction is hostile to the other by default — the Harrow are "a non-engaging
+// neighbour the player must choose to provoke", which is the whole premise of a
+// restraint lever.
+on_world_loaded("on_load");
+
+on_timer(4, "on_hold_the_enforcer");
+on_timer(8, "on_release_the_enforcer");
+on_timer(14, "on_cripple_the_claimant");
+on_timer(18, "on_kill_the_claimant");
+
+// The two branch chains. Both are the REAL chains: a condition crossing raises
+// and drops its own flag through `tick_infrastructure_condition`, and
+// `destroy_entity` pushes the same `WorldEvent::Destroyed` a combat kill does.
+on_flag_cleared("probe_claimant_guns_online", "on_claimant_disabled");
+on_destroyed("world.probe_restraint.entity.claimant_destroyed.name", "on_claimant_destroyed");
+
+// The authored party's reaction to the crew's own restraint (AC3). It reads the
+// MIRROR flag, exactly as a scenario condition reads `workforce.<id>.on_strike`
+// — no scenario ever touches the component.
+on_flag_set("weapons_hold.own_ship", "on_crew_restraint_noticed");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
+
+fn on_hold_the_enforcer(ctx) {
+    ctx.effects.hold_fire("world.probe_restraint.entity.enforcer.name");
+    ctx.flags.enforcer_ordered_to_hold = 1;
+}
+
+fn on_release_the_enforcer(ctx) {
+    ctx.effects.release_fire("world.probe_restraint.entity.enforcer.name");
+    ctx.flags.enforcer_released = 1;
+}
+
+// The operator watching the corridor notices that the destroyer has not gone
+// weapons-free, and says so in the only way a probe can: a flag, and a count of
+// how many times it has seen it.
+fn on_crew_restraint_noticed(ctx) {
+    ctx.flags.operator_saw_restraint = 1;
+    ctx.flags.increment("operator_restraint_notices", 1);
+}
+
+fn on_cripple_the_claimant(ctx) {
+    ctx.effects.damage_infrastructure("world.probe_restraint.entity.claimant_disabled.name", 80);
+}
+
+fn on_kill_the_claimant(ctx) {
+    ctx.effects.destroy_entity("world.probe_restraint.entity.claimant_destroyed.name");
+}
+
+// ── The two outcomes ────────────────────────────────────────────────────────
+//
+// Distinct handlers, distinct flags. `restraint_shown` is the campaign-level
+// answer and it is written by BOTH, to opposite values, because "how did you
+// take it out of the fight?" is one question with two answers rather than two
+// unrelated facts.
+fn on_claimant_disabled(ctx) {
+    ctx.effects.hold_fire("world.probe_restraint.entity.claimant_disabled.name");
+    ctx.flags.claimant_disabled = 1;
+    ctx.flags.restraint_shown = 1;
+}
+
+fn on_claimant_destroyed(ctx) {
+    ctx.flags.claimant_destroyed = 1;
+    ctx.flags.restraint_shown = 0;
+}
+"""

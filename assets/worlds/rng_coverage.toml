@@ -14,6 +14,34 @@
 # picked. Damage dealt to NPCs is invisible to the report, because the total a
 # hull absorbs is RNG-independent; only the distribution varies.
 #
+# ── BASELINE ─────────────────────────────────────────────────────────────────
+#
+# No digest was recorded here until the AI-thrust-burst fix moved it. Measured on
+# a clean tree with the debug binary:
+#
+#   target/debug/phoenix-headless --world assets/worlds/rng_coverage.toml \
+#     --seed 42 --ticks 900 --record target/rng_coverage.ron --digest-every 0
+#
+# CURRENT VALUE: 8393867315677906854, moved from 8980983873395264945 by the
+# `thrust_release_threshold` band on `entities/test/rng_coverage_lancer.toml`
+# (and on the player cruiser's inherited fleet baseline). The old number was only
+# ever measured, never claimed here; it is the lineage, not a former assertion.
+#
+# THIS WORLD IS WHERE THE DEFECT WAS CAUGHT, which is why it moves. Its two
+# lancers fly a geometry that parks a throttle right on 0.70 and dithers there,
+# and before the band `lancer_alpha` changed helm power level 18 times across an
+# 1800-tick run — sixteen of them inside 38 ticks, battery at 57-59 %, nowhere
+# near its 50 % shed floor. Banded, the same run makes 4 changes, and
+# `tests/headless_runner.rs`'s
+# `a_helm_power_level_holds_instead_of_strobing_at_the_thrust_threshold` pins
+# that here rather than leaving it to this digest.
+#
+# What must NOT move with this: the two shipped worlds, combat_test
+# 14942520827746055774 and patrol 11531679067393217131, and the pure-content
+# probes. Both shipped worlds field banded hulls and both hold, because their
+# NPCs stay at low LOD across the window and `ai_power_allocation` is
+# `With<AiHighFidelity>`.
+#
 # Layout — everything sits on top of everything else at the origin:
 #   - Player spawns at [0, 0, 0].
 #   - Two RNG-coverage escorts 45u away, inside their own weapons envelope from

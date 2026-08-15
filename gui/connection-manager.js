@@ -7,15 +7,32 @@ import './strings-boot.js';
 import { localiseTree } from './strings.js';
 
 export function defaultIceServers() {
+  // STUN only. The OpenRelay TURN fallbacks that used to live here are gone:
+  // Metered discontinued the free service and openrelay.metered.ca no longer
+  // resolves, so those entries could never connect — they only stalled ICE
+  // gathering. Relay now comes exclusively from the credential worker via
+  // fetchIceServers(); callers must treat relayAvailable=false as degraded.
   return [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
   ];
 }
 
+/** True if any entry in an iceServers list is a TURN/TURNS relay. */
+export function hasRelayServer(servers) {
+  return (servers || []).some(s => {
+    const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+    return urls.some(u => typeof u === 'string' && (u.startsWith('turn:') || u.startsWith('turns:')));
+  });
+}
+
+/**
+ * Fetch relay credentials from the worker and combine with the STUN base.
+ * Returns { servers, relayAvailable }. relayAvailable=false means no TURN
+ * relay is in the list — on CGNAT/hotspot networks the connection will
+ * almost certainly fail, so callers should warn the user rather than let
+ * the retry loop spin silently.
+ */
 export async function fetchIceServers() {
   const base = defaultIceServers();
   try {
@@ -23,13 +40,14 @@ export async function fetchIceServers() {
     if (r.ok) {
       const extra = await r.json();
       console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
-      return [...base, ...extra];
+      const servers = [...base, ...extra];
+      return { servers, relayAvailable: hasRelayServer(servers) };
     }
-    console.warn('[ICE] Metered.ca fetch returned', r.status, '— using OpenRelay only');
+    console.warn('[ICE] Metered.ca fetch returned', r.status, '— STUN only, no relay');
   } catch (e) {
-    console.warn('[ICE] Metered.ca fetch failed (placeholder or network error) — using OpenRelay only:', e.message);
+    console.warn('[ICE] Metered.ca fetch failed — STUN only, no relay:', e.message);
   }
-  return base;
+  return { servers: base, relayAvailable: false };
 }
 
 /**
@@ -45,6 +63,72 @@ export async function fetchIceServers() {
 export function nextBackoffDelay(attempt, initialMs = 100, maxMs = 30_000) {
   const raw = initialMs * Math.pow(2, Math.max(0, attempt));
   return Math.min(raw, maxMs);
+}
+
+/**
+ * Per-attempt DataChannel connect timeout. TURN allocation over TCP/TLS on
+ * cellular can legitimately take longer than the old flat 8s, so later
+ * attempts wait longer before giving up: 8s, then 16s, then 30s thereafter.
+ * Pure function, unit-testable like nextBackoffDelay.
+ *
+ * @param {number} attempt 0-indexed connect attempt number
+ * @returns {number} timeout in milliseconds for this attempt
+ */
+export function connectTimeoutMs(attempt, schedule = [8_000, 16_000, 30_000]) {
+  const i = Math.min(Math.max(0, attempt), schedule.length - 1);
+  return schedule[i];
+}
+
+/**
+ * Probe whether a TURN relay is actually allocatable from this network.
+ * Opens a throwaway RTCPeerConnection with iceTransportPolicy 'relay' — under
+ * that policy any candidate that surfaces IS a relay candidate, so the first
+ * one proves reachability. Resolves 'reachable', 'unreachable' (TURN in the
+ * list but no relay candidate within timeoutMs), or 'unavailable' (no TURN
+ * entries / no WebRTC).
+ */
+export function probeTurnRelay(iceServers, timeoutMs = 5_000) {
+  return new Promise(resolve => {
+    if (typeof RTCPeerConnection === 'undefined' || !hasRelayServer(iceServers)) {
+      resolve('unavailable');
+      return;
+    }
+    let pc;
+    try {
+      pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' });
+    } catch (_) {
+      resolve('unavailable');
+      return;
+    }
+    let settled = false;
+    const done = verdict => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { pc.close(); } catch (_) { /* already closed */ }
+      resolve(verdict);
+    };
+    const timer = setTimeout(() => done('unreachable'), timeoutMs);
+    pc.onicecandidate = e => {
+      if (e.candidate && e.candidate.candidate) done('reachable');
+    };
+    pc.createDataChannel('turn-probe');
+    pc.createOffer()
+      .then(offer => pc.setLocalDescription(offer))
+      .catch(() => done('unavailable'));
+  });
+}
+
+/**
+ * Candidate type ('host' | 'srflx' | 'relay' | 'prflx') from an
+ * RTCIceCandidate, falling back to parsing the SDP string on browsers that
+ * don't populate `.type`.
+ */
+export function candidateType(candidate) {
+  if (!candidate) return null;
+  if (candidate.type) return candidate.type;
+  const m = /\styp\s+(\S+)/.exec(candidate.candidate || '');
+  return m ? m[1] : null;
 }
 
 export class ConnectionManager {
@@ -66,14 +150,14 @@ export class ConnectionManager {
     return this.conn !== null && this.conn.open;
   }
 
-  connect(hostPeerId, { iceServers, onData, onStatus, onError, onLog, getIdent } = {}) {
+  connect(hostPeerId, { iceServers, onData, onStatus, onError, onLog, onDiag, getIdent } = {}) {
     const Peer = typeof window !== 'undefined' ? window.Peer : null;
     if (!Peer || !hostPeerId) return;
 
     // Stash for retryNow()/backoff-triggered reconnects, which re-run this
     // same setup against a fresh Peer.
     this._hostPeerId = hostPeerId;
-    this._opts = { iceServers, onData, onStatus, onError, onLog, getIdent };
+    this._opts = { iceServers, onData, onStatus, onError, onLog, onDiag, getIdent };
     this._identSent = false;
     this._clearRetryTimer();
     const generation = ++this._generation;
@@ -83,44 +167,63 @@ export class ConnectionManager {
     this._clientPeer = clientPeer;
 
     if (onLog) onLog('[PeerJS] connecting to host peer ID: ' + hostPeerId);
+    if (onDiag) onDiag({ event: 'signaling', state: 'connecting' });
 
     clientPeer.on('open', () => {
       if (!this._isCurrentPeer(clientPeer, generation)) return;
       if (onLog) onLog('[PeerJS] client peer open — starting DataChannel connect');
+      if (onDiag) onDiag({ event: 'signaling', state: 'open' });
       let connectTimeout;
 
       const startConnect = () => {
         if (!this._isCurrentPeer(clientPeer, generation)) return;
         if (onLog) onLog(`[PeerJS] connect attempt ${this._retryAttempt + 1}—`);
         if (onStatus) onStatus('connecting');
+        if (onDiag) onDiag({ event: 'attempt', attempt: this._retryAttempt + 1 });
         const conn = clientPeer.connect(hostPeerId, { reliable: true });
         this.conn = conn;
 
+        // Candidate types gathered this attempt. "No relay" here on a failing
+        // hotspot/CGNAT network is the smoking gun for a TURN problem.
+        const gathered = new Set();
         const pc = conn.peerConnection;
         if (pc) {
           pc.addEventListener('iceconnectionstatechange', () => {
             if (onLog) onLog(`[ICE] state — ${pc.iceConnectionState}`);
+            if (onDiag) onDiag({ event: 'ice-state', state: pc.iceConnectionState });
           });
           pc.addEventListener('icegatheringstatechange', () => {
             if (onLog) onLog(`[ICE] gathering — ${pc.iceGatheringState}`);
           });
+          pc.addEventListener('icecandidate', e => {
+            const type = candidateType(e.candidate);
+            if (type && !gathered.has(type)) {
+              gathered.add(type);
+              if (onLog) onLog(`[ICE] gathered ${type} candidate`);
+              if (onDiag) onDiag({ event: 'candidates', types: [...gathered] });
+            }
+          });
         }
 
+        const timeoutMs = connectTimeoutMs(this._retryAttempt);
         connectTimeout = setTimeout(() => {
           if (this._isCurrentConn(conn, clientPeer, generation) && !conn.open) {
-            if (onLog) onLog(`[PeerJS] ICE timed out on attempt ${this._retryAttempt + 1} — closing and retrying`);
+            const types = gathered.size ? [...gathered].join(',') : 'none';
+            if (onLog) onLog(`[PeerJS] ICE timed out after ${timeoutMs}ms on attempt ${this._retryAttempt + 1} (candidates: ${types}) — closing and retrying`);
+            if (onDiag) onDiag({ event: 'timeout', attempt: this._retryAttempt + 1, types: [...gathered] });
             this.conn = null;
             this._identSent = false;
             if (onStatus) onStatus('disconnected');
             conn.close();
             this._scheduleRetry();
           }
-        }, 8000);
+        }, timeoutMs);
 
         conn.on('open', () => {
           if (!this._isCurrentConn(conn, clientPeer, generation)) return;
           clearTimeout(connectTimeout);
           if (onLog) onLog('[PeerJS] DataChannel open');
+          if (onDiag) onDiag({ event: 'open' });
           this._retryAttempt = 0;
           this._clearRetryTimer();
           const pc = conn.peerConnection;
@@ -133,6 +236,7 @@ export class ConnectionManager {
                   const loc = vals.find(r => r.id === pair.localCandidateId);
                   const rem = vals.find(r => r.id === pair.remoteCandidateId);
                   if (onLog) onLog(`[ICE] active path: local=${loc?.candidateType} remote=${rem?.candidateType}`);
+                  if (onDiag) onDiag({ event: 'path', local: loc?.candidateType, remote: rem?.candidateType });
                   if (loc?.candidateType === 'relay' || rem?.candidateType === 'relay') {
                     if (onLog) onLog('[ICE] traffic is being relayed through a TURN server');
                   }
@@ -342,4 +446,5 @@ export const connectionManager = new ConnectionManager();
 if (typeof window !== 'undefined') {
   window.connectionManager = connectionManager;
   window.fetchIceServers = fetchIceServers;
+  window.probeTurnRelay = probeTurnRelay;
 }

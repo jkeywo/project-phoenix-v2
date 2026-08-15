@@ -530,18 +530,50 @@ capacity = 100.0
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25.0
 
-# DELIBERATELY the pre-#1003 single-floor shape: no `min_restore_*` pair and
-# `min_reserve_weapons` still at 10. This fixture exists for RNG/decode coverage
-# in one test world, it is outside `assets/entities/*.toml` (and so outside the
-# fleet-baseline pins), and it never fights long enough for a shed ladder to
-# matter — so it carries the smallest policy that still decodes rather than a
-# copy of the fleet's hysteresis. See `fragments/ai/fleet_baseline.toml` for the
-# shape every hull the fleet actually flies authors.
+# DELIBERATELY the pre-#1003 single-floor shape ON THE BATTERY AXIS: no
+# `min_restore_*` pair and `min_reserve_weapons` still at 10. This fixture exists
+# for RNG/decode coverage in one test world, it is outside
+# `assets/entities/*.toml` (and so outside the fleet-baseline pins), and it never
+# fights long enough for a battery shed ladder to matter — so it carries the
+# smallest policy that still decodes rather than a copy of the fleet's
+# hysteresis. See `fragments/ai/fleet_baseline.toml` for the shape every hull the
+# fleet actually flies authors. That single-floor battery shape is UNCHANGED and
+# is still the exercised one.
+#
+# THE THRUST AXIS IS A DIFFERENT MATTER, and this hull now carries the fleet's
+# band there. The "never long enough to matter" claim above was measured false
+# once `5672b09a` seeded the `thrust` fact from the real throttle: lancer_alpha
+# flipped helm 18 times in an 1800-tick `rng_coverage` run, sixteen of them
+# inside 38 ticks, throttle dithering across 0.70 with the battery at 57-59 —
+# nowhere near the 50 floor above. The battery ladder was indeed never reached;
+# the strobe was the THRUST threshold with no band, and it is the same defect
+# the fleet's hulls carried.
+#
+# Banding it here rather than keeping the raw shape is a deliberate call. [ai]
+# This fixture's purpose is coverage of the five seeded DAMAGE-DRAW sites, not
+# coverage of power-allocation chatter: a hull whose speed cap strobes at 30 Hz
+# flies a different path every time the tuning next to it moves, which makes the
+# draw sites it reaches LESS stable, not more. Nothing here exercises the
+# thrust-axis rule shape for its own sake, so there is no coverage to lose. The
+# HOLD rule below is the one addition; the elevate and baseline are untouched.
 [power.ai_policy.param]
 thrust_threshold = 0.7
+# [ai] Band width 0.1, matching the fleet. See fleet_baseline for the rationale.
+thrust_release_threshold = 0.6
 min_reserve_helm = 50.0
 min_reserve_weapons = 10.0
 min_reserve_baseline = 0.0
+
+# HOLD, above the elevate: helm is already at 3 and the throttle has not yet
+# fallen past the RELEASE floor, so keep it. Reads `min_reserve_helm` on the
+# battery axis exactly as the elevate does — the single floor is preserved, and
+# only the thrust axis carries a band.
+[[power.ai_policy.rule]]
+priority = 15
+channel = "helm"
+when = "fact(power_helm) >= 3 and fact(thrust) >= param(thrust_release_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+verb = "set_power_group_allocation"
+level = 3
 
 [[power.ai_policy.rule]]
 priority = 10

@@ -65,7 +65,7 @@
         var r = document.getElementById('red-alert');
         var o = document.getElementById('objective-list');
         c.state = { views: s.camera_views || [], current_view: s.view_direction || '', auto: s.viewscreen_auto || false };
-        r.state = { active: !!s.red_alert, auto: s.red_alert_auto || false };
+        r.state = { active: !!s.red_alert, hold: !!s.weapons_hold, auto: s.red_alert_auto || false };
         o.state = { objectives: s.objectives || [], boosted_objective_id: s.boosted_objective_id ?? null };
         var n = (s.blips && s.blips.length) || 0;
         document.getElementById('footer-target').textContent = n > 0

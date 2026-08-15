@@ -107,7 +107,7 @@
       // authored Cinematic view, even if the model carries extra markers.
       const courierViews = (command.camera_views || []).filter(view => view === 'camera_fore' || view === 'cinematic');
       document.getElementById('camera').state = { views: courierViews, current_view: command.view_direction || '', auto: !!command.viewscreen_auto };
-      document.getElementById('red-alert').state = { active: !!command.red_alert, auto: !!command.red_alert_auto };
+      document.getElementById('red-alert').state = { active: !!command.red_alert, hold: !!command.weapons_hold, auto: !!command.red_alert_auto };
       document.getElementById('objectives').state = { objectives: command.objectives || [], boosted_objective_id: command.boosted_objective_id ?? null };
       document.getElementById('shields').state = { facings: shields.facings || [], focused_facing: shields.focused_facing || null, auto: !!shields.shields_auto };
       const threatRow = document.getElementById('threat-row');

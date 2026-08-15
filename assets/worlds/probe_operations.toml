@@ -60,6 +60,76 @@
 # preserved one — nothing to compare it against yet — so it is written down here
 # to be the thing a later change is A/B'd against, the way the other probes'
 # already are.
+#
+# STILL 0xc5998d7cbe9f5e9c AFTER THE RADAR-DAMPENING SIGN FIX (found in #1037),
+# and this world spawns the template that changed, so the hold is a claim rather
+# than an oversight. `region_storm_band.toml`'s `[effects.radar_dampening]
+# range_modifier` went from `0.5` to `-1.0` — from a radar-range multiplier of
+# 1.5 to one of 0.5, which is to say from a storm that made the radar reach
+# FURTHER to one that halves it, which is what the band always claimed to do.
+#
+# THE MECHANISM IS THAT RADAR RANGE IS NOT FOLDED. `ShipModifiers` is not in
+# `sim_digest`'s fold at all — the entity namespace folds `ShipPhysics`,
+# `SystemHull` and `ShipRedAlert` — so a radar horizon only moves a digest by
+# changing BEHAVIOUR that reaches physics, hull, or another folded namespace.
+# Nothing here reads one: this world fires no shot and takes no lock by design,
+# and the packhorse's field repair is gated on the band's `slow_zone` being
+# PRESENT, never on how far anybody can see.
+#
+# BOTH HALVES OF THE A/B ARE RECORDED, because the attribution is the point and
+# not the conclusion. Re-authoring that same field to `-999.0` (radar
+# effectively dark) and to `+999.0` (radar effectively unbounded) BOTH reproduce
+# 14238567263822110364 exactly. Deleting the band's `[effects.slow_zone]`
+# instead moves it to 16965844278809164686 — so the packhorse IS inside the
+# band, the band's effects DO reach this fold, and "the radar change folds
+# nothing" is a fact about the radar rather than about the band standing empty.
+# `probe_destroy`, the other world that spawns this template, holds for the
+# weaker reason: there the slow-zone deletion moves nothing either.
+#
+# The full anchor set was re-measured on the same tree and is UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_strike (--ticks 1800) 535291289754814419,
+# probe_scan 7851858877582205234, probe_storm (--ticks 6480)
+# 11434311098359716284, probe_scandiff 2488189563210329022, probe_corroborate
+# 6231558379626882143, probe_restraint 1078282553163286478, probe_collapse
+# (--ticks 3600) 5992449400465842350, probe_window (--ticks 2400)
+# 8563713307821982951, probe_destroy 14665104268980394769, and falling_skyway
+# 12497900250050242030 — the last of which spawns `region_radiation_band.toml`,
+# a template whose `-2.0` was correct already and was not touched.
+#
+# STILL 0xc5998d7cbe9f5e9c AFTER THE SLOW-ZONE SIGN FIX TOO, which is the
+# sister defect on the neighbouring field pair of the same block, and this
+# world is the one the fix had most reason to move. `region_storm_band.toml`'s
+# `[effects.slow_zone]` went from `thrust_modifier = 0.5` / `yaw_rate_modifier
+# = 0.6` to `-1.0` / `-0.6666667` — from multipliers of 1.5x and 1.6x to 0.5
+# and 0.6, which is to say from a storm band that made ships HALF AGAIN AS FAST
+# to one that halves their speed.
+#
+# THIS ONE IS NOT THE RADAR'S REASON. `MaxSpeed` IS folded: it reaches
+# `ShipPhysics` through `ship::physics_systems`, which multiplies the hull's
+# authored `max_speed` by the slot before the helm integrates. A speed CAP,
+# though, only binds on a ship that is pushing it, and nothing in this world
+# is. Every hull here is station-keeping on an operation — the packhorse sits
+# in the band working a field repair, the tug holds a tow, the tender and the
+# depots do not move at all — so the cap is never the thing deciding how fast
+# anybody goes.
+#
+# BOTH HALVES OF THE A/B ARE RECORDED, and the pair settles it by measurement
+# rather than by argument. Re-authoring the band's `thrust_modifier` and
+# `yaw_rate_modifier` to `-999.0` (a ship in the band frozen to a thousandth of
+# its speed) and to `+999.0` (uncapped) BOTH reproduce 14238567263822110364
+# exactly. The digest FOLDS `ShipPhysics`, so a thousandfold swing in a cap
+# that bound anything would have moved a position or a speed and therefore this
+# number.
+#
+# AND THE BAND IS STILL LOAD-BEARING HERE, which is what stops that being a
+# statement about an unused template: deleting `[effects.slow_zone]` outright
+# STILL moves this digest to 16965844278809164686, exactly as the radar fix
+# recorded, because the packhorse's field repair is gated on the slow zone
+# being PRESENT. The presence reaches the fold; the two numbers do not. Those
+# are separate mechanisms and only the numbers were ever wrong — the
+# interrupt's own `rate_percent = 50` is a percentage, means half rate, and
+# always did.
 
 [global]
 seed = 1027

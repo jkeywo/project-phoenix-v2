@@ -5,6 +5,19 @@
 # practice.
 #
 # Anchors are inlined here (this world does not share state with default.toml).
+#
+# ── HOLDS at 11531679067393217131 over the thrust-band fix, and why ──────────
+#
+# The AI-thrust-burst fix banded the helm power rules of eight hulls, one of
+# which this world fields (`ship_harrow_patrol`, the raider) alongside the player
+# cruiser's inherited `fragments/ai/fleet_baseline.toml`. This digest does not
+# move, and that is a claim.
+#
+# MEASURED: 0 helm power changes across the 900-tick window, banded or not. The
+# raider patrols alone at the far side of its triangle with the player ship
+# AI-backfilled and parked, so it stays at low LOD — and `ai_power_allocation` is
+# `With<AiHighFidelity>`, so it never runs the helm rules at all. A band on a
+# rule that never resolves folds nothing.
 
 [global]
 seed = 42

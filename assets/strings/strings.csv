@@ -296,6 +296,8 @@ component.power.held,"Power group level readout while the reactor's battery floo
 component.red_alert.title,Red alert control heading (Captain console),RED ALERT
 component.red_alert.active,Red alert button while the alert is raised,RED ALERT
 component.red_alert.standby,Red alert button while the ship is stood down,STAND DOWN
+component.weapons_hold.free,"Weapons hold button while the guns are free to fire. [bracketed]: unapproved copy",[WEAPONS FREE]
+component.weapons_hold.held,"Weapons hold button while the captain is holding fire. [bracketed]: unapproved copy",[WEAPONS HOLD]
 component.repair_teams.title,Repair teams panel heading,REPAIR TEAMS
 component.repair_teams.empty,Repair panel when the ship has no repair teams,[NO REPAIR TEAMS]
 component.repair_teams.no_targets,Repair team row when nothing needs repair,[No repair targets]
@@ -793,6 +795,8 @@ server.complexity_normal,Host lobby station card — complexity pill for any oth
 server.slots_reserved.one,"Host lobby compact chip, exactly one reserved station slot. {n} is the count, {max} the total slots",[↻ {n} station slot reserved (max {max})]
 server.slots_reserved.other,"Host lobby compact chip, zero or several reserved station slots. {n} is the count, {max} the total slots",[↻ {n} station slots reserved (max {max})]
 server.spectator_waiting,Host lobby pill for a connected player holding no station yet. {name} is the player name,[{name} (waiting)]
+server.no_relay_warning,Host lobby warning under the QR when no TURN relay credentials could be fetched,[⚠ No relay server — players on mobile networks may fail to connect]
+server.client_ice_state,"Host lobby line for an inbound client stuck mid-connection. {id} is the client short id, {state} the ICE state",[client {id}…: connection {state}]
 client.status_connected,Connection status once the WebRTC link is up,Connected
 client.status_no_host_id,Connection status when the URL carries no host id,[No host ID in URL. Scan the QR code on the view screen.]
 client.status_waiting_server,Connection status while waiting for the signalling server,[Waiting for server]
@@ -801,6 +805,11 @@ client.status_disconnected,Connection status after losing the link,Disconnected
 client.status_unreachable,Connection status when WebRTC relay traffic appears blocked,[Cannot reach host - the network may be blocking WebRTC relay traffic. Try a different network.]
 client.status_host_not_found,Connection status when the host peer id is unknown,[Host not found — rescan the QR code on the view screen.]
 client.status_peer_error,Connection status on an unexpected peer error. {type} is the error kind,[Peer error: {type}]
+client.diag_no_relay,Connection diagnostics line when no TURN relay credentials could be fetched,[⚠ No relay server — connection may fail on mobile networks]
+client.diag_relay_ok,Connection diagnostics line when the TURN relay probe succeeds,[Relay server: reachable]
+client.diag_relay_fail,Connection diagnostics line when the TURN relay probe fails,[⚠ Relay server unreachable — this network may block relay traffic]
+client.diag_stage,"Connection diagnostics stage line. {attempt} is the attempt number, {ice} the ICE connection state, {types} the candidate types gathered",[attempt {attempt} — ICE: {ice} — candidates: {types}]
+client.diag_none,Connection diagnostics placeholder when no ICE candidates have been gathered yet,[none]
 client.doc_title,Browser-tab title of the client console page,[Project Phoenix — Console]
 console.battleship_captain.subtitle,battleship captain console — hero sub-heading under the title,[COMMAND & BATTLESPACE]
 console.courier_captain.subtitle,courier captain console — hero sub-heading under the title,COURIER COMMAND
@@ -1024,6 +1033,7 @@ world.falling_skyway.entity.depot_ladder_b.name,assets/worlds/falling_skyway.tom
 world.falling_skyway.entity.skyway_control.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Skyway Control]
 world.falling_skyway.entity.strike_committee.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Strike Committee]
 world.falling_skyway.entity.havelock_cutter.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Havelock Cutter]
+world.falling_skyway.entity.havelock_enforcer.name,"assets/worlds/falling_skyway.toml -> Havelock's hired security picket. [bracketed]: unapproved copy",[HAVELOCK PICKET]
 world.falling_skyway.entity.convoy_meridian.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Convoy Meridian]
 world.falling_skyway.entity.hauler_lark.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Lark]
 world.falling_skyway.entity.hauler_pell.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Hauler Pell]
@@ -1046,6 +1056,9 @@ world.probe_evidence.comms.press,"Response text — pressing the foreman for wha
 world.probe_evidence.comms.let_it_go,"Response text — letting the foreman off the hook, in the #1031 probe world","[Nothing further.]"
 world.falling_skyway.workforce.skyway_workers.label,assets/worlds/falling_skyway.toml -> [[workforce]] label,[Skyway Workers]
 world.falling_skyway.workforce.havelock_operations.label,assets/worlds/falling_skyway.toml -> [[workforce]] label,[Havelock Operations]
+world.probe_restraint.entity.enforcer.name,"assets/worlds/probe_restraint.toml -> the always-armed hostile the hold is tested on. [bracketed]: unapproved copy",[PROBE ENFORCER]
+world.probe_restraint.entity.claimant_disabled.name,"assets/worlds/probe_restraint.toml -> the claimant taken out of the fight alive. [bracketed]: unapproved copy",[PROBE CLAIMANT A]
+world.probe_restraint.entity.claimant_destroyed.name,"assets/worlds/probe_restraint.toml -> the claimant destroyed. [bracketed]: unapproved copy",[PROBE CLAIMANT B]
 world.probe_strike.workforce.workers.label,assets/worlds/probe_strike.toml -> [[workforce]] label,[Probe Workers]
 world.probe_strike.workforce.operator.label,assets/worlds/probe_strike.toml -> [[workforce]] label,[Probe Operator]
 world.probe_strike.entity.tender_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck-side Tender]
@@ -1115,3 +1128,189 @@ world.falling_skyway.objective.rescue.text,Objective text — the Act 2 tow resc
 world.falling_skyway.objective.storm.text,Objective text — the Act 2 storm watch in Falling Skyway,[See the sweep through. The corridor is yours again when the last band passes.]
 world.falling_skyway.objective.lee.text,Objective text — the Act 2 withdrawal to the storm lee in Falling Skyway,[Take the ship west into the lee and ride the rest of it out.]
 world.falling_skyway.objective.loss_report.text,Objective text — the Act 2 rescue-failure consequence in Falling Skyway,[Report the loss of Lyra Ascending to Skyway Control.]
+world.probe_scandiff.entity.ladder_frayed.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Frayed Rung]
+world.probe_scandiff.entity.ladder_sound.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Sound Rung]
+world.probe_scandiff.entity.ladder_unread.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Unread Rung]
+world.probe_scandiff.entity.ladder_slipping.name,assets/worlds/probe_scandiff.toml -> [[entity]] name,[Slipping Rung]
+world.probe_scandiff.threshold.certified_load.label,assets/worlds/probe_scandiff.toml -> [[infrastructure.threshold]] label,[Certified load standard]
+world.probe_scandiff.evidence.record_certified,"Evidence text — the operator's recorded claim about a rung, probe_scandiff",[Operator's file: this rung was inspected and re-rated at the certified load standard.]
+world.probe_scandiff.evidence.record_contradicted,"Evidence text — the reading and the record put side by side, probe_scandiff",[The rung cannot carry what its own file says it was signed off to carry.]
+world.falling_skyway.threshold.certified_load.label,assets/worlds/falling_skyway.toml -> [[infrastructure.threshold]] label,[Certified load standard]
+world.falling_skyway.evidence.ladder_b_record_inspection,"Evidence text — the operator's recorded inspection of Ladder B, Falling Skyway",[Operator's file on Ladder B: inspected eleven weeks ago and signed off at the certified load standard.]
+world.falling_skyway.evidence.ladder_b_record_reinforced,"Evidence text — the operator's recorded reinforcement of Ladder B, Falling Skyway","[Operator's file on Ladder B: transfer arm reinforced last spring, re-rated for full load, no follow-up required.]"
+world.falling_skyway.entity.rigger_tacket.name,assets/worlds/falling_skyway.toml -> [[entity]] name,[Rigger Tacket]
+world.falling_skyway.evidence.ladder_b_worker_account,"Evidence text — the rigger's account of the Ladder B inspections, Falling Skyway","[Tacket, who rigs the Ladder B transfer arm: nobody came up to look at it, and the re-rating was signed in an office.]"
+world.falling_skyway.objective.confront.text,Objective text — the Act 3 confrontation the corroboration unlocks in Falling Skyway,"[You have the record and a witness to it. Put both to Havelock when the transfer window opens.]"
+world.falling_skyway.commitment.protect_witness.terms,"Commitment terms — the captain's promise to keep the rigger's name back, Falling Skyway","[Rigger Tacket's name stays out of anything that reaches Havelock until she puts it there herself.]"
+world.falling_skyway.commitment.protect_witness.resolves,Commitment resolution condition — the witness-protection promise in Falling Skyway,[Settled when the Ladder B file reaches Control.]
+world.falling_skyway.comms.rigger_hails,Dialogue body — the rigger opens the corroboration channel in Falling Skyway,"[Destroyer — Tacket. I rig the transfer arm at B, or I did until six weeks ago. Committee say you have the operator's file on it. I was up there the week it says it was inspected.]"
+world.falling_skyway.comms.rigger_ask,Response text — asking the rigger what actually happened in Falling Skyway,[Then tell me what actually happened up there.]
+world.falling_skyway.comms.rigger_later,Response text — putting the rigger's channel down without answering in Falling Skyway,[Stand by. I will come back to you.]
+world.falling_skyway.comms.rigger_stands_by,Dialogue body — the rigger waiting on an open channel in Falling Skyway,[I will be on this channel. It is not as though I am working.]
+world.falling_skyway.comms.rigger_account,Dialogue body — the rigger's account of the Ladder B inspections in Falling Skyway,"[Nobody came up. Not that week, not the week after. The collar on that arm is the one that was on it four years ago — you can see the paint line where the new one was meant to sit. Whoever signed it off did it from an office. I will say all of that to Control. I would rather Havelock did not hear my name from you first.]"
+world.falling_skyway.comms.rigger_protect,Response text — promising to keep the rigger's name back in Falling Skyway,[Your name stays out of it until you put it there yourself.]
+world.falling_skyway.comms.rigger_no_promise,Response text — refusing the rigger cover in Falling Skyway,[I am not going to promise you that. It goes in the report as it stands.]
+world.falling_skyway.comms.rigger_thanks,Dialogue body — the rigger signing off with the promise given in Falling Skyway,[Then you will have it in writing before the window opens. Mind how you go up there.]
+world.falling_skyway.comms.rigger_accepts_risk,Dialogue body — the rigger signing off without cover in Falling Skyway,[Fair enough. I would rather you were honest with me than careful with me.]
+world.probe_corroborate.entity.rung_both.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Both-Halves Rung]
+world.probe_corroborate.entity.rung_late.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Late-Record Rung]
+world.probe_corroborate.entity.rung_forced.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Forced-Open Rung]
+world.probe_corroborate.entity.rung_unheard.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Unread Rung]
+world.probe_corroborate.entity.rung_quiet.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Quiet Rung]
+world.probe_corroborate.entity.witness_both.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Both-Halves Witness]
+world.probe_corroborate.entity.witness_late.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Late-Record Witness]
+world.probe_corroborate.entity.witness_forced.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Forced-Open Witness]
+world.probe_corroborate.entity.witness_unheard.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Unread Witness]
+world.probe_corroborate.entity.witness_quiet.name,assets/worlds/probe_corroborate.toml -> [[entity]] name,[Quiet Witness]
+world.probe_corroborate.evidence.record_both,"Evidence text — the records comparison on the both-halves rung, probe_corroborate",[The both-halves rung cannot carry what its own file says it was signed off to carry.]
+world.probe_corroborate.evidence.record_late,"Evidence text — the records comparison that arrived late, probe_corroborate",[The late-record rung cannot carry what its own file says it was signed off to carry.]
+world.probe_corroborate.evidence.record_forced,"Evidence text — the records comparison on the forced-open rung, probe_corroborate",[The forced-open rung cannot carry what its own file says it was signed off to carry.]
+world.probe_corroborate.evidence.record_unheard,"Evidence text — the records comparison nobody on the unread rung ever made, probe_corroborate",[The unread rung cannot carry what its own file says it was signed off to carry.]
+world.probe_corroborate.evidence.record_quiet,"Evidence text — the records comparison nobody on the quiet rung ever made, probe_corroborate",[The quiet rung cannot carry what its own file says it was signed off to carry.]
+world.probe_corroborate.evidence.account_both,"Evidence text — the witness's account of the both-halves rung, probe_corroborate",[A rigger who was on the both-halves rung: nobody came up to inspect it.]
+world.probe_corroborate.evidence.account_late,"Evidence text — the witness's account of the late-record rung, probe_corroborate",[A rigger who was on the late-record rung: nobody came up to inspect it.]
+world.probe_corroborate.evidence.account_forced,"Evidence text — the account no witness on the forced-open rung ever gave, probe_corroborate",[A rigger who was on the forced-open rung: nobody came up to inspect it.]
+world.probe_corroborate.evidence.account_unheard,"Evidence text — the account no witness on the unread rung ever gave, probe_corroborate",[A rigger who was on the unread rung: nobody came up to inspect it.]
+world.probe_corroborate.evidence.account_quiet,"Evidence text — the account no witness on the quiet rung ever gave, probe_corroborate",[A rigger who was on the quiet rung: nobody came up to inspect it.]
+world.probe_corroborate.comms.witness_hails,"Dialogue body — a witness opening the corroboration channel, probe_corroborate",[I worked that rung. I hear you have the file on it.]
+world.probe_corroborate.comms.witness_ask,"Response text — asking the witness what happened, probe_corroborate",[Tell me what happened up there.]
+world.probe_corroborate.comms.witness_account,"Dialogue body — the witness's account, probe_corroborate",[Nobody came up. Put that where it will be read.]
+entity.skyhook.threshold.load_bearing.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Load bearing]
+entity.skyhook.threshold.tether_tensioned.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Tether tension]
+entity.skyhook.threshold.station_holding.label,assets/entities/skyhook.toml -> [[infrastructure.threshold]] label,[Station holding]
+world.falling_skyway.deadline.skyhook_failure.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Verrow: projected failure]
+world.falling_skyway.entity.head_lighter.name,assets/worlds/falling_skyway.toml -> Act 3 collapse handler spawn_entity name,[Verrow Crew Lighter]
+world.falling_skyway.entity.head_pod.name,assets/worlds/falling_skyway.toml -> Act 3 collapse handler spawn_entity name,[Verrow Work Pod]
+world.falling_skyway.threshold.under_tow.label,assets/worlds/falling_skyway.toml -> Act 3 survivor craft [[infrastructure.threshold]] label,[Under tow]
+world.falling_skyway.objective.head_standoff.text,Objective text — the Act 3 approach to the skyhook head in Falling Skyway,[Take station off the head and stay inside stabiliser range of it.]
+world.falling_skyway.objective.head_watch.text,Objective text — the Act 3 standing watch on the skyhook in Falling Skyway,"[Keep Skyhook Verrow standing. It is carrying the whole corridor on a ribbon that has been slipping since before you arrived.]"
+world.falling_skyway.objective.tether_one.text,Objective text — the Act 3 first tether warning in Falling Skyway,"[Verrow is past its load limit and still taking traffic. Stabilise the head. If nobody does, it comes down.]"
+world.falling_skyway.objective.tether_two.text,Objective text — the Act 3 second tether warning in Falling Skyway,"[Tension control has gone and the head is swinging on the ribbon. Stabilise Verrow, or start deciding who comes off it.]"
+world.falling_skyway.objective.tether_three.text,Objective text — the Act 3 final tether warning in Falling Skyway,"[LAST WARNING. Verrow cannot hold its own station. One stabiliser run still saves it; in half a minute nothing will.]"
+world.falling_skyway.objective.head_report.text,Objective text — the Act 3 collapse report to Control in Falling Skyway,[Report the loss of Skyhook Verrow to Skyway Control.]
+world.falling_skyway.objective.muster.text,Objective text — the Act 3 epilogue approach to the debris in Falling Skyway,[Get the ship into the debris field where the head used to be.]
+world.falling_skyway.objective.survivors.text,Objective text — the Act 3 survivor-rescue epilogue in Falling Skyway,"[Two craft came off Verrow before it went. Get a line on both of them and pull them out of the debris.]"
+world.falling_skyway.comms.head_reports_load,"Dialogue body — the gang on the skyhook head check in as Act 3 opens, Falling Skyway","[Destroyer, Verrow head, gang boss speaking. Storm is off us and Control has put the corridor back on our berths, so we are carrying the lot on a ribbon that has been slipping since breakfast. Thought you should know there are people up here.]"
+world.falling_skyway.comms.head_warns_one,"Dialogue body — the skyhook head's first warning, Falling Skyway","[Destroyer, Verrow head. We are past our load limit and Control will not stop sending traffic at us. Trim is going. We can hold it a while, and a while is not all night.]"
+world.falling_skyway.comms.head_warns_two,"Dialogue body — the skyhook head's second warning, Falling Skyway","[Verrow head. Tension control has gone on the ribbon and the whole structure is swinging with it — you can feel it through the plates. I have a full shift up here and one lift.]"
+world.falling_skyway.comms.head_warns_three,"Dialogue body — the skyhook head's final warning, Falling Skyway","[Destroyer — Verrow. She will not hold station. We are riding down the ribbon. Whatever you were going to do, do it now.]"
+world.falling_skyway.comms.head_acknowledge,Response text — acknowledging the skyhook head's warning in Falling Skyway,"[Copy, Verrow. Keep this channel open and keep talking to me.]"
+world.falling_skyway.comms.head_clear_it,Response text — ordering the skyhook head cleared in Falling Skyway,"[Get your people off the head. Now, and all of them.]"
+world.falling_skyway.comms.head_stays_up,"Dialogue body — the gang staying on the head after an acknowledgement, Falling Skyway",[Understood. We will be stood by the rail if she goes.]
+world.falling_skyway.comms.head_clearing,"Dialogue body — the gang coming off the head in time, Falling Skyway","[You are sure. Right — everybody down, transfer is off. If you are wrong about this, the corridor is yours to explain.]"
+world.falling_skyway.comms.head_clearing_late,"Dialogue body — the evacuation ordered too late to clear the head, Falling Skyway",[Now? There is one lift and it takes six at a time. I will get who I can. The rest of us are staying with her.]
+world.falling_skyway.comms.head_already_clear,"Dialogue body — the head already evacuated, Falling Skyway","[Nobody left up here to tell, Destroyer. We are on the lighter watching it with you.]"
+world.falling_skyway.comms.head_holds,"Dialogue body — the skyhook head stabilised and holding, Falling Skyway","[She is steady. Trim is back and the swing has gone out of the ribbon. That was closer than I want in the log, Destroyer.]"
+world.falling_skyway.comms.head_holds_empty,"Dialogue body — the head held after being evacuated, Falling Skyway","[She held. And we are on a lighter looking at an empty head and a transfer nobody is running tonight. Your call. I am not saying it was the wrong one.]"
+world.falling_skyway.comms.lighter_calls,"Dialogue body — the survivor lighter calling for a tow, Falling Skyway","[Anyone on this channel — Verrow crew lighter. Our drive went with the head. We are in the debris with the pod somewhere off our beam and we cannot steer out of it.]"
+world.falling_skyway.evidence.head_collapse,"Evidence text — the skyhook's structural failure, Falling Skyway",[Skyhook Verrow failed structurally at the tether head and was lost with the corridor's only two transfer berths.]
+world.probe_collapse.entity.tender.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Stabiliser Tender]
+world.probe_collapse.entity.rescuer.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Rescue Tug]
+world.probe_collapse.entity.hook_saved.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Saved-side Head]
+world.probe_collapse.entity.hook_lost.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Lost-side Head]
+world.probe_collapse.entity.survivor.name,assets/worlds/probe_collapse.toml -> spawned by the collapse handler,[Survivor Lighter]
+world.probe_collapse.deadline.projection.label,assets/worlds/probe_collapse.toml -> [[deadline]] label,[Projected failure]
+world.probe_collapse.objective.saved.text,"Objective text — the head that is stabilised, in the #1040 probe world",[Keep the saved-side head standing.]
+world.probe_collapse.objective.lost.text,"Objective text — the head that is not stabilised, in the #1040 probe world",[Keep the lost-side head standing.]
+world.probe_collapse.objective.survivors.text,"Objective text — the collapse epilogue, in the #1040 probe world",[Get the survivor lighter out of the debris.]
+world.falling_skyway.capacity.claim_committee.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Lift claimed — strike committee]
+world.falling_skyway.capacity.claim_havelock.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Lift claimed — Havelock]
+world.falling_skyway.capacity.claim_convoy.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Lift claimed — Convoy Meridian]
+world.falling_skyway.capacity.window_available.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Lift available this window]
+world.falling_skyway.capacity.window_demand.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Lift claimed by all three]
+world.falling_skyway.capacity.window_shortfall.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Short by]
+world.falling_skyway.capacity.window_committed.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Lift committed and standing]
+world.falling_skyway.deadline.transfer_window.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Transfer window opens]
+world.falling_skyway.deadline.window_closes.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Transfer window closes]
+world.falling_skyway.objective.window_ready.text,Objective text — the Act 3 run-up to the transfer window in Falling Skyway,"[The transfer window opens on the clock. Whatever the chain can lift by then is all there is, so mend what you can and get back on station.]"
+world.falling_skyway.objective.window.text,Objective text — the Act 3 transfer window itself in Falling Skyway,"[The window is open and the lift will not cover all three claims. Read Control's manifest and decide who goes.]"
+world.falling_skyway.comms.window_opens_short,Dialogue body — Control opening a transfer window that has lift in it but not enough in Falling Skyway,"[Skyway Control to destroyer: transfer window is open. The head is certified and the ladder is pumping what it can pump. Our manifest carries that figure, and beside it what the three of them between them have asked for, and the second is the larger of the two. You have lift for two of them. You do not have lift for three, and nothing anybody does in the next hour changes that. Nobody down here is going to make the call for you.]"
+world.falling_skyway.comms.window_opens_dead,Dialogue body — Control opening a transfer window with no lift available at all in Falling Skyway,"[Skyway Control to destroyer: transfer window is open on paper and on paper only. The head is not certified to run a climber and the ladder has nothing to put in one, so the lift available on our manifest reads nothing at all against three standing claims. Every one of them is short by the whole of it. If you want anybody off this rock before we shut, somebody has to make the chain work first.]"
+world.falling_skyway.comms.window_closes,Dialogue body — Control closing the transfer window in Falling Skyway,"[Skyway Control: window is shut. Anything not already at the top comes back down — that was the rule before you got here and it is not mine to bend. The manifest stands as it stands.]"
+world.probe_window.workforce.crews.label,assets/worlds/probe_window.toml -> [[workforce]] label,[Depot crews]
+world.probe_window.workforce.pickets.label,assets/worlds/probe_window.toml -> [[workforce]] label,[Picket]
+world.probe_window.entity.head_certified.name,assets/worlds/probe_window.toml -> [[entity]] name,[Certified Head]
+world.probe_window.entity.head_slipped.name,assets/worlds/probe_window.toml -> [[entity]] name,[Slipped Head]
+world.probe_window.entity.rung_up.name,assets/worlds/probe_window.toml -> [[entity]] name,[Working Rung]
+world.probe_window.entity.rung_worked.name,assets/worlds/probe_window.toml -> [[entity]] name,[Staffed Rung]
+world.probe_window.entity.rung_struck.name,assets/worlds/probe_window.toml -> [[entity]] name,[Struck Rung]
+world.probe_window.entity.rung_low.name,assets/worlds/probe_window.toml -> [[entity]] name,[Under-Line Rung]
+world.probe_window.entity.manifest_full.name,assets/worlds/probe_window.toml -> [[entity]] name,[Full-Chain Manifest]
+world.probe_window.entity.manifest_struck.name,assets/worlds/probe_window.toml -> [[entity]] name,[Struck-Chain Manifest]
+world.probe_window.entity.manifest_low.name,assets/worlds/probe_window.toml -> [[entity]] name,[Under-Line-Chain Manifest]
+world.probe_window.entity.manifest_dead.name,assets/worlds/probe_window.toml -> [[entity]] name,[No-Lift-Chain Manifest]
+world.probe_window.deadline.opens.label,assets/worlds/probe_window.toml -> [[deadline]] label,[Window opens]
+world.probe_window.deadline.closes.label,assets/worlds/probe_window.toml -> [[deadline]] label,[Window closes]
+world.falling_skyway.capacity.shelter_berths.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Shelter berths — Ladder A]
+world.falling_skyway.objective.parley.text,Objective text — closing on the ladder to talk to all three claimants in Falling Skyway,"[Three parties are asking and the lift covers two. Neither the committee nor the cutter can hear you from the head — close on the ladder transit and get all three on the channel.]"
+world.falling_skyway.objective.choice.text,Objective text — the Act 3 safe-passage choice in Falling Skyway,"[Every claim on that manifest is somebody. Answer all three of them: take two up, and tell the third yourself.]"
+world.falling_skyway.objective.berth.text,Objective text — the Act 3 last-berth allocation in Falling Skyway,[There is no lift. Skyway Control is holding one mooring on Ladder A and wants a name to put against it.]
+world.falling_skyway.comms.claim_stand_by,Response text — holding a claimant's channel without deciding in Falling Skyway,[Stand by. I have not decided.]
+world.falling_skyway.comms.committee_claims,Dialogue body — the strike committee ask for a lift in the transfer window in Falling Skyway,"[Destroyer, committee. Thirty-one of us on this rung and one hauler with a cracked ring frame between the lot of us. We are not asking to go first. We are asking to be counted.]"
+world.falling_skyway.comms.lift_committee,Response text — granting the strike committee a lift in Falling Skyway,[You are on the manifest. Get your people to the climber head.]
+world.falling_skyway.comms.deny_committee,Response text — refusing the strike committee a lift in Falling Skyway,[The lift is spoken for. You are staying on the rung.]
+world.falling_skyway.comms.committee_lifting,Dialogue body — the strike committee hearing they are carried in Falling Skyway,"[Say that again on the record. — Right. Thirty-one, moving now. Nobody who matters is going to thank you for this, Destroyer. We will.]"
+world.falling_skyway.comms.committee_denied,Dialogue body — the strike committee hearing they are not carried in Falling Skyway,[Understood. We will get the gear off the arm and find ourselves a wall.]
+world.falling_skyway.comms.committee_waits,Dialogue body — the strike committee standing by for a decision in Falling Skyway,[We will hold. We have got very good at holding.]
+world.falling_skyway.comms.havelock_claims,Dialogue body — Havelock ask for a lift in the transfer window in Falling Skyway,"[Destroyer, Havelock Cutter. Twenty-two units, and I will say plainly what it buys you. This depot chain is company-run, and the next Federation hull through this corridor books its fuel through us. Our people are staff, not cargo.]"
+world.falling_skyway.comms.lift_havelock,Response text — granting Havelock a lift in Falling Skyway,[Havelock has the second slot. Load your people.]
+world.falling_skyway.comms.deny_havelock,Response text — refusing Havelock a lift in Falling Skyway,[Your staff can sit it out with everyone else. Havelock is not on the manifest.]
+world.falling_skyway.comms.havelock_lifting,Dialogue body — Havelock hearing they are carried in Falling Skyway,"[Noted, and logged. You will find us reasonable the next time you come through this corridor.]"
+world.falling_skyway.comms.havelock_denied,Dialogue body — Havelock hearing they are not carried in Falling Skyway,[That is your decision to make. I will make quite sure it is recorded as yours.]
+world.falling_skyway.comms.havelock_waits,Dialogue body — Havelock standing by for a decision in Falling Skyway,"[We will wait. We are good at waiting, Destroyer, and better at remembering.]"
+world.falling_skyway.comms.put_the_file,Response text — reading the Ladder B file onto the open corridor channel in Falling Skyway,"[Open channel, everyone on the corridor net. This is Havelock's own maintenance file on Ladder B. Control, log it as received.]"
+world.falling_skyway.comms.havelock_file_put,Dialogue body — Havelock reacting to their file going out on the open channel in Falling Skyway,[You have just put an internal document onto an open corridor net. I hope you read all of it. Everybody else is about to.]
+world.falling_skyway.comms.confront_unnamed,Response text — confronting Havelock with the record while protecting the witness in Falling Skyway,[Your file says that arm was inspected. I have somebody who was standing on it that week. You do not get their name.]
+world.falling_skyway.comms.confront_named,Response text — confronting Havelock with the record and naming the witness in Falling Skyway,[Your file says that arm was inspected. Rigger Tacket was standing on it that week and says nobody came up.]
+world.falling_skyway.comms.havelock_confronted,Dialogue body — Havelock answering a confrontation with no name attached in Falling Skyway,[Then produce them. No? Then it is an allegation from a hull that has been on station four hours. This channel is closed to you.]
+world.falling_skyway.comms.havelock_confronted_named,Dialogue body — Havelock answering a confrontation with the witness named in Falling Skyway,"[Tacket. Yes. She is on our books — or she was. Thank you, Destroyer. You have saved our people a great deal of looking.]"
+world.falling_skyway.comms.convoy_claims,Dialogue body — the civilian convoy ask for a lift in the transfer window in Falling Skyway,"[Skyway, Meridian, convoy lead. Twenty-six. That is four hulls and the families in them, and I know it is the biggest number on your board. I have nothing to offer you for it. I would not know what to offer.]"
+world.falling_skyway.comms.lift_convoy,Response text — granting the convoy a lift in Falling Skyway,"[Meridian, bring your hulls up. All four of them.]"
+world.falling_skyway.comms.deny_convoy,Response text — refusing the convoy a lift in Falling Skyway,"[Meridian, I cannot take you. Get your hulls tight against the rung and ride it out.]"
+world.falling_skyway.comms.convoy_lifting,Dialogue body — the convoy hearing they are carried in Falling Skyway,"[Say again? — All four. Understood, Skyway. Understood. We are moving.]"
+world.falling_skyway.comms.convoy_denied,Dialogue body — the convoy hearing they are not carried in Falling Skyway,[Understood. We will tuck in as close as they will let us. Thank you for saying it yourself.]
+world.falling_skyway.comms.convoy_waits,Dialogue body — the convoy standing by for a decision in Falling Skyway,[We will stand by. There is nowhere else to stand.]
+world.falling_skyway.comms.committee_pleads,Dialogue body — the strike committee asking for the last berth after the lift is gone in Falling Skyway,[Destroyer — committee. There is no climber and we all heard Control say so. If there is a mooring left on A with power at it we have people who will not last the night in the open.]
+world.falling_skyway.comms.havelock_pleads,Dialogue body — Havelock asking for the last berth after the lift is gone in Falling Skyway,"[Havelock Cutter. The head is finished, so let us be practical. A is company plant, there is one berth on it, and neither of us is going to pretend that is a coincidence.]"
+world.falling_skyway.comms.convoy_pleads,Dialogue body — the convoy asking for the last berth after the lift is gone in Falling Skyway,[Meridian. We are not asking for the lift any more. We are asking for a wall.]
+world.falling_skyway.comms.control_berth_offer,Dialogue body — Control offering the one remaining Ladder A berth in Falling Skyway,"[Skyway Control: there is no lift and there is not going to be. What is left on this corridor is one mooring on Ladder A with power at it and three parties who want it. That one is not arithmetic, Destroyer. Give me a name.]"
+world.falling_skyway.comms.control_no_berth,Dialogue body — Control with no berth left to offer at all in Falling Skyway,[Skyway Control: no lift and Ladder A is in no state to tie anybody up either. There is nothing on this corridor to give away tonight. Log it and take your ship home.]
+world.falling_skyway.comms.control_berth_settled,Dialogue body — Control after the last berth has been allocated in Falling Skyway,"[The berth is allocated, Destroyer. Nothing further from this station.]"
+world.falling_skyway.comms.berth_to_committee,Response text — giving the last berth to the strike committee in Falling Skyway,[The berth goes to the committee.]
+world.falling_skyway.comms.berth_to_havelock,Response text — giving the last berth to Havelock in Falling Skyway,[The berth goes to Havelock.]
+world.falling_skyway.comms.berth_to_convoy,Response text — giving the last berth to the convoy in Falling Skyway,[The berth goes to Meridian's convoy.]
+world.falling_skyway.comms.berth_to_nobody,Response text — holding the last berth clear in Falling Skyway,[The berth stays clear. Ladder A is the last working rung on this corridor and I will not have it blocked.]
+world.falling_skyway.comms.berth_given_committee,Dialogue body — Control logging the berth to the strike committee in Falling Skyway,[Logged: committee to Ladder A. I will let the other two know whose call it was.]
+world.falling_skyway.comms.berth_given_havelock,Dialogue body — Control logging the berth to Havelock in Falling Skyway,[Logged: Havelock to Ladder A. That will read tidily in their report and badly in everyone else's.]
+world.falling_skyway.comms.berth_given_convoy,Dialogue body — Control logging the berth to the convoy in Falling Skyway,[Logged: Meridian to Ladder A. Four hulls into a berth built for one. They will manage or they will not.]
+world.falling_skyway.comms.berth_withheld,Dialogue body — Control logging the berth held clear in Falling Skyway,"[Logged: berth held clear. Somebody up the line will want that reasoning in writing, Destroyer, and you had better have some.]"
+world.falling_skyway.comms.berth_waits,Dialogue body — Control standing by for a berth decision in Falling Skyway,"[Standing by, Destroyer. The weather is not.]"
+world.falling_skyway.comms.committee_rides_it_out,Dialogue body — the strike committee coming through the storm largely intact in Falling Skyway,"[Committee to Destroyer. All accounted for. Cold, and all accounted for, which is more than any of us expected when this started.]"
+world.falling_skyway.comms.committee_rides_it_out_hurt,Dialogue body — the strike committee coming through the storm badly in Falling Skyway,"[Committee. We got most of them behind the pump housing before it came through. Most. Do not ask me for a number tonight, Destroyer.]"
+world.falling_skyway.comms.committee_rides_it_out_promised,Dialogue body — the strike committee naming the broken safe-passage promise in Falling Skyway,"[Committee. You gave us your word the corridor would be clear for our people in the transfer window. We wrote it down. I read it out to the floor myself and they voted on it. Then we watched that window shut with our people still standing on the rung. Whatever else you take off this rock, Destroyer, take that with you.]"
+world.falling_skyway.comms.havelock_rides_it_out,Dialogue body — Havelock coming through the storm largely intact in Falling Skyway,[Havelock Cutter. Our staff sheltered aboard. The company will want a report and the report will have your name at the top of it.]
+world.falling_skyway.comms.havelock_rides_it_out_hurt,Dialogue body — Havelock coming through the storm badly in Falling Skyway,"[Havelock. We lost people on that rung tonight. There will be an inquiry, and I will be asked who was in the corridor and what they did with the lift.]"
+world.falling_skyway.comms.convoy_rides_it_out,Dialogue body — the convoy coming through the storm largely intact in Falling Skyway,"[Meridian. Four hulls, all still here. Scoured back to the frames and all still here. We will take that.]"
+world.falling_skyway.comms.convoy_rides_it_out_hurt,Dialogue body — the convoy coming through the storm badly in Falling Skyway,[Meridian. We lost the third hull. Everyone aboard her was somebody's. I am not going to say anything else on an open channel.]
+world.falling_skyway.comms.debrief_workers_and_convoy,Dialogue body — Control closing the window with the committee and the convoy carried in Falling Skyway,"[Skyway Control, closing the window. Manifest reads: strike committee carried, Meridian convoy carried, Havelock Operations not carried. The corridor is shut and the record stands as flown. Every party on it now knows exactly what this ship decided when it could only decide once.]"
+world.falling_skyway.comms.debrief_workers_and_operator,Dialogue body — Control closing the window with the committee and Havelock carried in Falling Skyway,"[Skyway Control, closing the window. Manifest reads: strike committee carried, Havelock Operations carried, Meridian convoy not carried. The corridor is shut. The two parties with something to trade are off this rock and the one with nothing is still on it, and it is filed in those words.]"
+world.falling_skyway.comms.debrief_operator_and_convoy,Dialogue body — Control closing the window with Havelock and the convoy carried in Falling Skyway,"[Skyway Control, closing the window. Manifest reads: Havelock Operations carried, Meridian convoy carried, strike committee not carried. The corridor is shut. The people who told you what was wrong with this ladder are the people still standing on it.]"
+world.falling_skyway.comms.debrief_one,Dialogue body — Control closing the window with only one claim carried in Falling Skyway,"[Skyway Control, closing the window. Manifest reads one claim carried out of three, against lift that would have taken two. The corridor is shut, and that difference is filed against this ship rather than against the ladder.]"
+world.falling_skyway.comms.debrief_none,Dialogue body — Control closing the window with nothing carried in Falling Skyway,"[Skyway Control, closing the window. Manifest reads nothing carried. There was lift in this window and it went up the ribbon empty. The corridor is shut and all three claims stand unmet.]"
+world.falling_skyway.comms.debrief_berth,Dialogue body — Control closing a window with no lift after a berth was allocated in Falling Skyway,"[Skyway Control, closing the window. No lift ran in this corridor tonight. One mooring on Ladder A was allocated, two claims were not, and the rest of it is weather and paperwork. Log it and go.]"
+world.falling_skyway.comms.debrief_berth_none,Dialogue body — Control closing a window with no lift and no berth allocated in Falling Skyway,"[Skyway Control, closing the window. No lift, no mooring allocated, three claims standing. Nothing left this rock tonight and nothing on this corridor is better than it was when you arrived. The window is shut. Go home.]"
+world.falling_skyway.evidence.record_on_the_open_channel,"Evidence text — the Ladder B file read onto the open corridor channel, Falling Skyway",[The Ladder B maintenance file was read onto the open corridor channel with Skyway Control receiving.]
+world.falling_skyway.evidence.havelock_confronted,"Evidence text — Havelock put to their own maintenance record, Falling Skyway",[Havelock Operations were put to their own maintenance record on the open channel during the transfer window.]
+world.falling_skyway.evidence.committee_rode_it_out,"Evidence text — the strike committee left in the corridor for the storm, Falling Skyway",[The strike committee were not carried in the transfer window and sheltered on the Ladder B rung. There were casualties.]
+world.falling_skyway.evidence.havelock_rode_it_out,"Evidence text — Havelock staff left in the corridor for the storm, Falling Skyway",[Havelock Operations staff were not carried in the transfer window and sheltered aboard their own hulls. There were casualties.]
+world.falling_skyway.evidence.convoy_rode_it_out,"Evidence text — the convoy left in the corridor for the storm, Falling Skyway",[Convoy Meridian were not carried in the transfer window and rode the corridor out in the open. There were casualties.]
+world.falling_skyway.evidence.record_named_witness,"Evidence text — the record surfaced with the witness named, Falling Skyway",[The Ladder B record was surfaced to Control with the name of the worker who contradicted it attached to it.]
+world.falling_skyway.evidence.record_filed,"Evidence text — the record surfaced with the witness protected, Falling Skyway","[The Ladder B record was surfaced to Control unedited, and the worker who contradicted it was not named.]"
+world.falling_skyway.evidence.record_buried,"Evidence text — the record found and never surfaced, Falling Skyway",[The Ladder B record discrepancy was established by this crew and never put to Control or to the operator.]
+world.falling_skyway.evidence.record_never_found,"Evidence text — no discrepancy established at all, Falling Skyway",[No discrepancy was established between Ladder B's condition and the operator's file on it. The claim stands unexamined.]
+world.falling_skyway.evidence.word_kept,"Evidence text — every commitment kept, Falling Skyway",[Every commitment this captain gave in the Skyway corridor was kept.]
+world.falling_skyway.evidence.word_broken,"Evidence text — at least one commitment broken, Falling Skyway",[At least one commitment this captain gave in the Skyway corridor was broken.]
+world.falling_skyway.evidence.word_none,"Evidence text — no commitments made at all, Falling Skyway",[This captain gave no commitments in the Skyway corridor.]
+world.falling_skyway.comms.committee_reprices,Dialogue body — the strike committee reacting to the transfer manifest moving in Falling Skyway,[Control's board just moved. Are we still on that manifest or are we not?]
+world.falling_skyway.comms.havelock_reprices,Dialogue body — Havelock reacting to the transfer manifest moving in Falling Skyway,"[The manifest has changed since we last spoke, Destroyer. Say plainly whether Havelock is on it.]"
+world.falling_skyway.comms.convoy_reprices,Dialogue body — the convoy reacting to the transfer manifest moving in Falling Skyway,"[Skyway — Meridian. Something just came off that board. Is that us?]"

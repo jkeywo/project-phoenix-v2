@@ -29,10 +29,23 @@
 #
 # TWO THINGS MAKE THAT ANSWER LAND, and both are authored deliberately:
 #
-#   1. The Comms response policy on the player ship, as an override because
-#      `alliance_destroyer.toml` declares none. It is the rule
-#      `alliance_courier.toml` ships: answer an open thread with its first
-#      response while Comms is available and the sender is in range.
+#   1. The Comms response policy on the player ship: answer an open thread with
+#      its first response while Comms is available and the sender is in range.
+#      [ai] THIS LINE USED TO READ "as an override because
+#      `alliance_destroyer.toml` declares none", AND THAT WAS WRONG TWICE — see
+#      the defect found while reviewing #1036. The destroyer declares no
+#      `[comms_console]` INLINE but COMPOSES that exact rule from
+#      `fragments/ai/fleet_baseline.toml`, which every Alliance hull includes
+#      (`alliance_courier.toml` authors the identical rule inline), so the
+#      answer lands with or without this block. And until that defect was fixed
+#      the block never reached the ship at all: `spawn_game_start_entities`
+#      replaced the world's merged config with the lobby-selected hull
+#      WHOLESALE, discarding every `[entity.overrides.*]` on a `player-ship`
+#      row after the validator had approved it. It is LIVE now, and what being
+#      live buys this world is independence from the lobby's pick: the one rule
+#      this probe depends on belongs to the WORLD, so a hull composing a
+#      different comms policy would still answer. Keep it for that, or delete
+#      it as a restatement of the fragment — a content call, not a code one.
 #   2. The thread is opened FROM the foreman's own hull, not from `_self`. The
 #      response router range-gates a pick against the sender's live range flag,
 #      so only a real, hailable, in-range sender can be answered — which is also
@@ -54,6 +67,13 @@
 # 14942520827746055774, patrol 11531679067393217131), so the claim below is
 # tested rather than asserted.
 #
+# STILL 0x4567b7901a66ffe4 after the player-ship override fix (the defect found
+# in #1036), and that is a claim rather than an oversight. The fix makes this
+# world's `comms_console.ai.rule` override reach the spawned hull for the FIRST
+# time; the value it lands is the one `fragments/ai/fleet_baseline.toml` was
+# already giving that hull, so an override that restates what it overrides moves
+# nothing. Every other anchor was swept on the same tree and is unmoved too.
+#
 # Nothing this world exists to exercise is IN that digest. An evidence entry is
 # authoritative state, but it is SCENARIO state — the same "authoritative but not
 # folded" bucket as the deadline table and the commitments ledger, and for their
@@ -69,9 +89,10 @@ ai_helm_tick_hz = 30.0
 [player_spawn]
 position = [0.0, 0.0, 0.0]
 
-# The player ship, with the Comms response policy the stock destroyer does not
-# author. Without it nothing answers the thread below and the dialogue half of
-# this probe never runs — see the header.
+# The player ship. The Comms response policy below RESTATES what every Alliance
+# hull already composes from `fragments/ai/fleet_baseline.toml`; it is authored
+# here so the one rule this probe depends on belongs to the world rather than to
+# whichever hull the lobby picks — see the header.
 [[entity]]
 template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"

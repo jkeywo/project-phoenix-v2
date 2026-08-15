@@ -21,7 +21,7 @@
 #
 # `radar_dampening` rides along because a storm you cannot see through is the
 # same storm. It costs an operation nothing unless a capability authors a rule
-# naming it.
+# naming it. Its sign is not a taste call and is documented at the block itself.
 
 tags = ["region", "storm", "slow_zone"]
 
@@ -36,10 +36,79 @@ radius = 400.0
 
 # The thrust/yaw numbers are the region system's own; an operation reads only
 # that a slow zone is PRESENT, because "how much slower does this make the work"
-# is the capability's rate to author and not the band's to impose.
+# is the capability's rate to author and not the band's to impose. THE TWO
+# MECHANISMS ARE SEPARATE and only one of them was ever wrong: the interrupt's
+# `rate_percent = 50` on `probe_operations`' field-repair means half rate and
+# always did, because a percentage is a percentage. These two are bonuses.
+#
+# HALF THE THRUST, and roughly three fifths the turn. Enough that a crew flying
+# a band feel the front on the stick — a course change costs real seconds, and a
+# job out here is one you committed to before you could see the far side.
+#
+# NEGATIVE, and that is not a typo — the same sign trap `[effects.radar_dampening]`
+# below documents at length, on the field pair whose names read even harder as
+# multipliers. `thrust_modifier` and `yaw_rate_modifier` are signed BONUSES on
+# `ModifierSlot::MaxSpeed` and `ModifierSlot::MaxYawRate`
+# (`modifiers::coordination::apply_region_effects`), not multipliers, and they
+# reach the helm through PRD #117's two-sided formula in
+# `modifiers::cache::ShipModifiers::rebuild_cache`:
+#
+#     bonus >= 0  ->  multiplier = 1 + bonus
+#     bonus <  0  ->  multiplier = 1 / (1 + |bonus|)
+#
+# So the bonus that gives a wanted multiplier `m` is `-(1/m - 1)`:
+#
+#     thrust, m = 0.5   ->   1/0.5 = 2      ->   -(2 - 1)     = -1.0
+#     yaw,    m = 0.6   ->   1/0.6 = 5/3    ->   -(5/3 - 1)   = -0.6666667
+#
+# THIS FILE SHIPPED WITH `0.5` AND `0.6` UNTIL THE COMMIT THAT ADDED THIS
+# COMMENT. Read as multipliers they say "half thrust, three fifths yaw"; read as
+# the signed bonuses the engine actually applies they said `1 + 0.5` and
+# `1 + 0.6`, and a storm band made a ship HALF AGAIN AS FAST and much more
+# agile than it is in clear space. A positive number on an effect called a SLOW
+# ZONE is always wrong, and `regions::effects` and `regions::server` now each
+# carry a guard that says so — one over the data, one through the engine.
+#
+# [ai] `-1.0` and `-0.6666667` are the values that reproduce this file's
+# original authoring intent under the real formula. They are a correction, not a
+# new tuning call, and the tuning itself is unratified. This band's job in
+# `probe_operations` is unchanged either way: that world gates its packhorse
+# field-repair on the slow zone being PRESENT, never on how slow it is — which
+# is measurable rather than assumed, and is measured in the commit that made
+# this change.
 [effects.slow_zone]
-thrust_modifier = 0.5
-yaw_rate_modifier = 0.6
+thrust_modifier = -1.0
+yaw_rate_modifier = -0.6666667
 
+# The picture HALVES. Enough that a crew inside the band are working a smaller
+# scope than the one they planned the job on; not enough that the scope goes
+# dark, which reads as a broken console rather than as weather.
+#
+# NEGATIVE, and that is not a typo. `range_modifier` is a signed BONUS on
+# `ModifierSlot::RadarRange` (`modifiers::coordination::apply_region_effects`),
+# not a multiplier, and it reaches the radar through PRD #117's two-sided
+# formula in `modifiers::cache::ShipModifiers::rebuild_cache`:
+#
+#     bonus >= 0  ->  multiplier = 1 + bonus
+#     bonus <  0  ->  multiplier = 1 / (1 + |bonus|)
+#
+# So "half the scope" is the bonus that solves `1 / (1 + |b|) = 0.5`:
+#
+#     1 + |b| = 1 / 0.5 = 2   ->   |b| = 1.0   ->   range_modifier = -1.0
+#
+# On the Alliance cruiser that flies `probe_operations` and `probe_destroy` that
+# is a weapons horizon of `50 x 0.5 = 25` units and a helm scope of
+# `93.75 x 0.5 = 46.875` — a 400-unit band whose far side a ship inside it
+# cannot see, which is the whole claim the header makes.
+#
+# THIS FILE SHIPPED WITH `0.5` UNTIL THE COMMIT THAT ADDED THIS COMMENT (found
+# in #1037). Read as a multiplier it says "halve the radar"; read as the signed
+# bonus the engine actually applies it said `1 + 0.5`, and a storm made the
+# radar reach FIFTY PERCENT FURTHER. A positive number on a DAMPENING effect is
+# always wrong, and `regions::effects`'s shipped-asset test now says so.
+#
+# [ai] `-1.0` is the value that reproduces this file's original authoring intent
+# under the real formula. It is a correction, not a new tuning call, and the
+# tuning itself is unratified.
 [effects.radar_dampening]
-range_modifier = 0.5
+range_modifier = -1.0

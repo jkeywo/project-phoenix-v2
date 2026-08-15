@@ -205,6 +205,23 @@
 # silent. That is exactly what this world did at the fleet's original reserve of
 # one round per remaining wave: the destroyer met wave 2 holding five rounds it
 # was never cleared to fire.
+#
+# ── HOLDS at 14942520827746055774 over the thrust-band fix, and why ──────────
+#
+# The AI-thrust-burst fix added a `thrust_release_threshold` band to the helm
+# power rules of eight hulls, two of which this world fields (`ship_harrow_
+# cruiser` and `ship_harrow_destroyer`, in the later waves) alongside the player
+# cruiser's inherited `fragments/ai/fleet_baseline.toml`. This digest does not
+# move, and that is a claim rather than an oversight.
+#
+# MEASURED: 0 helm power changes across the 900-tick window, banded or not. The
+# band changes WHEN a helm channel gives its point back, so it can only reach a
+# digest through a hull that actually resolves the helm HOLD rule — and
+# `ai_power_allocation` is `With<AiHighFidelity>`, so a low-LOD NPC never runs it
+# at all. The waves here sit outside promotion range for the whole window with
+# the player ship AI-backfilled and holding station, so no ship in this world
+# ever reaches the rule whose text changed. The two worlds that DO — `duel` and
+# `rng_coverage` — carry their own baselines and both moved.
 
 [global]
 seed = 475

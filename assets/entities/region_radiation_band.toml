@@ -43,20 +43,41 @@
 # radiation is TWO AND A HALF points a second of hull, and the arithmetic below
 # is written against that effective figure rather than against the nominal one.
 #
-#   Alliance Destroyer, 300 hull points
-#     crossing one 520-unit band at 18 u/s      ~29 s    72 pts   survives
-#     working the Falling Skyway rescue and
-#       then flying for the lee                 ~60 s   150 pts   survives, hurt
-#     loitering in the corridor for the whole
-#       three-band sweep the mission authors   ~124 s   310 pts   DESTROYED
+# EVERY CROSSING TIME BELOW IS AN IN-BAND SPEED, and until the slow-zone sign
+# fix none of them was. This table was first written at each hull's authored
+# `max_speed` — the destroyer's 18, the hauler's 12 — as though `slow_zone` did
+# not exist, which while `slow_zone` made ships FASTER was wrong in the other
+# direction as well. A band that genuinely slows to three fifths means a ship
+# inside it makes `0.6 x max_speed`, and a 520-unit crossing costs the time
+# below. Corrected with the sign; see `[effects.slow_zone]`.
 #
-#   Alliance Courier, 200 hull points            80 s of exposure  DESTROYED
-#   Civilian bulk hauler, 60 hull points         24 s of exposure  DESTROYED
+#   Alliance Destroyer, 300 hull points — 18 u/s clear, 10.8 u/s in-band
+#     crossing one 520-unit band                 ~48 s   120 pts   survives
+#     working the Falling Skyway rescue and
+#       then flying for the lee                  ~79 s   198 pts   survives, hurt
+#     loitering in the corridor for the whole
+#       three-band sweep the mission authors    ~124 s   310 pts   DESTROYED
+#
+#   Alliance Courier, 200 hull points — 22 u/s clear, 13.2 u/s in-band
+#     crossing one 520-unit band                 ~39 s    98 pts   survives
+#     loitering                                   80 s of exposure  DESTROYED
+#
+#   Civilian bulk hauler, 60 hull points — 12 u/s clear, 7.2 u/s in-band
+#     loitering                                   24 s of exposure  DESTROYED
+#
+# Only the CROSSINGS moved. Loitering is a wall-clock cost and the front does
+# not care how fast the ship it is cooking would like to be going, so those
+# three figures are exactly what they were.
 #
 # The last line is why Falling Skyway orders its traffic off the lane rather than
-# trusting it to fly through: a hauler makes 12 units a second and cannot cross a
-# 520-unit band alive. Traffic has to be routed AROUND a sweep, which is the
-# whole point of announcing one.
+# trusting it to fly through: a hauler makes 12 units a second in clear space and
+# 7.2 inside a band, so a 520-unit crossing would take it 72 seconds and it is
+# dead in 24. It cannot cross a band alive, and traffic has to be routed AROUND a
+# sweep, which is the whole point of announcing one. THE FIX MADE THIS CLAIM
+# TRUE RATHER THAN LUCKY: at the old positive bonus a hauler was swept along at
+# 19.2 u/s and crossed in 27 seconds against the 24 it takes to die, so the
+# sentence held by three seconds and would have stopped holding under any
+# gentler damage tuning.
 #
 # [ai] Every number here is unratified. `damage_per_second` and `shield_pierce`
 # are the pair the tuning pass (#1044) moves to make "you can be caught, you
@@ -106,7 +127,39 @@ range_modifier = -2.0
 
 # The thrust/yaw numbers are the region system's own — flying through a front is
 # slower than flying around it. An OPERATION reads only that a slow zone is
-# present; what that costs the work is the capability's rate to author.
+# present; what that costs the work is the capability's rate to author, and that
+# rate (`rate_percent = 50`, meaning half) is a percentage and was never wrong.
+#
+# THREE FIFTHS the thrust, seven tenths the turn. The thrust number is the one
+# the tuning table at the top of this file is written against: it is what makes
+# a 520-unit crossing 48 destroyer-seconds instead of 29, and so it is what
+# makes a crossing cost 120 hull points instead of 72. "Flying through a front
+# is slower than flying around it" is a claim about the ship, not only about the
+# work, and this is the field that has to be true for the sentence to be.
+#
+# NEGATIVE, and that is not a typo — the same sign trap `[effects.radar_dampening]`
+# above documents, on the field pair whose names read even harder as multipliers.
+# `thrust_modifier` and `yaw_rate_modifier` are signed BONUSES on
+# `ModifierSlot::MaxSpeed` and `ModifierSlot::MaxYawRate`, not multipliers, and
+# they go through PRD #117's two-sided formula. The bonus that gives a wanted
+# multiplier `m` is `-(1/m - 1)`:
+#
+#     thrust, m = 0.6   ->   1/0.6 = 5/3    ->   -(5/3 - 1)    = -0.6666667
+#     yaw,    m = 0.7   ->   1/0.7 = 10/7   ->   -(10/7 - 1)   = -0.4285714
+#
+# THIS FILE SHIPPED WITH `0.6` AND `0.7` UNTIL THE COMMIT THAT ADDED THIS
+# COMMENT. Read as multipliers they say "three fifths thrust, seven tenths yaw";
+# read as the signed bonuses the engine actually applies they said `1 + 0.6` and
+# `1 + 0.7`, and a RADIATION FRONT MADE SHIPS 60% FASTER AND 70% MORE AGILE than
+# they are in clear space — in a file whose own header, eighty lines up, said
+# that flying through a front is slower than flying around it. It is the same
+# defect the radar-dampening sign fix corrected on the neighbouring field
+# (found in #1037); this band's `radar_dampening` was authored deliberately
+# negative in that pass and these two were missed.
+#
+# [ai] `-0.6666667` and `-0.4285714` are the values that reproduce this file's
+# original authoring intent under the real formula. They are a correction, not a
+# new tuning call, and the tuning itself is unratified.
 [effects.slow_zone]
-thrust_modifier = 0.6
-yaw_rate_modifier = 0.7
+thrust_modifier = -0.6666667
+yaw_rate_modifier = -0.4285714

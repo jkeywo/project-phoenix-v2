@@ -1366,9 +1366,9 @@ sensor_range = 400.0
 
 # ── External operations (issue #1035) ────────────────────────────────────────
 #
-# The two verbs the band-A crew hull works the Falling Skyway with, and the
+# The verbs the band-A crew hull works the Falling Skyway with, and the
 # first `[operations]` table on a shipped hull rather than on a probe world's
-# override. Both are here rather than on the world because
+# override. They are here rather than on the world because
 # `spawn_game_start_entities` replaces the player row's config with the
 # LOBBY-SELECTED template wholesale — a world cannot give the crew's own hull a
 # capability, which the probe worlds record at length.
@@ -1480,3 +1480,39 @@ cause = "region"
 region_effect = "slow_zone"
 response = "slow"
 rate_percent = 50
+
+# Holding a degrading structure steady under load (issue #1040). The fourth verb,
+# and the one the Falling Skyway collapse is answered with: a skyhook head whose
+# condition is walking toward its structural floor is saved by a crew who take
+# the strain off it, not by a crew who patch its plating.
+#
+# [ai] Every number below is unratified.
+#
+# `range = 500` is stand-off work — the ship holds station off the head and
+# works it from there, so a crew do not have to fly into a structure that is
+# already shedding load.
+#
+# 18 SECONDS AND 22 POINTS ARE THE PAIR THE WARNING LADDER IS SIZED AGAINST, and
+# the arithmetic belongs to the world rather than to this file: Falling Skyway's
+# Act-3 header derives its final warning window from its own strain rate and
+# checks that this duration fits inside it with room to give the order. The
+# payout is a LUMP for `condition_on_complete`'s stated reason — a stabilise
+# either held long enough to arrest the decline or it did not — and it is sized
+# to carry a head sitting on its LAST warning rung back over its FIRST one in a
+# single run, so a crew who react late are still, unambiguously, a crew who
+# saved it.
+#
+# NO `work_stoppage` INTERRUPT, unlike `field_repair` above, and the omission is
+# the judgement rather than an oversight. A field repair is the ship's team on
+# somebody else's spine with a torch: without the people who know the structure
+# it is slow, which is what that rule says. A stabilise is the ship's own drives
+# and rig taking load off a head from alongside — there is nobody up there to
+# refuse it and nobody up there whose absence makes it harder. A strike costs
+# the crew the repair, not the catch.
+[[operations.capability]]
+verb = "stabilise"
+range = 500.0
+duration_secs = 18
+power_group = "helm"
+min_power_level = 2
+condition_on_complete = 22.0

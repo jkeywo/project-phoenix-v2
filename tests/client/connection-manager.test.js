@@ -2,18 +2,22 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   defaultIceServers,
   fetchIceServers,
+  hasRelayServer,
   nextBackoffDelay,
+  connectTimeoutMs,
+  probeTurnRelay,
+  candidateType,
   ConnectionManager,
   connectionManager,
 } from '../../gui/connection-manager.js';
 
 describe('defaultIceServers', () => {
-  it('returns the expected base ICE server list', () => {
+  it('returns the STUN-only base list (dead OpenRelay TURN entries removed)', () => {
     const servers = defaultIceServers();
-    expect(servers).toHaveLength(5);
+    expect(servers).toHaveLength(2);
     expect(servers[0].urls).toBe('stun:stun.l.google.com:19302');
     expect(servers[1].urls).toBe('stun:stun1.l.google.com:19302');
-    expect(servers.some(s => s.urls.startsWith('turn:'))).toBe(true);
+    expect(servers.some(s => s.urls.startsWith('turn:'))).toBe(false);
   });
 
   it('is frozen to prevent mutation', () => {
@@ -24,31 +28,143 @@ describe('defaultIceServers', () => {
   });
 });
 
+describe('hasRelayServer', () => {
+  it('is false for STUN-only lists', () => {
+    expect(hasRelayServer(defaultIceServers())).toBe(false);
+  });
+
+  it('detects turn: and turns: urls, including url arrays', () => {
+    expect(hasRelayServer([{ urls: 'turn:r.example.com:80' }])).toBe(true);
+    expect(hasRelayServer([{ urls: 'turns:r.example.com:443?transport=tcp' }])).toBe(true);
+    expect(hasRelayServer([{ urls: ['stun:s.example.com', 'turn:r.example.com'] }])).toBe(true);
+  });
+
+  it('handles empty and missing input', () => {
+    expect(hasRelayServer([])).toBe(false);
+    expect(hasRelayServer(undefined)).toBe(false);
+  });
+});
+
 describe('fetchIceServers', () => {
-  it('returns base list when fetch fails (network error)', async () => {
+  it('returns STUN base with relayAvailable=false when fetch fails (network error)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
-    const servers = await fetchIceServers();
-    expect(servers).toHaveLength(5);
+    const { servers, relayAvailable } = await fetchIceServers();
+    expect(servers).toHaveLength(2);
     expect(servers[0].urls).toBe('stun:stun.l.google.com:19302');
+    expect(relayAvailable).toBe(false);
     vi.unstubAllGlobals();
   });
 
-  it('returns base list when fetch returns non-ok status', async () => {
+  it('returns STUN base with relayAvailable=false when fetch returns non-ok status', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
-    const servers = await fetchIceServers();
-    expect(servers).toHaveLength(5);
+    const { servers, relayAvailable } = await fetchIceServers();
+    expect(servers).toHaveLength(2);
+    expect(relayAvailable).toBe(false);
     vi.unstubAllGlobals();
   });
 
-  it('appends extra servers when fetch succeeds', async () => {
+  it('appends worker servers and reports relayAvailable=true when they include TURN', async () => {
     const extra = [{ urls: 'turn:example.com:3478', username: 'test', credential: 'pass' }];
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue(extra),
     }));
-    const servers = await fetchIceServers();
-    expect(servers).toHaveLength(6);
-    expect(servers[5].urls).toBe('turn:example.com:3478');
+    const { servers, relayAvailable } = await fetchIceServers();
+    expect(servers).toHaveLength(3);
+    expect(servers[2].urls).toBe('turn:example.com:3478');
+    expect(relayAvailable).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports relayAvailable=false when the worker returns only STUN entries', async () => {
+    const extra = [{ urls: 'stun:stun.example.com:80' }];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue(extra),
+    }));
+    const { relayAvailable } = await fetchIceServers();
+    expect(relayAvailable).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('connectTimeoutMs', () => {
+  it('escalates 8s → 16s → 30s and holds at 30s', () => {
+    expect(connectTimeoutMs(0)).toBe(8_000);
+    expect(connectTimeoutMs(1)).toBe(16_000);
+    expect(connectTimeoutMs(2)).toBe(30_000);
+    expect(connectTimeoutMs(3)).toBe(30_000);
+    expect(connectTimeoutMs(100)).toBe(30_000);
+  });
+
+  it('treats negative attempts as attempt 0', () => {
+    expect(connectTimeoutMs(-1)).toBe(8_000);
+  });
+
+  it('respects a custom schedule', () => {
+    expect(connectTimeoutMs(0, [100, 200])).toBe(100);
+    expect(connectTimeoutMs(5, [100, 200])).toBe(200);
+  });
+});
+
+describe('candidateType', () => {
+  it('prefers the structured .type field', () => {
+    expect(candidateType({ type: 'relay', candidate: 'ignored' })).toBe('relay');
+  });
+
+  it('falls back to parsing the SDP string', () => {
+    expect(candidateType({ candidate: 'candidate:1 1 udp 2122260223 192.168.1.2 56789 typ host generation 0' })).toBe('host');
+    expect(candidateType({ candidate: 'candidate:2 1 udp 1686052607 203.0.113.5 56789 typ srflx raddr 0.0.0.0' })).toBe('srflx');
+  });
+
+  it('returns null for end-of-candidates and missing input', () => {
+    expect(candidateType(null)).toBeNull();
+    expect(candidateType({ candidate: '' })).toBeNull();
+  });
+});
+
+describe('probeTurnRelay', () => {
+  it('resolves unavailable when the list has no TURN servers', async () => {
+    await expect(probeTurnRelay(defaultIceServers())).resolves.toBe('unavailable');
+  });
+
+  it('resolves unavailable when RTCPeerConnection does not exist (Node)', async () => {
+    await expect(probeTurnRelay([{ urls: 'turn:r.example.com:80' }])).resolves.toBe('unavailable');
+  });
+
+  it('resolves reachable when a relay candidate surfaces', async () => {
+    // Under iceTransportPolicy 'relay' every candidate is a relay candidate,
+    // so the probe treats the first one as proof of reachability.
+    class FakePC {
+      constructor() { this.onicecandidate = null; }
+      createDataChannel() {}
+      createOffer() { return Promise.resolve({}); }
+      setLocalDescription() {
+        queueMicrotask(() =>
+          this.onicecandidate?.({ candidate: { candidate: 'candidate:1 1 udp 1 10.0.0.1 1 typ relay' } }));
+        return Promise.resolve();
+      }
+      close() {}
+    }
+    vi.stubGlobal('RTCPeerConnection', FakePC);
+    await expect(probeTurnRelay([{ urls: 'turn:r.example.com:80' }])).resolves.toBe('reachable');
+    vi.unstubAllGlobals();
+  });
+
+  it('resolves unreachable when no candidate arrives before the timeout', async () => {
+    class FakePC {
+      constructor() { this.onicecandidate = null; }
+      createDataChannel() {}
+      createOffer() { return Promise.resolve({}); }
+      setLocalDescription() { return Promise.resolve(); }
+      close() {}
+    }
+    vi.stubGlobal('RTCPeerConnection', FakePC);
+    vi.useFakeTimers();
+    const p = probeTurnRelay([{ urls: 'turn:r.example.com:80' }], 5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(p).resolves.toBe('unreachable');
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 });
@@ -315,6 +431,54 @@ describe('ConnectionManager lifecycle (identify re-send + reconnect)', () => {
     expect(conn1.close).toHaveBeenCalled();
     expect(statuses).toContain('disconnected');
     expect(statuses.at(-1)).toBe('disconnected');
+  });
+
+  it('escalates the connect timeout on the second attempt (8s → 16s)', async () => {
+    const conn1 = makeFakeConn();
+    const conn2 = makeFakeConn();
+    globalThis.window = { Peer: makeFakePeerCtor([conn1, conn2]) };
+    vi.useFakeTimers();
+
+    const cm = new ConnectionManager();
+    cm.connect('host-id', {});
+
+    // First attempt times out at 8s, backoff (100ms) fires, second attempt starts.
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(conn1.close).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+
+    // At +8s into attempt 2 the old flat timeout would have closed it; the
+    // escalated 16s window has not elapsed yet.
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(conn2.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(conn2.close).toHaveBeenCalled();
+  });
+
+  it('emits structured onDiag events across a timeout-then-connect cycle', async () => {
+    const conn1 = makeFakeConn();
+    const conn2 = makeFakeConn();
+    globalThis.window = { Peer: makeFakePeerCtor([conn1, conn2]) };
+    vi.useFakeTimers();
+
+    const cm = new ConnectionManager();
+    const events = [];
+    cm.connect('host-id', { onDiag: e => events.push(e) });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events.map(e => e.event)).toEqual(['signaling', 'signaling', 'attempt']);
+    expect(events[0]).toEqual({ event: 'signaling', state: 'connecting' });
+    expect(events[1]).toEqual({ event: 'signaling', state: 'open' });
+    expect(events[2]).toEqual({ event: 'attempt', attempt: 1 });
+
+    await vi.advanceTimersByTimeAsync(8000);
+    const timeout = events.find(e => e.event === 'timeout');
+    expect(timeout).toEqual({ event: 'timeout', attempt: 1, types: [] });
+
+    await vi.advanceTimersByTimeAsync(200);
+    conn2._simulateOpen();
+    expect(events.at(-1)).toEqual({ event: 'open' });
   });
 
   it('ignores stale DataConnection close/error callbacks after a fresh reconnect opens', async () => {

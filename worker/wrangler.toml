@@ -5,9 +5,13 @@ compatibility_date = "2024-09-23"
 [vars]
 # Your Metered.ca app subdomain — the part before ".metered.live"
 METERED_APP = "projectphoenix"
-# The canonical public dev origin, used for CORS. GitHub Pages serves this
-# site behind the custom domain configured in .github/workflows/ci.yml.
-ALLOWED_ORIGIN = "https://pp-dev.kiwigamedesign.co.uk"
+# Comma-separated allowlist of site origins, used for CORS. The worker echoes
+# the matching request origin. pp-dev is the canonical custom domain from
+# .github/workflows/ci.yml; the github.io origin covers direct Pages access;
+# localhost:3911 is the local dist-preview server. NOTE: the deployed worker
+# only picks this up on `wrangler deploy` — a stale deployed value silently
+# strips TURN from every client (2026-08 hotspot field failure).
+ALLOWED_ORIGIN = "https://pp-dev.kiwigamedesign.co.uk,https://jkeywo.github.io,http://localhost:3911"
 
 # METERED_KEY is NOT here — set it with:
 #   wrangler secret put METERED_KEY

@@ -104,6 +104,11 @@
     /* Status line: bottom-left, above canvas. z-index 25 keeps it above the
        phone bezel (15) so connection status isn't obscured by the corner. */
     #status { position: fixed; bottom: 0.5rem; left: 0.75rem; color: #778; font-size: 0.75rem; z-index: 25; }
+    /* Connection diagnostics readout: sits above #status, same corner. Shows
+       relay reachability + per-attempt ICE stage so a phone user can report
+       why a connection is stuck without opening devtools. */
+    #conn-diag { position: fixed; bottom: 1.6rem; left: 0.75rem; color: #667;
+      font-size: 0.65rem; z-index: 25; white-space: pre-line; max-width: 85vw; }
     section { display: none; }
     section.active { display: block; }
     #top-bar {
@@ -806,6 +811,7 @@
   </div>
 
   <div id="status" data-i18n="client.connecting">Connecting…</div>
+  <div id="conn-diag"></div>
 
   <div id="top-bar">
     <span id="conn-label"></span>
@@ -1993,8 +1999,37 @@
         }
 
         console.log('[PeerJS] fetching ICE servers');
-        const iceServers = await window.fetchIceServers();
+        const { servers: iceServers, relayAvailable } = await window.fetchIceServers();
         console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
+
+        // Connection diagnostics readout (#conn-diag). A phone stuck behind
+        // CGNAT shows "connecting…" forever with the real story buried in an
+        // unreachable console — this mirrors the relay + ICE stage on screen.
+        const diagEl = document.getElementById('conn-diag');
+        const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable };
+        function renderDiag() {
+          if (!diagEl) return;
+          const lines = [];
+          if (!diag.relayAvailable) lines.push(t('client.diag_no_relay'));
+          else if (diag.probe === 'unreachable') lines.push(t('client.diag_relay_fail'));
+          else if (diag.probe === 'reachable') lines.push(t('client.diag_relay_ok'));
+          if (diag.attempt > 0) {
+            lines.push(t('client.diag_stage', {
+              attempt: diag.attempt,
+              ice: diag.ice || '—',
+              types: diag.types.length ? diag.types.join(', ') : t('client.diag_none'),
+            }));
+          }
+          diagEl.textContent = lines.join('\n');
+        }
+        renderDiag();
+        if (relayAvailable && typeof window.probeTurnRelay === 'function') {
+          window.probeTurnRelay(iceServers).then(verdict => {
+            console.log('[ICE] relay probe:', verdict);
+            diag.probe = verdict;
+            renderDiag();
+          });
+        }
 
         if (typeof window.connectionManager === 'undefined') {
           console.warn('[client] connection-manager module not loaded; falling back to inline Peer setup');
@@ -2007,6 +2042,9 @@
           onData: handleMessage,
           onStatus: (state) => {
             setConnectionStatus(state);
+            // Diagnostics only matter while the link is down; hide them once
+            // the DataChannel is up so they don't sit under the lobby.
+            if (diagEl) diagEl.style.display = state === 'ready' ? 'none' : '';
             if (state === 'ready') {
               acquireWakeLock();
               setStatus(t('client.status_waiting_server'));
@@ -2028,6 +2066,14 @@
             }
           },
           onLog: (msg) => console.log(msg),
+          onDiag: (e) => {
+            if (e.event === 'attempt') { diag.attempt = e.attempt; diag.ice = ''; diag.types = []; }
+            else if (e.event === 'ice-state') diag.ice = e.state;
+            else if (e.event === 'candidates') diag.types = e.types;
+            else if (e.event === 'timeout') diag.ice = 'timeout';
+            else if (e.event === 'open') diag.ice = 'connected';
+            renderDiag();
+          },
         });
       })();
     }</script>

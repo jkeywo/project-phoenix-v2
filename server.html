@@ -1284,6 +1284,9 @@
         <a id="qr-link" target="_blank" style="cursor:pointer">
           <canvas id="qr"></canvas>
         </a>
+        <!-- Relay-degraded warning + inbound-connection ICE stage. Populated by
+             initPeerJS(); empty (and invisible) in the normal healthy case. -->
+        <div id="conn-diag" style="margin-top:8px;font-family:monospace;color:#fa4;font-size:13px;text-align:center;white-space:pre-line;"></div>
         <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
           <span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span id="loading-progress-pct">0</span>%
         </div>
@@ -1949,33 +1952,58 @@
     const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
 
     async function getIceServers() {
+      // STUN-only base. The dead OpenRelay TURN fallbacks were removed —
+      // Metered discontinued the free service and the hostname no longer
+      // resolves, so they only stalled ICE gathering. Relay comes exclusively
+      // from the credential worker; a failed fetch is a degraded state we
+      // surface in the lobby rather than a silent fallback.
       const base = [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
       ];
       try {
         const r = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev');
         if (r.ok) {
           const extra = await r.json();
           console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
-          return [...base, ...extra];
+          const servers = [...base, ...extra];
+          const relayAvailable = servers.some(s => {
+            const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+            return urls.some(u => typeof u === 'string' && (u.startsWith('turn:') || u.startsWith('turns:')));
+          });
+          return { servers, relayAvailable };
         }
-        console.warn('[ICE] Metered.ca fetch returned', r.status, '— using OpenRelay only');
+        console.warn('[ICE] Metered.ca fetch returned', r.status, '— STUN only, no relay');
       } catch (e) {
-        console.warn('[ICE] Metered.ca fetch failed (placeholder or network error) — using OpenRelay only:', e.message);
+        console.warn('[ICE] Metered.ca fetch failed — STUN only, no relay:', e.message);
       }
-      return base;
+      return { servers: base, relayAvailable: false };
     }
 
     async function initPeerJS() {
       setConnectionStatus('connecting');
       console.log('[PeerJS] fetching ICE servers…');
-      const iceServers = await getIceServers();
+      const { servers: iceServers, relayAvailable } = await getIceServers();
       console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
       console.log(`[PeerJS] host peer ID: ${hostPeerId}`);
+
+      // Lobby diagnostics under the QR: relay-degraded warning plus the ICE
+      // stage of any inbound client that is struggling to complete. When ICE
+      // fails, PeerJS's 'open' never fires — this is the only place the host
+      // operator learns a phone is trying and failing to get through.
+      const connDiagEl = document.getElementById('conn-diag');
+      const clientIceStages = new Map(); // shortId → troubled ICE state
+      function renderConnDiag() {
+        if (!connDiagEl) return;
+        const lines = [];
+        if (!relayAvailable) lines.push(t('server.no_relay_warning'));
+        for (const [id, state] of clientIceStages) {
+          lines.push(t('server.client_ice_state', { id, state }));
+        }
+        connDiagEl.textContent = lines.join('\n');
+      }
+      renderConnDiag();
+
       const peer = new Peer(hostPeerId, { config: { iceServers } });
 
       peer.on('open', () => {
@@ -2007,13 +2035,36 @@
         const shortId = conn.peer.slice(0, 8);
         console.log(`[PeerJS] inbound connection from ${shortId}…`);
 
+        // Attach ICE state tracking immediately — on a failed connection
+        // 'open' never fires, so listeners installed there see nothing.
+        // conn.peerConnection may not exist yet at 'connection' time; retry
+        // on the next tick until negotiation has created it.
+        let attachTries = 0;
+        const attachIceDiag = () => {
+          const pc = conn.peerConnection;
+          if (!pc) {
+            if (++attachTries < 50) setTimeout(attachIceDiag, 100);
+            return;
+          }
+          pc.addEventListener('iceconnectionstatechange', () => {
+            const s = pc.iceConnectionState;
+            console.log(`[ICE] ${shortId}… → ${s}`);
+            // Surface trouble in the lobby; clear the row once healthy.
+            if (s === 'connected' || s === 'completed' || s === 'closed') {
+              clientIceStages.delete(shortId);
+            } else {
+              clientIceStages.set(shortId, s);
+            }
+            renderConnDiag();
+          });
+        };
+        attachIceDiag();
+
         conn.on('open', () => {
           console.log(`[PeerJS] DataChannel open — ${shortId}…`);
           const pc = conn.peerConnection;
           if (pc) {
             // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
-            pc.addEventListener('iceconnectionstatechange', () =>
-              console.log(`[ICE] ${shortId}… → ${pc.iceConnectionState}`));
             setTimeout(() => {
               pc.getStats().then(stats => {
                 const vals = [...stats.values()];
@@ -2135,6 +2186,8 @@
         });
 
         conn.on('close', () => {
+          clientIceStages.delete(shortId);
+          renderConnDiag();
           const token = peerTokens.get(conn.peer);
           console.log(`[PeerJS] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
           peerTokens.delete(conn.peer);

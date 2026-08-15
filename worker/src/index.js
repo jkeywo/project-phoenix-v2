@@ -6,13 +6,18 @@
 //
 // Required vars (set in wrangler.toml [vars]):
 //   METERED_APP   — your Metered.ca app subdomain (e.g. "myapp")
-//   ALLOWED_ORIGIN — your deployed site origin (e.g. "https://you.github.io")
+//   ALLOWED_ORIGIN — comma-separated list of allowed site origins
+//                    (e.g. "https://pp-dev.example.com,https://you.github.io").
+//                    The response echoes the request origin when it matches;
+//                    a stale single-origin value here CORS-blocks every client
+//                    fetch, which silently strips TURN from the ICE list and
+//                    breaks all CGNAT/hotspot players (2026-08 field failure).
 
 export default {
   async fetch(request, env) {
     // CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders(env) });
+      return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     }
 
     if (request.method !== 'GET') {
@@ -34,15 +39,24 @@ export default {
       headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store', // credentials are time-limited; never cache
-        ...corsHeaders(env),
+        ...corsHeaders(request, env),
       },
     });
   },
 };
 
-function corsHeaders(env) {
+function corsHeaders(request, env) {
+  const allowed = (env.ALLOWED_ORIGIN || '*').split(',').map(s => s.trim()).filter(Boolean);
+  const origin = request.headers.get('Origin');
+  // Echo the request origin when it's on the list; otherwise fall back to the
+  // first entry so the browser still sees a definite (deny-by-mismatch) value.
+  const allow = allowed.includes('*') ? '*'
+    : (origin && allowed.includes(origin)) ? origin
+    : allowed[0];
   return {
-    'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
+    'Access-Control-Allow-Origin': allow,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    // Response varies by request origin, so caches must key on it.
+    'Vary': 'Origin',
   };
 }

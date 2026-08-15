@@ -85,6 +85,20 @@ Both pages show a coloured dot in the top-right:
 
 `peer.reconnect()` reuses the original peer ID, which avoids the PeerJS broker rate-limiting repeat registrations. A fully destroyed peer needs a manual page refresh.
 
+## ICE servers, TURN relay, and on-device diagnostics (2026-08 hotspot fix)
+
+The base ICE list (`defaultIceServers()`) is **STUN-only**; TURN relay credentials come exclusively from the Cloudflare worker (`worker/`, deployed per-target as `phoenix-turn-credentials` / `phoenix-turn-credentials-demo`). The dead OpenRelay fallbacks were removed — Metered discontinued the free service, so they only stalled gathering while pretending relay existed.
+
+**Relay is mandatory on hotspot/CGNAT networks** (phone tethering, two phones on separate mobile data): STUN hairpinning through carrier NAT essentially never works, and host candidates are mDNS-obfuscated. Three things therefore surface degraded relay instead of failing silently:
+
+- `fetchIceServers()` returns `{ servers, relayAvailable }`; both pages show a warning (`client.diag_no_relay` / `server.no_relay_warning`) when `relayAvailable` is false.
+- The client join screen shows a live diagnostics readout (`#conn-diag`): relay probe verdict (`probeTurnRelay()`, an `iceTransportPolicy:'relay'` throwaway connection) plus per-attempt ICE state and gathered candidate types. "candidates: host, srflx" with no relay on a failing network is the TURN smoking gun.
+- The host lobby mirrors any inbound client stuck mid-ICE under the QR code (listeners attach at `peer.on('connection')` time, because `conn.on('open')` never fires on a failed connection).
+
+The per-attempt connect timeout escalates 8s → 16s → 30s (`connectTimeoutMs()`) since TURN-over-TCP allocation on cellular can exceed the old flat 8s.
+
+**Deploy trap (caused the 2026-08 field failure):** the worker validates CORS against `ALLOWED_ORIGIN` in `worker/wrangler.toml`, and the deployed value only updates on `wrangler deploy`. A stale origin (e.g. the pre-custom-domain `github.io` value) CORS-blocks every credential fetch, silently stripping TURN for all players. `ALLOWED_ORIGIN` is now a comma-separated allowlist and the worker echoes the matching origin.
+
 ## Why no real backend
 
 - Game data is peer-to-peer. Only the WebRTC handshake touches PeerJS's public broker.

@@ -1663,7 +1663,26 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
 /// pull in — resolve against the pack first, then the active stack, then base
 /// content the host has already fetched (`peek_pending_world_toml` for worlds,
 /// `raw_template_text` for entity/fragment TOML).
-#[cfg(target_arch = "wasm32")]
+///
+/// **Absent from a demo build** (PRD #855, `build_flags::accepts_mod_pack_
+/// uploads`). The public build ships a deliberately restricted catalogue —
+/// combat_test and the Alliance Destroyer, curated by
+/// `assets/scenarios.demo.toml` (issue #931) — and this is the one call that
+/// widens it at runtime, adding whatever scenarios and hulls an uploaded ZIP
+/// carries. Gating it with `#[cfg]` rather than a runtime refusal is the same
+/// doctrine `command_admission::debug_route` follows and for the same reason:
+/// the host page's upload button is hidden in a demo build
+/// (`gui/build-flags.js`'s `offersModPackUpload`), a hidden button is a UI fact,
+/// and UI facts are forgeable. With the export compiled out, the hidden control
+/// and the closed route cannot come apart.
+///
+/// The rest of the overlay surface (`wasm_clear_mod_pack`,
+/// `wasm_remove_mod_pack`, `wasm_reorder_mod_packs`, `wasm_active_pack_
+/// manifest`) is deliberately NOT gated: `server.html` calls those
+/// unconditionally, and with nothing able to enter the stack they operate on an
+/// empty one and answer emptily. Gating the entrance is the whole restriction;
+/// gating the readers would only turn a no-op into a `TypeError`.
+#[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
 #[wasm_bindgen]
 pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
     // The host side of the mod-pack compatibility contract (issue #986): read

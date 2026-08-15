@@ -111,17 +111,28 @@ node scripts/build-client.mjs
 # cog's Debug/Cheat tab. Only .github/workflows/deploy-demo.yml sets it —
 # ci.yml's GitHub Pages deploy is the dev host and keeps its debug tooling.
 # Since #940 the same variable ALSO reaches the compiler as a cfg: build.rs
-# turns it into `phoenix_demo_build`, which DELETES three things from a demo
+# turns it into `phoenix_demo_build`, which DELETES four things from a demo
 # binary rather than merely refusing them —
 #   - the god-mode cheat route (src/command_admission/debug_route.rs),
-#   - ClientMessage::ToggleDebugFlag and its drain, and
-#   - ClientMessage::TogglePause and its drain.
-# The last is the blunt one: nothing server-side checks station, captaincy or
+#   - ClientMessage::ToggleDebugFlag and its drain,
+#   - ClientMessage::TogglePause and its drain, and
+#   - the host mod-pack upload export, `wasm_add_mod_pack` (PRD #855).
+# The third is the blunt one: nothing server-side checks station, captaincy or
 # GamePhase before honouring a client pause, so any one of N demo players could
 # otherwise freeze the mission for everyone, repeatedly. The HOST's own pause,
 # on the server cog (#939), is untouched in every build. A demo binary does not
 # decode either client message at all, so the hidden control and the closed
 # route cannot come apart.
+# The fourth is the catalogue restriction's other half: a demo build curates the
+# catalogue down to combat_test + the Alliance Destroyer
+# (assets/scenarios.demo.toml, #931), and a mod-pack upload adds whatever
+# scenarios and hulls a ZIP carries. `build_flags::accepts_mod_pack_uploads()`
+# states the rule, gui/build-flags.js's `offersModPackUpload` removes the
+# button, and the export is gone — same doctrine as the cheat route. The overlay
+# READERS (wasm_clear_mod_pack / _remove_ / _reorder_ / _active_pack_manifest)
+# stay in every build: server.html calls them unconditionally and, with nothing
+# able to enter the stack, they answer emptily — gating them would turn a no-op
+# into a TypeError.
 # The client page has no WASM to bake anything into, so it learns the
 # flag from the `phoenix-build-demo` meta tag the deploy workflow stamps.
 # The literal both halves compare against lives in ONE place —

@@ -49,6 +49,24 @@ pub const fn is_demo_cfg() -> bool {
     cfg!(phoenix_demo_build)
 }
 
+/// Does this build offer the host mod-pack upload? (PRD #855.)
+///
+/// The public build ships a curated catalogue — combat_test and the Alliance
+/// Destroyer, per `assets/scenarios.demo.toml` (issue #931). A mod-pack upload
+/// ADDS scenarios and hulls to that catalogue at runtime, so it is the one
+/// control that undoes the restriction, and a demo binary contains no
+/// `wasm_add_mod_pack` to reach: that export carries
+/// `#[cfg(not(phoenix_demo_build))]`, and `gui/build-flags.js`'s
+/// `offersModPackUpload` removes the button that would call it.
+///
+/// Stated here, as a predicate over the same cfg, so the rule is asserted by a
+/// test that runs in BOTH builds — `ci.yml`'s demo-build gate step already
+/// filters on `build_flags`, so this needs no new CI step to be exercised with
+/// the flag actually set.
+pub const fn accepts_mod_pack_uploads() -> bool {
+    !cfg!(phoenix_demo_build)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +122,23 @@ mod tests {
             is_demo_build(),
             "build.rs's phoenix_demo_build cfg must track PHOENIX_DEMO_BUILD \
              exactly, or the compiled-out route and the hidden tab disagree"
+        );
+    }
+
+    /// The catalogue restriction and the mod-pack upload are the same decision
+    /// (PRD #855): a build that curates its public catalogue must not also ship
+    /// the control that adds arbitrary scenarios and hulls to it.
+    ///
+    /// Like the assertion above, this is exercised with the flag genuinely set
+    /// by `ci.yml`'s demo-build gate step, which already filters on
+    /// `build_flags` — so the demo arm is compiled and run, not merely written.
+    #[test]
+    fn a_demo_build_that_curates_its_catalogue_offers_no_mod_pack_upload() {
+        assert_eq!(
+            accepts_mod_pack_uploads(),
+            !is_demo_build(),
+            "a demo build curates its catalogue; offering a mod-pack upload \
+             would hand any player at the host page the lever that undoes it"
         );
     }
 }

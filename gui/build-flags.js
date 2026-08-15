@@ -106,3 +106,24 @@ export function isDemoBuild(env = {}) {
 
   return false;
 }
+
+/**
+ * Does this build offer the host mod-pack upload control? (PRD #855.)
+ *
+ * The public build ships a deliberately restricted catalogue — combat_test and
+ * the Alliance Destroyer (issue #931), curated by `assets/scenarios.demo.toml`.
+ * A mod-pack upload ADDS scenarios and hulls to that catalogue at runtime, so
+ * leaving the control on a demo build would hand any player at the host page
+ * the one lever that undoes the curation.
+ *
+ * The Rust half is the real gate — `wasm_add_mod_pack` carries
+ * `#[cfg(not(phoenix_demo_build))]`, so a demo binary contains no upload path
+ * to call, exactly as the client cheat route does (issue #940). This predicate
+ * is the UI half: the control disappears rather than throwing when clicked.
+ *
+ * @param {{ win?: object, doc?: Document }} [env] — injectable for tests.
+ * @returns {boolean}
+ */
+export function offersModPackUpload(env = {}) {
+  return !isDemoBuild(env);
+}

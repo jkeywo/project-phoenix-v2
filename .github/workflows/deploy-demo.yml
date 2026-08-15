@@ -262,6 +262,34 @@ jobs:
             echo "ok: the demo build flag is stamped into $page"
           done
 
+      # The catalogue restriction's other half (PRD #855). The curated manifest
+      # above decides what the demo OFFERS; the mod-pack upload is the one
+      # control that adds scenarios and hulls to it at runtime, so a demo binary
+      # must not contain `wasm_add_mod_pack` at all. The Rust gate is
+      # `#[cfg(not(phoenix_demo_build))]` on that export — this asserts the gate
+      # actually fired in the artifact being shipped, which is the only place it
+      # can be observed (the export is wasm32-only, so no native job compiles it).
+      #
+      # NOTE the deliberate asymmetry with the check above: `dist/index.html`
+      # still CONTAINS the string, because server.html's page logic is unchanged
+      # and calls the binding behind `offersModPackUpload()`. It is the
+      # wasm-bindgen GLUE that must not export it. The glue's name is derived the
+      # same way the WASM-compression step below derives it, and the sanity grep
+      # makes a trunk layout change loud rather than vacuously green.
+      - name: Verify the mod-pack upload route is compiled out
+        run: |
+          set -euo pipefail
+          GLUE="dist/$(basename "$(ls dist/*_bg.wasm)" _bg.wasm).js"
+          if ! grep -qF 'wasm_get_scenario_catalog' "$GLUE"; then
+            echo "$GLUE does not look like the wasm-bindgen glue — build layout changed?" >&2
+            exit 1
+          fi
+          if grep -qF 'wasm_add_mod_pack' "$GLUE"; then
+            echo "$GLUE still exports wasm_add_mod_pack — the demo build would let a player widen the curated catalogue (PRD #855)" >&2
+            exit 1
+          fi
+          echo "ok: the mod-pack upload export is absent from the demo bundle"
+
       # Cloudflare Pages refuses any file over 25 MiB, and the release WASM
       # is ~38 MiB even after the -Oz pass (run 30847968215). Models are all
       # under the cap — the binary is the only offender — so it ships

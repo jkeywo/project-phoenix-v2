@@ -1344,6 +1344,12 @@
     import { t, has, applyToDom, localiseTree } from './gui/strings.js';
     window.phStrings = { t, has, applyToDom, localiseTree };
     applyToDom(document);
+    // Published for the classic script below, which decides whether the
+    // pre-scenario mod-pack upload control is offered at all (PRD #855). The
+    // Rust half — `wasm_add_mod_pack` under `#[cfg(not(phoenix_demo_build))]` —
+    // is the real gate; this is what stops the demo showing a button for it.
+    import { offersModPackUpload } from './gui/build-flags.js';
+    window.phOffersModPackUpload = offersModPackUpload;
   </script>
   <!-- Console-action dispatch table (issue #822): the host page routes its
        embedded console actions through the same gui/action-map.js →
@@ -2454,11 +2460,35 @@
       else worldList.appendChild(el);
     }
 
+    /**
+     * Remove the pre-scenario mod-pack upload control from a demo build
+     * (PRD #855). Removed rather than hidden: a `display: none` control is
+     * still in the DOM to be clicked from the console, and in a demo binary
+     * `wasm_add_mod_pack` does not exist to be called anyway.
+     *
+     * Called from renderScenarioLockState, which is the first render after the
+     * catalog is built — i.e. after WASM is up, so `wasm_is_demo_build()` has
+     * an answer even on a locally-compiled demo build that carries no meta tag.
+     */
+    function applyModPackRestriction() {
+      const offers = window.phOffersModPackUpload;
+      // Not yet imported (the module script above is async): leave the control
+      // alone rather than guess. The next render settles it.
+      if (typeof offers !== 'function') return;
+      // `window.wasmBindings` is the wasm-bindgen namespace trunk publishes —
+      // where `wasm_is_demo_build` actually lives. Falling back to `window`
+      // keeps the meta-tag answer working before it exists.
+      if (offers({ win: window.wasmBindings || window, doc: document })) return;
+      const upload = document.getElementById('mod-pack-upload');
+      if (upload) upload.remove();
+    }
+
     function renderScenarioLockState() {
       const worldList = document.getElementById('world-list');
       const label = document.getElementById('world-list-label');
       if (!worldList) return;
       if (!_catalogBuilt) return;
+      applyModPackRestriction();
 
       if (_preSelection.scenario_id == null) {
         // Scenario stage — one button per catalog scenario.

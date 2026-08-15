@@ -4681,7 +4681,13 @@ fn update_mesh_lod(
             }
         };
         let tier_base = tier_parent_scale_at(target, ladder_tier_scale);
-        transform.scale = Vec3::splat(lods.base.scale)
+        // NOT assigned yet. A GLB level can come back `Pending` for any number
+        // of frames while its scene streams, and the OLD level's child is still
+        // on screen for every one of them — so rescaling the parent here would
+        // dress the outgoing model in the incoming tier's scale and hold it
+        // there until the swap lands. Each branch below assigns it at the point
+        // it actually commits to the new level.
+        let next_scale = Vec3::splat(lods.base.scale)
             * tier_base
             * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
 
@@ -4705,10 +4711,12 @@ fn update_mesh_lod(
                 GlbSpawnOutcome::Failed => {
                     // Give up on this level; drop the old visual and settle so we
                     // stop retrying it every frame.
+                    transform.scale = next_scale;
                     teardown_lod_visual(&mut commands, &mut lods);
                     lods.current = Some(target);
                 }
                 GlbSpawnOutcome::Spawned(child) => {
+                    transform.scale = next_scale;
                     if lods.is_local_ship {
                         decorate_local_ship_model(&mut commands, child);
                     }
@@ -4718,6 +4726,10 @@ fn update_mesh_lod(
                 }
             }
         } else if let Some(shape) = level.shape {
+            // A procedural level builds its mesh from cached primitives and so
+            // commits this same frame — nothing to wait for, so the scale lands
+            // here rather than in a branch below.
+            transform.scale = next_scale;
             // Procedural level — fields fall back to the flat `base` config.
             let radius = level.radius.unwrap_or(lods.base.radius);
             let minor = level.minor_radius.unwrap_or(lods.base.minor_radius);
@@ -4762,11 +4774,12 @@ fn update_mesh_lod(
         } else if let Some(atlas) = level.billboard.as_deref() {
             // Billboard level: a camera-facing quad textured from a yaw-ring
             // atlas. Width/height (world units) come from the level's `scale`;
-            // the ENTITY is forced back to a UNIFORM scale here — the earlier
-            // `transform.scale` line multiplied in this level's `[w, h, 1]`,
-            // which on a quad that rotates to face the camera would shear it.
-            // The width/height instead ride the child's own scale (see
-            // `spawn_billboard_child`), leaving the parent uniform.
+            // the ENTITY takes a UNIFORM scale here rather than `next_scale` —
+            // that would multiply in this level's `[w, h, 1]`, which on a quad
+            // that rotates to face the camera would shear it. The width/height
+            // instead ride the child's own scale (see `spawn_billboard_child`),
+            // leaving the parent uniform. A billboard commits this frame too, so
+            // this is its equivalent of the `next_scale` assignment above.
             transform.scale = Vec3::splat(lods.base.scale);
             // The billboard's authored `scale` is the model's extents (width,
             // height) in whatever space its own ladder records extents in, so

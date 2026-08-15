@@ -1197,3 +1197,12 @@ world.falling_skyway.comms.head_holds,"Dialogue body — the skyhook head stabil
 world.falling_skyway.comms.head_holds_empty,"Dialogue body — the head held after being evacuated, Falling Skyway","[She held. And we are on a lighter looking at an empty head and a transfer nobody is running tonight. Your call. I am not saying it was the wrong one.]"
 world.falling_skyway.comms.lighter_calls,"Dialogue body — the survivor lighter calling for a tow, Falling Skyway","[Anyone on this channel — Verrow crew lighter. Our drive went with the head. We are in the debris with the pod somewhere off our beam and we cannot steer out of it.]"
 world.falling_skyway.evidence.head_collapse,"Evidence text — the skyhook's structural failure, Falling Skyway",[Skyhook Verrow failed structurally at the tether head and was lost with the corridor's only two transfer berths.]
+world.probe_collapse.entity.tender.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Stabiliser Tender]
+world.probe_collapse.entity.rescuer.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Rescue Tug]
+world.probe_collapse.entity.hook_saved.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Saved-side Head]
+world.probe_collapse.entity.hook_lost.name,assets/worlds/probe_collapse.toml -> [[entity]] name,[Lost-side Head]
+world.probe_collapse.entity.survivor.name,assets/worlds/probe_collapse.toml -> spawned by the collapse handler,[Survivor Lighter]
+world.probe_collapse.deadline.projection.label,assets/worlds/probe_collapse.toml -> [[deadline]] label,[Projected failure]
+world.probe_collapse.objective.saved.text,"Objective text — the head that is stabilised, in the #1040 probe world",[Keep the saved-side head standing.]
+world.probe_collapse.objective.lost.text,"Objective text — the head that is not stabilised, in the #1040 probe world",[Keep the lost-side head standing.]
+world.probe_collapse.objective.survivors.text,"Objective text — the collapse epilogue, in the #1040 probe world",[Get the survivor lighter out of the debris.]

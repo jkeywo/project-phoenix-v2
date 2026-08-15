@@ -1,0 +1,421 @@
+# Probe world for issue #1042 — a transfer window, the arithmetic that prices
+# it, and the rule that ends it.
+#
+# `falling_skyway.toml` authors the SCENE: three claimants, a chain that cannot
+# carry all of them, and a captain who has to choose. This world authors the
+# MECHANISM under it, in the shape every probe in this family uses — an
+# experiment beside a control that differs in exactly one authored fact.
+#
+# ── The four chains, and what each one isolates ──────────────────────────────
+#
+# Supply is `min(what the head can lift, what the ladder puts in it)`, and a
+# rung delivers only if it is above its OWN operational line AND the people who
+# staff it are at work. That is three clauses and a `min`, so there are four
+# ways to be short and this world fields all of them at once, priced in the same
+# beat by the same script function with different arguments:
+#
+#   full     head 2 berths x 20 = 40, ladder 30 + 12 = 42   ->  40   HEAD binds
+#   struck   the second rung's people are OUT                ->  30   ladder binds
+#   low      the second rung is UNDER ITS OWN LINE           ->  30   ladder binds
+#   dead     the head is not certified to lift               ->   0   nothing
+#
+# `full` and `struck`/`low` bind on OPPOSITE SIDES of the `min`, which is the
+# claim the pairing exists to make: the smaller of the two is genuinely the
+# smaller of the two, and not the ladder every time with the head as decoration.
+# `struck` and `low` differ from `full` in exactly one authored fact each — a
+# `workforce` and a `condition` — so a rung that fails is a rung that failed for
+# the reason under test.
+#
+# NO COMBAT. Nothing here is hostile, nothing is armed at anything, and the
+# player's hull is parked six kilometres away: a run that produces a shot has
+# gone wrong.
+#
+# ── The window, and the ledger it keeps ─────────────────────────────────────
+#
+# Everything runs against `manifest_full`, which is the only one carrying claims.
+# Four claimants totalling 50 against a supply of 40, so the window is short by
+# ten and the last one asked for cannot have it.
+#
+# Timeline (60 Hz), in mission seconds:
+#
+#   t=10  `probe_window_opens`. All four supplies are computed and published
+#         onto their manifests; the demand and the shortfall land on the full
+#         one. Before this tick every register reads its authored zero — a
+#         figure the mission has not earned is not a figure on a panel.
+#   t=12  ALPHA (10) is booked. 40 - 10 = 30 left, 10 committed.
+#   t=20  alpha's climber reaches the top INSIDE the window. SERVED.
+#   t=26  BETA (15) is booked, with four seconds left. 15 left, 25 committed.
+#   t=27  GAMMA (20) is asked for and REFUSED SHORT: 20 against 15.
+#   t=30  `probe_window_closes`. The window shuts, the lift on offer goes with
+#         it, and the available row is zero from this tick.
+#   t=32  DELTA (5) is asked for and REFUSED SHUT — the OTHER refusal, and the
+#         reason this world fields a fourth claimant at all. Each claimant's
+#         seam is a single ask, so the mission world cannot reach this rung with
+#         only three.
+#   t=34  beta's climber would have reached the top. THE AUTHORED CLOSE RULE:
+#         it is STOOD DOWN rather than completed or part-paid. Beta is not
+#         served, and its fifteen comes back off the committed row, which ends
+#         the run at 10 — what actually went up, not what was booked.
+#
+# ── What this world is really testing ───────────────────────────────────────
+#
+# `ctx.effects.adjust_capacity` (issue #1042), which is the only new engine
+# surface the slice adds. Every number below is a published
+# `[[infrastructure.capacity]]` level that a SCRIPT worked out and wrote — the
+# first thing in this codebase to move a capacity without a `transfer`
+# completing — so a run where the registers stay at their authored zeros is a
+# run where the verb did nothing, and a run where they drift is one where the
+# delta arithmetic is wrong.
+#
+# The capacities carry NO labels, deliberately. This world publishes data and
+# not prose; #1030's second gate is `probe_dossier`'s to prove, and that the
+# mission's own rows reach a fact sheet is asserted in the Falling Skyway tests.
+#
+# BASELINE (this world is new in #1042, so this is its first recorded digest):
+# `--seed 42 --ticks 2400` gives final digest 0x76d86be18703c4e7
+# (8563713307821982951), and 3884973033775218574 at tick 0. Measured on a clean
+# tree at the commit that added this line. It is a NEW number, not a preserved
+# one — nothing to compare it against yet — so it is written down here to be the
+# thing a later change is A/B'd against, the way the other probes' already are.
+#
+# What legitimately moves it: this file's entity list, the authored conditions
+# and capacities, the deadline times, and any engine change to what the digest
+# folds. The window's own bookkeeping IS in the digest, unlike most scenario
+# state, and that is the point of the world: a capacity level is folded by
+# `fold_infrastructure_namespace`, so every register below is a number the
+# authoritative digest can see.
+
+[global]
+seed = 1042
+ai_helm_tick_hz = 30.0
+
+# ── The two sides ────────────────────────────────────────────────────────────
+#
+# `probe_window_pickets` are out and stay out; `probe_window_crews` never were.
+# One rung each, and that one authored word is the only difference between them.
+
+[[workforce]]
+id = "probe_window_crews"
+label = "world.probe_window.workforce.crews.label"
+disposition = 60
+
+[[workforce]]
+id = "probe_window_pickets"
+label = "world.probe_window.workforce.pickets.label"
+on_strike = true
+disposition = 20
+
+[player_spawn]
+position = [6000.0, 0.0, 6000.0]
+
+# The player ship. Present because a world needs one; parked far enough away
+# that nothing it does reaches anything under test.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [6000.0, 0.0, 6000.0] }
+spawn_on = "game_start"
+
+# ── The heads ────────────────────────────────────────────────────────────────
+#
+# Both are `skyhook.toml`, which is the template the mission fields, and both
+# replace its capacity and threshold tables wholesale — because a capacity id and
+# a threshold flag are the SCENARIO'S namespace, and two heads sharing
+# `skyhook_lift_capable` would be declaring one flag between them and
+# overwriting each other's answer every tick.
+#
+# `load_certified = 20` is a deliberately SMALL climber: two berths at twenty is
+# forty against a forty-two-unit ladder, so the head is what binds on the `full`
+# chain. The mission authors a hundred and eighty for the opposite reason.
+# [ai] Unratified, like every number in this file.
+
+[[entity]]
+template_path = "assets/entities/skyhook.toml"
+name = "world.probe_window.entity.head_certified.name"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 80.0, capacity = [
+  { id = "berths_certified", amount = 2 },
+  { id = "load_certified", amount = 20 },
+], threshold = [
+  { flag = "head_certified_lift", fails_below = 0.45 },
+] } }
+
+# The control for the head clause, and the only authored difference is thirty
+# points of condition: the same template, the same berths, the same climber.
+[[entity]]
+template_path = "assets/entities/skyhook.toml"
+name = "world.probe_window.entity.head_slipped.name"
+transform = { position = [0.0, 0.0, 600.0] }
+overrides = { infrastructure = { condition = 30.0, capacity = [
+  { id = "berths_slipped", amount = 2 },
+  { id = "load_slipped", amount = 20 },
+], threshold = [
+  { flag = "head_slipped_lift", fails_below = 0.45 },
+] } }
+
+# ── The rungs ────────────────────────────────────────────────────────────────
+#
+# Four, and each of the last three differs from `rung_up` in exactly one thing.
+
+# The rung that works. Above its line, nobody staffing it is out.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.rung_up.name"
+transform = { position = [400.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 80.0, capacity = [
+  { id = "rung_up_lift", amount = 30 },
+], threshold = [
+  { flag = "rung_up_pumping", fails_below = 0.4 },
+] } }
+
+# The second rung of the `full` chain: above its line and worked by people who
+# turned up.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.rung_worked.name"
+transform = { position = [800.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 80.0, workforce = "probe_window_crews", capacity = [
+  { id = "rung_worked_lift", amount = 12 },
+], threshold = [
+  { flag = "rung_worked_pumping", fails_below = 0.4 },
+] } }
+
+# THE PEOPLE CLAUSE. Identical to `rung_worked` in condition, throughput and
+# threshold; the one authored difference is which side staffs it.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.rung_struck.name"
+transform = { position = [800.0, 0.0, 400.0] }
+overrides = { infrastructure = { condition = 80.0, workforce = "probe_window_pickets", capacity = [
+  { id = "rung_struck_lift", amount = 12 },
+], threshold = [
+  { flag = "rung_struck_pumping", fails_below = 0.4 },
+] } }
+
+# THE CONDITION CLAUSE. Identical to `rung_worked` but for its condition, which
+# is under its own authored line — so its flag is DOWN from the first tick and
+# nobody had to walk out for this rung to deliver nothing.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.rung_low.name"
+transform = { position = [800.0, 0.0, 800.0] }
+overrides = { infrastructure = { condition = 20.0, workforce = "probe_window_crews", capacity = [
+  { id = "rung_low_lift", amount = 12 },
+], threshold = [
+  { flag = "rung_low_pumping", fails_below = 0.4 },
+] } }
+
+# ── The manifests ────────────────────────────────────────────────────────────
+#
+# Four register-holders. Every row starts EMPTY and is written by script: this
+# world's whole subject is that a scenario can work a number out and put it
+# somewhere a console reads.
+#
+# `ceiling = 400` on each register, for the mission's reason: `adjust_capacity`
+# clamps to `0..=ceiling`, so a ceiling under anything the arithmetic can produce
+# would silently truncate the answer rather than fail loudly.
+
+# The one with claims on it, and the one the booking ledger runs against.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.manifest_full.name"
+transform = { position = [1600.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 100.0, capacity = [
+  { id = "claim_alpha", amount = 10 },
+  { id = "claim_beta", amount = 15 },
+  { id = "claim_gamma", amount = 20 },
+  { id = "claim_delta", amount = 5 },
+  { id = "full_available", amount = 0, ceiling = 400 },
+  { id = "full_demand", amount = 0, ceiling = 400 },
+  { id = "full_shortfall", amount = 0, ceiling = 400 },
+  { id = "full_committed", amount = 0, ceiling = 400 },
+], threshold = [] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.manifest_struck.name"
+transform = { position = [1600.0, 0.0, 400.0] }
+overrides = { infrastructure = { condition = 100.0, capacity = [
+  { id = "struck_available", amount = 0, ceiling = 400 },
+], threshold = [] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.manifest_low.name"
+transform = { position = [1600.0, 0.0, 800.0] }
+overrides = { infrastructure = { condition = 100.0, capacity = [
+  { id = "low_available", amount = 0, ceiling = 400 },
+], threshold = [] } }
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_window.entity.manifest_dead.name"
+transform = { position = [1600.0, 0.0, 1200.0] }
+overrides = { infrastructure = { condition = 100.0, capacity = [
+  { id = "dead_available", amount = 0, ceiling = 400 },
+], threshold = [] } }
+
+# ── The clock ────────────────────────────────────────────────────────────────
+#
+# Both visible, for the mission's reason: a window a crew cannot see coming is a
+# stopwatch somebody else is holding. Twenty seconds of window against an
+# eight-second climber, so a booking made near the end is genuinely still on the
+# ribbon when the shutters come down.
+
+[[deadline]]
+id = "probe_window_opens"
+label = "world.probe_window.deadline.opens.label"
+due_secs = 10
+visible = true
+
+[[deadline]]
+id = "probe_window_closes"
+label = "world.probe_window.deadline.closes.label"
+due_secs = 30
+visible = true
+
+[script]
+setup = """
+on_deadline("probe_window_opens", "on_window_opens");
+on_deadline("probe_window_closes", "on_window_closes");
+
+// The four asks, on a clock rather than on a captain's finger. Each is a single
+// shot, which is the mission's authored rule and the reason four claimants are
+// needed to reach both refusals.
+on_timer(12, "ask_alpha");
+on_timer(26, "ask_beta");
+on_timer(27, "ask_gamma");
+on_timer(32, "ask_delta");
+
+// ── The arithmetic, in the mission's own shape ──────────────────────────────
+
+// One rung. Two questions, and it has to pass both.
+fn rung_delivers(ctx, operational_flag, capacity_id, stoppage_flag) {
+    if ctx.flags[operational_flag] == 0 { return 0; }
+    if ctx.flags[stoppage_flag] > 0 { return 0; }
+    ctx.flags[capacity_id]
+}
+
+// One chain: the smaller of what the head lifts and what the ladder puts in it.
+// Called four times with four sets of arguments, which is what makes the four
+// results a comparison rather than four scripts.
+fn chain_supply(ctx, lift_flag, berths_id, load_id, ladder) {
+    let head = 0;
+    if ctx.flags[lift_flag] > 0 {
+        head = ctx.flags[berths_id] * ctx.flags[load_id];
+    }
+    if head < ladder { head } else { ladder }
+}
+
+// Publish an absolute figure onto a register, as a delta off what is there.
+fn publish(ctx, manifest, capacity_id, want) {
+    let live = ctx.flags[capacity_id];
+    if want != live {
+        ctx.effects.adjust_capacity(manifest, capacity_id, want - live);
+    }
+}
+
+fn on_window_opens(ctx) {
+    let worked = rung_delivers(ctx, "rung_worked_pumping", "rung_worked_lift",
+                               "workforce.probe_window_crews.on_strike");
+    let struck = rung_delivers(ctx, "rung_struck_pumping", "rung_struck_lift",
+                               "workforce.probe_window_pickets.on_strike");
+    let low    = rung_delivers(ctx, "rung_low_pumping", "rung_low_lift",
+                               "workforce.probe_window_crews.on_strike");
+    let up     = rung_delivers(ctx, "rung_up_pumping", "rung_up_lift", "nobody_is_out");
+
+    // THE FOUR CHAINS, priced in one beat by one function.
+    let full   = chain_supply(ctx, "head_certified_lift", "berths_certified", "load_certified", up + worked);
+    let picket = chain_supply(ctx, "head_certified_lift", "berths_certified", "load_certified", up + struck);
+    let under  = chain_supply(ctx, "head_certified_lift", "berths_certified", "load_certified", up + low);
+    let gone   = chain_supply(ctx, "head_slipped_lift", "berths_slipped", "load_slipped", up + worked);
+
+    let demand = ctx.flags["claim_alpha"] + ctx.flags["claim_beta"] +
+                 ctx.flags["claim_gamma"] + ctx.flags["claim_delta"];
+    let short = demand - full;
+    if short < 0 { short = 0; }
+
+    ctx.flags.probe_window_open = 1;
+    ctx.flags.probe_window_supply = full;
+
+    publish(ctx, "world.probe_window.entity.manifest_full.name", "full_available", full);
+    publish(ctx, "world.probe_window.entity.manifest_full.name", "full_demand", demand);
+    publish(ctx, "world.probe_window.entity.manifest_full.name", "full_shortfall", short);
+    publish(ctx, "world.probe_window.entity.manifest_struck.name", "struck_available", picket);
+    publish(ctx, "world.probe_window.entity.manifest_low.name", "low_available", under);
+    publish(ctx, "world.probe_window.entity.manifest_dead.name", "dead_available", gone);
+}
+
+// ── The ledger ─────────────────────────────────────────────────────────────
+
+// Granted or refused in ONE place, against the flag ledger rather than the
+// panel row: a capacity counter is re-published by the infrastructure tick, so
+// two asks landing in the same tick would both read the first one's row before
+// it had moved.
+fn book(ctx, claim_id) {
+    if ctx.flags.probe_window_open == 0 {
+        ctx.flags.increment("probe_refused_shut", 1);
+        return false;
+    }
+    let need = ctx.flags[claim_id];
+    let left = ctx.flags.probe_window_supply - ctx.flags.probe_window_reserved;
+    if left < need {
+        ctx.flags.increment("probe_refused_short", 1);
+        return false;
+    }
+    ctx.flags.increment("probe_window_reserved", need);
+    ctx.flags.increment("probe_lifts_started", 1);
+    ctx.effects.adjust_capacity("world.probe_window.entity.manifest_full.name", "full_available", -need);
+    ctx.effects.adjust_capacity("world.probe_window.entity.manifest_full.name", "full_committed", need);
+    true
+}
+
+// A climber reaching the top — or not. THE CLOSE RULE IS THIS BRANCH.
+fn land(ctx, claim_id, served_flag, stood_down_flag) {
+    if ctx.flags.probe_window_open > 0 {
+        ctx.flags[served_flag] = 1;
+        ctx.flags.increment("probe_lifts_landed", 1);
+        return;
+    }
+    ctx.flags[stood_down_flag] = 1;
+    ctx.flags.increment("probe_lifts_aborted", 1);
+    ctx.effects.adjust_capacity(
+        "world.probe_window.entity.manifest_full.name", "full_committed", -ctx.flags[claim_id]);
+}
+
+// Eight seconds a climber, so the one booked at t=26 is still on the ribbon at
+// t=30 and the one booked at t=12 is long since at the top.
+fn ask_alpha(ctx) {
+    if book(ctx, "claim_alpha") {
+        ctx.schedule.after(8, |ctx| { land(ctx, "claim_alpha", "served_alpha", "stood_down_alpha"); });
+    }
+}
+
+fn ask_beta(ctx) {
+    if book(ctx, "claim_beta") {
+        ctx.schedule.after(8, |ctx| { land(ctx, "claim_beta", "served_beta", "stood_down_beta"); });
+    }
+}
+
+fn ask_gamma(ctx) {
+    if book(ctx, "claim_gamma") {
+        ctx.schedule.after(8, |ctx| { land(ctx, "claim_gamma", "served_gamma", "stood_down_gamma"); });
+    }
+}
+
+fn ask_delta(ctx) {
+    if book(ctx, "claim_delta") {
+        ctx.schedule.after(8, |ctx| { land(ctx, "claim_delta", "served_delta", "stood_down_delta"); });
+    }
+}
+
+fn on_window_closes(ctx) {
+    ctx.flags.probe_window_open = 0;
+    ctx.flags.probe_window_closed = 1;
+    let left = ctx.flags.probe_window_supply - ctx.flags.probe_window_reserved;
+    if left > 0 {
+        ctx.effects.adjust_capacity(
+            "world.probe_window.entity.manifest_full.name", "full_available", -left);
+    }
+}
+"""

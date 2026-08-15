@@ -13519,10 +13519,7 @@ fn probe_window_prices_four_chains_and_stands_down_what_it_cannot_finish() {
         + skyway_flag(&app, "claim_gamma")
         + skyway_flag(&app, "claim_delta");
     assert_eq!(at_open["full_demand"], demand);
-    assert_eq!(
-        at_open["full_shortfall"],
-        demand - at_open["full_available"]
-    );
+    assert_eq!(at_open["full_shortfall"], demand - at_open["full_available"]);
     assert!(at_open["full_shortfall"] > 0);
 
     // ── The ledger: two grants and two refusals, for two different reasons ──

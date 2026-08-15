@@ -1220,3 +1220,17 @@ world.falling_skyway.objective.window.text,Objective text — the Act 3 transfer
 world.falling_skyway.comms.window_opens_short,Dialogue body — Control opening a transfer window that has lift in it but not enough in Falling Skyway,"[Skyway Control to destroyer: transfer window is open. The head is certified and the ladder is pumping what it can pump. Our manifest carries that figure, and beside it what the three of them between them have asked for, and the second is the larger of the two. You have lift for two of them. You do not have lift for three, and nothing anybody does in the next hour changes that. Nobody down here is going to make the call for you.]"
 world.falling_skyway.comms.window_opens_dead,Dialogue body — Control opening a transfer window with no lift available at all in Falling Skyway,"[Skyway Control to destroyer: transfer window is open on paper and on paper only. The head is not certified to run a climber and the ladder has nothing to put in one, so the lift available on our manifest reads nothing at all against three standing claims. Every one of them is short by the whole of it. If you want anybody off this rock before we shut, somebody has to make the chain work first.]"
 world.falling_skyway.comms.window_closes,Dialogue body — Control closing the transfer window in Falling Skyway,"[Skyway Control: window is shut. Anything not already at the top comes back down — that was the rule before you got here and it is not mine to bend. The manifest stands as it stands.]"
+world.probe_window.workforce.crews.label,assets/worlds/probe_window.toml -> [[workforce]] label,[Depot crews]
+world.probe_window.workforce.pickets.label,assets/worlds/probe_window.toml -> [[workforce]] label,[Picket]
+world.probe_window.entity.head_certified.name,assets/worlds/probe_window.toml -> [[entity]] name,[Certified Head]
+world.probe_window.entity.head_slipped.name,assets/worlds/probe_window.toml -> [[entity]] name,[Slipped Head]
+world.probe_window.entity.rung_up.name,assets/worlds/probe_window.toml -> [[entity]] name,[Working Rung]
+world.probe_window.entity.rung_worked.name,assets/worlds/probe_window.toml -> [[entity]] name,[Staffed Rung]
+world.probe_window.entity.rung_struck.name,assets/worlds/probe_window.toml -> [[entity]] name,[Struck Rung]
+world.probe_window.entity.rung_low.name,assets/worlds/probe_window.toml -> [[entity]] name,[Under-Line Rung]
+world.probe_window.entity.manifest_full.name,assets/worlds/probe_window.toml -> [[entity]] name,[Full-Chain Manifest]
+world.probe_window.entity.manifest_struck.name,assets/worlds/probe_window.toml -> [[entity]] name,[Struck-Chain Manifest]
+world.probe_window.entity.manifest_low.name,assets/worlds/probe_window.toml -> [[entity]] name,[Under-Line-Chain Manifest]
+world.probe_window.entity.manifest_dead.name,assets/worlds/probe_window.toml -> [[entity]] name,[No-Lift-Chain Manifest]
+world.probe_window.deadline.opens.label,assets/worlds/probe_window.toml -> [[deadline]] label,[Window opens]
+world.probe_window.deadline.closes.label,assets/worlds/probe_window.toml -> [[deadline]] label,[Window closes]

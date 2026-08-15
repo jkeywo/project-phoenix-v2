@@ -33,6 +33,20 @@
   --line-soft:      #3a4674;
   --line-faint:     #1f2750;
 
+  /* The border every console document draws around its content columns
+     (`border: 1px solid var(--edge)`, ~40 declarations across gui/*/*.html).
+     It was only ever defined in client.html's lobby `:root`, and a console is
+     an IFRAME — a separate document, inheriting nothing from its parent — so
+     inside a console the reference was invalid at computed-value time and the
+     whole `border` shorthand fell back to its initial value (`medium none
+     currentcolor`). Every panel column therefore rendered with NO border.
+     The value is `--line-soft` because that is what the one component which
+     bothered to write a fallback already resolved to (ph-dossier-panel.js:
+     `var(--edge, var(--line-soft))`). tests/client/console-tokens.test.js
+     fails if a console document or component references a custom property
+     that neither this block nor the file itself defines. */
+  --edge:           var(--line-soft);
+
   /* Text */
   --ink:            #d8e2ff;
   --ink-dim:        #8a98c4;

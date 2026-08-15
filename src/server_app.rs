@@ -3043,6 +3043,81 @@ fn player_ship_identity(
     (tags, radar)
 }
 
+/// The config the player's game-start hull actually spawns with: the
+/// **lobby-selected** hull, carrying the **world's own** `[[entity]]`
+/// overrides.
+///
+/// # The two authorities, and why both have to survive
+///
+/// A world's `player-ship` row names two different things at once, and before
+/// this function only the first survived:
+///
+/// * **Which hull.** The row's `template_path` is a placeholder — the lobby
+///   picks the hull, and a player who selected the Destroyer must not spawn the
+///   placeholder's weapons. `selected` wins that argument outright.
+/// * **How THIS mission tunes it.** `[entity.overrides.*]` on that same row is
+///   the world's per-instance intent — switch off the Comms AI for one mission,
+///   nudge a doctrine priority, widen a radar. `resolve_entity_via` merged those
+///   onto the row's template and the composition validator checked the result;
+///   then the wholesale `selected.clone()` threw the merged document away and
+///   every world's player-ship override became decorative. Found while
+///   reviewing #1036: `probe_evidence.toml`'s `comms_console.ai.rule` override
+///   was never the rule the run flew.
+///
+/// So the overrides are re-applied **onto the picked hull**, through
+/// [`crate::entity_loader::apply_overrides`] — the same merge the validator
+/// itself runs (`world::validate`) and the same one `resolve_entity_via`
+/// performs for every other `[[entity]]`. One merge, one set of semantics; a
+/// second implementation here would be a second set of answers about
+/// `behaviour.doctrine` keying, `tags` replacing and the `_remove` tombstone.
+///
+/// # Semantics
+///
+/// * An override expresses the WORLD's intent, not the placeholder hull's, so it
+///   applies to **whichever hull the lobby picked**. A world that tunes its
+///   player ship tunes the ship the crew actually fly.
+/// * An override naming a table the picked hull's template lacks follows the
+///   **existing absent-table semantics**: the merge inserts it, and whether it
+///   does anything is up to the system that reads it — a `[comms_console]`
+///   block on a hull with no Comms system is silently inert. That is unchanged
+///   here on purpose; making it loud is a separate task.
+/// * A world with **no** overrides on that row (`overrides == None`) gets
+///   `selected.clone()` — byte-for-byte the pre-fix path, which is what keeps
+///   every shipped world spawning identically.
+/// * A row that resolved without a lobby selection at all keeps `world_row`,
+///   which `resolve_entity_via` has already merged.
+///
+/// # A merge failure spawns the ship anyway
+///
+/// The validator checked these overrides against the ROW's template, not against
+/// the hull the lobby went on to pick, so a merge that was valid at validation
+/// time can still fail here (an override reshaping a table the picked hull
+/// declares differently). The ship is the one entity the session cannot do
+/// without, so this logs and falls back to the unmodified selection — today's
+/// behaviour — rather than dropping the player's hull.
+fn player_hull_config(
+    world_row: crate::entity_config::EntityConfig,
+    overrides: Option<&toml::Value>,
+    selected: Option<&crate::entity_config::EntityConfig>,
+) -> crate::entity_config::EntityConfig {
+    let Some(selected) = selected else {
+        return world_row;
+    };
+    let Some(overrides) = overrides else {
+        return selected.clone();
+    };
+    match crate::entity_loader::apply_overrides(selected, overrides) {
+        Ok(merged) => merged,
+        Err(e) => {
+            bevy::log::error!(
+                "player ship: the world's `player-ship` overrides do not merge onto the \
+                 lobby-selected hull, spawning it untuned: {e}"
+            );
+            selected.clone()
+        }
+    }
+}
+
 /// Spawn entities with `spawn_on = GameStart` (e.g. player ship) when the
 /// game transitions to InProgress. Registered in `OnEnter(GamePhase::InProgress)`.
 fn spawn_game_start_entities(
@@ -3105,14 +3180,19 @@ fn spawn_game_start_entities(
         // already sourced from the selection (PendingShipConfig); this brings the
         // EntityConfig-derived systems into agreement. Matched on the same
         // predicate used below for the player-ship position/rotation/marker.
+        //
+        // The row's `[entity.overrides.*]` ride ALONG with the selection rather
+        // than being discarded by it — see `player_hull_config` for why the
+        // world's per-instance tuning outlives the hull swap, and for what a
+        // world without overrides is guaranteed (nothing changes at all).
         let config = if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
-            match selected_ship
-                .as_ref()
-                .and_then(|sel| config_cache.get(&sel.0))
-            {
-                Some(selected_cfg) => selected_cfg.clone(),
-                None => config,
-            }
+            player_hull_config(
+                config,
+                entity_inst.overrides.as_ref(),
+                selected_ship
+                    .as_ref()
+                    .and_then(|sel| config_cache.get(&sel.0)),
+            )
         } else {
             config
         };
@@ -5616,6 +5696,131 @@ station = "pilot"
             radar.0.icon.as_deref(),
             Some("playerShip"),
             "player ship carries the playerShip radar icon"
+        );
+    }
+
+    // ── player_hull_config (the world's tuning survives the hull swap) ───────
+    //
+    // The defect these pin was found while reviewing #1036: the lobby-selected
+    // hull replaced the world's resolved config WHOLESALE, so every
+    // `[entity.overrides.*]` a world authored on its `player-ship` row was
+    // merged, validated, and then thrown away.
+
+    /// Two real shipped hulls, loaded the way the runtime loads them (include
+    /// closure resolved first) so these tests regress on the TOML too.
+    fn hull(path: &str) -> crate::entity_config::EntityConfig {
+        crate::entity_includes::load_entity_config(path)
+            .unwrap_or_else(|e| panic!("{path} must compose and parse: {e}"))
+    }
+
+    fn doctrine<'a>(
+        config: &'a crate::entity_config::EntityConfig,
+        id: &str,
+    ) -> &'a crate::entity_config::DoctrineObjective {
+        config
+            .behaviour
+            .as_ref()
+            .expect("hull authors [behaviour]")
+            .doctrine
+            .iter()
+            .find(|d| d.id == id)
+            .unwrap_or_else(|| panic!("hull authors a `{id}` doctrine"))
+    }
+
+    /// THE FIX. The world's row names the Destroyer and tunes it; the lobby
+    /// picked the Cruiser. What spawns is the Cruiser **carrying the world's
+    /// tuning** — not the Destroyer, and not an untuned Cruiser.
+    #[test]
+    fn player_hull_config_reapplies_the_worlds_overrides_onto_the_selected_hull() {
+        let world_row = hull("assets/entities/alliance_destroyer.toml");
+        let selected = hull("assets/entities/alliance_cruiser.toml");
+        let overrides: toml::Value = toml::from_str(
+            r#"
+[[behaviour.doctrine]]
+id = "hold-station"
+base_priority = 77.0
+"#,
+        )
+        .unwrap();
+
+        let spawned = player_hull_config(world_row, Some(&overrides), Some(&selected));
+
+        assert_eq!(
+            doctrine(&spawned, "hold-station").base_priority,
+            77.0,
+            "the world's per-instance tuning survived the hull swap"
+        );
+        assert_eq!(
+            doctrine(&spawned, "destroy-hostiles"),
+            doctrine(&selected, "destroy-hostiles"),
+            "…and it landed on the hull the LOBBY picked: every field the \
+             override does not name is exactly what the Cruiser authored, not \
+             what the placeholder Destroyer did"
+        );
+    }
+
+    /// The guarantee every shipped world rests on: a `player-ship` row with no
+    /// overrides spawns the lobby selection UNTOUCHED — not a round-tripped
+    /// copy of it. This is the pre-fix path, byte for byte, and it is why the
+    /// anchor digests must not move.
+    #[test]
+    fn player_hull_config_without_overrides_is_the_selection_untouched() {
+        let world_row = hull("assets/entities/alliance_destroyer.toml");
+        let selected = hull("assets/entities/alliance_cruiser.toml");
+
+        assert_eq!(
+            player_hull_config(world_row, None, Some(&selected)),
+            selected,
+            "no overrides authored: nothing about the selection is re-derived"
+        );
+    }
+
+    /// No lobby selection at all (a host that never ran a lobby) keeps the
+    /// world's own resolved config — which `resolve_entity_via` has already
+    /// merged the overrides into. Unchanged by the fix.
+    #[test]
+    fn player_hull_config_without_a_selection_keeps_the_worlds_resolved_config() {
+        let world_row = hull("assets/entities/alliance_destroyer.toml");
+        let overrides: toml::Value = toml::from_str(
+            r#"
+[[behaviour.doctrine]]
+id = "hold-station"
+base_priority = 77.0
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            player_hull_config(world_row.clone(), Some(&overrides), None),
+            world_row,
+            "with nothing selected there is no second merge to run"
+        );
+    }
+
+    /// The validator checked these overrides against the ROW's template, not
+    /// against the hull the lobby went on to pick, so this merge can fail where
+    /// validation passed. The player's hull is the one entity a session cannot
+    /// do without, so a failure spawns the untuned selection and says so —
+    /// rather than dropping the ship. `_remove` is the reachable failure: it is
+    /// a fragment-composition marker the instance layer rejects outright
+    /// (issue #911).
+    #[test]
+    fn player_hull_config_falls_back_to_the_selection_when_the_merge_is_refused() {
+        let world_row = hull("assets/entities/alliance_destroyer.toml");
+        let selected = hull("assets/entities/alliance_cruiser.toml");
+        let overrides: toml::Value = toml::from_str(
+            r#"
+[[behaviour.doctrine]]
+id = "hold-station"
+_remove = true
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            player_hull_config(world_row, Some(&overrides), Some(&selected)),
+            selected,
+            "a refused merge still spawns the crew a ship"
         );
     }
 

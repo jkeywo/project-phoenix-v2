@@ -203,6 +203,29 @@ pub enum ActionCmd {
     /// in the one system that owns operational-flag edges. A timed field-repair
     /// operation applies one small slice of this per tick.
     AdjustInfrastructureCondition { entity: String, delta: f32 },
+    /// Move one of the named entity's published `[[infrastructure.capacity]]`
+    /// levels by `delta` units — negative spends, positive returns
+    /// (issue #1042).
+    ///
+    /// The capacity sibling of [`Self::AdjustInfrastructureCondition`], and it
+    /// resolves and queues on identical terms: `entity` is the authored NAME,
+    /// the applier looks it up in `WorldContentRuntime::name_to_uuid`, and
+    /// `tick_infrastructure_condition` — the one system that re-publishes a
+    /// structure's numbers onto the counters a script predicate reads — does the
+    /// arithmetic. A `transfer` completing queues the same
+    /// [`CapacityAdjustment`](crate::infrastructure::CapacityAdjustment); this
+    /// is a scenario's door to the same queue.
+    ///
+    /// A DELTA rather than a set, matching every other move in this vocabulary
+    /// (condition points, a transfer's cargo) and for the same reason: the sign
+    /// convention lives at the call site, where the author can see what they
+    /// meant. A scenario publishing a *computed* number writes
+    /// `want - <the live counter>` and lands on the value it worked out.
+    AdjustInfrastructureCapacity {
+        entity: String,
+        capacity: String,
+        delta: i64,
+    },
     /// Start an external operation: `ship` performs `verb` on `target`
     /// (issue #1026).
     ///

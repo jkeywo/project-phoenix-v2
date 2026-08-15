@@ -350,6 +350,32 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
+    // Infrastructure CAPACITY (issue #1042). The third door onto a structure's
+    // published numbers, beside the two condition verbs above and the
+    // `transfer` operation below, and the only one a scenario can aim at a
+    // quantity it worked out for itself.
+    //
+    // ONE signed verb rather than the spend/return pair the condition hooks
+    // are, which is the opposite call and deliberately so: a condition move has
+    // a different FICTION on each side — repairing and damaging are two things a
+    // crew do — where a capacity move has one, "this published count moves by
+    // this much". Splitting it would force a scenario publishing a computed
+    // value to branch on the sign of its own arithmetic before it could name the
+    // verb it wanted.
+    //
+    // Whole units, and no `flt` overload, because a capacity is a count and the
+    // world counter it mirrors onto is an `i64` (`CapacityConfig::amount` says
+    // so at length).
+    engine.register_fn(
+        "adjust_capacity",
+        |sink: &mut EffectSink, entity: ImmutableString, capacity: ImmutableString, delta: i64| {
+            sink.push(ActionCmd::AdjustInfrastructureCapacity {
+                entity: entity.to_string(),
+                capacity: capacity.to_string(),
+                delta,
+            });
+        },
+    );
     // External operations (issues #1026, #1027). One host fn per VERB rather
     // than one taking a verb string, on the same reasoning the two
     // infrastructure hooks share: the verb lives in the name, so a misspelling

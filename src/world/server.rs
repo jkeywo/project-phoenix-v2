@@ -2614,6 +2614,32 @@ pub(crate) fn apply_dispatch_result(
                     .push(crate::infrastructure::ConditionAdjustment { uuid, delta });
             }
 
+            // Issue #1042, and the same three lines because it is the same
+            // shape: resolve the name here, queue the move, and let
+            // `tick_infrastructure_condition` do the arithmetic and re-publish
+            // the counter. A capacity the structure never declared is dropped
+            // THERE, with a warning, because that check needs the component.
+            ActionCmd::AdjustInfrastructureCapacity {
+                entity,
+                capacity,
+                delta,
+            } => {
+                let Some(uuid) = runtime.name_to_uuid.get(&entity).cloned() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: AdjustInfrastructureCapacity: no entity named '{entity}' \
+                         in this world — ignoring"
+                    );
+                    continue;
+                };
+                runtime
+                    .pending_capacity_adjustments
+                    .push(crate::infrastructure::CapacityAdjustment {
+                        uuid,
+                        capacity,
+                        delta,
+                    });
+            }
+
             // Issue #1026, on exactly the same terms: the applier resolves the
             // two names, and `tick_operations` — which can see the capability
             // table, the power grid and the target's position — decides whether

@@ -1141,8 +1141,10 @@ fn drain_snapshot_save(world: &mut World) {
     }
 }
 
-/// How long a staged save waits for the world to bootstrap before the restore
-/// is abandoned and the host is told.
+/// How long a staged save waits for the world to bootstrap before what is still
+/// missing is either rebuilt from the payload or the restore is abandoned and
+/// the host is told (issue #863 turned the second of those into the fallback
+/// rather than the only outcome).
 ///
 /// Frames rather than ticks, because this is a *wall-clock* patience budget for
 /// something that has not started ticking yet, and a world that never
@@ -1160,16 +1162,26 @@ const RESTORE_DEADLINE_FRAMES: u32 = 1_800;
 /// ships at tick 0, and restoring into that window writes a ship's state onto
 /// components it has not been given yet.
 ///
-/// # The wait is bounded, and the expiry is loud
+/// # The wait is bounded, and the bound is where a dynamic run is put back
 ///
-/// `ready_to_restore` can be false forever, and the way it happens is ordinary:
-/// a stale `?resume=` outlives its session, the host picks a different roster
-/// at boot, and the save then names ships this world will never spawn. Waiting
-/// silently for that is the worst available outcome — the page plays a
-/// perfectly good *fresh* session while the host believes they resumed, and
-/// nothing ever says otherwise. So the wait has a deadline, and reaching it
-/// clears the staged save and reports a failure through the same status the
+/// `ready_to_restore` can be false forever, and the ordinary way it happens is
+/// the one issue #863 is about: the save names ships a *script* spawned mid-run,
+/// and this session — booting with nobody at the consoles — is not replaying the
+/// run that spawned them. Waiting silently for that is the worst available
+/// outcome; the page plays a perfectly good *fresh* session while the host
+/// believes they resumed.
+///
+/// So the wait has a deadline, and reaching it asks a second question rather than
+/// giving up on the spot: `ready_to_rebuild` — is everything still missing
+/// something the payload can build? If it is, the restore runs and builds it,
+/// which is the whole of #863's browser half. If it is not — a stale `?resume=`,
+/// a different roster picked at boot, ships this world will never have — the
+/// staged save is cleared and the failure is reported through the same status the
 /// save button uses.
+///
+/// The deadline is what keeps those two apart, and it has to be time rather than
+/// a payload field: see `snapshot::ready_to_rebuild` for why a mid-run spawn is
+/// ambiguous until the bootstrap has had its chance.
 #[cfg(target_arch = "wasm32")]
 fn drain_snapshot_restore(world: &mut World) {
     let staged = PENDING_RESTORE.with(|p| p.borrow().clone());
@@ -1191,7 +1203,12 @@ fn drain_snapshot_restore(world: &mut World) {
             *w += 1;
             *w
         });
-        if waited >= RESTORE_DEADLINE_FRAMES {
+        if waited < RESTORE_DEADLINE_FRAMES {
+            return;
+        }
+        // The deadline. Everything the bootstrap was going to produce, it has;
+        // whatever is still missing is missing for good (issue #863).
+        if !crate::snapshot::ready_to_rebuild(world, &snapshot.state) {
             PENDING_RESTORE.with(|p| *p.borrow_mut() = None);
             set_snapshot_status(
                 false,
@@ -1204,8 +1221,10 @@ fn drain_snapshot_restore(world: &mut World) {
                     snapshot.tick
                 ),
             );
+            return;
         }
-        return;
+        // …and it IS rebuildable, so fall through to the restore, which builds
+        // the mid-run spawns this session was never going to reach.
     }
     let report = crate::snapshot::restore(world, &snapshot.state);
     PENDING_RESTORE.with(|p| *p.borrow_mut() = None);

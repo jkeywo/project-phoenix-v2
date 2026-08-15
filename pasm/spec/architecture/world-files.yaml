@@ -851,6 +851,10 @@ entities:
       authority: authoritative
       reads: [world-flag-state, world-name-binding-state, world-layer-runtime-state]
       writes: [objective-runtime-state, ship-modifier-state, spawned-entity-state, world-layer-runtime-state]
+      # Issue #863: the `SpawnEntity` arm is the ONE site a runtime spawn
+      # happens, so it is the one site that can record what the spawn was made
+      # from — see `runtime-spawn-origin-state` in trigger-pipeline.yaml.
+      owns: [runtime-spawn-origin-state]
       coordinates: [npc-doctrine-evaluator, game-flow-controller]
       runs_in: [host-browser-runtime]
     implementation:

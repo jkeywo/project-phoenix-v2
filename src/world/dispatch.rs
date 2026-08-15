@@ -392,8 +392,20 @@ pub enum ActionCmd {
         rotation: Option<[f32; 3]>,
         scale: Option<[f32; 3]>,
         layer_path: Option<String>,
+        /// The template path `config` was resolved from, carried alongside the
+        /// resolved config rather than instead of it (issue #863).
+        ///
+        /// The applier stamps it onto the spawned entity as part of its
+        /// [`crate::world::spawn_origin::SpawnOrigin`], which is what lets a
+        /// resume rebuild a mid-run spawn no fresh boot re-derives. `config` is
+        /// still the thing that gets spawned — nothing re-loads the template
+        /// here — so the two cannot disagree about *this* spawn; the path is
+        /// what a *later* rebuild resolves.
+        template_path: String,
         /// Optional inline TOML overrides already applied to `config` by the
-        /// dispatch function; preserved here for auditing / test assertions.
+        /// dispatch function; preserved here for auditing / test assertions —
+        /// and, since issue #863, so the spawn's origin record can carry the
+        /// same document a rebuild has to merge again.
         overrides: Option<toml::Value>,
     },
     /// Destroy the entity with `uuid` and run the destruction cascade.
@@ -1197,6 +1209,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 rotation: *rotation,
                 scale: *scale,
                 layer_path: context.origin_layer.clone(),
+                template_path: template_path.clone(),
                 overrides: overrides.clone(),
             });
 
@@ -2227,6 +2240,7 @@ mod tests {
                 rotation: None,
                 scale: None,
                 layer_path: None,
+                template_path: DESTROYER_TEMPLATE.to_string(),
                 overrides: None,
             }]
         );
@@ -2274,6 +2288,7 @@ mod tests {
                 rotation: None,
                 scale: None,
                 layer_path: Some("sub.toml".to_string()),
+                template_path: DESTROYER_TEMPLATE.to_string(),
                 overrides: None,
             }]
         );
@@ -3475,6 +3490,7 @@ mod tests {
                     rotation: None,
                     scale: None,
                     layer_path: None,
+                    template_path: DESTROYER_TEMPLATE.to_string(),
                     overrides: None,
                 }],
                 name_to_uuid_inserts: vec![("wave_1".to_string(), STUB_UUID.to_string())],

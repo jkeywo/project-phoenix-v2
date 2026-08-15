@@ -79,6 +79,45 @@ entities:
       symbols: [WorldEventBuffer]
       tests: [cargo test]
 
+  - state: runtime-spawn-origin-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Runtime Spawn Origin
+      summary: "What a MID-RUN spawn was made from: the entity template path, the instance overrides merged onto it, the resolved placement (position, optional rotation and scale), the scenario name patched over the template's display name, and the authoring layer. Held as an `EntitySpawnOrigin` COMPONENT on the entity the spawn produced, wrapping the Bevy-free `SpawnOrigin` record. Absent on every authored `[[entity]]` block, and the absence is half the signal."
+      rationale:
+        - "[ai] Issue #863. `snapshot::restore` was an overwrite and nothing else, so a captured entity the bootstrapped world did not have was a `RestoreGap::MissingEntity`. That was survivable only because a fresh app re-ran the same scenario from the same seed and re-minted the same ids through `WorldIdMint` — the resume was relying on a REPLAY. A resumed browser session boots with nobody at the consoles and replays nothing, so a wave released by a player's action came back as a gap or as a `ready_to_restore` that never became true. The record is what a restore rebuilds the ship from instead."
+        - "[ai] Nothing about a spawned entity says what made it: the template is merged into the config at spawn and the path discarded, and the overrides go the same way. `combat_test` alone authors nineteen override pairs, and they carry the raid's hostility, doctrine and weapon fit — a rebuild from the bare template would put back friendly, unarmed hulls in the raiders' positions, which is worse than a reported gap."
+        - "[ai] IT RIDES ON THE ENTITY rather than in a uuid-keyed ledger on `WorldContentRuntime` (the shape `DeadlineTable`, `CommitmentLedger` and `EvidenceLog` take). Those are state about the WORLD, and live there so every site that borrows the runtime can mutate them; this is state about ONE entity, and putting it there buys pruning for free — a destroyed ship's record dies with it, so nothing can go stale and no destroy path needs a hook. The capture walk that already visits every `EntityUuid` reads it in place."
+        - "[ai] The overrides travel as the dynamic `toml::Value` the merge consumed, not as the resolved `EntityConfig`. A dynamic document pins no struct's shape as save format; the config would freeze thirty authored sections' serde layout into the payload AND still be wrong, because its `#[serde(skip)]` system blocks do not survive a plain round-trip (issue #838). The template itself is re-read on restore rather than stored, because the content digest is already bound to the file."
+        - "[ai] AUTHORITATIVE BUT NOT FOLDED, like `FlagStore`, `ObjectiveManager`, `DeadlineTable` and `CommitmentLedger`: `state_digest` does not walk it. Measured rather than asserted — `probe_destroy`, which spawns two storm bands from script and therefore gains the component on each, reproduces 14665104268980394769 at seed 42 / 900 ticks exactly, as do all five anchors (combat_test, patrol, duel, falling_skyway, probe_storm)."
+        - "[ai] Writing it costs `ActionCmd::SpawnEntity` one field (`template_path`), carried BESIDE the already-resolved config rather than instead of it, so the applier still spawns what dispatch resolved and the two cannot disagree about this spawn; the path is what a LATER rebuild resolves."
+    architecture:
+      classification: authoritative
+      owner: world-trigger-action-dispatcher
+      writers: [world-trigger-action-dispatcher]
+    implementation:
+      status: observed
+      # `src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `mission-deadline-state` gives in scenario-scripting.yaml: it carries
+      # this state's persistence (`EntityState::spawn`, the restore's spawn
+      # path, and the 9 → 10 `SNAPSHOT_FORMAT` bump) but is a whole-payload
+      # module whose imports a scanner would attribute here wholesale.
+      paths:
+        - src/world/spawn_origin.rs
+        - src/world/server.rs
+        - src/entities/spawner.rs
+      symbols:
+        - SpawnOrigin
+        - EntitySpawnOrigin
+      tests:
+        - cargo test
+        - "cargo test --features headless --test snapshot_resume a_mid_run_spawn"
+    evidence:
+      - kind: test
+        reference: "tests/snapshot_resume.rs::a_mid_run_spawn_is_rebuilt_by_the_restore_rather_than_replayed_by_the_bootstrap"
+        summary: "`probe_reinforce.toml` spawns two Harrow raiders at t=3 s from the same `alliance_cruiser` template its authored escort flies, made hostile by an `overrides` block alone. The capture is taken after the spawn; a fresh app is stepped only to `ready_to_rebuild` — with the raiders provably absent and `ready_to_restore` provably false — and the restore builds both. Their FACTION and TAGS are read off the rebuilt hulls, neither of which travels anywhere else in the payload, so a rebuild from the bare template would fail the test while satisfying a count; `name_to_uuid`, the `raiders` group and the captured digest are all asserted alongside."
+
   - component: world-trigger-chaining-loop
     core:
       status: implemented

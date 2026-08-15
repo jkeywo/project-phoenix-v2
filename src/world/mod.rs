@@ -17,6 +17,10 @@ pub mod mod_pack;
 pub mod scenario;
 pub mod script;
 pub mod server;
+/// What a runtime-spawned entity was made from (issue #863) — the template,
+/// overrides and placement a script's spawn consumed, kept on the entity it
+/// produced so a resume can rebuild what no fresh boot re-derives.
+pub mod spawn_origin;
 pub mod validate;
 /// Who staffs a structure, and whether they are working (issue #1035) — the
 /// authored `[[workforce]]` sides of a labour dispute, their live strike status

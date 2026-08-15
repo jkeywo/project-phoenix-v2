@@ -147,6 +147,21 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     // `authoritative-weapons-hold-state` entity in
     // pasm/spec/architecture/red-alert.yaml.
     "ShipWeaponsHold",
+    // Issue #863's spawn provenance. `EntitySpawnOrigin` is a new Bevy
+    // COMPONENT — what a mid-run scripted spawn was made from, so a resume can
+    // rebuild the ship no fresh boot re-derives — and `SpawnOrigin` is the
+    // Bevy-free record it wraps. Authoritative and NOT folded, like the deadline
+    // table and the commitments ledger beside it.
+    //
+    // The guard's own computed set does NOT move for this entry, and the reason
+    // is worth writing down rather than leaving as a coincidence: the component
+    // is registered the first time a world runs a scripted `spawn_entity`, and
+    // this guard's world (`rng_coverage.toml`) authors none. So the entry is a
+    // FORWARD declaration — transcribed from the `runtime-spawn-origin-state`
+    // entity in pasm/spec/architecture/trigger-pipeline.yaml — rather than a
+    // response to a failure, and the day a spawning world becomes the guard's
+    // world it is already accounted for.
+    "EntitySpawnOrigin", "SpawnOrigin",
     "SimRng",
     "SimRngState", "SimulationPaused", "SourceLocation", "StationConfig", "SteeringInput",
     "SystemBlackboard",

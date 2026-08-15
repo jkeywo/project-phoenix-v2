@@ -34,8 +34,8 @@ use project_phoenix::messages::{GamePhase, ServerMessage};
 use project_phoenix::server_app::{GameOverReason, SimOutbox};
 use project_phoenix::sim_digest::world_digest;
 use project_phoenix::snapshot::{
-    capture, load_from, ready_to_restore, restore, run_for, save_to, versions, LoadRefusal,
-    PhoenixSnapshot, SavedGame, SIMULATION_RULES, SNAPSHOT_FORMAT,
+    capture, load_from, ready_to_rebuild, ready_to_restore, restore, run_for, save_to, versions,
+    LoadRefusal, PhoenixSnapshot, SavedGame, SIMULATION_RULES, SNAPSHOT_FORMAT,
 };
 use project_phoenix::world::script::load::script_ledger_key;
 use vellum_save::{FileStore, Moved, Verdict, Versions};
@@ -3662,6 +3662,491 @@ fn a_save_written_before_the_weapons_hold_is_refused_on_format() {
     let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
     let run = run_for(payload, digest, SEED, RESTRAINT, previous);
     let store = FileStore::new(scratch("weapons-hold-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}
+
+// ── Dynamic combat consequences across a resume (issue #863) ─────────────────
+
+/// The reinforcement probe: an authored escort, and two Harrow raiders a script
+/// spawns at t=3 s.
+const REINFORCE: &str = "assets/worlds/probe_reinforce.toml";
+
+/// Frames the reinforcement world runs before its capture.
+///
+/// It has to land AFTER the t=3 s spawn, because a capture taken before it names
+/// only authored ships — which is the one payload this file's claim cannot fail,
+/// since every row would find a bootstrapped hull waiting. The preconditions
+/// below assert the crossing rather than trusting the number.
+const REINFORCE_CAPTURE_AT: u64 = 360;
+
+fn reinforce_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: REINFORCE.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+/// Every `EntityUuid` in a world, as a set.
+fn uuids(app: &mut bevy::prelude::App) -> std::collections::BTreeSet<String> {
+    use project_phoenix::entity_spawner::EntityUuid;
+    let mut query = app.world_mut().query::<&EntityUuid>();
+    query.iter(app.world()).map(|u| u.0.clone()).collect()
+}
+
+/// Every live `AsteroidUuid`, as a set.
+fn rock_uuids(app: &mut bevy::prelude::App) -> std::collections::BTreeSet<String> {
+    use project_phoenix::asteroid_lifecycle::AsteroidUuid;
+    let mut query = app.world_mut().query::<&AsteroidUuid>();
+    query.iter(app.world()).map(|u| u.0.clone()).collect()
+}
+
+/// The live `name_to_uuid` map a scenario resolves its entity names through.
+fn live_name_to_uuid(app: &bevy::prelude::App) -> std::collections::BTreeMap<String, String> {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .iter()
+        .map(|(name, uuid)| (name.clone(), uuid.clone()))
+        .collect()
+}
+
+/// Bring a fresh app up to the point the **browser's deadline branch** restores
+/// at (issue #863): the authored roster is standing, and whatever the capture
+/// still names is something only the payload can build.
+///
+/// The sibling of [`boot_to_restore_point`], and the difference between them is
+/// the whole of #863's browser half. That one waits for `ready_to_restore` —
+/// every captured ship standing — which is the right thing to want and the wrong
+/// thing to wait for forever. This one stops at `ready_to_rebuild`, which is what
+/// `drain_snapshot_restore` asks once its patience budget is spent.
+///
+/// Deliberately does NOT keep stepping afterwards. A deterministic headless app
+/// replaying the same scenario would eventually reach the t=3 s spawn by itself
+/// and hand the test a bootstrapped roster — which is the coincidence the
+/// assertions here exist to rule out.
+fn boot_to_rebuild_point(args: &HeadlessArgs, snapshot: &PhoenixSnapshot) -> bevy::prelude::App {
+    let mut app = boot(args);
+    for _ in 0..1_000 {
+        if ready_to_rebuild(app.world(), snapshot) {
+            return app;
+        }
+        app.update();
+    }
+    panic!("the fresh app never reached the rebuild point");
+}
+
+/// Teleport the viewscreen ship, which is what the asteroid streamer's window
+/// follows. Written through `ShipPhysics` and `Transform` together for
+/// `restore_entities`' reason: the streamer reads the former, everything visual
+/// reads the latter, and a ship that moved only one of them is in two places.
+fn fly_local_ship_to(app: &mut bevy::prelude::App, x: f32, z: f32) {
+    use project_phoenix::server_app::LocalShip;
+    use project_phoenix::ship_state::ShipPhysics;
+    let mut query = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<LocalShip>>();
+    let entities: Vec<bevy::prelude::Entity> = query.iter(app.world()).collect();
+    for entity in entities {
+        let mut entity_mut = app.world_mut().entity_mut(entity);
+        if let Some(mut physics) = entity_mut.get_mut::<ShipPhysics>() {
+            physics.x = x;
+            physics.z = z;
+        }
+        if let Some(mut transform) = entity_mut.get_mut::<bevy::prelude::Transform>() {
+            transform.translation.x = x;
+            transform.translation.z = z;
+        }
+    }
+}
+
+/// **Issue #863, the roster half.** A ship a script spawned mid-run comes back
+/// because the SAVE carries it, not because the fresh app happened to replay the
+/// run that produced it.
+///
+/// The control is the whole test. `probe_reinforce` spawns its raiders at t=3 s,
+/// and a fresh app reaches its restore point in a fraction of that — so the
+/// world the restore is handed genuinely does not contain them, and the
+/// assertions below are about what `restore` built rather than about what a
+/// bootstrap coincidentally re-derived. Before this issue that state was not
+/// reachable at all: `ready_to_restore` waited for every captured uuid, so the
+/// fresh app sat there re-simulating until it re-minted the same ids — a resume
+/// that was quietly a replay, and one a browser session booting with nobody at
+/// the consoles never completes.
+///
+/// The two raiders are the same `alliance_cruiser` template the escort flies and
+/// are made Harrow by an `overrides` block alone, so the faction and tag
+/// assertions are what separate "two ships came back" from "the RIGHT two ships
+/// came back". Neither travels anywhere else in the payload: a rebuild from the
+/// bare template would put two friendly cruisers in the raiders' positions and
+/// satisfy a count.
+#[test]
+fn a_mid_run_spawn_is_rebuilt_by_the_restore_rather_than_replayed_by_the_bootstrap() {
+    use project_phoenix::entity_spawner::{
+        EntitySpawnOrigin, EntityTagsSection, EntityUuid, FactionComponent,
+    };
+
+    const HARROW: &str = "cccccccc-3333-4333-8333-cccccccccccc";
+
+    let mut live = boot(&reinforce_args());
+    step(&mut live, REINFORCE_CAPTURE_AT);
+
+    let raiders: std::collections::BTreeMap<String, String> = live_name_to_uuid(&live)
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("probe_raider_"))
+        .collect();
+    assert_eq!(
+        raiders.len(),
+        2,
+        "precondition: the capture must be taken AFTER the t=3 s reinforcement — \
+         a capture of the authored roster alone is the one payload this test \
+         cannot fail"
+    );
+    let escort = live_name_to_uuid(&live)
+        .get("world.probe_reinforce.entity.escort.name")
+        .expect("the escort is authored and named")
+        .clone();
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+
+    // The payload's own half of the precondition: exactly the two raiders carry
+    // a spawn origin, and the authored ships carry none. That asymmetry is what
+    // `restore` and `ready_to_restore` both read.
+    let with_origin: std::collections::BTreeSet<&String> = payload
+        .entities
+        .iter()
+        .filter(|row| row.spawn.is_some())
+        .map(|row| &row.uuid)
+        .collect();
+    assert_eq!(
+        with_origin,
+        raiders.values().collect(),
+        "only the scripted spawns should carry an origin; the player ship and \
+         the authored escort are what any fresh boot puts back by itself"
+    );
+
+    // Through the real storage path, not straight from the capture. The origin
+    // carries the instance overrides as a dynamic `toml::Value`, and RON is what
+    // a save is actually written in — so the round-trip below is where that
+    // document is proved to survive being a save rather than merely a struct.
+    let run = run_for(
+        payload.clone(),
+        captured_digest,
+        SEED,
+        REINFORCE,
+        current_versions(REINFORCE),
+    );
+    let store = FileStore::new(scratch("reinforce"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let reloaded =
+        load_from(&store, "autosave", &current_versions(REINFORCE)).expect("the save reloads");
+    assert_eq!(reloaded, run, "the artifact round-trips through RON");
+    let payload = reloaded
+        .snapshot
+        .as_ref()
+        .expect("a saved game carries a snapshot")
+        .state
+        .clone();
+
+    let mut resumed = boot_to_rebuild_point(&reinforce_args(), &payload);
+    let before = uuids(&mut resumed);
+    for uuid in raiders.values() {
+        assert!(
+            !before.contains(uuid),
+            "control: the freshly booted world must NOT have reached its own t=3 s \
+             reinforcement, or the restore is not what puts the raiders back"
+        );
+    }
+    assert!(
+        before.contains(&escort),
+        "control: the AUTHORED escort must be standing already, so the claim \
+         below is about mid-run spawns and not about restores in general"
+    );
+    assert!(
+        !ready_to_restore(resumed.world(), &payload),
+        "control: and the world is genuinely NOT ready by the waiting predicate — \
+         this is the deadline path the browser takes, not the ordinary one"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        report.entities_spawned, 2,
+        "the restore reports the two hulls it had to build: {report:?}"
+    );
+    assert_eq!(
+        report.entities_restored,
+        payload.entities.len(),
+        "and every captured row found a home, built or bootstrapped"
+    );
+
+    // The ships themselves — present, at the captured identity, and made of what
+    // the overrides said rather than of the bare template.
+    for (name, uuid) in &raiders {
+        let mut query = resumed.world_mut().query::<(
+            &EntityUuid,
+            Option<&FactionComponent>,
+            Option<&EntityTagsSection>,
+            Option<&EntitySpawnOrigin>,
+        )>();
+        let (_, faction, tags, origin) = query
+            .iter(resumed.world())
+            .find(|(u, ..)| &u.0 == uuid)
+            .unwrap_or_else(|| panic!("{name} must be back in the resumed world"));
+        assert_eq!(
+            faction.map(|f| f.0.to_string()).as_deref(),
+            Some(HARROW),
+            "{name} came back Alliance — the override that makes a raider of the \
+             cruiser template was not merged, so the resumed world is a different \
+             fight from the captured one"
+        );
+        assert!(
+            tags.is_some_and(|t| t.0.iter().any(|tag| tag == "probe_raider")),
+            "{name} lost the tags its override wrote; neither tags nor faction \
+             travel anywhere else in the payload, which is why they are read here"
+        );
+        assert!(
+            origin.is_some(),
+            "{name} must carry its origin again, or this resumed run could be \
+             saved once and never resumed a second time"
+        );
+    }
+
+    // And the scenario can still say which ship it means.
+    let resumed_names = live_name_to_uuid(&resumed);
+    for (name, uuid) in &raiders {
+        assert_eq!(
+            resumed_names.get(name),
+            Some(uuid),
+            "the resumed scenario must resolve `{name}` to the ship the capture \
+             named, or every `on_destroyed`/`destroy_entity` that mentions it \
+             addresses nobody"
+        );
+    }
+    assert_eq!(
+        resumed
+            .world()
+            .resource::<project_phoenix::world::server::WorldContentRuntime>()
+            .entity_groups
+            .get("raiders")
+            .map(|members| members.len()),
+        Some(2),
+        "and the group an `on_all_destroyed` is judged against comes back with \
+         both of them in it"
+    );
+
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "a world whose raiders the restore BUILT stands exactly where the capture \
+         did — the strong form of the claim, since a built hull is folded into \
+         the entity namespace alongside the bootstrapped ones"
+    );
+}
+
+/// **Issue #863.** The two predicates say different things, and only the second
+/// one lets a mid-run spawn through.
+///
+/// The pair asserted directly rather than through a resume, because the
+/// difference between them is a design decision rather than an implementation
+/// detail: `ready_to_restore` still waits for every captured ship — a
+/// bootstrapped hull is a better hull than a built one — and `ready_to_rebuild`
+/// is what the browser's deadline asks instead of giving up. A row with no origin
+/// fails both, which is the silent-write failure the waiting predicate has always
+/// existed to prevent, untouched.
+#[test]
+fn only_the_rebuild_predicate_lets_a_mid_run_spawn_through() {
+    let mut live = boot(&reinforce_args());
+    step(&mut live, REINFORCE_CAPTURE_AT);
+    let payload = capture(live.world());
+
+    // A fresh app at the deadline point: the authored roster is standing, the
+    // t=3 s raiders are not.
+    let mut fresh = boot_to_rebuild_point(&reinforce_args(), &payload);
+    let standing = uuids(&mut fresh);
+    assert!(
+        payload
+            .entities
+            .iter()
+            .any(|row| row.spawn.is_some() && !standing.contains(&row.uuid)),
+        "control: a captured row is genuinely absent, which is the only \
+         interesting case"
+    );
+    assert!(
+        !ready_to_restore(fresh.world(), &payload),
+        "the waiting predicate is still false — it wants the ship itself, not a \
+         recipe for one"
+    );
+    assert!(
+        ready_to_rebuild(fresh.world(), &payload),
+        "and the rebuild predicate is true, because what is missing is exactly \
+         what the payload can build"
+    );
+
+    // The same payload with the origins stripped: the raiders are now
+    // indistinguishable from authored ships this world simply has not spawned,
+    // and neither predicate will have them.
+    let mut without_origins = payload.clone();
+    for row in &mut without_origins.entities {
+        row.spawn = None;
+    }
+    assert!(
+        !ready_to_rebuild(fresh.world(), &without_origins),
+        "a captured row that names no live entity and carries no origin is a save \
+         this world cannot honour — the resume is abandoned loudly rather than \
+         restored over a roster that is short"
+    );
+}
+
+/// **Issue #863, the streamed-belt half.** A rock shot out of a streamed cell
+/// stays shot after the resume — and its cell refills on re-entry exactly as the
+/// live simulation refills it.
+///
+/// Two claims in one run, because they are two halves of one policy (see
+/// `snapshot`'s module docs). Destruction inside a streamed cell is recorded by
+/// ABSENCE — the rock is not in `PhoenixSnapshot::asteroids` and its window slot
+/// is empty — so the first half is that a fresh app which streamed the rock in
+/// alive has it taken away again. The second is that this does NOT make the
+/// destruction permanent: leaving the cell and returning respawns the rock whole,
+/// which is AGENTS.md's Key Constraint 8, and it is asserted on the LIVE world
+/// and the RESUMED one together because the point is that a resume gets no
+/// second opinion about it.
+///
+/// The rock's identity is what makes both halves readable: a streamed rock's
+/// uuid is a pure function of its lattice cell, so "the same rock" after a
+/// re-stream is a claim this test can make by string equality rather than by
+/// counting.
+#[test]
+fn a_destroyed_streamed_rock_stays_destroyed_and_its_cell_refills_on_re_entry() {
+    use project_phoenix::asteroid_lifecycle::AsteroidUuid;
+    use project_phoenix::entity_spawner::EntitySystemHull;
+    use project_phoenix::server_app::LocalShip;
+    use project_phoenix::ship_state::ShipPhysics;
+
+    let args = combat_test_args();
+    let mut live = boot(&args);
+    step(&mut live, CAPTURE_AT);
+
+    // The ship's own position, and the rock nearest it — near enough that a
+    // window rebuild re-evaluates its cell, which is what the re-entry leg needs.
+    let ship = live
+        .world_mut()
+        .query_filtered::<&ShipPhysics, bevy::prelude::With<LocalShip>>()
+        .iter(live.world())
+        .next()
+        .copied()
+        .expect("combat_test has a viewscreen ship");
+    let mut rocks: Vec<(bevy::prelude::Entity, String, f32)> = live
+        .world_mut()
+        .query::<(
+            bevy::prelude::Entity,
+            &AsteroidUuid,
+            &bevy::prelude::Transform,
+        )>()
+        .iter(live.world())
+        .map(|(e, uuid, t)| {
+            let dx = t.translation.x - ship.x;
+            let dz = t.translation.z - ship.z;
+            (e, uuid.0.clone(), dx * dx + dz * dz)
+        })
+        .collect();
+    assert!(
+        !rocks.is_empty(),
+        "precondition: combat_test's belts must have streamed by tick {CAPTURE_AT}"
+    );
+    rocks.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+    let (victim_entity, victim, _) = rocks[0].clone();
+
+    // Shoot it — the streamer's own `check_destroyed_asteroids` does the rest:
+    // the entity despawns and the cell's window slot is cleared.
+    {
+        let mut entity = live.world_mut().entity_mut(victim_entity);
+        let mut hull = entity
+            .get_mut::<EntitySystemHull>()
+            .expect("a gameplay rock carries a hull");
+        let ids: Vec<_> = hull.0.entries().map(|(id, _, _)| id.clone()).collect();
+        for id in ids {
+            hull.0.set_hp(&id, 0.0);
+        }
+    }
+    step(&mut live, 2);
+    assert!(
+        !rock_uuids(&mut live).contains(&victim),
+        "precondition: the rock must actually be destroyed in the live world"
+    );
+
+    let payload = capture(live.world());
+    assert!(
+        !payload.asteroids.iter().any(|a| a.uuid == victim),
+        "and the payload records the destruction the only way a streamed field \
+         can — by not naming the rock"
+    );
+
+    let mut resumed = boot_to_restore_point(&args, &payload);
+    assert!(
+        rock_uuids(&mut resumed).contains(&victim),
+        "control: the fresh app streams the same cell and spawns the same rock at \
+         the same cell-derived uuid, so something has to take it away again"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert!(
+        !rock_uuids(&mut resumed).contains(&victim),
+        "a rock destroyed before the save must stay destroyed through the resume"
+    );
+
+    // …and the declared policy: leave the cell, come back, and the field is
+    // whole again. Asserted on both worlds, because a resume that answered this
+    // differently from the live run would be a resumed world that plays
+    // differently from the one it resumed.
+    for (label, app) in [("live", &mut live), ("resumed", &mut resumed)] {
+        assert!(
+            !rock_uuids(app).contains(&victim),
+            "[{label}] precondition for the re-entry leg: the rock is gone"
+        );
+        fly_local_ship_to(app, ship.x + 40_000.0, ship.z + 40_000.0);
+        step(app, 4);
+        fly_local_ship_to(app, ship.x, ship.z);
+        step(app, 4);
+        assert!(
+            rock_uuids(app).contains(&victim),
+            "[{label}] leaving the cell and returning must respawn the rock whole, \
+             at the same cell-derived uuid — AGENTS.md Key Constraint 8, which a \
+             resume does not get a second opinion about"
+        );
+    }
+}
+
+/// A save written before mid-run spawns were recorded is refused on **format**.
+///
+/// Both new fields carry `#[serde(default)]`, so a format-9 payload still parses
+/// — which is exactly why the constant had to move. Nothing in one distinguishes
+/// a run that never spawned anything from a run with a whole raid on the board,
+/// and restoring the second resumes a fight two ships short with no error
+/// anywhere.
+#[test]
+fn a_save_written_before_the_spawn_record_is_refused_on_format() {
+    let mut live = boot(&reinforce_args());
+    step(&mut live, REINFORCE_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(REINFORCE);
+
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, REINFORCE, previous);
+    let store = FileStore::new(scratch("reinforce-format"));
     save_to(&store, "autosave", &run).expect("the save is written");
 
     let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");

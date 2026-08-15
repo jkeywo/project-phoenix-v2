@@ -2809,13 +2809,14 @@ pub(crate) fn apply_dispatch_result(
 
             ActionCmd::SpawnEntity {
                 config,
-                name: _,
+                name,
                 uuid,
                 position,
                 rotation,
                 scale,
                 layer_path,
-                overrides: _,
+                template_path,
+                overrides,
             } => {
                 // The template arrives already resolved and name-patched: the
                 // pure layer loaded it via `DispatchContext::template_loader`
@@ -2824,6 +2825,30 @@ pub(crate) fn apply_dispatch_result(
                 let pos_vec = Vec3::new(position[0], position[1], position[2]);
                 let spawned =
                     crate::entity_spawner::spawn_entity(commands, &config, pos_vec, uuid, None);
+
+                // Issue #863: the ONE site a runtime spawn happens, and so the
+                // one site that records what it was made from. Everything the
+                // record needs is in hand here and nowhere afterwards — the
+                // template path and the override document are both consumed by
+                // the resolution above and leave no trace on the spawned
+                // entity, which is exactly why a resume could not rebuild one.
+                //
+                // Stamped unconditionally rather than only for hostiles or only
+                // for ships: what makes an entity worth recording is that a
+                // *script* made it, not what it turned out to be.
+                commands
+                    .entity(spawned)
+                    .insert(crate::entity_spawner::EntitySpawnOrigin(
+                        crate::world::spawn_origin::SpawnOrigin {
+                            template_path,
+                            name,
+                            position,
+                            rotation,
+                            scale,
+                            overrides,
+                            layer_path: layer_path.clone(),
+                        },
+                    ));
 
                 // Apply optional rotation (XYZ Euler radians) and scale
                 // (per-axis) via the canonical `TransformConfig` conversions —

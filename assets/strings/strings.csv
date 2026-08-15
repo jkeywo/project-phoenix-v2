@@ -1322,3 +1322,4 @@ server.fatal.remedy,Host fatal-error panel — what the operator should do next,
 server.fatal.station_config,Host fatal-error detail when a ship template fails station validation. {detail} is the validator's own message,[Station config error: {detail}]
 server.fatal.load_failed,Host fatal-error detail when a ship template file cannot be fetched. {path} is the file path and {detail} the fetch error,[Could not load {path}: {detail}]
 server.preload.failed,Host loading panel — the world or entity preload could not complete,[Failed to load game configuration. See the browser console for details.]
+world.probe_reinforce.entity.escort.name,assets/worlds/probe_reinforce.toml -> [[entity]] name,[Escort]

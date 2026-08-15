@@ -82,6 +82,22 @@ pub struct StaticPointDefence;
 #[derive(Component, Clone, Debug)]
 pub struct EntityTagsSection(pub Vec<String>);
 
+/// Present on an entity a **script spawned mid-run**, carrying what the spawn
+/// was made from (issue #863) — see [`crate::world::spawn_origin`] for why the
+/// record exists and why it rides on the entity.
+///
+/// Absent on every authored `[[entity]]` block, and the absence is the useful
+/// half of the signal: an entity with no origin is one any fresh boot of the
+/// same scenario puts back by itself, so a resume waits for the bootstrap to
+/// produce it rather than building it. An entity *with* one is a consequence of
+/// how this particular run went, and nothing but the save will ever put it back.
+///
+/// Written at exactly one site — `world::server`'s `ActionCmd::SpawnEntity` arm,
+/// the one place a runtime spawn happens — and read at exactly two:
+/// `snapshot::capture` and `snapshot::restore`.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct EntitySpawnOrigin(pub crate::world::spawn_origin::SpawnOrigin);
+
 /// Present when the EntityConfig has a `faction` UUID.
 /// The AI tick reads this component to determine `self_faction` and enemy evaluation.
 #[derive(Component, Clone, Debug, PartialEq)]

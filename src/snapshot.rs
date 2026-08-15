@@ -127,17 +127,58 @@
 //! everything else. `tests/snapshot_resume.rs` measures how far that carries
 //! and writes the number down rather than tuning around it.
 //!
-//! # A restore is not a `spawn`
+//! # A restore is mostly not a `spawn`
 //!
 //! [`restore`] does not build a world from nothing. It is handed a world that
 //! the *same scenario* has already bootstrapped — `Run::scenario` and
 //! `Run::seed` are what say which — and it overwrites that world's
-//! authoritative state with the capture's. Entities are matched by uuid;
-//! anything the bootstrap spawned that the capture did not have is despawned,
-//! and anything the capture had that the bootstrap did not spawn is reported as
-//! a [`RestoreGap`] rather than silently skipped. A silent gap is the failure
-//! mode worth engineering against: it restores *most* of a world and then
+//! authoritative state with the capture's. Entities are matched by uuid, and
+//! anything the bootstrap spawned that the capture did not have is despawned.
+//!
+//! The exception is **what the bootstrap cannot make** (issue #863). A world
+//! file's `[[entity]]` blocks come back with any fresh boot; a ship a *script*
+//! spawned mid-run does not, unless the fresh app happens to replay the same run
+//! to the same point — which a browser session resuming with nobody at the
+//! consoles does not do. So a captured row that names no live entity is built
+//! from its [`EntityState::spawn`] record if it has one, and reported as a
+//! [`RestoreGap`] if it does not. A silent gap is the failure mode worth
+//! engineering against either way: it restores *most* of a world and then
 //! diverges for a reason nothing in the save points at.
+//!
+//! # Destroyed streamed rocks, and the respawn policy this payload declares
+//!
+//! Combat Test's belts are streamed, so "which rocks exist" is a fact about the
+//! streamer rather than about the world file, and destruction inside a streamed
+//! cell is recorded by *absence* in two places at once: the rock is not in
+//! [`PhoenixSnapshot::asteroids`], and its cell's slot in
+//! [`PhoenixSnapshot::asteroid_window`] is empty. Both travel, so a restore
+//! despawns the rock the fresh app had streamed in alive and installs a window
+//! that agrees the cell is empty.
+//!
+//! **Identity is the cell, never the handle and never a mint.** A streamed rock's
+//! `AsteroidUuid` is `deterministic_cell_uuid(0, gx, gz, gx mod size, gz mod size)`
+//! (`crate::asteroid_lifecycle`) — a pure function of its lattice cell, because
+//! ring addressing makes the slot a pure function of the cell too. Two runs of
+//! the same content name the same rock the same thing, and so does a re-stream
+//! after a resume, which is what lets absence mean "destroyed" rather than "some
+//! other rock". Nothing here stores an ECS handle or draws from
+//! [`WorldIdMint`], and neither could work: a handle is a slot in one process,
+//! and a mint counter is a fact about when the rock happened to be streamed.
+//!
+//! **The declared policy for leaving and re-entering a cell after a restore is
+//! the same one the live simulation follows: the rock respawns, whole.** That is
+//! AGENTS.md's Key Constraint 8 — "destroyed asteroids respawn fresh when the
+//! player leaves the cell and returns" — and a resume does not get to have a
+//! second opinion about it. Destruction of a streamed rock is a fact about the
+//! *current residency* of its cell in the window, not about the world, and it is
+//! exactly as durable in a resumed run as in a live one: it survives for as long
+//! as the cell stays streamed in, and no longer. A payload that made it durable
+//! would be a resumed world that plays differently from the one it resumed —
+//! belts that thin out permanently where a live run's refill themselves, and a
+//! save file that grows without bound, one record per rock ever shot. Hand-placed
+//! rocks (an authored `[[entity]]`, not a streamed cell) are a different thing
+//! and stay destroyed the way any other authored entity does, through the same
+//! surplus sweep.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -299,7 +340,34 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// posture. Nothing in the payload distinguishes that save from one taken with
 /// the lever never pulled, so both are refused by `Versions::check`, which names
 /// the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 9;
+///
+/// `10` — issue #863 added [`EntityState::spawn`] and
+/// [`ScenarioState::name_to_uuid`], and this is the argument #1035 made turned
+/// all the way around: not "the content digest cannot see this", but "the
+/// content digest is *identical* and the world is still different".
+///
+/// A format-9 save of a Combat Test run carries every wave NPC's hull, helm,
+/// weapons and blackboards — and nothing at all about where those ships came
+/// from. That was survivable while a restore was only ever an overwrite, because
+/// a fresh boot of the same scenario re-ran the same script from the same seed
+/// and re-minted the same uuids, so the roster the capture named was always
+/// standing by the time the restore ran. What it was silently relying on is a
+/// *replay*, and a resumed browser session is precisely where the replay does
+/// not happen: the fresh app boots with nobody at the consoles, so a wave
+/// released by a player's action is a wave the bootstrap never releases, and
+/// every ship in it comes back as a [`RestoreGap::MissingEntity`] — or, worse,
+/// as a `ready_to_restore` that never becomes true and a resume that simply
+/// hangs. Two saves of the same scenario, the same files, the same content
+/// digest, and one of them describes a raid this build cannot rebuild.
+///
+/// So the payload now records what each mid-run spawn was made from, and the
+/// restore builds it. Both new fields carry `#[serde(default)]`, so a format-9
+/// save still parses — and a format-9 save of a world that never spawns anything
+/// at runtime would even restore correctly, which is exactly why the constant
+/// cannot be left at 9. Nothing in the payload distinguishes that save from one
+/// whose run had a whole raid on the board, so both are refused by
+/// `Versions::check`, which names the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 10;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -349,6 +417,23 @@ pub type StoredRun = Run<LoggedCommand, PhoenixSnapshot>;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
     pub uuid: String,
+    /// What a **script spawned this entity from** (issue #863), or `None` for
+    /// every authored `[[entity]]` block.
+    ///
+    /// The one field on this row that is not state the entity *has* but the
+    /// recipe it was *made by*, and it is here because the row is otherwise
+    /// unusable when the target world has no such entity to write into. A fresh
+    /// app re-spawns the authored roster from the world file, so an authored
+    /// ship is always there to be overwritten; a mid-run spawn is there only if
+    /// the bootstrap happened to replay the run that produced it, which a
+    /// resumed browser session — booting with nobody at the consoles — does not.
+    ///
+    /// With the origin, [`restore`] builds the ship instead of reporting a
+    /// [`RestoreGap::MissingEntity`]; the rest of this row then lands on it
+    /// exactly as it lands on a bootstrapped one. Without it, the gap is still
+    /// the honest answer: see [`crate::world::spawn_origin::SpawnOrigin`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn: Option<crate::world::spawn_origin::SpawnOrigin>,
     /// `ShipPhysics`' eight fields, in the order the digest folds them:
     /// `x, y, z, yaw, forward_speed, roll, lateral_speed, vertical_speed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1203,6 +1288,23 @@ pub struct ScenarioState {
     /// iteration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entity_groups: Vec<(String, Vec<String>)>,
+    /// `(entity name, uuid)` sorted by name: `WorldContentRuntime::name_to_uuid`,
+    /// the map every name-carrying command in `world::dispatch` resolves through
+    /// (issue #863).
+    ///
+    /// It belongs beside `entity_groups` for the reason that field is here — both
+    /// are what a scenario knows about *which* entity it means — and it was left
+    /// out until now for a reason that stops being true the moment a restore can
+    /// spawn: a fresh boot rebuilt the map by re-running the same spawns, and the
+    /// mint being deterministic meant it rebuilt it with the same uuids. A
+    /// restore-spawned entity has no such re-run behind it, so the name it
+    /// answers to has to travel with it or the resumed scenario cannot destroy
+    /// it, cannot target it, and cannot notice it dying.
+    ///
+    /// Sorted, because a `HashMap`'s iteration order is not a payload's to
+    /// inherit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub name_to_uuid: Vec<(String, String)>,
     /// `(uuid, aggregate hull fraction)` sorted by uuid: the last sample
     /// `collect_world_events` compares against to decide whether a hull crossed
     /// *downward*.
@@ -1729,6 +1831,13 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         .collect();
     entity_groups.sort_by(|a, b| a.0.cmp(&b.0));
 
+    let mut name_to_uuid: Vec<(String, String)> = runtime
+        .name_to_uuid
+        .iter()
+        .map(|(name, uuid)| (name.clone(), uuid.clone()))
+        .collect();
+    name_to_uuid.sort_by(|a, b| a.0.cmp(&b.0));
+
     let mut observed_hull_fractions: Vec<(String, f32)> = runtime
         .observed_hull_fractions
         .iter()
@@ -1740,6 +1849,9 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         mission_elapsed_secs,
         triggers,
         entity_groups,
+        // Which entity each authored name means (issue #863) — see
+        // `ScenarioState::name_to_uuid`.
+        name_to_uuid,
         observed_hull_fractions,
         pending_events: runtime
             .pending_world_events
@@ -2464,6 +2576,27 @@ fn capture_scans(world: &World) -> Vec<(String, crate::science::ScanSaveState)> 
         .collect()
 }
 
+/// The spawn origins, in a query of their own, joined by uuid — see
+/// [`EntityState::spawn`] (issue #863).
+///
+/// A query of its own for the reason every sibling here has one, and this type
+/// is the sharpest case of it: `try_query` yields `None` when *any* component it
+/// names is unregistered, `Option<&T>` included, and `EntitySpawnOrigin` is only
+/// registered once a world has actually run a scripted spawn. Folding it into
+/// the main walk therefore made every capture of a spawn-free world — which is
+/// most of them — return no entity rows at all.
+fn capture_spawn_origins(world: &World) -> Vec<(String, crate::world::spawn_origin::SpawnOrigin)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::entity_spawner::EntitySpawnOrigin)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, origin)| (uuid.0.clone(), origin.0.clone()))
+        .collect()
+}
+
 /// The civilian traffic states, in a query of their own, joined by uuid — see
 /// [`EntityState::civilian`]. Only entities that authored `[civilian]` carry
 /// one, so most worlds capture an empty list.
@@ -2489,6 +2622,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let operations = capture_operations(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
+    let spawn_origins = capture_spawn_origins(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
         Option<&ShipPhysics>,
@@ -2559,6 +2693,14 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .map(|(.., cursors)| cursors.clone())
                 .unwrap_or_default(),
             uuid: uuid.0.clone(),
+            // Read off the entity rather than joined out of a ledger — see
+            // [`crate::world::spawn_origin`] for why the record rides there.
+            // Absent on every authored `[[entity]]`, which is the signal a
+            // restore reads it for.
+            spawn: spawn_origins
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, origin)| origin.clone()),
             physics: physics.map(|p| {
                 [
                     p.x,
@@ -2897,7 +3039,17 @@ impl std::fmt::Display for RestoreGap {
 /// What a restore actually managed to do.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RestoreReport {
+    /// Captured entity rows that found a home — bootstrapped or built.
     pub entities_restored: usize,
+    /// How many of those this restore had to **build** because the bootstrapped
+    /// world had no such entity (issue #863).
+    ///
+    /// Counted separately because the two are different claims about the same
+    /// number: a restore that matched everything is a resume of a run the fresh
+    /// app could have replayed, and a restore that built ships is a resume of one
+    /// it could not. A host that wants to know whether the save is carrying the
+    /// run or merely correcting it reads this.
+    pub entities_spawned: usize,
     pub asteroids_restored: usize,
     /// Entities the bootstrap spawned that the capture did not have. Despawned
     /// — a resumed world must not carry a ship the save never saw.
@@ -3152,6 +3304,22 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
             .iter()
             .map(|(group, members)| (group.clone(), members.iter().cloned().collect()))
             .collect();
+        // Wholesale replacement (issue #863), on this walk's rule and with the
+        // sharper reason `restore_entities` gives: the bootstrap's map names the
+        // ships the bootstrap spawned, and the surplus sweep has just despawned
+        // whichever of those the capture did not have. Merging would leave the
+        // resumed scenario resolving a name to an entity that no longer exists,
+        // which is how an `on_destroyed` handler waits forever for a ship that
+        // has already been taken off the board.
+        //
+        // Empty in the payload means empty here, not "leave what you found":
+        // this is the map a capture *had*, and a run with no named entities is a
+        // real state a resumed world must be able to stand in.
+        runtime.name_to_uuid = stored
+            .name_to_uuid
+            .iter()
+            .map(|(name, uuid)| (name.clone(), uuid.clone()))
+            .collect();
         runtime.observed_hull_fractions = stored
             .observed_hull_fractions
             .iter()
@@ -3370,25 +3538,41 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         .collect();
 
     let mut surplus = Vec::new();
-    let mut matched: Vec<(Entity, &EntityState)> = Vec::new();
+    let mut writes: Vec<(Entity, EntityState)> = Vec::new();
     for (entity, uuid) in &present {
         match snapshot.entities.iter().find(|row| &row.uuid == uuid) {
-            Some(row) => matched.push((*entity, row)),
+            Some(row) => writes.push((*entity, row.clone())),
             None => surplus.push(*entity),
         }
     }
+
+    // Issue #863. A row with nothing to write into is either a ship the
+    // bootstrap will never make — a mid-run spawn — or a genuine gap, and the
+    // difference is whether the capture recorded what the spawn was made from.
+    // Built here rather than waited for: waiting is what a fresh app booted with
+    // nobody at the consoles does forever.
     for row in &snapshot.entities {
-        if !present.iter().any(|(_, uuid)| uuid == &row.uuid) {
-            report
+        if present.iter().any(|(_, uuid)| uuid == &row.uuid) {
+            continue;
+        }
+        match row
+            .spawn
+            .as_ref()
+            .and_then(|origin| spawn_from_origin(world, row, origin))
+        {
+            Some(entity) => {
+                report.entities_spawned += 1;
+                writes.push((entity, row.clone()));
+            }
+            None => report
                 .gaps
-                .push(RestoreGap::MissingEntity(row.uuid.clone()));
+                .push(RestoreGap::MissingEntity(row.uuid.clone())),
         }
     }
 
-    let writes: Vec<(Entity, EntityState)> = matched
-        .into_iter()
-        .map(|(entity, row)| (entity, row.clone()))
-        .collect();
+    // Both kinds together: `entities_restored` is "captured rows that found a
+    // home", and a row that found a home this restore *built* is as restored as
+    // one that found a bootstrapped ship waiting.
     report.entities_restored = writes.len();
 
     for (entity, row) in writes {
@@ -3608,6 +3792,113 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
             entity_mut.despawn();
         }
     }
+}
+
+/// Rebuild one mid-run spawn the bootstrapped world does not have (issue #863).
+///
+/// The same three steps the live spawn took, through the same two functions, so
+/// a rebuilt ship and a streamed-in one cannot come out different: resolve the
+/// template and overrides ([`SpawnOrigin::resolve`]), build the entity
+/// ([`crate::entity_spawner::spawn_entity`]), then re-declare the layer
+/// ownership and the placement the applier's own arm declares.
+///
+/// `None` — and therefore a [`RestoreGap::MissingEntity`] — when the template
+/// does not resolve. That is the honest answer for the same reason
+/// [`restore_asteroids`] gives it for a rock with no config path: an entity
+/// built without its template is one with an invented collider and no weapons,
+/// and a resumed world carrying one is worse than a resumed world that says what
+/// it could not rebuild.
+///
+/// # Why the fidelity tier is read off the row
+///
+/// The helm axes are not spawn components — they arrive with
+/// `ai_high_fidelity_components()` when the LOD system promotes a ship inside the
+/// player's bubble — so a freshly built ship has none of them and every
+/// [`ControlState`] write below would land nowhere. That is the exact silent
+/// failure `ready_to_restore` was written to prevent, and the capture already
+/// answers it: a row carries `control` if and only if the ship it was taken from
+/// was high-fidelity. So the tier is *read*, not guessed. It is also
+/// self-correcting either way — `update_ai_lod` re-derives the tier from range on
+/// its next tick, with its own dwell timer — whereas a dropped write is not.
+fn spawn_from_origin(
+    world: &mut World,
+    row: &EntityState,
+    origin: &crate::world::spawn_origin::SpawnOrigin,
+) -> Option<Entity> {
+    let mut warnings = Vec::new();
+    let config = origin.resolve(&crate::entity_loader::WasmTemplateLoader, &mut warnings);
+    for warning in &warnings {
+        bevy::log::warn!(
+            target: crate::logging::LogCat::World.target(),
+            "snapshot restore: {warning}"
+        );
+    }
+    let config = config?;
+
+    let position = Vec3::new(origin.position[0], origin.position[1], origin.position[2]);
+    let entity = {
+        let mut commands = world.commands();
+        crate::entity_spawner::spawn_entity(
+            &mut commands,
+            &config,
+            position,
+            row.uuid.clone(),
+            None,
+        )
+    };
+    // `spawn_entity` builds through `Commands`, so the components are queued
+    // rather than present. Everything below — and every state write in
+    // `restore_entities` afterwards — reads the entity directly, so the queue
+    // has to be applied before any of it runs.
+    world.flush();
+
+    let mut entity_mut = world.entity_mut(entity);
+    // The applier's own placement step, on its terms: `spawn_entity` set the
+    // translation, and a rotation or scale replaces the whole `Transform`
+    // through the canonical `TransformConfig` conversions rather than a second
+    // Euler expression.
+    if origin.rotation.is_some() || origin.scale.is_some() {
+        let transform_config = crate::world::config::TransformConfig {
+            rotation: origin.rotation,
+            scale: origin.scale,
+            ..Default::default()
+        };
+        entity_mut.insert(Transform {
+            translation: position,
+            rotation: transform_config.quat(),
+            scale: transform_config.scale_vec(),
+        });
+    }
+    // Put the record back on the ship it describes, so a save taken *after* this
+    // resume can rebuild it again. A resumed run that could only be resumed once
+    // is a continuation with an expiry date.
+    entity_mut.insert(crate::entity_spawner::EntitySpawnOrigin(origin.clone()));
+    if row.control.is_some() {
+        entity_mut.insert(crate::ai_plugin::ai_high_fidelity_components());
+    }
+
+    if let Some(path) = &origin.layer_path {
+        // Layer ownership is what makes `UnloadWorld` despawn a layer's ad-hoc
+        // spawns. Declared only when the target world actually has that layer
+        // loaded — the applier's own guard — because pushing a handle into a
+        // layer the resumed world never loaded would record an ownership nothing
+        // will ever act on.
+        let owned = world
+            .get_resource_mut::<crate::world::server::WorldLayerMap>()
+            .and_then(|mut layers| {
+                layers.0.get_mut(path).map(|layer| {
+                    layer.spawned_entities.push(entity);
+                })
+            })
+            .is_some();
+        if owned {
+            world
+                .entity_mut(entity)
+                .insert(crate::world::server::EntityOriginLayer(path.clone()));
+        }
+    }
+
+    Some(entity)
 }
 
 /// Put a ship's weapon state machines back mid-cycle.
@@ -3999,6 +4290,21 @@ fn restore_asteroid_window(world: &mut World, snapshot: &PhoenixSnapshot) {
 /// integration test) step the fresh app until this is true and only then
 /// overwrite. It is the same question [`restore`] would otherwise answer too
 /// late, as a list of [`RestoreGap::MissingEntity`]s.
+///
+/// # It waits for the whole roster; [`ready_to_rebuild`] is the other half
+///
+/// This predicate is unchanged by issue #863 and deliberately so: a bootstrapped
+/// ship is a *better* ship than one [`restore`] builds, because the bootstrap ran
+/// the world's own systems over it — faction registration, AI token, LOD
+/// promotion and its dwell timer, the power seed — and the payload does not
+/// cover every one of those. The duel's 120-frame continuation claim is measured
+/// against a fully bootstrapped roster and is the standing proof: restoring
+/// earlier, onto hulls this module had built instead, parts the two worlds one
+/// frame after a matching digest.
+///
+/// So the order of preference is: wait for the bootstrap, and build only what
+/// never arrives. [`ready_to_rebuild`] is the second half of that sentence, and
+/// the caller's own deadline is what decides when to ask it.
 pub fn ready_to_restore(world: &World, snapshot: &PhoenixSnapshot) -> bool {
     let Some(mut query) = world.try_query::<(&EntityUuid, Option<&ThrustInput>)>() else {
         return false;
@@ -4018,6 +4324,50 @@ pub fn ready_to_restore(world: &World, snapshot: &PhoenixSnapshot) -> bool {
         })
     });
     roster_ready && belt_ready(world, snapshot)
+}
+
+/// Whether a world that has stopped becoming [`ready_to_restore`] can be
+/// restored into *anyway*, by building what the bootstrap never produced (issue
+/// #863).
+///
+/// # Why this is a second predicate and not a looser first one
+///
+/// [`ready_to_restore`] answers "is the bootstrap done?" and a caller loops on it
+/// until a deadline. This answers the question that deadline used to end the
+/// session on: **is what is still missing something this build can make?**
+///
+/// The two have to stay apart because a mid-run spawn is genuinely ambiguous
+/// while the wait is still running. `duel` spawns its whole NPC roster through
+/// script effects at t=0, and a fresh app produces every one of those ships
+/// within a frame or two — so a predicate that treated "spawned" as "do not
+/// wait" would build ten hulls it was about to be handed, which is measurably
+/// worse (see [`ready_to_restore`]). `probe_reinforce` spawns two at t=3 s, and a
+/// fresh app driven by nobody produces them never. Nothing in the payload
+/// distinguishes those two futures, so the only honest discriminator is *time*:
+/// wait, and if the ships have still not arrived, build them.
+///
+/// True when every captured row is either standing with its controls — the
+/// ordinary case, and the same rule as above — or carries a
+/// [`SpawnOrigin`](crate::world::spawn_origin::SpawnOrigin) that
+/// [`restore`] can build it from. A row that is standing *without* its controls
+/// makes this false as well: building does not help a ship that is already there,
+/// so a caller in that state should keep waiting or give up, not restore over a
+/// half-built hull.
+pub fn ready_to_rebuild(world: &World, snapshot: &PhoenixSnapshot) -> bool {
+    let Some(mut query) = world.try_query::<(&EntityUuid, Option<&ThrustInput>)>() else {
+        return false;
+    };
+    let present: Vec<(&str, bool)> = query
+        .iter(world)
+        .map(|(uuid, thrust)| (uuid.0.as_str(), thrust.is_some()))
+        .collect();
+    let roster_rebuildable = snapshot.entities.iter().all(|row| {
+        match present.iter().find(|(uuid, _)| *uuid == row.uuid) {
+            Some((_, has_controls)) => *has_controls || row.control.is_none(),
+            None => row.spawn.is_some(),
+        }
+    });
+    roster_rebuildable && belt_ready(world, snapshot)
 }
 
 /// Whether the target world's asteroid streamer has settled onto the same

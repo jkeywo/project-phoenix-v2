@@ -126,6 +126,239 @@ pub struct AmbientLightConfig {
     pub brightness: Option<f32>,
 }
 
+/// World-level presentation settings for the viewscreen: how the camera resolves
+/// light, and how long a visual takes to arrive or leave (PRD #1023, module 5).
+///
+/// Authored as a `[render]` block, beside `[ambient_light]` and `[dust]`, and —
+/// like both of those — read ONLY by render-coupled systems. A headless run
+/// registers none of them (`SimPluginOptions::render == false`), so nothing in
+/// this block can reach the simulation, and every field defaults, so no shipped
+/// world has to author one.
+///
+/// # Why the numbers below are what they are
+///
+/// The effects that carry combat — phaser beams, torpedo cores, blaster bolts,
+/// explosion flashes — are authored at emissive multipliers between 2.5 and 9.0
+/// (`server/pfx.rs`). Every one of those is a value ABOVE screen white, and
+/// until this block existed the viewscreen camera rendered to a low-dynamic-range
+/// target, which clamps at exactly 1.0: a torpedo core authored nine times
+/// brighter than white was drawn the same flat white as a value of one, and the
+/// authored range did nothing at all. `hdr` is what stops the clamp; `bloom` is
+/// what makes the surviving range visible as a glow rather than as a slightly
+/// different white.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct RenderConfig {
+    /// Render the 3D scene through a high-dynamic-range intermediate target
+    /// before tonemapping, so light values above screen white survive to be
+    /// tonemapped instead of being clipped at 1.0.
+    ///
+    /// `[ai] ` On by default. The emissive strengths this makes visible are
+    /// already authored, and were authored FOR it; leaving it off is what made
+    /// them decorative. It is also the half of the calibration the browser host
+    /// can actually run — unlike [`BloomConfig`], whose own documentation says
+    /// why. Turning it off is the one-line retreat if the WebGL2 backend turns
+    /// out not to like the float target.
+    pub hdr: bool,
+    /// Which display transform maps the HDR scene onto the screen.
+    ///
+    /// `[ai] ` `tony_mc_mapface`, which is both Bevy's own default and the
+    /// transform its bloom documentation recommends pairing bloom with: it
+    /// desaturates brights across the spectrum, so a nine-times-white torpedo
+    /// core reads as a hot core with its colour intact at the edges rather than
+    /// as a white disc. Named explicitly rather than left implicit because it is
+    /// now a calibration decision, not a default nobody chose.
+    pub tonemapping: TonemapChoice,
+    /// Bloom on the viewscreen camera. See [`BloomConfig`].
+    pub bloom: BloomConfig,
+    /// Seconds an LOD tier change takes to cross-fade — the incoming tier
+    /// fading in while the outgoing one fades out, both at their own correct
+    /// scale.
+    ///
+    /// `[ai] ` A quarter of a second. Long enough that the eye reads a
+    /// dissolve rather than a cut at the sort of distance a switch happens at
+    /// (the near band of a hull ladder ends in the tens of units, the far one
+    /// past 400), short enough that two tiers of the same hull are never both
+    /// on screen long enough to be counted. `0` disables the effect: the window
+    /// is over before it starts and the swap is the same-frame cut it was.
+    pub lod_fade_secs: f32,
+    /// Seconds a mid-mission arrival takes to materialise — the fade-in and
+    /// scale-in that cover the asynchronous GLB resolve.
+    ///
+    /// `[ai] ` Six tenths of a second, deliberately longer than the LOD
+    /// cross-fade: a cross-fade is meant to be unnoticed, whereas an arrival is
+    /// meant to be SEEN — the PRD's complaint is that reinforcements read as a
+    /// glitch, and a quarter-second flourish would read as one too. `0`
+    /// disables it and restores the pop.
+    pub materialise_secs: f32,
+    /// The fraction of full size a materialising visual starts at.
+    ///
+    /// `[ai] ` A quarter. Small enough that the growth is unmistakably an
+    /// arrival, large enough that the ship is identifiable for the whole of it
+    /// rather than emerging from a dot — a reinforcement the crew cannot name
+    /// until it is already there defeats the point of announcing it.
+    pub materialise_start_scale: f32,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self {
+            hdr: true,
+            tonemapping: TonemapChoice::default(),
+            bloom: BloomConfig::default(),
+            lod_fade_secs: 0.25,
+            materialise_secs: 0.6,
+            materialise_start_scale: 0.25,
+        }
+    }
+}
+
+/// Which display transform the viewscreen camera resolves HDR through.
+///
+/// Mirrors `bevy::core_pipeline::tonemapping::Tonemapping` by name so a designer
+/// can name any of them; the mapping to Bevy's own enum lives in
+/// [`crate::render_setup`], keeping this module's Bevy surface to the one
+/// `Resource` derive it already had.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TonemapChoice {
+    /// No display transform — the raw HDR values, clipped.
+    None,
+    Reinhard,
+    ReinhardLuminance,
+    AcesFitted,
+    AgX,
+    SomewhatBoringDisplayTransform,
+    #[default]
+    TonyMcMapface,
+    BlenderFilmic,
+}
+
+/// How the viewscreen camera blooms. Requires [`RenderConfig::hdr`]: with the
+/// scene clipped at screen white there is nothing above the threshold to bloom.
+///
+/// The numbers are a THRESHOLD calibration rather than a whole-image scatter,
+/// which is the conservative reading of "the emissives were authored for bloom":
+/// what should glow is the handful of things authored brighter than white, not
+/// every lit hull and every star in the skybox.
+///
+/// # Why this ships OFF, and what has to change for it to ship on
+///
+/// **Bevy 0.18.1's bloom cannot run on WebGL2, which is what the browser host
+/// is** (Key Constraint 9). Two separate upstream facts, both verified against
+/// the vendored sources rather than inferred:
+///
+/// 1. Bloom's downsample chain binds individual mip LEVELS of one texture for
+///    sampling, which WebGL2 does not support. `bevy_post_process` carries a
+///    fallback that allocates a separate texture per mip — behind its own
+///    `webgl` feature — but `bevy_internal`'s `webgl` feature forwards to eight
+///    sub-crates and `bevy_post_process` is not among them, so `bevy/webgl2`
+///    never turns it on.
+/// 2. Turning it on directly does not help: `prepare_bloom_bind_groups` reads
+///    `bloom_texture.texture.texture.id()` for its bind-group cache key with no
+///    `cfg`, and under that feature `texture` is a `Vec<CachedTexture>`. The
+///    fallback path does not compile in 0.18.1.
+///
+/// So the effect is authored, calibrated and reachable in one line — and left
+/// off, because the alternative is a viewscreen whose render graph fails. HDR
+/// and the display transform are NOT affected by any of this and do ship on:
+/// they are what stop an emissive of 9.0 being drawn as the same flat white as
+/// 1.0, which is the PRD's actual complaint. Bloom is the halo on top.
+///
+/// What would let it ship on, in rough order of likelihood: a Bevy release that
+/// fixes the cfg gap above; a move to the WebGPU backend; or a native host.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct BloomConfig {
+    /// `[ai] ` OFF by default — see the type's own documentation. Not a
+    /// judgement about how it looks; a statement about whether the browser host
+    /// can draw it at all.
+    pub enabled: bool,
+    /// How much scattered light is added back into the image.
+    ///
+    /// `[ai] ` `0.15`. Bevy's own additive-mode preset uses `0.05`, but that
+    /// preset thresholds at `0.6` — well below screen white — so a large part of
+    /// an ordinary lit scene passes the filter and a small intensity is already
+    /// plenty. This calibration thresholds at `1.0`, so only genuinely
+    /// over-white pixels contribute and a comparable amount of glow needs
+    /// roughly three times the intensity.
+    pub intensity: f32,
+    /// How much the widest (most scattered) blur contributes.
+    ///
+    /// `[ai] ` Bevy's default `0.7`. A weapon impact should throw a wide, soft
+    /// halo across the viewscreen, not a tight rim; this is the term that buys
+    /// the halo.
+    pub low_frequency_boost: f32,
+    /// Curvature of the low-frequency blend.
+    ///
+    /// `[ai] ` Bevy's default `0.95`, unexamined — it shapes the falloff
+    /// between the boosted widest blur and the rest, and there is no authored
+    /// content that argues for a different shape.
+    pub low_frequency_boost_curvature: f32,
+    /// How tightly light scatters (`1.0` is the widest scattering angle).
+    ///
+    /// `[ai] ` Bevy's default `1.0`. Space is empty and dark; there is nothing
+    /// for a tighter scatter to protect from being washed out.
+    pub high_pass_frequency: f32,
+    /// Pixels dimmer than this do not bloom at all.
+    ///
+    /// `[ai] ` `1.0` — exactly screen white, which is the same number the LDR
+    /// target used to clamp at. That is the whole calibration in one value: what
+    /// blooms is precisely what the old pipeline threw away. Everything a
+    /// designer authored at or below white looks exactly as it did before this
+    /// block existed, so adopting bloom cannot quietly restyle the hulls, the
+    /// skybox or the dust.
+    pub threshold: f32,
+    /// How softly the threshold is approached (`0` is a hard cutoff).
+    ///
+    /// `[ai] ` `0.4`. A hard cutoff at white would make a beam's own falloff
+    /// pop into bloom at a visible ring part-way down its length; softening it
+    /// spreads the onset over roughly the top 40% below the threshold.
+    pub threshold_softness: f32,
+    /// Whether bloom textures are blended between (energy-conserving) or added.
+    ///
+    /// `[ai] ` `additive`. Bevy's own guidance is that a non-zero prefilter
+    /// threshold should be paired with additive compositing — energy-conserving
+    /// mode assumes the whole image is participating, and with a threshold it is
+    /// not.
+    pub composite: BloomComposite,
+    /// Largest dimension of the bloom mip chain, in pixels.
+    ///
+    /// `[ai] ` Bevy's default `512`. This is the effect's cost knob: bloom runs
+    /// a down/up-sample chain every frame on the browser host's GPU, so it is
+    /// the one number here worth reaching for if the viewscreen's frame time
+    /// moves after this lands.
+    pub max_mip_dimension: u32,
+}
+
+impl Default for BloomConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            intensity: 0.15,
+            low_frequency_boost: 0.7,
+            low_frequency_boost_curvature: 0.95,
+            high_pass_frequency: 1.0,
+            threshold: 1.0,
+            threshold_softness: 0.4,
+            composite: BloomComposite::Additive,
+            max_mip_dimension: 512,
+        }
+    }
+}
+
+/// How bloom's blurred mips are combined back into the image.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BloomComposite {
+    /// Blend between the blurred images — physically motivated, and what Bevy
+    /// recommends when nothing is thresholded out.
+    EnergyConserving,
+    /// Add the scattered light on top. What a thresholded prefilter wants.
+    #[default]
+    Additive,
+}
+
 /// One depth layer of the camera-relative dust field (near / mid / far).
 ///
 /// Authored as `[[dust.layer]]`. Layers are independent emitters sharing the
@@ -535,6 +768,9 @@ pub struct RawWorld {
     /// Optional world-level ambient light override.
     #[serde(default)]
     pub ambient_light: Option<AmbientLightConfig>,
+    /// Optional world-level viewscreen presentation settings (PRD #1023).
+    #[serde(default)]
+    pub render: Option<RenderConfig>,
     /// Optional world-level audio (red-alert siren + music). Every other
     /// sound is configured on the ship entity instead.
     #[serde(default)]
@@ -1349,6 +1585,11 @@ pub struct WorldConfig {
     /// Optional world-level ambient light override; `None` means the
     /// renderer falls back to its built-in constants.
     pub ambient_light: Option<AmbientLightConfig>,
+    /// Optional world-level viewscreen presentation settings (PRD #1023, module
+    /// 5): HDR, bloom, and how long a visual takes to arrive or leave. `None`
+    /// means every field takes [`RenderConfig`]'s own default, which is the
+    /// calibration documented there — not "off".
+    pub render: Option<RenderConfig>,
     /// Optional world-level audio (red-alert siren + music); `None` means red
     /// alert is silent. Every other sound comes from the local ship's config.
     pub audio: Option<crate::audio_config::WorldAudioConfig>,
@@ -1747,6 +1988,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         extra_worlds: raw.extra_worlds,
         delayed_unload_policy,
         ambient_light: raw.ambient_light,
+        render: raw.render,
         audio: raw.audio,
         dust: raw.dust,
         available_ships,
@@ -5004,6 +5246,87 @@ brightness = 150.0
         let al = cfg.ambient_light.as_ref().expect("ambient_light present");
         assert!(al.color.is_none());
         assert_eq!(al.brightness, Some(150.0));
+    }
+
+    // ── [render] (PRD #1023, module 5) ────────────────────────────────
+
+    /// No shipped world authors a `[render]` block, so the absent case is the
+    /// one that actually ships — and it must mean "the documented calibration",
+    /// not "off".
+    #[test]
+    fn a_world_with_no_render_block_carries_none() {
+        let cfg = parse_world("").expect("must parse");
+        assert!(cfg.render.is_none());
+        let effective = cfg.render.unwrap_or_default();
+        assert!(effective.hdr, "HDR is the half the browser host can run");
+        assert!(
+            !effective.bloom.enabled,
+            "bloom is authored but off — see BloomConfig for the WebGL2 reason"
+        );
+        assert!(effective.lod_fade_secs > 0.0 && effective.materialise_secs > 0.0);
+    }
+
+    /// A designer can author one number and inherit the rest — the same partial
+    /// authoring `[ambient_light]` allows, which is what makes a `[render]`
+    /// block a tuning knob rather than a full re-specification.
+    #[test]
+    fn a_render_block_accepts_partial_fields() {
+        let toml = r#"
+[render]
+lod_fade_secs = 0.4
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let render = cfg.render.expect("render present");
+        assert_eq!(render.lod_fade_secs, 0.4);
+        assert_eq!(
+            render.materialise_secs,
+            RenderConfig::default().materialise_secs,
+            "an unauthored field keeps the documented default"
+        );
+        assert!(render.hdr, "and so does an unauthored sub-block's field");
+    }
+
+    /// The retreat path, authored end to end: a world that wants the old
+    /// clipped picture back says so in one line. And the forward path: bloom is
+    /// one authored key away for the day the platform can draw it.
+    #[test]
+    fn a_render_block_can_turn_hdr_off_and_bloom_on() {
+        let cfg = parse_world("[render]\nhdr = false\n").expect("must parse");
+        assert!(!cfg.render.expect("render present").hdr);
+
+        let cfg = parse_world("[render.bloom]\nenabled = true\n").expect("must parse");
+        assert!(cfg.render.expect("render present").bloom.enabled);
+    }
+
+    /// Every tonemapper Bevy offers is nameable in snake_case, so the display
+    /// transform is a designer's decision rather than a recompile.
+    #[test]
+    fn a_render_block_names_its_tonemapper() {
+        for (authored, want) in [
+            ("none", TonemapChoice::None),
+            ("reinhard", TonemapChoice::Reinhard),
+            ("reinhard_luminance", TonemapChoice::ReinhardLuminance),
+            ("aces_fitted", TonemapChoice::AcesFitted),
+            ("ag_x", TonemapChoice::AgX),
+            (
+                "somewhat_boring_display_transform",
+                TonemapChoice::SomewhatBoringDisplayTransform,
+            ),
+            ("tony_mc_mapface", TonemapChoice::TonyMcMapface),
+            ("blender_filmic", TonemapChoice::BlenderFilmic),
+        ] {
+            let toml = format!("[render]\ntonemapping = \"{authored}\"\n");
+            let cfg = parse_world(&toml).expect("must parse");
+            assert_eq!(cfg.render.expect("render present").tonemapping, want);
+        }
+    }
+
+    /// A misspelled key is a content error, not a silently ignored one — the
+    /// same `deny_unknown_fields` contract the rest of the schema keeps.
+    #[test]
+    fn a_misspelled_render_key_is_refused() {
+        assert!(parse_world("[render]\nbloomm = true\n").is_err());
+        assert!(parse_world("[render.bloom]\nintesity = 0.5\n").is_err());
     }
 
     #[test]

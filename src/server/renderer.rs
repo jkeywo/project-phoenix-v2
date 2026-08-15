@@ -25,8 +25,8 @@ use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
 use crate::render_setup::{
-    default_ambient_light, game_camera_projection, space_skybox, SpaceSkyboxAsset,
-    SpaceSkyboxPlugin,
+    apply_render_config, default_ambient_light, game_camera_projection, space_skybox, RenderTuning,
+    SpaceSkyboxAsset, SpaceSkyboxPlugin,
 };
 use crate::server::pfx::PfxPlugin;
 use crate::ship_state::{ShipPhysics, ShipViewMode};
@@ -80,6 +80,7 @@ impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(PfxPlugin)
             .add_plugins(SpaceSkyboxPlugin)
+            .init_resource::<RenderTuning>()
             .init_resource::<NebulaFogState>()
             .init_resource::<NebulaCloudState>()
             .init_resource::<CinematicCameraState>()
@@ -92,7 +93,8 @@ impl Plugin for RendererPlugin {
                 // runs after Startup (where `insert_world_config_resource`
                 // lives), but the annotation makes the ordering contract
                 // visible at the registration site.
-                spawn_world_ambient_light.after(crate::world::server::insert_world_config_resource),
+                (spawn_world_ambient_light, apply_world_render_config)
+                    .after(crate::world::server::insert_world_config_resource),
             )
             .add_systems(
                 Update,
@@ -264,19 +266,30 @@ fn setup(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
     // 3D camera — active during in-game phase, positioned for ship view.
     // order: -1 so the 3D scene composites before the UI layer (LobbyCamera
     // order 0), keeping the viewscreen border in front of all 3D objects.
-    commands.spawn((
-        GameCamera,
-        Camera3d::default(),
-        Camera {
-            is_active: false,
-            order: -1,
-            ..default()
-        },
-        CameraRenderGraph::new(Core3d),
-        game_camera_projection(),
-        space_skybox(&skybox),
-        Transform::from_xyz(0.0, 2.0, -10.0),
-    ));
+    let game_camera = commands
+        .spawn((
+            GameCamera,
+            Camera3d::default(),
+            Camera {
+                is_active: false,
+                order: -1,
+                ..default()
+            },
+            CameraRenderGraph::new(Core3d),
+            game_camera_projection(),
+            space_skybox(&skybox),
+            Transform::from_xyz(0.0, 2.0, -10.0),
+        ))
+        .id();
+    // The default calibration, so the viewscreen renders HDR from its first
+    // frame rather than from whenever a world happens to load. `PostStartup`'s
+    // `apply_world_render_config` re-applies this from the world's own
+    // `[render]` block, which is why `apply_render_config` is reversible.
+    apply_render_config(
+        &mut commands,
+        game_camera,
+        &crate::world::config::RenderConfig::default(),
+    );
 
     // Ambient light is now spawned by `spawn_world_ambient_light` in
     // `PostStartup`, which reads `WorldConfig.ambient_light` if present and
@@ -373,6 +386,29 @@ fn spawn_world_ambient_light(
         brightness,
         ..default()
     });
+}
+
+/// Adopt the world's `[render]` block: HDR, tonemapping and bloom onto the game
+/// camera, and the fade/materialise timings into [`RenderTuning`] (PRD #1023).
+///
+/// Runs at `PostStartup` beside `spawn_world_ambient_light`, and for the same
+/// reason: the camera is spawned at `Startup`, before the world config resource
+/// exists. A world with no `[render]` block re-applies the SAME defaults the
+/// camera was spawned with, so this is a no-op rather than a reset.
+fn apply_world_render_config(
+    mut commands: Commands,
+    mut tuning: ResMut<RenderTuning>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    cameras: Query<Entity, With<GameCamera>>,
+) {
+    let cfg = world_config
+        .as_ref()
+        .and_then(|wc| wc.render.clone())
+        .unwrap_or_default();
+    *tuning = RenderTuning::from_config(&cfg);
+    for camera in cameras.iter() {
+        apply_render_config(&mut commands, camera, &cfg);
+    }
 }
 
 /// Compute and display FPS using Bevy's Time + Local — works on native and WASM.
@@ -1323,6 +1359,151 @@ mod tests {
         // `Transform` queries panic with Bevy error B0001 before the system
         // body runs.
         app.update();
+    }
+
+    // ── Viewscreen HDR / bloom calibration (PRD #1023, module 5) ──────
+
+    use crate::render_setup::RenderTuning;
+    use crate::world::config::{RenderConfig, WorldConfig};
+    use bevy::core_pipeline::tonemapping::Tonemapping;
+    use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
+    use bevy::render::view::Hdr;
+
+    /// Run `apply_world_render_config` over a world config and report what the
+    /// game camera ended up carrying.
+    fn adopt(world: Option<WorldConfig>) -> App {
+        let mut app = App::new();
+        app.init_resource::<RenderTuning>()
+            .add_systems(Update, apply_world_render_config);
+        if let Some(world) = world {
+            app.insert_resource(world);
+        }
+        app.world_mut().spawn(GameCamera);
+        app.update();
+        app
+    }
+
+    fn game_camera(app: &mut App) -> Entity {
+        let mut q = app.world_mut().query_filtered::<Entity, With<GameCamera>>();
+        q.single(app.world()).unwrap()
+    }
+
+    /// The whole point of the module: the viewscreen renders through an HDR
+    /// intermediate, so an emissive authored at nine times white is no longer
+    /// clipped to the same white as a value of one, and blooms.
+    #[test]
+    fn a_world_with_no_render_block_still_gets_hdr() {
+        let mut app = adopt(None);
+        let camera = game_camera(&mut app);
+        assert!(
+            app.world().get::<Hdr>(camera).is_some(),
+            "the default calibration is HDR ON — that is what stops the clamp"
+        );
+        assert_eq!(
+            app.world().get::<Tonemapping>(camera),
+            Some(&Tonemapping::TonyMcMapface),
+            "the display transform is named rather than inherited"
+        );
+        assert!(
+            app.world().get::<Bloom>(camera).is_none(),
+            "bloom ships off — Bevy 0.18.1 cannot run it on WebGL2, which is \
+             what the browser host is; see `BloomConfig`"
+        );
+    }
+
+    /// The bloom calibration is authored and reachable even though it does not
+    /// ship on, so that turning it on is one line rather than a re-derivation:
+    /// thresholded at exactly screen white, composited additively.
+    #[test]
+    fn the_bloom_calibration_is_authored_and_one_line_away() {
+        let mut cfg = RenderConfig::default();
+        cfg.bloom.enabled = true;
+        let mut app = adopt(Some(WorldConfig {
+            render: Some(cfg),
+            ..Default::default()
+        }));
+        let camera = game_camera(&mut app);
+        let bloom = app
+            .world()
+            .get::<Bloom>(camera)
+            .expect("an enabled bloom block reaches the camera");
+        assert_eq!(
+            bloom.prefilter.threshold, 1.0,
+            "bloom is thresholded at exactly screen white, so what glows is \
+             precisely what the low-dynamic-range target used to throw away"
+        );
+        assert_eq!(
+            bloom.composite_mode,
+            BloomCompositeMode::Additive,
+            "a thresholded prefilter wants additive compositing"
+        );
+    }
+
+    /// The retreat has to work: a world that turns HDR off must leave the
+    /// camera with neither the float target nor the bloom pass, or the off
+    /// switch costs frame time for an effect that cannot show.
+    #[test]
+    fn a_world_can_turn_the_whole_thing_off() {
+        let mut app = adopt(Some(WorldConfig {
+            render: Some(RenderConfig {
+                hdr: false,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        let camera = game_camera(&mut app);
+        assert!(app.world().get::<Hdr>(camera).is_none());
+        assert!(
+            app.world().get::<Bloom>(camera).is_none(),
+            "bloom with nothing above white to bloom is pure cost"
+        );
+    }
+
+    /// Bloom can be taken back OFF after being turned on.
+    /// `apply_render_config` runs twice — once when the camera is spawned, once
+    /// when the world lands — so it has to be able to reverse itself, or a
+    /// world's `[render]` block could only ever add effects.
+    #[test]
+    fn bloom_can_be_taken_back_off_while_hdr_stays() {
+        let mut app = App::new();
+        app.init_resource::<RenderTuning>()
+            .add_systems(Update, apply_world_render_config);
+        let camera = app.world_mut().spawn(GameCamera).id();
+        let mut on = RenderConfig::default();
+        on.bloom.enabled = true;
+        {
+            let mut commands = app.world_mut().commands();
+            crate::render_setup::apply_render_config(&mut commands, camera, &on);
+        }
+        app.world_mut().flush();
+        assert!(app.world().get::<Bloom>(camera).is_some());
+
+        // No world config → the shipped default, which is bloom off.
+        app.update();
+        assert!(app.world().get::<Hdr>(camera).is_some());
+        assert!(app.world().get::<Bloom>(camera).is_none());
+    }
+
+    /// The authored timings reach the resource the LOD swap reads, and the
+    /// nonsense values a TOML can carry are clamped rather than trusted.
+    #[test]
+    fn the_authored_timings_reach_the_render_tuning_resource() {
+        let app = adopt(Some(WorldConfig {
+            render: Some(RenderConfig {
+                lod_fade_secs: 0.5,
+                materialise_secs: -3.0,
+                materialise_start_scale: 4.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        let tuning = *app.world().resource::<RenderTuning>();
+        assert_eq!(tuning.lod_fade_secs, 0.5);
+        assert_eq!(
+            tuning.materialise_secs, 0.0,
+            "a negative window is no window, not a window that runs backwards"
+        );
+        assert_eq!(tuning.materialise_start_scale, 1.0);
     }
 
     fn camera_test_app() -> App {

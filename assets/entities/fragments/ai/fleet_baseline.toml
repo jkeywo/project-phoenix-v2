@@ -211,18 +211,38 @@ emergency_threshold = 22
 # `ship::power::seed_power_facts`) is what the HOLD rule reads to know which
 # side of the gap it is on, so the hysteresis needs no policy state.
 #
-# The HOLD rule also carries the SAME trigger clauses as the ELEVATE it sits
-# above — helm's red alert AND thrust, weapons' red alert — not only the shed
-# floor. That is deliberate, not an oversight: one tick with the trigger false
-# (thrust dipped under `thrust_threshold`, or the alert dropped) reads as false
-# on HOLD exactly as a battery breach does, and the channel sheds to baseline
-# immediately. It then cannot climb back on the trigger returning alone while
-# the charge is under the restore floor — the ELEVATE rule that would take it
-# up again is gated on the RESTORE floor, not the shed one — so the channel is
-# stuck at baseline until the battery has climbed there too. This is a one-way
-# ratchet on TRIGGER FLAP for as long as the reserve is in the band, and it is
-# intended: elevated posture belongs to combat stations, not to a red alert
-# that blinked or a throttle that stuttered for a single tick.
+# THE THRUST AXIS NEEDS THE SAME PAIR, and for the same reason. Helm's trigger
+# is not a latch like the alert — `thrust` is a CONTINUOUS value, and
+# `plan_helm_travel` hands out analogue throttles: the decel ramps in
+# `helm_destroy` / `helm_navigate_to` sweep smoothly through the whole range,
+# and avoidance steering dithers whatever they produce. A single
+# `thrust_threshold` read by BOTH the HOLD and the ELEVATE is therefore the
+# same strobe the battery pair exists to prevent, one axis over — and unlike
+# the battery it has no ratchet to fall back on, because above the restore
+# floor the ELEVATE is satisfiable again on the very next arm. A hull whose
+# throttle DWELLS near the threshold flips helm 3<->2 on consecutive AI
+# decision arms, i.e. at 30 Hz, each flip a ×1.25/×1.0 `MaxSpeed` swing. That
+# is a ship visibly thrusting in bursts instead of holding a constant burn.
+#
+# So helm gets a pair here too:
+#
+#   thrust_threshold          the ELEVATE floor. Reached from below.
+#   thrust_release_threshold  the RELEASE floor, always the LOWER of the two. A
+#                             channel already up holds until the throttle falls
+#                             past this, not merely past the elevate floor.
+#
+# Measured, not reasoned: before this pair, `rng_coverage`'s lancer_alpha flipped
+# helm 18 times in a 1800-tick run — sixteen of them inside 38 ticks, throttle
+# dithering across 0.70 (0.677 .. 0.750) with the battery at 57-59, nowhere near
+# its 50 shed floor. This was dormant until `5672b09a` seeded the `thrust` fact
+# from the real throttle: before it the fact read 0.0 on every NPC, so the rule
+# never fired and helm was pinned at 2 for the whole fleet.
+#
+# The ALERT half of the trigger keeps the old treatment and needs no band: it is
+# a boolean that already hysteresises upstream (`combat_window_secs`), so one
+# tick with it false sheds to baseline and the battery ratchet then holds the
+# channel down until the reserve is back over the restore floor. Elevated
+# posture belongs to combat stations, not to an alert that blinked.
 #
 # There is likewise no ship-wide "total" rule anywhere in this file. The total
 # is EMERGENT from the per-channel bids (`shields` never bids at all, so
@@ -265,6 +285,14 @@ emergency_threshold = 22
 # repair seam to answer, not a tuning question for this staircase.
 [power.ai_policy.param]
 thrust_threshold = 0.7
+# Helm's THRUST pair (see the note above), the mirror of the battery pair one
+# axis over: elevate at 0.7, release at 0.6. [ai] The RATIFIABLE QUANTITY IS THE
+# BAND WIDTH (0.1 here), not either endpoint — it has to be wider than the
+# throttle's own dither around a doctrine speed and narrower than the gap
+# between two authored `target_speed`s, so that a real change of travel
+# intention still moves the channel. 0.7/0.6 clears the measured dither (±0.04)
+# with room and still separates the fleet's 0.8 Destroy from its 0.5/0.6 cruise.
+thrust_release_threshold = 0.6
 # Helm's pair. The shed at half a battery is the first point the ship gives
 # back; the restore ten points higher is what stops the two decisions chattering
 # into each other.
@@ -301,12 +329,15 @@ min_reserve_baseline = 0.0
 #
 # HOLD, at the higher priority: helm is ALREADY at 3 (`fact(power_helm)`, the
 # level seeded from the reactor's current allocation) and the charge is still
-# above the shed floor, so keep it. Same trigger clauses as the elevate below —
-# a hold is not a licence to ignore the alert or the throttle.
+# above the shed floor, so keep it. Same trigger clauses as the elevate below,
+# except that the throttle is read against the RELEASE floor rather than the
+# elevate one — a hold is not a licence to ignore the alert or the throttle, but
+# it is the wider half of the thrust band (see the note at the top of this
+# block, and the battery pair it mirrors).
 [[power.ai_policy.rule]]
 priority = 15
 channel = "helm"
-when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
+when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_release_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
 verb = "set_power_group_allocation"
 level = 3
 

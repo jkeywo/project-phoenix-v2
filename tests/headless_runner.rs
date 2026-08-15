@@ -5125,6 +5125,185 @@ fn neither_reactor_reaches_the_exhaustion_lock_across_a_seeded_duel() {
     }
 }
 
+/// A helm power level is a DECISION, not a strobe: once the channel moves it
+/// must hold the new level for a while before moving again.
+///
+/// The regression this pins is the AI-thrust-burst defect. `thrust` is a
+/// CONTINUOUS fact — `plan_helm_travel` hands out analogue throttles, and the
+/// decel ramps sweep smoothly through the whole range — so a helm rule whose
+/// HOLD and ELEVATE both read one bare `thrust_threshold` flips the channel on
+/// consecutive AI decision arms for as long as the throttle DWELLS near that
+/// number. Each flip is a ×1.25/×1.0 `MaxSpeed` swing, which is a ship visibly
+/// thrusting in bursts instead of holding a constant burn. The fix is the
+/// authored `thrust_release_threshold` — the thrust axis's mirror of the
+/// battery axis's `min_reserve_*`/`min_restore_*` pair.
+///
+/// `rng_coverage` is the vehicle because its two lancers fly a geometry that
+/// parks a throttle right on 0.70 and dithers there: before the band,
+/// `lancer_alpha` changed helm level 18 times across this window, SIXTEEN of
+/// them inside 38 ticks, with the battery at 57-59 % — nowhere near its 50 %
+/// shed floor, so the battery ladder was provably not the thing moving it.
+///
+/// The assertion is on the GAP between changes rather than on their count, and
+/// deliberately so: a ship that genuinely changes its travel intention should be
+/// free to re-decide, and bounding the total would fight that.
+///
+/// WHERE THE BOUND COMES FROM, measured on both sides. The defect reversed the
+/// channel every 2 to 4 ticks — one or two AI decision arms at the authored
+/// 30 Hz, against a 60 Hz sim tick. The banded tree's two CLOSEST changes in
+/// this same run are 28 and 16 ticks, and both are legitimate single-axis
+/// decisions rather than chatter, which the recorded facts prove:
+///
+///   * tick 39, gap 28, throttle 0.5911 — the throttle genuinely collapsed
+///     past the 0.6 RELEASE floor, a 0.16 move from the 0.7497 it elevated on.
+///   * tick 1423, gap 16, throttle 0.7483, reserve 49.83 % — the throttle is
+///     still high, so this is the BATTERY axis: the reserve crossed
+///     `min_reserve_helm` (50 %) and the shed ladder did its documented job.
+///
+/// So the bound is set to catch reversals within a handful of AI arms — the
+/// strobe's signature — and deliberately NOT to police the ladder's legitimate
+/// steps, whose timing belongs to the battery and the doctrine and may fall
+/// close behind an elevate. Ten ticks is five decision arms: comfortably above
+/// the defect's 2-to-4 and comfortably below the banded tree's 16. Do not
+/// tighten it towards 16 without re-reading the two changes above; they are
+/// correct behaviour and a tighter bound would forbid them.
+#[test]
+fn a_helm_power_level_holds_instead_of_strobing_at_the_thrust_threshold() {
+    use project_phoenix::entity_spawner::EntityName;
+    use project_phoenix::messages::PowerGroupId;
+    use project_phoenix::modifiers::power_system::HELM_POWER_GROUP;
+    use project_phoenix::ship::power::ShipPowerSystem;
+    use project_phoenix::simulation::Ship;
+    use std::collections::BTreeMap;
+
+    /// Minimum ticks a helm level must hold before it may move again. Anything
+    /// shorter is chatter rather than a decision — see the bound's derivation in
+    /// this test's doc comment before changing it.
+    const MIN_DWELL_TICKS: u64 = 10;
+
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/rng_coverage.toml".into(),
+        max_ticks: 0, // driven by hand below
+        seed: Some(42),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("rng_coverage must build an app");
+    app.finish();
+    app.cleanup();
+
+    let helm = PowerGroupId(HELM_POWER_GROUP.into());
+    /// One recorded helm level change, carrying the two facts that could have
+    /// caused it. A bare (from, to, tick) says a level moved; the throttle and
+    /// the reserve beside it say which axis moved it, which is the whole
+    /// difference between a decision and the strobe.
+    #[derive(Debug)]
+    #[allow(dead_code)] // read only through the Debug rendering in the message
+    struct Change {
+        from: u8,
+        to: u8,
+        tick: u64,
+        gap: Option<u64>,
+        thrust: f32,
+        battery_pct: f32,
+    }
+    struct Seen {
+        name: String,
+        level: u8,
+        changed_at: Option<u64>,
+        changes: Vec<Change>,
+    }
+    let mut seen: BTreeMap<Entity, Seen> = BTreeMap::new();
+
+    let mut reactors = app.world_mut().query_filtered::<(
+        Entity,
+        &ShipPowerSystem,
+        Option<&EntityName>,
+        Option<&project_phoenix::ship::helm::ThrustInput>,
+        Option<&project_phoenix::ship::power::PowerConfigResource>,
+    ), With<Ship>>();
+
+    for tick in 0..1800u64 {
+        run(&mut app, 1);
+
+        let sampled: Vec<(Entity, u8, String, f32, f32)> = reactors
+            .iter(app.world())
+            .map(|(e, power, name, thrust, cfg)| {
+                let capacity = cfg.map(|c| c.0.capacity).unwrap_or(0.0);
+                let pct = if capacity > 0.0 {
+                    (power.0.battery_charge / capacity) * 100.0
+                } else {
+                    f32::NAN
+                };
+                (
+                    e,
+                    power.0.level_for(&helm),
+                    name.map(|n| n.0.clone()).unwrap_or_else(|| format!("{e}")),
+                    thrust.map(|t| t.0).unwrap_or(f32::NAN),
+                    pct,
+                )
+            })
+            .collect();
+
+        for (ship, level, name, thrust, battery_pct) in sampled {
+            let entry = seen.entry(ship).or_insert_with(|| Seen {
+                name: name.clone(),
+                level,
+                changed_at: None,
+                changes: Vec::new(),
+            });
+            if entry.level == level {
+                continue;
+            }
+            let gap = entry.changed_at.map(|prev| tick - prev);
+            entry.changes.push(Change {
+                from: entry.level,
+                to: level,
+                tick,
+                gap,
+                thrust,
+                battery_pct,
+            });
+            entry.level = level;
+            entry.changed_at = Some(tick);
+        }
+    }
+
+    // The control: a run in which no helm level ever moved would satisfy the
+    // dwell assertion without exercising the rule whose text this fix changed.
+    let total_changes: usize = seen.values().map(|s| s.changes.len()).sum();
+    assert!(
+        total_changes > 0,
+        "no ship in rng_coverage moved its helm power level at all, so the dwell \
+         assertion below passed without the helm rules ever resolving. Ships \
+         sampled: {:?}",
+        seen.values().map(|s| &s.name).collect::<Vec<_>>()
+    );
+
+    for entry in seen.values() {
+        for change in &entry.changes {
+            let Some(gap) = change.gap else { continue };
+            assert!(
+                gap >= MIN_DWELL_TICKS,
+                "{} strobed its helm power level: {} -> {} at tick {}, only {gap} \
+                 ticks after the previous change (minimum dwell is \
+                 {MIN_DWELL_TICKS}), with the throttle at {:.4} and the reserve \
+                 at {:.1} %. That is the AI-thrust-burst defect — the helm \
+                 channel flipping on consecutive AI decision arms because the \
+                 HOLD and the ELEVATE read one bare `thrust_threshold` while the \
+                 throttle dithers across it. Every change this ship made: {:?}",
+                entry.name,
+                change.from,
+                change.to,
+                change.tick,
+                change.thrust,
+                change.battery_pct,
+                entry.changes
+            );
+        }
+    }
+}
+
 // ── The fixed logical tick (issue #895) ─────────────────────────────────────
 
 /// The logical tick counts fixed steps at the authored `[global] sim_tick_hz`,

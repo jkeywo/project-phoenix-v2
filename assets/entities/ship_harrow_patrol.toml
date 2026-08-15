@@ -476,6 +476,13 @@ emergency_threshold = 25.0
 # last commanded total — no floor reaches that case.
 [power.ai_policy.param]
 thrust_threshold = 0.7
+# Helm's THRUST pair, the mirror of the battery pair one axis over: elevate at
+# 0.7, release at 0.6. Without it a throttle DWELLING near the single threshold
+# strobes helm 3<->2 at the AI tick rate, each flip a ×1.25/×1.0 MaxSpeed swing --
+# a ship thrusting in bursts instead of holding a constant burn. [ai] The
+# ratifiable quantity is the BAND WIDTH (0.1), not either endpoint. See
+# fragments/ai/fleet_baseline.toml for the full note and the measurement.
+thrust_release_threshold = 0.6
 # Helm's shed/restore pair: the first point the ship gives back, and the higher
 # charge it takes the point again at.
 min_reserve_helm = 50.0
@@ -492,7 +499,7 @@ min_reserve_baseline = 0.0
 [[power.ai_policy.rule]]
 priority = 15
 channel = "helm"
-when = "fact(thrust) >= param(thrust_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
+when = "fact(thrust) >= param(thrust_release_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
 verb = "set_power_group_allocation"
 level = 3
 

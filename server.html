@@ -160,6 +160,11 @@
        aloud, not that it is present. */
     #qr-panel {
       display: flex; flex-direction: column; align-items: center; gap: 8px;
+      /* #overlay is a right-anchored block whose shrink-to-fit width is set by
+         its widest sibling (the diagnostics readout), so a plain block panel
+         stretches to that and leaves the code adrift in dead space. Size to the
+         content and keep the panel against the anchored edge. */
+      width: fit-content; margin-left: auto;
       padding: 14px 16px 12px;
       background: var(--scrim-panel);
       border: 1px solid var(--edge-control);

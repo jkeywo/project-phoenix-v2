@@ -1159,8 +1159,12 @@
       // showing when it comes back is from before the gap, so the console goes
       // back through CONNECTING rather than straight to live with stale
       // numbers on it (PRD #1023 user story 15).
+      //
+      // No scheduleRender() here, deliberately: this runs once at boot, ABOVE
+      // the scheduler's own `let _renderFrame`, and touching it from here put
+      // the whole inline script in a temporal dead zone. The onStatus callback
+      // that drives every LATER transition repaints instead.
       if (state !== 'ready') linkHasData = false;
-      scheduleRender();
       const dot = document.getElementById('conn-dot');
       const label = document.getElementById('conn-label');
       const retryBtn = document.getElementById('retry-now-btn');
@@ -2421,6 +2425,9 @@
           onData: handleMessage,
           onStatus: (state) => {
             setConnectionStatus(state);
+            // The console's live/connecting/dead treatment is part of render()
+            // (PRD #1023 module 4); a status change has to repaint it.
+            scheduleRender();
             // Diagnostics only matter while the link is down; hide them once
             // the DataChannel is up so they don't sit under the lobby.
             if (diagEl) diagEl.style.display = state === 'ready' ? 'none' : '';

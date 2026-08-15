@@ -104,6 +104,12 @@ pub mod content_ledger;
 /// world both a native test and the browser drive, under deliberately
 /// different frame pacing, folding the canonical digest at shared ticks.
 pub mod cross_target_probe;
+/// Delivery (PRD #855): how a host — browser tab or native `phoenix-host`
+/// process — publishes its client bundle, its content manifest, its scenario
+/// catalogue and its version pin. Compiles on both targets on purpose: the
+/// catalogue field list and the pin are shared code, and only the socket loop
+/// (`delivery::serve`) is native-only.
+pub mod delivery;
 /// Dossiers (issue #1030): the pure per-subject projection of what a crew
 /// knows, and the adapter that publishes it on the local ship's intelligence
 /// channel. Holds no state of its own — every fact is a fold of something

@@ -1597,47 +1597,37 @@ pub fn wasm_get_available_ships() -> Array {
     arr
 }
 
+/// Set one `delivery::payload` field on a JS object.
+///
+/// The bridge's ONLY way of writing a catalogue field. It takes the key from
+/// the payload rather than naming one, which is what makes the "native and
+/// browser hosts publish the same catalogue" claim of PRD #855 structural
+/// rather than a promise: a field added to `delivery::payload` reaches this
+/// surface automatically, and a field named only here cannot exist.
+#[cfg(target_arch = "wasm32")]
+fn set_payload_field(obj: &Object, key: &str, value: &crate::delivery::payload::PayloadValue) {
+    use crate::delivery::payload::PayloadValue;
+    let js = match value {
+        PayloadValue::Text(s) => JsValue::from_str(s),
+        PayloadValue::Number(n) => JsValue::from_f64(*n),
+    };
+    Reflect::set(obj, &JsValue::from_str(key), &js).ok();
+}
+
 /// Enrich one `AvailableShipEntry` into a JS `{ template_path, label, class,
 /// hull_id, power_rating, name }` object, reading the extra metadata from the
 /// cached entity config when it is available.
 ///
 /// Shared by `wasm_get_available_ships` (post-load, reads the loaded
 /// `WorldConfig`) and `wasm_get_scenario_catalog` (pre-load, reads the base
-/// scenario manifest) so both surfaces present ships identically.
+/// scenario manifest) so both surfaces present ships identically — and, since
+/// PRD #855, with the native host too: the field list is
+/// `delivery::payload::ship_payload`'s, not this function's.
 #[cfg(target_arch = "wasm32")]
 fn ship_entry_to_js(ship: &crate::world::config::AvailableShipEntry) -> Object {
     let obj = Object::new();
-    let label = ship.label.as_deref().unwrap_or(&ship.template_path);
-    Reflect::set(
-        &obj,
-        &JsValue::from_str("template_path"),
-        &JsValue::from_str(&ship.template_path),
-    )
-    .ok();
-    Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
-    if let Some(cfg) = crate::config_cache::get_cached_entity_config(&ship.template_path) {
-        if let Some(ref class) = cfg.class {
-            Reflect::set(&obj, &JsValue::from_str("class"), &JsValue::from_str(class)).ok();
-        }
-        if let Some(ref hull_id) = cfg.hull_id {
-            Reflect::set(
-                &obj,
-                &JsValue::from_str("hull_id"),
-                &JsValue::from_str(hull_id),
-            )
-            .ok();
-        }
-        if let Some(rating) = cfg.power_rating {
-            Reflect::set(
-                &obj,
-                &JsValue::from_str("power_rating"),
-                &JsValue::from_f64(rating as f64),
-            )
-            .ok();
-        }
-        if let Some(ref name) = cfg.name {
-            Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(name)).ok();
-        }
+    for (key, value) in crate::delivery::payload::ship_payload(ship).entries() {
+        set_payload_field(&obj, key, value);
     }
     obj
 }
@@ -1944,50 +1934,48 @@ pub fn wasm_get_scenario_catalog() -> Array {
         );
     }
     let catalog = merged.catalog;
-    for scenario in &catalog.scenarios {
+    // The published shape — including `source`, which flattens
+    // `ScenarioCatalogEntry::origin`'s `None` to the literal `"base"` for the
+    // phone's mod badge (issue #990) — is `delivery::payload`'s, so this loop
+    // names no field of its own and the native host publishes the same document.
+    for scenario in crate::delivery::payload::catalog_payload(&catalog) {
         let obj = Object::new();
-        Reflect::set(
-            &obj,
-            &JsValue::from_str("id"),
-            &JsValue::from_str(&scenario.id),
-        )
-        .ok();
-        Reflect::set(
-            &obj,
-            &JsValue::from_str("world"),
-            &JsValue::from_str(&scenario.world),
-        )
-        .ok();
-        if let Some(ref label) = scenario.label {
-            Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
+        for (key, value) in scenario.entries() {
+            set_payload_field(&obj, key, value);
         }
-        if let Some(ref desc) = scenario.description {
-            Reflect::set(
-                &obj,
-                &JsValue::from_str("description"),
-                &JsValue::from_str(desc),
-            )
-            .ok();
-        }
-        // Provenance for the client (issue #990): the pack id this scenario came
-        // from, or the literal `"base"` for a base-manifest scenario. Always
-        // present so the phone can badge a mod-supplied scenario and leave a base
-        // one unmarked without a second lookup — `ScenarioCatalogEntry::origin`
-        // (issue #987) is `None` for base, which this flattens to `"base"`.
-        Reflect::set(
-            &obj,
-            &JsValue::from_str("source"),
-            &JsValue::from_str(scenario.origin.as_deref().unwrap_or("base")),
-        )
-        .ok();
         let ships = Array::new();
-        for ship in &scenario.ships {
-            ships.push(&ship_entry_to_js(ship));
+        for ship in scenario.ships() {
+            let ship_obj = Object::new();
+            for (key, value) in ship.entries() {
+                set_payload_field(&ship_obj, key, value);
+            }
+            ships.push(&ship_obj);
         }
-        Reflect::set(&obj, &JsValue::from_str("ships"), &ships).ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str(crate::delivery::payload::SHIPS_KEY),
+            &ships,
+        )
+        .ok();
         arr.push(&obj);
     }
     arr
+}
+
+/// This host's delivery version stamp, as the JSON `phoenix-host` serves at
+/// `/host/stamp.json` (PRD #855).
+///
+/// The browser host's half of the version pin: `server.html` can hand a peer
+/// the same three numbers a native host publishes, encoded by the same
+/// `codec::encode_delivery_stamp`, so "native and browser hosts consume the
+/// same protocol contract" is checkable rather than asserted.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_delivery_stamp() -> String {
+    let manifest_toml = crate::config_cache::get_scenario_manifest_toml().unwrap_or_default();
+    crate::core::codec::encode_delivery_stamp(&crate::delivery::stamp::DeliveryStamp::for_manifest(
+        &manifest_toml,
+    ))
 }
 
 /// Return the Rhai host-fn signature registry for the scenario script editor

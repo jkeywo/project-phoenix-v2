@@ -7,6 +7,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Revision of the wire vocabulary in this module — the `ClientMessage` /
+/// `ServerMessage` enums and everything they carry.
+///
+/// Introduced by PRD #855 so a host can refuse a client built against a
+/// different vocabulary with a message that names both sides, instead of
+/// failing later as an unexplained decode error. It lives HERE, beside the
+/// types it versions, so bumping it is part of changing them.
+///
+/// Bump it when a change would make an older peer misread a message: a removed
+/// or renamed variant, a changed field type, a field whose absence changes
+/// meaning. Purely additive variants that an older peer simply fails to decode
+/// (and drops) do not require a bump — that is what `decode_bridge_client_
+/// messages`' failure path already handles.
+///
+/// A versioning boundary, not a gameplay value, so it is a code constant
+/// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
+pub const PROTOCOL_VERSION: u32 = 1;
+
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
 /// Set by modifiers (e.g. region effects) keyed by source; a flag reads true

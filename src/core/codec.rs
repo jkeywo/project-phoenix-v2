@@ -118,6 +118,85 @@ pub fn decode_bridge_client_messages(
     (successes, failures)
 }
 
+// ── Delivery documents (PRD #855) ─────────────────────────────────────────────
+//
+// The native host serves these over HTTP and the browser host publishes the
+// identical bytes through `bridge::wasm_delivery_manifest`. They live here for
+// the same reason everything above does: `serde_json` is confined to this
+// module (AGENTS.md constraint 1), so a host that wants JSON asks for it here.
+//
+// Field NAMES for the catalogue entries come from `delivery::payload`, never
+// from this file — that is the whole point of that module's ordered entry
+// lists, and it is why a new catalogue field cannot reach the browser surface
+// while skipping the native one.
+
+fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Value {
+    serde_json::json!({
+        "protocol": stamp.protocol,
+        "content_id": stamp.content_id,
+        "content_epoch": stamp.content_epoch,
+    })
+}
+
+fn payload_value_json(value: &crate::delivery::payload::PayloadValue) -> serde_json::Value {
+    use crate::delivery::payload::PayloadValue;
+    match value {
+        PayloadValue::Text(s) => serde_json::Value::String(s.clone()),
+        PayloadValue::Number(n) => serde_json::Number::from_f64(*n)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+    }
+}
+
+fn ship_json(ship: &crate::delivery::payload::ShipPayload) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    for (key, value) in ship.entries() {
+        obj.insert((*key).to_string(), payload_value_json(value));
+    }
+    serde_json::Value::Object(obj)
+}
+
+fn scenario_json(scenario: &crate::delivery::payload::ScenarioPayload) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    for (key, value) in scenario.entries() {
+        obj.insert((*key).to_string(), payload_value_json(value));
+    }
+    obj.insert(
+        crate::delivery::payload::SHIPS_KEY.to_string(),
+        serde_json::Value::Array(scenario.ships().iter().map(ship_json).collect()),
+    );
+    serde_json::Value::Object(obj)
+}
+
+/// Encode a host's own version stamp — the body of `/host/stamp.json`.
+pub fn encode_delivery_stamp(stamp: &crate::delivery::stamp::DeliveryStamp) -> String {
+    stamp_json(stamp).to_string()
+}
+
+/// Encode the content manifest + catalogue a host publishes.
+pub fn encode_delivery_manifest(manifest: &crate::delivery::DeliveryManifest) -> String {
+    serde_json::json!({
+        "stamp": stamp_json(&manifest.stamp),
+        "manifest_path": manifest.manifest_path,
+        "scenarios": manifest
+            .scenarios
+            .iter()
+            .map(scenario_json)
+            .collect::<Vec<_>>(),
+    })
+    .to_string()
+}
+
+/// Encode a version-pin refusal — the body of a `409` from either host.
+pub fn encode_delivery_refusal(refusal: &crate::delivery::DeliveryRefusal) -> String {
+    serde_json::json!({
+        "error": refusal.mismatch.code(),
+        "detail": refusal.mismatch.detail(),
+        "host": stamp_json(&refusal.host),
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

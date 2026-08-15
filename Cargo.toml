@@ -32,6 +32,17 @@ name = "phoenix-perf"
 path = "src/bin/phoenix_perf.rs"
 required-features = ["perf"]
 
+# Native delivery host (PRD #855): serves the client bundle, the content
+# manifest and the scenario catalogue over HTTP. Native-only, and — like every
+# native-only bin here — it MUST carry `required-features` or Trunk's wasm build
+# finds a second target artifact and refuses to build. The `host` feature gates
+# only this BINARY: `crate::delivery` itself is unconditional, so its unit tests
+# run under the `cargo test` CI already runs, with no extra feature set.
+[[bin]]
+name = "phoenix-host"
+path = "src/bin/phoenix_host.rs"
+required-features = ["host"]
+
 # Automatic LOD switch-range tuner (see src/bin/tune_lods.rs). Native-only, same
 # `capture` feature as capture-billboard (both are offscreen GPU render tools),
 # and — like every native-only bin here — it MUST carry `required-features` or
@@ -118,6 +129,12 @@ headless = []
 # exists to keep that binary out of the wasm target list rather than to gate any
 # code — see the `[[bin]]` note above.
 perf = []
+# Host feature: builds the `phoenix-host` native delivery binary (PRD #855).
+# Like `perf`, it gates a BINARY and no code — `crate::delivery` compiles on
+# both targets unconditionally, because the catalogue contract and the version
+# pin are shared with the browser host and a feature-gated copy would be exactly
+# the fork the PRD forbids.
+host = []
 # Capture feature: builds the `capture-billboard` tool, a native headless
 # renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because

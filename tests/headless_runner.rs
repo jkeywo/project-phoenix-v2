@@ -13597,3 +13597,919 @@ fn probe_window_prices_four_chains_and_stands_down_what_it_cannot_finish() {
          the run rather than a fact about the window"
     );
 }
+
+// ── Falling Skyway, Act 3: the choice and the endings (issue #1043, #852) ────
+//
+// The mission's last scene, walked end to end four ways. Every one of these is a
+// WHOLE RUN of `falling_skyway.toml` — booted at the lobby, stepped through Act
+// 1's survey, Act 2's dispute and weather, Act 3's tether and its window, and
+// out the far side into the debrief — because what this slice is answerable for
+// is what the mission HANDS ON, and a handoff assembled from a hand-built world
+// state would be a handoff from a run nobody could have played.
+
+/// The civilian convoy's lead hauler — the third claimant, and the only one that
+/// has to be flown to the conversation.
+const SKYWAY_CONVOY: &str = "world.falling_skyway.entity.convoy_meridian.name";
+/// The ladder transit leg. Where all three claimants are inside the smaller of
+/// their comms range and the destroyer's, which is why the choice objective
+/// carries a Reach directive to it.
+const CHOICE_LADDER: bevy::prelude::Vec3 = bevy::prelude::Vec3::new(900.0, 0.0, 40.0);
+
+/// Step the mission to `secs`, holding the hull on `station` the whole way.
+///
+/// The pin is the honest analogue of helm doing as it is told, and the same
+/// substitution every test in this file makes: Act 3's own Reach directives are
+/// live throughout and would otherwise fly the ship off the berth the scene
+/// needs it on. That the objective NAMES the berth is asserted below; that a
+/// backfilled helm gets there is helm's business, not this group's subject.
+fn parley_run_to(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    secs: f64,
+    station: bevy::prelude::Vec3,
+) {
+    while window_now(app) < secs {
+        skyway_move(app, ship, station);
+        run(app, 10);
+    }
+    skyway_move(app, ship, station);
+    run(app, 2);
+}
+
+/// Run past the window's close and the twenty-six seconds the endings wait for
+/// the last climber to land or stand down, then assert they were written.
+fn run_to_the_endings(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    station: bevy::prelude::Vec3,
+) {
+    let closes_at = skyway_deadline_secs(app, "skyway_window_closes") as f64;
+    parley_run_to(app, ship, closes_at + 32.0, station);
+    assert_eq!(
+        skyway_flag(app, "a3_endings_written"),
+        1,
+        "the mission has to resolve itself exactly once, and after the last lift has \
+         landed or stood down"
+    );
+}
+
+/// One promise's state on the live ledger, as a word.
+fn skyway_promise(app: &bevy::prelude::App, id: &str) -> String {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .commitments
+        .state_of(id)
+        .to_string()
+}
+
+/// The last thing `sender` said, which for every closing beat in this band is
+/// the thing the crew are left holding.
+fn skyway_last_said(app: &bevy::prelude::App, sender: &str) -> String {
+    skyway_messages(app, sender)
+        .last()
+        .map(|m| m.body.clone())
+        .unwrap_or_else(|| panic!("{sender} never said anything in this run"))
+}
+
+/// One subject's fact sheet as `text` ids, oldest first.
+fn skyway_sheet_texts(app: &mut bevy::prelude::App, subject: &str) -> Vec<String> {
+    let uuid = scan_uuid_named(app, subject);
+    diff_file(app, &uuid)
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect()
+}
+
+/// **The invariant every run has to satisfy, whatever the crew did.**
+///
+/// Four of the six families are EXCLUSIVE — a claimant is carried or is left,
+/// the strike ended one of three ways, the evidence is at one of three depths,
+/// the structure held or fell — and the promise this slice makes to whatever
+/// mission reads them next is that each says exactly one thing rather than
+/// leaving the reader to infer an absence. #1037 set that rule for the Lyra and
+/// #1040 kept it for the head; this asserts it across the whole handoff.
+fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
+    let exclusive: [(&str, Vec<&str>); 6] = [
+        (
+            "the workers",
+            vec![
+                "campaign.skyway.passage.committee",
+                "campaign.skyway.passage.left_committee",
+            ],
+        ),
+        (
+            "the operator",
+            vec![
+                "campaign.skyway.passage.havelock",
+                "campaign.skyway.passage.left_havelock",
+            ],
+        ),
+        (
+            "the convoy",
+            vec![
+                "campaign.skyway.passage.convoy",
+                "campaign.skyway.passage.left_convoy",
+            ],
+        ),
+        (
+            "the strike",
+            vec![
+                "campaign.skyway.strike.negotiated",
+                "campaign.skyway.strike.forced",
+                "campaign.skyway.strike.unresolved",
+            ],
+        ),
+        (
+            "the evidence",
+            vec![
+                "campaign.skyway.evidence.none",
+                "campaign.skyway.evidence.records",
+                "campaign.skyway.evidence.corroborated",
+            ],
+        ),
+        (
+            "the structure",
+            vec![
+                "campaign.skyway.skyhook.held",
+                "campaign.skyway.skyhook.lost",
+            ],
+        ),
+    ];
+    for (family, members) in exclusive {
+        let set: Vec<&str> = members
+            .iter()
+            .copied()
+            .filter(|f| skyway_flag(app, f) > 0)
+            .collect();
+        assert_eq!(
+            set.len(),
+            1,
+            "{family}: exactly one of {members:?} must be written so a later mission reads \
+             a fact rather than an absence — this run wrote {set:?}"
+        );
+    }
+
+    let total = skyway_flag(app, "campaign.skyway.casualties.total");
+    assert_eq!(
+        total,
+        skyway_flag(app, "campaign.skyway.casualties.picket")
+            + skyway_flag(app, "campaign.skyway.casualties.head")
+            + skyway_flag(app, "campaign.skyway.casualties.storm"),
+        "the itemised casualties have to add up to the number a debrief reads"
+    );
+    assert_eq!(
+        skyway_flag(app, "campaign.skyway.casualties.none"),
+        i64::from(total == 0),
+        "…and the 'nobody was hurt' bit is that sum, not a separate claim about it"
+    );
+
+    let taken = skyway_flag(app, "campaign.skyway.passage.taken");
+    assert_eq!(
+        taken,
+        skyway_flag(app, "campaign.skyway.passage.committee")
+            + skyway_flag(app, "campaign.skyway.passage.havelock")
+            + skyway_flag(app, "campaign.skyway.passage.convoy")
+    );
+    assert!(
+        taken <= 2,
+        "THE WHOLE ACT: three claimants asked and the corridor can never carry all three. \
+         This run carried {taken}"
+    );
+}
+
+/// **Issue #1043, AC1/AC2/AC4/AC5/AC6/AC7 — the best road through the mission,
+/// and it still leaves somebody on the rock.**
+///
+/// This crew did everything the scenario had to offer: they read the rung, got
+/// the strike settled at the table, got a worker on the record, mended Ladder B
+/// and caught the tether every time it slipped. So they arrive at the window
+/// with the whole chain — and 52 units of lift against 66 of claims, which buys
+/// two of the three.
+///
+/// They take the workers they gave their word to and the convoy who had nothing
+/// to trade, refuse the operator to their face, and put the operator's own file
+/// to them on the open channel without naming the woman who contradicted it.
+/// Both promises on the books come out KEPT, and the ledger says so.
+#[test]
+fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    let (_, ship_uuid) = window_ship(&mut app);
+
+    // ── Act 2: read the rung, talk them down, get her on the record ──────────
+    skyway_scan_ladder_b(&mut app, ship);
+    assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 1);
+    skyway_negotiate_to_a_vote(&mut app);
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
+    assert_eq!(
+        skyway_promise(&app, "skyway_safe_passage"),
+        "open",
+        "precondition: the captain has given the workers their word about this very window"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_protect",
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_confront_unlocked"),
+        1,
+        "precondition: #1039's gate is open, so the confrontation is on this scene's menu"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-confront"),
+        ObjectiveStatus::Active,
+        "…and #1039 left it Active for this slice to resolve"
+    );
+
+    let settled_by = window_now(&app) + 24.0;
+    window_run_to(&mut app, settled_by);
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+
+    // ── Act 2's other work, and Act 3's: mend the rung, hold the head ────────
+    window_field_repair(
+        &mut app,
+        ship,
+        &ship_uuid,
+        SKYWAY_DEPOT_B,
+        bevy::prelude::Vec3::new(1180.0, 0.0, 300.0),
+    );
+    assert_eq!(skyway_flag(&app, "depot_b_pumping"), 1);
+
+    let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
+    let watch_opens = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    window_run_to(&mut app, watch_opens + 4.0);
+    window_hold_the_tether(&mut app, ship, &ship_uuid, projection);
+    assert_eq!(skyway_flag(&app, "skyhook_lift_capable"), 1);
+
+    // ── The parley. Helm closes on the ladder, because that is where they are ─
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    parley_run_to(&mut app, ship, opens_at + 6.0, CHOICE_LADDER);
+
+    assert_eq!(
+        objective_status(&app, "obj-a3-parley"),
+        ObjectiveStatus::Completed,
+        "AC1: the scene posts an approach that makes the conversation answerable — the \
+         committee are 947 units off the act's own station-keeping berth against a \
+         900-unit channel — and, being the objective that carries the Reach directive, \
+         it completes on arrival. That is why the DECIDING is a second objective"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-choice"),
+        ObjectiveStatus::Active
+    );
+    let supply = skyway_flag(&app, "skyway_window_supply");
+    assert_eq!(
+        supply, 52,
+        "the whole chain: both rungs pumping under a certified head"
+    );
+
+    // ── AC2: each of them asks, from its own hull ───────────────────────────
+    let committee = skyway_open_node(&app, SKYWAY_COMMITTEE);
+    assert_eq!(
+        committee.body,
+        "world.falling_skyway.comms.committee_claims"
+    );
+    let havelock = skyway_open_node(&app, SKYWAY_CUTTER);
+    assert_eq!(havelock.body, "world.falling_skyway.comms.havelock_claims");
+    let convoy = skyway_open_node(&app, SKYWAY_CONVOY);
+    assert_eq!(
+        convoy.body, "world.falling_skyway.comms.convoy_claims",
+        "the convoy asks for itself too, which is why the act marshals them onto the \
+         ladder run at the top of it"
+    );
+    assert_eq!(
+        skyway_options(&committee).first().map(String::as_str),
+        Some("world.falling_skyway.comms.claim_stand_by"),
+        "INDEX 0 IS THE HOLD on every one of these trees: an AI-backfilled Tactical seat \
+         answers an open thread with its first response, and an empty chair must not be \
+         able to decide who rides the storm out"
+    );
+
+    // AC2: the confrontation is on the operator's tree, and only because the
+    // crew earned both halves of the case.
+    assert!(
+        skyway_options(&havelock)
+            .contains(&"world.falling_skyway.comms.confront_unnamed".to_string()),
+        "the confront option appears for a crew holding the record AND the witness: \
+         {:?}",
+        skyway_options(&havelock)
+    );
+
+    // ── The choice ──────────────────────────────────────────────────────────
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.lift_committee",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CONVOY,
+        "world.falling_skyway.comms.lift_convoy",
+    );
+    run(&mut app, 8);
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_lifts_started"),
+        2,
+        "both picks reached #1042's booking seam and both were granted"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_reserved"),
+        18 + 26,
+        "…and spent 44 of the 52 on the ledger the third claimant is measured against"
+    );
+
+    // AC1 IN ITS STRONGEST FORM. A node is built once and answered later, so the
+    // parties watch the manifest and say when it moves — and the tree they say
+    // it on is rebuilt from the ledger as it now stands. The operator's own
+    // screen no longer carries a lift line, and nothing in this file counted to
+    // two to arrive at that.
+    let repriced_by = window_now(&app) + 6.0;
+    parley_run_to(&mut app, ship, repriced_by, CHOICE_LADDER);
+    let havelock_now = skyway_open_node(&app, SKYWAY_CUTTER);
+    assert_eq!(
+        havelock_now.body, "world.falling_skyway.comms.havelock_reprices",
+        "the operator noticed the board move"
+    );
+    assert!(
+        !skyway_options(&havelock_now)
+            .contains(&"world.falling_skyway.comms.lift_havelock".to_string()),
+        "22 against 8 left: the option is GONE, because the arithmetic says so. \
+         Offered: {:?}",
+        skyway_options(&havelock_now)
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.confront_unnamed",
+    );
+    assert_eq!(skyway_flag(&app, "skyway_confronted"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_witness_named"),
+        0,
+        "her name stayed out of it, which is the promise she was given"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-confront"),
+        ObjectiveStatus::Completed
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.deny_havelock",
+    );
+
+    // ── The endings ─────────────────────────────────────────────────────────
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
+
+    assert_eq!(skyway_flag(&app, "skyway_window_served_committee"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_window_served_convoy"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_window_served_havelock"), 0);
+
+    // AC4: the ledger, settled at this scene, both promises kept.
+    assert_eq!(
+        skyway_promise(&app, "skyway_safe_passage"),
+        "kept",
+        "the workers were given the corridor and the workers got the corridor"
+    );
+    assert_eq!(skyway_promise(&app, "skyway_protect_witness"), "kept");
+    assert_eq!(
+        skyway_promise(&app, "skyway_surface_records"),
+        "unknown",
+        "a promise that was never made is not a promise that was broken — the file was \
+         shown rather than sworn about, which is what saved the captain this one"
+    );
+    assert_eq!(skyway_flag(&app, "commitment.skyway_safe_passage.kept"), 1);
+
+    // AC3: the excluded party's fate lands on their own channel, and what it
+    // cost is read off the mission rather than rolled.
+    assert_eq!(
+        skyway_flag(&app, "skyway_left_havelock_cost"),
+        1,
+        "the operator's people ride it out aboard the cutter and the picket, both still \
+         hulls with power on them, on a corridor whose head is standing and whose rung \
+         is moving: two for being left, less one for the picket nobody shot at"
+    );
+    assert_eq!(
+        skyway_last_said(&app, SKYWAY_CUTTER),
+        "world.falling_skyway.comms.havelock_rides_it_out",
+        "…and they say so themselves, on the channel the crew refused them on"
+    );
+
+    // AC5/AC7: the mission reads finished — a headline naming the pairing, and a
+    // fact sheet saying what became of the record and of the captain's word.
+    assert_eq!(
+        skyway_last_said(&app, WINDOW_CONTROL),
+        "world.falling_skyway.comms.debrief_workers_and_convoy"
+    );
+    let sheet = skyway_sheet_texts(&mut app, WINDOW_CONTROL);
+    assert!(
+        sheet.contains(&"world.falling_skyway.evidence.record_filed".to_string()),
+        "the record went to Control and her name did not go with it: {sheet:?}"
+    );
+    assert!(sheet.contains(&"world.falling_skyway.evidence.word_kept".to_string()));
+
+    assert_eq!(
+        objective_status(&app, "obj-a3-choice"),
+        ObjectiveStatus::Completed,
+        "all three were answered — two carried and one told to its face"
+    );
+
+    // ── AC6: the six families ───────────────────────────────────────────────
+    assert_the_campaign_record_is_complete(&app);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.committee"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.convoy"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.passage.left_havelock"),
+        1
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.passage.refused_havelock"),
+        1
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.taken"), 2);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.negotiated"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.evidence.corroborated"),
+        1
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.filed"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.confronted"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.evidence.witness_named"),
+        0
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.picket"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.head"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.storm"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 2);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.clean"), 1);
+}
+
+/// **Issue #1043, AC4 — the captain who promised these people the corridor and
+/// then left them standing on the rung, told so BY NAME.**
+///
+/// A different mission behind the same window: the word was given at the table
+/// and then the picket was cleared over their heads anyway, which is where
+/// #1036 broke the promise. Nothing this crew did afterwards found the file, so
+/// the confrontation is not on the menu. They carry the operator and the convoy
+/// and refuse the workers.
+///
+/// What comes back is not a severity band. It is the committee reading the terms
+/// of the promise back to the ship that gave them.
+#[test]
+fn a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    let (_, ship_uuid) = window_ship(&mut app);
+
+    // ── The word, given ─────────────────────────────────────────────────────
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.listen",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_passage",
+    );
+    assert_eq!(skyway_promise(&app, "skyway_safe_passage"), "open");
+
+    // ── …and the picket cleared over their heads anyway ─────────────────────
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_warned",
+    );
+    let cleared_by = window_now(&app) + 18.0;
+    window_run_to(&mut app, cleared_by);
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+    assert_eq!(
+        skyway_promise(&app, "skyway_safe_passage"),
+        "broken",
+        "precondition: #1036 broke it at the order, and this scene must not re-resolve \
+         a promise somebody else already settled"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_force_casualties"), 1);
+
+    // Mend the rung the boarding party damaged, and hold the head, so the window
+    // has enough in it for the pair this run is about (22 + 26 = 48).
+    window_field_repair(
+        &mut app,
+        ship,
+        &ship_uuid,
+        SKYWAY_DEPOT_B,
+        bevy::prelude::Vec3::new(1180.0, 0.0, 300.0),
+    );
+    let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
+    let watch_opens = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    window_run_to(&mut app, watch_opens + 4.0);
+    window_hold_the_tether(&mut app, ship, &ship_uuid, projection);
+
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    parley_run_to(&mut app, ship, opens_at + 6.0, CHOICE_LADDER);
+
+    // A crew who never went looking are not offered the file line, on either
+    // tree — the evidence branch reads the fact sheet, and theirs is empty.
+    let havelock = skyway_open_node(&app, SKYWAY_CUTTER);
+    assert!(
+        !skyway_options(&havelock).contains(&"world.falling_skyway.comms.put_the_file".to_string()),
+        "nothing to put: {:?}",
+        skyway_options(&havelock)
+    );
+    assert!(!skyway_options(&havelock)
+        .contains(&"world.falling_skyway.comms.confront_unnamed".to_string()));
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.lift_havelock",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CONVOY,
+        "world.falling_skyway.comms.lift_convoy",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.deny_committee",
+    );
+
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
+
+    // ── AC4, and the reason this test exists ────────────────────────────────
+    assert_eq!(
+        skyway_last_said(&app, SKYWAY_COMMITTEE),
+        "world.falling_skyway.comms.committee_rides_it_out_promised",
+        "the workers do not report a casualty count at a captain who gave them their \
+         word and then left them on the rung. They read the promise back."
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_left_committee_cost"),
+        3,
+        "two for being left, one more for a rung their own people were cleared off at \
+         somebody else's authorisation"
+    );
+
+    assert_eq!(
+        skyway_last_said(&app, WINDOW_CONTROL),
+        "world.falling_skyway.comms.debrief_operator_and_convoy"
+    );
+    let sheet = skyway_sheet_texts(&mut app, WINDOW_CONTROL);
+    assert!(sheet.contains(&"world.falling_skyway.evidence.record_never_found".to_string()));
+    assert!(sheet.contains(&"world.falling_skyway.evidence.word_broken".to_string()));
+    assert_eq!(
+        objective_status(&app, "obj-a3-choice"),
+        ObjectiveStatus::Completed
+    );
+
+    assert_the_campaign_record_is_complete(&app);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.passage.left_committee"),
+        1
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.passage.refused_committee"),
+        1
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.havelock"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.convoy"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.forced"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.filed"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.picket"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.storm"), 3);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 4);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.clean"), 0);
+}
+
+/// **Issue #1043, AC1 — the third claimant refused BY THE ARITHMETIC, in front
+/// of the captain, before they could pick it.**
+///
+/// The strike is talked down and nothing else is mended, so the window opens on
+/// one rung's worth of lift: 40 units, which is exactly the workers' 18 and the
+/// operator's 22 and not one unit more. The captain takes both — and the
+/// convoy's tree, built from the same ledger a tick later, has no lift line on
+/// it at all.
+///
+/// This is the acceptance criterion in its literal form. Nothing counted to two.
+/// The two most expensive claims were 22 and 26 and the numbers decided which
+/// pair fitted.
+///
+/// It is also the mixed-ledger run: the captain gave both promises to get the
+/// vote, kept the one about the corridor and broke the one about the file.
+#[test]
+fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+    let (_, ship_uuid) = window_ship(&mut app);
+
+    skyway_negotiate_to_a_vote(&mut app);
+    assert_eq!(
+        skyway_promise(&app, "skyway_surface_records"),
+        "open",
+        "precondition: an empty-handed crew give BOTH promises to get the vote called"
+    );
+    let settled_by = window_now(&app) + 24.0;
+    window_run_to(&mut app, settled_by);
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+
+    let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
+    let watch_opens = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    window_run_to(&mut app, watch_opens + 4.0);
+    window_hold_the_tether(&mut app, ship, &ship_uuid, projection);
+
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    parley_run_to(&mut app, ship, opens_at + 6.0, CHOICE_LADDER);
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_supply"),
+        40,
+        "precondition: Ladder B was never mended, so the ladder puts in one rung's worth"
+    );
+
+    // Every option is on the table before anything is spent.
+    for (sender, line) in [
+        (
+            SKYWAY_COMMITTEE,
+            "world.falling_skyway.comms.lift_committee",
+        ),
+        (SKYWAY_CUTTER, "world.falling_skyway.comms.lift_havelock"),
+        (SKYWAY_CONVOY, "world.falling_skyway.comms.lift_convoy"),
+    ] {
+        let node = skyway_open_node(&app, sender);
+        assert!(
+            skyway_options(&node).contains(&line.to_string()),
+            "with 40 unspent every single claim fits on its own: {sender} offered {:?}",
+            skyway_options(&node)
+        );
+        assert!(
+            node.sender_in_range,
+            "{sender} has to be answerable from the ladder leg the scene sends helm to, \
+             or the choice is not a choice — they are at {:?}",
+            skyway_position(&mut app, sender)
+        );
+    }
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.lift_committee",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.lift_havelock",
+    );
+    run(&mut app, 8);
+    assert_eq!(skyway_flag(&app, "skyway_window_reserved"), 40);
+
+    // The convoy watch the same board the captain does, and it just emptied.
+    let repriced_by = window_now(&app) + 6.0;
+    parley_run_to(&mut app, ship, repriced_by, CHOICE_LADDER);
+    let convoy = skyway_open_node(&app, SKYWAY_CONVOY);
+    assert_eq!(convoy.body, "world.falling_skyway.comms.convoy_reprices");
+    assert!(
+        !skyway_options(&convoy).contains(&"world.falling_skyway.comms.lift_convoy".to_string()),
+        "AC1: the ledger is empty and the option is gone. The dialogue never counted to \
+         two; it asked the window what was left. Offered: {:?}",
+        skyway_options(&convoy)
+    );
+    assert!(
+        skyway_options(&convoy).contains(&"world.falling_skyway.comms.deny_convoy".to_string()),
+        "…and telling them so is still a thing the captain has to do"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CONVOY,
+        "world.falling_skyway.comms.deny_convoy",
+    );
+
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
+
+    assert_eq!(
+        skyway_flag(&app, "skyway_window_refused_short"),
+        0,
+        "the backstop never had to fire: the option was withheld before it could be picked"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_left_convoy_cost"),
+        2,
+        "a party with no ground of its own, on a corridor whose head is standing and \
+         whose rung is moving, and a lane the crew never proved they could work"
+    );
+    assert_eq!(
+        skyway_last_said(&app, SKYWAY_CONVOY),
+        "world.falling_skyway.comms.convoy_rides_it_out"
+    );
+    assert_eq!(
+        skyway_last_said(&app, WINDOW_CONTROL),
+        "world.falling_skyway.comms.debrief_workers_and_operator"
+    );
+
+    // AC4: one promise kept and one broken in the same run, which is what makes
+    // the ledger a record rather than a score.
+    assert_eq!(skyway_promise(&app, "skyway_safe_passage"), "kept");
+    assert_eq!(
+        skyway_promise(&app, "skyway_surface_records"),
+        "broken",
+        "the captain swore the file would reach Control and never found the file"
+    );
+    let sheet = skyway_sheet_texts(&mut app, WINDOW_CONTROL);
+    assert!(sheet.contains(&"world.falling_skyway.evidence.word_broken".to_string()));
+
+    assert_the_campaign_record_is_complete(&app);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.committee"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.havelock"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.left_convoy"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.passage.refused_convoy"),
+        1
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.strike.negotiated"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 2);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.clean"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a3-choice"),
+        ObjectiveStatus::Completed
+    );
+}
+
+/// **Issue #1043, AC5 — the early collapse, and the scene that is left.**
+///
+/// Nobody caught the tether, so #1040's floor took the head twenty-two seconds
+/// before the window opened and #1042 priced the window at nothing. There is no
+/// parley, because there is nothing to parley about: what is left on this
+/// corridor is ONE mooring on the rung that still works, and Skyway Control asks
+/// the captain for a name to put against it.
+///
+/// It is a different scene rather than a quieter one — a different channel, a
+/// different resource, one winner instead of two, and its own debrief — and it
+/// is keyed on the NUMBER the window published rather than on the collapse, so
+/// a crew who kept the head standing and let it fall out of lift certification
+/// walk into the same room.
+///
+/// The two who do not get it ride the storm out on a corridor with no lee in it
+/// and a rung nobody is working, and their casualty numbers are the highest this
+/// mission can produce.
+#[test]
+fn the_early_collapse_leaves_one_berth_and_control_asks_for_a_name() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+
+    // Nothing is done about anything. The ship is parked where it can hear
+    // Control, which is the only thing this crew get right.
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    parley_run_to(&mut app, ship, opens_at + 6.0, WINDOW_STATION);
+
+    assert_eq!(
+        skyway_flag(&app, "skyway_skyhook_lost"),
+        1,
+        "precondition: the head came down before the window opened"
+    );
+    assert!(!named_entity_present(&mut app, WINDOW_HEAD));
+    assert_eq!(skyway_flag(&app, "skyway_window_supply"), 0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_shelter_only"),
+        1,
+        "AC5: the window published nothing, so the smaller scene is the one that opened"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_shelter_supply"),
+        1,
+        "…and what is left is Ladder A's one mooring, above its own line with its own \
+         people still at work on it"
+    );
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-parley"),
+        None,
+        "there is no ladder parley in this variant: it is not a re-skin of the other one"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-berth"),
+        ObjectiveStatus::Active
+    );
+
+    // AC2: all three still ask, from their own hulls, and are not answered —
+    // the allocation is a name given to the authority that runs the corridor.
+    assert_eq!(
+        skyway_last_said(&app, SKYWAY_COMMITTEE),
+        "world.falling_skyway.comms.committee_pleads"
+    );
+    assert_eq!(
+        skyway_last_said(&app, SKYWAY_CUTTER),
+        "world.falling_skyway.comms.havelock_pleads"
+    );
+    assert_eq!(
+        skyway_last_said(&app, SKYWAY_CONVOY),
+        "world.falling_skyway.comms.convoy_pleads"
+    );
+
+    let offer = skyway_open_node(&app, WINDOW_CONTROL);
+    assert_eq!(offer.body, "world.falling_skyway.comms.control_berth_offer");
+    assert_eq!(
+        skyway_options(&offer),
+        vec![
+            "world.falling_skyway.comms.claim_stand_by".to_string(),
+            "world.falling_skyway.comms.berth_to_committee".to_string(),
+            "world.falling_skyway.comms.berth_to_havelock".to_string(),
+            "world.falling_skyway.comms.berth_to_convoy".to_string(),
+            "world.falling_skyway.comms.berth_to_nobody".to_string(),
+        ],
+        "one node, one berth, four names — and index 0 is still the hold"
+    );
+
+    skyway_pick(
+        &mut app,
+        WINDOW_CONTROL,
+        "world.falling_skyway.comms.berth_to_convoy",
+    );
+    run(&mut app, 8);
+    assert_eq!(skyway_flag(&app, "skyway_berth_convoy"), 1);
+    assert_eq!(
+        window_capacity_of(&mut app, WINDOW_DEPOT_A, "depot_a_shelter_berths"),
+        0,
+        "the berth leaves the rung's own manifest as it is spoken for — the same grammar \
+         the window's four computed rows use"
+    );
+
+    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+
+    // AC3: the two who were left, and the worst numbers this mission produces.
+    assert_eq!(
+        skyway_flag(&app, "skyway_left_committee_cost"),
+        4,
+        "two for being left, one for a corridor with no head in it, one for a rung \
+         nobody settled — the same claimant the forced run costs three"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_left_havelock_cost"),
+        3,
+        "the same corridor, less one for a picket nobody shot at"
+    );
+    assert_eq!(
+        skyway_last_said(&app, SKYWAY_COMMITTEE),
+        "world.falling_skyway.comms.committee_rides_it_out_hurt",
+        "nothing was promised on this run, so what comes back is the severity and not \
+         the terms of a broken word"
+    );
+    assert_eq!(
+        skyway_last_said(&app, WINDOW_CONTROL),
+        "world.falling_skyway.comms.debrief_berth",
+        "…and the debrief is the collapse variant's own, not the lift scene's"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-berth"),
+        ObjectiveStatus::Completed,
+        "one name given and two parties told: all three were answered"
+    );
+
+    assert_the_campaign_record_is_complete(&app);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.convoy"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.passage.left_committee"),
+        1
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.passage.left_havelock"),
+        1
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.taken"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.passage.berth_only"), 1);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.strike.unresolved"),
+        1,
+        "nobody settled it and nobody forced it, and the next mission through here \
+         inherits a stopped rung"
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.lost"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.storm"), 7);
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.commitments.none"),
+        1,
+        "this captain gave nobody their word, which is a different record from keeping it"
+    );
+}

@@ -4,10 +4,10 @@
 # PLACE, the TRAFFIC that was already moving before the crew arrived, the CLOCK
 # they are working against, and Act 1's triage. It began as a skeleton, and the
 # slices that fill it band their own content in below rather than reflowing this
-# one: the strike (#1035), the negotiation (#1036) and the storm and the rescue
-# (#1037) have landed; the scan-versus-dossier evidence (#1038/#1039), the
-# collapse (#1040), the restraint lever (#1041) and the transfer window itself
-# (#1042) are still to come.
+# one: the strike (#1035), the negotiation (#1036), the storm and the rescue
+# (#1037), the scan-versus-dossier evidence (#1038) and the worker who
+# corroborates it (#1039) have landed; the collapse (#1040), the restraint lever
+# (#1041) and the transfer window itself (#1042) are still to come.
 #
 # ── The place ────────────────────────────────────────────────────────────────
 #
@@ -29,6 +29,11 @@
 #
 #   Strike Committee    the workers, moored off Depot B. They know what the
 #                       maintenance record actually says (#1038/#1039).
+#   Rigger Tacket       one of them, moored with them, who was on the Ladder B
+#                       transfer arm the day its file says it was inspected. She
+#                       is the second half of the evidence case (#1039), and her
+#                       channel opens only for a crew who settled the strike by
+#                       talking and went and read the rung.
 #   Havelock Cutter     the operator's security, sitting on the same depot.
 #   Convoy Meridian     the civilian traffic — sympathetic, and with no
 #                       leverage at all.
@@ -311,6 +316,16 @@ storm_lee = [-560.0, 0.0, -300.0]
 # run exists to stop.
 shelter_west = [-880.0, 0.0, -300.0]
 
+# ── The witness's place (issue #1039) ────────────────────────────────────────
+#
+# Where the rigger's own skiff is tied up: on the picket, with the committee,
+# and NOT alongside them — she is one of the people the committee speak for, not
+# one of the people speaking. Inside the destroyer's authored 1000-unit comms
+# range from the ladder transit leg that #1036's line objective already sends
+# helm to, so a crew who did that act's work can answer her without moving
+# again. [ai] Unratified, like every other coordinate in this table.
+rigger_mooring = [1050.0, 0.0, 430.0]
+
 # ── Lanes ────────────────────────────────────────────────────────────────────
 
 # The corridor run. Loops, so a craft left alone flies it for the whole mission
@@ -581,6 +596,35 @@ id = "shuttle_wick"
 name = "world.falling_skyway.entity.shuttle_wick.name"
 transform = { position = [700.0, 0.0, -120.0] }
 overrides = { civilian = { route = "ladder_run" } }
+
+# ── The witness (issue #1039) ────────────────────────────────────────────────
+#
+# The rigger who works the Ladder B transfer arm, tied up on the picket with the
+# rest of them. Present from the first tick for the reason the strike is: she
+# was on that arm the day the operator's file says it was inspected, and she was
+# on it long before anybody sent a destroyer. Nothing calls her; her channel
+# opens only if the crew earn it, which is the whole of #1039.
+#
+# [ai] A PERSON WITH HER OWN HULL, rather than a second thread on the committee's
+# channel, and the choice is the beat. What she gives the crew is testimony — one
+# named someone saying what she saw — where the committee are a body that votes,
+# take positions and speak for a floor. They are also the channel #1036 spends on
+# the negotiation and CLOSES on the force-open, so hanging corroboration off it
+# would make "will they talk to us" and "have they stopped talking to us" the
+# same question. A hull of her own also makes her a dossier subject through
+# #1030's hail door, so "who told us this" is answerable on the panel rather than
+# implied by a provenance.
+#
+# She costs the world one entity and therefore moves its digest — the header at
+# the top of this file carries that A/B — and a civilian hauler is the hull
+# because it is what `probe_evidence.toml`'s own witness flies and what the
+# committee are moored in. There is no smaller civilian template.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "rigger_tacket"
+name = "world.falling_skyway.entity.rigger_tacket.name"
+transform = { anchor = "rigger_mooring" }
+overrides = { comms = { hailable = true } }
 
 # ── Act 1's clock ────────────────────────────────────────────────────────────
 #
@@ -1676,5 +1720,222 @@ fn read_the_file_against_the_rung(ctx) {
         provenance: "records",
     });
     ctx.flags.skyway_records_diff_found = 1;
+}
+
+// ═══ THE WORKER WHO WAS ON THE RUNG (issue #1039) ════════════════════════════
+//
+// #1038 proves a DISCREPANCY: a rung that cannot carry what its own file says it
+// was signed off to carry. It does not prove INTENT, and it cannot — an
+// instrument reading has nothing to say about who knew. This block is the other
+// half of the same case, and it arrives the only way that half ever could:
+// somebody who was there says what actually happened.
+//
+// The finding #1038 files reads "every inspection signed off, none of them by
+// anyone who was on the rung that day". Tacket was on the rung that day. That is
+// the whole beat, and the copy was written to hand it over a slice early.
+//
+// ── The two gates, and why each one is the gate it is ───────────────────────
+//
+// NEITHER is a difficulty knob. Each is a thing the crew did, and each closes a
+// different half of the scene:
+//
+//   THE STRIKE WAS SETTLED BY NEGOTIATION.  `skyway_settled_by_negotiation`, set
+//   by #1036's `on_settle` and by nothing else. A crew who had corporate
+//   security clear the line over these people's heads do not get one of them on
+//   the record afterwards, and that is not a punishment — it is the only thing
+//   that could happen. #1036 already writes the closure down where the crew can
+//   see it (`obj-a2-corroborate` goes red, the committee say why on the channel
+//   they will not answer again, `skyway_worker_corroboration_closed` carries it
+//   into the campaign), so this slice deliberately adds NO second announcement:
+//   the route it would announce is one the crew were already told they had lost.
+//
+//   THE CREW HAVE THE FILE.  A conversation needs a subject. Somebody calling to
+//   corroborate a document nobody has read is an exposition scene, and the crew
+//   would have no question to ask her.
+//
+// [ai] THE SECOND GATE READS THE LOG, NOT `skyway_records_diff_found`. The issue
+// names that flag, and every run it describes behaves identically either way —
+// #1038 appends the finding and sets the flag in that order, so the flag's runs
+// are a strict subset of the log's. What the log ALSO admits is the crew who got
+// the same file off Havelock's channel instead of scanning the rung: same
+// finding, same id, same RECORDS provenance, and #1031 dedupes the pair. #1036's
+// own note says the tree must light up for "any route that files the same
+// finding — including the ones #1038/#1039 have not written yet", and a slice
+// that read a flag beside one route's append would be the first one in this file
+// to break that rule about itself.
+//
+// ── Either order, and no memory of its own ──────────────────────────────────
+//
+// Registered from both sides, exactly as #1038's comparison is: the settlement
+// can carry before or after the file lands, and a crew who scan the rung in Act
+// 3 reach the same call as a crew who scanned it in Act 1. The single-shot is a
+// flag on the OPEN rather than on a trigger, so neither road can double-hail.
+on_flag_set("skyway_settled_by_negotiation", "on_the_floor_carries_it");
+on_flag_set("skyway_records_diff_found", "on_the_diff_lands");
+
+// The corroboration's own consequence, chained off the campaign flag rather than
+// written beside the append. The order inside `on_rigger_ask` is load-bearing:
+// the applier runs a call's commands in the order the script authored them, so
+// by the time this handler is dispatched the entry IS on the sheet and the
+// `holds` reads below are asking a question about the world rather than about
+// something still sitting in an effect buffer.
+on_flag_set("skyway_worker_corroboration_obtained", "on_corroboration_filed");
+
+fn on_the_floor_carries_it(ctx) { call_the_rigger_if_both_halves_hold(ctx) }
+fn on_the_diff_lands(ctx)       { call_the_rigger_if_both_halves_hold(ctx) }
+
+fn call_the_rigger_if_both_halves_hold(ctx) {
+    if ctx.flags.skyway_rigger_called > 0 { return; }
+    // Belt and braces. `on_settle` is unreachable once the picket has been
+    // cleared (#1036's `committee_terms` returns an empty node) and the force is
+    // unreachable once the rung is moving, so these two cannot both be true
+    // today — but the gate is what this slice IS, and a later slice that finds a
+    // third way to end the strike should have to come and read this.
+    if ctx.flags.skyway_forced_open > 0 { return; }
+    if ctx.flags.skyway_settled_by_negotiation == 0 { return; }
+    if !ctx.dossier.holds(#{ text: "world.falling_skyway.evidence.ladder_b_maintenance_file" }) {
+        return;
+    }
+
+    ctx.flags.skyway_rigger_called = 1;
+    // From her own hull, never `_self`, for the reason #1036's two threads are:
+    // the response router range-gates a pick against the sender's live range
+    // flag, and somebody calling is the more honest scene than a voice.
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.rigger_tacket.name",
+        node_fn: "rigger_hails",
+        urgent: true,
+    });
+}
+
+// ── The scene ───────────────────────────────────────────────────────────────
+//
+// INDEX 0 IS THE ASK, and that is the opposite call to the one `havelock_offer`
+// makes — deliberately, and off the same underlying fact. The destroyer's
+// backfilled Comms policy answers an open thread with its first response, so
+// index 0 is what the ship does when nobody is holding Tactical. On Havelock's
+// channel that meant index 0 had to be the REFUSAL, because a boarding party
+// authorised by a seating accident is the loudest authoring accident there is.
+// Here there is nothing to protect the crew from: the two gates above are the
+// work, and a crew who negotiated the strike down and went and read the rung
+// have earned this whether or not somebody was sitting at the console when she
+// called. [ai] The console-complexity ladder's human-seeking comms is still the
+// real fix for both trees.
+fn rigger_hails(ctx) {
+    #{
+        message: "world.falling_skyway.comms.rigger_hails",
+        responses: [
+            #{ text: "world.falling_skyway.comms.rigger_ask", on_pick: "on_rigger_ask", important: true },
+            #{ text: "world.falling_skyway.comms.rigger_later", on_pick: "on_rigger_later" },
+        ],
+    }
+}
+
+// Never terminal. A captain in the middle of a tow can put her down and pick her
+// back up, and the node she comes back to has the one thing left to say on it.
+fn on_rigger_later(ctx) {
+    #{
+        message: "world.falling_skyway.comms.rigger_stands_by",
+        responses: [
+            #{ text: "world.falling_skyway.comms.rigger_ask", on_pick: "on_rigger_ask", important: true },
+        ],
+    }
+}
+
+// THE CORROBORATION. One append, under DIALOGUE provenance, onto LADDER B's
+// sheet — not onto hers.
+//
+// A finding is filed under what it is ABOUT and not under who said it, which is
+// the rule `probe_evidence.toml` was built to state; the subject is therefore
+// the same rung #1038's records entry went onto, and the two sit on one panel
+// under two provenances. That is the payload of this slice as a crew reads it: a
+// fact sheet that says what the structure IS and who KNEW, and that can say
+// which of those two it was told and which it worked out.
+//
+// The append comes BEFORE the flag write — see the trigger registration above.
+fn on_rigger_ask(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.depot_ladder_b.name",
+        text:       "world.falling_skyway.evidence.ladder_b_worker_account",
+        provenance: "dialogue",
+    });
+    // Campaign state: whether THIS crew got a worker on the record. The mirror
+    // of `skyway_worker_corroboration_closed`, so a later mission reads a fact
+    // on both branches rather than an absence on one.
+    ctx.flags.skyway_worker_corroboration_obtained = 1;
+
+    #{
+        message: "world.falling_skyway.comms.rigger_account",
+        responses: [
+            #{ text: "world.falling_skyway.comms.rigger_protect", on_pick: "on_rigger_protect", important: true },
+            #{ text: "world.falling_skyway.comms.rigger_no_promise", on_pick: "on_rigger_no_promise" },
+        ],
+    }
+}
+
+// She has already said it by the time she asks for this, which is the order a
+// person talks in and the reason the promise cannot be a price. It goes on the
+// ledger OPEN, made to her rather than to the committee: keeping it is what the
+// report to Control (#1042) and the confrontation (#1043) have to decide, and a
+// captain who puts her account to the operator has to know whose name is on it.
+fn on_rigger_protect(ctx) {
+    ctx.commitments.record(#{
+        id: "skyway_protect_witness",
+        made_to: "world.falling_skyway.entity.rigger_tacket.name",
+        terms: "world.falling_skyway.commitment.protect_witness.terms",
+        resolves_when: "world.falling_skyway.commitment.protect_witness.resolves",
+    });
+    #{ message: "world.falling_skyway.comms.rigger_thanks", responses: [] }
+}
+
+// Refusing costs the corroboration nothing and is not a trap. It writes a flag
+// instead of a promise, because a captain who would not give her cover is a fact
+// about this crew that #1043's scene should be able to read.
+fn on_rigger_no_promise(ctx) {
+    ctx.flags.increment("skyway_witness_unprotected", 1);
+    #{ message: "world.falling_skyway.comms.rigger_accepts_risk", responses: [] }
+}
+
+// ── What two entries on one sheet unlock ────────────────────────────────────
+//
+// The optional objective #1036 posted is COMPLETED here, which is the green
+// mirror of the red one the force-open produces. Before this slice it had no
+// resolution on the negotiated branch at all: an optional line that could go
+// wrong and never go right.
+//
+// Then the unlock, and it is a genuine read of the fact sheet rather than a
+// second name for the pick that just happened. Both entries, each narrowed to
+// its own provenance — the crew hold a records comparison AND somebody's word —
+// because "the sheet says both" is the sentence the confrontation is built on,
+// and a crew who reach the dialogue entry by some route this file has not
+// written yet should unlock it on the same terms.
+//
+// `skyway_confront_unlocked` is the campaign state and `obj-a3-confront` is the
+// crew-facing half of it. #1043 authors the safe-passage scene the option lives
+// in and resolves this objective there; until it lands the objective is an
+// optional lead on the panel saying what the crew have earned, which is the
+// shape `obj-a2-corroborate` itself had between #1036 and this slice.
+fn on_corroboration_filed(ctx) {
+    ctx.effects.complete_objective("obj-a2-corroborate");
+
+    if ctx.flags.skyway_confront_unlocked > 0 { return; }
+    if !ctx.dossier.holds(#{
+        text: "world.falling_skyway.evidence.ladder_b_maintenance_file",
+        provenance: "records",
+    }) { return; }
+    if !ctx.dossier.holds(#{
+        text: "world.falling_skyway.evidence.ladder_b_worker_account",
+        provenance: "dialogue",
+    }) { return; }
+
+    ctx.flags.skyway_confront_unlocked = 1;
+    ctx.effects.add_objective(#{
+        id: "obj-a3-confront",
+        text: "world.falling_skyway.objective.confront.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 20,
+        targets: ["world.falling_skyway.entity.havelock_cutter.name"],
+    });
 }
 """

@@ -1,0 +1,400 @@
+# Probe world for issue #1039 — a witness whose channel opens on two gates, with
+# every corner of the matrix authored at once so no single run can be mistaken
+# for the mechanism.
+#
+# The slice's claim is that corroboration is CONDITIONAL, on two separate things
+# the crew did, and that a run in which it happens and a run in which it does not
+# differ only in those two things. A world that opened the channel on a timer
+# would look identical from the outside on one playthrough — so this world stands
+# five sites side by side, authored line for line the same, and moves only the
+# gates.
+#
+#   both      the record on the sheet, the dispute settled by NEGOTIATION
+#             -> the witness calls, the account is filed, the confrontation
+#                unlocks. The whole beat.
+#   late      the same two facts, ARRIVING IN THE OTHER ORDER: settled first,
+#             the record filed two seconds later
+#             -> nothing at the settlement, and the witness calls when the
+#                record lands. The gate is a pair of conditions, not a sequence.
+#   forced    the record on the sheet, and the dispute ended the OTHER way —
+#             the picket cleared rather than talked down
+#             -> silence, for the whole run. The gate under test is HOW it ended.
+#   unheard   settled by negotiation, and nobody ever read the rung
+#             -> silence. The gate under test is having something to ask about.
+#   quiet     neither. The control.
+#
+# Read them in pairs and each gate isolates. Both against Forced is the
+# SETTLEMENT: identical records, identical witness, identical everything, and the
+# only difference is which flag the dispute ended on. Both against Unheard is the
+# EVIDENCE: identical settlements, and the only difference is whether anything
+# was ever filed about the rung. Both against Late is the ORDER, and Late is the
+# corner a scripted reveal could not produce — its witness calls on a tick
+# nothing was settled and nobody chose anything, because the OTHER half of the
+# pair arrived.
+#
+# ── What the sites are made of ──────────────────────────────────────────────
+#
+# Each site is a RUNG (the dossier subject — what the evidence is about) and a
+# WITNESS (a hailable hull — who says it). They are separate entities because
+# they are separate things, and `probe_evidence.toml` states the rule this world
+# leans on entirely: a finding is filed under what it is ABOUT, not under who
+# said it. So every append below lands on a rung, never on the person, and the
+# rung's fact sheet is where the two provenances end up side by side.
+#
+# The five rungs carry no thresholds and no capacities. Nothing here is a
+# condition question — #1038's probe is where a structure's own numbers decide
+# anything — and a shared capacity id across five instances would be five rungs
+# publishing one counter between them.
+#
+# ── The clock, and why it is a clock ────────────────────────────────────────
+#
+#   t=0   `file_the_records_that_were_read` files the RECORDS finding onto the
+#         rungs whose crews did the reading: `both` and `forced`. Not onto
+#         `late` (its crew read it later), and not onto `unheard` or `quiet`
+#         (their crews never did).
+#   t=2   `settle_the_disputes` writes each site's gate flags. Nothing is asked
+#         on this tick: a script call reads the flag store as it stood when the
+#         call started, so a sweep in the same handler would be asking about a
+#         world its own writes had not reached yet.
+#   t=3   `ask_every_site` — the first sweep. `both` opens. `late` does not.
+#   t=4   `the_late_record_lands` files `late`'s finding, and nothing else moves.
+#         No settlement, no pick, no timer that knows what a witness is.
+#   t=5   `ask_every_site` again. `late` opens, on a tick whose only new fact is
+#         a document. THAT is the either-order claim.
+#   t=8   `ask_every_site` a third time, and then `unlock_every_site`. The three
+#         silent sites are asked with every flag they will ever have, so their
+#         silence is a refusal rather than a race; and the unlock is read off the
+#         fact sheets a beat after the last account was filed, which is the only
+#         honest moment to read it (an append is applied by the applier, so a
+#         handler cannot see its own).
+#
+# ── Who answers ─────────────────────────────────────────────────────────────
+#
+# The crew's Comms officer is AI-backfilled and answers an open thread with its
+# FIRST response, which is `probe_evidence.toml`'s rule and is authored on the
+# player hull below because the stock destroyer declares none. The threads that
+# open are therefore answered through the ordinary admitted `RespondToMessage`
+# path, and the `on_pick` that files the account runs as a genuine dialogue pick
+# rather than as a timer standing in for one. It is also why the scenario puts
+# its own ask at index 0 — see `falling_skyway.toml`.
+#
+# BASELINE (debug headless, `--seed 42 --ticks 900 --digest-every 0`, no `--ship`
+# override — the invocation `probe_scandiff.toml` and `probe_scan.toml` record):
+# final digest 0x9f1d92a25a56aad3 (11465141232936091859). A NEW number — nothing
+# to compare it against yet — so it is written down to be the thing a later
+# change is A/B'd against, the way the shipped worlds' digests already are. Tick
+# 0 is 6162059247118093054.
+#
+# The anchors were measured on the same clean tree and are UNMOVED: combat_test
+# 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, probe_strike
+# (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
+# 11434311098359716284, and probe_scandiff 2488189563210329022.
+# `falling_skyway` DID move, and its own header carries the A/B that attributes
+# the move to one authored entity rather than to anything this world does.
+#
+# What is IN that digest is the entity population and eleven hulls' transforms.
+# What is NOT in it is every single thing this world exists to exercise: an
+# evidence entry, a flag-store counter, a comms thread and an objective are all
+# authoritative-but-unfolded, in the same bucket as the deadline table and the
+# commitments ledger. If a later change moves this number without moving a hull
+# or the population, something started folding scenario state, and that is the
+# question to ask before re-blessing this line.
+
+[global]
+seed = 1039
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The crew's hull, with the Comms response policy the stock destroyer does not
+# author — see the header. Without it nothing answers the two threads that open
+# and the dialogue half of this probe never runs.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[entity.overrides.comms_console.ai.rule]]
+priority = 0
+channel = "comms_respond"
+when = "fact(comms_available) > 0 and fact(sender_in_range) > 0"
+verb = "respond_to_message"
+response_index = 0
+
+# ── The five rungs ───────────────────────────────────────────────────────────
+#
+# The subjects. Authored identically: same template, same absence of thresholds
+# and capacities, nothing on any of them that a script branches on. What lands on
+# each one's sheet is decided entirely by the gates, which is the point.
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "rung_both"
+name = "world.probe_corroborate.entity.rung_both.name"
+transform = { position = [600.0, 0.0, 0.0] }
+[entity.overrides.infrastructure]
+capacity = []
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "rung_late"
+name = "world.probe_corroborate.entity.rung_late.name"
+transform = { position = [1200.0, 0.0, 0.0] }
+[entity.overrides.infrastructure]
+capacity = []
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "rung_forced"
+name = "world.probe_corroborate.entity.rung_forced.name"
+transform = { position = [1800.0, 0.0, 0.0] }
+[entity.overrides.infrastructure]
+capacity = []
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "rung_unheard"
+name = "world.probe_corroborate.entity.rung_unheard.name"
+transform = { position = [2400.0, 0.0, 0.0] }
+[entity.overrides.infrastructure]
+capacity = []
+
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "rung_quiet"
+name = "world.probe_corroborate.entity.rung_quiet.name"
+transform = { position = [3000.0, 0.0, 0.0] }
+[entity.overrides.infrastructure]
+capacity = []
+
+# ── The five witnesses ───────────────────────────────────────────────────────
+#
+# Hailable hulls, all of them well inside the destroyer's authored 1000-unit
+# comms range, because a thread that failed to open for want of range would be
+# indistinguishable from a gate refusing it. Five, not one, so "this site's
+# witness never called" is a statement about a real party rather than about a
+# shared channel being busy.
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "witness_both"
+name = "world.probe_corroborate.entity.witness_both.name"
+transform = { position = [300.0, 0.0, -300.0] }
+overrides = { comms = { hailable = true } }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "witness_late"
+name = "world.probe_corroborate.entity.witness_late.name"
+transform = { position = [300.0, 0.0, 300.0] }
+overrides = { comms = { hailable = true } }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "witness_forced"
+name = "world.probe_corroborate.entity.witness_forced.name"
+transform = { position = [450.0, 0.0, -150.0] }
+overrides = { comms = { hailable = true } }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "witness_unheard"
+name = "world.probe_corroborate.entity.witness_unheard.name"
+transform = { position = [450.0, 0.0, 150.0] }
+overrides = { comms = { hailable = true } }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "witness_quiet"
+name = "world.probe_corroborate.entity.witness_quiet.name"
+transform = { position = [150.0, 0.0, 0.0] }
+overrides = { comms = { hailable = true } }
+
+[script]
+setup = """
+on_world_loaded("file_the_records_that_were_read");
+on_timer(2, "settle_the_disputes");
+on_timer(3, "ask_every_site");
+on_timer(4, "the_late_record_lands");
+on_timer(5, "ask_every_site_again");
+on_timer(8, "the_last_word");
+
+// ── t=0: what each crew had read by the time the mission started ────────────
+// RECORDS provenance, because it is a document comparison. Two sites have it,
+// one gets it later, two never do — and that is the only difference between the
+// five fact sheets when the clock starts.
+fn file_the_records_that_were_read(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.probe_corroborate.entity.rung_both.name",
+        text:       "world.probe_corroborate.evidence.record_both",
+        provenance: "records",
+    });
+    ctx.dossier.append(#{
+        subject:    "world.probe_corroborate.entity.rung_forced.name",
+        text:       "world.probe_corroborate.evidence.record_forced",
+        provenance: "records",
+    });
+    ctx.flags.records_filed = 1;
+}
+
+// ── t=2: how each dispute ended ─────────────────────────────────────────────
+// `forced` gets `settled_forced` as well as `forced_forced`, so it is not the
+// site where nothing happened — its dispute ended too. What it does not have is
+// the one flag the gate actually reads.
+fn settle_the_disputes(ctx) {
+    ctx.flags.negotiated_both = 1;
+    ctx.flags.negotiated_late = 1;
+    ctx.flags.negotiated_unheard = 1;
+
+    ctx.flags.forced_forced = 1;
+    ctx.flags.settled_forced = 1;
+
+    ctx.flags.ground_set = 1;
+}
+
+// ── t=4: one document, arriving late and alone ──────────────────────────────
+// Nothing else moves on this tick. No settlement, no pick, and no handler that
+// knows a witness exists.
+fn the_late_record_lands(ctx) {
+    ctx.dossier.append(#{
+        subject:    "world.probe_corroborate.entity.rung_late.name",
+        text:       "world.probe_corroborate.evidence.record_late",
+        provenance: "records",
+    });
+    ctx.flags.late_filed = 1;
+}
+
+// ── The gate, once, for every site ──────────────────────────────────────────
+//
+// TWO READS OF THE WORLD AND NO MEMORY OF ITS OWN, exactly as #1038's comparison
+// is. It does not know which site it is looking at beyond the names it was
+// handed; it does not know how anything got into the flag store or onto a sheet.
+// Re-author `settle_the_disputes` to negotiate the forced site and that site
+// opens, with no line of copy edited and no handler touched.
+fn open_if_the_ground_holds(ctx, called, negotiated, forced, record, witness, node) {
+    if ctx.flags[called] > 0 { return; }
+    if ctx.flags[forced] > 0 { return; }
+    if ctx.flags[negotiated] == 0 { return; }
+    if !ctx.dossier.holds(#{ text: record }) { return; }
+
+    ctx.flags[called] = 1;
+    ctx.effects.open_comms(#{ from: witness, node_fn: node, urgent: true });
+}
+
+fn ask_every_site(ctx) {
+    open_if_the_ground_holds(ctx, "called_both", "negotiated_both", "forced_both",
+        "world.probe_corroborate.evidence.record_both",
+        "world.probe_corroborate.entity.witness_both.name", "both_hails");
+    open_if_the_ground_holds(ctx, "called_late", "negotiated_late", "forced_late",
+        "world.probe_corroborate.evidence.record_late",
+        "world.probe_corroborate.entity.witness_late.name", "late_hails");
+    open_if_the_ground_holds(ctx, "called_forced", "negotiated_forced", "forced_forced",
+        "world.probe_corroborate.evidence.record_forced",
+        "world.probe_corroborate.entity.witness_forced.name", "forced_hails");
+    open_if_the_ground_holds(ctx, "called_unheard", "negotiated_unheard", "forced_unheard",
+        "world.probe_corroborate.evidence.record_unheard",
+        "world.probe_corroborate.entity.witness_unheard.name", "unheard_hails");
+    open_if_the_ground_holds(ctx, "called_quiet", "negotiated_quiet", "forced_quiet",
+        "world.probe_corroborate.evidence.record_quiet",
+        "world.probe_corroborate.entity.witness_quiet.name", "quiet_hails");
+    ctx.flags.increment("swept", 1);
+}
+
+fn ask_every_site_again(ctx) { ask_every_site(ctx) }
+
+// The last sweep, and then the read. Asking a third time is what makes the three
+// silences a REFUSAL rather than a race: every flag those sites will ever have
+// is set by t=2, so a site that has not called by t=8 was never going to.
+fn the_last_word(ctx) {
+    ask_every_site(ctx);
+    unlock_every_site(ctx);
+}
+
+// ── The five witnesses, authored identically ────────────────────────────────
+//
+// All five node functions exist and all five say the same thing. Three of them
+// are never called, which is the control: the difference between the sites is
+// not that some of them have a witness with something to say.
+
+fn both_hails(ctx)    { #{ message: "world.probe_corroborate.comms.witness_hails",
+    responses: [#{ text: "world.probe_corroborate.comms.witness_ask", on_pick: "on_ask_both" }] } }
+fn late_hails(ctx)    { #{ message: "world.probe_corroborate.comms.witness_hails",
+    responses: [#{ text: "world.probe_corroborate.comms.witness_ask", on_pick: "on_ask_late" }] } }
+fn forced_hails(ctx)  { #{ message: "world.probe_corroborate.comms.witness_hails",
+    responses: [#{ text: "world.probe_corroborate.comms.witness_ask", on_pick: "on_ask_forced" }] } }
+fn unheard_hails(ctx) { #{ message: "world.probe_corroborate.comms.witness_hails",
+    responses: [#{ text: "world.probe_corroborate.comms.witness_ask", on_pick: "on_ask_unheard" }] } }
+fn quiet_hails(ctx)   { #{ message: "world.probe_corroborate.comms.witness_hails",
+    responses: [#{ text: "world.probe_corroborate.comms.witness_ask", on_pick: "on_ask_quiet" }] } }
+
+// The account. DIALOGUE provenance, onto the RUNG — somebody's word about a
+// structure, filed under the structure, beside the records comparison that is
+// already there. The flag is written after the append for the reason
+// `falling_skyway.toml` gives at its own call site: a call's commands are
+// applied in the order the script wrote them.
+fn testify(ctx, subject, account, corroborated) {
+    ctx.dossier.append(#{
+        subject:    subject,
+        text:       account,
+        provenance: "dialogue",
+    });
+    ctx.flags[corroborated] = 1;
+    #{ message: "world.probe_corroborate.comms.witness_account", responses: [] }
+}
+
+fn on_ask_both(ctx) {
+    testify(ctx, "world.probe_corroborate.entity.rung_both.name",
+        "world.probe_corroborate.evidence.account_both", "corroborated_both")
+}
+fn on_ask_late(ctx) {
+    testify(ctx, "world.probe_corroborate.entity.rung_late.name",
+        "world.probe_corroborate.evidence.account_late", "corroborated_late")
+}
+fn on_ask_forced(ctx) {
+    testify(ctx, "world.probe_corroborate.entity.rung_forced.name",
+        "world.probe_corroborate.evidence.account_forced", "corroborated_forced")
+}
+fn on_ask_unheard(ctx) {
+    testify(ctx, "world.probe_corroborate.entity.rung_unheard.name",
+        "world.probe_corroborate.evidence.account_unheard", "corroborated_unheard")
+}
+fn on_ask_quiet(ctx) {
+    testify(ctx, "world.probe_corroborate.entity.rung_quiet.name",
+        "world.probe_corroborate.evidence.account_quiet", "corroborated_quiet")
+}
+
+// ── The unlock: a read of two fact sheets, not a second name for a pick ─────
+//
+// Both entries, each narrowed to its own provenance. The three silent sites fail
+// it in two different ways and the distinction is worth having: `forced` holds a
+// records comparison and no word from anybody, while `unheard` and `quiet` hold
+// neither. Nothing here knows which site opened a channel.
+fn unlock_if_both_halves(ctx, unlocked, record, account) {
+    if ctx.flags[unlocked] > 0 { return; }
+    if !ctx.dossier.holds(#{ text: record, provenance: "records" }) { return; }
+    if !ctx.dossier.holds(#{ text: account, provenance: "dialogue" }) { return; }
+    ctx.flags[unlocked] = 1;
+}
+
+fn unlock_every_site(ctx) {
+    unlock_if_both_halves(ctx, "unlocked_both",
+        "world.probe_corroborate.evidence.record_both",
+        "world.probe_corroborate.evidence.account_both");
+    unlock_if_both_halves(ctx, "unlocked_late",
+        "world.probe_corroborate.evidence.record_late",
+        "world.probe_corroborate.evidence.account_late");
+    unlock_if_both_halves(ctx, "unlocked_forced",
+        "world.probe_corroborate.evidence.record_forced",
+        "world.probe_corroborate.evidence.account_forced");
+    unlock_if_both_halves(ctx, "unlocked_unheard",
+        "world.probe_corroborate.evidence.record_unheard",
+        "world.probe_corroborate.evidence.account_unheard");
+    unlock_if_both_halves(ctx, "unlocked_quiet",
+        "world.probe_corroborate.evidence.record_quiet",
+        "world.probe_corroborate.evidence.account_quiet");
+    ctx.flags.increment("unlocks_read", 1);
+}
+"""

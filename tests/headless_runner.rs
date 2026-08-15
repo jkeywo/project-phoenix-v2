@@ -9942,9 +9942,33 @@ fn a_storm_band_is_survivable_to_cross_and_fatal_to_live_in() {
     let args = storm_args(dt, 108.0);
     let mut app = build_headless_app(&args).expect("the probe world must load and build");
 
-    // A 520-unit band crossed at a destroyer's 18 units a second is 29 seconds
-    // inside it. The band arrives at t=3, so the crossing ends at t=32.
-    const CROSSING_ENDS_AT: f64 = 32.0;
+    // A 520-unit band crossed at an Alliance Courier's IN-BAND speed. The band
+    // arrives at t=3, so the crossing ends 39 seconds later, at t=42.
+    //
+    // MOVED BY THE SLOW-ZONE SIGN FIX, from 32.0, and the derivation moved with
+    // it in two ways. It used to read "a 520-unit band crossed at a destroyer's
+    // 18 units a second is 29 seconds inside it" — which borrowed a different
+    // hull's number, and took that hull's speed in CLEAR SPACE for its speed
+    // inside a band. `region_radiation_band.toml`'s `slow_zone` authored a
+    // POSITIVE `thrust_modifier`, so the band was in fact making ships 60%
+    // FASTER, and 29 seconds was neither hull's crossing under either reading.
+    //
+    // The ship flown out here is a courier, so this is a courier's crossing:
+    // 22 u/s clear x 0.6 in-band = 13.2 u/s, and 520 / 13.2 = 39 s. The
+    // destroyer the mission actually fields crosses the same band in 48 s at
+    // 10.8 u/s, and `region_radiation_band.toml` carries that arithmetic — the
+    // two are consistent rather than interchangeable, which is the thing the
+    // old constant got wrong.
+    //
+    // Both hulls still land inside the `0.5..0.85` band asserted below under
+    // their OWN crossing. MEASURED in this world: the loiterer dies at t=88.6
+    // having been in the band since t=3, so 200 points buy 85.6 seconds and the
+    // band bills 2.34 hull points a second. A courier's 39-second crossing is
+    // therefore 91 points and it comes out on ~54% of 200; a destroyer's
+    // 48-second crossing is 112 points and it comes out on ~63% of 300. The
+    // substitution the world header makes for run length is still faithful, and
+    // it is now faithful on purpose rather than by accident.
+    const CROSSING_ENDS_AT: f64 = 42.0;
     let mut crosser_hull_on_exit = 1.0f32;
     let mut loiterer_gone_at: Option<f64> = None;
     let mut sweep_complete_at: Option<f64> = None;

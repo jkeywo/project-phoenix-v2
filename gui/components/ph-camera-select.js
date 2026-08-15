@@ -25,7 +25,7 @@ export class PhCameraSelect extends HTMLElement {
     .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     #container { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 0.35rem; }
-    .cam-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink-dim); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-sm); font-weight: 600; padding: 0.5rem 0; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; transition: all 0.15s ease; }
+    .cam-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink-dim); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-sm); font-weight: 600; padding: 0.5rem 0; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .cam-btn:hover:not(:disabled) { background: var(--cyan-deep); color: var(--ink-dim); }
     .cam-btn.active { background: var(--surface-panel-up); border-color: var(--cyan); color: var(--cyan); }
     .cam-btn.active:hover { background: var(--cyan-dim); }

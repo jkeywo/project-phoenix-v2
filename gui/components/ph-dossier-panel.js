@@ -84,7 +84,7 @@ export class PhDossierPanel extends HTMLElement {
     .list { display: flex; flex-direction: column; gap: 0.35rem; overflow-y: auto; min-height: 0; }
     .subject { display: flex; flex-direction: column; gap: 0.1rem; text-align: left; width: 100%;
                font-family: inherit; color: inherit; background: transparent; cursor: pointer;
-               border: 1px solid var(--line-soft); border-radius: 2px; padding: 0.35rem 0.4rem; }
+               border: 1px solid var(--line-soft); border-radius: 2px; padding: 0.35rem 0.4rem; min-height: var(--control-hit-min); }
     .subject .name { font-size: var(--text-sm); letter-spacing: 0.06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .subject .count { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.1em; }
     .sheet { display: flex; flex-direction: column; gap: 0.3rem; overflow-y: auto; min-height: 0; }
@@ -99,7 +99,7 @@ export class PhDossierPanel extends HTMLElement {
     .entry .provenance { color: var(--gold); font-size: var(--text-xs); letter-spacing: 0.12em; }
     button.back { align-self: flex-start; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.15em;
                   padding: 0.2rem 0.5rem; margin-bottom: 0.2rem; background: transparent; color: var(--ink);
-                  border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; }
+                  border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; min-height: var(--control-hit-min); }
   </style>
   <div class="heading" id="heading"></div>
   <div id="body"></div>

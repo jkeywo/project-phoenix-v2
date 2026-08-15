@@ -86,7 +86,7 @@ export class PhScanReadout extends HTMLElement {
     .reason { font-size: var(--text-xs); color: var(--reloading); padding: 0.2rem; letter-spacing: 0.05em; }
     button { width: 100%; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.15em;
              padding: 0.35rem; margin-top: 0.25rem; background: transparent; color: var(--ink);
-             border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; }
+             border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; min-height: var(--control-hit-min); }
     button:disabled { color: var(--ink-dim); cursor: default; }
   </style>
   <div class="heading" id="heading"></div>

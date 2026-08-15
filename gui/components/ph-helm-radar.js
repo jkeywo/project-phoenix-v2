@@ -39,6 +39,11 @@ export class PhHelmRadar extends HTMLElement {
       '  border: 1px solid var(--line-faint); border-radius: 2px; padding: 2px 12px;',
       '  cursor: pointer; text-transform: uppercase;',
       '  transition: border-color 0.15s, color 0.15s, background 0.15s;',
+      /* The touch floor (PRD #1023 module 3). inline-flex because min-height
+         does nothing to an inline box, and the label has to stay centred in a
+         control that is now taller than its own text. */
+      '  display: inline-flex; align-items: center; justify-content: center;',
+      '  min-height: var(--control-hit-min);',
       '}',
       '.on-screen-btn:hover { border-color: var(--cyan); }',
       '.on-screen-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--rgb-cyan), 0.18); }',

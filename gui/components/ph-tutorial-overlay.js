@@ -75,7 +75,7 @@ export class PhTutorialOverlay extends BaseElement {
       font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.18em;
       text-transform: uppercase; color: var(--cyan); background: transparent;
       border: 1px solid var(--cyan-dim); padding: 0.3rem 0.8rem; cursor: pointer;
-      touch-action: manipulation;
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .dismiss:hover { background: rgba(var(--rgb-cyan-dim), 0.55); }
   </style>

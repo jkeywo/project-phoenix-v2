@@ -42,7 +42,19 @@ export class PhPowerControls extends HTMLElement {
        instead of floating in a detached row underneath (issue #1005). */
     .pip-cluster { display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
     .pip-row { display: flex; align-items: center; gap: 0.4rem; }
-    .pip { width: 1.2rem; height: 1.2rem; border-radius: 50%; border: 2px solid var(--line-faint); background: var(--bg-deep); cursor: pointer; transition: all 0.15s ease; }
+    /* The one control in the fleet that genuinely cannot BE the touch floor
+       (PRD #1023 module 3): five rungs to a group, three groups, on a 375px
+       phone. Five 44px pips is 220px of pip before either stepper, and a 44px
+       circle has stopped being a pip and become a button.
+
+       So it keeps its drawn size and takes the documented escape. The floor is
+       taken in FULL on the vertical, where the row has room to give — 13.5px
+       of target becomes 44 — and held at the pip's own width on the horizontal,
+       where a wider target would reach across the gap and start answering for
+       the rung beside it. Selecting the WRONG power level under fire is a worse
+       outcome than a narrow target, because it does something rather than
+       nothing. */
+    .pip { width: 1.2rem; height: 1.2rem; --hit-expand-w: 100%; border-radius: 50%; border: 2px solid var(--line-faint); background: var(--bg-deep); cursor: pointer; transition: all 0.15s ease; }
     .pip:hover:not(.disabled) { border-color: var(--ink-dim); }
     .pip.active { background: var(--loaded); border-color: var(--loaded); box-shadow: 0 0 6px rgba(var(--rgb-loaded), 0.5); }
     .pip.inactive { background: transparent; border-color: var(--line-faint); }
@@ -181,7 +193,7 @@ export class PhPowerControls extends HTMLElement {
         let pip = this.#pipCache.get(key);
         if (!pip) {
           pip = document.createElement('div');
-          pip.className = 'pip';
+          pip.className = 'pip hit-expand';
           pip.dataset.level = i;
           this.#pipCache.set(key, pip);
           pipRow.appendChild(pip);
@@ -189,7 +201,7 @@ export class PhPowerControls extends HTMLElement {
         let stateClass = ' inactive';
         if (i <= level) stateClass = ' active';
         else if (i <= commanded) stateClass = ' held';
-        pip.className = 'pip' + stateClass + (auto ? ' disabled' : '');
+        pip.className = 'pip hit-expand' + stateClass + (auto ? ' disabled' : '');
       }
       for (const [key, pip] of this.#pipCache) {
         if (key.startsWith(gid + ':') && !livePips.has(key)) { pip.remove(); this.#pipCache.delete(key); }

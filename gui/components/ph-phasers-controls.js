@@ -29,7 +29,7 @@ export class PhPhasersControls extends HTMLElement {
     .bank-row.blocked .status { color: var(--fire); }
     .bank-row.unavailable .status { color: var(--ink-faint); }
     .bank-row.ready .status { color: var(--loaded); }
-    .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: var(--bg-card); transition: all 0.15s ease; }
+    .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: var(--bg-card); transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .mode-toggle:hover { border-color: var(--ink); color: var(--ink); }
     .mode-toggle.auto { border-color: var(--reloading); color: var(--reloading); }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }

@@ -578,6 +578,24 @@
       opacity: 1;
       animation: hud-pulse 1.3s ease-in-out infinite;
     }
+    /* Reduced motion (PRD #1023 module 3). The viewscreen is a television
+       in a room full of people, so a looping glow is exactly what a viewer
+       who asked for stillness cannot walk away from. Each loop is held at
+       the frame that carries its meaning rather than switched off: the
+       ready badge keeps its glow, the red-alert vignette keeps its full
+       opacity, the spinner keeps its arc. */
+    @media (prefers-reduced-motion: reduce) {
+      .spinner-ring { animation: none; }
+      #lobby-ready-badge.go {
+        animation: none;
+        box-shadow: 0 0 14px rgba(95,216,232,0.6);
+      }
+      #hud-overlay.alert-on #hud-vignette {
+        animation: none;
+        opacity: 1;
+      }
+    }
+
     @keyframes hud-pulse {
       0%, 100% { opacity: 0.55; }
       50%      { opacity: 1; }

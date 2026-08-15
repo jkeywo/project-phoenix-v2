@@ -36,13 +36,18 @@
 // Colour variants (.armed / .danger / .tactical / :disabled) are written once
 // and apply at every size.
 //
-// ── What this deliberately does NOT do ─────────────────────────────────────
+// ── The touch floor ────────────────────────────────────────────────────────
 //
-// `--control-hit-min` (44px) is defined in tokens.css and not applied here.
-// Raising every packed console control to the touch floor re-flows columns
-// that need looking at on a real phone; that is module 3's sweep. The three
-// heights below are today's rendered sizes, named rather than changed, so the
-// sweep has exactly one place to move them from.
+// `--control-hit-min` (44px) is applied here, in module 3 of the same PRD. The
+// three `--control-h-*` heights stay exactly as authored — they are the design,
+// and the family still looks like itself — but every member now floors at 44px
+// of finger. Measured before: the square stepper rendered 15.8 × 15.8 CSS px on
+// a 375px phone, which is a third of the target a thumb needs.
+//
+// A control too packed to BE 44px gets `.hit-expand` instead: the documented
+// escape, an invisible pseudo-element that grows the TARGET without growing the
+// control. That is a real option, not a way out of the floor — see the rule for
+// what it costs.
 
 const CSS = `
 /* ── Size variants ───────────────────────────────────────────────
@@ -85,6 +90,11 @@ const CSS = `
 .mini-btn {
   position: relative;
   height: var(--btn-h);
+  /* The touch floor (PRD #1023 module 3). 'height' stays the authored design
+     size and 'min-height' wins where the two disagree, so raising the floor
+     later is one edit in tokens.css and the family's proportions are still
+     written where a designer would look for them. */
+  min-height: var(--control-hit-min);
   padding: var(--btn-pad);
   display: inline-flex; align-items: center;
   font-family: var(--font-display);
@@ -184,9 +194,39 @@ const CSS = `
   --btn-cham-in: var(--control-cham-sm-inner);
   --btn-font:    var(--control-font-sm);
   width: var(--control-h-sm); height: var(--control-h-sm);
+  /* Square, so the floor applies on BOTH axes — a 44px-tall stepper 16px wide
+     is still a miss waiting to happen. */
+  min-width: var(--control-hit-min); min-height: var(--control-hit-min);
   flex-shrink: 0; padding: 0;
   justify-content: center;
   font-weight: 700;
+}
+
+/* ── The documented escape ───────────────────────────────────────
+   For a control that genuinely cannot BE 44px: a row of five power pips
+   cannot each be 44px wide and still be a row, and a 44px circle is not a
+   pip any more, it is a button.
+
+   So the control keeps its drawn size and gets a 44px TARGET behind it — an
+   absolutely-positioned pseudo-element, centred, transparent, that inherits
+   the parent's pointer events because it IS the parent as far as hit-testing
+   is concerned.
+
+   What this costs, and why it is not the default: an expanded target that
+   overlaps its neighbour's steals taps that belonged to the neighbour, and
+   the thief is whichever element paints last — a bug far more annoying than
+   a small target, because it does the WRONG thing rather than nothing. So
+   each axis is opt-in. '--hit-expand-w' / '--hit-expand-h' default to the
+   floor; a caller in a packed row sets the crowded axis back to '100%' and
+   takes the floor on the axis it has room for. */
+.hit-expand { position: relative; }
+.hit-expand::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width:  max(100%, var(--hit-expand-w, var(--control-hit-min)));
+  height: max(100%, var(--hit-expand-h, var(--control-hit-min)));
 }
 `;
 

@@ -95,7 +95,7 @@
       background: var(--surface-panel); color: var(--ink); border: 1px solid var(--edge); padding: 0.5rem; margin-top: 0.25rem; }
     button { display: block; width: 100%; background: var(--surface-lift); color: var(--ink);
       border: 1px solid var(--edge); padding: 0.75rem; margin: 0.4rem 0; cursor: pointer;
-      font-family: monospace; font-size: var(--text-lg); text-align: left; }
+      font-family: monospace; font-size: var(--text-lg); text-align: left; min-height: var(--control-hit-min); }
     button:active { background: var(--surface-ridge); }
     button:disabled { opacity: 0.4; cursor: default; }
     button.mine { border-color: var(--sky); color: var(--sky); }
@@ -118,13 +118,13 @@
     #retry-now-btn {
       display: none; width: auto; background: var(--fire-deep); color: var(--tactical-bright);
       border: 1px solid var(--fire); padding: 0.2rem 0.5rem; margin: 0;
-      font-size: var(--text-sm); cursor: pointer;
+      font-size: var(--text-sm); cursor: pointer; min-height: var(--control-hit-min);
     }
     #retry-now-btn.visible { display: inline-block; }
     #retry-now-btn:active { background: var(--reloading-dim); }
     #fullscreen-btn {
       display: inline; width: auto; background: none; border: none; color: var(--ink);
-      font-size: var(--text-lg); cursor: pointer; padding: 0; margin: 0; line-height: 1;
+      font-size: var(--text-lg); cursor: pointer; padding: 0; margin: 0; line-height: 1; min-height: var(--control-hit-min);
     }
     /* View selector cross and Red Alert button moved to Bevy WASM (#48). */
     /* Console container: full-screen flex column layout host for all console
@@ -220,9 +220,11 @@
        The answer is to stop the ANIMATION, not to hide the STATE — so the
        bezel holds at the keyframe's peak: full red border and full glow,
        simply not moving. Someone reading the room still sees a ship at red
-       alert. This is the reduced-motion contract module 3 generalises to every
-       looping animation; the bezel gets it here because it is the loop this
-       commit turns on. */
+       alert. This is the reduced-motion contract, and module 3 of PRD #1023
+       generalises it to every indefinitely looping animation. The rest of the
+       lobby's live at the END of this stylesheet, for the reason written
+       there; this one can stay beside the loop it stills because the loop is
+       declared above it. */
     @media (prefers-reduced-motion: reduce) {
       #phone-bezel.alert-on {
         animation: none;
@@ -319,7 +321,7 @@
       background: rgba(var(--rgb-cyan), 0.12);
       border: 1px solid var(--ink-dim);
       border-radius: 2px;
-      cursor: pointer;
+      cursor: pointer; min-height: var(--control-hit-min);
     }
 
     /* -- Waiting-for-scenario overlay (shown after ReturnToLobby until host picks) */
@@ -377,7 +379,7 @@
       color: var(--ink); text-align: left;
       background: rgba(var(--rgb-cyan), 0.1);
       border: 1px solid var(--edge-control); border-radius: 6px;
-      cursor: pointer;
+      cursor: pointer; min-height: var(--control-hit-min);
     }
     #scenario-picker-body .scenario-btn:active { background: rgba(var(--rgb-cyan), 0.22); }
     #scenario-picker-body .scenario-desc { font-size: var(--text-sm); color: var(--ink-dim); margin-top: 6px; letter-spacing: 0.02em; }
@@ -484,7 +486,7 @@
     .station-row .action button { padding: 4px 12px; border-radius: 4px;
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-sm);
       font-weight: 600; letter-spacing: .06em; cursor: pointer; border: 1px solid;
-      transition: background .15s; display: block; width: auto; margin: 0; text-align: center; }
+      transition: background .15s; display: block; width: auto; margin: 0; text-align: center; min-height: var(--control-hit-min); }
     .station-row .action .claim-btn { background: var(--surface-panel-up); color: var(--signal);
       border-color: var(--signal); }
     .station-row .action .claim-btn:hover { background: var(--cyan-dim); }
@@ -502,7 +504,7 @@
     #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
     #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
       font-size: var(--text-xs); background: var(--surface-panel-up); color: var(--ink-dim); border: 1px solid var(--edge);
-      cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+      cursor: pointer; transition: background .15s, border-color .15s, color .15s; display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-hit-min); }
     #detail-panel .detail-consoles .chip:hover { border-color: var(--signal); color: var(--signal); }
     #detail-panel .detail-consoles .chip.selected { background: var(--surface-panel-up);
       border-color: var(--signal); color: var(--signal); }
@@ -511,7 +513,7 @@
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-xs);
       font-weight: 500; cursor: pointer; border: 1px solid var(--edge);
       background: var(--surface-panel); color: var(--ink-faint); display: block; width: auto; margin: 0;
-      transition: background .15s, border-color .15s; }
+      transition: background .15s, border-color .15s; min-height: var(--control-hit-min); }
     #detail-panel .detail-ratings .rating-btn.active { background: var(--surface-panel-up);
       border-color: var(--signal); color: var(--signal); }
     #detail-panel .detail-release-btn { padding: 2px 10px; border-radius: 3px;
@@ -519,7 +521,7 @@
       font-weight: 600; letter-spacing: .06em; cursor: pointer;
       border: 1px solid var(--fire-hot); background: transparent; color: var(--fire-hot);
       display: block; width: auto; margin: 0; flex-shrink: 0;
-      transition: background .15s; }
+      transition: background .15s; min-height: var(--control-hit-min); }
     #detail-panel .detail-release-btn:hover { background: rgba(var(--rgb-fire), 0.1); }
     /* Lobby footer */
     #lobby-footer { flex-shrink: 0; display: flex; align-items: center;
@@ -530,7 +532,7 @@
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-sm);
       font-weight: 700; letter-spacing: .12em; cursor: pointer;
       border: 1px solid var(--edge); background: var(--surface-panel); color: var(--ink-faint);
-      transition: all .3s ease; display: none; width: auto; margin: 0; }
+      transition: all .3s ease; display: none; width: auto; margin: 0; min-height: var(--control-hit-min); }
     #ready-btn.armed { display: block; background: var(--surface-panel-up);
       border-color: var(--signal); color: var(--signal); }
     #ready-btn.armed:hover { background: var(--cyan-dim); }
@@ -575,7 +577,7 @@
       cursor: pointer;
       user-select: none;
       touch-action: manipulation;
-      padding: 0;
+      padding: 0; min-height: var(--control-hit-min);
     }
     .settings-btn:hover { color: var(--ink); border-color: var(--loaded); }
     .settings-btn:active { background: rgba(var(--rgb-panel-up), 0.85); }
@@ -616,7 +618,7 @@
       border: 1px solid var(--edge); border-radius: 3px;
       background: var(--surface-panel-up); color: var(--ink-faint);
       text-align: center;
-      touch-action: manipulation;
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .settings-tab.active {
       background: var(--surface-panel-up); border-color: var(--signal);
@@ -663,7 +665,7 @@
       cursor: pointer;
       border: 1px solid var(--edge); border-radius: 3px;
       background: var(--surface-panel-up); color: var(--ink-faint);
-      touch-action: manipulation;
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .settings-rating-btn.active {
       background: var(--surface-panel-up); border-color: var(--signal);
@@ -703,7 +705,7 @@
       border: 1px solid var(--edge); border-radius: 3px;
       background: var(--surface-panel-up); color: var(--ink);
       text-align: center;
-      touch-action: manipulation;
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .settings-action-btn:active { background: var(--cyan-dim); }
     .settings-leave-btn {
@@ -721,7 +723,7 @@
       cursor: pointer;
       border: 1px solid var(--edge); border-radius: 3px;
       background: var(--surface-panel-up); color: var(--ink-faint);
-      touch-action: manipulation;
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .manual-tab.active {
       background: var(--surface-panel-up); border-color: var(--signal);
@@ -762,6 +764,45 @@
     }
     .manual-rating-name { color: var(--signal); min-width: 5rem; }
     .manual-rating-systems { flex: 1; word-break: break-word; }
+
+    /* ── Reduced motion, continued ──────────────────────────────
+       LAST in the stylesheet, and that position is the whole point.
+
+       A media query adds no specificity. `@media (prefers-reduced-motion)
+       { #ready-pill.go { animation: none } }` and the `#ready-pill.go` that
+       starts the pulse are the same weight, so the one written LATER wins —
+       and these four loops are all declared further down the file than the
+       red-alert bezel is. Written up beside the bezel, as they first were,
+       every one of them silently lost, and the page went on pulsing at a
+       player who had asked it not to. A reduced-motion rule that loses the
+       cascade is indistinguishable from one nobody wrote.
+
+       So they live here, after everything they override. The alternative —
+       `!important` on each — wins the same argument by shouting, and leaves
+       the next reader unable to tell which rules genuinely need it.
+       tests/client/control-floors.test.js asserts the ORDER, not just the
+       presence, for exactly this reason. */
+    @media (prefers-reduced-motion: reduce) {
+      /* The two spinners. A spinner says "still working", and a ring with one
+         arc in a different colour still reads as a progress indicator that has
+         stopped moving — which is honest, because the work IS proceeding.
+         Removing it would leave a blank panel reading as broken, which is a
+         defect this same PRD fixes elsewhere. */
+      #asset-loading .spinner-ring,
+      #waiting-overlay .spinner-ring {
+        animation: none;
+      }
+      /* The two "you are good to go" glows, held at the peak of their own
+         pulse so the ready state is still the brightest thing in the footer. */
+      #ready-pill.go {
+        animation: none;
+        box-shadow: 0 0 12px rgba(var(--rgb-signal), 0.5);
+      }
+      #ready-btn.armed.glow {
+        animation: none;
+        box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.7);
+      }
+    }
   </style>
 </head>
 <body>

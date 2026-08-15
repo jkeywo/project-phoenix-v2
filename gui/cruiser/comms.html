@@ -17,10 +17,10 @@
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     ph-comms-contact-list, ph-comms-hail-list, ph-comms-current-message, ph-navigation-map { flex: 1; min-height: 0; }
     .hero-controls { display: flex; align-items: center; gap: 8px; }
-    .overlay-toggle { background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 8px 16px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; white-space: nowrap; }
+    .overlay-toggle { background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 8px 16px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; white-space: nowrap; min-height: var(--control-hit-min); }
     .overlay-toggle:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
     .overlay-toggle.active { background: rgba(var(--rgb-cyan-dim), 0.9); border-color: var(--cyan); color: var(--cyan); }
-    .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; }
+    .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
     .overlay-panel.open { display: flex; }

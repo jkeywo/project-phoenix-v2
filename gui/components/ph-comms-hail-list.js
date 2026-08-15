@@ -24,7 +24,7 @@ export class PhCommsHailList extends HTMLElement {
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.25rem; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
-    .row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-sm); padding: 0.35rem 0.4rem; cursor: pointer; border-radius: 2px; transition: background 0.15s ease; }
+    .row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-sm); padding: 0.35rem 0.4rem; cursor: pointer; border-radius: 2px; transition: background 0.15s ease; min-height: var(--control-hit-min); }
     .row:hover { background: var(--cyan-deep); }
     .dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; flex-shrink: 0; }
     .dot.unread { background: var(--science); }

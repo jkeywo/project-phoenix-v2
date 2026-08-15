@@ -58,7 +58,7 @@ export class PhCommsCurrentMessage extends HTMLElement {
     .msg .speaker { font-weight: 700; color: var(--ink-dim); }
     .msg .text { color: var(--ink); }
     .responses { display: flex; flex-wrap: wrap; gap: 0.35rem; padding-top: 0.35rem; border-top: 1px solid var(--line-faint); }
-    .resp-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 600; padding: 0.35rem 0.6rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
+    .resp-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 600; padding: 0.35rem 0.6rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .resp-btn:hover:not(:disabled) { background: var(--cyan-deep); border-color: var(--edge); }
     .resp-btn:disabled { opacity: 0.35; cursor: default; }
     /* Unavailable (sender out of range): visible but greyed and disabled,

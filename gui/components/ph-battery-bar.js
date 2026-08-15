@@ -38,6 +38,17 @@ export class PhBatteryBar extends HTMLElement {
     :host([orientation="vertical"]) .bar-wrap .threshold-marker { top: auto; left: 0; width: 100%; height: 2px; }
     :host([orientation="vertical"]) .bar-wrap .label,
     :host([orientation="vertical"]) .charging-indicator { writing-mode: vertical-rl; text-orientation: mixed; font-size: var(--text-xs); letter-spacing: 0.18em; }
+    /* Reduced motion (PRD #1023 module 3). The pulse says "charging"; held
+       at the bright end of its own loop it still says charging, without a
+       glow breathing at the edge of an officer's vision for the whole of a
+       long recharge. */
+    @media (prefers-reduced-motion: reduce) {
+      .charging-indicator {
+        animation: none;
+        opacity: 1;
+        text-shadow: 0 0 8px var(--loaded), 0 0 16px var(--loaded-dim);
+      }
+    }
     @keyframes pulse-glow {
       0%, 100% { opacity: 0.5; text-shadow: 0 0 2px var(--loaded); }
       50% { opacity: 1; text-shadow: 0 0 8px var(--loaded), 0 0 16px var(--loaded-dim); }

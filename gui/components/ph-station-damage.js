@@ -48,7 +48,7 @@ export class PhStationDamage extends HTMLElement {
     :host * { box-sizing: border-box; }
     .bar {
       display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer;
-      background: none; border: none; padding: 0; color: inherit; font: inherit;
+      background: none; border: none; padding: 0; color: inherit; font: inherit; min-height: var(--control-hit-min);
     }
     .bar-label { font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--ink-dim); text-transform: uppercase; white-space: nowrap; }
     .bar-wrap { position: relative; width: 90px; height: 0.7em; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }

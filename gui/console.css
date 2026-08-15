@@ -495,6 +495,16 @@ body .frame { height: 100dvh; }
   border-radius: 2px;
   animation: tutorial-pulse 1.6s ease-in-out infinite;
 }
+/* Reduced motion (PRD #1023 module 3). The highlight exists to say WHICH
+   control the tutorial tip is about; the pulse only draws the eye to it.
+   Held at the lit outline, the answer to "which one" survives intact. */
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-highlight {
+    animation: none;
+    outline-color: var(--cyan);
+  }
+}
+
 @keyframes tutorial-pulse {
   0%, 100% { outline-color: var(--cyan); }
   50% { outline-color: rgba(var(--rgb-signal), 0.25); }

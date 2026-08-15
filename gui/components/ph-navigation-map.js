@@ -71,7 +71,7 @@ export class PhNavigationMap extends HTMLElement {
       '.st-neutral { color: var(--ink-dim); }',
       '.st-unknown { color: var(--ink-dim); }',
       '.wp-bar { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: flex-end; gap: 8px; z-index: 2; pointer-events: none; }',
-      '.wp-btn { pointer-events: auto; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); background: rgba(var(--rgb-panel), 0.88); border: 1px solid rgba(var(--rgb-edge-control), 0.5); padding: 6px 12px; cursor: pointer; display: none; white-space: nowrap; }',
+      '.wp-btn { pointer-events: auto; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); background: rgba(var(--rgb-panel), 0.88); border: 1px solid rgba(var(--rgb-edge-control), 0.5); padding: 6px 12px; cursor: pointer; display: none; white-space: nowrap; min-height: var(--control-hit-min); }',
       '.wp-btn.show { display: block; }',
       '.wp-btn.active { color: var(--gold); border-color: var(--gold); }',
       '.wp-btn:active { opacity: 0.7; }',

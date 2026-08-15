@@ -89,7 +89,7 @@ export class PhOperationPanel extends HTMLElement {
     .slowed { font-size: var(--text-xs); color: var(--reloading); padding: 0 0.2rem 0.2rem; letter-spacing: 0.05em; }
     select { width: 100%; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.1em;
              padding: 0.3rem; margin-top: 0.2rem; background: transparent; color: var(--ink);
-             border: 1px solid var(--line-soft); border-radius: 2px; }
+             border: 1px solid var(--line-soft); border-radius: 2px; min-height: var(--control-hit-min); }
     :host([data-state="stalled"]) .fill { background: var(--reloading); }
     :host([data-state="stalled"]) .state { color: var(--reloading); }
     :host([data-state="failed"]) .fill,
@@ -99,7 +99,7 @@ export class PhOperationPanel extends HTMLElement {
     :host([data-state="aborted"]) .fill { background: var(--ink-dim); }
     button { width: 100%; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.15em;
              padding: 0.35rem; margin-top: 0.2rem; background: transparent; color: var(--ink);
-             border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; }
+             border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; min-height: var(--control-hit-min); }
     button:disabled { color: var(--ink-dim); cursor: default; }
   </style>
   <div class="heading" id="heading"></div>

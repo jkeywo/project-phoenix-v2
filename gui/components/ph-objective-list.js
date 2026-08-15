@@ -24,7 +24,7 @@ export class PhObjectiveList extends HTMLElement {
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.35rem; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
-    .row { display: flex; align-items: flex-start; gap: 0.4rem; font-size: var(--text-sm); line-height: 1.3; }
+    .row { display: flex; align-items: flex-start; gap: 0.4rem; font-size: var(--text-sm); line-height: 1.3; min-height: var(--control-hit-min); }
     .row .indicator { flex-shrink: 0; width: 0.7rem; height: 0.7rem; margin-top: 0.2rem; border: 1px solid var(--edge); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
     .row .indicator.done { background: var(--loaded-dim); border-color: var(--loaded); }
     .row .indicator.done::after { content: '\\2713'; font-size: var(--text-xs); color: var(--loaded); }

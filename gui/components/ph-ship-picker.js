@@ -51,7 +51,7 @@ export class PhShipPicker extends HTMLElement {
     .ship-card {
       background: var(--surface-panel); border: 1px solid var(--cyan-dim); border-radius: 6px;
       padding: 12px 14px; cursor: pointer; transition: all 0.15s ease;
-      display: flex; flex-direction: column; gap: 6px;
+      display: flex; flex-direction: column; gap: 6px; min-height: var(--control-hit-min);
     }
     .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-control); }
     .ship-card:active { background: var(--surface-panel-up); border-color: var(--violet); }

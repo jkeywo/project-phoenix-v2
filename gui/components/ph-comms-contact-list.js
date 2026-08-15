@@ -32,7 +32,7 @@ export class PhCommsContactList extends HTMLElement {
     .badge.friendly { background: var(--loaded-deep); color: var(--loaded); }
     .badge.neutral { background: var(--surface-panel-up); color: var(--science); }
     .badge.allied { background: var(--loaded-deep); color: var(--loaded); }
-    .hail-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 600; padding: 0.25rem 0.5rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
+    .hail-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 600; padding: 0.25rem 0.5rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .hail-btn:hover:not(:disabled) { background: var(--cyan-deep); border-color: var(--edge); }
     .hail-btn:disabled { opacity: 0.35; cursor: default; }
   </style>

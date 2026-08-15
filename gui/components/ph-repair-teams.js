@@ -48,7 +48,7 @@ export class PhRepairTeams extends HTMLElement {
       display: flex; align-items: center; gap: 0.4rem; width: 100%;
       background: var(--bg-card); border: 1px solid var(--line-faint);
       color: inherit; font: inherit; text-align: left; cursor: pointer;
-      padding: 0.25rem 0.35rem;
+      padding: 0.25rem 0.35rem; min-height: var(--control-hit-min);
     }
     .dmg-row:disabled { cursor: default; opacity: 0.5; }
     .dmg-row.prioritised { border-color: var(--cyan); }

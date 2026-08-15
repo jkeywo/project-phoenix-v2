@@ -53,6 +53,27 @@
 # 11531679067393217131). Neither destroys anything from script, and a destroy
 # mints nothing — the entity namespace's counter does not advance on a removal —
 # so neither world's mint sequence or fold can have shifted.
+#
+# STILL 0xcb84eaa232a41b11 AFTER THE RADAR-DAMPENING SIGN FIX (found in #1037),
+# and this world is one of the two that spawn the template that changed, so the
+# hold is a claim rather than an oversight. `region_storm_band.toml`'s
+# `[effects.radar_dampening] range_modifier` went from `0.5` to `-1.0` — from a
+# radar-range multiplier of 1.5 to one of 0.5, which is to say from a storm that
+# made the radar reach further to one that halves it.
+#
+# THE MECHANISM IS THAT RADAR RANGE IS NOT FOLDED, and this was measured rather
+# than reasoned. `ShipModifiers` is not in `sim_digest`'s fold at all — the
+# entity namespace folds `ShipPhysics`, `SystemHull` and `ShipRedAlert` — so a
+# radar horizon only ever moves a digest by changing BEHAVIOUR that reaches
+# physics, hull, or one of the other folded namespaces. Nothing in this world
+# reads one: the bands exist to be destroyed by name on a script timer, both
+# cruisers are parked, and there is no combat for an acquisition horizon to
+# change. Re-authoring the same field to `-999.0` (radar effectively dark) and
+# to `+999.0` (radar effectively unbounded) BOTH reproduce
+# 14665104268980394769 exactly, and so does deleting the band's `slow_zone`
+# outright — which is the sharper half of the evidence, because in
+# `probe_operations` that same deletion DOES move the number. Nothing here is
+# inside a band.
 
 [global]
 seed = 1033

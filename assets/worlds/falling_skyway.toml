@@ -128,8 +128,8 @@
 # authors its own `[[deadline]]` blocks (the transfer window) against the same
 # counter.
 #
-# BASELINE. CURRENT VALUE: 0x8ad4dcec24908b8d (10003863579080559501), last moved
-# by #1039 — the paragraphs below are the history of how it got there, oldest
+# BASELINE. CURRENT VALUE: 0x07cf71231e2a6c05 (562792874088492037), last moved
+# by #1040 — the paragraphs below are the history of how it got there, oldest
 # first, and the first number in them is NOT the one to A/B against.
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
@@ -270,6 +270,44 @@
 # (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
 # 11434311098359716284, probe_scandiff 2488189563210329022, and
 # probe_corroborate 6231558379626882143.
+
+# MOVED AGAIN IN #1040, to 0x07cf71231e2a6c05 (562792874088492037), with
+# 7864036191597303522 at tick 0. ONE mechanism, and it is not the one the slice
+# is mostly made of: `skyhook.toml` gained three WARNING RUNGS between its lift
+# line and its structural floor, and `fold_infrastructure_namespace` folds every
+# threshold flag on every condition track — the count, each flag's name, and
+# whether it is held. This world fields the only skyhook in the repository, so
+# five rungs where there were two is a different fold on tick zero, before
+# anything in the mission has happened.
+#
+# A/B'd rather than assumed, and re-run on this tree rather than carried over
+# from the pre-#1041 measurement: stripping those three
+# `[[infrastructure.threshold]]` blocks back out and re-running gives
+# 243186184528244893 exactly, which is #1041's number. Nothing else in the slice
+# reaches the fold, and the code says why in each case —
+#
+#   the destroyer's new `stabilise` capability   a hull that CAN run an operation
+#       and never has folds nothing (`fold_operations_namespace`), the same
+#       reading #1041's own `fold_weapons_hold_namespace` note relies on; and an
+#       Act-3 run is four hundred seconds past a 900-frame window in any case;
+#   `skyhook_failure_due`                        a `[[deadline]]` lives on
+#       `WorldContentRuntime`, which nothing folds;
+#   `hailable` on the head                       the digest folds no comms state;
+#   the two debris anchors                       authored content, and nothing
+#       spawns at them until the head is gone — the reading #1039 recorded for
+#       `rigger_mooring` and #1041 for `corporate_picket`;
+#   the whole Act-3 script                       Act 3 opens at t=268 and the
+#       baseline run is fifteen seconds long.
+#
+# The anchors were re-measured on the same clean tree and are UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_strike (--ticks 1800) 535291289754814419,
+# probe_scan 7851858877582205234, probe_storm (--ticks 6480)
+# 11434311098359716284, probe_destroy 14665104268980394769, probe_scandiff
+# 2488189563210329022, probe_corroborate 6231558379626882143, probe_restraint
+# 1078282553163286478 and probe_collapse (--ticks 3600) 5992449400465842350.
+# None of them fields a skyhook; the two that fly the destroyer never run an
+# operation on it, and the one this slice added never pulls a weapons hold.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls

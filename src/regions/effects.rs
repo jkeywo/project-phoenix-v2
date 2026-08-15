@@ -44,10 +44,56 @@ pub struct SlowZoneEffect {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BlocksImpulseEffect {}
 
+/// A region's effect on the radar horizon of every ship standing in it.
+///
+/// # `range_modifier` is a signed BONUS, not a multiplier
+///
+/// The field name is `range_modifier` and the serde alias is `multiplier`, and
+/// the alias is the historical trap: the value is neither. It is added to
+/// [`crate::messages::ModifierSlot::RadarRange`] by
+/// `modifiers::coordination::apply_region_effects`, and the slot's cache
+/// (`modifiers::cache::ShipModifiers::rebuild_cache`) turns the SUM of every
+/// bonus on the slot into the multiplier the radar actually uses, via PRD
+/// #117's two-sided formula:
+///
+/// ```text
+/// bonus >= 0  ->  multiplier = 1 + bonus
+/// bonus <  0  ->  multiplier = 1 / (1 + |bonus|)
+/// ```
+///
+/// So a DAMPENING region authors a NEGATIVE number, and the value that gives a
+/// wanted multiplier `m` (for `0 < m < 1`) is `-(1/m - 1)`: −1.0 halves the
+/// horizon, −1.5 takes it to two fifths, −2.0 to a third.
+///
+/// A POSITIVE `range_modifier` on an effect called *dampening* therefore does
+/// the opposite of what it reads like — it lets a ship see FURTHER inside the
+/// hazard than outside it. Two of the three shipped region templates authored
+/// exactly that (`region_kaleth_nebula.toml` at `0.4`, `region_storm_band.toml`
+/// at `0.5`, both evidently meaning "reduce the radar to 40%/50%") until the
+/// fix that added this doc comment; the defect was found in #1037, whose own
+/// `region_radiation_band.toml` documents the formula and authors `-2.0`
+/// deliberately.
+///
+/// There is no load-time validation surface for region effects to warn from —
+/// see `shipped_assets::every_shipped_radar_dampening_actually_dampens` below,
+/// which is the CI-side guard that replaced the warning that would have needed
+/// one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RadarDampeningEffect {
     #[serde(alias = "multiplier")]
     pub range_modifier: f32,
+}
+
+impl RadarDampeningEffect {
+    /// True when this effect actually reduces the radar horizon — i.e. when the
+    /// authored bonus resolves to a multiplier below 1.0.
+    ///
+    /// `0.0` is not dampening either: it is a modifier that changes nothing,
+    /// which on an effect whose entire job is to change something is an
+    /// authoring mistake rather than a neutral default.
+    pub fn dampens(&self) -> bool {
+        self.range_modifier < 0.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -295,5 +341,103 @@ multiplier = 0.4
         }
         let wrap: Wrap = toml::from_str(toml_str).unwrap();
         assert_eq!(wrap.effects.radar_dampening.unwrap().range_modifier, 0.4);
+    }
+
+    // ── The sign of a dampening bonus ─────────────────────────────────────
+
+    #[test]
+    fn a_negative_range_modifier_dampens_and_a_positive_one_does_not() {
+        assert!(RadarDampeningEffect {
+            range_modifier: -1.0
+        }
+        .dampens());
+        assert!(!RadarDampeningEffect {
+            range_modifier: 0.5
+        }
+        .dampens());
+        // Zero is a modifier that modifies nothing, which on this effect is an
+        // authoring mistake rather than a neutral default.
+        assert!(!RadarDampeningEffect {
+            range_modifier: 0.0
+        }
+        .dampens());
+    }
+}
+
+/// Shipped-asset conformance: every region template in `assets/` that claims to
+/// dampen radar actually does.
+///
+/// This reads the real files (native only, like `marker_validate`'s own
+/// shipped-asset walk) because the defect this guards against is a DATA defect
+/// and no amount of engine testing catches it: the runtime formula was always
+/// right, and `regions::server`'s own dampening tests always passed, because
+/// they author their own negative bonuses. What shipped were two templates
+/// authoring a positive one — a nebula and a storm band that made the radar
+/// reach further inside the hazard than outside it, for as long as they existed
+/// (found in #1037).
+///
+/// There is deliberately no load-time warning to go with this. A region effect
+/// has no validation surface of its own — the `WorldFinding` collector in
+/// `world::validate` walks WORLD references and `entities::marker_validate`
+/// walks rig markers, and a third one would mean a new finding type, a new
+/// startup call site and a new editor-side twin to keep honest. A `cargo test`
+/// gate over `assets/` is strictly harder than a printed warning for everything
+/// that ships in this repository; what it does NOT cover is a region template
+/// arriving from a MOD PACK, which is the case a real load-time check would
+/// buy and the reason to revisit this when one needs it.
+#[cfg(test)]
+mod shipped_assets {
+    use super::*;
+
+    #[test]
+    fn every_shipped_radar_dampening_actually_dampens() {
+        #[derive(Deserialize)]
+        struct Wrap {
+            #[serde(default)]
+            effects: RegionEffectsConfig,
+        }
+
+        let mut checked = 0usize;
+        let mut problems: Vec<String> = Vec::new();
+        let entries = std::fs::read_dir("assets/entities").expect("assets/entities must exist");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let file = path.to_string_lossy().replace('\\', "/");
+            let toml_str = std::fs::read_to_string(&path).expect("entity template readable");
+            // Templates that are not regions simply carry no `[effects]` block;
+            // one that fails to parse is somebody else's test to fail.
+            let Ok(wrap) = toml::from_str::<Wrap>(&toml_str) else {
+                continue;
+            };
+            let Some(dampening) = wrap.effects.radar_dampening else {
+                continue;
+            };
+            checked += 1;
+            if !dampening.dampens() {
+                let m = dampening.range_modifier;
+                let effective = if m >= 0.0 {
+                    1.0 + m
+                } else {
+                    1.0 / (1.0 + m.abs())
+                };
+                problems.push(format!(
+                    "{file}: `[effects.radar_dampening] range_modifier = {m}` is a signed BONUS, \
+                     so it resolves to a radar-range multiplier of {effective} — the region makes \
+                     the radar reach FURTHER. For a multiplier of `m`, author `-(1/m - 1)`."
+                ));
+            }
+        }
+        assert!(
+            checked > 0,
+            "shipped region templates should author radar dampening"
+        );
+        assert!(
+            problems.is_empty(),
+            "a region that dampens radar must author a NEGATIVE range_modifier:\n{}",
+            problems.join("\n")
+        );
     }
 }

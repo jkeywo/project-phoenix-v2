@@ -1467,6 +1467,77 @@ mod tests {
         );
     }
 
+    /// **A shipped dampening region must make the radar SHORTER, not longer.**
+    ///
+    /// The three tests above author their own bonuses and so can only ever
+    /// prove the formula; this one drives the REAL numbers out of the shipped
+    /// templates through the real `RegionPlugin`, and is the only thing in the
+    /// suite that would have failed while `region_kaleth_nebula.toml` authored
+    /// `0.4` and `region_storm_band.toml` authored `0.5` (found in #1037). Both
+    /// read as "reduce the radar to 40%/50%"; both are signed BONUSES, so both
+    /// resolved to `1 + b` and let a ship see further inside the hazard than
+    /// outside it.
+    ///
+    /// The claim asserted is the SIGN — inside strictly less than outside —
+    /// rather than a particular multiplier. `region_kaleth_nebula.toml`'s
+    /// `-1.5` and the two bands' `-1.0` / `-2.0` are unratified tuning ([ai]);
+    /// pinning them here would make a designer's edit fail a test that is not
+    /// about tuning. `regions::effects`'s shipped-asset walk covers the whole
+    /// `assets/entities` directory from the data side; this covers the same
+    /// data from the runtime side, so neither the authored number nor the
+    /// formula can drift out from under the other.
+    #[test]
+    fn every_shipped_dampening_region_shortens_the_radar_it_is_entered_with() {
+        #[derive(serde::Deserialize)]
+        struct Wrap {
+            #[serde(default)]
+            effects: EffectsCfg,
+        }
+
+        let mut checked = 0usize;
+        let entries = std::fs::read_dir("assets/entities").expect("assets/entities must exist");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let file = path.to_string_lossy().replace('\\', "/");
+            let toml_str = std::fs::read_to_string(&path).expect("entity template readable");
+            let Ok(wrap) = toml::from_str::<Wrap>(&toml_str) else {
+                continue;
+            };
+            let Some(dampening) = wrap.effects.radar_dampening else {
+                continue;
+            };
+            checked += 1;
+
+            let mut app = radar_dampening_test_app();
+            spawn_radar_dampening_region(&mut app, 0.0, 0.0, 50.0, dampening.range_modifier);
+
+            // Outside first, so "shorter" is measured against this world's own
+            // unmodified horizon rather than against an assumed 1.0.
+            set_ship_pos(&mut app, 500.0, 0.0);
+            tick_with_dt(&mut app, 0.016);
+            let outside = get_ship_modifiers(&mut app).get(&ModifierSlot::RadarRange);
+
+            set_ship_pos(&mut app, 0.0, 0.0);
+            tick_with_dt(&mut app, 0.016);
+            let inside = get_ship_modifiers(&mut app).get(&ModifierSlot::RadarRange);
+
+            assert!(
+                inside < outside,
+                "{file} authors `range_modifier = {}`, which gives a radar-range multiplier of \
+                 {inside} INSIDE the region against {outside} outside it. A dampening region must \
+                 shorten the radar; `range_modifier` is a signed bonus, so author a negative one.",
+                dampening.range_modifier
+            );
+        }
+        assert!(
+            checked > 0,
+            "shipped region templates should author radar dampening"
+        );
+    }
+
     #[test]
     fn overlapping_radar_dampening_regions_stack_additively() {
         let mut app = radar_dampening_test_app();

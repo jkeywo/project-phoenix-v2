@@ -152,7 +152,6 @@ pub(crate) fn integrate_ship_physics(
     >,
     #[cfg(debug_assertions)] frame: Res<crate::ship::helm::HelmPhysicsFrame>,
     #[cfg(debug_assertions)] mut guard_q: Query<&mut crate::ship::helm::HelmPhysicsWriteGuard>,
-    #[cfg(debug_assertions)] mut commands: Commands,
 ) {
     // The `HELM_AI_MAX_DT_SECS` clamp is DEAD in production, and is kept only
     // for the bare-`App` fixtures (issue #895).
@@ -194,19 +193,24 @@ pub(crate) fn integrate_ship_physics(
         (impulse, boost),
     ) in ships.iter_mut()
     {
-        // Debug-only single-writer tripwire (issue #699). Self-healing: ships
-        // that lack a guard get one, so promotion/demotion needs no bookkeeping.
+        // Debug-only single-writer tripwire (issue #699). The guard arrives
+        // with `AiHighFidelity` itself (`#[require]`, issue #1051), so this
+        // loop — whose query is `With<AiHighFidelity>` — is structurally
+        // guaranteed to find one, and there is no `Commands::insert` here to
+        // move a ship's archetype mid-run. It used to self-heal instead, which
+        // made every debug build create an archetype no release build ever did
+        // and moved the authoritative digest across build profiles; see
+        // `ai::server::AiHighFidelity` for the whole story.
         #[cfg(debug_assertions)]
         {
             let entity = _entity;
-            match guard_q.get_mut(entity) {
-                Ok(mut guard) => guard.record_write(entity, "integrate_ship_physics", frame.0),
-                Err(_) => {
-                    let mut guard = crate::ship::helm::HelmPhysicsWriteGuard::default();
-                    guard.record_write(entity, "integrate_ship_physics", frame.0);
-                    commands.entity(entity).insert(guard);
-                }
-            }
+            guard_q
+                .get_mut(entity)
+                .expect(
+                    "AiHighFidelity requires HelmPhysicsWriteGuard, so every ship this \
+                     system iterates must already carry one",
+                )
+                .record_write(entity, "integrate_ship_physics", frame.0);
         }
 
         let default_modifiers;
@@ -556,7 +560,7 @@ mod tests {
                 .world()
                 .entity(ship)
                 .get::<crate::ship::helm::HelmPhysicsWriteGuard>()
-                .expect("integrate_ship_physics must self-heal a write guard onto every ship");
+                .expect("AiHighFidelity must bring a write guard onto every ship it marks");
             assert_eq!(
                 guard.last_write(),
                 Some((frame, "integrate_ship_physics")),

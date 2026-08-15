@@ -141,7 +141,31 @@ impl AiTokenRegistry {
 
 /// Marker component: entity is eligible for high-fidelity AI simulation.
 /// Entities without this marker run at reduced simulation fidelity.
+///
+/// # Why it REQUIRES `HelmPhysicsWriteGuard` in debug builds (issue #1051)
+///
+/// Same argument as `server_app::LocalShip`'s `#[require]` of
+/// `HumanSeekingHosts` (issue #984's S7 fix, 66c3c1bd), and found the same way.
+/// `integrate_ship_physics` is the only writer of the debug-only write-tracker,
+/// it runs on exactly this marker, and it used to `Commands::insert` the guard
+/// the first time it saw a ship. That is an ARCHETYPE MOVE on a mid-run tick:
+/// Bevy allocates archetype ids in creation order and every query iterates its
+/// matched archetypes in that order, so the extra archetype re-orders the ones
+/// the ship hulls land in, the per-victim RNG draws in the damage sites
+/// interleave differently, and the authoritative digest moves.
+///
+/// Because the guard is `#[cfg(debug_assertions)]`, that mid-run move happened
+/// in dev builds and *not* in release builds — which is exactly the
+/// cross-environment digest instability issue #1051 was opened for. Measured on
+/// c2c38984: a dev build differing from the standard one in nothing but
+/// `debug-assertions = false` reproduced the release-profile `duel` and
+/// `rng_coverage` digests byte for byte, and `duel` diverged at the gameplay
+/// level with it (different knockouts, different shots fired). Requiring the
+/// guard makes it arrive in the SAME transition as the marker on both promotion
+/// routes, so debug and release builds create the same archetypes in the same
+/// order and the integrator needs no `Commands` at all.
 #[derive(Component)]
+#[cfg_attr(debug_assertions, require(crate::ship::helm::HelmPhysicsWriteGuard))]
 pub struct AiHighFidelity;
 
 /// The per-ship AI components that MUST travel with [`AiHighFidelity`] — the

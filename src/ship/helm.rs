@@ -99,9 +99,15 @@ pub fn tick_helm_physics_frame(mut frame: ResMut<HelmPhysicsFrame>) {
 }
 
 /// Per-ship record of who last advanced this ship's `ShipPhysics` along the
-/// helm path, and on which frame. Self-healing: `integrate_ship_physics`
-/// inserts it on any ship that lacks one, so there is no insertion-site
-/// churn and demoted (low-LOD) ships simply stop being stamped.
+/// helm path, and on which frame.
+///
+/// Arrives with `ai::server::AiHighFidelity` (`#[require]`) rather than being
+/// self-healed onto a ship mid-run: `integrate_ship_physics` runs on exactly
+/// that marker, so requiring the guard reaches both promotion routes with no
+/// insertion-site churn, and demoted (low-LOD) ships simply stop being stamped.
+/// It used to be inserted by the integrator on first sight, which is a mid-run
+/// archetype move that only debug builds ever performed — issue #1051's
+/// cross-profile digest divergence. See `AiHighFidelity` for the mechanism.
 #[cfg(debug_assertions)]
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct HelmPhysicsWriteGuard {

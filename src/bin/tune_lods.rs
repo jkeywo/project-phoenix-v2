@@ -282,8 +282,8 @@ fn main() {
         .add_systems(Startup, setup)
         // Billboard facing/tile is the game's own system, reused verbatim — the
         // capture camera is tagged `GameCamera` so a billboard level renders
-        // exactly as it would in game.
-        .add_systems(Update, orient_lod_billboards)
+        // exactly as it would in game, down to which two yaw poses it blends.
+        .add_systems(Update, orient_lod_billboards::<GameCamera>)
         .add_systems(PostUpdate, drive)
         .run();
 }
@@ -424,12 +424,13 @@ fn spawn_level(
     } else if let Some(atlas) = level.billboard.as_deref() {
         // Uniform parent scale; the quad's world w/h ride the child, as in the
         // billboard branch of `update_mesh_lod`.
-        let [w, h] = level.scale.map(|s| [s[0], s[1]]).unwrap_or([1.0, 1.0]);
-        let views = level
-            .capture
-            .as_ref()
-            .and_then(|c| c.yaw_views)
-            .unwrap_or(1);
+        // The tuner works in RAW model space — it never applies a `[base]` rig —
+        // so the tier scale it asks the shared sizing rule for is unity.
+        let [w, h] = project_phoenix::entities::billboard::billboard_quad_size(
+            level.scale,
+            bevy::math::Vec3::ONE,
+        );
+        let views = project_phoenix::entities::billboard::billboard_yaw_views(level);
         let entity = commands
             .spawn((Transform::default(), Visibility::Hidden))
             .id();

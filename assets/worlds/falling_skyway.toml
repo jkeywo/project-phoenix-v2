@@ -119,8 +119,8 @@
 # Act 3 is still a structural stub, and the slices that fill it author their own
 # `[[deadline]]` blocks (the transfer window) against the same counter.
 #
-# BASELINE. CURRENT VALUE: 0x83a3099415dc33b0 (9485435771798959024), last moved
-# by #1038 — the paragraphs below are the history of how it got there, oldest
+# BASELINE. CURRENT VALUE: 0x8ad4dcec24908b8d (10003863579080559501), last moved
+# by #1039 — the paragraphs below are the history of how it got there, oldest
 # first, and the first number in them is NOT the one to A/B against.
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
@@ -202,6 +202,30 @@
 # 5001167740764356580, probe_scan 7851858877582205234, probe_strike
 # (--ticks 1800) 535291289754814419, and probe_storm (--ticks 6480)
 # 11434311098359716284.
+#
+# MOVED AGAIN IN #1039, to 0x8ad4dcec24908b8d (10003863579080559501), with
+# 1513716769129269911 (0x1501cd61aa808a97) at tick 0. The mechanism is the same
+# class as #1037's and by the same one line of authored content: the
+# corroboration slice adds Rigger Tacket as an `[[entity]]`, so this world spawns
+# one more hull than it used to, and that hull takes a uuid out of the mint
+# sequence and folds its own transform and hull every tick.
+#
+# BOTH HALVES OF THE A/B ARE RECORDED AGAIN, because the attribution is the point
+# and not the conclusion. Delete that one `[[entity]]` block alone and the digest
+# returns to #1038's 9485435771798959024 exactly, tick-0 number and all; delete
+# the whole #1039 script block instead — the trigger registrations, the witness's
+# tree, the evidence append, the commitment, the objective and the two campaign
+# flags — and it stays at 10003863579080559501. So a comms thread, a dossier
+# entry, a promise on the ledger and an objective fold NOTHING, which puts them
+# in the same authoritative-but-unfolded bucket as the deadline table and the
+# flag store. The `rigger_mooring` anchor is in the deleted-entity run and does
+# not move the number either: an anchor nothing spawns at is a lookup table.
+#
+# The anchors were re-measured on the same clean tree and are UNMOVED:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_scan 7851858877582205234, probe_strike
+# (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
+# 11434311098359716284, and probe_scandiff 2488189563210329022.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls

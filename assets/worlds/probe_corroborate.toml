@@ -78,12 +78,12 @@
 # rather than as a timer standing in for one. It is also why the scenario puts
 # its own ask at index 0 — see `falling_skyway.toml`.
 #
-# BASELINE (debug headless, `--seed 42 --ticks 900 --digest-every 0`, no `--ship`
+# BASELINE (headless, `--seed 42 --ticks 900 --digest-every 0`, no `--ship`
 # override — the invocation `probe_scandiff.toml` and `probe_scan.toml` record):
-# final digest 0x9f1d92a25a56aad3 (11465141232936091859). A NEW number — nothing
+# final digest 0x567af1547ec4e45f (6231558379626882143). A NEW number — nothing
 # to compare it against yet — so it is written down to be the thing a later
 # change is A/B'd against, the way the shipped worlds' digests already are. Tick
-# 0 is 6162059247118093054.
+# 0 is 9061975724796068249 (0x7dc29ae8c7aec199).
 #
 # The anchors were measured on the same clean tree and are UNMOVED: combat_test
 # 14942520827746055774, patrol 11531679067393217131, probe_evidence

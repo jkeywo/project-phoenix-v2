@@ -1770,11 +1770,31 @@ that produces a wanted multiplier `m` (for `0 < m < 1`) is `-(1/m - 1)`:
 | `0.25` (a quarter) | `-3.0` |
 
 A positive number on a *dampening* or *slow* effect makes the ship BETTER inside
-the hazard than outside it. Two shipped region templates authored exactly that
-against `radar_dampening` for as long as they existed — a nebula and a storm
-band that LENGTHENED the radar — and
-`regions::effects::shipped_assets::every_shipped_radar_dampening_actually_dampens`
-now fails `cargo test` if one comes back.
+the hazard than outside it, and **every shipped region template got this wrong on
+at least one field**. Two authored a positive `range_modifier` on
+`radar_dampening` — a nebula and a storm band that LENGTHENED the radar — and the
+two storm bands authored positive `thrust_modifier`/`yaw_rate_modifier` on
+`slow_zone`, so a storm front made ships half again as fast and a radiation front
+60% faster. Note that the row for `slow_zone` in the table above said "additive
+bonus" correctly the whole time: *the guide being right is not enough*, which is
+why both defects are now held by paired `cargo test` gates rather than by prose.
+
+| effect | data-side guard | runtime guard |
+|---|---|---|
+| `radar_dampening` | `regions::effects::shipped_assets::every_shipped_radar_dampening_actually_dampens` | `regions::server::tests::every_shipped_dampening_region_shortens_the_radar_it_is_entered_with` |
+| `slow_zone` | `regions::effects::shipped_assets::every_shipped_slow_zone_actually_slows` | `regions::server::tests::every_shipped_slow_zone_slows_the_ship_that_enters_it` |
+
+Each pair walks every template under `assets/entities/`: the data-side guard
+checks the authored sign, the runtime guard drives the same authored number
+through the real `RegionPlugin` and asserts the ship is worse off inside the
+region than outside it. Neither the number nor the formula can drift out from
+under the other.
+
+`[effects.slow_zone]` with **neither** field authored is legitimate and is not a
+sign error: it is the presence marker an operation's
+`[[operations.capability.interrupt]]` names with `region_effect = "slow_zone"`,
+and the rate that stretches the work lives on the capability as `rate_percent`
+(a true percentage — `50` means half). Both guards skip it.
 
 #### Example — `assets/entities/region_nebula.toml`
 

@@ -130,12 +130,33 @@ including the one whose serde alias is literally `multiplier`. It is summed onto
 the slot and resolved by `ShipModifiers::rebuild_cache`'s two-sided formula
 (`1 + sum` when non-negative, `1 / (1 + |sum|)` when negative), so an effect
 that makes a ship WORSE authors a NEGATIVE number, and the bonus for a wanted
-multiplier `m` is `-(1/m - 1)`. Two shipped region templates authored a positive
-`range_modifier` on `radar_dampening` for as long as they existed, which made
-the radar reach further inside the hazard than outside it;
-`regions::effects::shipped_assets::every_shipped_radar_dampening_actually_dampens`
-and `regions::server::tests::every_shipped_dampening_region_shortens_the_radar_it_is_entered_with`
-are the data-side and runtime-side guards that now catch it.
+multiplier `m` is `-(1/m - 1)`. Both hazard effects shipped with the sign
+inverted. Two templates authored a positive `range_modifier` on
+`radar_dampening`, which made the radar reach further inside the hazard than
+outside it; the two storm bands authored positive `thrust_modifier` /
+`yaw_rate_modifier` on `slow_zone`, which made ships fly FASTER and turn harder
+inside a front than in clear space (`region_storm_band.toml` at 1.5x/1.6x and
+`region_radiation_band.toml` at 1.6x/1.7x). Each is now held by a pair of
+guards — one over the data, one through the engine:
+
+| effect | data-side | runtime |
+|---|---|---|
+| `radar_dampening` | `regions::effects::shipped_assets::every_shipped_radar_dampening_actually_dampens` | `regions::server::tests::every_shipped_dampening_region_shortens_the_radar_it_is_entered_with` |
+| `slow_zone` | `regions::effects::shipped_assets::every_shipped_slow_zone_actually_slows` | `regions::server::tests::every_shipped_slow_zone_slows_the_ship_that_enters_it` |
+
+The two defects differ in what they reach. `RadarRange` is folded into no
+digest, so correcting it moved none; `MaxSpeed` IS folded — `ship::physics_systems`
+multiplies the hull's authored `max_speed` by the slot before the helm
+integrates — but a speed cap only binds on a ship pushing it, and every hull
+standing in a shipped band is station-keeping, so that correction moved no
+digest either. Both facts are measured (`±999` A/Bs) rather than reasoned, in
+the world headers of `probe_operations`, `probe_storm`, `probe_destroy` and
+`falling_skyway`.
+
+A `slow_zone` with neither field authored is not a sign error but the presence
+marker an operation's `[[operations.capability.interrupt]]` names; its rate
+lives on the capability as `rate_percent`, which is a true percentage and was
+never affected. Both `slow_zone` guards skip that shape.
 
 On region exit, `on_region_exited` calls `modifiers.clear_source()`
 with the leaving region's `ModifierSource::RegionEffect { uuid }`, removing all

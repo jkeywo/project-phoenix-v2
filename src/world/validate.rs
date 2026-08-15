@@ -1010,23 +1010,139 @@ fn validate_template_resolution_in(
         let Some(overrides) = inst.overrides else {
             continue;
         };
-        let Err(e) = crate::entity_loader::apply_overrides(&template, overrides) else {
+        match crate::entity_loader::apply_overrides(&template, overrides) {
+            Ok(_merged) => {
+                // The merge succeeded, but "succeeded" only means the merged
+                // document re-parses — see `validate_override_table_presence`
+                // for the quieter defect that survives a clean merge.
+                findings.extend(validate_override_table_presence(
+                    &inst, &template, overrides, src,
+                ));
+            }
+            Err(e) => {
+                findings.push(WorldFinding {
+                    severity: Severity::Error,
+                    category: "unmergeable-override",
+                    message: format!(
+                        "entity '{}' carries an 'overrides' table that does not apply to its \
+                         template '{}', in '{}': {e}; every spawn caller would log and skip \
+                         it, leaving the world silently short of that entity",
+                        inst.label, inst.template_path, src.path
+                    ),
+                    source: SourceLocation {
+                        file: src.path.clone(),
+                        line: line_of(src.toml, &inst.label)
+                            .or_else(|| line_of(src.toml, inst.template_path)),
+                        reference: inst.template_path.to_string(),
+                    },
+                });
+            }
+        }
+    }
+    findings
+}
+
+/// Warn when an instance `overrides` table names a top-level TABLE the
+/// resolved template does not declare (issue #1043).
+///
+/// # The foot-gun
+///
+/// [`crate::entity_loader::apply_overrides`] deep-merges an override onto the
+/// template's serialised document (`EntityConfig::to_toml_value`); when the
+/// template's own field is `None`, its key is simply absent from that
+/// document, so the merge does not refuse the override or merge it into
+/// anything — it inserts the override's table **fresh**, and the merged
+/// document still parses. The load succeeds either way, so nothing here is an
+/// `unmergeable-override`.
+///
+/// Whether that freshly-inserted table then does anything is entirely up to
+/// whatever system reads it, and a template that never declared the table
+/// typically has nothing wired up to read it. That is precisely how #1043
+/// lost a debugging pass: a `[behaviour]` override on a hauler template with
+/// no `[behaviour]` of its own parsed cleanly and changed nothing anyone could
+/// see. `player_hull_config` (`src/server_app.rs`) documents the exact same
+/// "existing absent-table semantics" for the player-ship row and deliberately
+/// leaves them unchanged — "making it loud is a separate task". This is that
+/// task, at the one place both spawn paths (`resolve_entity_via` and
+/// `player_hull_config`) actually share: the merge itself.
+///
+/// # Why a WARNING and not an ERROR
+///
+/// Unlike `unmergeable-override`, nothing here is refused: the entity spawns
+/// whole, carrying the override's data, and a template gaining the table later
+/// is a legitimate, unremarkable edit — the doctrine anchor/route checks this
+/// sits beside are errors because a miss can never resolve on any later load;
+/// this one already might, on the very next template edit. The author still
+/// needs to see it, because today it is silent.
+///
+/// # Only TABLES, not scalars
+///
+/// A scalar override (`hull_id`, `power_rating`, `class`, ...) on a field the
+/// template leaves unset is ordinary authoring, not this foot-gun: a scalar is
+/// read directly wherever it is read, with no separate system that has to
+/// already be wired up to consume it. Only a nested `toml::Value::Table`
+/// override — a config *section* — carries the "attaches to nothing" risk, so
+/// only those are checked. `WorldEntity`'s own `transform` (position/rotation)
+/// lives as a sibling field beside `overrides`, never inside it, so there is no
+/// override-only key here that could false-positive against this rule; every
+/// key that reaches this function is a real `EntityConfig` field name, or the
+/// merge above would already have refused it as `unmergeable-override`.
+///
+/// # Deriving the table set from the struct, not a hardcoded list
+///
+/// The set of "tables the template declares" is read off the SAME
+/// `EntityConfig::to_toml_value()` document `apply_overrides` merges onto —
+/// whatever key serde actually emitted for this resolved (fragment-composed)
+/// template — rather than a hardcoded field-name list. That keeps this check
+/// honest against `EntityConfig` as it evolves: a renamed or newly-added
+/// section is covered for free, and nothing here has to be told about
+/// `workforce` or the next table by name.
+fn validate_override_table_presence(
+    inst: &SpawnedInstance,
+    template: &crate::entity_config::EntityConfig,
+    overrides: &toml::Value,
+    src: &WorldSource,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    let Some(override_table) = overrides.as_table() else {
+        return findings;
+    };
+    // Serialising a second time (`apply_overrides` above already did this
+    // once, successfully) is the price of keeping this check independent of
+    // that function's return value, which discards the intermediate template
+    // table. `to_toml_value` is a cheap, pure, in-memory serialise, and
+    // validation is not a hot path.
+    let Ok(template_value) = template.to_toml_value() else {
+        return findings;
+    };
+    let Some(template_table) = template_value.as_table() else {
+        return findings;
+    };
+
+    for (key, value) in override_table {
+        if !matches!(value, toml::Value::Table(_)) {
             continue;
-        };
+        }
+        if template_table.contains_key(key) {
+            continue;
+        }
         findings.push(WorldFinding {
-            severity: Severity::Error,
-            category: "unmergeable-override",
+            severity: Severity::Warning,
+            category: "override-absent-table",
             message: format!(
-                "entity '{}' carries an 'overrides' table that does not apply to its \
-                 template '{}', in '{}': {e}; every spawn caller would log and skip \
-                 it, leaving the world silently short of that entity",
+                "entity '{}' overrides '[{key}]', which template '{}' does not declare \
+                 after fragment composition, in '{}'; the merge inserts the table fresh \
+                 rather than refusing it, so the load succeeds but nothing the template \
+                 already wires up reads it — the override may attach to nothing until \
+                 the template gains that table itself",
                 inst.label, inst.template_path, src.path
             ),
             source: SourceLocation {
                 file: src.path.clone(),
-                line: line_of(src.toml, &inst.label)
+                line: line_of(src.toml, key)
+                    .or_else(|| line_of(src.toml, &inst.label))
                     .or_else(|| line_of(src.toml, inst.template_path)),
-                reference: inst.template_path.to_string(),
+                reference: key.clone(),
             },
         });
     }
@@ -2840,12 +2956,139 @@ name = "ghost"
         );
     }
 
+    // ── Override-absent-table warning (issue #1043) ──────────────────────────
+
+    /// The #1043 foot-gun itself: an override names a top-level table
+    /// (`[civilian]`) the resolved template does not declare at all —
+    /// `patroller.toml` has no `[civilian]` anywhere in its fixture TOML. The
+    /// merge still succeeds (it inserts the table fresh), so this is NOT an
+    /// `unmergeable-override`; it is the quieter defect that survives a clean
+    /// merge, and is why this check exists at all.
+    #[test]
+    fn override_targeting_an_absent_template_table_warns() {
+        let world_toml = overridden_entity_world("ghost", "{ civilian = { route = \"lane-a\" } }");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        let warning = findings
+            .iter()
+            .find(|f| f.category == "override-absent-table")
+            .unwrap_or_else(|| panic!("expected an override-absent-table finding: {findings:?}"));
+        assert!(!warning.is_error(), "the foot-gun is silent, not blocking");
+        assert!(warning.message.contains("ghost"), "{}", warning.message);
+        assert!(warning.message.contains("civilian"), "{}", warning.message);
+        assert!(
+            warning.message.contains("assets/entities/patroller.toml"),
+            "{}",
+            warning.message
+        );
+    }
+
+    /// The other side of the same fixture: `patroller.toml` DOES declare
+    /// `[behaviour]` (it is a patrolling hull — see the `PATROLLER` const), so
+    /// an override that adds a second doctrine entry merges into a real table
+    /// and must not warn.
+    ///
+    /// Declares `[anchors] route_a / route_b` — the same pair `PATROLLER`'s own
+    /// baked-in `patrol-route` doctrine already names — so this world is clean
+    /// under `validate_doctrine_anchors_in` too and the "no errors" assertion
+    /// below is not contaminated by a pre-existing, unrelated anchor gap in the
+    /// fixture.
+    #[test]
+    fn override_targeting_a_declared_template_table_does_not_warn() {
+        let world_toml = format!(
+            "{}\n[anchors]\nroute_a = [10.0, 0.0, 20.0]\nroute_b = [30.0, 0.0, 40.0]\n",
+            overridden_entity_world(
+                "ghost",
+                "{ behaviour = { doctrine = [{ id = \"reinforce\", text = \"x\", \
+                 directive_kind = \"Reach\", directive_anchor = \"route_a\" }] } }",
+            )
+        );
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.category == "override-absent-table"),
+            "'[behaviour]' is declared by the template, so this must not warn: {findings:?}"
+        );
+        assert!(
+            !findings.iter().any(WorldFinding::is_error),
+            "and this override is well-formed, so nothing should block activation either: \
+             {findings:?}"
+        );
+    }
+
+    /// A warning is exactly that: the world still activates. The deliberate
+    /// contrast with `an_override_that_does_not_merge_blocks_activation`, which
+    /// is the same fixture shape one severity up.
+    ///
+    /// The override is an EMPTY `[civilian]` table — no `route` — so this stays
+    /// clean under `validate_civilian_routes_in` too (an authored route id that
+    /// resolves nowhere is its own, separate, unresolved-route error, not this
+    /// check's concern). `[anchors] route_a / route_b` is declared for the same
+    /// reason as the sibling "does not warn" test: `PATROLLER`'s own baked-in
+    /// doctrine names them regardless of what this test overrides.
+    #[test]
+    fn override_absent_table_warning_does_not_block_activation() {
+        let world_toml = format!(
+            "{}\n[anchors]\nroute_a = [10.0, 0.0, 20.0]\nroute_b = [30.0, 0.0, 40.0]\n",
+            overridden_entity_world("ghost", "{ civilian = {} }")
+        );
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "override-absent-table"),
+            "precondition: the warning itself must still be present: {findings:?}"
+        );
+        assert!(
+            !has_error(&findings),
+            "a warning must never block activation: {findings:?}"
+        );
+    }
+
+    /// The Bevy `Startup` gate carries the warning too, for the same reason it
+    /// carries every other half of this function's findings: the browser never
+    /// calls `validate_composition`.
+    #[test]
+    fn activation_findings_carries_the_override_absent_table_warning() {
+        let config = cfg(&overridden_entity_world(
+            "ghost",
+            "{ civilian = { route = \"lane-a\" } }",
+        ));
+        let findings = activation_findings(
+            &config,
+            &crate::entity_includes::HostFragmentSource,
+            &patroller_templates(),
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "override-absent-table" && !f.is_error()),
+            "{findings:?}"
+        );
+    }
+
     /// Every template every shipped world names resolves through the loader
     /// headless validates with, **and** every `overrides` table those worlds
     /// carry merges onto the hull it names — so a hull that is deleted,
     /// renamed, or mistyped in a world file, or an override that no longer
     /// applies to the template it targets, fails the build instead of costing a
     /// scenario its entities at runtime.
+    ///
+    /// Checks only `!has_error`, not `is_empty`, since #1043's
+    /// `override-absent-table` WARNING now rides in this same findings list and
+    /// several shipped worlds legitimately carry one (see
+    /// `shipped_world_override_absent_table_warnings_are_the_known_set`, which
+    /// pins exactly which). A warning is not a resolution failure — nothing
+    /// here got harder to resolve — so it must not fail this test.
     ///
     /// # What this does NOT catch, stated so nobody reads it as more
     ///
@@ -2882,11 +3125,105 @@ name = "ghost"
             let mut seen = HashSet::new();
             let findings = validate_template_resolution_in(&src, &loader, &mut seen);
             assert!(
-                findings.is_empty(),
+                !has_error(&findings),
                 "shipped world {path_str} names a template that does not resolve: {findings:?}"
             );
             checked += 1;
         }
         assert!(checked > 0, "expected at least one shipped world");
+    }
+
+    /// Every shipped world's `override-absent-table` warnings (issue #1043),
+    /// pinned to the known `(world, key)` set so a NEW one — an authoring slip
+    /// shaped exactly like the hauler `[behaviour]` #1043 found by hand — fails
+    /// the build instead of hiding in a diff, the same discipline
+    /// `every_shipped_world_names_a_template_that_resolves` applies to the
+    /// error half of this same function.
+    ///
+    /// # Every entry here is read, not merely inert-but-harmless
+    ///
+    /// `[operations]` and `[infrastructure]` are attached purely off
+    /// `EntityConfig` presence — `entities::spawner`: `if let Some(x) =
+    /// &config.x { entity_commands.insert(...) }` — with nothing else the
+    /// template needs to have already declared. So an override granting
+    /// #1025's damage/repair surface or #1026's tow/stabilise/escort surface to
+    /// ONE probe-scenario instance of an otherwise-generic hull (an
+    /// `alliance_cruiser` "tug" or "tender", a `ship_civilian_hauler` "hulk", a
+    /// `ship_harrow_patrol` "claimant", `station_axiom` itself) genuinely works
+    /// — each probe world's name says which capability it exists to exercise
+    /// (`probe_operations`, `probe_stabilise`, `probe_collapse`, `probe_storm`,
+    /// `probe_strike`, `probe_restraint`, `falling_skyway`). None of these is
+    /// the #1043 shape (an override whose data land on a field nothing reads),
+    /// so none is "fixed" — the warning is accurate: the picked template really
+    /// does not declare the table, the author should still be able to see
+    /// that, and today can.
+    ///
+    /// # The negative case #1043's fix already relies on
+    ///
+    /// `probe_evidence.toml` and `probe_corroborate.toml` author a
+    /// `comms_console.ai.rule` override — live today via `player_hull_config`
+    /// (`src/server_app.rs`) — and must NOT appear here: `comms_console.ai` is
+    /// declared on every composed player hull through the shared AI fragment
+    /// library, so that override merges into a real table, not a fresh one.
+    #[test]
+    fn shipped_world_override_absent_table_warnings_are_the_known_set() {
+        const KNOWN: &[(&str, &str)] = &[
+            ("assets/worlds/falling_skyway.toml", "infrastructure"),
+            ("assets/worlds/probe_collapse.toml", "operations"),
+            ("assets/worlds/probe_destroy.toml", "operations"),
+            ("assets/worlds/probe_operations.toml", "infrastructure"),
+            ("assets/worlds/probe_operations.toml", "operations"),
+            ("assets/worlds/probe_restraint.toml", "infrastructure"),
+            ("assets/worlds/probe_stabilise.toml", "operations"),
+            ("assets/worlds/probe_storm.toml", "infrastructure"),
+            ("assets/worlds/probe_storm.toml", "operations"),
+            ("assets/worlds/probe_strike.toml", "infrastructure"),
+            ("assets/worlds/probe_strike.toml", "operations"),
+        ];
+
+        let loader = crate::entity_loader::WasmTemplateLoader;
+        let mut unexpected: Vec<String> = Vec::new();
+        let mut evidence_or_corroborate_warned = false;
+        for entry in std::fs::read_dir("assets/worlds").expect("worlds dir readable") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let path_str = path.to_string_lossy().replace('\\', "/");
+            let toml = std::fs::read_to_string(&path).expect("shipped world readable");
+            let config = parse_world(&toml).expect("shipped world parses");
+            let src = WorldSource::new(&path_str, &toml, &config);
+            let mut seen = HashSet::new();
+            let findings = validate_template_resolution_in(&src, &loader, &mut seen);
+            for f in findings
+                .iter()
+                .filter(|f| f.category == "override-absent-table")
+            {
+                let key = f.source.reference.as_str();
+                if path_str.ends_with("probe_evidence.toml")
+                    || path_str.ends_with("probe_corroborate.toml")
+                {
+                    evidence_or_corroborate_warned = true;
+                }
+                if !KNOWN.contains(&(path_str.as_str(), key)) {
+                    unexpected.push(format!("{path_str} overrides absent table '{key}'"));
+                }
+            }
+        }
+
+        assert!(
+            unexpected.is_empty(),
+            "a shipped world now names an override-absent-table combination this test does \
+             not know about: {unexpected:?}. If this is a genuine new use of the \
+             absent-table-insertion pattern (like `operations`/`infrastructure` above), add it \
+             to KNOWN with a note on why it is read; if it is the #1043 shape instead, fix the \
+             world instead of the allowlist."
+        );
+        assert!(
+            !evidence_or_corroborate_warned,
+            "probe_evidence/probe_corroborate's `comms_console.ai.rule` override must merge \
+             onto a declared table (issue #1036/#1043) — a warning here means the player-ship \
+             fix regressed"
+        );
     }
 }

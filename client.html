@@ -191,7 +191,14 @@
     #phone-bezel.alert-on {
       border-color: var(--bezel-red);
       box-shadow: 0 0 var(--bezel-glow-size) calc(var(--bezel-glow-size) * 3) var(--bezel-frame);
-      animation: bezel-pulse 2.8s ease-in-out forwards;
+      /* `infinite`, not `forwards`: the alert is a STATE, and the bezel is how
+         the whole crew reads that state off each other's phones across a room.
+         With no iteration count the pulse ran exactly once — about three
+         seconds of alarm at the moment the captain raised it, and then a
+         static red frame for the rest of the engagement. The keyframes were
+         always written for a loop (the comment inside says "a steady slow
+         pulsing loop"); only the iteration count was missing. */
+      animation: bezel-pulse 2.8s ease-in-out infinite;
     }
 
     #phone-bezel.alert-on::after {
@@ -208,6 +215,24 @@
      50%   { box-shadow: inset 0 0 8px var(--bezel-red), 0 0 16px calc(var(--bezel-glow-size) * 4) rgba(230,60,30,0.9); border-color: #ff5a44; opacity: 0.95; }
     100%   { box-shadow: inset 0 0 4px transparent; border-color: rgba(255,80,60,0.5); opacity: 1; }
 }
+
+    /* Reduced motion: still the pulse, keep the alert.
+       A looping red flash across the whole screen edge is exactly the kind of
+       thing a player who asks for reduced motion is asking not to be given.
+       The answer is to stop the ANIMATION, not to hide the STATE — so the
+       bezel holds at the keyframe's peak: full red border and full glow,
+       simply not moving. Someone reading the room still sees a ship at red
+       alert. This is the reduced-motion contract module 3 generalises to every
+       looping animation; the bezel gets it here because it is the loop this
+       commit turns on. */
+    @media (prefers-reduced-motion: reduce) {
+      #phone-bezel.alert-on {
+        animation: none;
+        border-color: #ff5a44;
+        box-shadow: inset 0 0 8px var(--bezel-red),
+                    0 0 16px calc(var(--bezel-glow-size) * 4) rgba(230,60,30,0.9);
+      }
+    }
 
      #phone-bezel[aria-hidden="true"] { display: none; }
     #coordination-popup {

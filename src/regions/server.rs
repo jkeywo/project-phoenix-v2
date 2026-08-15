@@ -1975,6 +1975,136 @@ mod tests {
         );
     }
 
+    /// **A shipped slow zone must make a ship SLOWER, not faster.**
+    ///
+    /// Every slow-zone test above authors its own bonus (`-0.5`, `-0.3`) and so
+    /// can only ever prove the formula; this one drives the REAL numbers out of
+    /// the shipped templates through the real `RegionPlugin`, and is the only
+    /// thing in the suite that would have failed while `region_storm_band.toml`
+    /// authored `0.5`/`0.6` and `region_radiation_band.toml` authored
+    /// `0.6`/`0.7`. All four read as "reduce this axis to 50%/60%/70%"; all
+    /// four are signed BONUSES, so all four resolved to `1 + b` and let a ship
+    /// fly FASTER and turn harder inside the hazard than outside it, while
+    /// `region_radiation_band.toml`'s own header said in the same file that
+    /// "flying through a front is slower than flying around it".
+    ///
+    /// This is the runtime twin of
+    /// `regions::effects::shipped_assets::every_shipped_slow_zone_actually_slows`,
+    /// exactly as the radar guards are twins: that one walks the data, this one
+    /// walks the same data through the engine, so neither the authored number
+    /// nor the formula can drift out from under the other.
+    ///
+    /// Two claims, because a slow zone makes two of them. The MaxSpeed and
+    /// MaxYawRate multipliers are the MODIFIER claim; `forward_speed` after the
+    /// `handle_slow_zone_speed_clamp` observer has run is the PHYSICS claim —
+    /// the same ship, at the same throttle, actually travelling slower. Only
+    /// the second would notice if the clamp stopped reading the slot.
+    ///
+    /// The claim asserted is the SIGN — inside strictly less than outside —
+    /// rather than a particular multiplier, for the radar guard's reason: the
+    /// bands' numbers are unratified tuning ([ai]) and pinning them here would
+    /// make a designer's edit fail a test that is not about tuning.
+    ///
+    /// A template whose `slow_zone` authors NEITHER number is skipped rather
+    /// than failed: that is the operations presence marker documented on
+    /// `SlowZoneEffect`, and it has no sign to get wrong.
+    #[test]
+    fn every_shipped_slow_zone_slows_the_ship_that_enters_it() {
+        #[derive(serde::Deserialize)]
+        struct Wrap {
+            #[serde(default)]
+            effects: EffectsCfg,
+        }
+
+        let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
+        let mut checked = 0usize;
+        let entries = std::fs::read_dir("assets/entities").expect("assets/entities must exist");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let file = path.to_string_lossy().replace('\\', "/");
+            let toml_str = std::fs::read_to_string(&path).expect("entity template readable");
+            let Ok(wrap) = toml::from_str::<Wrap>(&toml_str) else {
+                continue;
+            };
+            let Some(slow_zone) = wrap.effects.slow_zone else {
+                continue;
+            };
+            if slow_zone.thrust_modifier.is_none() && slow_zone.yaw_rate_modifier.is_none() {
+                continue;
+            }
+            checked += 1;
+
+            let mut app = slow_zone_test_app();
+            spawn_slow_zone(
+                &mut app,
+                0.0,
+                0.0,
+                50.0,
+                slow_zone.thrust_modifier,
+                slow_zone.yaw_rate_modifier,
+            );
+
+            // Outside first, so "slower" is measured against this world's own
+            // unmodified flight rather than against an assumed 1.0. The ship is
+            // put at the hull's full throttle both times; nothing clamps it out
+            // here, so this is the speed the same order buys in clear space.
+            set_physics(&mut app, |p| {
+                p.forward_speed = base_max;
+                p.x = 500.0;
+            });
+            set_ship_pos(&mut app, 500.0, 0.0);
+            tick_with_dt(&mut app, 0.016);
+            let outside_speed = get_ship_physics(&mut app).forward_speed;
+            let outside = get_ship_modifiers(&mut app);
+            let outside_thrust = outside.get(&ModifierSlot::MaxSpeed);
+            let outside_yaw = outside.get(&ModifierSlot::MaxYawRate);
+
+            set_physics(&mut app, |p| {
+                p.forward_speed = base_max;
+                p.x = 0.0;
+            });
+            set_ship_pos(&mut app, 0.0, 0.0);
+            tick_with_dt(&mut app, 0.016);
+            let inside_speed = get_ship_physics(&mut app).forward_speed;
+            let inside = get_ship_modifiers(&mut app);
+            let inside_thrust = inside.get(&ModifierSlot::MaxSpeed);
+            let inside_yaw = inside.get(&ModifierSlot::MaxYawRate);
+
+            if let Some(bonus) = slow_zone.thrust_modifier {
+                assert!(
+                    inside_thrust < outside_thrust,
+                    "{file} authors `thrust_modifier = {bonus}`, which gives a MaxSpeed \
+                     multiplier of {inside_thrust} INSIDE the region against {outside_thrust} \
+                     outside it. A slow zone must reduce speed; the field is a signed bonus, so \
+                     author a negative one."
+                );
+                assert!(
+                    inside_speed < outside_speed,
+                    "{file} authors `thrust_modifier = {bonus}`, and the SAME ship at the SAME \
+                     throttle travels at {inside_speed} inside the region against \
+                     {outside_speed} outside it. A ship in a slow zone has to actually fly \
+                     slower."
+                );
+            }
+            if let Some(bonus) = slow_zone.yaw_rate_modifier {
+                assert!(
+                    inside_yaw < outside_yaw,
+                    "{file} authors `yaw_rate_modifier = {bonus}`, which gives a MaxYawRate \
+                     multiplier of {inside_yaw} INSIDE the region against {outside_yaw} outside \
+                     it. A slow zone must reduce the turn rate; the field is a signed bonus, so \
+                     author a negative one."
+                );
+            }
+        }
+        assert!(
+            checked > 0,
+            "shipped region templates should author slow-zone numbers"
+        );
+    }
+
     // Ã¢â€â‚¬Ã¢â€â‚¬ Flag effect tests (CommsJam / SensorBlind) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     use crate::messages::FlagKind;

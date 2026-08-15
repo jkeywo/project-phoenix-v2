@@ -35,10 +35,78 @@ pub struct DamageZoneEffect {
     pub shield_pierce: f32,
 }
 
+/// A region's effect on how fast — and how sharply — a ship standing in it can
+/// fly.
+///
+/// # Both fields are signed BONUSES, not multipliers
+///
+/// This is the same trap [`RadarDampeningEffect::range_modifier`] carries, on a
+/// field pair whose names read even more like multipliers. `thrust_modifier`
+/// and `yaw_rate_modifier` are added to [`crate::messages::ModifierSlot::MaxSpeed`]
+/// and [`crate::messages::ModifierSlot::MaxYawRate`] by
+/// `modifiers::coordination::apply_region_effects`, and each slot's cache
+/// (`modifiers::cache::ShipModifiers::rebuild_cache`) turns the SUM of every
+/// bonus on the slot into the multiplier the helm actually flies, through PRD
+/// #117's two-sided formula:
+///
+/// ```text
+/// bonus >= 0  ->  multiplier = 1 + bonus
+/// bonus <  0  ->  multiplier = 1 / (1 + |bonus|)
+/// ```
+///
+/// So a SLOWING region authors NEGATIVE numbers, and the value that gives a
+/// wanted multiplier `m` (for `0 < m < 1`) is `-(1/m - 1)`: −1.0 halves the
+/// axis, −2/3 takes it to three fifths, −3/7 to seven tenths.
+///
+/// A POSITIVE number on an effect called a *slow zone* therefore does the
+/// opposite of what it reads like — the hazard makes ships FASTER and more
+/// agile than they are in clear space. Both shipped bands authored exactly
+/// that (`region_storm_band.toml` at `0.5`/`0.6` and
+/// `region_radiation_band.toml` at `0.6`/`0.7`, evidently meaning "reduce
+/// thrust to 50%/60%" and "to 60%/70%") until the fix that added this doc
+/// comment, so a storm front sped a ship up by half and a radiation front by
+/// three fifths. It is the same defect the radar-dampening sign fix corrected
+/// on the neighbouring field, found in #1037 and fixed there first.
+///
+/// # A field-free slow zone is not a mistake
+///
+/// `[effects.slow_zone]` with NEITHER field authored is legitimate and shipped
+/// deliberately: it is the presence marker an operation's
+/// `[[operations.capability.interrupt]]` names with
+/// `region_effect = "slow_zone"`, and the rate that stretches the work lives on
+/// the CAPABILITY. A band that only wants to make external work take longer
+/// authors no numbers here and has no sign to get wrong. That path is a
+/// separate, correctly-signed mechanism (`rate_percent`, where 50 means half
+/// rate) and nothing here touches it.
+///
+/// See `shipped_assets::every_shipped_slow_zone_actually_slows` below for the
+/// CI-side guard, and
+/// `regions::server::every_shipped_slow_zone_slows_the_ship_that_enters_it` for
+/// the runtime twin.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlowZoneEffect {
     pub thrust_modifier: Option<f32>,
     pub yaw_rate_modifier: Option<f32>,
+}
+
+impl SlowZoneEffect {
+    /// True when every axis this effect actually authors slows the ship — i.e.
+    /// when each present bonus resolves to a multiplier below 1.0.
+    ///
+    /// Vacuously true for the field-free presence marker described on the type,
+    /// and that is the intended reading: a slow zone that authors no numbers has
+    /// no sign to get wrong, and rejecting it here would fail the one shape the
+    /// operations path depends on.
+    ///
+    /// `0.0` on a PRESENT axis is not neutral either: it is a modifier that
+    /// modifies nothing, on the one axis whose entire job is to change
+    /// something, which is an authoring mistake rather than a default.
+    pub fn slows(&self) -> bool {
+        [self.thrust_modifier, self.yaw_rate_modifier]
+            .into_iter()
+            .flatten()
+            .all(|bonus| bonus < 0.0)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -362,6 +430,37 @@ multiplier = 0.4
         }
         .dampens());
     }
+
+    // ── The sign of a slow-zone bonus ─────────────────────────────────────
+
+    #[test]
+    fn negative_slow_zone_bonuses_slow_and_positive_ones_do_not() {
+        let slow = |thrust, yaw| {
+            SlowZoneEffect {
+                thrust_modifier: thrust,
+                yaw_rate_modifier: yaw,
+            }
+            .slows()
+        };
+
+        assert!(slow(Some(-1.0), Some(-0.5)));
+        assert!(slow(Some(-1.0), None));
+        assert!(slow(None, Some(-0.5)));
+
+        // The shipped shape of the defect: numbers that READ as multipliers.
+        assert!(!slow(Some(0.5), Some(0.6)));
+        assert!(!slow(Some(0.6), Some(0.7)));
+        // One good axis does not excuse the other.
+        assert!(!slow(Some(-1.0), Some(0.6)));
+        assert!(!slow(Some(0.5), Some(-0.6)));
+        // Zero on a present axis modifies nothing, which on this axis is a
+        // mistake rather than a default.
+        assert!(!slow(Some(0.0), None));
+
+        // …but a slow zone that authors NEITHER number is the operations
+        // presence marker, and has no sign to get wrong.
+        assert!(slow(None, None));
+    }
 }
 
 /// Shipped-asset conformance: every region template in `assets/` that claims to
@@ -437,6 +536,80 @@ mod shipped_assets {
         assert!(
             problems.is_empty(),
             "a region that dampens radar must author a NEGATIVE range_modifier:\n{}",
+            problems.join("\n")
+        );
+    }
+
+    /// The same walk, on the same defect, one field pair over: every region
+    /// template that authors a `slow_zone` number actually slows a ship down.
+    ///
+    /// This is the sister of the radar guard above and exists for the same
+    /// reason — the runtime formula was always right and `regions::server`'s
+    /// own slow-zone tests always passed, because every one of them authors its
+    /// own negative bonus (`-0.5`, `-0.3`). What shipped were two bands
+    /// authoring positive ones: `region_storm_band.toml` at `0.5`/`0.6` and
+    /// `region_radiation_band.toml` at `0.6`/`0.7`, which resolved to `1.5×`
+    /// and `1.6×` thrust. Both "slow zones" made ships FASTER, and
+    /// `region_radiation_band.toml`'s own header claimed in the same file that
+    /// "flying through a front is slower than flying around it".
+    ///
+    /// A slow zone with NEITHER field authored passes: see `SlowZoneEffect`'s
+    /// type docs for why the field-free presence marker is a shape this repo
+    /// depends on rather than one to reject.
+    #[test]
+    fn every_shipped_slow_zone_actually_slows() {
+        #[derive(Deserialize)]
+        struct Wrap {
+            #[serde(default)]
+            effects: RegionEffectsConfig,
+        }
+
+        let mut checked = 0usize;
+        let mut problems: Vec<String> = Vec::new();
+        let entries = std::fs::read_dir("assets/entities").expect("assets/entities must exist");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let file = path.to_string_lossy().replace('\\', "/");
+            let toml_str = std::fs::read_to_string(&path).expect("entity template readable");
+            let Ok(wrap) = toml::from_str::<Wrap>(&toml_str) else {
+                continue;
+            };
+            let Some(slow_zone) = wrap.effects.slow_zone else {
+                continue;
+            };
+            checked += 1;
+            if slow_zone.slows() {
+                continue;
+            }
+            for (field, axis, bonus) in [
+                ("thrust_modifier", "speed", slow_zone.thrust_modifier),
+                (
+                    "yaw_rate_modifier",
+                    "turn rate",
+                    slow_zone.yaw_rate_modifier,
+                ),
+            ] {
+                let Some(bonus) = bonus.filter(|b| *b >= 0.0) else {
+                    continue;
+                };
+                problems.push(format!(
+                    "{file}: `[effects.slow_zone] {field} = {bonus}` is a signed BONUS, so it \
+                     resolves to a {axis} multiplier of {} — the region makes ships FASTER. For \
+                     a multiplier of `m`, author `-(1/m - 1)`.",
+                    1.0 + bonus
+                ));
+            }
+        }
+        assert!(
+            checked > 0,
+            "shipped region templates should author slow zones"
+        );
+        assert!(
+            problems.is_empty(),
+            "a region that slows ships must author NEGATIVE slow_zone bonuses:\n{}",
             problems.join("\n")
         );
     }

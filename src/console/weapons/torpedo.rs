@@ -1123,7 +1123,18 @@ pub(crate) struct HitPositionQueries<'w, 's> {
 /// broadcasts and VFX events.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_torpedo_lifecycle(
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::Ship>>,
+    // `Entity` + `EntityUuid` ride along so the per-ship walk below can be
+    // sorted into a stable order (issue #1052) rather than taken in archetype
+    // order; `EntityUuid` is `Option` because minimal test-only ship spawns
+    // omit it, exactly as the beam and collision paths allow.
+    mut torpedo_sys_q: Query<
+        (
+            Entity,
+            Option<&crate::entity_spawner::EntityUuid>,
+            &mut TorpedoSystemResource,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     // `world` + the reported registry bundled into one param to stay under
     // Bevy's 16-parameter ceiling (issue #838). `world_tracked.world` is the
@@ -1211,7 +1222,32 @@ pub(crate) fn tick_torpedo_lifecycle(
     let mut detonations: Vec<Detonation> = Vec::new();
     let mut any_ship_component = false;
 
-    for mut torpedo_sys in torpedo_sys_q.iter_mut() {
+    // Stable shooter order (issue #1052), the same mechanism
+    // `server_app::handle_collisions` has used since #896. Two things ride on
+    // it: the detonations this walk collects are applied — and draw from
+    // `SimStream::TorpedoDamage` — in collection order, and each ship's tick
+    // mints `IdNamespace::Projectile` ids from the shared `WorldIdMint`, so
+    // archetype order decided both which hit consumed which draw and which
+    // launch got which id. The proximity `targets` list this feeds is already
+    // uuid-sorted for the same class of reason.
+    let mut shooter_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = torpedo_sys_q
+        .iter()
+        .map(|(entity, uuid, _)| {
+            (
+                (
+                    uuid.map(|u| u.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    shooter_order.sort();
+
+    for shooter in shooter_order.into_iter().map(|(_, entity)| entity) {
+        let Ok((_, _, mut torpedo_sys)) = torpedo_sys_q.get_mut(shooter) else {
+            continue;
+        };
         any_ship_component = true;
         let result = torpedo_sys.0.tick(dt, target_positions, &mut || {
             crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Projectile)

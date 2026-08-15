@@ -657,7 +657,18 @@ pub(crate) fn handle_blaster_hits(
         Option<&mut crate::entity_spawner::EntityShipArcHull>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
     )>,
-    mut blaster_res_q: Query<&mut BlasterSystemResource, With<crate::server_app::Ship>>,
+    // `Entity` + `EntityUuid` ride along so the shooter walk below can be
+    // sorted into a stable order (issue #1052) rather than taken in archetype
+    // order; `EntityUuid` is `Option` because minimal test-only ship spawns
+    // omit it, exactly as the beam and collision paths allow.
+    mut blaster_res_q: Query<
+        (
+            Entity,
+            Option<&crate::entity_spawner::EntityUuid>,
+            &mut BlasterSystemResource,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     mut outbox: ResMut<SimOutbox>,
     mut commands: Commands,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
@@ -698,6 +709,13 @@ pub(crate) fn handle_blaster_hits(
             0.0,
         ));
     }
+    // Sorted by uuid before it is used (issue #1052), for the same reason the
+    // torpedo path already sorts its own proximity list: `find_hits` takes the
+    // FIRST target a projectile overlaps and stops, so this list's order is
+    // what decides which of two overlapping bodies a bolt hits. Built from two
+    // queries walked in archetype order, it was otherwise a function of how the
+    // world happened to spawn.
+    targets.sort_by(|a, b| a.0.cmp(&b.0));
 
     #[derive(Clone)]
     struct BlasterDetonation {
@@ -713,8 +731,31 @@ pub(crate) fn handle_blaster_hits(
         source_uuid: Option<String>,
     }
 
+    // Stable shooter order (issue #1052), the same mechanism
+    // `server_app::handle_collisions` has used since #896. The detonations this
+    // walk collects are applied — and draw from `SimStream::BlasterDamage` — in
+    // the order they were collected, so archetype order decided which bolt
+    // consumed which draw and therefore which of the victim's systems absorbed
+    // it.
+    let mut shooter_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = blaster_res_q
+        .iter()
+        .map(|(entity, uuid, _)| {
+            (
+                (
+                    uuid.map(|u| u.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    shooter_order.sort();
+
     let mut detonations: Vec<BlasterDetonation> = Vec::new();
-    for mut blaster_res in blaster_res_q.iter_mut() {
+    for shooter in shooter_order.into_iter().map(|(_, entity)| entity) {
+        let Ok((_, _, mut blaster_res)) = blaster_res_q.get_mut(shooter) else {
+            continue;
+        };
         for bank in blaster_res.0.iter_mut() {
             let hits = bank.find_hits(&targets);
             for (proj_id, target_uuid) in hits {

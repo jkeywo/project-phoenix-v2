@@ -212,9 +212,37 @@ fn apply_damage_zone_damage(
         return;
     }
 
-    for (ship_entity, mut hull, mut shields_opt, ship_uuid, is_local, mut arc_hull_opt) in
-        ship_query.iter_mut()
-    {
+    // Stable iteration order (issue #1052), the same mechanism
+    // `server_app::handle_collisions` has used since #896 and for the same
+    // reason. `ship_query.iter_mut()` walks the archetypes, which is an
+    // artefact of how entities were spawned, moved and despawned rather than
+    // anything the simulation authored — and the order is load-bearing here
+    // because every ship in a damage zone draws from `SimStream::RegionDamage`
+    // to pick which system absorbs the hit. Two ships swapping places swap
+    // their draws, so the same total damage lands on different systems.
+    // Measured (issue #1051): that is exactly what moved `rng_coverage` when a
+    // debug-only component insert displaced the archetype order.
+    let mut ship_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = ship_query
+        .iter()
+        // Position 3 of the tuple below is the ship's `Option<&EntityUuid>`.
+        .map(|(entity, _, _, uuid, _, _)| {
+            (
+                (
+                    uuid.map(|u| u.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    ship_order.sort();
+
+    for ship_entity in ship_order.into_iter().map(|(_, entity)| entity) {
+        let Ok((ship_entity, mut hull, mut shields_opt, ship_uuid, is_local, mut arc_hull_opt)) =
+            ship_query.get_mut(ship_entity)
+        else {
+            continue;
+        };
         let Some(region_set) = membership.inside.get(&ship_entity) else {
             continue;
         };

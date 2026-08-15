@@ -1153,20 +1153,45 @@ pub(crate) fn tick_beams_prepare(
     // previous frame survives.
     beam_context.clear();
 
-    for (
-        shooter_entity,
-        shooter_uuid_opt,
-        shooter_physics,
-        mut beam,
-        mut cooldown,
-        combat_config_opt,
-        modifiers_opt,
-        _weapons_target_opt,
-        is_local_shooter,
-        shooter_faction_opt,
-        shooter_phaser_freq_opt,
-    ) in ship_q.iter_mut()
-    {
+    // Stable shooter order (issue #1052), the same mechanism
+    // `server_app::handle_collisions` has used since #896. `ship_q.iter_mut()`
+    // walks the archetypes, and the `ShooterState`s this loop pushes are what
+    // `tick_beams_apply_damage` walks to draw from `SimStream::BeamDamage` —
+    // so archetype order decided which shooter's hit consumed which draw, and
+    // therefore which of the victim's systems absorbed it. #790 already sorted
+    // the BANKS within a shooter for this reason; this sorts the shooters.
+    let mut shooter_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = ship_q
+        .iter()
+        // Position 1 of the tuple below is the shooter's `Option<&EntityUuid>`.
+        .map(|(entity, uuid, ..)| {
+            (
+                (
+                    uuid.map(|u| u.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    shooter_order.sort();
+
+    for shooter in shooter_order.into_iter().map(|(_, entity)| entity) {
+        let Ok((
+            shooter_entity,
+            shooter_uuid_opt,
+            shooter_physics,
+            mut beam,
+            mut cooldown,
+            combat_config_opt,
+            modifiers_opt,
+            _weapons_target_opt,
+            is_local_shooter,
+            shooter_faction_opt,
+            shooter_phaser_freq_opt,
+        )) = ship_q.get_mut(shooter)
+        else {
+            continue;
+        };
         cooldown.tick(dt);
 
         // Every bank burning this tick, in authored-id order (issue #790). Taken

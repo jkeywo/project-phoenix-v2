@@ -100,6 +100,27 @@
 # — combat_test 14942520827746055774 and patrol 11531679067393217131 in
 # particular.
 #
+# MOVED IN #1052, to 0xc1034cdf5e40d79c (13908044596492949404). This world is
+# the ONLY one of the fifteen measured that moved, and the mechanism is named
+# and A/B'd rather than assumed: `regions::server::apply_damage_zone_damage`
+# now collects its victims and sorts them by world id before it walks them,
+# the pattern `server_app::handle_collisions` has used since #896. Every ship
+# inside a damage zone draws from `SimStream::RegionDamage` to pick which of
+# its systems absorbs the tick's damage, so the walk order decides which ship
+# gets which draw — and the old order was Bevy's archetype-creation order,
+# i.e. an artefact of how the world happened to spawn rather than anything
+# authored. This file is the one world with several ships inside a band at the
+# same time (eight hulls, two radiation bands), which is precisely why it is
+# the one that moved: everywhere else there was never a second victim for the
+# order to matter between.
+#
+# BOTH HALVES OF THE A/B ARE RECORDED. Reverting `src/regions/server.rs`
+# alone, with #1052's three weapons-site sorts left in place, returns this
+# digest to 11434311098359716284 exactly — so the region sort is the whole of
+# the move and the beam/blaster/torpedo sorts contributed nothing here. The
+# other twelve anchors and duel and rng_coverage were re-measured across the
+# same change and are unmoved.
+#
 # No `--ship`: the player row is the headless default hull, parked 6 km from
 # anything, exactly as the other probes leave it.
 

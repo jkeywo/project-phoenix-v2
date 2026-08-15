@@ -1334,3 +1334,8 @@ console.radar.scale,"Radar scope scale readout, drawn against the outermost rang
 client.no_scenarios,"Phone scenario picker — shown when the host's catalogue arrived with nothing in it. NOT ""waiting for the host to pick"": the host has already broadcast, and the broadcast was empty",[No scenarios available]
 client.pick_pending,Phone scenario/ship picker — shown on the option a player just tapped while the request is in flight and the host has not yet broadcast the lock,[Sending…]
 client.pick_taken,"Phone scenario/ship picker — shown when another phone's pick landed first and locked the choice. {choice} is what that phone chose, named so the stage change has a stated cause",[Another phone chose {choice} first.]
+client.game_over_victory,Game-over overlay headline when the run ended in the scenario's victory condition,[VICTORY]
+client.game_over_defeat,Game-over overlay headline when the run ended in defeat — the scenario's loss condition or the hull reaching zero,[DEFEAT]
+client.game_over_ended,Game-over overlay headline when the run ended without a declared win or loss,[ENGAGEMENT ENDED]
+client.link_connecting,Console banner before the first state arrives from the host — an empty console is loading rather than broken,[Linking to the ship…]
+client.link_dead,Console banner headline while the link to the host is down. The console behind it is dimmed and stops accepting commands,[LINK LOST]

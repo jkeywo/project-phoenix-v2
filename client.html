@@ -47,6 +47,13 @@
   <script type="module" src="gui/station-roster.js"></script>
   <script type="module" src="gui/client-router.js"></script>
   <script type="module" src="gui/lobby-view.js"></script>
+  <!-- Onboarding/session-flow state (PRD #1023 module 4): the in-flight
+       scenario/ship pick, the game-over frame, and whether a console's link is
+       live, still loading or dead. All three are pure rules the inline script
+       renders; none of them touch the DOM themselves. -->
+  <script type="module" src="gui/scenario-pick.js"></script>
+  <script type="module" src="gui/game-over-view.js"></script>
+  <script type="module" src="gui/link-state.js"></script>
   <script type="module" src="gui/coordination-popup.js"></script>
   <!-- Per-tab session identity (issue: multiple clients on one desktop).
        localStorage is shared across all tabs of an origin, so every console
@@ -141,6 +148,51 @@
     #console-container > *, #console-container section.active > * {
       pointer-events: auto;
     }
+    /* -- Link state (PRD #1023 module 4, user stories 14 and 15) ---------
+       A console renders from local state, so it looks the same whether the
+       numbers behind it are live, stale or absent. [data-link] is what makes
+       that difference visible.
+
+       `connecting` is dimmed but still live to the touch: it is "not yet", and
+       it resolves on its own. `dead` is "no longer" — dimmed harder, drained
+       of colour, and inert, so a thumb cannot keep firing torpedoes into a
+       link that closed thirty seconds ago. pointer-events on the container is
+       what actually stops the taps: the controls themselves live inside
+       console iframes and shadow roots this page does not own. */
+    #console-container[data-link="connecting"] { opacity: 0.55; }
+    #console-container[data-link="dead"] {
+      opacity: 0.32; filter: grayscale(0.85);
+      pointer-events: none;
+    }
+    #console-container[data-link="dead"] > *,
+    #console-container[data-link="dead"] section.active > * {
+      pointer-events: none;
+    }
+    #console-container[data-link] { transition: opacity .25s ease, filter .25s ease; }
+    #link-banner[aria-hidden="true"] { display: none; }
+    #link-banner {
+      position: fixed; z-index: 188;
+      top: max(env(safe-area-inset-top), 3.2rem); left: 50%;
+      transform: translateX(-50%);
+      max-width: min(92vw, 46ch);
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      padding: 10px 18px; border-radius: 6px;
+      font-family: 'Chakra Petch', monospace; text-align: center;
+      background: var(--scrim-panel);
+      border: 1px solid var(--edge-strong);
+      pointer-events: none;
+    }
+    #link-banner[data-mode="dead"] {
+      border-color: var(--fire); background: rgba(var(--rgb-fire), 0.18);
+    }
+    #link-banner .link-banner-title {
+      font-size: var(--text-md); font-weight: 700;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      color: var(--ink);
+    }
+    #link-banner[data-mode="dead"] .link-banner-title { color: var(--fire-bright); }
+    #link-banner .link-banner-detail { font-size: var(--text-sm); color: var(--ink-dim); }
+    #link-banner .link-banner-detail:empty { display: none; }
     /* Helm console UI moved to Bevy WASM (#49). */
     /* Weapons console: full-viewport iframe overlay when active (issue #422).
        Padding leaves room for the phone bezel (issue #439); see --bezel-inset
@@ -303,6 +355,37 @@
       text-align: center;
       padding: 32px;
     }
+    /* The frame, outermost first (PRD #1023 module 4): the scenario that just
+       ended, the result it ended in, then the world's own closing prose. The
+       accent is the only thing the outcome changes — the layout is identical
+       for a win and a loss, so neither reads as the "special" ending. */
+    #game-over-overlay .game-over-scenario {
+      font-size: var(--text-md);
+      letter-spacing: var(--tracking-widest);
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      margin-bottom: 10px;
+    }
+    #game-over-overlay .game-over-scenario:empty { display: none; }
+    #game-over-overlay .game-over-headline {
+      font-size: var(--text-display);
+      font-weight: 700;
+      letter-spacing: var(--tracking-wide);
+      text-transform: uppercase;
+      line-height: 1.1;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--edge-strong);
+    }
+    #game-over-overlay[data-outcome="victory"] .game-over-headline {
+      color: var(--loaded-bright); border-bottom-color: var(--loaded);
+    }
+    #game-over-overlay[data-outcome="defeat"] .game-over-headline {
+      color: var(--fire-bright); border-bottom-color: var(--fire);
+    }
+    #game-over-overlay[data-outcome="ended"] .game-over-headline {
+      color: var(--ink); border-bottom-color: var(--edge-strong);
+    }
     #game-over-overlay .game-over-message {
       font-size: var(--text-lg);
       white-space: pre-wrap;
@@ -382,6 +465,27 @@
       cursor: pointer; min-height: var(--control-hit-min);
     }
     #scenario-picker-body .scenario-btn:active { background: rgba(var(--rgb-cyan), 0.22); }
+    /* In-flight pick (PRD #1023 user story 16). The tapped button keeps its
+       accent and gains a line saying the request is out; every other button
+       recedes, because the arbiter will ignore a second request anyway and a
+       picker that keeps taking taps it will not act on is what made the stage
+       change feel arbitrary. */
+    #scenario-picker-body .scenario-btn:disabled { opacity: 0.45; cursor: default; }
+    #scenario-picker-body .scenario-btn.pending:disabled {
+      opacity: 1; border-color: var(--signal); background: rgba(var(--rgb-cyan), 0.2);
+    }
+    #scenario-picker-body .scenario-pending {
+      margin-top: 6px; font-size: var(--text-sm); color: var(--signal);
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+    }
+    /* Another phone won the race. Stated, and naming what it chose, so the
+       stage the player was moved to has a cause. */
+    #scenario-picker-body .scenario-race-note {
+      padding: 10px 14px; border-radius: 6px; text-align: center;
+      font-size: var(--text-md); color: var(--ink);
+      background: rgba(var(--rgb-gold), 0.14); border: 1px solid var(--gold);
+      letter-spacing: 0.03em;
+    }
     #scenario-picker-body .scenario-desc { font-size: var(--text-sm); color: var(--ink-dim); margin-top: 6px; letter-spacing: 0.02em; }
     #scenario-picker-body .scenario-locked-note { text-align: center; color: var(--ink-dim); font-size: var(--text-md); letter-spacing: 0.05em; }
     /* Mod-origin badge on a scenario button (issue #990): a base scenario gets
@@ -903,8 +1007,18 @@
   <!-- Game-over overlay: shown when GamePhase::GameOver. Displays either
        "Ship Destroyed" (hull death) or the scenario's game_over message. -->
   <div id="game-over-overlay">
+    <div class="game-over-scenario" id="game-over-scenario"></div>
+    <div class="game-over-headline" id="game-over-headline"></div>
     <div class="game-over-message" id="game-over-message"></div>
     <button id="return-to-lobby-btn" class="game-over-return-btn" data-i18n="client.return_to_lobby">Return to Lobby</button>
+  </div>
+
+  <!-- Link banner (PRD #1023 module 4): says out loud what the dimmed console
+       behind it means — either the host is gone, or its first state has not
+       landed yet. Hidden whenever the link is live. -->
+  <div id="link-banner" aria-hidden="true" role="status">
+    <div class="link-banner-title"></div>
+    <div class="link-banner-detail"></div>
   </div>
 
   <!-- Waiting-for-scenario overlay: shown after ReturnToLobby while the
@@ -961,18 +1075,23 @@
       if (window.phStrings && window.phStrings.has(key)) return window.phStrings.t(key);
       return st.name || st.id || '';
     }
+    // Resolve a value that arrived over the wire and MAY be a string id.
+    // A phone's copy came through localiseTree and is already resolved text;
+    // a mod pack's literal prose never was an id. Substitute only what the
+    // table actually holds — the same passthrough rule as
+    // gui/components/ph-ship-picker.js.
+    function wireText(value) {
+      if (!value) return '';
+      if (window.phStrings && window.phStrings.has(value)) return window.phStrings.t(value);
+      return String(value);
+    }
     // What a station DOES, shown on its lobby row before the claim tap (PRD
     // #1023 module 4). The copy is already authored per hull as
     // `entity.<hull>.station.<id>.description` and rides the wire in
     // StationDef.description — this reuses those ids rather than minting a
-    // second, diverging set. A phone's copy arrived through localiseTree and is
-    // already resolved text; the has()/t() pass is for the ids that did not
-    // (the same passthrough rule as gui/components/ph-ship-picker.js).
+    // second, diverging set.
     function stationDescription(st) {
-      if (!st || !st.description) return '';
-      const raw = st.description;
-      if (window.phStrings && window.phStrings.has(raw)) return window.phStrings.t(raw);
-      return raw;
+      return st ? wireText(st.description) : '';
     }
 
     // -- Click sound --------------------------------------------------------
@@ -998,7 +1117,50 @@
 
     // -- Connection status --------------------------------------------------
 
+    /// The connection-manager status verbatim, and whether the host has said
+    /// anything at all since the link came up. Together they decide whether a
+    /// console is live, still loading, or dead (gui/link-state.js).
+    let linkStatus = 'connecting';
+    let linkHasData = false;
+
+    /// Dim + disable the console, or mark it as still loading, per
+    /// gui/link-state.js. Game shell only: in the lobby the status line and
+    /// the ready pill already carry this, and dimming the roster the player is
+    /// trying to claim from would be worse than useless.
+    function renderLinkState(inGame) {
+      const container = document.getElementById('console-container');
+      const banner = document.getElementById('link-banner');
+      if (!container || typeof window.linkView !== 'function') return;
+      const lv = window.linkView(linkStatus, linkHasData);
+      const mode = inGame ? lv.mode : 'live';
+      container.dataset.link = mode;
+      // aria-disabled rather than the disabled attribute: the controls live
+      // inside console iframes and shadow roots this page does not own, so the
+      // container's own pointer-events is what actually stops the taps.
+      container.setAttribute('aria-disabled', (inGame && lv.disable) ? 'true' : 'false');
+      if (banner) {
+        const showBanner = inGame && lv.bannerId;
+        banner.setAttribute('aria-hidden', showBanner ? 'false' : 'true');
+        banner.dataset.mode = mode;
+        if (showBanner) {
+          const title = banner.querySelector('.link-banner-title');
+          const detail = banner.querySelector('.link-banner-detail');
+          if (title) title.textContent = t(lv.mode === 'dead' ? 'client.link_dead' : 'client.link_connecting');
+          // The dead case says BOTH that the link is gone and what the client
+          // is doing about it; connecting has nothing to add to its own title.
+          if (detail) detail.textContent = lv.mode === 'dead' ? t(lv.bannerId) : '';
+        }
+      }
+    }
+
     function setConnectionStatus(state) {
+      linkStatus = state;
+      // A link that dropped has to re-earn "has data": whatever the console is
+      // showing when it comes back is from before the gap, so the console goes
+      // back through CONNECTING rather than straight to live with stale
+      // numbers on it (PRD #1023 user story 15).
+      if (state !== 'ready') linkHasData = false;
+      scheduleRender();
       const dot = document.getElementById('conn-dot');
       const label = document.getElementById('conn-label');
       const retryBtn = document.getElementById('retry-now-btn');
@@ -1232,14 +1394,57 @@
     // rebuilt when the stage actually changes — the render loop runs at rAF
     // cadence and must not tear down a half-tapped picker.
     let _pickerStageKey = null;
+    /// The request this phone has sent and not yet seen answered, and the
+    /// "another phone got there first" record left by the last one that lost
+    /// the race. Both are pure-rule state — see gui/scenario-pick.js — kept
+    /// here because the arbiter never addresses an acknowledgement to us.
+    let _pick = null;
+    let _pickNotice = null;
+
+    /// Settle an outstanding pick against a freshly-arrived lock. Called from
+    /// handleMessage on every ScenarioCatalog broadcast (PRD #1023 module 4).
+    function settleScenarioPick() {
+      const ls = window.lobbyState;
+      if (!ls || !window.scenarioPick) return;
+      const settled = window.scenarioPick.settlePick(_pick, ls.selectionLocked);
+      _pick = settled.pending;
+      if (settled.state === 'lost') {
+        // Name what actually won, not just that we lost. `lostTo` is a
+        // scenario id or a template_path; resolve it back to its catalogue
+        // label so the message reads as prose.
+        _pickNotice = { choice: pickChoiceLabel(settled.lostTo) };
+      } else if (settled.state === 'won') {
+        _pickNotice = null;
+      }
+    }
+
+    /// Catalogue label for a locked scenario id or ship template_path.
+    function pickChoiceLabel(id) {
+      const ls = window.lobbyState;
+      const catalog = (ls && ls.scenarioCatalog) || [];
+      for (const sc of catalog) {
+        if (!sc) continue;
+        if (sc.id === id) return wireText(sc.label) || sc.id;
+        for (const sh of (sc.ships || [])) {
+          if (sh && sh.template_path === id) {
+            return wireText(sh.label) || wireText(sh.name) || id;
+          }
+        }
+      }
+      return String(id || '');
+    }
+
     function renderScenarioPicker() {
       const ls = window.lobbyState;
       const body = document.getElementById('scenario-picker-body');
       const heading = document.getElementById('scenario-picker-heading');
-      if (!ls || !body) return;
+      if (!ls || !body || !window.scenarioPick) return;
       const catalog = ls.scenarioCatalog || [];
       const activePacks = ls.activePacks || [];
       const locked = ls.selectionLocked || { scenario_id: null, template_path: null };
+      const pv = window.scenarioPick.scenarioPickView({
+        catalog, locked, pending: _pick, notice: _pickNotice,
+      });
 
       let stage;
       if (locked.scenario_id == null) stage = 'scenario';
@@ -1248,17 +1453,33 @@
       // Pack count is in the key so a change to the applied mods re-renders the
       // scenario buttons' mod-origin badges (issue #990), not only a catalog
       // change (the two arrive together, but a later pack edit updates one).
-      const key = stage + '|' + catalog.length + '|' + activePacks.length;
+      // The pending id and the race notice are in it too: a tap must repaint
+      // the picker WITHOUT waiting for a stage change, since waiting for the
+      // stage change is exactly the silence the pending state exists to fill.
+      const key = stage + '|' + catalog.length + '|' + activePacks.length
+        + '|' + (pv.pendingId || '') + '|' + (pv.noticeParams ? pv.noticeParams.choice : '');
       if (key === _pickerStageKey) return;
       _pickerStageKey = key;
 
       body.innerHTML = '';
+      // "Another phone chose X" — rendered above whichever stage the player
+      // was moved to, so the stage change has a stated cause (PRD #1023 user
+      // story 16).
+      if (pv.noticeId) {
+        const notice = document.createElement('div');
+        notice.className = 'scenario-race-note';
+        notice.setAttribute('role', 'status');
+        notice.textContent = t(pv.noticeId, pv.noticeParams);
+        body.appendChild(notice);
+      }
       if (stage === 'scenario') {
         if (heading) heading.textContent = t('client.select_scenario');
-        if (catalog.length === 0) {
+        if (pv.emptyId) {
           const note = document.createElement('div');
           note.className = 'scenario-locked-note';
-          note.textContent = t('client.waiting_scenario');
+          // NOT "waiting for the host to select a scenario": the host has
+          // already broadcast its catalogue and the catalogue is empty.
+          note.textContent = t(pv.emptyId);
           body.appendChild(note);
           return;
         }
@@ -1285,7 +1506,24 @@
             badgeEl.textContent = t('client.scenario_mod_origin', { name: badge.name });
             btn.appendChild(badgeEl);
           }
+          // Immediate feedback (PRD #1023 user story 16). The arbiter sends no
+          // acknowledgement, so between the tap and the next catalogue
+          // broadcast the picker used to look untouched — which is how a phone
+          // on a slow link ends up tapping twice.
+          if (pv.pendingId === sc.id) {
+            btn.classList.add('pending');
+            btn.setAttribute('aria-busy', 'true');
+            const wait = document.createElement('div');
+            wait.className = 'scenario-pending';
+            wait.textContent = t('client.pick_pending');
+            btn.appendChild(wait);
+          }
+          btn.disabled = !pv.accepting;
           btn.addEventListener('click', () => {
+            if (!pv.accepting) return;
+            _pick = window.scenarioPick.pendingPick('scenario', sc.id);
+            _pickNotice = null;
+            scheduleRender();
             // Same action map as the host page — two transports (issue #755).
             if (typeof window.dispatchConsoleAction === 'function') {
               window.dispatchConsoleAction({ action: 'select_scenario', scenario_id: sc.id }, send);
@@ -1303,9 +1541,14 @@
           if (_pickerStageKey !== key) return; // stage changed meanwhile
           const picker = document.createElement('ph-ship-picker');
           body.appendChild(picker);
-          picker.state = { ships };
+          // The picker greys itself out and marks the tapped card while the
+          // request is unacknowledged (PRD #1023 user story 16).
+          picker.state = { ships, pendingTemplate: pv.pendingId, accepting: pv.accepting };
           picker.addEventListener('ship-selected', (e) => {
             const tp = e.detail.template_path;
+            _pick = window.scenarioPick.pendingPick('ship', tp);
+            _pickNotice = null;
+            scheduleRender();
             if (typeof window.dispatchConsoleAction === 'function') {
               window.dispatchConsoleAction({ action: 'select_player_ship', template_path: tp }, send);
             } else {
@@ -1397,12 +1640,36 @@
       const container = $('console-container');
       if (container) container.dataset.orientation = orientation;
 
+      // Link state (PRD #1023 module 4): the console dims and stops taking
+      // taps when the host is gone, and reads as LOADING rather than broken
+      // before the first state lands. Game shell only — the lobby has its own
+      // status line and ready pill for the same information.
+      renderLinkState(inGame);
+
       // Game-over overlay: covers the game shell when phase is GameOver.
+      // Framed with the scenario's name and the run's outcome (PRD #1023
+      // module 4, user story 17) rather than a bare line of text.
       const gameOverEl = document.getElementById('game-over-overlay');
       const gameOverMsgEl = document.getElementById('game-over-message');
-      if (gameOverEl && gameOverMsgEl) {
-        if (s.phase === 'GameOver') {
-          gameOverMsgEl.textContent = s.shipDestroyed ? t('client.ship_destroyed') : (s.gameOverReason || '');
+      if (gameOverEl && gameOverMsgEl && typeof window.gameOverView === 'function') {
+        const ls = window.lobbyState;
+        const gv = window.gameOverView({
+          phase: s.phase,
+          shipDestroyed: s.shipDestroyed,
+          reason: s.gameOverReason,
+          // Authored per world; not published on the wire today. See
+          // gui/game-over-view.js for why this reads a field that is
+          // currently always absent.
+          outcome: ls ? ls.gameOverOutcome : null,
+          scenarioTitle: ls ? ls.scenarioTitle : '',
+        });
+        if (gv.visible) {
+          gameOverEl.dataset.outcome = gv.outcome;
+          const scenarioEl = document.getElementById('game-over-scenario');
+          if (scenarioEl) scenarioEl.textContent = wireText(gv.scenarioName);
+          const headlineEl = document.getElementById('game-over-headline');
+          if (headlineEl) headlineEl.textContent = t(gv.headlineId);
+          gameOverMsgEl.textContent = gv.bodyId ? t(gv.bodyId) : wireText(gv.bodyText);
           gameOverEl.style.display = 'flex';
         } else {
           gameOverEl.style.display = 'none';
@@ -1947,6 +2214,11 @@
     // -- Incoming message handler --------------------------------
 
     function handleMessage(msg) {
+      // The host has said something, so the console's panels are showing real
+      // numbers rather than their empty shape — it may leave CONNECTING (PRD
+      // #1023 user story 15). Any message counts: the point is that the link
+      // is carrying traffic, not which traffic.
+      if (msg && !linkHasData) { linkHasData = true; scheduleRender(); }
       // JS state modules (issue #460) — every inbound ServerMessage is applied
       // to the pure state modules first. window.simState is the ONLY sim
       // store (issue #819): the console builders read it directly. Guards
@@ -1956,7 +2228,7 @@
       if (window.commsState)      window.commsState.apply(msg);
       // The QR-first ScenarioCatalog message (issue #755) is not part of the
       // client-router case table, so force a render to (re)draw the picker.
-      if (msg && msg.type === 'ScenarioCatalog') scheduleRender();
+      if (msg && msg.type === 'ScenarioCatalog') { settleScenarioPick(); scheduleRender(); }
       // The host's debug/session read-back (issue #940) only arrives on change,
       // and it is the one push that can change what an OPEN settings panel
       // shows — so repaint here rather than from the render loop, which would

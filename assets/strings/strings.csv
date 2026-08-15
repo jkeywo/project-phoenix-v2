@@ -1339,3 +1339,5 @@ client.game_over_defeat,Game-over overlay headline when the run ended in defeat 
 client.game_over_ended,Game-over overlay headline when the run ended without a declared win or loss,[ENGAGEMENT ENDED]
 client.link_connecting,Console banner before the first state arrives from the host — an empty console is loading rather than broken,[Linking to the ship…]
 client.link_dead,Console banner headline while the link to the host is down. The console behind it is dimmed and stops accepting commands,[LINK LOST]
+server.qr_caption,Host viewscreen join panel — caption above the QR code telling guests what scanning it does,[Scan to join the crew]
+server.qr_url_label,Host viewscreen join panel — label above the join URL in text for anyone whose camera will not scan the code,[or type this in]

@@ -149,6 +149,46 @@
     #canvas { display: block; width: 100%; height: 100%; background: #000; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
     #qr { display: none; }
+    /* The join panel (PRD #1023 module 4, user story 4): "I want the join QR
+       framed, captioned, and accompanied by a readable URL, so that guests can
+       join from across the room without being talked through it."
+
+       The frame is what makes it read as a thing to act on rather than an
+       artefact on the viewscreen; the caption says what acting on it does; the
+       URL is the fallback for every phone whose camera will not focus, and is
+       therefore SELECTABLE — the point is that it can be copied and read
+       aloud, not that it is present. */
+    #qr-panel {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      padding: 14px 16px 12px;
+      background: var(--scrim-panel);
+      border: 1px solid var(--edge-control);
+      border-radius: 8px;
+      font-family: 'Chakra Petch', monospace;
+    }
+    #qr-caption {
+      font-size: var(--text-md); font-weight: 600;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      color: var(--ink);
+    }
+    /* The padding is the code's quiet zone, so it has to be the same white the
+       QR itself is drawn on — a scanner reads the margin as part of the code. */
+    #qr-link { display: block; line-height: 0; padding: 8px; border-radius: 4px;
+      background: rgb(var(--rgb-white)); }
+    #qr-url-row {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      max-width: 232px;
+    }
+    #qr-url-label {
+      font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+      text-transform: uppercase; color: var(--ink-faint);
+    }
+    #qr-url {
+      font-family: var(--font-mono); font-size: var(--text-sm);
+      color: var(--cyan-bright); word-break: break-all; text-align: center;
+      line-height: 1.35;
+      -webkit-user-select: all; user-select: all;
+    }
     #top-bar {
       position: absolute; top: 0.75rem; right: 0.75rem; z-index: 20;
       display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
@@ -1327,11 +1367,22 @@
         <div id="chatter-container"></div>
       </div>
 
-      <!-- QR code shown over the canvas during lobby phase (or toggled mid-game) -->
+      <!-- QR code shown over the canvas during lobby phase (or toggled mid-game).
+           Framed, captioned and accompanied by the join URL in selectable text
+           (PRD #1023 module 4, user story 4): a bare code floating on the
+           viewscreen told a guest across the room nothing about what it was
+           for, and gave anyone whose camera would not focus no way in at all. -->
       <div id="overlay">
-        <a id="qr-link" target="_blank" style="cursor:pointer">
-          <canvas id="qr"></canvas>
-        </a>
+        <div id="qr-panel">
+          <div id="qr-caption" data-i18n="server.qr_caption">Scan to join the crew</div>
+          <a id="qr-link" target="_blank" style="cursor:pointer">
+            <canvas id="qr"></canvas>
+          </a>
+          <div id="qr-url-row">
+            <span id="qr-url-label" data-i18n="server.qr_url_label">or type this in</span>
+            <span id="qr-url"></span>
+          </div>
+        </div>
         <!-- Relay-degraded warning + inbound-connection ICE stage. Populated by
              initPeerJS(); empty (and invisible) in the normal healthy case. -->
         <div id="conn-diag" style="margin-top:8px;font-family:monospace;color:#fa4;font-size:13px;text-align:center;white-space:pre-line;"></div>
@@ -2079,6 +2130,11 @@
         QRCode.toCanvas(canvas, joinUrl, { width: 200 });
         const qrLink = document.getElementById('qr-link');
         qrLink.href = joinUrl;
+        // The same URL the code encodes, in text a guest can read across the
+        // room or copy (PRD #1023 user story 4). Written from joinUrl rather
+        // than composed twice, so the two can never disagree.
+        const qrUrl = document.getElementById('qr-url');
+        if (qrUrl) qrUrl.textContent = joinUrl;
         // Clicking the QR opens the client in a separate WINDOW, not a tab, so
         // testers can run several clients side-by-side on one desktop. A
         // features string (size) is what makes the browser spawn a window

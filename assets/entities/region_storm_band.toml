@@ -21,7 +21,7 @@
 #
 # `radar_dampening` rides along because a storm you cannot see through is the
 # same storm. It costs an operation nothing unless a capability authors a rule
-# naming it.
+# naming it. Its sign is not a taste call and is documented at the block itself.
 
 tags = ["region", "storm", "slow_zone"]
 
@@ -41,5 +41,35 @@ radius = 400.0
 thrust_modifier = 0.5
 yaw_rate_modifier = 0.6
 
+# The picture HALVES. Enough that a crew inside the band are working a smaller
+# scope than the one they planned the job on; not enough that the scope goes
+# dark, which reads as a broken console rather than as weather.
+#
+# NEGATIVE, and that is not a typo. `range_modifier` is a signed BONUS on
+# `ModifierSlot::RadarRange` (`modifiers::coordination::apply_region_effects`),
+# not a multiplier, and it reaches the radar through PRD #117's two-sided
+# formula in `modifiers::cache::ShipModifiers::rebuild_cache`:
+#
+#     bonus >= 0  ->  multiplier = 1 + bonus
+#     bonus <  0  ->  multiplier = 1 / (1 + |bonus|)
+#
+# So "half the scope" is the bonus that solves `1 / (1 + |b|) = 0.5`:
+#
+#     1 + |b| = 1 / 0.5 = 2   ->   |b| = 1.0   ->   range_modifier = -1.0
+#
+# On the Alliance cruiser that flies `probe_operations` and `probe_destroy` that
+# is a weapons horizon of `50 x 0.5 = 25` units and a helm scope of
+# `93.75 x 0.5 = 46.875` — a 400-unit band whose far side a ship inside it
+# cannot see, which is the whole claim the header makes.
+#
+# THIS FILE SHIPPED WITH `0.5` UNTIL THE COMMIT THAT ADDED THIS COMMENT (found
+# in #1037). Read as a multiplier it says "halve the radar"; read as the signed
+# bonus the engine actually applies it said `1 + 0.5`, and a storm made the
+# radar reach FIFTY PERCENT FURTHER. A positive number on a DAMPENING effect is
+# always wrong, and `regions::effects`'s shipped-asset test now says so.
+#
+# [ai] `-1.0` is the value that reproduces this file's original authoring intent
+# under the real formula. It is a correction, not a new tuning call, and the
+# tuning itself is unratified.
 [effects.radar_dampening]
-range_modifier = 0.5
+range_modifier = -1.0

@@ -252,7 +252,12 @@ describe('getRegionRenderSpec', () => {
         colour: [0.5, 0.2, 0.8],
         effects: {
           damage_zone: { damage_per_second: 3.0 },
-          radar_dampening: { range_modifier: 0.4 },
+          // Mirrors `assets/entities/region_kaleth_nebula.toml`. NEGATIVE:
+          // `range_modifier` is a signed bonus on the radar-range slot, not a
+          // multiplier, so -1.5 is the 0.4x the template wants. The render spec
+          // only lists effect NAMES, so the value changes nothing here — it is
+          // kept in step so the fixture does not teach the wrong sign.
+          radar_dampening: { range_modifier: -1.5 },
           sensor_blind: {},
         },
       };

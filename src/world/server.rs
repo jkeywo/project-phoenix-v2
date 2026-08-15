@@ -2631,13 +2631,13 @@ pub(crate) fn apply_dispatch_result(
                     );
                     continue;
                 };
-                runtime
-                    .pending_capacity_adjustments
-                    .push(crate::infrastructure::CapacityAdjustment {
+                runtime.pending_capacity_adjustments.push(
+                    crate::infrastructure::CapacityAdjustment {
                         uuid,
                         capacity,
                         delta,
-                    });
+                    },
+                );
             }
 
             // Issue #1026, on exactly the same terms: the applier resolves the

@@ -1,0 +1,154 @@
+entities:
+  - runtime: native-host-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Host Runtime
+      summary: The native phoenix-host binary that serves a built client bundle, the content manifest, the scenario catalogue and the delivery version stamp over HTTP, so a Phoenix host is not required to be an open browser tab. It serves delivery only — the authoritative simulation still runs in the host browser runtime or the headless runtime.
+    architecture:
+      kind: runtime
+      authority: non-authoritative
+
+  - component: delivery-catalogue-payload
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Delivery Catalogue Payload
+      summary: The single ordered field list for a published scenario/ship catalogue entry, walked by the wasm bridge's JS object construction and by the JSON encoder alike, so the browser host and the native host publish the same document by construction rather than by agreement.
+      rationale:
+        - "[ai] PRD #855's first implementation decision is that native and browser hosts consume the same content manifest and protocol contracts. That is only true if one place says what a catalogue field is called; before this, wasm_get_scenario_catalog and ship_entry_to_js named every field themselves, so a second publisher would necessarily have been a second field list."
+        - "[ai] The payload holds (key, value) pairs rather than a serde struct because the wasm surface is a JS object built with Reflect::set and the native surface is JSON: a shared serde type would still have left the JS side spelling out keys. Neither surface carries a field name of its own now."
+        - "[ai] The enrichment fields (class, hull_id, power_rating, name) read config_cache::get_cached_entity_config, whose signature is identical on both targets — the browser fills that cache by fetch, the native host by insert_native_config — so this is genuinely the same code path and not a target-conditional twin."
+    architecture:
+      kind: contract
+      authority: authoritative
+      reads: [world-content-pack-state]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/delivery/payload.rs, src/core/codec.rs, src/server/bridge.rs]
+      symbols:
+        [
+          ShipPayload,
+          ScenarioPayload,
+          ship_payload,
+          scenario_payload,
+          catalog_payload,
+          encode_delivery_manifest,
+          encode_delivery_stamp,
+          wasm_get_scenario_catalog,
+          wasm_delivery_stamp,
+        ]
+      tests: [cargo test, tests/native_host.rs]
+
+  - component: delivery-version-pin
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Delivery Version Pin
+      summary: The three-number stamp — wire protocol revision plus the scenario manifest's content id and epoch — that a host publishes and checks, refusing an incompatible client with a machine-readable code, prose naming both sides, and the host's own stamp.
+      rationale:
+        - "[ai] Two of the three numbers already existed: the manifest [content] identity is the same one the mod-pack contract (issue #986) gates uploads on. Only PROTOCOL_VERSION is new, and it is a version OF the existing wire vocabulary, declared beside the types it versions in core/messages.rs so bumping it is part of changing them."
+        - "[ai] Enforced at two moments because the two halves are knowable at different ones. The client bundle on disk states its content identity in its own assets/scenarios.toml, so that half is checked at startup and refuses the port; a built bundle cannot state which protocol its WASM holds, so that half is checked per request."
+        - "[ai] An unstamped caller is refused rather than assumed compatible, and a manifest with no [content] block stamps the empty identity no real client can match. Both follow #986's existing default: unidentified content refuses rather than silently accepts."
+        - "[ai] Protocol is compared before content: a protocol mismatch makes every other field's meaning uncertain, so reporting a content difference first would send an operator after the wrong thing."
+    architecture:
+      kind: contract
+      authority: authoritative
+      reads: [world-content-pack-state]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/delivery/stamp.rs, src/core/messages.rs, src/delivery/mod.rs]
+      symbols:
+        [
+          PROTOCOL_VERSION,
+          DeliveryStamp,
+          StampMismatch,
+          check_client_stamp,
+          check_bundle_content,
+          client_stamp_from_request,
+        ]
+      tests: [cargo test, tests/native_host.rs]
+
+  - component: delivery-http-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Delivery HTTP and Caching Contract
+      summary: The transport contract a Phoenix client is served under — path resolution and its traversal guard, the MIME table, and the caching policy that makes content-addressed bundles immutable while entry points and authored manifests always revalidate. Served by the native host and, as Cloudflare Pages header rules, by the public deployment.
+      rationale:
+        - "[ai] Stated as pure functions over strings so the contract is testable without binding a port, and asserted a second time against a deployed URL by scripts/check-deploy-headers.mjs. Two implementations, one contract — the deployed half cannot be checked at build time and the native half cannot be checked by a CDN."
+        - "[ai] deploy/cloudflare/_headers is written so no two patterns set the same header: Pages applies every matching rule and this repository has no way to test precedence, so /* carries only security headers and the media directories are named individually rather than as /assets/* (which would overlap assets/scenarios.toml, the one file under there that must never be held). Everything unnamed keeps Pages' revalidating default, which is correct for the entry points and merely conservative elsewhere."
+        - "[ai] Cross-origin isolation is deliberately NOT required: the shipped build is single-threaded and COOP/COEP would break the cross-origin PeerJS and TURN fetches. COEP set WITHOUT COOP is an error, because that combination isolates nothing and blocks them anyway. The checker's --require-isolation is the switch for the day PRD #855's worker-thread benchmark spike says yes."
+        - "[ai] .wasm is served as application/wasm because streaming instantiation refuses anything else, and the demo's gzipped .wasm.gz must arrive WITHOUT Content-Encoding or the browser unwraps what the page means to decompress itself."
+    architecture:
+      kind: contract
+      authority: non-authoritative
+      runs_in: [native-host-runtime, node-tooling-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          src/delivery/http.rs,
+          deploy/cloudflare/_headers,
+          scripts/deploy-headers.mjs,
+          scripts/check-deploy-headers.mjs,
+          .github/workflows/check-deploy-headers.yml,
+        ]
+      symbols: [CachePolicy, cache_policy_for, content_type_for, resolve_static_path, checkProbe, checkAll]
+      tests: [cargo test, npx vitest run]
+
+  - component: native-delivery-host
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Delivery Host
+      summary: The phoenix-host binary and its socket loop — loads the manifest and worlds off disk, builds the catalogue through the shared payload, runs the startup bundle pin, and serves the stamp, manifest and client bundle. Chooses its public catalogue by which manifest file it is pointed at, the same lever the browser page pulls with ?manifest=.
+      rationale:
+        - "[ai] The catalogue restriction needed no new mechanism: issue #917's curated assets/scenarios.demo.toml already filters the catalogue built from a world without editing that world, so --manifest is the whole of the native host's half."
+        - "[ai] Hand-rolled HTTP over std::net rather than a framework, for the reason headless::args is hand-rolled rather than clap: this crate's primary target is wasm32 under lto = true, so any dependency is paid for by the browser build unless target-gated, and what is needed is a static file server and two JSON endpoints."
+        - "[ai] crate::delivery is unconditional on both targets and only the BINARY is behind the host feature. A feature-gated delivery module would have been exactly the fork the PRD forbids, and would also have left its tests out of the plain cargo test CI already runs."
+        - "[ai] Serves delivery only. The authoritative simulation, PeerJS signalling and every snapshot surface remain where they were; the native host does not yet run a world."
+    architecture:
+      kind: service
+      authority: non-authoritative
+      reads: [world-content-pack-state]
+      coordinates: [delivery-catalogue-payload, delivery-version-pin, delivery-http-contract, base-scenario-manifest]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/delivery/serve.rs, src/delivery/args.rs, src/bin/phoenix_host.rs, assets/scenarios.demo.toml]
+      symbols: [HostServer, HostArgs, load_content, preload_templates, route, Route]
+      tests: [cargo test, tests/native_host.rs]
+
+  - component: curated-public-catalogue-gate
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Curated Public Catalogue Gate
+      summary: The public build's catalogue restriction and the removal of the one control that could widen it at runtime — the host mod-pack upload, whose wasm export is compiled out of a demo build and whose button is removed from the page.
+      rationale:
+        - "[ai] The curated manifest decides what the demo OFFERS; a mod-pack upload adds whatever scenarios and hulls an uploaded archive carries, so leaving it enabled handed any player at the public host page the restriction's own undo. Found while verifying that the native host and the Cloudflare path both honour issue #931's curation."
+        - "[ai] Gated by #[cfg] rather than a runtime refusal, following command_admission::debug_route's doctrine (issue #940): a hidden button is a UI fact and UI facts are forgeable. With no export to call, the hidden control and the closed route cannot come apart."
+        - "[ai] The overlay READERS are deliberately not gated — server.html calls them unconditionally and, with nothing able to enter the stack, they answer emptily. Gating them would convert a no-op into a TypeError."
+        - "[ai] The rule is stated natively as build_flags::accepts_mod_pack_uploads() so ci.yml's existing demo-build gate step, which already filters on build_flags, exercises it with PHOENIX_DEMO_BUILD genuinely set; deploy-demo.yml asserts the export's absence from the glue it is about to ship, which is the only place a wasm32-only cfg can be observed."
+    architecture:
+      kind: policy
+      authority: authoritative
+      reads: [world-content-pack-state]
+      coordinates: [native-delivery-host, world-content-pack-catalog]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        [
+          assets/scenarios.demo.toml,
+          src/build_flags.rs,
+          src/server/bridge.rs,
+          gui/build-flags.js,
+          server.html,
+          .github/workflows/deploy-demo.yml,
+        ]
+      symbols: [accepts_mod_pack_uploads, offersModPackUpload, wasm_add_mod_pack]
+      tests: [cargo test, npx vitest run, tests/native_host.rs]

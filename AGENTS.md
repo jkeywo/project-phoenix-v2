@@ -78,6 +78,34 @@ node scripts/balance-runs.mjs scripts/balance-runs.example.toml [--out <dir>]
 # Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
 
+# Native delivery host (PRD #855) — serves a built bundle, the content manifest,
+# the scenario catalogue and a version stamp from a native process instead of an
+# open browser tab. DELIVERY ONLY: the authoritative simulation is still
+# server.html or phoenix-headless, PeerJS signalling is unchanged, and there is
+# no TLS or auth — LAN or behind something else, never a public address.
+cargo build --release --features host --bin phoenix-host
+./target/release/phoenix-host --client-dir dist --addr 0.0.0.0:8080
+./target/release/phoenix-host --help
+#   --manifest assets/scenarios.demo.toml  IS the catalogue restriction — the
+#     same lever `?manifest=` pulls in the browser (issue #917).
+#   --client-dir is version-pinned at STARTUP against the manifest being served:
+#     a bundle built for other content refuses to start, before the port is
+#     taken. /host/manifest.json pins a running client's protocol per request.
+#   The catalogue it publishes is the browser host's own — src/delivery/payload.rs
+#     holds the single field list that wasm_get_scenario_catalog and the JSON
+#     encoder both walk, so the two surfaces cannot drift.
+
+# Deployed header/caching contract (PRD #855). Takes a LIVE url; run it after a
+# public deploy, from a laptop (Node 20, no npm install) or by dispatching the
+# `Check Deploy Headers` workflow. Never a push gate — the offline half of the
+# contract is already covered by tests/client/deploy-headers.test.js and
+# src/delivery/http.rs's unit tests.
+node scripts/check-deploy-headers.mjs https://pp-demo.kiwigamedesign.co.uk/
+#   The rules ship as deploy/cloudflare/_headers, installed into dist/ by
+#   deploy-demo.yml. NO TWO PATTERNS IN THAT FILE MAY SET THE SAME HEADER —
+#   Pages applies every matching rule and nothing here can test precedence.
+#   Manual/credentialed deploy steps live in docs/delivery-checklist.md.
+
 # LOD generation (issue #919) — regenerate a model's decimated levels from the
 # `[lod.generate]` blocks in its own rig sidecar. Needs `npm install` (pinned
 # @gltf-transform/cli); rewrites .glb files under assets/models and the
@@ -253,6 +281,10 @@ src/
   comms/        — Comms range check + component
   console/      — Per-console SERVER plugins: captain, comms, helm, navigation, repair, weapons
   console_ai/   — Server-side AI controllers for systems under AI control
+  delivery/     — How a host publishes its client, manifest, catalogue and
+                  version pin (PRD #855). Bevy-free; compiles on BOTH targets on
+                  purpose (the catalogue field list and the pin are shared with
+                  the browser host); only delivery/serve.rs is native-only
   server/       — wasm-bindgen exports, renderer, viewscreen border
   gui/          — Rust-side GenericRadar UI widget (server viewscreen)
   server_app.rs — Server App builder: plugin registration + SimSet chain ordering
@@ -347,6 +379,10 @@ crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for testing
 [features]
 default = ["server"]
 server = []   # host build → server.html (bridge.rs compiled in)
+host = []     # native delivery binary → phoenix-host. Gates the BINARY only:
+              # `crate::delivery` is unconditional, because a feature-gated copy
+              # of the catalogue contract would be the fork PRD #855 forbids —
+              # and would leave its tests out of the plain `cargo test` CI runs.
 # The client page (client.html) is pure JS (gui/*.js) — there is no
 # `client` cargo feature and no client-side WASM (removed in #463).
 

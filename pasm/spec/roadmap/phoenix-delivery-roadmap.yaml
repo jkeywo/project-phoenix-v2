@@ -229,15 +229,19 @@ entities:
       status: accepted
       confidence: confirmed
       title: Native Host and Cloud Delivery Expansion
-      summary: "Release A. Extend the delivered native scenario host (#420) into #855's compatible native host/client serving and Cloudflare-cached curated deployment, superseding the demo's manual Pages deploy (#931). Worker-thread adoption remains a benchmarked option, not an assumed requirement."
+      summary: "Release A. Extend the delivered native scenario host (#420) into #855's compatible native host/client serving and Cloudflare-cached curated deployment, superseding the demo's manual Pages deploy (#931). Worker-thread adoption remains a benchmarked option, not an assumed requirement. The code half is delivered (see native-delivery.yaml); what remains is credentialed and manual, tracked in docs/delivery-checklist.md."
       rationale:
         - Public demo feedback and #868 measurements should determine caching and worker-thread investment.
         - Release A is where the deploy path stops being manual, because it is the first band that adds a scenario to the public catalogue.
+        - "[ai] Shipped in code: the phoenix-host binary (delivery only — it serves the bundle, manifest, catalogue and version stamp; the authoritative simulation and PeerJS signalling stay where they were), the shared catalogue payload that makes native and browser hosts publish the same document by construction, the two-moment version pin, the Cloudflare caching rules with an offline rule-check and a dispatch-only deployed check, and the removal of the mod-pack upload from a demo build."
+        - "[ai] NOT shipped, and deliberately: worker threads and cross-origin isolation, which PRD #855 puts behind a benchmark spike, and every step needing an account — Pages custom domain, both TURN workers' ALLOWED_ORIGIN redeploys and the demo worker's 401, and the native-host release packaging and signing decisions. Those are docs/delivery-checklist.md's, not this milestone's remaining code."
+        - "[ai] The status stays `accepted` rather than `implemented` because the milestone's own acceptance is a deployed, verified public build, and no deploy has been run against this work. The components it delivered are `implemented` in native-delivery.yaml; the milestone closes when the checklist does."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-content-pack-state]
-      runs_in: [host-browser-runtime, headless-runtime]
+      coordinates: [native-delivery-host, delivery-catalogue-payload, delivery-version-pin, delivery-http-contract, curated-public-catalogue-gate]
+      runs_in: [host-browser-runtime, headless-runtime, native-host-runtime]
 
   - component: roadmap-p2p-multiship-delivery
     core:

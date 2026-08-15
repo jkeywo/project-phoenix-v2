@@ -1,9 +1,9 @@
 ---
 title: Build & Deployment
 type: concept
-tags: [trunk, wasm, github-pages, ci]
-sources: [Trunk.toml, scripts/build-client.mjs, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml]
-updated: 2026-08-11
+tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
+sources: [Trunk.toml, scripts/build-client.mjs, scripts/check-deploy-headers.mjs, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+updated: 2026-08-15
 ---
 
 # Build & Deployment
@@ -77,7 +77,9 @@ Pages, alongside (not instead of) the GitHub Pages dev host above.
 |---|---|---|
 | Trigger | `ci.yml` `deploy` job, automatic on push to `main` | `.github/workflows/deploy-demo.yml`, `workflow_dispatch` only — **never** on push |
 | Host | GitHub Pages behind `https://pp-dev.kiwigamedesign.co.uk` | Cloudflare Pages behind `https://pp-demo.kiwigamedesign.co.uk` |
-| Scenario manifest | `dist/assets/scenarios.toml` as authored (full catalogue) | overwritten with `assets/scenarios.demo.toml` (issue #917 curation — bare URL serves `combat_test` + the Alliance Destroyer only; mod-pack upload stays enabled) |
+| Scenario manifest | `dist/assets/scenarios.toml` as authored (full catalogue) | overwritten with `assets/scenarios.demo.toml` (issue #917 curation — bare URL serves `combat_test` + the Alliance Destroyer only) |
+| Mod-pack upload | enabled | **absent** — `wasm_add_mod_pack` carries `#[cfg(not(phoenix_demo_build))]` and `gui/build-flags.js`'s `offersModPackUpload` removes the control, so nothing can widen the curated catalogue at runtime (PRD #855) |
+| Caching rules | none — GitHub Pages ignores `_headers` | `deploy/cloudflare/_headers`, copied to `dist/_headers` by the workflow |
 | TURN worker | `worker/wrangler.toml` → `phoenix-turn-credentials`, `ALLOWED_ORIGIN = pp-dev.kiwigamedesign.co.uk` | `worker/wrangler.demo.toml` → `phoenix-turn-credentials-demo`, `ALLOWED_ORIGIN = pp-demo.kiwigamedesign.co.uk` — a **separate worker**, deployed by the same run; `wrangler.toml` and the dev worker are never touched by the demo workflow |
 
 **Trigger procedure**: Actions tab → *Deploy Demo* → Run workflow. The
@@ -106,8 +108,57 @@ once, before the first successful worker deploy, with
 `wrangler secret put METERED_KEY --config wrangler.demo.toml` from `worker/`
 (owner action; not something CI can do).
 
+Everything else the deploy needs that CI cannot do — Pages project, custom
+domain, both workers' `ALLOWED_ORIGIN` redeploys, the header check, the native
+host's packaging decisions — is enumerated in
+[`docs/delivery-checklist.md`](../../docs/delivery-checklist.md).
+
+### Deployed caching (PRD #855)
+
+`deploy/cloudflare/_headers` is the caching contract; Pages reads it from the
+root of the uploaded directory. Its one structural rule is that no two patterns
+may set the same header, because Pages applies every matching rule and nothing
+here can test precedence — so `/*` carries only security headers, media
+directories are named individually rather than as `/assets/*`, and everything
+unnamed keeps Pages' revalidating default. The win it buys is the ~11-13 MiB
+gzipped WASM and its glue being cached for a year, which is what
+`/project-phoenix-*` names.
+
+Checked in three places: `tests/client/deploy-headers.test.js` (the rules, over
+canned fixtures, every push), `src/delivery/http.rs`'s unit tests (the same
+contract as the native host serves it, every push), and
+`scripts/check-deploy-headers.mjs <url>` against a real deploy — run from a
+laptop (Node 20, no dependencies) or by dispatching the *Check Deploy Headers*
+workflow. That last one is `workflow_dispatch` only on purpose: as a push gate
+it would turn someone else's uptime into a red branch.
+
+## Native host (PRD #855)
+
+`phoenix-host` serves the client bundle, the content manifest, the scenario
+catalogue and a version stamp from a native process, so a host need not be an
+open browser tab.
+
+```bash
+cargo build --release --features host --bin phoenix-host
+./target/release/phoenix-host --client-dir dist --addr 0.0.0.0:8080
+```
+
+- `--manifest assets/scenarios.demo.toml` is the catalogue restriction — the
+  same lever `?manifest=` pulls in the browser.
+- `--client-dir` is version-pinned at startup against the manifest the host
+  serves: a bundle built for other content refuses to start, before the port is
+  taken. `/host/manifest.json` pins a running client's protocol per request.
+- Serves **delivery only**. The authoritative simulation is still `server.html`
+  or `phoenix-headless`, PeerJS signalling is unchanged, and there is no TLS or
+  auth — LAN or behind something else, never a public address.
+
+The catalogue it publishes is the browser host's own: `src/delivery/payload.rs`
+holds the single field list that both `wasm_get_scenario_catalog` and the JSON
+encoder walk. See `pasm/spec/architecture/native-delivery.yaml`.
+
 ## Related
 
 - [Architecture](./architecture.md) · [Testing Strategy](./testing-strategy.md)
 - PRD #1 — original deploy decision
 - Issue #931 — demo release: manual Cloudflare Pages deploy
+- PRD #855 — native host, curated catalogue gate, deployed caching contract

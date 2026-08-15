@@ -22,7 +22,7 @@ Current implementation orientation only. For intended design use [`pasm/spec/`](
 
 - [Model Viewer](./concepts/model-viewer.md) — standalone shader/lighting iteration harness, and the LOD ladder editor (`npm run dev:viewer`)
 - [LOD Generation](./concepts/lod-generation.md) — sidecar-declared decimation + the manifest CI checks (`npm run lods`)
-- [Build & Deployment](./concepts/build-and-deployment.md)
+- [Build & Deployment](./concepts/build-and-deployment.md) — the two deploys, the deployed caching contract, and the native `phoenix-host`
 
 ## Audits
 

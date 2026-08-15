@@ -2883,6 +2883,150 @@ pub const DEFAULT_SLOT: &str = "autosave";
 /// a GitHub Pages account is — must not read or overwrite each other's saves.
 pub const STORAGE_NAMESPACE: &str = "phoenix";
 
+/// The file name a host is offered when it exports a save (issue #866).
+///
+/// `.ron` and not `.sav`, because the extension is a promise about the contents
+/// and this one is keeping it: `Store` moves `String`, the record is RON text,
+/// and an exported save is a file a human can open in an editor and read. That
+/// is the property to lean on in a bug report — "paste me the first twenty
+/// lines" is a diagnosis, and an opaque blob is not.
+pub const EXPORT_FILE_NAME: &str = "phoenix-save.ron";
+
+// ── The portable artifact (issue #866) ───────────────────────────────────────
+
+/// A [`vellum_save::Store`] that holds its slots in memory, for the moment a
+/// save is in transit rather than at rest.
+///
+/// # Why a third backend and not two lines of `to_ron`/`from_ron`
+///
+/// A browser has no filesystem, so "export a file" cannot be `FileStore` and
+/// "import a file" cannot be `FileStore` either: the bytes arrive from a
+/// `<input type="file">` and leave through a download, and the only durable
+/// thing in between is the RON text itself. The obvious implementation is to
+/// call `Run::to_ron` on the way out and `Run::from_ron` plus `versions.check`
+/// on the way in — and that is exactly what this type exists to avoid.
+///
+/// [`load_from`]'s three lines are not three lines: they are an ORDER — read,
+/// parse, gate — and the module's own docs explain why the gate runs before a
+/// single component is written. A second copy of that sequence for the file
+/// path would be a second place for it to be got wrong, and the way it would be
+/// got wrong is silent (a host half-adopts a world it is about to be refused).
+/// So the file path goes through the same [`save_to`] and [`load_from`] every
+/// slot goes through, and what changes is only *where the string lives* — which
+/// is the one thing `Store` is for.
+///
+/// That is also what makes this issue's "no second snapshot schema" true by
+/// construction rather than by review: there is nowhere to put one. Three
+/// backends, one record, one gate.
+///
+/// # Not a cache and not a save
+///
+/// It keeps nothing beyond the call that made it. Each export builds one, writes
+/// one slot into it and takes the string straight back out; each import builds
+/// one holding the text it was handed and reads it once. Nothing polls it,
+/// nothing persists it, and it is deliberately not a `Resource`.
+#[derive(Debug, Default)]
+pub struct TransferStore {
+    slots: std::cell::RefCell<std::collections::BTreeMap<String, String>>,
+}
+
+impl TransferStore {
+    /// An empty store, for an export about to be written into it.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// A store already holding `text` in `slot`, for an import about to be read
+    /// out of it.
+    pub fn holding(slot: &str, text: String) -> Self {
+        let store = Self::empty();
+        store.slots.borrow_mut().insert(slot.to_string(), text);
+        store
+    }
+
+    /// Take a slot's text out, leaving the store without it.
+    pub fn take(&self, slot: &str) -> Option<String> {
+        self.slots.borrow_mut().remove(slot)
+    }
+}
+
+impl vellum_save::Store for TransferStore {
+    /// Nothing here can fail: a `BTreeMap` in this process always answers.
+    type Error = std::convert::Infallible;
+
+    fn read(&self, slot: &str) -> Result<Option<String>, Self::Error> {
+        Ok(self.slots.borrow().get(slot).cloned())
+    }
+
+    fn write(&self, slot: &str, contents: &str) -> Result<(), Self::Error> {
+        self.slots
+            .borrow_mut()
+            .insert(slot.to_string(), contents.to_string());
+        Ok(())
+    }
+
+    fn remove(&self, slot: &str) -> Result<(), Self::Error> {
+        self.slots.borrow_mut().remove(slot);
+        Ok(())
+    }
+
+    fn slots(&self) -> Result<Vec<String>, Self::Error> {
+        Ok(self.slots.borrow().keys().cloned().collect())
+    }
+}
+
+/// Serialise a run into the text of a portable save file (issue #866).
+///
+/// Byte-identical to what [`save_to`] hands `LocalStorage` for the same run,
+/// because it *is* [`save_to`] — see [`TransferStore`]. An exported file and a
+/// browser slot are the same record in the same encoding, which is what makes
+/// importing one into another host a resume rather than an import format.
+pub fn export_artifact(run: &StoredRun) -> Result<String, String> {
+    let store = TransferStore::empty();
+    save_to(&store, DEFAULT_SLOT, run)?;
+    store
+        .take(DEFAULT_SLOT)
+        .ok_or_else(|| "the exported save was not written".to_string())
+}
+
+/// Read the text of a portable save file and put it through the same gate a
+/// local slot goes through (issue #866).
+///
+/// The mirror of [`export_artifact`], and the same statement about the gate:
+/// this is [`load_from`] over a store that happens to hold the file's text, so
+/// the refusal it returns is the one a `localStorage` slot would have returned
+/// for the same bytes.
+///
+/// The two refusals a host actually meets are different kinds of bad news and
+/// stay different values here rather than collapsing into one sentence:
+/// [`LoadRefusal::Unparsable`] means the FILE is damaged — truncated, edited,
+/// or not a save at all — and [`LoadRefusal::Moved`] means the file is intact
+/// and this BUILD cannot honour it, naming the dimension that moved. "Pick
+/// another file" and "this save is from an older build" are different
+/// instructions, and a host told the wrong one goes looking in the wrong place.
+pub fn import_artifact(text: &str, current: &Versions) -> Result<StoredRun, LoadRefusal> {
+    let store = TransferStore::holding(DEFAULT_SLOT, text.to_string());
+    load_from(&store, DEFAULT_SLOT, current)
+}
+
+/// Which scenario a portable save belongs to, read WITHOUT the version gate.
+///
+/// The browser needs this before it can run the gate at all, and the ordering is
+/// forced rather than chosen: the content dimension is a digest over the files a
+/// world load consumed, so there is nothing to check a save against until its
+/// world has been loaded — and which world that is, is written in the save. So
+/// an import reads the scenario first, loads it, and only then asks
+/// [`import_artifact`] whether this build can honour the file.
+///
+/// It is exactly `Run::from_ron` and one field read: parsing is the only thing
+/// that can fail here, which is why a damaged file is caught at THIS step and
+/// reported as damaged before any world is loaded on its behalf.
+pub fn peek_artifact_scenario(text: &str) -> Result<String, LoadRefusal> {
+    StoredRun::from_ron(text)
+        .map(|run| run.scenario)
+        .map_err(|e| LoadRefusal::Unparsable(e.to_string()))
+}
+
 /// Why a stored save did not become a resumable session.
 ///
 /// [`LoadRefusal::Moved`] carries `vellum_save::Moved` **unchanged**, and its

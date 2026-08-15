@@ -239,7 +239,20 @@ thread_local! {
     /// some systems for the step have drawn and others have not, so "all six
     /// streams right now" is not a point any system agrees on. A JS click can
     /// land anywhere; a Bevy system in `PostUpdate` cannot.
-    static PENDING_SAVE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Since issue #866 it also carries WHERE the save is going. The capture is
+    /// identical either way — the destination is chosen at the `Store`, which is
+    /// the whole of what portability costs.
+    static PENDING_SAVE: RefCell<Option<(String, SaveDestination)>> = const { RefCell::new(None) };
+
+    /// The text of an exported save, waiting for the host page to collect it
+    /// (issue #866).
+    ///
+    /// Parked rather than returned, for [`PENDING_SAVE`]'s reason turned around:
+    /// the capture happens on a tick boundary in `PostUpdate`, so the click that
+    /// asked for it is long over by the time there is a string to hand back.
+    /// Taken exactly once by `wasm_take_exported_snapshot`, which is what turns
+    /// it into a download.
+    static EXPORTED_ARTIFACT: RefCell<Option<String>> = const { RefCell::new(None) };
 
     /// Host-visible outcome of the last save or resume, `(succeeded, message)`,
     /// **drained** by `wasm_snapshot_status()`.
@@ -992,6 +1005,22 @@ fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
 // host must never be half-way into a world it is about to be told it cannot
 // have.
 
+/// Where a queued save is going (issue #866).
+///
+/// The two destinations differ in one line of `drain_snapshot_save` — which
+/// `vellum_save::Store` the run is written to — and in nothing else. The
+/// capture, the digest, the seed, the `Versions` and the record are the same
+/// object either way, which is what "no second snapshot schema" means when it is
+/// true by construction rather than by review.
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SaveDestination {
+    /// `vellum_save::LocalStorage` — this browser, this origin.
+    Slot,
+    /// `snapshot::TransferStore` — a string the host page downloads as a file.
+    File,
+}
+
 /// Queue a save of the running session into `slot`.
 ///
 /// Returns immediately; the capture happens on the next `PostUpdate`, and the
@@ -999,7 +1028,43 @@ fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_save_snapshot(slot: String) {
-    PENDING_SAVE.with(|s| *s.borrow_mut() = Some(slot));
+    PENDING_SAVE.with(|s| *s.borrow_mut() = Some((slot, SaveDestination::Slot)));
+}
+
+/// Queue an EXPORT of the running session (issue #866).
+///
+/// The same queue, the same capture and the same tick boundary as
+/// [`wasm_save_snapshot`]; only the destination differs. The resulting RON is
+/// collected by [`wasm_take_exported_snapshot`] once the capture has been taken.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_export_snapshot() {
+    PENDING_SAVE.with(|s| {
+        *s.borrow_mut() = Some((
+            crate::snapshot::DEFAULT_SLOT.to_string(),
+            SaveDestination::File,
+        ))
+    });
+}
+
+/// Take the exported save's text, if one is waiting.
+///
+/// Returns `""` when there is nothing to collect. Taken rather than read, so a
+/// host page polling this cannot download the same save twice.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_take_exported_snapshot() -> String {
+    EXPORTED_ARTIFACT.with(|a| a.borrow_mut().take().unwrap_or_default())
+}
+
+/// The file name a host is offered for an exported save.
+///
+/// Published rather than spelled in JS so the extension and the Rust constant
+/// that explains it (`snapshot::EXPORT_FILE_NAME`) cannot drift apart.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_export_file_name() -> String {
+    crate::snapshot::EXPORT_FILE_NAME.to_string()
 }
 
 /// Which button an outcome answers. Carried so the host page can put the
@@ -1009,6 +1074,11 @@ pub fn wasm_save_snapshot(slot: String) {
 const SNAPSHOT_SAVE: &str = "save";
 #[cfg(target_arch = "wasm32")]
 const SNAPSHOT_RESUME: &str = "resume";
+/// The export half of issue #866. Its own label rather than `save`'s, because
+/// the two controls sit in different places and an answer belongs on the one
+/// that was pressed.
+#[cfg(target_arch = "wasm32")]
+const SNAPSHOT_EXPORT: &str = "export";
 
 /// Record a host-visible outcome for the next [`wasm_snapshot_status`] poll.
 #[cfg(target_arch = "wasm32")]
@@ -1079,16 +1149,90 @@ pub fn wasm_resume_pending() -> bool {
     PENDING_RESTORE.with(|p| p.borrow().is_some())
 }
 
+/// Which scenario an imported file belongs to, BEFORE any world is loaded on its
+/// behalf (issue #866).
+///
+/// Returns `"ok\t<scenario path>"`, or `"damaged\t<why>"` for a file that is not
+/// a save this build can parse at all. Tab-separated for
+/// [`wasm_snapshot_status`]'s reason: one string is the cheapest thing that
+/// crosses this boundary, and the host page needs the CLASS as well as the
+/// sentence — a damaged file and an incompatible one send a host to two
+/// different places.
+///
+/// Only the damaged class can be answered here, and that is the point of having
+/// two calls rather than one. The version gate needs a content digest, a content
+/// digest needs a loaded world, and which world to load is written inside the
+/// file — so parsing has to come first and the gate second. Splitting them means
+/// a damaged file is refused before this page loads a scenario on its behalf,
+/// rather than after.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_peek_import(text: String) -> String {
+    match crate::snapshot::peek_artifact_scenario(&text) {
+        Ok(scenario) => format!("ok\t{scenario}"),
+        Err(refusal) => format!("damaged\t{refusal}"),
+    }
+}
+
+/// Put an imported file through the version gate and stage it for the boot that
+/// is about to happen (issue #866). Call BEFORE `wasm_init`, exactly where
+/// [`wasm_prepare_resume`] is called.
+///
+/// Returns `""` when the file was accepted and is now pending, or
+/// `"<class>\t<message>"` when it was not. The two classes are the two AC5
+/// answers and they are deliberately not one:
+///
+/// * `damaged` — the file is not a `Run` this build can parse. Truncated,
+///   hand-edited, or never a save. The host should pick another file.
+/// * `incompatible` — the file is intact and this build cannot honour it. The
+///   message is `vellum_save::Moved`'s own sentence, verbatim, because it names
+///   WHICH dimension moved and to what, and phoenix has no vocabulary that would
+///   say more.
+///
+/// A refusal stages nothing, so the page boots a normal new session — the same
+/// promise [`wasm_prepare_resume`] makes, for the same reason.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_prepare_import(text: String) -> String {
+    if SNAPSHOT_WORLD.with(|w| w.borrow().is_none()) {
+        // Same guard as `wasm_prepare_resume`: no world means no content digest,
+        // so there is nothing to check the save against.
+        return format!("damaged\t{}", "the scenario has not been loaded yet");
+    }
+    let versions = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
+    match crate::snapshot::import_artifact(&text, &versions) {
+        Ok(run) => {
+            PENDING_RESTORE.with(|p| *p.borrow_mut() = Some(run));
+            RESTORE_WAITED.with(|w| *w.borrow_mut() = 0);
+            SNAPSHOT_STATUS.with(|s| *s.borrow_mut() = None);
+            String::new()
+        }
+        // The classification is `LoadRefusal`'s own, not a re-reading of the
+        // message: `Unparsable` IS "the file is damaged" and `Moved` IS "this
+        // build cannot honour it", and keeping the match here means the host
+        // page never has to infer a class from a sentence it is not allowed to
+        // paraphrase.
+        Err(crate::snapshot::LoadRefusal::Moved(moved)) => format!("incompatible\t{moved}"),
+        Err(other) => format!("damaged\t{other}"),
+    }
+}
+
 /// Take a queued save, if there is one.
 #[cfg(target_arch = "wasm32")]
 fn drain_snapshot_save(world: &mut World) {
-    let Some(slot) = PENDING_SAVE.with(|s| s.borrow_mut().take()) else {
+    let Some((slot, destination)) = PENDING_SAVE.with(|s| s.borrow_mut().take()) else {
         return;
+    };
+    // Which control the answer goes back to. Everything below is shared; only
+    // this label and the store at the bottom differ (issue #866).
+    let source = match destination {
+        SaveDestination::Slot => SNAPSHOT_SAVE,
+        SaveDestination::File => SNAPSHOT_EXPORT,
     };
     let Some((path, _toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
         set_snapshot_status(
             false,
-            SNAPSHOT_SAVE,
+            source,
             "no scenario is loaded, so there is nothing to save",
         );
         return;
@@ -1106,7 +1250,7 @@ fn drain_snapshot_save(world: &mut World) {
         phase,
         Some(messages::GamePhase::InProgress) | Some(messages::GamePhase::GameOver)
     ) {
-        set_snapshot_status(false, SNAPSHOT_SAVE, "there is no run in progress to save");
+        set_snapshot_status(false, source, "there is no run in progress to save");
         return;
     }
     let payload = crate::snapshot::capture(world);
@@ -1121,21 +1265,33 @@ fn drain_snapshot_save(world: &mut World) {
         path,
         crate::snapshot::versions(&crate::content_ledger::frozen_or_live()),
     );
-    let store = vellum_save::LocalStorage::new(crate::snapshot::STORAGE_NAMESPACE);
-    // The failure worth naming is `QuotaExceededError`: a save is one RON
-    // string in `localStorage`, and a long bounded run is a big one. The store
-    // hands the browser's own exception text back, and it is reported as-is —
-    // "the save could not be written: QuotaExceededError" says more to whoever
-    // has to clear space than any phoenix paraphrase of it would.
-    match crate::snapshot::save_to(&store, &slot, &run) {
+    // The ONE line that differs between a slot and a file (issue #866), and it
+    // is a choice of `Store` rather than a choice of format: both branches hand
+    // the SAME `run` to the SAME `save_to`, so the string a host downloads is
+    // byte-identical to the one this browser would have kept.
+    let written = match destination {
+        // The failure worth naming is `QuotaExceededError`: a save is one RON
+        // string in `localStorage`, and a long bounded run is a big one. The
+        // store hands the browser's own exception text back, and it is reported
+        // as-is — "the save could not be written: QuotaExceededError" says more
+        // to whoever has to clear space than any phoenix paraphrase of it would.
+        SaveDestination::Slot => {
+            let store = vellum_save::LocalStorage::new(crate::snapshot::STORAGE_NAMESPACE);
+            crate::snapshot::save_to(&store, &slot, &run)
+        }
+        SaveDestination::File => crate::snapshot::export_artifact(&run).map(|text| {
+            EXPORTED_ARTIFACT.with(|a| *a.borrow_mut() = Some(text));
+        }),
+    };
+    match written {
         Ok(()) => set_snapshot_status(
             true,
-            SNAPSHOT_SAVE,
+            source,
             format!("saved at tick {}", run.ledger.final_tick),
         ),
         Err(why) => set_snapshot_status(
             false,
-            SNAPSHOT_SAVE,
+            source,
             format!("the save could not be written: {why}"),
         ),
     }

@@ -67,6 +67,12 @@ export const DEBUG_COMMANDS = [
   { id: 'teleport-waypoint', labelId: 'settings.debug.teleport', call: 'wasm_teleport_to_waypoint', enabled: 'wasm_has_navigation_waypoint' },
   { id: 'save-snapshot', labelId: 'settings.debug.save_snapshot', call: '__hostSaveSnapshot' },
   { id: 'resume-snapshot', labelId: 'settings.debug.resume_snapshot', call: '__hostResumeSnapshot' },
+  // Issue #866. The EXPORT half sits here beside the save it is a variant of —
+  // same capture, same record, a different `vellum_save::Store` — because both
+  // act on a session that is already running. Its IMPORT twin cannot live here:
+  // an import happens before a world is loaded, so it is a control on the
+  // scenario panel rather than one in a panel over a running game.
+  { id: 'export-snapshot', labelId: 'settings.debug.export_snapshot', call: '__hostExportSnapshot' },
 ];
 
 // The tab list — and the "which tab survives this build" answer — moved to

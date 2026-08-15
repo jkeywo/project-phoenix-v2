@@ -4155,3 +4155,244 @@ fn a_save_written_before_the_spawn_record_is_refused_on_format() {
         "the refusal names the dimension that moved: {refusal}"
     );
 }
+
+// ── Portable saves: export, import, and the two refusals (issue #866) ────────
+
+/// The exported artifact is **the same string** a browser slot holds.
+///
+/// Not "equivalent", not "round-trips to an equal value" — the same bytes. That
+/// is the whole of this issue's no-second-schema claim, and it is checkable
+/// because both paths are `save_to` over a `vellum_save::Store`: one writes into
+/// a file, one into `localStorage`, one into memory on its way to a download,
+/// and the record they carry is built once.
+///
+/// `FileStore` stands in for the browser here for the reason the rest of this
+/// file uses it: `LocalStorage` needs a browser and `backend-fs` is the same
+/// trait over the same text.
+#[test]
+fn an_exported_artifact_is_byte_identical_to_what_a_slot_holds() {
+    let mut live = boot(&reinforce_args());
+    step(&mut live, REINFORCE_CAPTURE_AT);
+
+    let run = run_for(
+        capture(live.world()),
+        world_digest(live.world()),
+        SEED,
+        REINFORCE,
+        current_versions(REINFORCE),
+    );
+
+    // One `scratch()` call, bound: the helper clears the directory each time it
+    // is asked for one, so asking twice would delete the slot between writing
+    // and reading it.
+    let dir = scratch("export-identity");
+    let store = FileStore::new(dir.clone());
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let on_disk = std::fs::read_to_string(dir.join("autosave.ron"))
+        .expect("the backend wrote the slot as one RON file");
+
+    assert_eq!(
+        project_phoenix::snapshot::export_artifact(&run).expect("the export is written"),
+        on_disk,
+        "an exported save and a stored slot are the same record in the same \
+         encoding — if these ever differ, a second snapshot schema has been \
+         introduced somewhere between them"
+    );
+}
+
+/// And it is RON *text*, deliberately — the property the issue asks to lean on
+/// rather than paper over.
+///
+/// Asserted at the shallowest level that means anything: the artifact is
+/// human-readable, and the two facts a bug report is asked for first — which
+/// world, and which tick — are legible in it without a parser.
+#[test]
+fn an_exported_artifact_is_text_a_human_can_read() {
+    let mut live = boot(&reinforce_args());
+    step(&mut live, REINFORCE_CAPTURE_AT);
+    let tick = live
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0;
+    let run = run_for(
+        capture(live.world()),
+        world_digest(live.world()),
+        SEED,
+        REINFORCE,
+        current_versions(REINFORCE),
+    );
+
+    let text = project_phoenix::snapshot::export_artifact(&run).expect("the export is written");
+    assert!(
+        text.contains(REINFORCE),
+        "the scenario it was taken in is readable in the file itself"
+    );
+    assert!(
+        text.contains(&tick.to_string()),
+        "and so is the tick it was taken at"
+    );
+}
+
+/// A save exported from one session imports into a **fresh app** and restores.
+///
+/// The acceptance criterion end to end, and it goes through the transport rather
+/// than around it: the payload that reaches `restore` here was serialised, handed
+/// out as a file's worth of text, and parsed back by the import gate — not
+/// carried in memory from the capture.
+#[test]
+fn an_exported_save_imports_into_a_fresh_app_and_restores() {
+    let mut live = boot(&reinforce_args());
+    step(&mut live, REINFORCE_CAPTURE_AT);
+
+    let captured_digest = world_digest(live.world());
+    let run = run_for(
+        capture(live.world()),
+        captured_digest,
+        SEED,
+        REINFORCE,
+        current_versions(REINFORCE),
+    );
+    let file = project_phoenix::snapshot::export_artifact(&run).expect("the export is written");
+
+    // The world the file names, read WITHOUT the version gate — the step the
+    // browser takes first, because it has to load that world before it has a
+    // content digest to check the file against.
+    assert_eq!(
+        project_phoenix::snapshot::peek_artifact_scenario(&file)
+            .expect("an intact file names its scenario"),
+        REINFORCE,
+        "an import knows which world to load from the file itself"
+    );
+
+    let imported = project_phoenix::snapshot::import_artifact(&file, &current_versions(REINFORCE))
+        .expect("this build can honour its own export");
+    assert_eq!(
+        imported, run,
+        "the imported record is the exported one, field for field"
+    );
+
+    let payload = imported
+        .snapshot
+        .as_ref()
+        .expect("a saved game carries a snapshot")
+        .state
+        .clone();
+    let mut resumed = boot_to_rebuild_point(&reinforce_args(), &payload);
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "a session resumed from a FILE stands exactly where the capture did"
+    );
+}
+
+/// A damaged file is refused as damaged, and an incompatible one as incompatible.
+///
+/// AC5, stated as the one thing that makes the two messages worth having:
+/// they are different **values**, not different wordings of one. A host told
+/// "this file is damaged" goes looking for a better copy; a host told "this save
+/// is from an older build" does not. Getting the classification wrong sends them
+/// to the wrong place, and that is not a thing a shared error string can be
+/// careful about.
+///
+/// Three shapes of damage, because a file arrives damaged in more than one way:
+/// truncated mid-record (an interrupted download), replaced by something that is
+/// not a save at all, and empty.
+#[test]
+fn a_damaged_file_and_an_incompatible_one_are_refused_differently() {
+    use project_phoenix::snapshot::{import_artifact, LoadRefusal};
+
+    let mut live = boot(&reinforce_args());
+    step(&mut live, REINFORCE_CAPTURE_AT);
+    let run = run_for(
+        capture(live.world()),
+        world_digest(live.world()),
+        SEED,
+        REINFORCE,
+        current_versions(REINFORCE),
+    );
+    let current = current_versions(REINFORCE);
+    let intact = project_phoenix::snapshot::export_artifact(&run).expect("the export is written");
+
+    // The control: intact and honourable, so nothing below is refused for being
+    // a save at all.
+    assert!(import_artifact(&intact, &current).is_ok());
+
+    for (what, damaged) in [
+        ("truncated", intact[..intact.len() / 2].to_string()),
+        ("not a save", "hello, this is not a save file".to_string()),
+        ("empty", String::new()),
+    ] {
+        assert!(
+            matches!(
+                import_artifact(&damaged, &current),
+                Err(LoadRefusal::Unparsable(_))
+            ),
+            "[{what}] a file this build cannot parse is DAMAGED, and must not be \
+             reported as a version answer — there is no version in it to have moved"
+        );
+    }
+
+    // Intact, and from a build whose payload shape moved. The refusal names the
+    // dimension, which is the whole reason it is `vellum_save::Moved` verbatim.
+    let older = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let stale = project_phoenix::snapshot::export_artifact(&run_for(
+        capture(live.world()),
+        world_digest(live.world()),
+        SEED,
+        REINFORCE,
+        older,
+    ))
+    .expect("the export is written");
+    let refusal = import_artifact(&stale, &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "an intact save this build cannot honour is INCOMPATIBLE, and the \
+         refusal names which dimension moved: {refusal}"
+    );
+
+    // And the same file still parses, which is what makes the two classes
+    // genuinely different rather than a fallback ordering.
+    assert!(
+        project_phoenix::snapshot::peek_artifact_scenario(&stale).is_ok(),
+        "an incompatible save is a perfectly readable file — it is the BUILD \
+         that cannot honour it, and a host told otherwise would go looking for a \
+         better copy of a file that is already fine"
+    );
+}
+
+/// The transfer store is a `Store` like the others, including the parts nothing
+/// in this issue uses.
+///
+/// Small, and worth having: an incomplete `Store` impl would work for export and
+/// import (which only ever write once and read once) and be quietly wrong the
+/// first time anything asked it for a slot list.
+#[test]
+fn the_transfer_store_behaves_like_any_other_store() {
+    use project_phoenix::snapshot::TransferStore;
+    use vellum_save::Store;
+
+    let store = TransferStore::empty();
+    assert_eq!(store.read("autosave").expect("infallible"), None);
+    assert!(store.slots().expect("infallible").is_empty());
+
+    store.write("autosave", "hello").expect("infallible");
+    assert_eq!(
+        store.read("autosave").expect("infallible").as_deref(),
+        Some("hello")
+    );
+    assert_eq!(store.slots().expect("infallible"), vec!["autosave"]);
+
+    store.remove("autosave").expect("infallible");
+    assert_eq!(store.read("autosave").expect("infallible"), None);
+    store.remove("autosave").expect("removing nothing succeeds");
+
+    let holding = TransferStore::holding("autosave", "text".to_string());
+    assert_eq!(holding.take("autosave").as_deref(), Some("text"));
+    assert_eq!(
+        holding.take("autosave"),
+        None,
+        "taken means taken — an export must not be handed out twice"
+    );
+}

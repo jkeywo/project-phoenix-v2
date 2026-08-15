@@ -214,6 +214,14 @@
       margin-top: auto; padding-top: 1rem; border-top: 1px solid #223;
       display: flex; flex-direction: column; gap: 0.4rem;
     }
+    /* Portable save import (issue #866) — the same column-footer treatment as
+       the mod-pack control it sits under. */
+    #snapshot-import {
+      margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem;
+    }
+    #snapshot-import-status {
+      font-size: 0.75rem; color: #9ab; white-space: normal; word-break: break-word;
+    }
     #mod-pack-status {
       font-size: 0.72rem; color: #889; white-space: normal; word-break: break-word;
     }
@@ -1062,7 +1070,11 @@
       // Only the message may contain a tab, so everything past the second one
       // is rejoined rather than dropped.
       showSnapshotStatus(ok, parts.slice(2).join('\t'));
-      flagSnapshotButton(parts[1] === 'save' ? 'save-snapshot' : 'resume-snapshot', ok);
+      // Three sources now (issue #866 added `export`), so the mapping is a
+      // table rather than a ternary: a fourth would otherwise land silently on
+      // the resume button.
+      var button = { save: 'save-snapshot', resume: 'resume-snapshot', export: 'export-snapshot' }[parts[1]];
+      if (button) flagSnapshotButton(button, ok);
     }
 
     // send(type, data?) for the local-console path: wraps the ClientMessage
@@ -1181,6 +1193,19 @@
         <div id="mod-pack-list"></div>
         <div id="mod-pack-conflicts"></div>
         <div id="mod-pack-findings"></div>
+      </div>
+      <!-- Portable save import (issue #866). Pre-activation by construction:
+           #scenario-panel is hidden the moment world load starts, so a save can
+           only ever be picked before this session has a world — which is what
+           the version gate needs, because it runs against the world the save
+           itself names. -->
+      <div id="snapshot-import">
+        <input id="snapshot-import-file" type="file" accept=".ron,.txt,text/plain" style="display:none;">
+        <!-- `world-btn` is a STYLING hook only, as on #mod-pack-btn: this is
+             static markup with a page-lifetime handler and must never be matched
+             by renderScenarioLockState()'s `.scenario-entry` rebuild. -->
+        <button id="snapshot-import-btn" class="world-btn" data-i18n="server.import_snapshot">Import saved game</button>
+        <div id="snapshot-import-status"></div>
       </div>
     </div>
   </div>
@@ -1373,6 +1398,11 @@
     // is the real gate; this is what stops the demo showing a button for it.
     import { offersModPackUpload } from './gui/build-flags.js';
     window.phOffersModPackUpload = offersModPackUpload;
+    // Portable saves (issue #866). The classic scripts below own the file
+    // chooser and the download; the classification of a refusal and the DOM
+    // mechanics of both are in a module so vitest can reach them.
+    import * as snapshotTransfer from './gui/snapshot-transfer.js';
+    window.phSnapshotTransfer = snapshotTransfer;
   </script>
   <!-- Console-action dispatch table (issue #822): the host page routes its
        embedded console actions through the same gui/action-map.js →
@@ -2484,16 +2514,17 @@
     }
 
     /**
-     * Remove the pre-scenario mod-pack upload control from a demo build
-     * (PRD #855). Removed rather than hidden: a `display: none` control is
-     * still in the DOM to be clicked from the console, and in a demo binary
-     * `wasm_add_mod_pack` does not exist to be called anyway.
+     * Remove the pre-scenario HOST TOOLING controls from a demo build — the
+     * mod-pack upload (PRD #855) and, since issue #866, the save importer.
+     * Removed rather than hidden: a `display: none` control is still in the DOM
+     * to be clicked from the console, and in a demo binary `wasm_add_mod_pack`
+     * does not exist to be called anyway.
      *
      * Called from renderScenarioLockState, which is the first render after the
      * catalog is built — i.e. after WASM is up, so `wasm_is_demo_build()` has
      * an answer even on a locally-compiled demo build that carries no meta tag.
      */
-    function applyModPackRestriction() {
+    function applyPreScenarioRestrictions() {
       const offers = window.phOffersModPackUpload;
       // Not yet imported (the module script above is async): leave the control
       // alone rather than guess. The next render settles it.
@@ -2504,6 +2535,14 @@
       if (offers({ win: window.wasmBindings || window, doc: document })) return;
       const upload = document.getElementById('mod-pack-upload');
       if (upload) upload.remove();
+      // The save importer goes with it (issue #866), on the same test and for
+      // the same reason the settings cog's Debug tab is absent from a demo
+      // build (#940): importing an arbitrary session is host tooling, not part
+      // of the demo. Removed rather than hidden, exactly as above — a
+      // `display: none` control is still in the DOM to be clicked from the
+      // console.
+      const importer = document.getElementById('snapshot-import');
+      if (importer) importer.remove();
     }
 
     function renderScenarioLockState() {
@@ -2511,7 +2550,7 @@
       const label = document.getElementById('world-list-label');
       if (!worldList) return;
       if (!_catalogBuilt) return;
-      applyModPackRestriction();
+      applyPreScenarioRestrictions();
 
       if (_preSelection.scenario_id == null) {
         // Scenario stage — one button per catalog scenario.
@@ -2806,6 +2845,76 @@
         setStatus('server.mod_pack_applied');
         renderModPackList();
         refreshMergedCatalog();
+      });
+    })();
+
+    // Wire the saved-game file chooser (issue #866). Imports are accepted ONLY
+    // in the pre-round scenario stage, exactly like the mod-pack upload above
+    // and for a sharper reason: the version gate checks a save against the
+    // CONTENT of the world it was taken in, so it can only run once that world
+    // has been loaded — and which world that is, is written inside the file.
+    //
+    // So an import is two steps, and the split is what makes AC5's two refusals
+    // two different sentences. `wasm_peek_import` parses the file and nothing
+    // else, here, before this page loads a scenario on its behalf: a DAMAGED
+    // file is refused now. `wasm_prepare_import` runs the version gate later, at
+    // the same point `?resume=` runs it, so an INCOMPATIBLE file is refused
+    // there, naming the dimension that moved. Neither refusal activates
+    // anything.
+    (function wireSnapshotImport() {
+      const btn = document.getElementById('snapshot-import-btn');
+      const input = document.getElementById('snapshot-import-file');
+      const status = document.getElementById('snapshot-import-status');
+      if (!btn || !input) return;
+
+      function setStatus(text) {
+        if (status) status.textContent = text;
+      }
+
+      btn.addEventListener('click', function () {
+        if (_worldLoadStarted) return;
+        input.value = '';
+        input.click();
+      });
+
+      input.addEventListener('change', async function () {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        if (_worldLoadStarted || !wasmReady) return;
+        setStatus(t('server.import_snapshot_reading'));
+        let text;
+        try {
+          text = await window.phSnapshotTransfer.readFileText(file);
+        } catch (e) {
+          console.error('[Phoenix] saved game read failed:', e);
+          setStatus(t('server.import_snapshot_read_error'));
+          return;
+        }
+        // Step one: is this a save at all, and which world is it of?
+        let peek;
+        try {
+          peek = window.phSnapshotTransfer.parsePeekAnswer(wasmBindings.wasm_peek_import(text));
+        } catch (e) {
+          console.error('[Phoenix] saved game peek threw:', e);
+          setStatus(t('server.import_snapshot_read_error'));
+          return;
+        }
+        if (!peek.ok || !peek.scenario) {
+          setStatus(window.phSnapshotTransfer.importRefusalText(peek));
+          return;
+        }
+        // Step two happens on the way into wasm_init — see finishInit. All this
+        // does is load the world the save names, which is what the gate there
+        // will need to check it against.
+        window.__phoenixPendingImport = text;
+        setStatus(t('server.import_snapshot_loading'));
+        _worldLoadStarted = true;
+        selectedScenario = peek.scenario;
+        document.getElementById('scenario-panel').style.display = 'none';
+        resetJoinQrLayer();
+        showLobbyPanel();
+        startMenuMusic();
+        startPhoenix();
       });
     })();
 
@@ -3260,6 +3369,13 @@ function finishInit() {
   window.wasm_snapshot_status = wasmBindings.wasm_snapshot_status;
   window.wasm_prepare_resume = wasmBindings.wasm_prepare_resume;
   window.wasm_resume_pending = wasmBindings.wasm_resume_pending;
+  // Portable saves (issue #866): export is a running-session action, import is
+  // a pre-activation one, and both go through the same record as the slot above.
+  window.wasm_export_snapshot = wasmBindings.wasm_export_snapshot;
+  window.wasm_take_exported_snapshot = wasmBindings.wasm_take_exported_snapshot;
+  window.wasm_export_file_name = wasmBindings.wasm_export_file_name;
+  window.wasm_peek_import = wasmBindings.wasm_peek_import;
+  window.wasm_prepare_import = wasmBindings.wasm_prepare_import;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
   window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
   // Pause is a GAMEPLAY control, not a debug one (issue #939): it sits on the
@@ -3654,6 +3770,31 @@ function startServer() {
     showSnapshotStatus(false, 'the saved session could not be prepared: ' + e);
   }
 
+  // The IMPORT half of the same gate (issue #866), at the same point and for
+  // the same reason: the world is loaded (so there is a content digest to check
+  // against) and nothing has been activated (so a refusal costs nothing). The
+  // file was picked on the scenario panel and parsed there; this is where it
+  // meets the version gate a local slot meets.
+  try {
+    var importText = window.__phoenixPendingImport;
+    if (importText && typeof wasm_prepare_import === 'function') {
+      // Consumed either way, exactly as `?resume=` is stripped either way: a
+      // refused import must not be retried, and an accepted one is now staged
+      // in Rust rather than here.
+      window.__phoenixPendingImport = null;
+      var importRefusal = wasm_prepare_import(importText);
+      if (importRefusal) {
+        var answer = window.phSnapshotTransfer.parseTransferAnswer(importRefusal);
+        var sentence = window.phSnapshotTransfer.importRefusalText(answer);
+        showSnapshotStatus(false, sentence);
+        console.warn('[Phoenix] the imported save was refused: ' + importRefusal);
+      }
+    }
+  } catch (e) {
+    console.error('[Phoenix] save import failed:', e);
+    showSnapshotStatus(false, 'the saved game could not be prepared: ' + e);
+  }
+
   try { wasm_init(); } catch (_) {}
 
   // From here on, saves and the pending resume report themselves. Half a
@@ -3693,6 +3834,12 @@ window.addEventListener('TrunkApplicationStarted', () => {
     // The settings cog's Debug tab drives these by name; the slot id and the
     // "a resume is a page load" reload are the host page's business, not the
     // menu's.
+    // Both save controls answer a click made before the simulation exists the
+    // same way, so they say it in one place rather than in two copies that can
+    // drift (issue #866 added the second caller).
+    function reportNoSimulationToSave() {
+      showSnapshotStatus(false, 'the simulation is not running yet, so there is nothing to save');
+    }
     window.__hostSaveSnapshot = function() {
       // Fire-and-forget: the capture itself is taken by a Bevy system on the
       // next PostUpdate, because a save has to stand on a tick boundary and a
@@ -3700,7 +3847,7 @@ window.addEventListener('TrunkApplicationStarted', () => {
       if (typeof wasm_save_snapshot === 'function') {
         wasm_save_snapshot(PHOENIX_SAVE_SLOT);
       } else {
-        showSnapshotStatus(false, 'the simulation is not running yet, so there is nothing to save');
+        reportNoSimulationToSave();
       }
     };
     window.__hostResumeSnapshot = function() {
@@ -3711,6 +3858,45 @@ window.addEventListener('TrunkApplicationStarted', () => {
       var resumeUrl = new URL(window.location.href);
       resumeUrl.searchParams.set('resume', PHOENIX_SAVE_SLOT);
       window.location.href = resumeUrl.toString();
+    };
+    // The EXPORT half of portable saves (issue #866). The same capture and the
+    // same record as __hostSaveSnapshot; only the `vellum_save::Store` differs,
+    // which is why this is a sibling shim rather than a second save path.
+    //
+    // Two steps rather than one, because the capture has to stand on a tick
+    // boundary: the click queues it, a `PostUpdate` system takes it, and the RON
+    // is parked for collection. The short poll below is deliberately faster than
+    // the 500ms status poll — a download wants to land while the click that
+    // asked for it is still recent, and one frame is all the capture needs.
+    var _exportPollTimer = null;
+    window.__hostExportSnapshot = function() {
+      if (typeof wasm_export_snapshot !== 'function') {
+        reportNoSimulationToSave();
+        return;
+      }
+      wasm_export_snapshot();
+      if (_exportPollTimer) clearInterval(_exportPollTimer);
+      var waited = 0;
+      _exportPollTimer = setInterval(function () {
+        waited += 1;
+        var text = '';
+        try { text = wasm_take_exported_snapshot(); } catch (_) { text = ''; }
+        if (text) {
+          clearInterval(_exportPollTimer);
+          _exportPollTimer = null;
+          var name = 'phoenix-save.ron';
+          try { name = wasm_export_file_name() || name; } catch (_) {}
+          window.phSnapshotTransfer.downloadArtifact(document, name, text);
+          return;
+        }
+        // Fifty ticks at 100ms. A capture that has not happened in five seconds
+        // is not going to; the refusal (no world, or no run in progress) has
+        // already been posted through the ordinary status channel by then.
+        if (waited > 50) {
+          clearInterval(_exportPollTimer);
+          _exportPollTimer = null;
+        }
+      }, 100);
     };
   </script>
 

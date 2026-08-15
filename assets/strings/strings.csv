@@ -652,6 +652,7 @@ settings.debug.session,"Server settings menu — Debug tab, heading over the ses
 settings.debug.teleport,Server settings menu — jump the ship to the shared Navigation waypoint; disabled when there is no waypoint,[Teleport to Waypoint]
 settings.debug.save_snapshot,Server settings menu — save the running session to the browser,Save Session
 settings.debug.resume_snapshot,Server settings menu — reload the page and resume the saved session,[Resume Saved Session]
+settings.debug.export_snapshot,Server settings menu — download the running session as a portable save file (issue #866),[Export Session To File]
 settings.gameplay.simulation,"Server settings menu — Gameplay tab, heading over the pause control",Simulation
 settings.gameplay.pause,Server settings menu — button that pauses the simulation clock,Pause
 settings.gameplay.resume,Server settings menu — button that resumes a paused simulation clock,Resume
@@ -778,6 +779,12 @@ server.mod_pack_reading,Host scenario picker — status while an uploaded mod pa
 server.mod_pack_applied,Host scenario picker — status when an uploaded mod pack passed validation and its scenarios were added,[Mod pack applied]
 server.mod_pack_rejected,Host scenario picker — status heading when an uploaded mod pack failed validation and nothing was applied,[Mod pack rejected — nothing applied]
 server.mod_pack_read_error,Host scenario picker — status when the uploaded file could not be read at all,[Could not read the uploaded file]
+server.import_snapshot,Host scenario picker — button that opens the saved-game file chooser (issue #866),[Import saved game]
+server.import_snapshot_reading,Host scenario picker — status while an imported save file is being read,[Reading saved game…]
+server.import_snapshot_read_error,Host scenario picker — status when the chosen save file could not be read off disk at all,[Could not read that file]
+server.import_snapshot_damaged,"Host scenario picker — status when the chosen file is not a save this build can parse: truncated, edited, or never a save. {detail} is the parser's own reason","[That file is damaged and could not be read as a saved game. {detail}]"
+server.import_snapshot_incompatible,"Host scenario picker — status when the chosen file IS a save but this build cannot honour it. {detail} is vellum-save's own sentence naming which version dimension moved","[That saved game was made by a different build. {detail}]"
+server.import_snapshot_loading,Host scenario picker — status while the world an imported save names is being loaded on its behalf,[Loading the world that save was taken in…]
 server.hud_nominal,Viewscreen HUD — ship condition when undamaged,NOMINAL
 server.hud_alert,Viewscreen HUD — ship condition while the ship is at red alert,ALERT
 server.hud_designation,Viewscreen HUD — default ship designation,PHOENIX

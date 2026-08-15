@@ -822,6 +822,40 @@ crew find changes, with no copy edited.
 See `assets/worlds/probe_scandiff.toml`, which runs all four combinations of
 "is the record true" and "did anybody look" in one run.
 
+**The follow-on pattern** is a channel that opens only for a crew who have done
+two separate things — a reading proves *what a structure is*, and only a person
+can tell you *who knew*. Register the beat from **both** sides and let it hold
+no memory of its own, so the two facts may arrive in either order:
+
+```rhai
+on_flag_set("skyway_settled_by_negotiation", "on_the_floor_carries_it");
+on_flag_set("skyway_records_diff_found", "on_the_diff_lands");
+
+fn call_the_witness(ctx) {
+    if ctx.flags.witness_called > 0 { return; }        // single-shot on the OPEN
+    if ctx.flags.skyway_settled_by_negotiation == 0 { return; }
+    if !ctx.dossier.holds(#{ text: "…evidence.the_file" }) { return; }
+    ctx.flags.witness_called = 1;
+    ctx.effects.open_comms(#{ from: "…entity.witness.name", node_fn: "hails" });
+}
+```
+
+Two rules worth writing down:
+
+* **Gate on `ctx.dossier.holds`, not on the flag one route sets beside its
+  append.** Any route that files the same finding should open the same line — a
+  scan, a document handed over, a slice not written yet — and the log is the
+  thing that knows.
+* **Put the append before the flag write** in an `on_pick`. A call's commands are
+  applied in the order you authored them, so a beat chained off the flag reads a
+  sheet that already holds the entry, while a `holds` *inside the same call*
+  would not.
+
+And file what she says under **what it is about**, never under who said it: the
+subject is the structure, so the records comparison and the testimony end up on
+one fact sheet under two provenances. See `assets/worlds/probe_corroborate.toml`,
+which stands five sites side by side and moves only the gates.
+
 ### Example — a world, end to end
 
 ```toml

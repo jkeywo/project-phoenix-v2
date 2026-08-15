@@ -10781,3 +10781,565 @@ fn the_ladder_b_panel_shows_the_recorded_standard_failing_beside_the_claim() {
         "what they were told, then what they worked out, in that order"
     );
 }
+
+// ── The worker who corroborates the record (issue #1039, parent #852) ────────
+
+/// The witness's own hull — the sender whose thread is the whole slice.
+const SKYWAY_RIGGER: &str = "world.falling_skyway.entity.rigger_tacket.name";
+/// What she says, filed under DIALOGUE provenance onto the rung's sheet.
+const SKYWAY_ACCOUNT: &str = "world.falling_skyway.evidence.ladder_b_worker_account";
+
+/// Whether the rigger has ever been on the channel at all — the read the two
+/// negative runs are built on, where the claim is that nothing was ever sent.
+fn rigger_called(app: &bevy::prelude::App) -> bool {
+    !skyway_messages(app, SKYWAY_RIGGER).is_empty()
+}
+
+/// Ladder B's fact sheet as `(text, provenance)` pairs, oldest first — the panel
+/// payload, read through the same helper #1038's tests use.
+fn ladder_b_sheet(app: &mut bevy::prelude::App) -> Vec<(String, String)> {
+    let rung = scan_uuid_named(app, SKYWAY_DEPOT_B);
+    diff_file(app, &rung)
+}
+
+/// Talk the committee round to a vote with whatever ground the crew already
+/// hold. A crew carrying the maintenance file settle on one promise; a crew
+/// carrying nothing give both. Either way the strike ends by NEGOTIATION, which
+/// is the gate this slice reads — and which of the two roads got there is
+/// #1036's business rather than this one's.
+fn skyway_negotiate_to_a_vote(app: &mut bevy::prelude::App) {
+    skyway_pick(app, SKYWAY_COMMITTEE, "world.falling_skyway.comms.listen");
+    let options = skyway_options(&skyway_open_node(app, SKYWAY_COMMITTEE));
+    if options.contains(&"world.falling_skyway.comms.show_file".to_string()) {
+        skyway_pick(
+            app,
+            SKYWAY_COMMITTEE,
+            "world.falling_skyway.comms.show_file",
+        );
+        skyway_pick(
+            app,
+            SKYWAY_COMMITTEE,
+            "world.falling_skyway.comms.promise_passage",
+        );
+    } else {
+        skyway_pick(
+            app,
+            SKYWAY_COMMITTEE,
+            "world.falling_skyway.comms.promise_passage",
+        );
+        skyway_pick(
+            app,
+            SKYWAY_COMMITTEE,
+            "world.falling_skyway.comms.promise_records",
+        );
+    }
+    skyway_pick(
+        app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.call_the_vote",
+    );
+}
+
+/// **Issue #1039, AC1/AC3/AC4/AC5/AC6/AC7 — the beat end to end.**
+///
+/// A crew who went and read the rung and then talked the strike down get one of
+/// the people off that rung on an open channel, and what she says lands on the
+/// SAME fact sheet as the document she is talking about, under a different
+/// provenance. They finish able to say both what the structure is and who knew,
+/// which is the sentence the confrontation is built on and the reason it unlocks
+/// here and nowhere else.
+///
+/// The order is asserted causally throughout: she is silent while either gate is
+/// open, and the beat she calls on is the one that closes the second.
+#[test]
+fn a_worker_corroborates_the_record_for_a_crew_who_read_it_and_talked_them_down() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::world::commitments::CommitmentState;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let (mut app, ship) = skyway_at_act_two();
+
+    // NEITHER GATE HELD YET, and she is not on the channel.
+    assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 0);
+    assert!(
+        !rigger_called(&app),
+        "nobody calls a crew who have not done anything yet"
+    );
+
+    // ── The evidence gate, on its own: the crew go and read the rung ─────────
+    skyway_scan_ladder_b(&mut app, ship);
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_diff_found"),
+        1,
+        "precondition: #1038's finding is on the sheet"
+    );
+    run(&mut app, ticks_for_sim_seconds(3.0, SKYWAY_DT));
+    assert!(
+        !rigger_called(&app),
+        "ONE gate is not the gate: the strike is still on, and nobody on that \
+         picket is talking to a destroyer about anything yet"
+    );
+
+    // ── The settlement gate: the floor carries the vote ──────────────────────
+    skyway_negotiate_to_a_vote(&mut app);
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_forced_open"),
+        0,
+        "precondition: nobody cleared that picket for them"
+    );
+
+    // AC1: the contact exists, and she is a real sender on a real hull rather
+    // than a voice — the pick below is range-gated against where she is sitting.
+    assert!(
+        rigger_called(&app),
+        "with both halves in place she calls, on the beat the second one lands"
+    );
+    let hail = skyway_open_node(&app, SKYWAY_RIGGER);
+    assert_eq!(hail.body, "world.falling_skyway.comms.rigger_hails");
+    assert_eq!(
+        skyway_options(&hail),
+        vec![
+            "world.falling_skyway.comms.rigger_ask".to_string(),
+            "world.falling_skyway.comms.rigger_later".to_string(),
+        ],
+        "the ask is index 0 — what a backfilled Tactical seat does with a thread \
+         the crew already earned"
+    );
+
+    // The sheet before she speaks: what they were told, then what they worked
+    // out. #1038's three rows and nothing else.
+    assert_eq!(
+        ladder_b_sheet(&mut app)
+            .iter()
+            .map(|(t, p)| (t.as_str(), p.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (SKYWAY_RECORD[0], "briefing"),
+            (SKYWAY_RECORD[1], "briefing"),
+            (SKYWAY_FILE, "records"),
+        ],
+    );
+
+    // ── AC4: the corroboration ───────────────────────────────────────────────
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+
+    // AC6: campaign state — the mirror of `skyway_worker_corroboration_closed`,
+    // so a later mission reads a fact on either branch rather than an absence.
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_obtained"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_closed"), 0);
+
+    // AC4 proper: a FOURTH row on the same rung's sheet, visibly distinct from
+    // the records comparison above it. One panel, one subject, and the crew can
+    // say which of the four they were handed, which they worked out, and which
+    // somebody told them to their face.
+    assert_eq!(
+        ladder_b_sheet(&mut app)
+            .iter()
+            .map(|(t, p)| (t.as_str(), p.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (SKYWAY_RECORD[0], "briefing"),
+            (SKYWAY_RECORD[1], "briefing"),
+            (SKYWAY_FILE, "records"),
+            (SKYWAY_ACCOUNT, "dialogue"),
+        ],
+        "the account is filed under the RUNG — a finding goes under what it is \
+         about, not under who said it — and under its own provenance"
+    );
+
+    // ── AC5: what two entries on one sheet unlock ────────────────────────────
+    assert_eq!(
+        skyway_flag(&app, "skyway_confront_unlocked"),
+        1,
+        "the records comparison AND somebody's word: the confrontation is on the \
+         table for the Act-3 scene"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Completed,
+        "the optional objective #1036 posted goes GREEN — the mirror of the red \
+         one the force-open produces"
+    );
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-confront"),
+        Some(ObjectiveStatus::Active),
+        "and the crew are told what they have earned, on the panel, without this \
+         slice authoring #1043's scene"
+    );
+
+    // Her own ask, answered. The promise is made to HER and not to the
+    // committee: a captain who puts her account to the operator has to know
+    // whose name is on it.
+    let account = skyway_open_node(&app, SKYWAY_RIGGER);
+    assert_eq!(account.body, "world.falling_skyway.comms.rigger_account");
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_protect",
+    );
+    {
+        let ledger = &app.world().resource::<WorldContentRuntime>().commitments;
+        let promise = ledger
+            .get("skyway_protect_witness")
+            .expect("the captain's promise to the witness is on the books");
+        assert_eq!(promise.state, CommitmentState::Open);
+        assert_eq!(promise.made_to, SKYWAY_RIGGER);
+    }
+    assert_eq!(skyway_flag(&app, "skyway_witness_unprotected"), 0);
+}
+
+/// **AC2 — the force-open path, and the closure said out loud.**
+///
+/// The SAME crew, holding the SAME finding, who let Havelock clear the line
+/// instead of talking. Nobody calls them, and the only difference between this
+/// run and the one above is one dialogue pick.
+///
+/// The closure is asserted as legible rather than merely absent: #1036 fails the
+/// objective on the crew's own list, the committee say why on the channel they
+/// will not answer again, and the campaign flag carries it forward. This slice
+/// deliberately adds no second announcement — the route it would announce is one
+/// the crew were already told they had lost — so what is asserted here is that
+/// all three of those still hold with the corroboration authored behind them.
+#[test]
+fn forcing_the_picket_open_leaves_nobody_willing_to_corroborate_and_says_so() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+
+    // The evidence gate is SATISFIED, so the only thing separating this run from
+    // the one above is how the dispute ended.
+    skyway_scan_ladder_b(&mut app, ship);
+    assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 1);
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+    // The dispute ENDS. This is not the run where nothing happened.
+    run(&mut app, ticks_for_sim_seconds(10.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&app, "strike_resolved"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 0);
+
+    // Long enough that a slow route would have shown up.
+    run(&mut app, ticks_for_sim_seconds(20.0, SKYWAY_DT));
+    assert!(
+        !rigger_called(&app),
+        "the workers watched security come over the rail; none of them is getting \
+         on a channel to help afterwards"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_obtained"), 0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_confront_unlocked"),
+        0,
+        "half a case is not a case: the crew hold the record and nobody's word"
+    );
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-confront"),
+        None,
+        "and no objective promises them a confrontation they cannot have"
+    );
+
+    // LEGIBLY, not silently — all three of #1036's surfaces, with this slice's
+    // content in the world.
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_closed"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed,
+        "the route goes red on the crew's own list rather than latching quietly"
+    );
+    assert!(
+        skyway_messages(&app, SKYWAY_COMMITTEE)
+            .iter()
+            .any(|m| m.body == "world.falling_skyway.comms.committee_signs_off"),
+        "and the workers say why, on the channel they will not answer again"
+    );
+    // Ladder B's sheet carries what a reading can prove and nothing a person
+    // said, which is the whole cost of this branch in one assertion.
+    assert!(
+        ladder_b_sheet(&mut app)
+            .iter()
+            .all(|(text, _)| text != SKYWAY_ACCOUNT),
+        "nothing on the rung's file came from anybody's mouth"
+    );
+}
+
+/// **AC3 — negotiated, and nothing to ask about.**
+///
+/// The crew talk the strike down without ever pointing anything at the rung.
+/// Nobody calls: a witness corroborating a document the crew have not read is an
+/// exposition scene, and there is no question to put to her.
+///
+/// Then the other half of the same claim, and it is what separates this branch
+/// from the force-open one: the route is NOT shut. The objective is still on the
+/// list, no campaign flag says otherwise, and the moment the crew go and do the
+/// survey — with nothing settled on that beat, nobody picking anything on it,
+/// and no timer that knows a witness exists — she calls. Which is the
+/// registration working from its other side.
+#[test]
+fn a_crew_who_settled_the_strike_but_never_read_the_rung_hear_nothing_yet() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = skyway_at_act_two();
+
+    skyway_negotiate_to_a_vote(&mut app);
+    assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
+    run(&mut app, ticks_for_sim_seconds(25.0, SKYWAY_DT));
+    assert_eq!(
+        skyway_flag(&app, "strike_resolved"),
+        1,
+        "precondition: the rung is moving again, and it was talked into moving"
+    );
+
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_diff_found"),
+        0,
+        "precondition: nobody read the rung"
+    );
+    assert!(
+        !rigger_called(&app),
+        "she has nothing to corroborate — the crew are holding an unchallenged \
+         document"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_obtained"), 0);
+    assert_eq!(skyway_flag(&app, "skyway_confront_unlocked"), 0);
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-confront"),
+        None,
+        "nothing is unlocked by half a case"
+    );
+
+    // NOT SHUT, which is the difference from the other negative run.
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_closed"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a2-corroborate"),
+        ObjectiveStatus::Active,
+        "the crew can still go and do the work; nothing has told them otherwise"
+    );
+
+    // ── The other order ──────────────────────────────────────────────────────
+    // The settlement is a long way behind them. The only new fact is a reading
+    // of a rung, and it is what puts her on the channel — so the pair of
+    // conditions is a pair rather than a sequence.
+    skyway_scan_ladder_b(&mut app, ship);
+    assert_eq!(skyway_flag(&app, "skyway_records_diff_found"), 1);
+    assert!(
+        rigger_called(&app),
+        "the second half arriving second reaches the same beat"
+    );
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+    assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_obtained"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_confront_unlocked"), 1);
+    assert_eq!(
+        ladder_b_sheet(&mut app)
+            .iter()
+            .map(|(t, p)| (t.as_str(), p.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (SKYWAY_RECORD[0], "briefing"),
+            (SKYWAY_RECORD[1], "briefing"),
+            (SKYWAY_FILE, "records"),
+            (SKYWAY_ACCOUNT, "dialogue"),
+        ],
+    );
+}
+
+/// Refusing the witness cover costs the crew nothing they already have, and it
+/// is written down. A captain who would not give her the promise is a fact about
+/// this crew, and #1043's scene should be able to read it.
+#[test]
+fn refusing_the_witness_cover_keeps_the_corroboration_and_records_the_refusal() {
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_scan_ladder_b(&mut app, ship);
+    skyway_negotiate_to_a_vote(&mut app);
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_ask",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_RIGGER,
+        "world.falling_skyway.comms.rigger_no_promise",
+    );
+
+    assert_eq!(skyway_flag(&app, "skyway_witness_unprotected"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_confront_unlocked"),
+        1,
+        "she said it before she asked for anything, so refusing her does not \
+         un-say it"
+    );
+    {
+        let ledger = &app.world().resource::<WorldContentRuntime>().commitments;
+        assert!(
+            ledger.get("skyway_protect_witness").is_none(),
+            "and nothing the captain did not promise is on the books"
+        );
+    }
+}
+
+/// **`probe_corroborate.toml` — the whole matrix in one run.**
+///
+/// Five sites, authored line for line the same, differing only in how their
+/// dispute ended and in what their crew had read. The world's own header carries
+/// the timeline every assertion below is read against.
+///
+/// * BOTH against FORCED is the settlement gate. Identical records, identical
+///   witness, identical everything — and the only difference is which flag the
+///   dispute ended on.
+/// * BOTH against UNHEARD is the evidence gate. Identical settlements, and the
+///   only difference is whether anything was ever filed about the rung.
+/// * BOTH against LATE is the ORDER, and it is the corner a scripted reveal
+///   could not produce: Late's witness calls on a beat whose only new fact is a
+///   document, with nothing settled and nobody choosing anything.
+///
+/// The unlock is read at the end for all five, so its three refusals are
+/// distinguished too: Forced holds a records comparison and nobody's word, while
+/// Unheard and Quiet hold neither.
+#[test]
+fn corroboration_opens_on_two_gates_and_on_neither_of_them_alone() {
+    let dt = 1.0 / 60.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_corroborate.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(15.0, dt),
+        deterministic: true,
+        seed: Some(1039),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // Sampled tick by tick, so the ORDER below is causal rather than arithmetic:
+    // what is asserted is which fact was in the world when each thread opened,
+    // never which frame it happened on.
+    let mut called_both: Option<u64> = None;
+    let mut called_late: Option<u64> = None;
+    let mut late_filed: Option<u64> = None;
+    for tick in 0..args.max_ticks {
+        run(&mut app, 1);
+        if called_both.is_none() && diff_flag(&app, "called_both") == 1 {
+            called_both = Some(tick);
+        }
+        if called_late.is_none() && diff_flag(&app, "called_late") == 1 {
+            called_late = Some(tick);
+        }
+        if late_filed.is_none() && diff_flag(&app, "late_filed") == 1 {
+            late_filed = Some(tick);
+        }
+    }
+
+    // The world ran its whole clock: three sweeps and one unlock pass.
+    assert_eq!(diff_flag(&app, "records_filed"), 1);
+    assert_eq!(diff_flag(&app, "ground_set"), 1);
+    assert_eq!(diff_flag(&app, "swept"), 3, "asked three times, not once");
+    assert_eq!(diff_flag(&app, "unlocks_read"), 1);
+
+    // ── Which witnesses called ───────────────────────────────────────────────
+    assert_eq!(diff_flag(&app, "called_both"), 1);
+    assert_eq!(diff_flag(&app, "called_late"), 1);
+    assert_eq!(
+        diff_flag(&app, "called_forced"),
+        0,
+        "the dispute ended, and it ended the other way: nobody is talking"
+    );
+    assert_eq!(
+        diff_flag(&app, "called_unheard"),
+        0,
+        "talked down, and nothing on the sheet to ask about"
+    );
+    assert_eq!(diff_flag(&app, "called_quiet"), 0);
+
+    // ── The order, and what it proves ────────────────────────────────────────
+    let both_at = called_both.expect("the both-halves witness called");
+    let late_at = called_late.expect("the late-record witness called");
+    let filed_at = late_filed.expect("the late record was filed");
+    assert!(
+        both_at < filed_at,
+        "the first site opened on a settlement, before the late document existed \
+         ({both_at} vs {filed_at})"
+    );
+    assert!(
+        filed_at < late_at,
+        "and the second opened AFTER its document landed, on a beat nothing was \
+         settled and nobody chose anything on ({filed_at} vs {late_at})"
+    );
+
+    // ── The picks the backfilled Comms officer made ──────────────────────────
+    assert_eq!(diff_flag(&app, "corroborated_both"), 1);
+    assert_eq!(diff_flag(&app, "corroborated_late"), 1);
+    for silent in ["forced", "unheard", "quiet"] {
+        assert_eq!(
+            diff_flag(&app, &format!("corroborated_{silent}")),
+            0,
+            "no thread, no pick, no account from the {silent} site"
+        );
+    }
+
+    // ── The fact sheets ──────────────────────────────────────────────────────
+    let both_sheet = {
+        let uuid = scan_uuid_named(&mut app, "world.probe_corroborate.entity.rung_both.name");
+        diff_file(&app, &uuid)
+    };
+    assert_eq!(
+        both_sheet,
+        vec![
+            (
+                "world.probe_corroborate.evidence.record_both".to_string(),
+                "records".to_string()
+            ),
+            (
+                "world.probe_corroborate.evidence.account_both".to_string(),
+                "dialogue".to_string()
+            ),
+        ],
+        "one sheet, two provenances: what a reading proved and what somebody said"
+    );
+    let forced_sheet = {
+        let uuid = scan_uuid_named(&mut app, "world.probe_corroborate.entity.rung_forced.name");
+        diff_file(&app, &uuid)
+    };
+    assert_eq!(
+        forced_sheet,
+        vec![(
+            "world.probe_corroborate.evidence.record_forced".to_string(),
+            "records".to_string()
+        )],
+        "the forced site holds exactly what an instrument can prove, and nothing \
+         anybody was willing to say"
+    );
+    for empty in ["rung_unheard", "rung_quiet"] {
+        let name = format!("world.probe_corroborate.entity.{empty}.name");
+        let uuid = scan_uuid_named(&mut app, &name);
+        assert!(
+            diff_file(&app, &uuid).is_empty(),
+            "{empty} was never read and never spoken about"
+        );
+    }
+
+    // ── The unlock, read off the sheets rather than off the picks ────────────
+    assert_eq!(diff_flag(&app, "unlocked_both"), 1);
+    assert_eq!(diff_flag(&app, "unlocked_late"), 1);
+    assert_eq!(
+        diff_flag(&app, "unlocked_forced"),
+        0,
+        "a records comparison on its own does not unlock it"
+    );
+    assert_eq!(diff_flag(&app, "unlocked_unheard"), 0);
+    assert_eq!(diff_flag(&app, "unlocked_quiet"), 0);
+}

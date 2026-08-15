@@ -186,7 +186,7 @@ describe('PhHelmRadar', () => {
   }, over || {});
 
   const baseState = (over) => Object.assign({
-    range: 500, x: 0, z: 0, heading: 0,
+    range: 500, x: 0, z: 0, ship_heading: 0,
     hostile_arcs: [contact()],
     hostile_arc_color: [1, 0.3, 0.3, 0.07],
   }, over || {});
@@ -250,7 +250,7 @@ describe('PhHelmRadar', () => {
     // Same contact, ship now heading 90. The contact falls abeam to port and
     // the world-180 arc becomes a screen-relative 90 — subtracting the
     // heading, not adding it.
-    el.state = baseState({ heading: 90 });
+    el.state = baseState({ ship_heading: 90 });
     expect(g.children[0].getAttribute('d'))
       .toBe('M 40.0 50.0 L 54.1 35.9 A 20.0 20.0 0 0 1 54.1 64.1 Z');
   });
@@ -264,7 +264,7 @@ describe('PhHelmRadar', () => {
     // -90 and nothing else about it changes.
     el.state = baseState();
     const straight = g.children[0].getAttribute('d');
-    el.state = baseState({ heading: 90 });
+    el.state = baseState({ ship_heading: 90 });
     const rotated = g.children[0].getAttribute('d');
     expect(rotated).not.toBe(straight);
     // Same wedge, re-derived by hand: heading 90 puts the contact abeam to

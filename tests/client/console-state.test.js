@@ -815,7 +815,7 @@ describe('buildHelmConsoleState', () => {
     ];
     for (const { yaw, expectedHeading } of cases) {
       const s = parse(buildHelmConsoleState({ shipYaw: yaw }));
-      expect(s.heading).toBeCloseTo(expectedHeading, 3);
+      expect(s.ship_heading).toBeCloseTo(expectedHeading, 3);
     }
   });
 
@@ -897,7 +897,7 @@ describe('buildHelmConsoleState', () => {
       shipYaw: 0, forwardSpeed: 0,
     };
     const s = parse(buildHelmConsoleState(state));
-    expect(s.heading).toBeCloseTo(180, 2);
+    expect(s.ship_heading).toBeCloseTo(180, 2);
     expect(s.speed).toBeCloseTo(99.0, 3);
   });
 
@@ -917,7 +917,7 @@ describe('buildHelmConsoleState', () => {
 
   it('falls back to legacy props when blackboard absent', () => {
     const s = parse(buildHelmConsoleState({ shipYaw: Math.PI / 2, forwardSpeed: 33 }));
-    expect(s.heading).toBeCloseTo(90, 2);
+    expect(s.ship_heading).toBeCloseTo(90, 2);
     expect(s.speed).toBeCloseTo(33, 3);
   });
 });

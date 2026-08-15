@@ -813,7 +813,7 @@ export function buildCaptainConsoleState(state) {
  * Payload contract for the Helm console iframe (issue #827). Rendered by
  * gui/battleship/helm.html, gui/cruiser/helm.html and gui/destroyer/helm.html.
  *
- * @typedef {{ range: number, heading: number, speed: number, x: number,
+ * @typedef {{ range: number, ship_heading: number, speed: number, x: number,
  *             z: number, yaw: number, impulse_charge_progress: number,
  *             on_screen: boolean, blips: RadarBlip[],
  *             waypoint: {x: number, z: number}|null,
@@ -900,7 +900,7 @@ export function buildHelmConsoleState(state) {
 
   return JSON.stringify({
     range,
-    heading:                 (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
+    ship_heading:            (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
     speed:                   forwardSpeed,
     x:                       shipX,
     z:                       shipZ,

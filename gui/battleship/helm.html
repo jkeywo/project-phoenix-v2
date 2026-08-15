@@ -101,7 +101,7 @@
       name: 'helm',
       // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
-        document.getElementById('helm-radar').state = { blips: s.blips || [], range: s.range || 500, x: s.x || 0, z: s.z || 0, heading: s.heading || 0, speed: s.speed || 0, ship_heading: s.heading || 0, on_screen_active: !!s.on_screen, config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0, hostile_arcs: s.hostile_arcs || [], hostile_arc_color: s.hostile_arc_color || null };
+        document.getElementById('helm-radar').state = { blips: s.blips || [], range: s.range || 500, x: s.x || 0, z: s.z || 0, ship_heading: s.ship_heading || 0, speed: s.speed || 0, on_screen_active: !!s.on_screen, config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0, hostile_arcs: s.hostile_arcs || [], hostile_arc_color: s.hostile_arc_color || null };
         document.getElementById('helm-joystick').state = { auto: !!s.helm_auto };
         document.getElementById('impulse-btn').state = { state: s.impulse_charge_progress > 0 ? 'charging' : 'ready', charge_pct: (s.impulse_charge_progress || 0) * 100, auto: !!s.helm_auto };
         document.getElementById('boost-btn').state = { available: !!s.boost_enabled, active: !!s.boost_active, recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100, auto: !!s.helm_auto };

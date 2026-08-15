@@ -109,7 +109,7 @@ export class PhHelmRadar extends HTMLElement {
 
     const bearingLabel = this.shadowRoot.getElementById('label-bearing');
     if (bearingLabel) {
-      const h = s.heading != null ? ((s.heading % 360) + 360) % 360 : 0;
+      const h = s.ship_heading != null ? ((s.ship_heading % 360) + 360) % 360 : 0;
       bearingLabel.textContent = String(h.toFixed(0)).padStart(3, '0') + '\u00B0';
     }
 
@@ -185,7 +185,7 @@ export class PhHelmRadar extends HTMLElement {
     const range = s.range > 0 ? s.range : 1;
     const shipX = s.x || 0;
     const shipZ = s.z || 0;
-    const heading = s.heading || 0;
+    const heading = s.ship_heading || 0;
     const yaw = heading * Math.PI / 180;
     const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
 

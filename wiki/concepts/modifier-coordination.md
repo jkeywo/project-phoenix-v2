@@ -125,6 +125,18 @@ Effect-to-modifier mapping:
 | `DamageZone { .. }` | **Not a modifier** — handled directly by regions plugin | N/A |
 | `BlocksImpulse` | **Not a modifier** — handled directly by regions plugin | N/A |
 
+Every value in the first two rows is a **signed bonus, not a multiplier** —
+including the one whose serde alias is literally `multiplier`. It is summed onto
+the slot and resolved by `ShipModifiers::rebuild_cache`'s two-sided formula
+(`1 + sum` when non-negative, `1 / (1 + |sum|)` when negative), so an effect
+that makes a ship WORSE authors a NEGATIVE number, and the bonus for a wanted
+multiplier `m` is `-(1/m - 1)`. Two shipped region templates authored a positive
+`range_modifier` on `radar_dampening` for as long as they existed, which made
+the radar reach further inside the hazard than outside it;
+`regions::effects::shipped_assets::every_shipped_radar_dampening_actually_dampens`
+and `regions::server::tests::every_shipped_dampening_region_shortens_the_radar_it_is_entered_with`
+are the data-side and runtime-side guards that now catch it.
+
 On region exit, `on_region_exited` calls `modifiers.clear_source()`
 with the leaving region's `ModifierSource::RegionEffect { uuid }`, removing all
 modifiers and flags that originated from that region. This is how stale modifier

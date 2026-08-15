@@ -164,7 +164,7 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 - A single per-tick system computes containment, diffs against the previous tick's `RegionMembership`, and emits `RegionEntered` / `RegionExited` events; region despawn while a ship is inside emits an implicit exit.
 - Effects (each is a separate component, opted into via a `[effects.*]` sub-table; multiple effects per region are allowed):
   - `blocks_impulse` — cancels charging AND active impulse on entry; prevents new transitions out of Idle while inside.
-  - `radar_dampening { range_modifier }` — registers a `RadarRange` modifier with `ModifierSource::RegionEffect { uuid }` for the duration of containment. Multiple regions stack.
+  - `radar_dampening { range_modifier }` — registers a `RadarRange` modifier with `ModifierSource::RegionEffect { uuid }` for the duration of containment. Multiple regions stack. `range_modifier` is a signed BONUS, not a multiplier: it is summed onto the slot and resolved as `1 + b` when the sum is positive and `1 / (1 + |b|)` when it is negative, so **a dampening region authors a NEGATIVE number** (`-1.0` halves the horizon, `-1.5` takes it to two fifths).
   - `damage_zone { damage_per_second }` — applies `dps * dt` per tick, bypassing shields, via the shared damage helper. Fractional damage accumulates.
   - `slow_zone { thrust_modifier?, yaw_rate_modifier? }` — registers `MaxSpeed` / `MaxYawRate` modifiers on entry AND immediately clamps current velocity. Exit removes modifiers; previously-clamped velocity is not restored.
   - `comms_jammed` — sets `FlagKind::CommsJammed` keyed by region UUID; OR-aggregates across multiple sources.

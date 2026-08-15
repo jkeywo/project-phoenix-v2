@@ -1744,9 +1744,37 @@ six are independent; any combination is valid.
 | `[effects.slow_zone]` | `thrust_modifier` | f32? | none | Additive bonus on `MaxSpeed`. |
 | | `yaw_rate_modifier` | f32? | none | Additive bonus on `MaxYawRate`. |
 | `[effects.blocks_impulse]` | — | — | — | Empty marker table; blocks impulse charge. |
-| `[effects.radar_dampening]` | `range_modifier` (alias `multiplier`) | f32 | **required** | Multiplier on `RadarRange`. |
+| `[effects.radar_dampening]` | `range_modifier` (alias `multiplier`) | f32 | **required** | Additive bonus on `RadarRange`. **Negative to dampen** — see below. |
 | `[effects.comms_jammed]` (alias `comms_jam`) | — | — | — | Empty marker; raises `CommsJammed` flag. |
 | `[effects.sensor_blind]` | — | — | — | Empty marker; raises `SensorBlind` flag. |
+
+**Every `*_modifier` above is a signed BONUS, never a multiplier**, and the
+alias `multiplier` on `range_modifier` is a historical name that means the
+opposite of what it says. Each one is summed onto its `ModifierSlot`, and the
+slot's cache turns that sum into the multiplier the game actually uses, via PRD
+#117's two-sided formula (`modifiers::cache::ShipModifiers::rebuild_cache`):
+
+```text
+bonus >= 0  ->  multiplier = 1 + bonus
+bonus <  0  ->  multiplier = 1 / (1 + |bonus|)
+```
+
+So an effect that makes something WORSE authors a NEGATIVE number, and the bonus
+that produces a wanted multiplier `m` (for `0 < m < 1`) is `-(1/m - 1)`:
+
+| wanted multiplier | author |
+|---|---|
+| `0.5` (halved) | `-1.0` |
+| `0.4` (two fifths) | `-1.5` |
+| `0.333…` (a third) | `-2.0` |
+| `0.25` (a quarter) | `-3.0` |
+
+A positive number on a *dampening* or *slow* effect makes the ship BETTER inside
+the hazard than outside it. Two shipped region templates authored exactly that
+against `radar_dampening` for as long as they existed — a nebula and a storm
+band that LENGTHENED the radar — and
+`regions::effects::shipped_assets::every_shipped_radar_dampening_actually_dampens`
+now fails `cargo test` if one comes back.
 
 #### Example — `assets/entities/region_nebula.toml`
 

@@ -84,6 +84,16 @@
 # state, and that is the point of the world: a capacity level is folded by
 # `fold_infrastructure_namespace`, so every register below is a number the
 # authoritative digest can see.
+#
+# WHAT DOES NOT MOVE IT: `skyhook.toml` growing thresholds. This is the only
+# probe that fields a skyhook, and the collapse slice (#1040) added three warning
+# rungs to that template — which lengthens the fold row of every head that
+# inherits them. Both heads below override `[[infrastructure.threshold]]` per
+# instance, and an instance override REPLACES an array wholesale, so each carries
+# exactly the one flag it declares and this world's number is unchanged. That is
+# not luck: two heads in one world MUST override, because a threshold flag is the
+# scenario's namespace and two of them sharing `skyhook_lift_capable` would be
+# declaring one flag between them.
 
 [global]
 seed = 1042

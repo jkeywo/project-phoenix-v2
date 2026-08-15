@@ -161,7 +161,7 @@
 # script that does the sum. The CHOICE is #1043's; what #1042 owns is the ledger
 # that choice has to obey.
 #
-# BASELINE. CURRENT VALUE: 0xPENDING (PENDING), last moved
+# BASELINE. CURRENT VALUE: 0x1341ba04afa6feeb (1387594689496415979), last moved
 # by #1042 — the paragraphs below are the history of how it got there, oldest
 # first, and the first number in them is NOT the one to A/B against.
 #
@@ -342,29 +342,41 @@
 # None of them fields a skyhook; the two that fly the destroyer never run an
 # operation on it, and the one this slice added never pulls a weapons hold.
 #
-# MOVED AGAIN IN #1042, to 0x9e3c07f4e6290a46 (11401997105010117190), with
-# 13991704457914341324 (0xc22c8512c03bd7cc) at tick 0. The mechanism is ONE
-# authored block and it is the same class as #1038's extra threshold rather than
-# #1039's extra hull: Skyway Control gains an
-# `[entity.overrides.infrastructure]` table — the transfer window's manifest —
-# and `station_axiom.toml` authored none, so a station that folded nothing now
-# folds a condition track and seven capacity levels every tick.
+# MOVED AGAIN IN #1042, to 0x1341ba04afa6feeb (1387594689496415979), with
+# 15608756571256264688 at tick 0. The mechanism is ONE authored block, and it is
+# the same class as #1038's extra threshold rather than #1039's extra hull:
+# Skyway Control gains an `[entity.overrides.infrastructure]` table — the
+# transfer window's manifest — and `station_axiom.toml` authored none, so a
+# station that folded nothing now folds a condition track and seven capacity
+# levels every tick.
 #
-# BOTH HALVES OF THE A/B ARE RECORDED, on the same terms as the two above.
-# Delete that one manifest block alone and the digest returns to #1039's
-# 10003863579080559501 exactly; delete the Act-3 clock and the whole #1042 script
+# BOTH HALVES OF THE A/B ARE RECORDED, on the same terms as every paragraph
+# above. Delete that one manifest block alone and the digest returns to #1040's
+# 562792874088492037 exactly; delete the Act-3 clock and the whole #1042 script
 # block instead — two `[[deadline]]`s, the window's arithmetic, its objectives,
-# its comms and the booking ledger — and it stays at 11401997105010117190. So a
+# its comms and the booking ledger — and it stays at 1387594689496415979. So a
 # deadline table, a script band, an objective and a comms thread fold NOTHING,
-# which is the same bucket #1039 put them in, and the ONLY thing this slice does
-# that the digest can see is give a structure numbers to publish.
+# which is the same bucket #1039, #1040 and #1041 all put them in, and the ONLY
+# thing this slice does that the digest can see is give a structure numbers to
+# publish.
 #
 # The anchors were re-measured on the same clean tree and are UNMOVED:
 # combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
 # 5001167740764356580, probe_scan 7851858877582205234, probe_strike
 # (--ticks 1800) 535291289754814419, probe_storm (--ticks 6480)
-# 11434311098359716284, probe_scandiff 2488189563210329022, and
-# probe_corroborate 6231558379626882143.
+# 11434311098359716284, probe_scandiff 2488189563210329022, probe_corroborate
+# 6231558379626882143, probe_restraint 1078282553163286478, probe_collapse
+# (--ticks 3600) 5992449400465842350, and probe_window (--ticks 2400)
+# 8563713307821982951.
+#
+# `probe_window` is worth a sentence, because it is the one probe that DOES
+# field a skyhook and it still holds. Its two heads override
+# `[[infrastructure.threshold]]` per instance, and an instance override REPLACES
+# an array wholesale — so the three warning rungs #1040 added to `skyhook.toml`
+# never reach it, and its fold rows are the same length they were. This world's
+# head, which overrides no thresholds at all, inherits all five; that is exactly
+# why #1040's own paragraph above is the one that moved this number and this
+# paragraph is not.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls

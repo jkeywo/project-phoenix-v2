@@ -436,8 +436,28 @@ for (const relPath of WIRE_VISIBLE_RUST) {
 for (const w of warnings) console.warn(`warn  ${w}`);
 for (const e of errors) console.error(`error ${e}`);
 
+// Editorial progress, reported beside the gate result.
+//
+// `[square brackets]` around an `en` value mean "agent-drafted, not yet signed
+// off" — see the convention in gui/strings.js. A human removes the brackets
+// line by line as they approve the copy, which makes "how much of this game
+// still reads as a draft" a number this script can simply count. It was not
+// counted, so the only way to answer was to eyeball the CSV.
+//
+// Deliberately NOT an error, and not gated by --strict: brackets are a normal,
+// correct state for freshly extracted copy, and failing on them would mean
+// every content commit had to wait on an editorial pass.
+const enCol = header.indexOf('en');
+let bracketed = 0;
+for (let i = 1; i < rows.length; i += 1) {
+  const en = String(rows[i][enCol] ?? '').trim();
+  if (en.startsWith('[') && en.endsWith(']')) bracketed += 1;
+}
+const pct = table.size > 0 ? Math.round((bracketed / table.size) * 100) : 0;
+
 console.log(
-  `\n${table.size} strings; ${errors.length} error(s), ${warnings.length} warning(s)`,
+  `\n${table.size} strings; ${errors.length} error(s), ${warnings.length} warning(s)` +
+  `\n${bracketed} still bracketed (${pct}%) — unapproved placeholder copy`,
 );
 
 if (errors.length > 0 || (STRICT && warnings.length > 0)) process.exit(1);

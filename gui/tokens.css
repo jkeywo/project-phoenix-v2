@@ -238,9 +238,17 @@
   --control-font-md:   var(--text-xs);
   --control-font-lg:   var(--text-2xl);
 
-  --control-cham-sm:   0.22rem;
-  --control-cham-md:   0.34rem;
-  --control-cham-lg:   0.875rem;
+  /* Outer silhouette, and the slightly tighter one the recessed body inside it
+     clips to. The inner radius is a separate token rather than the outer minus
+     a bit, because `--btn-cham: calc(var(--btn-cham) - 0.04rem)` is a CYCLE —
+     a custom property that references itself is guaranteed-invalid, and the
+     symptom is a body that quietly renders unclipped. */
+  --control-cham-sm:        0.22rem;
+  --control-cham-sm-inner:  0.18rem;
+  --control-cham-md:        0.34rem;
+  --control-cham-md-inner:  0.3rem;
+  --control-cham-lg:        0.875rem;
+  --control-cham-lg-inner:  0.8125rem;
 
   --control-pad-sm:    0;
   --control-pad-md:    0 0.65rem 0 1.6rem;

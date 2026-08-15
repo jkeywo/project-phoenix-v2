@@ -202,6 +202,28 @@ describe('every component adopts the shared control family', () => {
   });
 });
 
+describe('no custom property is defined in terms of itself', () => {
+  // A cycle is guaranteed-invalid, and it fails silently: the property resolves
+  // to nothing and whatever read it falls back to its initial value. The
+  // control family shipped `--btn-cham: calc(var(--btn-cham) - 0.04rem)` on the
+  // recessed body of every button, which computed the body's `clip-path` to
+  // `none` — the chamfered silhouette simply stopped being cut, and nothing
+  // said so. Caught in the browser, pinned here.
+  for (const file of [...SURFACES, TOKENS_CSS]) {
+    it(`${rel(file)} has no self-referencing custom property`, () => {
+      const source = readStripped(file);
+      const decl = /(--[a-z0-9-]+)\s*:\s*([^;}]*)/gi;
+      const cycles = [];
+      let m;
+      while ((m = decl.exec(source)) !== null) {
+        const [, name, value] = m;
+        if (new RegExp(`var\\(\\s*${name}\\b`).test(value)) cycles.push(`${name}: ${value.trim()}`);
+      }
+      expect(cycles).toEqual([]);
+    });
+  }
+});
+
 // ── 4. No literals outside the token file ───────────────────────────────────
 
 const SURFACES = [

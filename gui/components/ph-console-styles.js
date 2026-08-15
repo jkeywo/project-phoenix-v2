@@ -50,28 +50,32 @@ const CSS = `
    them, so a size is a data change rather than a second copy of the design. */
 :host,
 :root {
-  --btn-h:    var(--control-h-md);
-  --btn-cham: var(--control-cham-md);
-  --btn-font: var(--control-font-md);
-  --btn-pad:  var(--control-pad-md);
+  --btn-h:       var(--control-h-md);
+  --btn-cham:    var(--control-cham-md);
+  --btn-cham-in: var(--control-cham-md-inner);
+  --btn-font:    var(--control-font-md);
+  --btn-pad:     var(--control-pad-md);
 }
 .btn--sm {
-  --btn-h:    var(--control-h-sm);
-  --btn-cham: var(--control-cham-sm);
-  --btn-font: var(--control-font-sm);
-  --btn-pad:  var(--control-pad-sm);
+  --btn-h:       var(--control-h-sm);
+  --btn-cham:    var(--control-cham-sm);
+  --btn-cham-in: var(--control-cham-sm-inner);
+  --btn-font:    var(--control-font-sm);
+  --btn-pad:     var(--control-pad-sm);
 }
 .btn--md {
-  --btn-h:    var(--control-h-md);
-  --btn-cham: var(--control-cham-md);
-  --btn-font: var(--control-font-md);
-  --btn-pad:  var(--control-pad-md);
+  --btn-h:       var(--control-h-md);
+  --btn-cham:    var(--control-cham-md);
+  --btn-cham-in: var(--control-cham-md-inner);
+  --btn-font:    var(--control-font-md);
+  --btn-pad:     var(--control-pad-md);
 }
 .btn--lg {
-  --btn-h:    var(--control-h-lg);
-  --btn-cham: var(--control-cham-lg);
-  --btn-font: var(--control-font-lg);
-  --btn-pad:  var(--control-pad-lg);
+  --btn-h:       var(--control-h-lg);
+  --btn-cham:    var(--control-cham-lg);
+  --btn-cham-in: var(--control-cham-lg-inner);
+  --btn-font:    var(--control-font-lg);
+  --btn-pad:     var(--control-pad-lg);
 }
 
 /* ── The chamfered silhouette, cut once ──────────────────────────
@@ -105,13 +109,12 @@ const CSS = `
 .btn > .btn-bg,
 .mini-btn > .mini-bg {
   position: absolute; inset: var(--control-inset);
-  --btn-cham: calc(var(--btn-cham) - 0.04rem);
   background: linear-gradient(180deg,
     var(--surface-lift) 0%, var(--surface-base) 50%, var(--surface-deep) 100%);
   clip-path: polygon(
-    var(--btn-cham) 0, calc(100% - var(--btn-cham)) 0, 100% var(--btn-cham),
-    100% calc(100% - var(--btn-cham)), calc(100% - var(--btn-cham)) 100%,
-    var(--btn-cham) 100%, 0 calc(100% - var(--btn-cham)), 0 var(--btn-cham)
+    var(--btn-cham-in) 0, calc(100% - var(--btn-cham-in)) 0, 100% var(--btn-cham-in),
+    100% calc(100% - var(--btn-cham-in)), calc(100% - var(--btn-cham-in)) 100%,
+    var(--btn-cham-in) 100%, 0 calc(100% - var(--btn-cham-in)), 0 var(--btn-cham-in)
   );
   z-index: 0;
 }
@@ -176,9 +179,10 @@ const CSS = `
    because it holds a single glyph. Same silhouette, same gradients. */
 .btn--sm,
 .mini-btn {
-  --btn-h:    var(--control-h-sm);
-  --btn-cham: var(--control-cham-sm);
-  --btn-font: var(--control-font-sm);
+  --btn-h:       var(--control-h-sm);
+  --btn-cham:    var(--control-cham-sm);
+  --btn-cham-in: var(--control-cham-sm-inner);
+  --btn-font:    var(--control-font-sm);
   width: var(--control-h-sm); height: var(--control-h-sm);
   flex-shrink: 0; padding: 0;
   justify-content: center;

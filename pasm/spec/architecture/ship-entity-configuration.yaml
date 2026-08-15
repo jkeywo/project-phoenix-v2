@@ -206,17 +206,28 @@ entities:
       status: implemented
       confidence: confirmed
       title: Entity Override Resolver
-      summary: Applies world-authored entity overrides to template defaults before spawn without changing the template's shared definition.
+      summary: Applies world-authored entity overrides to template defaults before spawn without changing the template's shared definition, including on the player ship, whose hull the lobby chooses rather than the world.
+      rationale:
+        - "THE PLAYER SHIP IS THE ONE ENTITY WHOSE TEMPLATE THE WORLD DOES NOT CHOOSE, and until a defect found while reviewing #1036 it was also the one entity whose overrides were discarded. A world's `player-ship` row names two things under two authorities: `template_path`, a PLACEHOLDER the lobby overrules (a player selecting the Destroyer must not spawn the row's hull weapons), and `[entity.overrides.*]`, the world's per-mission tuning. server_app::spawn_game_start_entities resolved the row through entity_loader::resolve_entity_via — merging and validating the overrides — and then replaced the whole config with the lobby selection, so every player-ship override in the tree was decorative. assets/worlds/probe_evidence.toml and probe_corroborate.toml each authored a comms_console.ai.rule the run never flew; the rule they got came from fragments/ai/fleet_baseline.toml, which every Alliance hull includes, and both world headers claimed the opposite."
+        - "The fix re-applies the row's overrides ONTO THE PICKED HULL through entity_loader::apply_overrides — the same merge world::validate runs and the same one resolve_entity_via performs for every other [[entity]] — so there is still exactly one set of merge rules and one answer about doctrine keying, tags replacing and the _remove tombstone. Semantics: an override is the WORLD's per-instance intent and therefore applies to whichever hull the lobby picked; an override naming a table the picked hull's template lacks keeps the existing absent-table behaviour (the merge inserts it and the reading system decides, which for a console block on a hull without that system is silently inert); a row with NO overrides returns the selection untouched, which is what keeps every shipped world byte-identical. A merge that fails here — possible because validation checked these overrides against the ROW's template, not the picked hull — logs and spawns the untuned selection rather than dropping the crew's ship."
     architecture:
       kind: configuration-transform
       authority: authoritative
       reads: [entity-template-state, world-configuration-state]
       transforms: [entity-template-state]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/entities/entity_override.rs, src/entities/spawner.rs]
+      paths: [src/entities/entity_override.rs, src/entities/spawner.rs, src/server_app.rs]
+      symbols: [player_hull_config]
       tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: a_worlds_player_ship_overrides_apply_to_the_lobby_selected_hull
+        summary: A world row naming the Destroyer and tuning hold-station, booted with the Cruiser selected, spawns a Cruiser carrying the tuning — and every field the override does not name comes back exactly as the Cruiser authored it.
+      - kind: test
+        reference: player_hull_config_without_overrides_is_the_selection_untouched
+        summary: A player-ship row with no overrides spawns the lobby selection itself, not a re-derived copy of it.
 
   - component: world-available-ship-catalog
     core:

@@ -71,12 +71,21 @@
 # ── Who answers ─────────────────────────────────────────────────────────────
 #
 # The crew's Comms officer is AI-backfilled and answers an open thread with its
-# FIRST response, which is `probe_evidence.toml`'s rule and is authored on the
-# player hull below because the stock destroyer declares none. The threads that
-# open are therefore answered through the ordinary admitted `RespondToMessage`
-# path, and the `on_pick` that files the account runs as a genuine dialogue pick
-# rather than as a timer standing in for one. It is also why the scenario puts
-# its own ask at index 0 — see `falling_skyway.toml`.
+# FIRST response, which is `probe_evidence.toml`'s rule and is RESTATED on the
+# player hull below. The threads that open are therefore answered through the
+# ordinary admitted `RespondToMessage` path, and the `on_pick` that files the
+# account runs as a genuine dialogue pick rather than as a timer standing in for
+# one. It is also why the scenario puts its own ask at index 0 — see
+# `falling_skyway.toml`.
+#
+# [ai] "RESTATED", not "supplied". This paragraph used to say the rule was
+# authored below "because the stock destroyer declares none", and that was
+# wrong: the destroyer COMPOSES that exact rule from
+# `fragments/ai/fleet_baseline.toml`, as every Alliance hull does.
+# `probe_evidence.toml`'s header carries the full account — including why the
+# override only reached the spawned ship at all once the player-ship override
+# defect found in #1036 was fixed — and the same keep-or-delete question
+# applies to this copy of it.
 #
 # BASELINE (headless, `--seed 42 --ticks 900 --digest-every 0`, no `--ship`
 # override — the invocation `probe_scandiff.toml` and `probe_scan.toml` record):
@@ -93,6 +102,11 @@
 # `falling_skyway` DID move, and its own header carries the A/B that attributes
 # the move to one authored entity rather than to anything this world does.
 #
+# STILL 0x567af1547ec4e45f after the player-ship override fix (the defect found
+# in #1036), for `probe_evidence.toml`'s reason: the fix makes the override
+# below reach the spawned hull for the first time, and what it lands is the rule
+# `fragments/ai/fleet_baseline.toml` was already giving that hull.
+#
 # What is IN that digest is the entity population and eleven hulls' transforms.
 # What is NOT in it is every single thing this world exists to exercise: an
 # evidence entry, a flag-store counter, a comms thread and an objective are all
@@ -108,9 +122,10 @@ ai_helm_tick_hz = 30.0
 [player_spawn]
 position = [0.0, 0.0, 0.0]
 
-# The crew's hull, with the Comms response policy the stock destroyer does not
-# author — see the header. Without it nothing answers the two threads that open
-# and the dialogue half of this probe never runs.
+# The crew's hull. The Comms response policy below RESTATES what every Alliance
+# hull already composes from `fragments/ai/fleet_baseline.toml`; it is authored
+# here so the rule the two threads depend on belongs to the world rather than to
+# whichever hull the lobby picks — see the header.
 [[entity]]
 template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"

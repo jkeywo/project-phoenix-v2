@@ -23,3 +23,13 @@ command_arguments = ["scripts/wasm-opt-fixup.mjs", "dist/.stage"]
 stage = "post_build"
 command = "node"
 command_arguments = ["scripts/wasm-editor-alias.mjs", "dist/.stage"]
+
+# Lobby ship-picker art (PRD #1023 module 4). The host renders the same
+# ph-ship-picker the phone does, so it needs the same `assets/ship-cards/`
+# atlases and index — the playable hulls' captured billboards, resolved through
+# their rig sidecars at build time. The phone page gets them from
+# scripts/build-client.mjs, which calls the same module.
+[[hooks]]
+stage = "post_build"
+command = "node"
+command_arguments = ["scripts/ship-cards.mjs", "dist/.stage"]

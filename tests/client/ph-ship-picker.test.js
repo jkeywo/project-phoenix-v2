@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { shipArtStyle, setShipCards } from '../../gui/components/ph-ship-picker.js';
+import { CARD_TILE } from '../../scripts/ship-cards.mjs';
 import '../../gui/components/ph-ship-picker.js';
 
 function setup() {
@@ -164,5 +166,108 @@ describe('PhShipPicker', () => {
       ]
     };
     expect(queryText(el, '.ship-name')).toBe('alliance_battleship');
+  });
+});
+
+/**
+ * PRD #1023 module 4, user story 3 — the card shows the ship.
+ *
+ * The picture is one tile of the captured yaw-ring atlas, positioned by CSS.
+ * An off-by-one in the strip maths is a card showing half of two ships, so the
+ * ends and the step are pinned here.
+ */
+describe('shipArtStyle — one tile out of the yaw strip', () => {
+  it('sizes the strip so exactly one tile spans the box', () => {
+    const style = shipArtStyle({ image: 'a.png', views: 8, tile: 3 });
+    expect(style).toContain('background-size:800% auto');
+    expect(style).toContain("background-image:url('a.png')");
+  });
+
+  it('puts the first tile at 0% and the last at 100%', () => {
+    expect(shipArtStyle({ image: 'a.png', views: 8, tile: 0 }))
+      .toContain('background-position-x:0.0000%');
+    expect(shipArtStyle({ image: 'a.png', views: 8, tile: 7 }))
+      .toContain('background-position-x:100.0000%');
+  });
+
+  it('steps evenly between them', () => {
+    // Tile i of an n-tile strip sits at i/(n-1) of the scroll range.
+    const style = shipArtStyle({ image: 'a.png', views: 8, tile: CARD_TILE });
+    expect(style).toContain(`background-position-x:${((CARD_TILE / 7) * 100).toFixed(4)}%`);
+  });
+
+  it('is empty when there is no art, so the card renders without a frame', () => {
+    expect(shipArtStyle(null)).toBe('');
+    expect(shipArtStyle({ image: '', views: 8, tile: 0 })).toBe('');
+    expect(shipArtStyle({ image: 'a.png', views: 1, tile: 0 })).toBe('');
+  });
+});
+
+describe('PhShipPicker — card art', () => {
+  const DESTROYER = 'assets/entities/alliance_destroyer.toml';
+  beforeEach(() => { document.body.innerHTML = ''; setShipCards(null); });
+  afterEach(() => { document.body.innerHTML = ''; setShipCards(null); });
+
+  it('draws the hull when the build resolved art for its template', () => {
+    setShipCards({ [DESTROYER]: { image: 'assets/ship-cards/alliance_destroyer.png', views: 8, tile: 3 } });
+    const { el } = setup();
+    el.state = { ships: [{ template_path: DESTROYER, label: 'Destroyer' }] };
+    const art = el.shadowRoot.querySelector('.ship-art');
+    expect(art).not.toBeNull();
+    expect(art.getAttribute('style')).toContain('alliance_destroyer.png');
+    // Decoration: the card's own name is the accessible label.
+    expect(art.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  // A mod pack's hull was never scanned at build time. That is not an error —
+  // the card is complete without a portrait, exactly as it was before.
+  it('renders a full card with no art for a hull the build never saw', () => {
+    setShipCards({});
+    const { el } = setup();
+    el.state = { ships: [{ template_path: 'assets/entities/mod_hull.toml', label: 'Mod Hull' }] };
+    expect(el.shadowRoot.querySelector('.ship-art')).toBeNull();
+    expect(queryText(el, '.ship-name')).toBe('Mod Hull');
+    expect(el.shadowRoot.querySelectorAll('.ship-card').length).toBe(1);
+  });
+});
+
+/**
+ * PRD #1023 module 4, user story 16 — an unacknowledged pick.
+ *
+ * The host's arbiter is first-valid-wins and sends the asking phone no
+ * acknowledgement, so the picker has to show the request is out on its own.
+ */
+describe('PhShipPicker — pending pick', () => {
+  const A = 'assets/entities/alliance_destroyer.toml';
+  const B = 'assets/entities/alliance_cruiser.toml';
+  const twoShips = { ships: [{ template_path: A, label: 'D' }, { template_path: B, label: 'C' }] };
+
+  beforeEach(() => { document.body.innerHTML = ''; setShipCards({}); });
+  afterEach(() => { document.body.innerHTML = ''; setShipCards(null); });
+
+  it('is not busy with nothing in flight', () => {
+    const { el } = setup();
+    el.state = twoShips;
+    expect(el.shadowRoot.getElementById('grid').dataset.busy).toBe('false');
+    expect(el.shadowRoot.querySelectorAll('.ship-card.pending').length).toBe(0);
+  });
+
+  it('marks the tapped card and busies the grid', () => {
+    const { el } = setup();
+    el.state = { ...twoShips, pendingTemplate: A };
+    expect(el.shadowRoot.getElementById('grid').dataset.busy).toBe('true');
+    const pending = el.shadowRoot.querySelectorAll('.ship-card.pending');
+    expect(pending.length).toBe(1);
+    expect(pending[0].dataset.template).toBe(A);
+    expect(pending[0].textContent).toContain(t('client.pick_pending'));
+  });
+
+  it('leaves the other cards unmarked', () => {
+    const { el } = setup();
+    el.state = { ...twoShips, pendingTemplate: A };
+    const other = [...el.shadowRoot.querySelectorAll('.ship-card')]
+      .find(c => c.dataset.template === B);
+    expect(other.classList.contains('pending')).toBe(false);
+    expect(other.textContent).not.toContain(t('client.pick_pending'));
   });
 });

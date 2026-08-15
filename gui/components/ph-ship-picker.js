@@ -14,6 +14,24 @@
  * already uses: substitute only what the table actually holds. Text a phone
  * already resolved (and a mod pack's literal prose) is not an id, so it passes
  * through untouched.
+ *
+ * ── Card art (PRD #1023 module 4, user story 3) ────────────────────────────
+ *
+ * "I want the ship picker to show me the ship I am choosing, so that the
+ * choice feels meaningful rather than abstract." The cards showed a name, a
+ * class badge, a hull number and two numbers — an accurate description of a
+ * spreadsheet row.
+ *
+ * The picture comes from the capture pipeline that already runs: each playable
+ * hull's rig sidecar ends its LOD ladder with a captured yaw-ring billboard
+ * atlas, and scripts/ship-cards.mjs copies those four atlases into the dist at
+ * build time with an index keyed by `template_path` (the wire carries no model
+ * path, and entity stem does not reliably match model stem). One tile of the
+ * strip is shown per card.
+ *
+ * The index is fetched once, lazily, and its absence is not an error: a mod
+ * pack's hull was never scanned at build time and simply gets a card with no
+ * portrait, exactly as before.
  */
 // strings-boot first: its synchronous load delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
@@ -31,6 +49,66 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 function localised(value) {
   if (!value) return '';
   return has(value) ? t(value) : String(value);
+}
+
+/**
+ * The build-time `template_path` → card-art index, once fetched.
+ *
+ * Module-level so the two pages that mount this element (the phone lobby and
+ * the host) each fetch it once. `{}` means "fetched, nothing there" — a dist
+ * without the build step, which is not an error and must not retry per render.
+ * @type {Object<string, {image: string, views: number, tile: number}>|null}
+ */
+let shipCards = null;
+let shipCardsPending = null;
+
+/**
+ * Fetch the card index. Resolves to `{}` on any failure, so a missing file is
+ * indistinguishable from an empty one at the call site — both mean "no art".
+ * @returns {Promise<Object>}
+ */
+export function loadShipCards(fetchImpl) {
+  if (shipCards) return Promise.resolve(shipCards);
+  if (shipCardsPending) return shipCardsPending;
+  const doFetch = fetchImpl || (typeof fetch === 'function' ? fetch : null);
+  if (!doFetch) {
+    shipCards = {};
+    return Promise.resolve(shipCards);
+  }
+  shipCardsPending = Promise.resolve()
+    .then(() => doFetch('assets/ship-cards/index.json'))
+    .then((r) => (r && r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((json) => {
+      shipCards = (json && typeof json === 'object') ? json : {};
+      shipCardsPending = null;
+      return shipCards;
+    });
+  return shipCardsPending;
+}
+
+/** Test seam: install a known index (or reset with `null`). */
+export function setShipCards(index) {
+  shipCards = index;
+  shipCardsPending = null;
+}
+
+/**
+ * The inline background style that shows tile `tile` of a `views`-wide strip.
+ *
+ * The strip is `views` square tiles packed left→right. Sizing it to
+ * `views * 100%` of the box width makes one tile exactly as wide as the box;
+ * the background-position percentage then resolves against
+ * `(box width − image width)`, so tile `i` sits at `i / (views − 1)`.
+ *
+ * @returns {string} a `style="…"` value, or '' when there is no art
+ */
+export function shipArtStyle(card) {
+  if (!card || !card.image || !(card.views > 1)) return '';
+  const x = (card.tile / (card.views - 1)) * 100;
+  return `background-image:url('${card.image}');`
+    + `background-size:${card.views * 100}% auto;`
+    + `background-position-x:${x.toFixed(4)}%;`;
 }
 
 export class PhShipPicker extends HTMLElement {
@@ -55,6 +133,29 @@ export class PhShipPicker extends HTMLElement {
     }
     .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-control); }
     .ship-card:active { background: var(--surface-panel-up); border-color: var(--violet); }
+    /* The hull itself (PRD #1023 user story 3). One yaw tile out of the
+       captured billboard strip; shipArtStyle() computes the size and offset.
+       Height is deliberately shorter than the square tile — every capture has
+       generous empty sky above and below the hull, and cropping it is what
+       makes the card read as a portrait rather than a stamp. */
+    .ship-art {
+      width: 100%; height: 88px;
+      background-repeat: no-repeat;
+      background-position-y: center;
+      border-radius: 4px;
+      background-color: var(--surface-abyss);
+    }
+    /* An unacknowledged pick (PRD #1023 module 4). The chosen card holds its
+       accent and says the request is out; the rest recede and stop taking
+       taps, because the host's arbiter ignores a second request anyway. */
+    .ship-grid[data-busy="true"] .ship-card { opacity: 0.45; pointer-events: none; }
+    .ship-grid[data-busy="true"] .ship-card.pending {
+      opacity: 1; border-color: var(--signal); background: var(--surface-panel-up);
+    }
+    .ship-pending {
+      font-size: var(--text-sm); color: var(--signal);
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+    }
     .ship-name {
       font-family: 'Chakra Petch', sans-serif; font-size: var(--text-lg); font-weight: 600;
       color: var(--ink); letter-spacing: 0.06em; white-space: nowrap; overflow: hidden;
@@ -91,6 +192,13 @@ export class PhShipPicker extends HTMLElement {
   set state(val) {
     this.#state = val;
     this.#render();
+    // Art arrives on a second paint when the index has not been fetched yet.
+    // The card is complete without it, so the first paint is never blocked.
+    if (shipCards === null) {
+      loadShipCards().then(() => {
+        if (this.#state === val) this.#render();
+      });
+    }
   }
 
   get state() { return this.#state; }
@@ -98,6 +206,10 @@ export class PhShipPicker extends HTMLElement {
   #render() {
     const grid = this.shadowRoot.getElementById('grid');
     const ships = this.#state?.ships ?? [];
+    // An unacknowledged pick greys the grid and marks the chosen card; the
+    // caller passes both (see gui/scenario-pick.js).
+    const pendingTemplate = this.#state?.pendingTemplate ?? null;
+    grid.dataset.busy = pendingTemplate ? 'true' : 'false';
     if (ships.length === 0) {
       grid.innerHTML = `<div style="color:var(--edge-strong);font-size:var(--text-md);padding:8px 0;">${t('component.ship_picker.empty')}</div>`;
       return;
@@ -115,8 +227,14 @@ export class PhShipPicker extends HTMLElement {
       const hullId = ship.hull_id ? `#${ship.hull_id}` : '';
       const power = ship.power_rating != null ? `⚡${ship.power_rating}` : '';
       const stations = ship.station_count || '';
+      // The hull's portrait, when the build resolved one for this template.
+      // `aria-hidden`: the card's own name is the accessible label, so the
+      // picture is decoration and a screen reader should not announce it.
+      const art = shipArtStyle(shipCards ? shipCards[ship.template_path] : null);
+      const isPending = pendingTemplate === ship.template_path;
       return `
-  <div class="ship-card" data-template="${ship.template_path}">
+  <div class="ship-card${isPending ? ' pending' : ''}" data-template="${ship.template_path}">
+    ${art ? `<div class="ship-art" aria-hidden="true" style="${art}"></div>` : ''}
     <div class="ship-name">${name}</div>
     <div class="ship-meta">
       <span class="ship-badge ${cls}">${clsLabel}</span>
@@ -127,6 +245,7 @@ export class PhShipPicker extends HTMLElement {
       ${power ? `<div class="ship-stat"><span class="ship-stat-label">${t('component.ship_picker.power')}</span><span class="ship-stat-value">${ship.power_rating}</span></div>` : ''}
       ${stations ? `<div class="ship-stat"><span class="ship-stat-label">${t('component.ship_picker.stations')}</span><span class="ship-stat-value">${stations}</span></div>` : ''}
     </div>` : ''}
+    ${isPending ? `<div class="ship-pending">${t('client.pick_pending')}</div>` : ''}
   </div>`;
     }).join('');
 

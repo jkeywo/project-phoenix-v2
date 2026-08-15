@@ -11,11 +11,13 @@
 //   dist/client/index.html      (= client.html)
 //   dist/client/gui/...         (JS modules + console HTML)
 //   dist/client/assets/<dir>/   (runtime assets referenced by the consoles)
+//   dist/client/assets/ship-cards/  (lobby ship-picker art — see ship-cards.mjs)
 //   dist/client/logo.png
 
 import { cp, mkdir, copyFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { emitShipCards } from './ship-cards.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'dist', 'client');
@@ -54,11 +56,17 @@ async function main() {
     );
   }
 
+  // Lobby ship-picker art (PRD #1023 module 4). `assets/models` is NOT in
+  // ASSET_DIRS — it is ~40 MB of GLB — so the four playable hulls' captured
+  // billboard atlases are resolved through their rig sidecars and copied in
+  // on their own, with an index keyed by template_path. See ship-cards.mjs.
+  const cards = emitShipCards(out, root);
+
   // logo.png / favicon.ico at the client root.
   await copyFile(path.join(root, 'assets', 'logo.png'), path.join(out, 'logo.png'));
   await copyFile(path.join(root, 'assets', 'favicon.ico'), path.join(out, 'favicon.ico'));
 
-  console.log('client page built → dist/client/ (pure JS, no WASM)');
+  console.log(`client page built → dist/client/ (pure JS, no WASM; ${cards} ship cards)`);
 }
 
 main().catch((err) => {

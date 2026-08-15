@@ -11,6 +11,23 @@ export class PhRadar extends HTMLElement {
   #surroundImage = null;
   #projectedBlips = [];
 
+  // Buffer pixels per CSS pixel — `canvas.width / rect.width`, i.e. the device
+  // pixel ratio in practice.
+  //
+  // The backing store is deliberately sized rect × devicePixelRatio so the
+  // scope rasterises crisply on a phone (see #initResize). Everything the
+  // scope DRAWS was then authored as a bare number — an 11px label font, a
+  // 6px minimum blip radius, a 14px tap radius — and a bare number in a
+  // buffer-space context is a DEVICE pixel. On a 3× phone that renders the
+  // labels at 3.7 CSS px and shrinks the tap target to under 5, which is the
+  // radar half of PRD #1023's problem statement.
+  //
+  // So every fixed size below is multiplied by this. Geometry derived from R
+  // (blip positions, `scaled_radius`) is already proportional to the buffer
+  // and must NOT be scaled again. gui/components/ph-navigation-map.js reached
+  // the same conclusion independently for its label fonts.
+  #px = 1;
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -117,6 +134,12 @@ export class PhRadar extends HTMLElement {
     const R = Math.min(W, H) / 2;
     const state = this.#state || {};
 
+    // Refreshed per frame: a phone dragged onto an external display changes
+    // devicePixelRatio without changing the element's CSS size.
+    const rect = this.getBoundingClientRect ? this.getBoundingClientRect() : null;
+    this.#px = (rect && rect.width > 0) ? (W / rect.width) : 1;
+    const px = this.#px;
+
     let octx = this.#ctx;
     if (typeof document !== 'undefined') {
       if (!this.#offscreen || this.#offscreen.width !== W || this.#offscreen.height !== H) {
@@ -162,7 +185,7 @@ export class PhRadar extends HTMLElement {
     for (const b of blips) {
       const bx = cx + (b.radar_x != null ? b.radar_x : 0) * R;
       const by = cy - (b.radar_y != null ? b.radar_y : 0) * R;
-      const dotR = Math.max(6, (b.scaled_radius || 0) * R * 0.6);
+      const dotR = Math.max(6 * px, (b.scaled_radius || 0) * R * 0.6);
       const color = b.color || '#a8b0c0';
 
       if (b.kind === 'waypoint') {
@@ -188,16 +211,16 @@ export class PhRadar extends HTMLElement {
       }
 
       if (b.label) {
-        octx.font = '11px "JetBrains Mono", monospace';
+        octx.font = Math.round(11 * px) + 'px "JetBrains Mono", monospace';
         octx.fillStyle = 'rgba(153,255,217,0.9)';
-        octx.fillText(b.label, bx + dotR + 4, by + 4);
+        octx.fillText(b.label, bx + dotR + 4 * px, by + 4 * px);
       }
 
       if (state.selected_target_uuid && state.selected_target_uuid === b.uuid) {
-        this.#drawRing(octx, bx, by, dotR + 6, 2, '#5fd8e8');
+        this.#drawRing(octx, bx, by, dotR + 6 * px, 2 * px, '#5fd8e8');
       }
       if (state.target_uuid && state.target_uuid === b.uuid) {
-        this.#drawRing(octx, bx, by, dotR + 8, 2, '#ff3344');
+        this.#drawRing(octx, bx, by, dotR + 8 * px, 2 * px, '#ff3344');
       }
 
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
@@ -219,11 +242,12 @@ export class PhRadar extends HTMLElement {
   }
 
   #drawTargetBlip(ctx, bx, by, dotR, edge, color) {
-    const r = Math.max(7, dotR + 3);
+    const px = this.#px;
+    const r = Math.max(7 * px, dotR + 3 * px);
     ctx.save();
     ctx.translate(bx, by);
     ctx.strokeStyle = color;
-    ctx.lineWidth = edge ? 2.5 : 2;
+    ctx.lineWidth = (edge ? 2.5 : 2) * px;
 
     ctx.beginPath();
     ctx.moveTo(0, -r);
@@ -238,14 +262,14 @@ export class PhRadar extends HTMLElement {
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.arc(0, 0, r + 5, 0, Math.PI * 2);
+    ctx.arc(0, 0, r + 5 * px, 0, Math.PI * 2);
     ctx.stroke();
 
     if (edge) {
       ctx.beginPath();
-      ctx.moveTo(0, -r - 8);
-      ctx.lineTo(4, -r - 1);
-      ctx.lineTo(-4, -r - 1);
+      ctx.moveTo(0, -r - 8 * px);
+      ctx.lineTo(4 * px, -r - 1 * px);
+      ctx.lineTo(-4 * px, -r - 1 * px);
       ctx.closePath();
       ctx.fillStyle = color;
       ctx.fill();
@@ -255,10 +279,14 @@ export class PhRadar extends HTMLElement {
 
   #getBlipAt(canvasX, canvasY) {
     const blips = this.#projectedBlips || [];
+    const px = this.#px;
     let best = null;
     let bestDist = Infinity;
     for (const b of blips) {
-      const hitR = Math.max(14, b.dotR + 6);
+      // Buffer-space coordinates come in from #onPointerTap, so the floor is
+      // a CSS-pixel floor scaled up — a fixed 14 would be under 5 CSS px of
+      // finger on a 3× phone.
+      const hitR = Math.max(14 * px, b.dotR + 6 * px);
       const dist = Math.hypot(canvasX - b.bx, canvasY - b.by);
       if (dist <= hitR && dist < bestDist) {
         best = b;

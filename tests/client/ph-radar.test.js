@@ -95,19 +95,20 @@ function setup(opts) {
 
   const canvas = el.shadowRoot.querySelector('canvas');
 
+  // The scope is `cssSize` CSS pixels square with a backing store `dpr` times
+  // that — the real arrangement, and the one the pixel-ratio tests vary.
+  const cssSize = opts.cssSize || 300;
+  const dpr = opts.dpr || 2;
+  const rect = { width: cssSize, height: cssSize, left: 0, top: 0, right: cssSize, bottom: cssSize };
+
   // Mock getBoundingClientRect on element for ResizeObserver sizing
-  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
-    { width: 300, height: 300, left: 0, top: 0, right: 300, bottom: 300 }
-  );
+  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(rect);
 
   // Also mock on the canvas for click coordinate mapping
-  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(
-    { width: 300, height: 300, left: 0, top: 0, right: 300, bottom: 300 }
-  );
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(rect);
 
-  // Manually size canvas to 600×600 (300 * 2 DPR)
-  canvas.width = 600;
-  canvas.height = 600;
+  canvas.width = cssSize * dpr;
+  canvas.height = cssSize * dpr;
 
   const tickRaf = () => {
     if (window.requestAnimationFrame.mock.calls.length > 0) {
@@ -122,7 +123,14 @@ function setup(opts) {
 
   const cleanup = () => {};
 
-  return { el, canvas, fakeCtx, tickRaf, cleanup };
+  return { el, canvas, fakeCtx, tickRaf, cleanup, cssSize, dpr };
+}
+
+/** Tap the scope at a point given in CSS pixels from its top-left corner. */
+function tapCss(h, cssX, cssY) {
+  h.canvas.dispatchEvent(new MouseEvent('click', {
+    clientX: cssX, clientY: cssY, bubbles: true,
+  }));
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -342,6 +350,54 @@ describe('PhRadar', () => {
     // The Image mock has complete=true, naturalWidth>0, so icon is "loaded"
     h.tickRaf();
     expect(h.fakeCtx._calls.drawImage.length).toBeGreaterThan(0);
+  });
+
+  // ── Device pixel ratio (PRD #1023 defect) ────────────────────────
+  //
+  // The backing store is sized rect × devicePixelRatio, so a bare number in a
+  // draw call is a DEVICE pixel. Every fixed size the scope drew was authored
+  // as a bare number, which made labels and tap targets shrink by 1/dpr — on a
+  // 3× phone, 11px labels rendered at 3.7 CSS px and the 14px tap radius at
+  // 4.7. These assert the sizes in the units the player actually experiences.
+
+  it('renders blip labels at the same CSS size whatever the pixel ratio', () => {
+    const labelled = { blips: [{ uuid: 'a', radar_x: 0, radar_y: 0, label: 'HARROW' }] };
+
+    const one = setup({ dpr: 1 });
+    one.el.state = labelled;
+    one.tickRaf();
+    expect(one.fakeCtx.font).toBe('11px "JetBrains Mono", monospace');
+
+    const three = setup({ dpr: 3 });
+    three.el.state = labelled;
+    three.tickRaf();
+    // 33 buffer px ÷ 3 = the same 11 CSS px the 1× scope draws.
+    expect(three.fakeCtx.font).toBe('33px "JetBrains Mono", monospace');
+  });
+
+  it('keeps the blip tap target at its CSS size on a high-DPI screen', () => {
+    const hits = [];
+    const h = setup({ dpr: 3, cssSize: 300, sendAction: (a, p) => hits.push([a, p]) });
+    h.el.state = { blips: [{ uuid: 'contact', radar_x: 0, radar_y: 0 }] };
+    h.tickRaf();
+
+    // The blip sits at the centre of the scope. The hit radius is 14 CSS px,
+    // so a finger 13 CSS px off-centre selects it. Before the fix the radius
+    // was 14 BUFFER px — 4.7 CSS px — and this tap missed by a mile.
+    tapCss(h, 150 + 13, 150);
+    expect(hits).toEqual([['set_target', { uuid: 'contact' }]]);
+  });
+
+  it('still rejects a tap outside the blip tap target', () => {
+    const hits = [];
+    const h = setup({ dpr: 3, cssSize: 300, sendAction: (a, p) => hits.push([a, p]) });
+    h.el.state = { blips: [{ uuid: 'contact', radar_x: 0, radar_y: 0 }] };
+    h.tickRaf();
+
+    // 40 CSS px away — comfortably outside the 14 CSS px radius. The floor
+    // grows with the ratio; it does not become unbounded.
+    tapCss(h, 150 + 40, 150);
+    expect(hits).toEqual([]);
   });
 
   it('blip without icon uses arc + fill', () => {

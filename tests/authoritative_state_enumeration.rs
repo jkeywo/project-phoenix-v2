@@ -443,6 +443,24 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // its own fold decision, to answer a question a counter answers. See
     // `src/science/scan.rs`'s `scanned_flag` docs for the mirror argument, and
     // #1035's `FlagMirror` two paragraphs up for the precedent.
+    //
+    // Issue #1043's CAMPAIGN FLAG HANDOFF registers nothing either, and it is the
+    // largest test of that reading so far. Six families of fact that Falling
+    // Skyway hands to whatever mission comes after it — who was carried in the
+    // transfer window and who was left, how the strike ended, how deep the
+    // evidence went, what the casualties came to, whether the skyhook held, and
+    // how many promises were kept and broken — are ordinary named counters in
+    // that same base-world `FlagStore`, written by world script under a
+    // `campaign.<mission>.<family>.<fact>` prefix. There is no `CampaignRecord`
+    // resource and no per-mission component, for the reason the paragraph above
+    // rejected `ScannedSubjects`: it would be a second authoritative copy of
+    // facts the store already holds. The prefix is a naming convention over
+    // existing state, not a type — see
+    // pasm/spec/architecture/world-files.yaml's `campaign-flag-handoff-state`
+    // for the contract it does carry (exactly one member of each exclusive
+    // family, always written) and the Rust types that hold it. The slice adds no
+    // Rust at all, so it moved no `SNAPSHOT_FORMAT`: the names land in a map
+    // `ScenarioState` already saves.
     "RawWorldSource", "WorldScriptRuntime",
 ];
 

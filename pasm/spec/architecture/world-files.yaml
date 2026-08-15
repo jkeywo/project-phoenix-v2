@@ -78,7 +78,7 @@ entities:
     architecture:
       kind: subsystem
       authority: authoritative
-      owns: [world-flag-state]
+      owns: [world-flag-state, campaign-flag-handoff-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
@@ -101,6 +101,47 @@ entities:
       paths: [src/world/flags.rs]
       symbols: [FlagStore]
       tests: [cargo test]
+
+  - state: campaign-flag-handoff-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: The Campaign Flag Handoff — What One Mission Leaves for the Next
+      summary: "Issue #1043 (parent #852, Falling Skyway). The facts a finished mission hands forward to the missions after it, written as ordinary named counters in the base-world `FlagStore` under a `campaign.<mission>.<family>.<fact>` prefix. Falling Skyway writes six families at its close - who was carried in the transfer window and who was left on the rock, how the strike ended, how deep the evidence went and what was done with it, the casualties each beat cost, whether the skyhook held, and how many promises were kept and broken. FOUR of the six are EXCLUSIVE and exactly one member of each is always written, so a later mission reads a fact rather than inferring one from an absence. It is not a new record: it is a naming convention over state that is already authoritative, already censused and already snapshotted."
+      rationale:
+        - "[ai] IT REGISTERS NO NEW STATE, and that is the whole architectural claim rather than a convenience. A CampaignRecord resource or a per-mission component would be a second authoritative copy of facts the flag store already holds - needing its own census classification, its own snapshot field, its own fold decision and its own restore path - to answer questions a counter answers. `FlagStore` is a field on `WorldContentRuntime`, is accounted for in tests/authoritative_state_enumeration.rs, and rides `ScenarioState` in a save already. This is the same reading #1038 recorded for `scan.<id>.taken` and #1035 for `workforce.<id>.on_strike`: the one bit a later reader needs, written by the code that knows it, into the store that already carries that class of bit."
+        - "[ai] THE PREFIX IS THE CONTRACT, not a type. There is no schema, no registry of family names and no validator, because a campaign flag has exactly one consumer shape - a `counter(name)` read from another world's script or predicate - and a table of legal names would be a second place to keep in step with the scenario that writes them. What replaces a schema is the EXCLUSIVITY INVARIANT: for a family with N mutually exclusive outcomes the writing mission writes exactly one, always, on every path that reaches the close. That is #1037's rule for `skyway_lyra_lost`/`recovered` and #1040's for `skyhook_lost`/`held`, generalised, and it is asserted from the run rather than from the code (`assert_the_campaign_record_is_complete`, applied to all four end-to-end paths)."
+        - "[ai] WRITTEN AT ONE BEAT, FROM STATE, rather than accumulated as the mission goes. `write_the_campaign_record` runs once at the mission's close and derives every family from what the run actually left behind - the window's own served flags, the ledger's settled promises, the two casualty counters earlier beats banked. A record composed incrementally would have to be corrected whenever a later beat changed an earlier answer (a promise broken in Act 2 and a claimant lifted in Act 3 are both about the same captain), and the correction is the thing that goes wrong."
+        - "[ai] IT IS AUTHORITATIVE BUT NOT FOLDED, exactly like `FlagStore` itself, `ObjectiveManager`, `DeadlineTable`, `CommitmentLedger` and `WorkforceRegister`: `state_digest` does not walk it. Falling Skyway's own baseline A/B measures that claim rather than asserting it - deleting the entire #1043 script band, six flag families and all, gives the identical digest to deleting the two civilian mooring orders inside it, so the record folds nothing and the two hulls that stopped drifting fold everything the slice moved."
+        - "[ai] THE COMMITMENT HALF IS COUNTED OFF THE LEDGER, not tallied separately. `commitment.<id>.kept` / `.broken` are already emitted by the commitments vocabulary as ordinary flag writes, so the campaign family is a COUNT derived from `ctx.commitments.state(id)` at the close - which means a promise broken in Act 2 by a force-open and a promise broken in Act 3 by a refusal arrive in the same number without either beat knowing about the other."
+        - "[ai] Casualties are itemised AND summed, because the two readings answer different questions: which beat of this mission hurt people is what a debrief needs, and how many it came to is what a later mission's opening disposition reads. The sum is derived at the same beat rather than maintained, so the two cannot drift."
+    architecture:
+      classification: authoritative
+      owner: world-flag-store
+      writers: [world-flag-store]
+    implementation:
+      status: declared
+      # `src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `mission-deadline-state` and `commitment-ledger-state` omit it: it is a
+      # whole-payload module whose own imports the scanner would attribute
+      # wholesale to this entity. The persistence is `ScenarioState`'s existing
+      # flag payload and needed no `SNAPSHOT_FORMAT` move, because this slice
+      # adds no field - it writes names into a map that was already saved.
+      paths:
+        - src/world/flags.rs
+        - src/world/server.rs
+        - src/world/commitments.rs
+      symbols:
+        - FlagStore
+        - Predicate
+        - WorldContentRuntime
+        - CommitmentLedger
+        - CommitmentState
+      tests: [cargo test, "cargo test --features headless --test headless_runner falling_skyway"]
+    evidence:
+      - kind: test
+        reference: "tests/headless_runner.rs::falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word; ::a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back; ::the_lift_runs_out_and_the_third_claimant_is_never_offered_one; ::the_early_collapse_leaves_one_berth_and_control_asks_for_a_name"
+        summary: "Four whole runs of `falling_skyway.toml` from the lobby to the debrief, each taking a different road and each asserting all six families plus the exclusivity invariant. Between them they cover both strike resolutions, all three evidence depths, both skyhook fates, every pairing the window can carry and the early-collapse variant where it carries none; the casualty families differ per run and the same claimant costs 3 on one road and 4 on another. The commitments family is exercised at every value it can take: two kept and none broken, none kept and one broken, one of each, and a run where nothing was ever promised."
 
   - component: infrastructure-condition-tracker
     core:

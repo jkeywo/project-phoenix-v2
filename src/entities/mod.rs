@@ -30,3 +30,6 @@ pub mod spawner;
 pub mod star;
 pub mod tags;
 pub mod target;
+/// Fading a visual in or out — the LOD cross-fade window and the mid-mission
+/// arrival flourish built on it (PRD #1023, module 5).
+pub mod visual_fade;

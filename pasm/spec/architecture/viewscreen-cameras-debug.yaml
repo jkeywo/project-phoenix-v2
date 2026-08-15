@@ -94,6 +94,42 @@ entities:
       paths: [src/server/renderer.rs, src/server/radar.rs, src/server/viewscreen_border.rs]
       tests: [cargo test]
 
+  - component: model-presentation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Model Presentation — HDR, LOD Cross-Fade, Billboard Blending, Arrival
+      summary: "How a model reaches the viewscreen and how it leaves it: the camera's high-dynamic-range intermediate target and display transform, the cross-fade window that replaces an LOD tier's same-frame swap, the two-pose blend that replaces a billboard's yaw quantisation, and the arrival effect that covers a mid-mission spawn's asynchronous GLB resolve. Authored in a world's [render] block; registered only under SimPluginOptions::render, so it is digest-neutral by construction."
+      rationale:
+        - "PRD #1023 module 5. Weapon fire and engine glow are authored at emissive multipliers between 2.5 and 9.0 (src/server/pfx.rs), every one of them above screen white. The viewscreen camera rendered to a low-dynamic-range target, which clips at exactly 1.0, so a torpedo core authored nine times brighter than white was drawn the same flat white as a value of one. HDR is what stops the clamp, and it is the half of the calibration that ships on."
+        - "[ai] The display transform is named rather than inherited: tony_mc_mapface, which is both Bevy's own default and the transform its bloom documentation recommends pairing bloom with. It desaturates brights across the spectrum, so an over-white core reads as hot with its colour intact at the edges rather than as a white disc. Pending designer ratification."
+        - "[ai] BLOOM IS AUTHORED AND SHIPS OFF, and the reason is a platform fact rather than a taste judgement. Bevy 0.18.1's bloom cannot run on WebGL2, which is what the browser host is (Key Constraint 9). Its downsample chain binds individual mip LEVELS of one texture for sampling, which WebGL2 does not support; bevy_post_process carries a separate-texture-per-mip fallback behind its own `webgl` feature, but bevy_internal's `webgl` feature forwards to eight sub-crates and bevy_post_process is not among them — and enabling that feature directly does not compile, because prepare_bloom_bind_groups reads `bloom_texture.texture.texture.id()` for its bind-group cache key with no cfg while the fallback makes `texture` a Vec. Both facts were read out of the vendored 0.18.1 sources, not inferred. The full calibration is therefore authored, tested and one key away — `[render.bloom] enabled = true` — for a Bevy release that closes the gap, a move to WebGPU, or a native host."
+        - "[ai] The bloom prefilter thresholds at exactly 1.0 — screen white, the same number the old target clamped at — with a softness of 0.4 and additive compositing. That is the calibration in one value: what would glow is precisely what the low-dynamic-range pipeline used to throw away, so adopting bloom cannot quietly restyle the hulls, the skybox or the dust. Bevy's own guidance is that a non-zero prefilter wants additive rather than energy-conserving compositing, and the intensity of 0.15 is three times its additive preset's because that preset thresholds well below white and passes far more of the image."
+        - "[ai] LOD tiers cross-fade over 0.25 s, and mid-mission arrivals materialise over 0.6 s from a quarter of full size. A cross-fade is meant to be unnoticed; an arrival is meant to be SEEN, since the PRD's complaint is that reinforcements read as a glitch — hence the longer window. Each is disabled by authoring 0, independently of the other. Pending designer ratification against a play session: none of the five effects has been seen by eye, only asserted structurally."
+        - "The arrival is gated on the mission already being in progress. At mission start every visual is an entity's first visual, and materialising the whole map at once would be a light show rather than an announcement — the effect exists to cover a REINFORCEMENT's asynchronous GLB resolve. A cross-fade is deliberately not gated: an LOD switch during loading should dissolve exactly as one later will."
+        - "A fade drives alpha on a per-visual COPY of each material it touches, never on the material asset. A GLB's materials are shared by every entity drawing that GLB — all 32 rocks of a size class hold the same handles — so writing into them would fade the whole field. An opaque copy fades through AlphaMode::AlphaToCoverage rather than Blend, which keeps the mesh in the opaque pass with depth writes intact so a half-faded hull does not show its own far side through itself; where MSAA is off, coverage degrades to a cutoff and the swap looks like the hard cut it replaced, which is the right way for this to fail."
+        - "The outgoing tier of a cross-fade is rescaled by the ratio of the two tiers' parent scales. Both tiers are on screen for the window and the tier scale lives on the ENTITY transform they both hang from, which the incoming tier claims — so an uncorrected outgoing tier would change size while it faded. This preserves the new-scale-lands-with-the-tier invariant the LOD flash fix established rather than reopening it."
+        - "Billboards draw TWO coplanar pose quads and dissolve between them. Every shipped atlas packs an eight-view yaw ring, so snapping to the nearest capture is a 45-degree jump in apparent yaw taken in a single frame every time a hull drifts across a tile boundary. The bracketing pair and the weight between them are one pure function, swept round the ring by test so no angle leaves the billboard faded out, doubled up, or indexing past its atlas."
+        - "The billboard's quad size, its ring size, and the system that turns it are shared with the standalone model viewer rather than restated there — the viewer showing a size or a pose the game does not is the exact failure the tier-scale repairs had to fix once already. The viewer previewing a billboard tier at all is new: it used to fall back to the full-detail model for a level it could not build, which is why billboard pose snapping and per-level atlas quality shipped unreviewed."
+    architecture:
+      kind: presentation-layer
+      authority: derived
+      reads: [world-configuration-state]
+      renders: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/render_setup.rs, src/entities/visual_fade.rs, src/entities/billboard.rs, src/server_app.rs, src/server/renderer.rs, src/world/config.rs, src/viewer/lod.rs, src/viewer/subject.rs]
+      symbols: [RenderConfig, BloomConfig, RenderTuning, apply_render_config, VisualFade, drive_visual_fades, retire_lod_visual, yaw_blend, billboard_quad_size, orient_lod_billboards]
+      # The viewer half of this runs under `--features viewer`, which NO CI job
+      # executes: `cargo test` and the test job's `--all-features` clippy both
+      # COMPILE it, but the viewer's own tests are run only by a developer
+      # typing the second command below. That gap is why the billboard-preview
+      # test in src/viewer/lod.rs went stale rather than red for a whole
+      # release — it asserted a far level was a procedural sphere long after
+      # the imposter atlases replaced it.
+      tests: [cargo test, cargo test --features viewer]
+
   - component: viewscreen-hud-effects
     core:
       status: implemented

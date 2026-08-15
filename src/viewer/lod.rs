@@ -27,7 +27,7 @@ use crate::entities::glb_visual::{
 };
 use crate::entity_config::{select_lod, LodLevel};
 
-use super::subject::{ProceduralLevel, Showing, SubjectState};
+use super::subject::{BillboardLevel, ProceduralLevel, Showing, SubjectState};
 use super::{ViewerArgs, ViewerCamera};
 
 /// The renderer's own default emissive multiplier for a general-purpose entity
@@ -268,7 +268,8 @@ pub fn apply_lod_mode(
 /// `update_mesh_lod` folds it into the entity's transform, so the viewer shows a
 /// model at ONE size across its whole ladder for either ladder convention.
 fn showing_for(index: usize, level: &LodLevel, args: &ViewerArgs, ladder: &LadderState) -> Showing {
-    let scale = ladder.tier_base(index) * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
+    let tier_base = ladder.tier_base(index);
+    let scale = tier_base * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
     if let Some(model) = &level.model {
         return Showing::Glb {
             path: model.clone(),
@@ -278,9 +279,23 @@ fn showing_for(index: usize, level: &LodLevel, args: &ViewerArgs, ladder: &Ladde
             scale,
         };
     }
+    if let Some(atlas) = &level.billboard {
+        // A billboard tier does NOT put `scale` on the subject: the level's
+        // `scale` is the quad's world width and height, and those ride the
+        // billboard's own root while the subject stays uniform. Both numbers
+        // come out of the billboard module, which is where `update_mesh_lod`
+        // asks for them too — the viewer showing a size the game does not is
+        // exactly the failure 14776447 had to fix for the GLB tiers.
+        return Showing::Billboard(BillboardLevel {
+            atlas: atlas.clone(),
+            size: crate::entities::billboard::billboard_quad_size(level.scale, tier_base),
+            views: crate::entities::billboard::billboard_yaw_views(level),
+        });
+    }
     let Some(shape) = level.shape else {
-        // Neither model nor shape: an invalid level, which the game skips.
-        // Showing the base model says so more clearly than an empty screen.
+        // Neither model, billboard nor shape: an invalid level, which the game
+        // skips. Showing the base model says so more clearly than an empty
+        // screen.
         return Showing::Base;
     };
     let radius = level.radius.unwrap_or_else(|| ladder.stand_in_radius());
@@ -381,28 +396,91 @@ mod tests {
     }
 
     /// The far level of every shipped asteroid ladder is a BILLBOARD, and the
-    /// viewer builds no billboard level — so it falls back to the base model.
+    /// viewer now previews it as the game draws it.
     ///
-    /// This test used to assert that last level was a bare `shape = "sphere"`,
-    /// which is what those ladders ended in before the imposter atlases landed.
-    /// It went stale rather than red, because CI runs `cargo test --features
-    /// headless` and this module is behind `--features viewer`: nothing in the
-    /// pipeline runs these tests. Retargeted at what the shipped ladder actually
-    /// is, and at the gap that leaves — `showing_for` returns `Showing::Base`
-    /// for a level it cannot build, so the panel's "fixed 3" shows the
-    /// full-detail model rather than the imposter the game draws at that range.
+    /// This test has been wrong twice. It first asserted that last level was a
+    /// bare `shape = "sphere"`, which is what those ladders ended in before the
+    /// imposter atlases landed; it went stale rather than red, because CI runs
+    /// `cargo test --features headless` and this module is behind `--features
+    /// viewer`, so nothing in the pipeline runs these tests. It was then
+    /// retargeted at the GAP — `showing_for` returning `Showing::Base` for a
+    /// level it could not build, so the panel's "fixed 3" showed the full-detail
+    /// model rather than the imposter the game draws at that range. This is the
+    /// gap closed (PRD #1023, module 5): the atlas, the ring, and the quad's
+    /// world size, all from the same functions `update_mesh_lod` uses.
     #[test]
-    fn the_far_billboard_level_falls_back_to_the_base_model() {
-        let (levels, showing) = run_schedule(
-            "assets/models/asteroid_common_1.glb",
-            Some("large"),
-            LodMode::Fixed(3),
-        );
+    fn the_far_billboard_level_previews_as_the_games_imposter() {
+        let model = "assets/models/asteroid_common_1.glb";
+        let (levels, showing) = run_schedule(model, Some("large"), LodMode::Fixed(3));
         assert_eq!(levels, 4, "the large variant carries the four-level ladder");
+        let Showing::Billboard(billboard) = showing else {
+            panic!("the far level of a shipped rock ladder is a billboard, got {showing:?}");
+        };
+        assert!(
+            billboard.atlas.ends_with(".png"),
+            "a billboard level previews from its captured atlas, got {}",
+            billboard.atlas
+        );
         assert_eq!(
-            showing,
-            Showing::Base,
-            "the viewer builds no billboard level, so it shows the base model"
+            billboard.views, 8,
+            "every shipped atlas packs an eight-view yaw ring"
+        );
+        assert!(
+            billboard.size[0] > 0.0 && billboard.size[1] > 0.0,
+            "the imposter quad must have a size, got {:?}",
+            billboard.size
+        );
+    }
+
+    /// The preview is the size the GAME draws, on both ladder conventions —
+    /// which is the whole reason the size rule lives in the billboard module
+    /// rather than being restated here. A rock's ladder records its extents in
+    /// world units already, so its imposter is its authored `scale`; a hull's
+    /// atlas was captured off raw model extents, so its imposter takes the
+    /// model's whole `[base].scale`.
+    #[test]
+    fn a_billboard_preview_is_the_size_the_game_draws() {
+        let rock = "assets/models/asteroid_common_1.glb";
+        let (_, showing) = run_schedule(rock, Some("large"), LodMode::Fixed(3));
+        let Showing::Billboard(imposter) = showing else {
+            panic!("the rock's far level is a billboard");
+        };
+        let levels = {
+            let rig = resolve_sidecar_rig(rock, Some("large")).expect("native reads are sync");
+            rig.lod
+        };
+        let authored = levels[3]
+            .scale
+            .expect("a shipped billboard authors its size");
+        assert!(
+            (imposter.size[0] - authored[0]).abs() < 1e-4
+                && (imposter.size[1] - authored[1]).abs() < 1e-4,
+            "a pipeline ladder's imposter is its authored size, got {:?} for {authored:?}",
+            imposter.size
+        );
+
+        let hull = "assets/models/alliance_destroyer.glb";
+        let (hull_levels, hull_showing) = {
+            let rig = resolve_sidecar_rig(hull, None).expect("native reads are sync");
+            let last = rig.lod.len() - 1;
+            (
+                rig.lod.clone(),
+                run_schedule(hull, None, LodMode::Fixed(last)).1,
+            )
+        };
+        let Showing::Billboard(hull_imposter) = hull_showing else {
+            panic!("the destroyer's far level is a billboard");
+        };
+        let hull_authored = hull_levels
+            .last()
+            .and_then(|l| l.scale)
+            .expect("the destroyer's billboard authors its size");
+        // 0.75 is the destroyer's `[base].scale`; a hull ladder's far tier owes
+        // the parent all of it, and a billboard folds it into the quad instead.
+        assert!(
+            (hull_imposter.size[0] - hull_authored[0] * 0.75).abs() < 1e-3,
+            "a hull imposter takes the base scale, got {:?} for {hull_authored:?}",
+            hull_imposter.size
         );
     }
 

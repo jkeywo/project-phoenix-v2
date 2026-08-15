@@ -225,20 +225,37 @@ impl Plugin for ViewerPlugin {
                     camera::orbit_camera,
                     camera::frame_subject_once,
                     gizmos::draw_rig_gizmos,
+                    // The game's own billboard system, driven off the viewer's
+                    // camera. This is what makes a previewed imposter turn and
+                    // blend the way it does in game rather than hanging at tile
+                    // 0 — the whole point of previewing it here at all (PRD
+                    // #1023, module 5).
+                    crate::entities::billboard::orient_lod_billboards::<ViewerCamera>,
                 ),
             );
     }
 }
 
 fn setup_camera(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
-    commands.spawn((
-        ViewerCamera,
-        Camera3d::default(),
-        game_camera_projection(),
-        space_skybox(&skybox),
-        OrbitCamera::default(),
-        Transform::default(),
-    ));
+    let camera = commands
+        .spawn((
+            ViewerCamera,
+            Camera3d::default(),
+            game_camera_projection(),
+            space_skybox(&skybox),
+            OrbitCamera::default(),
+            Transform::default(),
+        ))
+        .id();
+    // The same HDR / tonemapping / bloom calibration the game camera takes
+    // (PRD #1023). The viewer exists to be a valid reference for how things
+    // look; one that resolved light differently from the viewscreen would be a
+    // tool for tuning a picture nobody sees.
+    crate::render_setup::apply_render_config(
+        &mut commands,
+        camera,
+        &crate::world::config::RenderConfig::default(),
+    );
 }
 
 /// Drain the JS command queue and apply each command to the world.

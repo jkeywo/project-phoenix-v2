@@ -7,9 +7,10 @@
 //!   base rig is composed exactly as the game composes it.
 //! - `?entity=` — an entity TOML, parsed with `EntityConfig::from_toml` and
 //!   dispatched to the star, planet or mesh visual the game would build.
-//! - a level of the selected model's LOD ladder ([`super::lod`]) — either
-//!   another GLB or, for a far level, the procedural primitive the game builds
-//!   through the same `procedural_mesh_material` its own LOD swap uses.
+//! - a level of the selected model's LOD ladder ([`super::lod`]) — another GLB,
+//!   the imposter billboard the game builds through the same
+//!   `spawn_billboard_child` its own LOD swap uses, or the procedural primitive
+//!   it builds through the same `procedural_mesh_material`.
 //!
 //! All are asynchronous on wasm (the GLB streams; the TOML is fetched by JS
 //! and pushed back), so spawning is a poll loop rather than a one-shot.
@@ -66,6 +67,31 @@ pub enum Showing {
     },
     /// A procedural LOD level.
     Shape(ProceduralLevel),
+    /// A billboard LOD level: the imposter atlas quad the game draws in the
+    /// farthest band, built through the game's own
+    /// [`crate::entities::billboard::spawn_billboard_child`] and turned by the
+    /// game's own `orient_lod_billboards`.
+    ///
+    /// Until PRD #1023 the viewer had no way to build one, so `showing_for`
+    /// returned [`Showing::Base`] for a billboard level and the panel's "fixed
+    /// 3" showed the FULL-DETAIL model where the game draws an imposter. That
+    /// is the tooling gap the PRD names: billboard pose snapping and per-level
+    /// atlas quality shipped because the one tool for reviewing far LODs could
+    /// not display the thing being reviewed.
+    Billboard(BillboardLevel),
+}
+
+/// A billboard LOD level, resolved to what the renderer needs to build it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BillboardLevel {
+    /// Atlas PNG path, as authored (`assets/…`).
+    pub atlas: String,
+    /// Quad width and height in world units —
+    /// [`crate::entities::billboard::billboard_quad_size`]'s answer for this
+    /// tier, so the preview is the size the game draws.
+    pub size: [f32; 2],
+    /// How many yaw tiles the atlas packs.
+    pub views: u32,
 }
 
 /// Tracks the in-flight spawn so the poll loop knows when to stop.
@@ -173,6 +199,32 @@ pub fn poll_pending_model(
         commands
             .entity(entity)
             .insert(Transform::from_scale(level.scale))
+            .add_child(child);
+        state.settled = true;
+        return;
+    }
+
+    // A billboard LOD level: the game's own imposter quad, built through the
+    // game's own spawn so the preview IS what ships. The subject transform takes
+    // a UNIFORM scale for the same reason `update_mesh_lod` gives the entity
+    // one — the quad's world width and height ride the billboard's own root, so
+    // rotating it to face the camera never shears it — and unity, because the
+    // viewer has no entity `[mesh] scale` to fold in.
+    if let Showing::Billboard(level) = state.showing.clone() {
+        let child = crate::entities::billboard::spawn_billboard_child(
+            &mut commands,
+            &mut meshes,
+            &mut standard_materials,
+            &asset_server,
+            &level.atlas,
+            level.size[0],
+            level.size[1],
+            level.views,
+        );
+        state.extents = Some(Vec3::new(level.size[0], level.size[1], level.size[0]));
+        commands
+            .entity(entity)
+            .insert(Transform::from_scale(Vec3::ONE))
             .add_child(child);
         state.settled = true;
         return;

@@ -22,7 +22,9 @@
 
 use bevy::prelude::*;
 
-use crate::entities::glb_visual::resolve_sidecar_rig;
+use crate::entities::glb_visual::{
+    resolve_sidecar_rig, resolve_tier_parent_scale, tier_parent_scale_at,
+};
 use crate::entity_config::{select_lod, LodLevel};
 
 use super::subject::{ProceduralLevel, Showing, SubjectState};
@@ -91,6 +93,16 @@ pub struct LadderState {
     /// The model's largest extent, from its rig sidecar. Sizes a procedural
     /// level that names no radius.
     pub extent: Option<f32>,
+    /// What a NON-near tier of this ladder folds onto the subject's transform —
+    /// [`resolve_tier_parent_scale`]'s answer for this model, resolved once when
+    /// the ladder is read. `None` only before a ladder has been read at all.
+    ///
+    /// The viewer needs this for the same reason the game does: a tier's own GLB
+    /// resolves its OWN sidecar, so a hull ladder's generated tiers come back at
+    /// raw model size and a pipeline ladder's come back already scaled. Without
+    /// it the viewer showed a hull shrinking as it crossed its own LOD bands —
+    /// the very artefact the tool exists to catch.
+    pub tier_scale: Option<Vec3>,
     /// A strong handle to every GLB level's scene, held for as long as this
     /// ladder is the one on screen.
     ///
@@ -126,6 +138,21 @@ impl LadderState {
     fn stand_in_radius(&self) -> f32 {
         self.extent.map(|e| e * 0.5).unwrap_or(1.0)
     }
+
+    /// The scale the tier at `index` folds onto the subject's transform.
+    ///
+    /// The near tier is the model itself, so its child already carries the whole
+    /// `[base].scale` and the parent folds in nothing; every other tier takes
+    /// this ladder's [`Self::tier_scale`]. Identical to what `update_mesh_lod`
+    /// puts on the entity, because it is the same function.
+    ///
+    /// The `Vec3::ONE` floor is unreachable in practice — `refresh_ladder` will
+    /// not publish levels until it has resolved a tier scale — and means "fold
+    /// nothing", so a ladder that somehow arrived without one renders at the
+    /// model's own size rather than collapsing to zero.
+    fn tier_base(&self, index: usize) -> Vec3 {
+        tier_parent_scale_at(index, self.tier_scale.unwrap_or(Vec3::ONE))
+    }
 }
 
 /// Read the selected model's ladder out of its rig sidecar.
@@ -159,6 +186,15 @@ pub fn refresh_ladder(
     let Some(rig) = resolve_sidecar_rig(&key.0, key.1.as_deref()) else {
         return; // sidecar fetch in flight — try again next frame
     };
+    // Resolved BEFORE the levels are published, and on the same retry-next-frame
+    // terms as the sidecar above (on wasm this reads a second sidecar, which may
+    // still be in flight). A ladder on the panel whose tier scale had not landed
+    // yet would render its far tiers at the wrong size for those frames.
+    let Some(tier_scale) = resolve_tier_parent_scale(&rig.lod, rig.base.scale, key.1.as_deref())
+    else {
+        return;
+    };
+    ladder.tier_scale = Some(tier_scale);
     ladder.levels = rig.lod.clone();
     ladder.extent = rig
         .extents
@@ -206,8 +242,8 @@ pub fn apply_lod_mode(
     }
 
     let desired = ladder.desired(*mode, ladder.distance);
-    let showing = match desired.and_then(|i| ladder.levels.get(i)) {
-        Some(level) => showing_for(level, &args, &ladder),
+    let showing = match desired.and_then(|i| ladder.levels.get(i).map(|level| (i, level))) {
+        Some((index, level)) => showing_for(index, level, &args, &ladder),
         None => Showing::Base,
     };
     if ladder.current == desired && subject.showing == showing {
@@ -225,8 +261,14 @@ pub fn apply_lod_mode(
 /// and the model's extents. A sphere level with no radius is the shipped
 /// asteroid case: it stands in for the whole rock, so half the model's largest
 /// extent is the honest stand-in for what the entity would have supplied.
-fn showing_for(level: &LodLevel, args: &ViewerArgs, ladder: &LadderState) -> Showing {
-    let scale = level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
+///
+/// `index` is the level's position in the ladder, which decides how much of the
+/// model's `[base].scale` this tier still owes — see [`LadderState::tier_base`].
+/// It is folded into the `scale` both level kinds carry, exactly as
+/// `update_mesh_lod` folds it into the entity's transform, so the viewer shows a
+/// model at ONE size across its whole ladder for either ladder convention.
+fn showing_for(index: usize, level: &LodLevel, args: &ViewerArgs, ladder: &LadderState) -> Showing {
+    let scale = ladder.tier_base(index) * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
     if let Some(model) = &level.model {
         return Showing::Glb {
             path: model.clone(),
@@ -338,17 +380,29 @@ mod tests {
         );
     }
 
-    /// The far level of every shipped asteroid ladder is a bare sphere.
+    /// The far level of every shipped asteroid ladder is a BILLBOARD, and the
+    /// viewer builds no billboard level — so it falls back to the base model.
+    ///
+    /// This test used to assert that last level was a bare `shape = "sphere"`,
+    /// which is what those ladders ended in before the imposter atlases landed.
+    /// It went stale rather than red, because CI runs `cargo test --features
+    /// headless` and this module is behind `--features viewer`: nothing in the
+    /// pipeline runs these tests. Retargeted at what the shipped ladder actually
+    /// is, and at the gap that leaves — `showing_for` returns `Showing::Base`
+    /// for a level it cannot build, so the panel's "fixed 3" shows the
+    /// full-detail model rather than the imposter the game draws at that range.
     #[test]
-    fn the_fallback_level_renders_as_a_procedural_shape() {
-        let (_, showing) = run_schedule(
+    fn the_far_billboard_level_falls_back_to_the_base_model() {
+        let (levels, showing) = run_schedule(
             "assets/models/asteroid_common_1.glb",
             Some("large"),
             LodMode::Fixed(3),
         );
-        assert!(
-            matches!(showing, Showing::Shape(level) if level.shape == MeshShape::Sphere),
-            "the last level is `shape = \"sphere\"`",
+        assert_eq!(levels, 4, "the large variant carries the four-level ladder");
+        assert_eq!(
+            showing,
+            Showing::Base,
+            "the viewer builds no billboard level, so it shows the base model"
         );
     }
 
@@ -466,7 +520,8 @@ mod tests {
             ..Default::default()
         }]);
         state.extent = Some(8.0);
-        let Showing::Shape(level) = showing_for(&state.levels[0], &ViewerArgs::default(), &state)
+        let Showing::Shape(level) =
+            showing_for(0, &state.levels[0], &ViewerArgs::default(), &state)
         else {
             panic!("a shape level renders as a shape");
         };
@@ -481,7 +536,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            showing_for(&state.levels[0], &args, &state),
+            showing_for(0, &state.levels[0], &args, &state),
             Showing::Glb {
                 path: "assets/models/x_lod1.glb".into(),
                 variant: Some("large".into()),
@@ -500,7 +555,8 @@ mod tests {
             scale: Some([3.0, 1.0, 0.5]),
             ..Default::default()
         }]);
-        let Showing::Shape(level) = showing_for(&state.levels[0], &ViewerArgs::default(), &state)
+        let Showing::Shape(level) =
+            showing_for(0, &state.levels[0], &ViewerArgs::default(), &state)
         else {
             panic!("a shape level renders as a shape");
         };
@@ -516,7 +572,8 @@ mod tests {
             rotation: Some([0.0, std::f32::consts::FRAC_PI_2, 0.0]),
             ..Default::default()
         }]);
-        let Showing::Shape(level) = showing_for(&state.levels[0], &ViewerArgs::default(), &state)
+        let Showing::Shape(level) =
+            showing_for(0, &state.levels[0], &ViewerArgs::default(), &state)
         else {
             panic!("a shape level renders as a shape");
         };
@@ -530,7 +587,8 @@ mod tests {
             shape: Some(MeshShape::Sphere),
             ..Default::default()
         }]);
-        let Showing::Shape(level) = showing_for(&state.levels[0], &ViewerArgs::default(), &state)
+        let Showing::Shape(level) =
+            showing_for(0, &state.levels[0], &ViewerArgs::default(), &state)
         else {
             panic!("a shape level renders as a shape");
         };
@@ -546,7 +604,8 @@ mod tests {
             colour: Some(vec![0.5, 0.25, 0.125]),
             ..Default::default()
         }]);
-        let Showing::Shape(level) = showing_for(&state.levels[0], &ViewerArgs::default(), &state)
+        let Showing::Shape(level) =
+            showing_for(0, &state.levels[0], &ViewerArgs::default(), &state)
         else {
             panic!("a shape level renders as a shape");
         };
@@ -560,7 +619,7 @@ mod tests {
     fn a_level_without_a_scale_renders_unscaled() {
         let state = ladder(vec![glb(None, "assets/models/x.glb")]);
         assert_eq!(
-            showing_for(&state.levels[0], &ViewerArgs::default(), &state),
+            showing_for(0, &state.levels[0], &ViewerArgs::default(), &state),
             Showing::Glb {
                 path: "assets/models/x.glb".into(),
                 variant: None,
@@ -581,12 +640,127 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            showing_for(&state.levels[0], &args, &state),
+            showing_for(0, &state.levels[0], &args, &state),
             Showing::Glb {
                 path: "assets/models/x_lod1.glb".into(),
                 variant: Some("cosmetic".into()),
                 scale: Vec3::ONE,
             }
+        );
+    }
+
+    // ── One world size across the ladder, both conventions ───────────────
+
+    /// Drive the real schedule over a SHIPPED ladder and compose what the viewer
+    /// would actually put on screen at `index`: the subject transform's scale
+    /// (`Showing::Glb.scale`) times whatever that tier's own sidecar applies to
+    /// the GLB child (`spawn_glb_visual`'s `base_bevy_transform`).
+    ///
+    /// That product is the model's on-screen size, and it must be the primary
+    /// sidecar's `[base].scale` at EVERY tier — otherwise the model changes size
+    /// as it crosses its own LOD bands, which is the artefact the viewer exists
+    /// to catch and was itself producing.
+    fn composed_world_scale(model: &str, variant: Option<&str>, index: usize) -> Vec3 {
+        let (_, showing) = run_schedule(model, variant, LodMode::Fixed(index));
+        let Showing::Glb {
+            path,
+            variant: tier_variant,
+            scale,
+        } = showing
+        else {
+            panic!("level {index} of {model} is a GLB level");
+        };
+        let tier_rig = resolve_sidecar_rig(&path, tier_variant.as_deref())
+            .expect("native sidecar reads are synchronous");
+        scale * Vec3::from_array(tier_rig.base.scale)
+    }
+
+    fn primary_base_scale(model: &str, variant: Option<&str>) -> Vec3 {
+        Vec3::from_array(
+            resolve_sidecar_rig(model, variant)
+                .expect("native sidecar reads are synchronous")
+                .base
+                .scale,
+        )
+    }
+
+    /// A HULL ladder: no sidecar beside the generated tier GLBs, so the parent
+    /// owes each of them the whole `[base].scale` (0.75 for the destroyer).
+    /// Before the fix the viewer folded in none of it, and the destroyer visibly
+    /// SHRANK to raw model size the moment it crossed out of its near band.
+    #[test]
+    fn a_hull_ladder_is_one_size_across_the_viewers_tiers() {
+        let model = "assets/models/alliance_destroyer.glb";
+        let want = primary_base_scale(model, None);
+        assert_eq!(
+            want,
+            Vec3::splat(0.75),
+            "the destroyer's authored base scale"
+        );
+        for index in 0..=2 {
+            let got = composed_world_scale(model, None, index);
+            assert!(
+                (got - want).length() < 1e-5,
+                "tier {index} composes to {got:?}, but every tier must reach {want:?}"
+            );
+        }
+    }
+
+    /// A PIPELINE ladder: every tier GLB ships a sidecar carrying the primary
+    /// `[base]` rig, so the child already applies the base scale and the parent
+    /// must fold in nothing. Folding it in anyway is what made a rock render at
+    /// its base scale SQUARED in the game (bf4c4b02, fixed in `update_mesh_lod`);
+    /// the viewer has to agree, or the tool disagrees with what it is inspecting.
+    #[test]
+    fn a_pipeline_ladder_is_one_size_across_the_viewers_tiers() {
+        let model = "assets/models/asteroid_common_1.glb";
+        let want = primary_base_scale(model, Some("large"));
+        for index in 0..=2 {
+            let got = composed_world_scale(model, Some("large"), index);
+            assert!(
+                (got - want).length() < 1e-4,
+                "tier {index} composes to {got:?}, but every tier must reach {want:?}"
+            );
+        }
+    }
+
+    /// The two conventions pull the parent scale in opposite directions, so the
+    /// test above would pass on a viewer that simply never scaled anything. This
+    /// pins the halves apart: a hull ladder's far tier carries the base scale on
+    /// the PARENT, a rock's carries it on the CHILD and the parent stays at 1.
+    #[test]
+    fn the_two_conventions_put_the_base_scale_on_opposite_transforms() {
+        let (_, hull) = run_schedule(
+            "assets/models/alliance_destroyer.glb",
+            None,
+            LodMode::Fixed(1),
+        );
+        let Showing::Glb {
+            scale: hull_parent, ..
+        } = hull
+        else {
+            panic!("the destroyer's level 1 is a GLB level");
+        };
+        assert!(
+            (hull_parent - Vec3::splat(0.75)).length() < 1e-5,
+            "a hull ladder's far tier needs the whole base scale on the parent, got {hull_parent:?}"
+        );
+
+        let (_, rock) = run_schedule(
+            "assets/models/asteroid_common_1.glb",
+            Some("large"),
+            LodMode::Fixed(1),
+        );
+        let Showing::Glb {
+            scale: rock_parent, ..
+        } = rock
+        else {
+            panic!("the rock's level 1 is a GLB level");
+        };
+        assert!(
+            (rock_parent - Vec3::ONE).length() < 1e-5,
+            "a pipeline ladder's far tier already carries it on the child, so the \
+             parent must stay at 1, got {rock_parent:?}"
         );
     }
 }

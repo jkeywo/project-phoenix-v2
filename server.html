@@ -3145,7 +3145,8 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {
     // Show error to user — use wasm-spinner element so we don't destroy #qr-link
     const errDiv = document.getElementById('wasm-spinner');
     if (errDiv) {
-      errDiv.innerHTML = '<div style="color: #f44; padding: 2rem; text-align: center; font-family: monospace;">Failed to load game configuration. See console for details.</div>';
+      errDiv.innerHTML = '<div style="color: #f44; padding: 2rem; text-align: center; font-family: monospace;">' +
+        escapeHtml(t('server.preload.failed')) + '</div>';
       errDiv.style.display = 'flex';
     }
     return;
@@ -3444,12 +3445,12 @@ function finishInit() {
         // resolved against this path. Passing text alone would reject every
         // composed hull.
         try { wasm_validate_stations(templatePath, toml); } catch (err) {
-          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
           return;
         }
         startServer();
       })
-      .catch(err => { showFatalError('Failed to load ' + templatePath + ': ' + String(err)); });
+      .catch(err => { showFatalError(t('server.fatal.load_failed', { path: templatePath, detail: String(err) })); });
     return;
   }
 
@@ -3462,7 +3463,7 @@ function finishInit() {
       .then(toml => {
         wasm_select_ship('assets/entities/alliance_cruiser.toml');
         try { wasm_validate_stations('assets/entities/alliance_cruiser.toml', toml); } catch (err) {
-          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
           return;
         }
         startServer();
@@ -3476,12 +3477,12 @@ function finishInit() {
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
         try { wasm_validate_stations(templatePath, toml); } catch (err) {
-          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
           return;
         }
         startServer();
       })
-      .catch(err => { showFatalError('Failed to load ' + templatePath + ': ' + String(err)); });
+      .catch(err => { showFatalError(t('server.fatal.load_failed', { path: templatePath, detail: String(err) })); });
   } else {
     // Multiple ships — show ph-ship-picker component, defer server start until selection.
     const panel = document.getElementById('scenario-panel');
@@ -3503,12 +3504,12 @@ function finishInit() {
           .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
           .then(toml => {
             try { wasm_validate_stations(template_path, toml); } catch (err) {
-              showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+              showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
               return;
             }
             startServer();
           })
-          .catch(err => { showFatalError('Failed to load ' + template_path + ': ' + String(err)); });
+          .catch(err => { showFatalError(t('server.fatal.load_failed', { path: template_path, detail: String(err) })); });
       });
 
       panel.style.display = '';
@@ -3516,14 +3517,19 @@ function finishInit() {
   }
 }
 
+// The one panel a host sees when the game cannot start. Its chrome — the
+// heading and the "what now" line — is display text like any other and reads
+// from the string table; only `message` is a detail composed by the caller,
+// itself from a string id. The validator's own text inside that detail stays
+// English, because it is a diagnostic for whoever is editing the TOML.
 function showFatalError(message) {
   const spinner = document.getElementById('wasm-spinner');
   if (spinner) {
     spinner.innerHTML =
       '<div style="color:#f44;padding:2rem;text-align:center;font-family:monospace;max-width:40rem;">' +
-      '<strong>Fatal configuration error</strong><br><br>' +
-      message.replace(/</g, '&lt;') +
-      '<br><br>Fix the TOML and reload the page.</div>';
+      '<strong>' + escapeHtml(t('server.fatal.title')) + '</strong><br><br>' +
+      escapeHtml(message) +
+      '<br><br>' + escapeHtml(t('server.fatal.remedy')) + '</div>';
     spinner.style.display = 'flex';
   }
   // PeerJS is already constructed but we never call startServer(), so it

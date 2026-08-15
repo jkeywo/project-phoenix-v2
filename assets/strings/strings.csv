@@ -1317,3 +1317,8 @@ world.falling_skyway.evidence.word_none,"Evidence text — no commitments made a
 world.falling_skyway.comms.committee_reprices,Dialogue body — the strike committee reacting to the transfer manifest moving in Falling Skyway,[Control's board just moved. Are we still on that manifest or are we not?]
 world.falling_skyway.comms.havelock_reprices,Dialogue body — Havelock reacting to the transfer manifest moving in Falling Skyway,"[The manifest has changed since we last spoke, Destroyer. Say plainly whether Havelock is on it.]"
 world.falling_skyway.comms.convoy_reprices,Dialogue body — the convoy reacting to the transfer manifest moving in Falling Skyway,"[Skyway — Meridian. Something just came off that board. Is that us?]"
+server.fatal.title,Host fatal-error panel — heading shown when the ship or world TOML cannot be used,[Fatal configuration error]
+server.fatal.remedy,Host fatal-error panel — what the operator should do next,[Fix the TOML and reload the page.]
+server.fatal.station_config,Host fatal-error detail when a ship template fails station validation. {detail} is the validator's own message,[Station config error: {detail}]
+server.fatal.load_failed,Host fatal-error detail when a ship template file cannot be fetched. {path} is the file path and {detail} the fetch error,[Could not load {path}: {detail}]
+server.preload.failed,Host loading panel — the world or entity preload could not complete,[Failed to load game configuration. See the browser console for details.]

@@ -29,6 +29,12 @@
 # Windows-only helper scripts keep CRLF; cmd.exe is the consumer.
 *.bat text eol=crlf
 
+# Cloudflare Pages configuration, which carries no extension and is parsed line
+# by line off the uploaded directory. Pinned rather than left to whatever a
+# Windows checkout produces (PRD #855).
+_headers text eol=lf
+_redirects text eol=lf
+
 # Binary assets — never touched, never diffed as text.
 *.png binary
 *.webp binary

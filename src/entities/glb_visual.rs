@@ -117,6 +117,109 @@ pub fn resolve_sidecar_rig(
     }
 }
 
+/// The scale a NON-near LOD tier folds onto the PARENT transform, given the
+/// primary sidecar's `[base].scale` and the scale the ladder's own GENERATED
+/// tiers already carry.
+///
+/// Every tier of one model has to reach the same world size — the primary
+/// sidecar's `[base].scale`. Two ladder shapes deliver it differently, and
+/// nothing that composes a tier may assume either:
+///
+/// * A **hull ladder** (every ship, the starbase, the research outpost) ships
+///   no sidecar beside its generated tier GLBs. Each generated tier therefore
+///   resolves an identity rig, and the ladder's non-GLB tiers — the billboard's
+///   `scale`, a procedural level's radius — are authored in RAW model units, so
+///   the parent must supply the whole base scale. This is the case bf4c4b02
+///   fixed: before it, a starbase at `[base].scale = [15, 18, 18]` snapped back
+///   to raw model size the moment it left its near band.
+/// * A **pipeline ladder** (every asteroid class, since e20a5035) writes a
+///   sidecar beside EVERY tier GLB carrying the primary's `[base]` rig
+///   verbatim, and records that model's `[extents]` — and the billboard `scale`
+///   derived from them — already in post-scale WORLD units. The child applies
+///   the base scale itself, so the parent must supply NONE of it.
+///
+/// Dividing the base scale by whatever a generated tier already carries covers
+/// both without either convention having to know about the other: an identity
+/// child yields the whole base scale, a base-scaled child yields 1. Folding the
+/// base scale in unconditionally instead SQUARES it on a pipeline ladder, which
+/// is how a `huge` rock (`[base].scale` 12.6756) came to render at 160.67x raw
+/// instead of 12.6756x — 12.68x oversize, "almost planet sized" — from the
+/// moment it crossed out of its 45-unit near band.
+///
+/// Lives here, beside [`resolve_sidecar_rig`], because it is a fact about how a
+/// model's rig composes across its ladder — not about either of the two things
+/// that need the answer. `update_mesh_lod` (the game) and `super::super::viewer`
+/// (the standalone model viewer) both build a tier's transform, and a second
+/// copy of this reasoning in the viewer is exactly how the viewer came to be
+/// showing a size the game did not.
+pub fn tier_parent_scale(base_scale: [f32; 3], generated_child_scale: [f32; 3]) -> Vec3 {
+    // A zero/degenerate child scale carries no usable information — read it as
+    // the hull-ladder case rather than dividing by ~0 into a non-finite scale.
+    let axis = |base: f32, child: f32| {
+        if child.abs() > 1e-6 {
+            base / child
+        } else {
+            base
+        }
+    };
+    Vec3::new(
+        axis(base_scale[0], generated_child_scale[0]),
+        axis(base_scale[1], generated_child_scale[1]),
+        axis(base_scale[2], generated_child_scale[2]),
+    )
+}
+
+/// Resolve [`tier_parent_scale`] for a ladder by reading the sidecar of its
+/// first GENERATED tier — the first level past the near one that carries its own
+/// GLB. That one tier settles the convention for the whole ladder, because a
+/// ladder's tiers are generated together, by one pipeline, from one source
+/// model. (`every_shipped_ladder_holds_one_world_size_across_its_tiers` holds
+/// that claim to the shipped assets: no ladder mixes the two conventions.)
+///
+/// `entity_variant` is the `[mesh] variant` fallback a level uses when it
+/// declares none of its own — the same fallback the GLB spawn path applies.
+///
+/// Returns `None` only on wasm, while that sidecar's fetch is still in flight;
+/// the caller retries next frame, the same wait the GLB spawn path already
+/// takes. On native the read is synchronous and this always resolves.
+pub fn resolve_tier_parent_scale(
+    levels: &[crate::entity_config::LodLevel],
+    base_scale: [f32; 3],
+    entity_variant: Option<&str>,
+) -> Option<Vec3> {
+    // Level 0 is the primary GLB itself and so always resolves the PRIMARY
+    // sidecar — it says nothing about how the GENERATED tiers were written, and
+    // asking it would report every ladder as already pre-scaled.
+    let generated = levels.iter().skip(1).find_map(|level| {
+        level
+            .model
+            .as_deref()
+            .map(|m| (m, level.variant.as_deref()))
+    });
+    let Some((model_path, level_variant)) = generated else {
+        // A ladder with no generated GLB tier (a near GLB straight to a
+        // billboard) has nothing to measure against, so keep the hull reading.
+        return Some(Vec3::from_array(base_scale));
+    };
+    let rig = resolve_sidecar_rig(model_path, level_variant.or(entity_variant))?;
+    Some(tier_parent_scale(base_scale, rig.base.scale))
+}
+
+/// The scale the tier at `index` folds onto its PARENT transform.
+///
+/// The near tier (index 0) IS the primary GLB, so its child already carries the
+/// whole `[base].scale` from the primary sidecar and the parent must fold in
+/// nothing; every other tier takes [`resolve_tier_parent_scale`]'s answer. Both
+/// the game's LOD swap and the viewer's ask exactly this question, so they ask
+/// it in one place.
+pub fn tier_parent_scale_at(index: usize, ladder_tier_scale: Vec3) -> Vec3 {
+    if index == 0 {
+        Vec3::ONE
+    } else {
+        ladder_tier_scale
+    }
+}
+
 /// Outcome of attempting to spawn a GLB visual (flat render or LOD swap).
 pub enum GlbSpawnOutcome {
     /// The scene + rig resolved; the `SceneRoot` child entity was spawned.
@@ -215,4 +318,167 @@ pub fn spawn_glb_visual(
         .entity(entity)
         .insert(crate::model_rig::ModelMarkers::from_rig(rig));
     GlbSpawnOutcome::Spawned(child)
+}
+
+// ── Tests ────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A HULL ladder ships no sidecar beside its generated tier GLBs, so each
+    /// resolves an identity rig and the parent owes that tier the whole
+    /// `[base].scale`. These are `alliance_starbase.model.toml`'s real numbers —
+    /// the model bf4c4b02 was written for. That repair must survive.
+    #[test]
+    fn a_hull_ladder_far_tier_takes_the_whole_base_scale() {
+        assert_eq!(
+            tier_parent_scale([15.0, 18.0, 18.0], [1.0, 1.0, 1.0]),
+            Vec3::new(15.0, 18.0, 18.0),
+            "a generated tier with no sidecar of its own must be scaled by the \
+             parent, or the starbase snaps back to raw model size past its near band"
+        );
+    }
+
+    /// A PIPELINE ladder writes the primary's `[base]` rig beside EVERY tier
+    /// GLB, so the child already applies the base scale and the parent owes it
+    /// nothing. These are `asteroid_common_1.huge.toml`'s real numbers, and the
+    /// square of them is precisely the bug John reported: folding the base scale
+    /// in regardless rendered a `huge` rock at 12.6756² = 160.67x raw instead of
+    /// 12.6756x — "almost planet sized".
+    #[test]
+    fn a_pipeline_ladder_far_tier_takes_none_of_the_base_scale() {
+        let huge_rock = [12.675_623, 12.675_623, 12.675_623];
+        // `asteroid_common_1_lod1.huge.toml` carries the primary rig verbatim.
+        let got = tier_parent_scale(huge_rock, huge_rock);
+        assert!(
+            (got - Vec3::ONE).length() < 1e-5,
+            "a generated tier that carries its own base rig must not be scaled \
+             again by the parent, got {got:?}"
+        );
+    }
+
+    /// Every size class lands on 1 — the error factor WAS the base scale, which
+    /// is why the fault scaled with the rock and the X3 class showed it worst.
+    #[test]
+    fn every_rock_size_class_takes_none_of_the_base_scale() {
+        // asteroid_common_1's four shipped size classes, to f32 precision.
+        for scale in [1.056_302_f32, 2.112_604, 4.225_208, 12.675_623] {
+            let base = [scale, scale, scale];
+            let got = tier_parent_scale(base, base);
+            assert!(
+                (got - Vec3::ONE).length() < 1e-5,
+                "size class {scale} must fold nothing onto the parent, got {got:?}"
+            );
+        }
+    }
+
+    /// A zero child scale carries no information about the ladder's convention,
+    /// so it reads as the hull case rather than dividing into a non-finite scale.
+    #[test]
+    fn a_degenerate_child_scale_reads_as_the_hull_convention() {
+        let got = tier_parent_scale([15.0, 18.0, 18.0], [0.0, 0.0, 0.0]);
+        assert_eq!(got, Vec3::new(15.0, 18.0, 18.0));
+        assert!(
+            got.is_finite(),
+            "must never produce a non-finite parent scale"
+        );
+    }
+
+    /// The regression itself, measured against the SHIPPED sidecars rather than
+    /// numbers copied into a test: for every ladder in `assets/models`, every
+    /// generated tier must compose — parent scale times whatever that tier's own
+    /// sidecar applies to the child — to exactly the primary `[base].scale`.
+    /// That is the invariant "the model is the same size at every view
+    /// distance", which is what John was actually looking at.
+    ///
+    /// Before the fix, all 32 asteroid ladders composed to their base scale
+    /// SQUARED. It also holds the claim `resolve_tier_parent_scale` rests on:
+    /// no ladder mixes the two conventions across its own tiers, so probing the
+    /// first generated tier settles the rest.
+    #[test]
+    fn every_shipped_ladder_holds_one_world_size_across_its_tiers() {
+        let mut hull = 0usize;
+        let mut pipeline = 0usize;
+        let mut ambiguous = 0usize;
+
+        let dir = std::fs::read_dir("assets/models").expect("assets/models must be readable");
+        let mut sidecars: Vec<std::path::PathBuf> = dir
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
+            .collect();
+        sidecars.sort();
+
+        for path in sidecars {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let text = std::fs::read_to_string(&path).expect("read sidecar");
+            let Ok(rig) = crate::model_rig::ModelRig::from_toml(&text) else {
+                continue;
+            };
+            // Only the ladder-bearing sidecars: a generated tier's own sidecar
+            // carries a `[base]` rig but no `[[lod]]` chain of its own.
+            if rig.lod.is_empty() {
+                continue;
+            }
+            let variant = crate::model_rig::sidecar_variant(&name);
+            let parent = resolve_tier_parent_scale(&rig.lod, rig.base.scale, variant)
+                .expect("native sidecar reads are synchronous");
+
+            let mut generated_tiers = 0usize;
+            for level in rig.lod.iter().skip(1) {
+                let Some(model) = level.model.as_deref() else {
+                    continue;
+                };
+                generated_tiers += 1;
+                let tier = resolve_sidecar_rig(model, level.variant.as_deref().or(variant))
+                    .expect("native sidecar reads are synchronous");
+                let composed = parent * Vec3::from_array(tier.base.scale);
+                let want = Vec3::from_array(rig.base.scale);
+                assert!(
+                    (composed - want).length() < 1e-3,
+                    "{name}: tier {model} composes to {composed:?}, but every tier of \
+                     this model must reach the primary [base].scale {want:?} — that \
+                     mismatch IS the on-screen size change across an LOD crossing"
+                );
+            }
+            assert!(
+                generated_tiers > 0,
+                "{name} declares a ladder with no generated GLB tier"
+            );
+
+            // Book-keeping, so the assertions above cannot pass vacuously and a
+            // future ladder in a THIRD convention is noticed rather than folded
+            // silently into one of these two.
+            let base = Vec3::from_array(rig.base.scale);
+            if (base - Vec3::ONE).length() < 1e-4 {
+                // A model authored at world size needs no base scale at all, so
+                // the two conventions coincide and neither reading is wrong.
+                ambiguous += 1;
+            } else if (parent - Vec3::ONE).length() < 1e-4 {
+                pipeline += 1;
+            } else if (parent - base).length() < 1e-4 {
+                hull += 1;
+            } else {
+                panic!(
+                    "{name}: parent tier scale {parent:?} is neither 1 (a pipeline \
+                     ladder) nor the base scale {base:?} (a hull ladder) — a ladder \
+                     in a convention this renderer has not been taught"
+                );
+            }
+        }
+
+        assert_eq!(
+            hull, 8,
+            "expected the 8 shipped hull ladders whose base scale is not 1 to need \
+             the full base scale on their far tiers"
+        );
+        assert_eq!(
+            pipeline, 32,
+            "expected the 32 shipped asteroid ladders to need none of it"
+        );
+        assert_eq!(
+            ambiguous, 2,
+            "expected alliance_cruiser and dynasty_destroyer — authored at world \
+             size, so [base].scale is 1 and the conventions coincide"
+        );
+    }
 }

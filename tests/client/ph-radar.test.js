@@ -2,25 +2,10 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-radar.js';
+import { makeRadarCtx } from './radar-canvas-stub.js';
 
 function makeFakeCtx() {
-  const calls = { fillRect: [], arc: [], fill: [], drawImage: [], fillText: [], save: [], restore: [], translate: [], rotate: [] };
-  const ctx = {
-    _calls: calls,
-    fillStyle: '',
-    fillRect: (...a) => calls.fillRect.push(a),
-    beginPath: vi.fn(),
-    arc: (...a) => calls.arc.push(a),
-    fill: () => calls.fill.push(true),
-    drawImage: (...a) => calls.drawImage.push(a),
-    fillText: (...a) => calls.fillText.push(a),
-    save: () => calls.save.push(true),
-    restore: () => calls.restore.push(true),
-    translate: (...a) => calls.translate.push(a),
-    rotate: (...a) => calls.rotate.push(a),
-    font: '',
-  };
-  return ctx;
+  return makeRadarCtx();
 }
 
 // ── Shared mocks (applied before each test) ────────────────────────────

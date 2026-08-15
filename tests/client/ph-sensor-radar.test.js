@@ -2,22 +2,10 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-sensor-radar.js';
+import { makeRadarCtx } from './radar-canvas-stub.js';
 
 function makeFakeCtx() {
-  return {
-    fillStyle: '',
-    font: '',
-    fillRect: vi.fn(),
-    beginPath: vi.fn(),
-    arc: vi.fn(),
-    fill: vi.fn(),
-    fillText: vi.fn(),
-    drawImage: vi.fn(),
-    save: vi.fn(),
-    restore: vi.fn(),
-    translate: vi.fn(),
-    rotate: vi.fn(),
-  };
+  return makeRadarCtx();
 }
 
 function setup(opts) {

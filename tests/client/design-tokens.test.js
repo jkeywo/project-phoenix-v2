@@ -156,8 +156,15 @@ describe('contrast-bearing tokens meet WCAG AA', () => {
 // ── 3. Adoption ─────────────────────────────────────────────────────────────
 
 describe('every component adopts the shared control family', () => {
+  // A COMPONENT is a file that registers a custom element. The others under
+  // gui/components/ are shared fragments the components import —
+  // ph-console-styles.js carries the control family itself, ph-scope-chrome.js
+  // the corner readouts every radar draws — and a fragment has no shadow root
+  // to adopt anything into. Asked by what they ARE rather than named in an
+  // exemption list, so a third fragment does not have to remember to add
+  // itself here.
   const components = componentFiles()
-    .filter((f) => path.basename(f) !== 'ph-console-styles.js');
+    .filter((f) => /customElements\.define/.test(fs.readFileSync(f, 'utf8')));
 
   it('finds the components to check', () => {
     expect(components.length).toBeGreaterThanOrEqual(30);

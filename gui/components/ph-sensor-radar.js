@@ -6,6 +6,9 @@ import './ph-radar.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import {
+  SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
+} from './ph-scope-chrome.js';
 
 export class PhSensorRadar extends HTMLElement {
   #innerRadar = null;
@@ -21,14 +24,7 @@ export class PhSensorRadar extends HTMLElement {
       '<style>',
       ':host { display: block; width: 100%; height: 100%; position: relative; }',
       'ph-radar { display: block; width: 100%; height: 100%; }',
-      '.corner-label {',
-      '  position: absolute; pointer-events: none; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
-      '  letter-spacing: 0.1em; color: var(--edge-strong);',
-      '}',
-      '.corner-label.top-left { top: 4%; left: 6%; }',
-      '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
-      '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
+      SCOPE_CHROME_CSS,
       '.on-screen-btn {',
       '  position: absolute; bottom: 6%; right: 6%;',
       '  pointer-events: auto; z-index: 10;',
@@ -42,9 +38,7 @@ export class PhSensorRadar extends HTMLElement {
       '.on-screen-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--rgb-cyan), 0.18); }',
       '</style>',
       '<ph-radar id="inner-radar"></ph-radar>',
-      '<div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
-      '<div class="corner-label top-right" id="label-bearing">000°</div>',
-      '<div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
+      scopeChromeMarkup(''),
       '<button class="on-screen-btn" id="on-screen-btn" type="button">' + t('console.common.on_screen') + '</button>',
     ].join('\n');
     this.shadowRoot.appendChild(tpl.content.cloneNode(true));
@@ -85,24 +79,14 @@ export class PhSensorRadar extends HTMLElement {
       };
     }
 
-    const posLabel = this.shadowRoot.getElementById('label-pos');
-    if (posLabel) {
-      const x = val?.ship_x != null ? val.ship_x : 0;
-      const z = val?.ship_z != null ? val.ship_z : 0;
-      posLabel.textContent = t('console.common.radar_pos', { x: x.toFixed(0), z: z.toFixed(0) });
-    }
-
-    const bearingLabel = this.shadowRoot.getElementById('label-bearing');
-    if (bearingLabel) {
-      const h = val?.ship_heading != null ? ((val.ship_heading % 360) + 360) % 360 : 0;
-      bearingLabel.textContent = String(h.toFixed(0)).padStart(3, '0') + '\u00B0';
-    }
-
-    const speedLabel = this.shadowRoot.getElementById('label-speed');
-    if (speedLabel) {
-      const spd = val?.ship_speed != null ? val.ship_speed : 0;
-      speedLabel.textContent = (spd * 3.6).toFixed(1) + ' km/s';
-    }
+    // Sensors names the same three readings differently on the wire \u2014
+    // `ship_x` / `ship_z` / `ship_speed` where helm and tactical say `x` / `z`
+    // / `speed`. Unpacked here, once, so the divergence stops at this boundary
+    // instead of being carried into a third copy of the rendering.
+    updateScopeChrome(this.shadowRoot, {
+      x: val?.ship_x, z: val?.ship_z,
+      headingDeg: val?.ship_heading, speed: val?.ship_speed,
+    });
 
     const btn = this.shadowRoot.getElementById('on-screen-btn');
     if (btn) {

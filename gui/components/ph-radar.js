@@ -1,4 +1,22 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the scale readout never draws against an empty table.
+// No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
 import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import {
+  ringPlan, scaleReadout, phPx, TEXT_MIN_FALLBACK_PX,
+} from './ph-scope-chrome.js';
+
+/**
+ * How far a label sits from its blip, and how far apart two labels must stay.
+ *
+ * Both in CSS pixels, both multiplied by `#px` at the draw call — see the note
+ * on that field.
+ */
+const LABEL_GAP_CSS = 4;
+const LABEL_HALO_CSS = 3;
+
 export class PhRadar extends HTMLElement {
   #state = null;
   #canvas = null;
@@ -177,6 +195,9 @@ export class PhRadar extends HTMLElement {
       octx.fill();
     }
 
+    // Rings before contacts, so a blip is never drawn under its own scale.
+    this.#drawRangeRings(octx, cx, cy, R, px, state.range);
+
     if (this.#offscreen) {
       this.#ctx.drawImage(this.#offscreen, 0, 0);
     }
@@ -185,6 +206,7 @@ export class PhRadar extends HTMLElement {
     if (blips.length === 0) { this.#needsRender = false; return; }
 
     this.#projectedBlips = [];
+    const labels = [];
 
     for (const b of blips) {
       const bx = cx + (b.radar_x != null ? b.radar_x : 0) * R;
@@ -214,10 +236,14 @@ export class PhRadar extends HTMLElement {
         }
       }
 
+      // Collected, not drawn: a label's final Y depends on the other labels,
+      // so nothing can be painted until every one of them is known.
       if (b.label) {
-        octx.font = Math.round(11 * px) + 'px "JetBrains Mono", monospace';
-        octx.fillStyle = phColor(this, 'rgba(var(--rgb-loaded-bright), 0.9)');
-        octx.fillText(b.label, bx + dotR + 4 * px, by + 4 * px);
+        labels.push({
+          text: b.label,
+          x: bx + dotR + LABEL_GAP_CSS * px,
+          y: by + LABEL_GAP_CSS * px,
+        });
       }
 
       if (state.selected_target_uuid && state.selected_target_uuid === b.uuid) {
@@ -230,11 +256,172 @@ export class PhRadar extends HTMLElement {
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
     }
 
+    this.#drawLabels(octx, labels, px);
+
     if (this.#offscreen) {
       this.#ctx.drawImage(this.#offscreen, 0, 0);
     }
 
     this.#needsRender = false;
+  }
+
+  /** The type floor in BUFFER pixels — `--text-min`, scaled for the backing store. */
+  #labelFontPx(px) {
+    return Math.round(phPx(this, '--text-min', TEXT_MIN_FALLBACK_PX) * px);
+  }
+
+  /**
+   * Range rings, and the scale readout that says what the outer one means.
+   *
+   * Harvested from gui/radar-widget.js, which drew three rings at a fixed 33 /
+   * 66 / 100 % of the scope radius and labelled none of them. Those rings were
+   * decoration: the middle one stood for two-thirds of whatever that console's
+   * range happened to be, so the same picture meant 333 units on the helm scope
+   * and 200 on the weapons scope, and nothing on screen said which.
+   *
+   * Here the radii come from `state.range` through `ringPlan`, which picks a
+   * round spacing — so a ring is a distance a player can name, and the scale
+   * readout names the outermost one. `range` is the LIVE per-tick value: it is
+   * `bb.radar_range` on the helm blackboard, which shrinks as the radar system
+   * takes damage and moves when doctrine changes it. The scope therefore
+   * redraws its own scale rather than lying at the range it booted with.
+   *
+   * Handed no range, the rings fall back to the harvested thirds and no readout
+   * is drawn — an unlabelled ring is a weaker picture than a labelled one, but
+   * a labelled ring with no distance behind the label would be a false one.
+   */
+  #drawRangeRings(ctx, cx, cy, R, px, range) {
+    const plan = ringPlan(range);
+    const fractions = plan.length > 0
+      ? plan.map((ring) => ring.fraction)
+      : [0.33, 0.66, 1.0];
+
+    ctx.save();
+    ctx.strokeStyle = phColor(this, 'rgba(var(--rgb-edge-strong), 0.28)');
+    ctx.lineWidth = Math.max(1, px);
+    for (const fraction of fractions) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * fraction, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const readout = plan.length > 0 ? scaleReadout(range) : '';
+    if (!readout) return;
+
+    // Against the outer ring on the forward-starboard diagonal, where the
+    // corner labels are not and where a contact clamped to the rim is least
+    // likely to be — the same reasoning that put the three corner readouts in
+    // corners.
+    const font = this.#labelFontPx(px);
+    const diagonal = Math.SQRT1_2;
+    ctx.save();
+    ctx.font = font + 'px ' + this.#labelFontFamily();
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    this.#paintHaloed(
+      ctx, readout,
+      cx + R * diagonal - LABEL_GAP_CSS * px,
+      cy + R * diagonal - LABEL_GAP_CSS * px,
+      px, 'rgba(var(--rgb-edge-strong), 0.95)',
+    );
+    ctx.restore();
+  }
+
+  #labelFontFamily() {
+    return '"JetBrains Mono", monospace';
+  }
+
+  /**
+   * Draw contact labels: haloed, and nudged apart where they would overprint.
+   *
+   * TWO separate legibility problems, and they are not the same problem.
+   *
+   * A halo is about the BACKGROUND. The scope's backdrop is a photographic
+   * PNG — a starfield with an asteroid belt across it — so a label's contrast
+   * against it is whatever pixels it happens to land on. A dark outline behind
+   * the glyphs makes the text readable over any of them, which is what a chart
+   * does and what the flat `fillText` this replaces did not.
+   *
+   * De-collision is about the OTHER LABELS. Contacts cluster — that is what a
+   * furball is — and two labels at the same Y overprint into an unreadable
+   * smear exactly when the officer most needs to read them. The pass below
+   * places labels top-down and pushes each one clear of the box already taken,
+   * which keeps a label near its own blip (the offset only ever grows by as
+   * much as the overlap) and is stable frame to frame because the order is a
+   * function of position, not of arrival.
+   */
+  #drawLabels(ctx, labels, px) {
+    if (labels.length === 0) return;
+
+    const font = this.#labelFontPx(px);
+    ctx.save();
+    ctx.font = font + 'px ' + this.#labelFontFamily();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+
+    const lineHeight = font * 1.2;
+    const placed = [];
+    // Top-down, so a run of collisions cascades downward instead of
+    // ping-ponging: each label only ever moves away from the ones above it.
+    const ordered = labels.slice().sort((a, b) => a.y - b.y || a.x - b.x);
+
+    for (const label of ordered) {
+      const width = this.#measureText(ctx, label.text, font);
+      let y = label.y;
+      // Repeat until clear: pushing below one label can slide this one onto
+      // another, and a single pass would leave that second overlap standing.
+      for (let guard = 0; guard < placed.length + 1; guard += 1) {
+        const clash = placed.find((box) => (
+          label.x < box.x + box.width
+          && label.x + width > box.x
+          && y - lineHeight < box.y
+          && y > box.y - lineHeight
+        ));
+        if (!clash) break;
+        y = clash.y + lineHeight;
+      }
+      placed.push({ x: label.x, y, width });
+      this.#paintHaloed(ctx, label.text, label.x, y, px,
+        'rgba(var(--rgb-loaded-bright), 0.9)');
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Text with a dark outline behind it.
+   *
+   * `strokeText` before `fillText`, so the outline is centred on the glyph
+   * edges and half of it ends up under the fill — a halo, rather than a stroked
+   * outline drawn on top of the letters.
+   */
+  #paintHaloed(ctx, text, x, y, px, fill) {
+    if (typeof ctx.strokeText === 'function') {
+      ctx.lineWidth = LABEL_HALO_CSS * px;
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.strokeStyle = phColor(this, 'rgba(var(--rgb-void), 0.85)');
+      ctx.strokeText(text, x, y);
+    }
+    ctx.fillStyle = phColor(this, fill);
+    ctx.fillText(text, x, y);
+  }
+
+  /**
+   * Label width in buffer pixels.
+   *
+   * `measureText` where the context has it. Where it does not, a monospace
+   * estimate — the label font IS monospace, so 0.6 em per character is close
+   * enough to keep the de-collision pass working rather than silently doing
+   * nothing.
+   */
+  #measureText(ctx, text, font) {
+    if (typeof ctx.measureText === 'function') {
+      const m = ctx.measureText(text);
+      if (m && Number.isFinite(m.width) && m.width > 0) return m.width;
+    }
+    return String(text).length * font * 0.6;
   }
 
   #drawRing(ctx, x, y, r, lineWidth, color) {

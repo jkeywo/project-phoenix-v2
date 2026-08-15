@@ -2,6 +2,7 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-helm-radar.js';
+import { makeRadarCtx } from './radar-canvas-stub.js';
 
 let rafCb;
 let rafIdCounter;
@@ -11,21 +12,18 @@ let origRO;
 let origGetContext;
 
 function makeFakeCtx() {
-  const ctx = {
-    fillStyle: '',
-    font: '',
-    fillRect: vi.fn(),
-    beginPath: vi.fn(),
-    arc: vi.fn(),
-    fill: vi.fn(),
-    fillText: vi.fn(),
-    drawImage: vi.fn(),
-    save: vi.fn(),
-    restore: vi.fn(),
-    translate: vi.fn(),
-    rotate: vi.fn(),
-  };
-  return ctx;
+  return makeRadarCtx();
+}
+
+/**
+ * What the player actually sees a wedge painted at: the group's opacity applied
+ * to the flattened group, times the path's own fill-opacity. See
+ * `applyArcCompositeCap` in gui/components/ph-scope-chrome.js.
+ */
+function compositeAlpha(group, path) {
+  const groupOpacity = parseFloat(group.getAttribute('opacity') ?? '1');
+  const fillOpacity = parseFloat(path.getAttribute('fill-opacity') ?? '1');
+  return groupOpacity * fillOpacity;
 }
 
 function mockRAF() {
@@ -287,13 +285,16 @@ describe('PhHelmRadar', () => {
     const { el } = setup();
     const g = el.shadowRoot.getElementById('hostile-arcs');
 
+    // The alpha the server authored is what a LONE wedge composites to; the
+    // group's cap only bites once wedges stack. So the assertion is on the
+    // product, which is what reaches the player's eye.
     el.state = baseState({ hostile_arc_color: [1, 0, 0, 0.05] });
     expect(g.children[0].getAttribute('fill')).toBe('rgb(255,0,0)');
-    expect(g.children[0].getAttribute('fill-opacity')).toBe('0.05');
+    expect(compositeAlpha(g, g.children[0])).toBeCloseTo(0.05, 6);
 
     el.state = baseState({ hostile_arc_color: [0, 0.5, 1, 0.2] });
     expect(g.children[0].getAttribute('fill')).toBe('rgb(0,128,255)');
-    expect(g.children[0].getAttribute('fill-opacity')).toBe('0.2');
+    expect(compositeAlpha(g, g.children[0])).toBeCloseTo(0.2, 6);
   });
 
   // Walk a path and report whether every `A` command actually draws: per the

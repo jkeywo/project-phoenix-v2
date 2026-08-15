@@ -6,6 +6,10 @@ import './ph-radar.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import {
+  SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
+  applyArcCompositeCap, cappedArcAlpha,
+} from './ph-scope-chrome.js';
 
 export class PhHelmRadar extends HTMLElement {
   #state = null;
@@ -26,14 +30,7 @@ export class PhHelmRadar extends HTMLElement {
       '.svg-overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
       '.thrust-arc { fill: none; stroke: var(--cyan); stroke-width: 4; stroke-linecap: round; }',
       '.hostile-arc { stroke: none; }',
-      '.corner-label {',
-      '  position: absolute; pointer-events: none; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
-      '  letter-spacing: 0.1em; color: var(--edge-strong);',
-      '}',
-      '.corner-label.top-left { top: 4%; left: 6%; }',
-      '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
-      '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
+      SCOPE_CHROME_CSS,
       '.on-screen-btn {',
       '  position: absolute; bottom: 6%; right: 6%;',
       '  pointer-events: auto; z-index: 10;',
@@ -59,14 +56,16 @@ export class PhHelmRadar extends HTMLElement {
       '    <path class="thrust-arc" id="arc-port" />',
       '    <path class="thrust-arc" id="arc-stbd" />',
       '  </svg>',
-      '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
-      '  <div class="corner-label top-right" id="label-bearing">000°</div>',
-      '  <div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
+      scopeChromeMarkup(),
       '  <button class="on-screen-btn" id="on-screen-btn" type="button">' + t('console.common.on_screen') + '</button>',
       '</div>',
     ].join('\n');
     this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.#innerRadar = this.shadowRoot.getElementById('inner-radar');
+    // Every hostile on the scope contributes its own banks to this one group,
+    // so it stacks harder than the tactical scope's does — a three-ship
+    // engagement can put a dozen wedges over the same pixel.
+    applyArcCompositeCap(this.shadowRoot.getElementById('hostile-arcs'));
   }
 
   connectedCallback() {
@@ -104,24 +103,9 @@ export class PhHelmRadar extends HTMLElement {
     this.#updateThrustArcs(s);
     this.#renderHostileArcs(s);
 
-    const posLabel = this.shadowRoot.getElementById('label-pos');
-    if (posLabel) {
-      const x = s.x != null ? s.x : 0;
-      const z = s.z != null ? s.z : 0;
-      posLabel.textContent = t('console.common.radar_pos', { x: x.toFixed(0), z: z.toFixed(0) });
-    }
-
-    const bearingLabel = this.shadowRoot.getElementById('label-bearing');
-    if (bearingLabel) {
-      const h = s.ship_heading != null ? ((s.ship_heading % 360) + 360) % 360 : 0;
-      bearingLabel.textContent = String(h.toFixed(0)).padStart(3, '0') + '\u00B0';
-    }
-
-    const speedLabel = this.shadowRoot.getElementById('label-speed');
-    if (speedLabel) {
-      const spd = s.speed != null ? s.speed : 0;
-      speedLabel.textContent = (spd * 3.6).toFixed(1) + ' km/s';
-    }
+    updateScopeChrome(this.shadowRoot, {
+      x: s.x, z: s.z, headingDeg: s.ship_heading, speed: s.speed,
+    });
 
     const btn = this.shadowRoot.getElementById('on-screen-btn');
     if (btn) {
@@ -224,7 +208,9 @@ export class PhHelmRadar extends HTMLElement {
       }
       path.setAttribute('d', d);
       path.setAttribute('fill', phColor(this, fill));
-      path.setAttribute('fill-opacity', String(opacity));
+      // The authored 0.07 keeps ONE wedge legible; the group's cap is what
+      // keeps a dozen of them legible. See `applyArcCompositeCap`.
+      path.setAttribute('fill-opacity', String(cappedArcAlpha(opacity)));
     });
   }
 

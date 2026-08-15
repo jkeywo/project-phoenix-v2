@@ -4,12 +4,19 @@ import './ph-radar.js';
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
-import { t } from '../strings.js';
 import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import {
+  SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
+  applyArcCompositeCap, cappedArcAlpha, phPx, TEXT_MIN_FALLBACK_PX,
+} from './ph-scope-chrome.js';
+
+/** The overlay's user-space box. Badge geometry is in these units, not pixels. */
+const SCOPE_VIEWBOX = 100;
 
 export class PhTacticalRadar extends HTMLElement {
   #state = null;
   #innerRadar = null;
+  #resizeObserver = null;
 
   constructor() {
     super();
@@ -24,34 +31,30 @@ export class PhTacticalRadar extends HTMLElement {
       '.container { position: relative; width: 100%; height: 100%; }',
       'ph-radar { display: block; width: 100%; height: 100%; }',
       '.overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
-      '.corner-label {',
-      '  position: absolute; pointer-events: none; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
-      '  letter-spacing: 0.1em; color: var(--edge-strong);',
-      '}',
-      '.corner-label.top-left { top: 4%; left: 6%; }',
-      '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
-      '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
+      SCOPE_CHROME_CSS,
       '#torpedo-badges text {',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--svg-badge-size);',
-      '  letter-spacing: 0.08em; fill: var(--gold-bright);',
+      '  font-family: var(--font-mono); font-size: var(--svg-badge-size);',
+      '  letter-spacing: var(--tracking-tight); fill: var(--gold-bright);',
       '}',
       '</style>',
       '<div class="container">',
       '  <ph-radar id="inner-radar"></ph-radar>',
-      '  <svg class="overlay" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">',
+      '  <svg class="overlay" viewBox="0 0 ' + SCOPE_VIEWBOX + ' ' + SCOPE_VIEWBOX + '"'
+        + ' preserveAspectRatio="xMidYMid meet">',
       '    <g id="phaser-arcs"></g>',
       '    <g id="torpedo-arcs"></g>',
       '    <g id="selected-highlight"></g>',
       '    <g id="torpedo-badges"></g>',
       '  </svg>',
-      '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
-      '  <div class="corner-label top-right" id="label-bearing">000°</div>',
-      '  <div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
+      scopeChromeMarkup(),
       '</div>',
     ].join('\n');
     this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.#innerRadar = this.shadowRoot.getElementById('inner-radar');
+    // Both arc groups are capped once, here, rather than per render: the cap is
+    // a property of the group, not of the arcs that happen to be in it today.
+    applyArcCompositeCap(this.shadowRoot.getElementById('phaser-arcs'));
+    applyArcCompositeCap(this.shadowRoot.getElementById('torpedo-arcs'));
   }
 
   connectedCallback() {
@@ -61,6 +64,41 @@ export class PhTacticalRadar extends HTMLElement {
         this.sendAction?.(action, payload);
       };
     }
+    this.#syncBadgeScale();
+    if (typeof ResizeObserver === 'function' && !this.#resizeObserver) {
+      this.#resizeObserver = new ResizeObserver(() => this.#syncBadgeScale());
+      this.#resizeObserver.observe(this);
+    }
+  }
+
+  disconnectedCallback() {
+    if (this.#resizeObserver) {
+      this.#resizeObserver.disconnect();
+      this.#resizeObserver = null;
+    }
+  }
+
+  /**
+   * Put the torpedo badge on the shared type floor.
+   *
+   * An SVG `font-size` inside `viewBox="0 0 100 100"` is in USER-SPACE units,
+   * so it scales with the element: the authored `--svg-badge-size: 3.2px`
+   * rendered at 9.6 CSS px on a 300px scope and 4.4 on a phone's 138px one —
+   * comfortably under the 11px floor the type ramp exists to hold, and the size
+   * the design audit noticed the badge had shipped at.
+   *
+   * A user-space length cannot carry a pixel floor on its own, so the floor is
+   * converted INTO user space against the element's measured width every time
+   * that width changes. `--text-min` stays the single definition of the floor;
+   * this only expresses it in the units the overlay draws in.
+   */
+  #syncBadgeScale() {
+    const rect = this.getBoundingClientRect ? this.getBoundingClientRect() : null;
+    const width = rect && rect.width > 0 ? rect.width : 0;
+    if (width <= 0) return;
+    const floorPx = phPx(this, '--text-min', TEXT_MIN_FALLBACK_PX);
+    this.style.setProperty('--svg-badge-size',
+      (SCOPE_VIEWBOX * floorPx / width).toFixed(2) + 'px');
   }
 
   set state(val) {
@@ -83,25 +121,12 @@ export class PhTacticalRadar extends HTMLElement {
     }
     this.#renderOverlays(s);
 
-    const posLabel = this.shadowRoot.getElementById('label-pos');
-    if (posLabel) {
-      const x = s.x != null ? s.x : 0;
-      const z = s.z != null ? s.z : 0;
-      posLabel.textContent = t('console.common.radar_pos', { x: x.toFixed(0), z: z.toFixed(0) });
-    }
-
-    const bearingLabel = this.shadowRoot.getElementById('label-bearing');
-    if (bearingLabel) {
-      const h = s.ship_heading != null ? ((s.ship_heading % 360) + 360) % 360 : 0;
-      bearingLabel.textContent = String(h.toFixed(0)).padStart(3, '0') + '\u00B0';
-    }
-
-    const speedLabel = this.shadowRoot.getElementById('label-speed');
-    if (speedLabel) {
-      const spd = s.speed != null ? s.speed : 0;
-      speedLabel.textContent = (spd * 3.6).toFixed(1) + ' km/s';
-    }
-
+    // The wire's field names are unpacked here and the readings handed on, so
+    // the three corner readouts are rendered by one shared fragment rather than
+    // by a third copy of the same twenty lines.
+    updateScopeChrome(this.shadowRoot, {
+      x: s.x, z: s.z, headingDeg: s.ship_heading, speed: s.speed,
+    });
   }
 
   #renderOverlays(s) {
@@ -172,7 +197,11 @@ export class PhTacticalRadar extends HTMLElement {
       else { path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); g.appendChild(path); }
       path.setAttribute('d', d);
       path.setAttribute('fill', phColor(this, a.color || defaultColor));
-      path.setAttribute('fill-opacity', String(a.opacity ?? defaultOpacity));
+      // Divided through by the group's cap, so one arc alone still paints at
+      // the alpha it was authored with and only a STACK is pulled back. See
+      // `applyArcCompositeCap`.
+      path.setAttribute('fill-opacity',
+        String(cappedArcAlpha(a.opacity ?? defaultOpacity)));
     });
   }
 

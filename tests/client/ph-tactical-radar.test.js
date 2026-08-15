@@ -2,24 +2,24 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-tactical-radar.js';
+import { makeRadarCtx } from './radar-canvas-stub.js';
 
 function makeFakeCtx() {
-  const calls = { fillRect: [], arc: [], fill: [], drawImage: [], fillText: [] };
-  return {
-    _calls: calls,
-    fillStyle: '',
-    fillRect: (...a) => calls.fillRect.push(a),
-    beginPath: vi.fn(),
-    arc: (...a) => calls.arc.push(a),
-    fill: () => calls.fill.push(true),
-    drawImage: (...a) => calls.drawImage.push(a),
-    fillText: (...a) => calls.fillText.push(a),
-    save: vi.fn(),
-    restore: vi.fn(),
-    translate: vi.fn(),
-    rotate: vi.fn(),
-    font: '',
-  };
+  return makeRadarCtx();
+}
+
+/**
+ * What the player actually sees an arc painted at: the group's opacity applied
+ * to the flattened group, times the path's own fill-opacity.
+ *
+ * That product is the contract. Neither factor means anything alone — the cap
+ * lives on the group precisely so that the number on any one path does not
+ * have to know how many other paths are in there with it.
+ */
+function compositeAlpha(group, path) {
+  const groupOpacity = parseFloat(group.getAttribute('opacity') ?? '1');
+  const fillOpacity = parseFloat(path.getAttribute('fill-opacity') ?? '1');
+  return groupOpacity * fillOpacity;
 }
 
 let fakeCtx;
@@ -176,7 +176,11 @@ describe('PhTacticalRadar', () => {
     expect(paths.length).toBe(1);
     expect(paths[0].getAttribute('fill')).toBe('#4ec870');
     expect(paths[0].getAttribute('d')).toBeTruthy();
-    expect(paths[0].getAttribute('fill-opacity')).toBe('0.3');
+    // What a player sees is the group's opacity times the path's own, and a
+    // LONE arc still lands on the authored 0.3 — the composite cap only pulls
+    // a stack back. Asserting the product rather than the raw attribute is the
+    // difference between testing the picture and testing the plumbing.
+    expect(compositeAlpha(g, paths[0])).toBeCloseTo(0.3, 6);
   });
 
   it('torpedo arcs render with default color when no color specified', () => {

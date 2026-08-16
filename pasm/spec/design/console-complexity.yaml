@@ -44,5 +44,6 @@ entities:
       rationale:
         - "The seek order only ever chooses among human-held stations: the mechanism prefers any human over the AI, it never forces a human."
         - "Scenarios can mark additional systems human-seeking through the scenario-floor vocabulary."
+        - "The order is derived by default — the system's own station, then the remaining stations as authored — and a hull may override it per system with an explicit seek_order. That list is a PERMUTATION of the hull's stations headed by the system's own: an order reorders, it does not filter, so authoring one can never strand a seated human behind an omitted station, and owner-first stays visible in the text rather than being silently prepended. The destroyer authors Tactical, Engineering, Captain, Helm for both systems — Engineering promoted ahead of the Captain, whose attention is meant to stay on the whole board."
     game_design:
-      must_not_be: [allowed to inflate the host station's star rating, used to force a station onto an unwilling holder]
+      must_not_be: [allowed to inflate the host station's star rating, used to force a station onto an unwilling holder, authored as a partial order that leaves a station unreachable]

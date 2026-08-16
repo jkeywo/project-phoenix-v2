@@ -153,7 +153,36 @@ function owningConsoles(family, stationSystems) {
 }
 
 /**
+ * True when a blackboard update entry belongs to a human-seeking system —
+ * recognised by the presence of the `host_station` KEY, `null` included (issue
+ * #984). The server writes that key unconditionally on a seeking system's
+ * blackboard for exactly this test; see `NavigationBlackboard::host_station`.
+ *
+ * The entry is `[systemId, { kind, data }]` — an adjacently-tagged
+ * `SystemBlackboard`, the same envelope gui/sim-state.js unwraps — so the
+ * field sits inside `data` rather than on the entry itself.
+ *
+ * @param {[string, object]|string} entry
+ */
+function isSeekingBlackboard(entry) {
+  if (!Array.isArray(entry)) return false;
+  const tagged = entry[1];
+  const data = tagged && typeof tagged === 'object' ? tagged.data : null;
+  return !!data && typeof data === 'object' && 'host_station' in data;
+}
+
+/**
  * Console names dirtied by an inbound ServerMessage.
+ *
+ * A seeking system's blackboard dirties EVERY station, not just the station
+ * that authors it (issue #984). This is the one deliberate cross-read edge the
+ * module note above warns about, and it is deliberate because the seek is a
+ * ship-wide fact: which console shows Comms can change without anything the
+ * hosting station owns having changed, and the console that LOSES it has no
+ * event of its own to learn that from. The cost is bounded by the driver, which
+ * pushes only consoles that are active (`client.html`): a phone renders one
+ * console, so the fan-out is at most one extra push of the console the player
+ * is actually looking at — which is the console that has to be right.
  *
  * @param {{ type?: string, data?: object }} msg  decoded ServerMessage
  * @param {Object<string, string[]>|null|undefined} stationSystems
@@ -170,6 +199,9 @@ export function dirtyConsolesFor(msg, stationSystems) {
       const id = Array.isArray(entry) ? entry[0] : entry;
       for (const family of familiesForBlackboardId(id)) {
         for (const name of owningConsoles(family, stationSystems)) dirty.add(name);
+      }
+      if (isSeekingBlackboard(entry)) {
+        for (const name of Object.keys(stationSystems || {})) dirty.add(name);
       }
     }
     return dirty;

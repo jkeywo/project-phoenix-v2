@@ -1103,17 +1103,41 @@ kind = "blaster_bank"
 station = "tactical"
 power_group = "weapons"
 
+# Both floating systems walk the same authored order, and it is NOT the
+# authored station order (captain, helm, tactical, engineering) that the
+# derived walk would give them.
+#
+# Tactical first because Tactical owns them: a destroyer's own Tactical officer
+# keeps navigation and comms at their own console, which is what owner-first
+# has always meant and what the [[station]] list cannot express here (Tactical
+# is authored third).
+#
+# ENGINEERING SECOND is the ruling this list exists for. On a four-seat hull
+# the realistic under-crewed shapes are Captain+Helm and Captain+Engineering,
+# and Engineering is the seat with slack: its own systems are damage-control
+# and power, which are bursty, while Helm is continuously loaded and the
+# Captain is the one person whose attention is meant to be free to look at the
+# whole board. Handing an empty Tactical's comms to Engineering puts it on the
+# officer most able to answer a hail; the derived order would have handed it to
+# the Captain, whose console is the least appropriate place for a second job.
+#
+# Captain then Helm keeps the fallback honest for the emptier crews — a lone
+# Captain still gets the systems, and a Helm-only bridge still gets them last
+# rather than never. The order is a permutation of the hull's stations, so no
+# seat is unreachable; see `SystemInstanceConfig::seek_order`.
 [[system]]
 id = "navigation"
 kind = "navigation"
 station = "tactical"
 human_seeking = true
+seek_order = ["tactical", "engineering", "captain", "helm"]
 
 [[system]]
 id = "comms"
 kind = "comms"
 station = "tactical"
 human_seeking = true
+seek_order = ["tactical", "engineering", "captain", "helm"]
 
 [[system]]
 id = "shields-system"

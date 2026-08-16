@@ -4673,6 +4673,7 @@ impl EntityConfig {
                         },
                         ai_only: !has_shields_station,
                         human_seeking: false,
+                        seek_order: Vec::new(),
                         // Shield arcs are governed by the shields group as a
                         // whole through ShieldRegen; they are not an extra
                         // allocatable Operations channel.
@@ -4711,6 +4712,7 @@ impl EntityConfig {
                         station: None,
                         ai_only: true,
                         human_seeking: false,
+                        seek_order: Vec::new(),
                         power_group: None,
                         marker: None,
                         config: None,

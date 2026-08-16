@@ -89,6 +89,11 @@ fn publish_comms_blackboard(
         (
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &mut crate::server_app::ShipSystemBlackboards,
+            // Where the human seek landed comms, if anywhere (issue #984).
+            // `Option` because only `LocalShip` carries the component, and
+            // optional access filters no archetype — the matched set, and so
+            // the iteration order, is exactly what it was.
+            Option<&crate::ship::components::HumanSeekingHosts>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -178,15 +183,19 @@ fn publish_comms_blackboard(
         messages,
         objectives: objectives_snap,
         contacts,
+        // Filled per ship below: the seek is a property of the hull, not of the
+        // shared player-channel content this local blackboard is built from.
+        host_station: None,
     };
 
     let comms_key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
-    for (is_local, mut bbs) in ship_q.iter_mut() {
-        let bb = if is_local {
+    for (is_local, mut bbs, hosts) in ship_q.iter_mut() {
+        let mut bb = if is_local {
             local_bb.clone()
         } else {
             CommsBlackboard::default()
         };
+        bb.host_station = hosts.and_then(|h| h.0.get(&comms_key).cloned());
         bbs.0.insert(comms_key.clone(), SystemBlackboard::Comms(bb));
     }
 }

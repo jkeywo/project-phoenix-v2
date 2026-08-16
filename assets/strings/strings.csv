@@ -482,6 +482,8 @@ console.navigation.none,Navigation console — selected-entity readout when noth
 console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
 console.common.comms_toggle,Button that toggles the comms overlay,Comms
 console.common.intel_toggle,Button that toggles the intelligence-files overlay (issue #1030),Intel
+console.common.navigation_panel,"Heading on the full-frame Navigation panel a console opens when the seek parks Navigation on it (issue #984)",Navigation
+console.common.comms_panel,"Heading on the full-frame Comms panel a console opens when the seek parks Comms on it (issue #984)",Comms
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
 console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
 console.pilot.cam_cinematic,Courier pilot — cinematic camera button,Cinematic

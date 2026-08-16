@@ -1540,6 +1540,49 @@ mod tests {
         }
     }
 
+    // ── Human-seeking hosts on the wire (issue #984) ──────────────────────
+
+    /// `host_station` is how the resolved seek reaches a console, and it rides
+    /// the seeking system's own blackboard. The key is always written — the
+    /// client's push router recognises a seeking system BY that key, so a key
+    /// that disappeared on `None` would make "the seek let go" unroutable.
+    #[test]
+    fn seeking_blackboards_always_carry_a_host_station_key() {
+        let comms = serde_json::to_value(crate::messages::SystemBlackboard::Comms(
+            crate::messages::CommsBlackboard::default(),
+        ))
+        .unwrap();
+        // Adjacently tagged (`{"kind":…,"data":…}`) — the shape
+        // gui/sim-state.js unwraps and gui/dirty-consoles.js inspects.
+        assert_eq!(comms["kind"], "Comms");
+        assert!(
+            comms["data"]
+                .as_object()
+                .expect("a comms blackboard is an object")
+                .contains_key("host_station"),
+            "an unhosted comms blackboard still names the field"
+        );
+        assert!(comms["data"]["host_station"].is_null());
+
+        let nav = serde_json::to_value(crate::messages::SystemBlackboard::Navigation(
+            crate::messages::NavigationBlackboard {
+                host_station: Some(StationId("engineering".into())),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        assert_eq!(nav["kind"], "Navigation");
+        assert_eq!(nav["data"]["host_station"], "engineering");
+    }
+
+    #[test]
+    fn seeking_blackboards_default_their_host_when_a_peer_omits_it() {
+        // The pre-#984 shape: every other field, no `host_station`.
+        let legacy = r#"{"messages":[],"objectives":[],"contacts":[]}"#;
+        let bb: crate::messages::CommsBlackboard = serde_json::from_str(legacy).unwrap();
+        assert_eq!(bb.host_station, None);
+    }
+
     /// BlasterHit server message round-trip (issue #631).
     #[test]
     fn blaster_hit_server_message_round_trips() {

@@ -3836,6 +3836,13 @@ pub struct CommsBlackboard {
     pub objectives: Vec<ObjectiveSnapshot>,
     /// Hailable contacts derived from the active world content.
     pub contacts: Vec<CommsContact>,
+    /// Which station is currently hosting this system, when it is
+    /// `human_seeking` and the seek found a human. See
+    /// [`NavigationBlackboard::host_station`] for the whole argument — the two
+    /// fields are one contract, and comms is the system that argument is
+    /// written about.
+    #[serde(default)]
+    pub host_station: Option<StationId>,
 }
 
 /// Ship-wide aggregate blackboard written by the Viewscreen phase-1b aggregator
@@ -3931,6 +3938,38 @@ pub struct NavigationBlackboard {
     /// NPC's own Navigation blackboard has no console to render it on.
     #[serde(default)]
     pub civilians: Vec<CivilianTrafficSnapshot>,
+    /// Which station is currently hosting this system (issue #984 / pasm
+    /// `console-complexity-human-seeking-systems`), when it is `human_seeking`
+    /// and the seek found a human to host it.
+    ///
+    /// This is the ONLY way the resolved seek reaches a console, and it rides
+    /// the seeking system's own blackboard because that is where per-system
+    /// truth has lived since #570 — "which station am I on right now" is a fact
+    /// about this system, not a second station-roster surface. Every blackboard
+    /// goes out at `Target::All`, so every console learns it in the same tick,
+    /// and the blackboard diff means the button appears and disappears on a
+    /// real change rather than on a poll.
+    ///
+    /// `None` deliberately covers BOTH "this system does not seek" and "it
+    /// seeks and found nobody", because the two want the same rendering: the
+    /// console of the station that AUTHORS the system, which is exactly what
+    /// every console did before this field existed. So a hull that authors no
+    /// `human_seeking`, a host too old to send the field, and an all-AI bridge
+    /// all render identically to today, and no client needs a second field to
+    /// tell the cases apart.
+    ///
+    /// `Some(station)` is exclusive: that station's console hosts the system
+    /// and no other console does — including the authoring one, which is the
+    /// half of the feature that makes the buttons disappear when the seek moves
+    /// on.
+    ///
+    /// The key is ALWAYS written, `null` included — no `skip_serializing_if`.
+    /// The client's push router (`gui/dirty-consoles.js`) uses the key's
+    /// presence to recognise a seeking system's blackboard, and a key that
+    /// vanished on `None` would make "the seek let go of this station" the one
+    /// transition nothing could route.
+    #[serde(default)]
+    pub host_station: Option<StationId>,
 }
 
 /// One civilian craft as the Navigation console reads it (issue #1028).
@@ -3983,6 +4022,7 @@ impl Default for NavigationBlackboard {
             nav_chart_selects: Vec::new(),
             navigation_waypoint: None,
             civilians: Vec::new(),
+            host_station: None,
         }
     }
 }

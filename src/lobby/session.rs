@@ -347,6 +347,7 @@ mod tests {
                 station: None,
                 ai_only: true,
                 human_seeking: false,
+                seek_order: Vec::new(),
                 power_group: None,
                 marker: None,
                 config: None,

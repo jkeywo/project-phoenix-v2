@@ -196,6 +196,13 @@ fn ship_seats(
 /// else, so resolving an NPC hull against it would let a human seated on the
 /// player's bridge switch an enemy alliance hull's comms off AI.
 ///
+/// A system may author its own walk (`seek_order`), which this adapter hands
+/// straight through to [`coordination::seek_human_host_in`]. It is one more
+/// authored vector read in authored order, so nothing below changes: an empty
+/// `seek_order` takes the derived owner-first walk, and the shared `seats` list
+/// is still built once for the whole hull (the order chooses among the seats,
+/// it does not change what a seat is).
+///
 /// Determinism (issue #984 §2.4): the iteration order is the authored
 /// `ShipConfig.systems` and `ShipConfig.stations` vectors — never a map — and
 /// the only non-config inputs are `Sessions` and the control sources, neither
@@ -248,7 +255,11 @@ pub fn resolve_human_seeking_hosts(
         > = std::collections::BTreeMap::new();
         let mut decisions: Vec<(crate::messages::SystemId, ControlSource)> = Vec::new();
         for system in config.systems.iter().filter(|s| s.human_seeking) {
-            match coordination::seek_human_host(system.station.as_ref(), &seats) {
+            match coordination::seek_human_host_in(
+                system.station.as_ref(),
+                &system.seek_order,
+                &seats,
+            ) {
                 Some(seat) => {
                     resolved.insert(system.id.clone(), seat.station.clone());
                     decisions.push((system.id.clone(), ControlSource::Human));
@@ -2209,6 +2220,79 @@ mod tests {
                      nobody here, which is why CommsState never arrived"
                 );
             }
+        }
+    }
+
+    /// The destroyer's authored `seek_order`, read off the resolved config
+    /// (issue #984). Not a restatement of the TOML: it also pins that the order
+    /// is a permutation of the hull's stations and that it DIFFERS from the
+    /// derived one, which is the only reason to author it at all.
+    #[test]
+    fn the_destroyer_authors_engineering_second_in_its_seek_order() {
+        let config = hull_ship_config("alliance_destroyer");
+        let authored_stations: Vec<&str> =
+            config.stations.iter().map(|s| s.id.0.as_str()).collect();
+        assert_eq!(
+            authored_stations,
+            vec!["captain", "helm", "tactical", "engineering"],
+            "the [[station]] array is the lobby's row order and the broadcast \
+             router's fan-out order — the seek order does not touch it"
+        );
+
+        for system_id in [
+            crate::system_registry::comms_system_id(),
+            crate::system_registry::navigation_system_id(),
+        ] {
+            let system = config
+                .system(&system_id)
+                .expect("the destroyer declares it");
+            let order: Vec<&str> = system.seek_order.iter().map(|s| s.0.as_str()).collect();
+            assert_eq!(
+                order,
+                vec!["tactical", "engineering", "captain", "helm"],
+                "{:?}: Tactical owns it, then Engineering — John's ruling",
+                system_id.0
+            );
+            assert_eq!(
+                order.len(),
+                authored_stations.len(),
+                "{:?}: the order is a permutation, so no seat is unreachable",
+                system_id.0
+            );
+            assert_ne!(
+                order, authored_stations,
+                "{:?}: an order identical to the authored station list would be \
+                 the derived walk written out, and worth nothing",
+                system_id.0
+            );
+        }
+    }
+
+    /// The authored order, live: Tactical empty and three other seats crewed.
+    /// The DERIVED walk would hand both systems to the Captain (first authored
+    /// station); the authored one hands them to Engineering.
+    #[test]
+    fn the_destroyers_seek_order_prefers_engineering_over_the_captain() {
+        let mut app = seeking_app("alliance_destroyer", &["captain", "helm", "engineering"]);
+        tick(&mut app);
+
+        for system_id in [
+            crate::system_registry::comms_system_id(),
+            crate::system_registry::navigation_system_id(),
+        ] {
+            assert_eq!(
+                host_of(&mut app, &system_id).as_deref(),
+                Some("engineering"),
+                "{:?}: the authored order promotes Engineering ahead of the \
+                 Captain, whose attention is meant to stay on the whole board",
+                system_id.0
+            );
+            assert_eq!(
+                source_of(&mut app, &system_id),
+                ControlSource::Human,
+                "{:?}: the host is a human, so the system accepts human input",
+                system_id.0
+            );
         }
     }
 

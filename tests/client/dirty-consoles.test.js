@@ -228,3 +228,38 @@ describe('window exposure for the client.html inline script', () => {
     expect(window.DIRTY_ALWAYS_PUSH).toBe(ALWAYS_PUSH);
   });
 });
+
+// ── human-seeking systems (issue #984) ───────────────────────────────────────
+
+/** A blackboard update for a SEEKING system: the `host_station` key present. */
+const seekingUpdate = (id, host) => ({
+  type: 'BlackboardUpdate',
+  data: { updates: [[id, { kind: 'X', data: { host_station: host } }]] },
+});
+
+describe('a seeking system dirties every station', () => {
+  // The one deliberate cross-read edge in this module. Which console shows
+  // Comms can change without anything the hosting station owns having changed,
+  // and the console that LOSES it has no event of its own to learn that from.
+  it('fans out to all stations when a host is named', () => {
+    expect(dirtyConsolesFor(seekingUpdate('comms', 'engineering'), DESTROYER_STATIONS))
+      .toEqual(new Set(['captain', 'helm', 'tactical', 'engineering']));
+  });
+
+  // The transition the fan-out exists for: the seek letting go. `host_station`
+  // is serialised even when null precisely so this case is still recognisable.
+  it('fans out when the host goes away', () => {
+    expect(dirtyConsolesFor(seekingUpdate('comms', null), DESTROYER_STATIONS))
+      .toEqual(new Set(['captain', 'helm', 'tactical', 'engineering']));
+  });
+
+  it('leaves an ordinary blackboard update routing exactly as it did', () => {
+    expect(dirtyConsolesFor(bbUpdate(['shields-system']), DESTROYER_STATIONS))
+      .toEqual(new Set(['engineering']));
+  });
+
+  it('does not invent stations when ownership is unknown', () => {
+    expect(dirtyConsolesFor(seekingUpdate('comms', 'engineering'), null))
+      .toEqual(new Set(['comms']));
+  });
+});

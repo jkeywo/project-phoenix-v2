@@ -67,6 +67,16 @@
  *             pct: number, damagePct: number }} StationHullAggregate
  */
 
+/**
+ * The systems this station is HOLDING right now — its authored systems, minus
+ * any the human seek has moved to another station, plus any it has parked here
+ * (issue #984). `window.buildConsoleState` merges it into EVERY console payload
+ * as `hosted_systems`, the same way `own_hull` is merged, so a console asks the
+ * same question whatever payload shape it has. See `withVisitingSystems`.
+ *
+ * @typedef {string[]} HostedSystems
+ */
+
 // ── Entity position / radius helpers ───────────────────────────────────────
 
 /**
@@ -1834,6 +1844,97 @@ function withStationDamage(consoleName, state, json) {
  * also scopes every progress lookup (`<station>/<id>` keys — see
  * gui/tutorial-state.js), so stations never share dismissal state.
  */
+/**
+ * Where each human-seeking system is hosted right now, keyed by system id
+ * (issue #984, pasm decision `console-complexity-human-seeking-systems`).
+ *
+ * Read off the blackboards themselves rather than from a list of system ids
+ * kept here: a blackboard that carries a `host_station` IS a seeking system's
+ * blackboard, so a hull (or a scenario, through the scenario-floor vocabulary)
+ * that makes another system seek needs no edit on this side.
+ *
+ * A `null`/absent host means "nobody is hosting this", which the wire uses for
+ * both "does not seek" and "seeks and found no human" — see the field's doc
+ * comment in src/core/messages.rs. Both want the pre-#984 rendering, and
+ * leaving the id out of this map is what produces it.
+ *
+ * @param {object} state  simState
+ * @returns {Object<string, string>}  system id → hosting station id
+ */
+export function soughtSystemHosts(state) {
+  const hosts = {};
+  const blackboards = state.blackboards || {};
+  for (const id of Object.keys(blackboards)) {
+    const bb = blackboards[id];
+    const host = bb && bb.host_station;
+    if (typeof host === 'string' && host !== '') hosts[id] = host;
+  }
+  return hosts;
+}
+
+/**
+ * Answer, on every console's payload, "which systems is this station holding
+ * right now" — the client half of issue #984.
+ *
+ * Two things go on:
+ *
+ * **`hosted_systems`** is the station's live holding: its authored systems
+ * MINUS any the seek has moved elsewhere, PLUS any the seek has parked here.
+ * This is what decides whether a console offers a system's controls, and it is
+ * a separate list from `systems` on purpose. A view that stops being OFFERED
+ * has not stopped being READ: the destroyer's Intel panel renders dossiers out
+ * of the comms view, and Intel does not move when Comms does. Hiding a button
+ * is a presentation decision, so it is expressed as one.
+ *
+ * **`systems[<id>]`** grows a view for each VISITING system, so a console can
+ * render what it has just been handed. This is cross-cutting like
+ * `withStationDamage` and for the same reason: it must work on BOTH payload
+ * shapes. A system-composed station already has a `systems` map and the visitor
+ * joins it; a flat single-family station (the destroyer's Helm) grows one
+ * holding the visitor alone, every field its own console reads untouched. "A
+ * visiting system rides under `systems[id]`" is then one rule, and a console
+ * asks one question whatever kind of console it is.
+ *
+ * With no seek information at all — a hull that authors no `human_seeking`, a
+ * host too old to send `host_station`, the boot race before the first
+ * blackboard — `hosted_systems` is exactly the authored list and nothing is
+ * merged, which is precisely the pre-#984 rendering.
+ *
+ * Visiting views carry no `*_auto` flag, which is right rather than missing:
+ * the seek only ever lands a system on a human-held station, so the flag would
+ * be false by construction.
+ *
+ * @param {string} consoleName  station id
+ * @param {object} state  simState
+ * @param {string} json  the console payload built so far
+ * @returns {string} json, with `hosted_systems` and any visiting views
+ */
+export function withVisitingSystems(consoleName, state, json) {
+  try {
+    const hosts = soughtSystemHosts(state);
+    const authored = state.stationSystems?.[consoleName] || [];
+    const kept = authored.filter(id => !(id in hosts) || hosts[id] === consoleName);
+    // Sorted so two clients with the same state produce the same payload
+    // regardless of blackboard key order.
+    const visiting = Object.keys(hosts)
+      .filter(id => hosts[id] === consoleName && !authored.includes(id))
+      .sort();
+    const obj = JSON.parse(json);
+    obj.hosted_systems = kept.concat(visiting);
+    if (visiting.length > 0) {
+      const systems = obj.systems || {};
+      for (const id of visiting) {
+        const build = FAMILY_BUILDERS[consoleForSystemId(id)];
+        if (build) systems[id] = JSON.parse(build(state));
+      }
+      obj.systems = systems;
+    }
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
 export function withTutorialOverlay(consoleName, state, json) {
   try {
     const obj = JSON.parse(json);
@@ -1855,10 +1956,17 @@ if (typeof window !== 'undefined') {
   window.stationDisplayName = stationDisplayName;
   window.buildConsoleState = function buildConsoleState(consoleName, state) {
     const inner = buildConsoleStateInner(consoleName, state);
+    // Visiting systems are merged BEFORE the tutorial pass, so a station's
+    // authored `state`-kind triggers can reference a sought system's view the
+    // same way they reference an owned one.
     return withTutorialOverlay(
       consoleName,
       state,
-      withStationDamage(consoleName, state, inner),
+      withStationDamage(
+        consoleName,
+        state,
+        withVisitingSystems(consoleName, state, inner),
+      ),
     );
   };
   window.buildConsoleStateInner = function buildConsoleStateInner(consoleName, state) {
@@ -1873,6 +1981,11 @@ if (typeof window !== 'undefined') {
     // system between stations without any change here — no per-hull composite
     // builders remain. Single-family stations (every battleship station) keep
     // their flat plain-builder payloads.
+    // AUTHORED ownership, deliberately not the seek-adjusted list (issue
+    // #984): this decides the payload's SHAPE, and a console whose shape
+    // changed under it mid-round would have to re-render as a different
+    // console. A sought system arrives as `systems[<id>]` on whichever shape
+    // the station already has — see `withVisitingSystems`.
     const owned = state.stationSystems?.[consoleName];
     if (owned) {
       const families = [...new Set(owned.map(consoleForSystemId).filter(f => f !== null))];

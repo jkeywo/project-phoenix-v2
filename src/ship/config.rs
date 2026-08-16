@@ -95,6 +95,40 @@ pub struct SystemInstanceConfig {
     /// for the pure resolution this flag gates.
     #[serde(default)]
     pub human_seeking: bool,
+    /// Optional authored walk for this system's human seek, overriding the
+    /// order derived from `station` + the authored `[[station]]` list.
+    ///
+    /// **Absent is the default and means exactly today's behaviour**: the
+    /// system's own `station` first, then the remaining stations in authored
+    /// order. Nothing about a hull that authors no `seek_order` changes — the
+    /// field is `skip_serializing_if` empty, so such a config also round-trips
+    /// byte-for-byte.
+    ///
+    /// **Present, the list IS the walk, literally and completely.** It is a
+    /// PERMUTATION of the hull's stations — every station exactly once, the
+    /// system's own `station` first — enforced by [`validate`]. Three reasons
+    /// the contract is a permutation and not a prefix or an allow-list:
+    ///
+    /// * The field is an *order*, so it reorders; it does not filter. A list
+    ///   that could omit a station would need a second, invisible rule about
+    ///   what happens to the omitted ones, and the TOML would no longer say
+    ///   what the seek does.
+    /// * Exhaustiveness preserves the decision's own promise — "the mechanism
+    ///   prefers any human over the AI". An author who omitted a station could
+    ///   drop a system to AI while a human sat at the unlisted console, which
+    ///   is the one outcome `human_seeking` exists to avoid.
+    /// * Owner-first is not a courtesy, it is the rule that keeps a hull's own
+    ///   officer at their own console (see
+    ///   [`crate::ship::coordination::seek_human_host`]). Requiring the owner
+    ///   at the head, rather than silently prepending it, means the authored
+    ///   list can be read top-to-bottom as the literal walk and cannot quietly
+    ///   author the invariant away.
+    ///
+    /// A hull that gains a station therefore fails the load loudly until every
+    /// `seek_order` names it — the alternative being a new console the seek
+    /// never visits, with no symptom but a system stuck on AI.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seek_order: Vec<StationId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_group: Option<PowerGroupId>,
     /// Optional rig-marker name for this system instance.
@@ -204,6 +238,37 @@ pub enum ShipConfigError {
     DuplicateRatingName {
         station: StationId,
         rating: String,
+    },
+    /// A `seek_order` on a system that does not seek. The list would be read
+    /// by nothing, so it is a typo rather than a preference.
+    SeekOrderWithoutHumanSeeking {
+        system: SystemId,
+    },
+    /// A `seek_order` entry naming a station this hull does not have.
+    SeekOrderUnknownStation {
+        system: SystemId,
+        station: StationId,
+    },
+    /// The same station twice in one `seek_order`. The second visit could
+    /// never fire, so the list does not mean what it looks like.
+    SeekOrderDuplicateStation {
+        system: SystemId,
+        station: StationId,
+    },
+    /// A `seek_order` that leaves a station off. See the field's doc comment:
+    /// the list is the whole walk, so an omitted station is a console the seek
+    /// can never reach.
+    SeekOrderMissingStation {
+        system: SystemId,
+        station: StationId,
+    },
+    /// A `seek_order` that does not begin at the system's own station.
+    /// Owner-first is the rule that keeps a hull's own officer at their own
+    /// console; authoring it away is never what an author means.
+    SeekOrderOwnerNotFirst {
+        system: SystemId,
+        owner: StationId,
+        first: Option<StationId>,
     },
 }
 
@@ -447,6 +512,7 @@ pub fn validate(
                 });
             }
         }
+        validate_seek_order(system, &config.stations)?;
         system_owner_by_id.insert(system.id.clone(), system.station.clone());
     }
 
@@ -475,6 +541,66 @@ pub fn validate(
     Ok(())
 }
 
+/// Enforce the `seek_order` contract: authored only on a seeking system, and
+/// then a permutation of the hull's stations headed by the system's own.
+///
+/// The whole contract is checked here rather than folded into the system loop
+/// above so the rules read as one paragraph — the field's doc comment argues
+/// for each of them, and a reader who wants to know what a `seek_order` may
+/// say has exactly one function to read.
+fn validate_seek_order(
+    system: &SystemInstanceConfig,
+    stations: &[StationConfig],
+) -> Result<(), ShipConfigError> {
+    if system.seek_order.is_empty() {
+        return Ok(());
+    }
+    if !system.human_seeking {
+        return Err(ShipConfigError::SeekOrderWithoutHumanSeeking {
+            system: system.id.clone(),
+        });
+    }
+
+    let hull: HashSet<&StationId> = stations.iter().map(|s| &s.id).collect();
+    let mut seen: HashSet<&StationId> = HashSet::new();
+    for station in &system.seek_order {
+        if !hull.contains(station) {
+            return Err(ShipConfigError::SeekOrderUnknownStation {
+                system: system.id.clone(),
+                station: station.clone(),
+            });
+        }
+        if !seen.insert(station) {
+            return Err(ShipConfigError::SeekOrderDuplicateStation {
+                system: system.id.clone(),
+                station: station.clone(),
+            });
+        }
+    }
+    // Reported in AUTHORED station order, so a hull that grew two stations
+    // names the first of them rather than a hash-order pick.
+    if let Some(missing) = stations.iter().find(|s| !seen.contains(&s.id)) {
+        return Err(ShipConfigError::SeekOrderMissingStation {
+            system: system.id.clone(),
+            station: missing.id.clone(),
+        });
+    }
+    // An ownerless system has no owner to lead with; every other rule still
+    // applies. (`validate` has already refused an ownerless system that is not
+    // `ai_only`, so this arm is only reachable for a config that asks the AI to
+    // run a seeking system — contradictory, but not this check's business.)
+    if let Some(owner) = &system.station {
+        if system.seek_order.first() != Some(owner) {
+            return Err(ShipConfigError::SeekOrderOwnerNotFirst {
+                system: system.id.clone(),
+                owner: owner.clone(),
+                first: system.seek_order.first().cloned(),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,6 +613,9 @@ mod tests {
         "torpedo_tube",
         "viewscreen",
         "sensors",
+        // The seek-order fixtures below author a real seeking system, and on
+        // every shipped hull that is `comms`.
+        "comms",
     ];
 
     fn valid_toml() -> &'static str {
@@ -771,6 +900,147 @@ human_seeking = true
         let encoded = toml::to_string(&config).expect("ship config should serialize");
         let decoded = parse_ok(&encoded);
         assert_eq!(decoded, config);
+    }
+
+    // ── Authored seek order (issue #984) ──────────────────────────────────
+
+    /// Two stations and one seeking system on the first of them, so a
+    /// `seek_order` is a two-name permutation and every rule has room to fail.
+    fn seek_order_toml(system_block: &str) -> String {
+        format!(
+            r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Fight the ship."
+rank = "Lt. Cmdr."
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "Keep it running."
+rank = "Ltn."
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+{system_block}
+"#
+        )
+    }
+
+    #[test]
+    fn seek_order_is_absent_by_default_and_round_trips_when_authored() {
+        // A hull that authors none keeps an empty list AND serialises without
+        // the key, so an untouched hull's TOML is byte-for-byte what it was.
+        let plain = parse_ok(&seek_order_toml(
+            "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\n",
+        ));
+        let comms = plain.system(&SystemId("comms".into())).unwrap();
+        assert!(comms.seek_order.is_empty());
+        let encoded = toml::to_string(&plain).expect("ship config should serialize");
+        assert!(
+            !encoded.contains("seek_order"),
+            "an unauthored seek_order must not appear on the way out:\n{encoded}"
+        );
+
+        let authored = parse_ok(&seek_order_toml(
+            "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\", \"engineering\"]\n",
+        ));
+        assert_eq!(
+            authored
+                .system(&SystemId("comms".into()))
+                .unwrap()
+                .seek_order,
+            vec![
+                StationId("tactical".into()),
+                StationId("engineering".into())
+            ]
+        );
+        let encoded = toml::to_string(&authored).expect("ship config should serialize");
+        assert_eq!(parse_ok(&encoded), authored);
+    }
+
+    #[test]
+    fn seek_order_rejects_a_station_this_hull_does_not_have() {
+        let err = ShipConfig::from_toml(
+            &seek_order_toml(
+                "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\", \"engineering\", \"science\"]\n",
+            ),
+            KINDS,
+        );
+        assert!(matches!(
+            err,
+            Err(ShipConfigError::SeekOrderUnknownStation { ref station, .. })
+                if station.0 == "science"
+        ));
+    }
+
+    #[test]
+    fn seek_order_rejects_the_same_station_twice() {
+        let err = ShipConfig::from_toml(
+            &seek_order_toml(
+                "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\", \"tactical\", \"engineering\"]\n",
+            ),
+            KINDS,
+        );
+        assert!(matches!(
+            err,
+            Err(ShipConfigError::SeekOrderDuplicateStation { .. })
+        ));
+    }
+
+    /// The list is the WHOLE walk, so a station left off is a console the seek
+    /// could never reach — refused at load rather than discovered by a crew.
+    #[test]
+    fn seek_order_rejects_an_incomplete_walk() {
+        let err = ShipConfig::from_toml(
+            &seek_order_toml(
+                "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\"]\n",
+            ),
+            KINDS,
+        );
+        assert!(matches!(
+            err,
+            Err(ShipConfigError::SeekOrderMissingStation { ref station, .. })
+                if station.0 == "engineering"
+        ));
+    }
+
+    /// Owner-first is the rule that keeps a hull's own officer at their own
+    /// console. A complete permutation that starts anywhere else is still wrong.
+    #[test]
+    fn seek_order_rejects_an_order_that_does_not_start_at_the_owner() {
+        let err = ShipConfig::from_toml(
+            &seek_order_toml(
+                "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"engineering\", \"tactical\"]\n",
+            ),
+            KINDS,
+        );
+        assert!(matches!(
+            err,
+            Err(ShipConfigError::SeekOrderOwnerNotFirst { ref owner, ref first, .. })
+                if owner.0 == "tactical" && first.as_ref().map(|s| s.0.as_str()) == Some("engineering")
+        ));
+    }
+
+    #[test]
+    fn seek_order_rejects_a_system_that_does_not_seek() {
+        let err = ShipConfig::from_toml(
+            &seek_order_toml(
+                "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nseek_order = [\"tactical\", \"engineering\"]\n",
+            ),
+            KINDS,
+        );
+        assert!(matches!(
+            err,
+            Err(ShipConfigError::SeekOrderWithoutHumanSeeking { .. })
+        ));
     }
 
     #[test]

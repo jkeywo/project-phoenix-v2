@@ -170,6 +170,12 @@ pub fn broadcast_to_ship(sender_origin: ControlSource, seats: &[ShipSeat]) -> Ve
 /// anyone else on the bridge is seated. Trying `owner` before the rest of
 /// `seats` keeps the hull's own officer at their own console.
 ///
+/// A hull may override that derived order with an authored one
+/// (`SystemInstanceConfig::seek_order`); see [`seek_human_host_in`], which this
+/// function is the no-authored-order case of. The derived order is still what
+/// every hull that authors nothing gets, and the destroyer's authored order
+/// starts at the same owner for the same reason.
+///
 /// `owner` is the seeking system's own authored station (`SystemInstanceConfig::station`,
 /// resolved before calling — this function does no lookup of its own).
 /// `seats` MUST be built with the seeking system's own fine-system policy
@@ -180,8 +186,43 @@ pub fn seek_human_host<'a>(
     owner: Option<&StationId>,
     seats: &'a [ShipSeat],
 ) -> Option<&'a ShipSeat> {
-    fn is_human_and_connected(seat: &ShipSeat) -> bool {
-        seat.control == ControlSource::Human && seat.holder.is_some()
+    seek_human_host_in(owner, &[], seats)
+}
+
+fn is_human_and_connected(seat: &ShipSeat) -> bool {
+    seat.control == ControlSource::Human && seat.holder.is_some()
+}
+
+/// [`seek_human_host`] with an optional AUTHORED walk
+/// (`SystemInstanceConfig::seek_order`) in place of the derived one.
+///
+/// An EMPTY `order` is the default and delegates to the derived walk above,
+/// unchanged — not "equivalent to", the same code. That is deliberate: the
+/// promise the field makes is that a hull authoring no `seek_order` picks the
+/// same seat it picked before the field existed, and the cheapest way to keep a
+/// promise like that is to leave one path rather than to maintain two that
+/// agree.
+///
+/// A NON-EMPTY `order` is walked literally, first entry to last, and nothing
+/// else is consulted — including `owner`, which
+/// [`crate::ship::config::validate`] has already pinned to the head of the
+/// list. The seek is still only ever a choice AMONG humans: an authored order
+/// changes which human is preferred, never whether a human is required.
+///
+/// Names in `order` that no seat answers to are skipped rather than treated as
+/// misses. Validation makes that unreachable from a parsed hull; the skip
+/// exists so this pure function has no panic and no silent early stop if a
+/// caller ever assembles the two halves by hand.
+pub fn seek_human_host_in<'a>(
+    owner: Option<&StationId>,
+    order: &[StationId],
+    seats: &'a [ShipSeat],
+) -> Option<&'a ShipSeat> {
+    if !order.is_empty() {
+        return order
+            .iter()
+            .filter_map(|id| seats.iter().find(|seat| &seat.station == id))
+            .find(|seat| is_human_and_connected(seat));
     }
 
     if let Some(owner_id) = owner {
@@ -603,6 +644,147 @@ mod tests {
 
         assert_eq!(found.station, StationId("captain".into()));
         assert_eq!(found.holder.as_deref(), Some("alice"));
+    }
+
+    // ── Authored seek order (issue #984) ──────────────────────────────────
+
+    /// The destroyer's shape: a bridge where the system's owner (Tactical) is
+    /// empty and three other seats are crewed. The DERIVED order would hand the
+    /// system to the earliest authored seat; the AUTHORED order hands it to
+    /// Engineering.
+    fn destroyer_bridge() -> Vec<ShipSeat> {
+        vec![
+            seat("captain", ControlSource::Human, Some("alice")),
+            seat("helm", ControlSource::Human, Some("hikaru")),
+            seat("tactical", ControlSource::Ai, None),
+            seat("engineering", ControlSource::Human, Some("scotty")),
+        ]
+    }
+
+    fn order(ids: &[&str]) -> Vec<StationId> {
+        ids.iter().map(|s| StationId((*s).into())).collect()
+    }
+
+    #[test]
+    fn an_authored_order_is_walked_instead_of_the_derived_one() {
+        let seats = destroyer_bridge();
+        let owner = StationId("tactical".into());
+
+        let derived = seek_human_host(Some(&owner), &seats).unwrap();
+        assert_eq!(
+            derived.station,
+            StationId("captain".into()),
+            "the derived walk takes the earliest authored human"
+        );
+
+        let authored = seek_human_host_in(
+            Some(&owner),
+            &order(&["tactical", "engineering", "captain", "helm"]),
+            &seats,
+        )
+        .unwrap();
+        assert_eq!(
+            authored.station,
+            StationId("engineering".into()),
+            "John's ruling: Engineering is promoted ahead of the Captain"
+        );
+    }
+
+    /// The authored order starts at the owner, so a crewed owner still wins —
+    /// the promotion only decides who gets it when Tactical is empty.
+    #[test]
+    fn an_authored_order_still_prefers_a_crewed_owner() {
+        let mut seats = destroyer_bridge();
+        seats[2] = seat("tactical", ControlSource::Human, Some("chang"));
+
+        let found = seek_human_host_in(
+            Some(&StationId("tactical".into())),
+            &order(&["tactical", "engineering", "captain", "helm"]),
+            &seats,
+        )
+        .unwrap();
+
+        assert_eq!(found.station, StationId("tactical".into()));
+    }
+
+    /// The authored walk skips non-human seats exactly as the derived one does:
+    /// an order chooses among humans, it never conjures one.
+    #[test]
+    fn an_authored_order_with_no_humans_yields_none() {
+        let seats = vec![
+            seat("captain", ControlSource::Ai, Some("alice")),
+            seat("tactical", ControlSource::Offline, None),
+            seat("engineering", ControlSource::Human, None),
+        ];
+
+        assert!(
+            seek_human_host_in(
+                Some(&StationId("tactical".into())),
+                &order(&["tactical", "engineering", "captain"]),
+                &seats,
+            )
+            .is_none(),
+            "backfilled, offline and disconnected seats are all skipped"
+        );
+    }
+
+    /// THE DEFAULT IS THE OLD PATH, not a re-implementation of it. Every seat
+    /// arrangement a four-station hull can be in, against every owner it can
+    /// name: an empty `seek_order` must choose the identical seat.
+    #[test]
+    fn an_empty_seek_order_chooses_exactly_what_the_derived_walk_chooses() {
+        let stations = ["captain", "helm", "tactical", "engineering"];
+        let controls = [
+            (ControlSource::Human, Some("crew")),
+            (ControlSource::Human, None),
+            (ControlSource::Ai, Some("crew")),
+            (ControlSource::Offline, None),
+        ];
+
+        // Base 4 over 4 seats: 256 bridges, each tried against all four owners
+        // and against no owner at all.
+        for combo in 0..256u32 {
+            let seats: Vec<ShipSeat> = stations
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    let (control, holder) = controls[((combo >> (2 * i)) & 0b11) as usize];
+                    seat(id, control, holder)
+                })
+                .collect();
+
+            let owners: Vec<Option<StationId>> = std::iter::once(None)
+                .chain(stations.iter().map(|s| Some(StationId((*s).into()))))
+                .collect();
+            for owner in &owners {
+                assert_eq!(
+                    seek_human_host_in(owner.as_ref(), &[], &seats),
+                    seek_human_host(owner.as_ref(), &seats),
+                    "bridge {combo:#010b}, owner {owner:?}"
+                );
+            }
+        }
+    }
+
+    /// A name no seat answers to is stepped over, not treated as the end of the
+    /// walk. `ShipConfig::validate` makes this unreachable from parsed TOML;
+    /// the property is here so the pure function has no cliff for a caller that
+    /// assembles the two halves by hand.
+    #[test]
+    fn an_authored_order_steps_over_a_station_that_is_not_seated() {
+        let seats = vec![
+            seat("captain", ControlSource::Human, Some("alice")),
+            seat("tactical", ControlSource::Ai, None),
+        ];
+
+        let found = seek_human_host_in(
+            Some(&StationId("tactical".into())),
+            &order(&["tactical", "science", "captain"]),
+            &seats,
+        )
+        .unwrap();
+
+        assert_eq!(found.station, StationId("captain".into()));
     }
 
     // ── seeking_seats (issue #984) ────────────────────────────────────────

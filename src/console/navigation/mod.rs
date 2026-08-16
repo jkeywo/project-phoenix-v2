@@ -442,6 +442,11 @@ fn publish_navigation_blackboard(
             &NavigationWaypoint,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &mut crate::server_app::ShipSystemBlackboards,
+            // Where the human seek landed this system, if anywhere (issue
+            // #984). `Option` because only `LocalShip` carries the component,
+            // and optional access filters no archetype — the matched set, and
+            // so the iteration order, is exactly what it was.
+            Option<&crate::ship::components::HumanSeekingHosts>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -451,7 +456,8 @@ fn publish_navigation_blackboard(
     // world picture for everyone, and UUID-sorted so archetype order never
     // reaches the wire.
     let civilians = civilian_traffic_rows(&civilians_q, world_config.as_deref());
-    for (waypoint, is_local, mut bbs) in ship_q.iter_mut() {
+    let nav_id = SystemId(NAVIGATION_SYSTEM_ID.to_string());
+    for (waypoint, is_local, mut bbs, hosts) in ship_q.iter_mut() {
         let navigation_waypoint = waypoint.snapshot();
         let bb = if is_local {
             NavigationBlackboard {
@@ -460,6 +466,7 @@ fn publish_navigation_blackboard(
                 nav_chart_selects: cfg.nav_chart_selects.clone(),
                 navigation_waypoint,
                 civilians: civilians.clone(),
+                host_station: hosts.and_then(|h| h.0.get(&nav_id).cloned()),
             }
         } else {
             NavigationBlackboard {
@@ -467,10 +474,8 @@ fn publish_navigation_blackboard(
                 ..Default::default()
             }
         };
-        bbs.0.insert(
-            SystemId(NAVIGATION_SYSTEM_ID.to_string()),
-            SystemBlackboard::Navigation(bb),
-        );
+        bbs.0
+            .insert(nav_id.clone(), SystemBlackboard::Navigation(bb));
     }
 }
 

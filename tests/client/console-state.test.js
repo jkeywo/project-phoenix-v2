@@ -23,6 +23,8 @@ import {
   buildNavigationConsoleState,
   buildSystemStationConsoleState,
   withTutorialOverlay,
+  withVisitingSystems,
+  soughtSystemHosts,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 import { t, getTable } from '../../gui/strings.js';
@@ -3481,5 +3483,108 @@ describe('withTutorialOverlay (destroyer engineering station, issue #921)', () =
     expect(s2.systems['repair'].overall_hull.pct).toBe(0.5);
     expect(s2.tutorial.active.id).toBe('engineering-damage'); // priority 5 preempts
     expect(s2.tutorial.remaining).toBe(5);
+  });
+});
+
+// ── human-seeking hosts (issue #984) ─────────────────────────────────────────
+
+describe('soughtSystemHosts', () => {
+  it('reads a host off any blackboard that carries one', () => {
+    const state = {
+      blackboards: {
+        comms: { host_station: 'engineering', messages: [] },
+        navigation: { host_station: 'tactical' },
+        helm: { x: 1 },
+      },
+    };
+    expect(soughtSystemHosts(state)).toEqual({
+      comms: 'engineering',
+      navigation: 'tactical',
+    });
+  });
+
+  // Null means "nobody is hosting this", which the wire uses for both "does
+  // not seek" and "seeks and found no human" — and both want the pre-#984
+  // rendering, which is what leaving the id out produces.
+  it('leaves out a system with no host', () => {
+    expect(soughtSystemHosts({ blackboards: { comms: { host_station: null } } })).toEqual({});
+    expect(soughtSystemHosts({ blackboards: { comms: {} } })).toEqual({});
+    expect(soughtSystemHosts({})).toEqual({});
+  });
+});
+
+describe('withVisitingSystems', () => {
+  // The destroyer: Tactical authors navigation + comms.
+  const DESTROYER = {
+    captain: ['captain', 'viewscreen', 'red-alert', 'sensors', 'sensor-radar'],
+    helm: ['helm-thrust', 'helm-steering'],
+    tactical: ['tactical-radar', 'phaser-omni', 'navigation', 'comms'],
+    engineering: ['shields-system', 'power-reactor', 'repair'],
+  };
+  const seek = (hosts) => ({
+    stationSystems: DESTROYER,
+    blackboards: Object.fromEntries(
+      Object.entries(hosts).map(([id, station]) => [id, { host_station: station }]),
+    ),
+  });
+
+  it('with no seek information at all, hosted_systems is exactly the authored list', () => {
+    const state = { stationSystems: DESTROYER };
+    const s = parse(withVisitingSystems('tactical', state, '{}'));
+    expect(s.hosted_systems).toEqual(DESTROYER.tactical);
+    expect(s.systems).toBeUndefined();
+  });
+
+  it('drops a system the seek has taken away, and keeps everything else', () => {
+    const state = seek({ comms: 'engineering', navigation: 'engineering' });
+    const s = parse(withVisitingSystems('tactical', state, '{}'));
+    expect(s.hosted_systems).toEqual(['tactical-radar', 'phaser-omni']);
+  });
+
+  // The view stays in the payload even when the button goes: Tactical's Intel
+  // panel renders dossiers out of the comms view, and Intel does not move.
+  it('does not remove the view of a system it stops offering', () => {
+    const state = seek({ comms: 'engineering' });
+    const before = buildSystemStationConsoleState('tactical', state);
+    const s = parse(withVisitingSystems('tactical', state, before));
+    expect(s.systems.comms).toBeDefined();
+    expect(s.hosted_systems).not.toContain('comms');
+  });
+
+  it('adds a visiting system to a station that does not author it', () => {
+    const state = seek({ comms: 'engineering' });
+    const s = parse(withVisitingSystems(
+      'engineering',
+      state,
+      buildSystemStationConsoleState('engineering', state),
+    ));
+    expect(s.hosted_systems).toContain('comms');
+    expect(s.systems.comms).toHaveProperty('contacts');
+    // The station's own systems are untouched by the visit.
+    expect(s.systems['power-reactor']).toBeDefined();
+  });
+
+  // A flat single-family payload (the destroyer's Helm) grows a `systems` map
+  // holding only the visitor; every field its own console reads is untouched.
+  it('gives a flat payload a systems map for the visitor alone', () => {
+    const state = seek({ comms: 'helm' });
+    const flat = JSON.stringify({ helm_auto: false, speed: 12 });
+    const s = parse(withVisitingSystems('helm', state, flat));
+    expect(s.speed).toBe(12);
+    expect(Object.keys(s.systems)).toEqual(['comms']);
+    expect(s.hosted_systems).toContain('comms');
+  });
+
+  it('the owner keeps the system when the seek chose the owner', () => {
+    const state = seek({ comms: 'tactical', navigation: 'tactical' });
+    const s = parse(withVisitingSystems('tactical', state, '{}'));
+    expect(s.hosted_systems).toEqual(DESTROYER.tactical);
+  });
+
+  it('exactly one station hosts a sought system', () => {
+    const state = seek({ comms: 'engineering' });
+    const hosting = ['captain', 'helm', 'tactical', 'engineering']
+      .filter(name => parse(withVisitingSystems(name, state, '{}')).hosted_systems.includes('comms'));
+    expect(hosting).toEqual(['engineering']);
   });
 });
